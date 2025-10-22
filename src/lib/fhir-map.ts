@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /* [NURSEOS PRO PATCH 2025-10-22] fhir-map.ts
    - Tipos y exports alineados con tests (HandoverValues, AttachmentInput, HandoverInput)
    - Alias de unidades (__test__.UNITS) y helpers
@@ -58,6 +60,137 @@ export type MedicationInput = {
   when?: string;                // ISO timestamp; si falta, se usa now
   note?: string;
 };
+
+/////////////////////////////
+// Zod schemas / Validación
+/////////////////////////////
+
+const VALID_RANGES = {
+  hr: { min: 0, max: 260, label: "Heart rate" },
+  rr: { min: 0, max: 80, label: "Respiratory rate" },
+  temp: { min: 25, max: 45, label: "Temperature" },
+  spo2: { min: 0, max: 100, label: "SpO2" },
+  sbp: { min: 0, max: 300, label: "Systolic blood pressure" },
+  dbp: { min: 0, max: 200, label: "Diastolic blood pressure" },
+  bgMgDl: { min: 0, max: 2000, label: "Blood glucose (mg/dL)" },
+  bgMmolL: { min: 0, max: 110, label: "Blood glucose (mmol/L)" },
+  o2FlowLpm: { min: 0, max: 100, label: "O₂ flow" }
+} as const;
+
+const numOpt = () =>
+  z
+    .preprocess((value) => {
+      if (value === "" || value === null || value === undefined) return undefined;
+      if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return undefined;
+        const num = Number(trimmed);
+        if (!Number.isFinite(num)) return value;
+        return num;
+      }
+      return value;
+    }, z.number().finite())
+    .optional();
+
+const optionalString = () =>
+  z
+    .preprocess((value) => {
+      if (value === "" || value === null || value === undefined) return undefined;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed.length ? trimmed : undefined;
+      }
+      return value;
+    }, z.string().min(1))
+    .optional();
+
+const withinRange = (range: { min: number; max: number; label: string }) =>
+  numOpt().superRefine((val, ctx) => {
+    if (val === undefined) return;
+    if (val < range.min || val > range.max) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${range.label} must be between ${range.min} and ${range.max}`
+      });
+    }
+  });
+
+const vitalsSchema = z
+  .object({
+    hr: withinRange(VALID_RANGES.hr),
+    rr: withinRange(VALID_RANGES.rr),
+    temp: withinRange(VALID_RANGES.temp),
+    spo2: withinRange(VALID_RANGES.spo2),
+    sbp: withinRange(VALID_RANGES.sbp),
+    dbp: withinRange(VALID_RANGES.dbp),
+    bgMgDl: withinRange(VALID_RANGES.bgMgDl),
+    bgMmolL: withinRange(VALID_RANGES.bgMmolL),
+    avpu: z.enum(["A", "V", "P", "U"]).optional(),
+    acvpu: z.enum(["A", "C", "V", "P", "U"]).optional(),
+    o2: z.boolean().optional(),
+    o2Device: optionalString(),
+    o2FlowLpm: withinRange(VALID_RANGES.o2FlowLpm),
+    fio2: numOpt().superRefine((val, ctx) => {
+      if (val === undefined) return;
+      const inFraction = val >= 0 && val <= 1;
+      const inPercent = val >= 21 && val <= 100;
+      if (!inFraction && !inPercent) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "FiO2 must be between 0-1 or 21-100"
+        });
+      }
+    })
+  })
+  .passthrough();
+
+const medicationSchema: z.ZodType<MedicationInput> = z
+  .object({
+    code: z
+      .object({
+        system: optionalString(),
+        code: optionalString(),
+        display: optionalString()
+      })
+      .partial()
+      .optional(),
+    name: optionalString(),
+    dose: z.union([z.number(), z.string()]).optional(),
+    unit: optionalString(),
+    route: optionalString(),
+    when: optionalString(),
+    note: optionalString()
+  })
+  .passthrough();
+
+const attachmentSchema: z.ZodType<AttachmentInput> = z
+  .object({
+    url: z.string().url().or(z.string().min(1)),
+    contentType: optionalString(),
+    description: optionalString()
+  })
+  .passthrough();
+
+const handoverValuesSchema: z.ZodType<HandoverValues> = z
+  .object({
+    patientId: z.string().min(1),
+    encounterId: optionalString(),
+    vitals: vitalsSchema.optional(),
+    meds: z.array(medicationSchema).optional()
+  })
+  .passthrough();
+
+const handoverInputSchema: z.ZodType<HandoverInput> = z
+  .object({
+    values: handoverValuesSchema,
+    attachments: z.array(attachmentSchema).optional(),
+    meds: z.array(medicationSchema).optional()
+  })
+  .passthrough();
+
+const handoverPayloadSchema = z.union([handoverInputSchema, handoverValuesSchema]);
+type ParsedHandoverPayload = z.infer<typeof handoverPayloadSchema>;
 
 ////////////////////////////////////////////////////
 // Alias de unidades y CODES mínimos para los tests
@@ -521,16 +654,15 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
 /////////////////////////////////////////
 
 export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bundle {
-  // Admite ambos (los tests varían)
-  const values: HandoverValues = ("values" in (input as any))
-    ? (input as any).values
-    : (input as HandoverValues);
+  const parsed = handoverPayloadSchema.parse(input) as ParsedHandoverPayload;
+
+  const values: HandoverValues = "values" in parsed ? parsed.values : parsed;
 
   const attachments: AttachmentInput[] | undefined =
-    ("values" in (input as any)) ? (input as HandoverInput).attachments : undefined;
+    "values" in parsed ? parsed.attachments : undefined;
 
   const medsIn: MedicationInput[] | undefined =
-    ("values" in (input as any)) ? (input as HandoverInput).meds : values.meds;
+    "values" in parsed ? parsed.meds ?? parsed.values.meds : parsed.meds ?? values.meds;
 
   const resources: any[] = [];
 
