@@ -4,27 +4,52 @@
     "slug": "handover-pro",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "ios": {
-      "supportsTablet": true
-    },
+
+    "plugins": [
+      "expo-sqlite",
+      "expo-secure-store",
+      "expo-notifications",
+      ["expo-audio", { "microphonePermission": "Permitir a Handover usar el micrófono." }]
+    ],
+
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "useNextNotificationsApi": true
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Escaneo de pulsera y códigos clínicos",
+        "NSMicrophoneUsageDescription": "Grabación de notas de audio del turno",
+        "NSUserTrackingUsageDescription": "Se usa para mejorar la experiencia del turno"
+      }
+    },
+
+    "extra": {
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      },
+      "FHIR_BASE_URL": "http://192.168.0.16:8080/fhir",
+      "STT_ENDPOINT": "http://192.168.0.16:8091/stt",
+      "ENCRYPTION_NAMESPACE": "handover-pro"
     }
   }
 }

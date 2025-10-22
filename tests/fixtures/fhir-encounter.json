@@ -1,0 +1,1 @@
+{ "resourceType":"Encounter", "id":"enc-001", "status":"in-progress", "subject":{"reference":"Patient/pat-001"}, "location":[{"location":{"reference":"Location/loc-uci-3","display":"UCI-3"}}], "period":{"start":"2025-10-16T08:00:00Z"} }

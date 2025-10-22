@@ -1,0 +1,65 @@
+import { describe, it, expect } from 'vitest';
+import { mapVitalsToObservations } from '@/src/lib/fhir-map';
+
+const ISO_NOW = '2025-10-19T12:00:00Z';
+
+const LOINC = {
+  RR: '9279-1',
+  HR: '8867-4',
+  SBP: '8480-6',
+  TEMP: '8310-5',
+  SPO2: '59408-5',
+};
+
+const byCode = (a: any, b: any) =>
+  String(a?.code?.coding?.[0]?.code ?? '').localeCompare(String(b?.code?.coding?.[0]?.code ?? ''));
+
+describe('mapVitalsToObservations — edge cases', () => {
+  it('ignora valores undefined/null/NaN (no crea Observations inválidas)', () => {
+    const obs = mapVitalsToObservations(
+      {
+        patientId: 'pat-EDG-1',
+        vitals: { rr: undefined as any, hr: null as any, sbp: Number.NaN, temp: 36.5 },
+      },
+      { now: ISO_NOW },
+    ).sort(byCode);
+
+    // Solo Temp debe generarse
+    expect(obs).toHaveLength(1);
+    expect(obs[0].code?.coding?.[0]?.code).toBe(LOINC.TEMP);
+    expect(obs[0].valueQuantity?.code).toBe('Cel');
+  });
+
+  it('valores fuera de rango no rompen y preservan UCUM', () => {
+    const obs = mapVitalsToObservations(
+      {
+        patientId: 'pat-EDG-2',
+        vitals: { rr: 0, hr: 300, temp: 45 }, // extremos a propósito
+      },
+      { now: ISO_NOW },
+    ).sort(byCode);
+
+    const codes = obs.map(o => o.code?.coding?.[0]?.code).sort();
+    expect(codes).toEqual([LOINC.HR, LOINC.RR, LOINC.TEMP].sort());
+
+    const get = (c: string) => obs.find(o => o.code?.coding?.[0]?.code === c)!;
+    expect(get(LOINC.RR).valueQuantity?.system).toBe('http://unitsofmeasure.org');
+    expect(get(LOINC.RR).valueQuantity?.code).toBe('/min');
+    expect(get(LOINC.HR).valueQuantity?.code).toBe('/min');
+    expect(get(LOINC.TEMP).valueQuantity?.code).toBe('Cel');
+
+    for (const o of obs) expect(o.effectiveDateTime).toBe(ISO_NOW);
+  });
+
+  it('si no se pasa "now", effectiveDateTime existe y es ISO', () => {
+    const obs = mapVitalsToObservations(
+      { patientId: 'pat-EDG-3', vitals: { sbp: 120 } },
+      /* sin now */ {},
+    );
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0].code?.coding?.[0]?.code).toBe(LOINC.SBP);
+    expect(obs[0].valueQuantity?.code).toBe('mm[Hg]');
+    expect(String(obs[0].effectiveDateTime)).toMatch(/^\d{4}-\d{2}-\d{2}T.+Z$/);
+  });
+});

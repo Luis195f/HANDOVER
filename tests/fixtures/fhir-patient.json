@@ -1,0 +1,1 @@
+{ "resourceType":"Patient", "id":"pat-001", "name":[{"text":"García, Ana"}], "gender":"female", "birthDate":"1985-01-02", "identifier":[{"system":"urn:nurseos:id","value":"pat-001"}] }

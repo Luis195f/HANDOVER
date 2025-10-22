@@ -1,0 +1,1 @@
+{ "patientId":"pat-001", "unitId":"loc-uci-3", "shift":"morning", "acvpu":"A", "vitals":{"rr":22,"spo2":92,"temp":38.1,"sbp":95,"hr":110,"o2":true}, "incidents":[], "checklist":["IV","fall-risk"], "notes":"Paciente con fiebre, oxígeno 2L/min por cánula." }

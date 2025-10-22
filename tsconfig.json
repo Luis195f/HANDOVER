@@ -1,6 +1,26 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "target": "ES2020",
+    "lib": ["ES2021", "DOM"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "checkJs": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/src/*": ["src/*"]
+    },
+    "types": ["vite/client", "react", "react-native"]
+  },
+  "include": ["src", "tests", "**/__tests__/**"],
+  "exclude": ["node_modules", "dist", "**/__tests__/**", "tests/**"]
 }
