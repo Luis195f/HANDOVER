@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /* [NURSEOS PRO PATCH 2025-10-22] fhir-map.ts
    - Tipos y exports alineados con tests (HandoverValues, AttachmentInput, HandoverInput)
    - Alias de unidades (__test__.UNITS) y helpers
@@ -33,6 +35,7 @@ export type HandoverValues = {
   };
   // Opcional: medicaciones administradas durante el turno
   meds?: MedicationInput[];
+  attachments?: AttachmentInput[];
 };
 
 // attachments: description opcional (lo piden los tests)
@@ -49,6 +52,19 @@ export type HandoverInput = {
   meds?: MedicationInput[]; // permite pasar meds aquí o dentro de values.meds
 };
 
+export type BuildOptions = {
+  now?: string;
+  authorId?: string;
+  attachments?: AttachmentInput[];
+  emitPanel?: boolean;
+  emitIndividuals?: boolean;
+  emitHasMember?: boolean;
+  emitBpPanel?: boolean;
+  normalizeGlucoseToMgdl?: boolean;
+  glucoseDecimals?: number;
+  profileUrls?: string[];
+};
+
 export type MedicationInput = {
   code?: { system?: string; code?: string; display?: string };
   name?: string;                // si no hay code, se usa como texto
@@ -58,6 +74,104 @@ export type MedicationInput = {
   when?: string;                // ISO timestamp; si falta, se usa now
   note?: string;
 };
+
+/////////////////////////////////////
+// Adjuntos (validación y helpers)
+/////////////////////////////////////
+
+const HTTP_URL_RE = /^https?:\/\//i;
+
+const ATTACHMENT_MIME_ALLOWLIST = new Set<string>([
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/m4a',
+  'audio/x-m4a',
+  'audio/aac',
+  'audio/wav',
+  'audio/ogg',
+  'audio/opus',
+  'audio/flac',
+  'audio/amr',
+  'audio/3gpp',
+  'audio/3gpp2',
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'application/octet-stream',
+]);
+
+const ATTACHMENT_EXTENSION_MIME = new Map<string, string>([
+  ['mp3', 'audio/mpeg'],
+  ['m4a', 'audio/mp4'],
+  ['mp4', 'audio/mp4'],
+  ['aac', 'audio/aac'],
+  ['wav', 'audio/wav'],
+  ['ogg', 'audio/ogg'],
+  ['oga', 'audio/ogg'],
+  ['opus', 'audio/opus'],
+  ['flac', 'audio/flac'],
+  ['amr', 'audio/amr'],
+  ['3gp', 'audio/3gpp'],
+  ['3gpp', 'audio/3gpp'],
+  ['3gpp2', 'audio/3gpp2'],
+  ['pdf', 'application/pdf'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['png', 'image/png'],
+  ['webp', 'image/webp'],
+  ['heic', 'image/heic'],
+]);
+
+const ATTACHMENT_DEFAULT_MIME = 'application/octet-stream';
+
+export const AttachmentSchema: z.ZodType<AttachmentInput> = z.object({
+  url: z
+    .string()
+    .url()
+    .refine((value) => HTTP_URL_RE.test(value), {
+      message: 'Attachment URL must use http/https',
+    }),
+  contentType: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (typeof value !== 'string') return undefined;
+      const normalized = value.trim().toLowerCase();
+      return normalized.length ? normalized : undefined;
+    })
+    .refine((mime) => mime === undefined || ATTACHMENT_MIME_ALLOWLIST.has(mime), {
+      message: 'Unsupported attachment MIME type',
+    }),
+  description: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (typeof value !== 'string') return undefined;
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : undefined;
+    }),
+});
+
+const AttachmentArraySchema = AttachmentSchema.array();
+
+function inferAttachmentMime(url: string): string | undefined {
+  const clean = url.split('#')[0]?.split('?')[0] ?? '';
+  const ext = clean.includes('.') ? clean.substring(clean.lastIndexOf('.') + 1).toLowerCase() : '';
+  if (!ext) return undefined;
+  const mime = ATTACHMENT_EXTENSION_MIME.get(ext);
+  return mime && ATTACHMENT_MIME_ALLOWLIST.has(mime) ? mime : undefined;
+}
+
+function resolveAttachmentContentType(att: AttachmentInput): string {
+  if (att.contentType && ATTACHMENT_MIME_ALLOWLIST.has(att.contentType)) {
+    return att.contentType;
+  }
+  const inferred = inferAttachmentMime(att.url);
+  if (inferred) return inferred;
+  return ATTACHMENT_DEFAULT_MIME;
+}
 
 ////////////////////////////////////////////////////
 // Alias de unidades y CODES mínimos para los tests
@@ -495,7 +609,11 @@ function buildO2Note(values: HandoverValues) {
 // DocumentReference desde attachments[]
 /////////////////////////////////////////
 
-function mapDocumentReference(values: HandoverValues, attachments?: AttachmentInput[]): DocumentReference[] {
+function mapDocumentReference(
+  values: HandoverValues,
+  attachments: AttachmentInput[] | undefined,
+  now?: string
+): DocumentReference[] {
   if (!attachments || attachments.length === 0) return [];
   const dr: DocumentReference = {
     resourceType: "DocumentReference",
@@ -503,11 +621,11 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
     status: "current",
     type: { text: "Handover attachments" },
     subject: refPatient(values.patientId),
-    date: nowISO(),
+    date: now ?? nowISO(),
     content: attachments.map(a => ({
       attachment: {
         url: a.url,
-        contentType: a.contentType,
+        contentType: resolveAttachmentContentType(a),
         title: a.description // opcional; si undefined, los visores usan filename del URL
       }
     })),
@@ -520,17 +638,35 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
 // buildHandoverBundle (núcleo de tests)
 /////////////////////////////////////////
 
-export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bundle {
-  // Admite ambos (los tests varían)
-  const values: HandoverValues = ("values" in (input as any))
-    ? (input as any).values
+export function buildHandoverBundle(
+  input: HandoverInput | HandoverValues,
+  options: BuildOptions = {}
+): Bundle {
+  const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
+  const values: HandoverValues = isWrapped
+    ? (input as HandoverInput).values
     : (input as HandoverValues);
 
-  const attachments: AttachmentInput[] | undefined =
-    ("values" in (input as any)) ? (input as HandoverInput).attachments : undefined;
+  const attachmentsFromValues = Array.isArray(values.attachments)
+    ? values.attachments
+    : [];
+  const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
+    ? ((input as HandoverInput).attachments as AttachmentInput[])
+    : [];
+  const attachmentsFromOptions = Array.isArray(options.attachments)
+    ? options.attachments
+    : [];
 
-  const medsIn: MedicationInput[] | undefined =
-    ("values" in (input as any)) ? (input as HandoverInput).meds : values.meds;
+  const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
+    (att): att is AttachmentInput => Boolean(att)
+  );
+  const attachments = mergedAttachments.length > 0
+    ? AttachmentArraySchema.parse(mergedAttachments)
+    : undefined;
+
+  const medsIn: MedicationInput[] | undefined = isWrapped
+    ? (input as HandoverInput).meds ?? values.meds
+    : values.meds;
 
   const resources: any[] = [];
 
@@ -545,7 +681,7 @@ export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bund
   resources.push(...mapMedicationStatements(values, medsIn));
 
   // 4) DocumentReference desde attachments
-  resources.push(...mapDocumentReference(values, attachments));
+  resources.push(...mapDocumentReference(values, attachments, options.now));
 
   // Devuelve Bundle tipo collection (seguro para tests)
   return {
