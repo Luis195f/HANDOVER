@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 /* [NURSEOS PRO PATCH 2025-10-22] fhir-map.ts
    - Tipos y exports alineados con tests (HandoverValues, AttachmentInput, HandoverInput)
@@ -80,6 +80,7 @@ export type HandoverValues = {
   };
   // Opcional: medicaciones administradas durante el turno
   meds?: MedicationInput[];
+  attachments?: AttachmentInput[];
 };
 
 // attachments: description opcional (lo piden los tests)
@@ -96,6 +97,19 @@ export type HandoverInput = {
   meds?: MedicationInput[]; // permite pasar meds aquí o dentro de values.meds
 };
 
+export type BuildOptions = {
+  now?: string;
+  authorId?: string;
+  attachments?: AttachmentInput[];
+  emitPanel?: boolean;
+  emitIndividuals?: boolean;
+  emitHasMember?: boolean;
+  emitBpPanel?: boolean;
+  normalizeGlucoseToMgdl?: boolean;
+  glucoseDecimals?: number;
+  profileUrls?: string[];
+};
+
 export type MedicationInput = {
   code?: { system?: string; code?: string; display?: string };
   name?: string;                // si no hay code, se usa como texto
@@ -106,136 +120,103 @@ export type MedicationInput = {
   note?: string;
 };
 
-/////////////////////////////
-// Zod schemas / Validación
-/////////////////////////////
+/////////////////////////////////////
+// Adjuntos (validación y helpers)
+/////////////////////////////////////
 
-const VALID_RANGES = {
-  hr: { min: 0, max: 260, label: "Heart rate" },
-  rr: { min: 0, max: 80, label: "Respiratory rate" },
-  temp: { min: 25, max: 45, label: "Temperature" },
-  spo2: { min: 0, max: 100, label: "SpO2" },
-  sbp: { min: 0, max: 300, label: "Systolic blood pressure" },
-  dbp: { min: 0, max: 200, label: "Diastolic blood pressure" },
-  bgMgDl: { min: 0, max: 2000, label: "Blood glucose (mg/dL)" },
-  bgMmolL: { min: 0, max: 110, label: "Blood glucose (mmol/L)" },
-  o2FlowLpm: { min: 0, max: 100, label: "O₂ flow" }
-} as const;
+const HTTP_URL_RE = /^https?:\/\//i;
 
-const numOpt = () =>
-  z
-    .preprocess((value) => {
-      if (value === "" || value === null || value === undefined) return undefined;
-      if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (!trimmed) return undefined;
-        const num = Number(trimmed);
-        if (!Number.isFinite(num)) return value;
-        return num;
-      }
-      return value;
-    }, z.number().finite())
-    .optional();
+const ATTACHMENT_MIME_ALLOWLIST = new Set<string>([
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/m4a',
+  'audio/x-m4a',
+  'audio/aac',
+  'audio/wav',
+  'audio/ogg',
+  'audio/opus',
+  'audio/flac',
+  'audio/amr',
+  'audio/3gpp',
+  'audio/3gpp2',
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'application/octet-stream',
+]);
 
-const optionalString = () =>
-  z
-    .preprocess((value) => {
-      if (value === "" || value === null || value === undefined) return undefined;
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        return trimmed.length ? trimmed : undefined;
-      }
-      return value;
-    }, z.string().min(1))
-    .optional();
+const ATTACHMENT_EXTENSION_MIME = new Map<string, string>([
+  ['mp3', 'audio/mpeg'],
+  ['m4a', 'audio/mp4'],
+  ['mp4', 'audio/mp4'],
+  ['aac', 'audio/aac'],
+  ['wav', 'audio/wav'],
+  ['ogg', 'audio/ogg'],
+  ['oga', 'audio/ogg'],
+  ['opus', 'audio/opus'],
+  ['flac', 'audio/flac'],
+  ['amr', 'audio/amr'],
+  ['3gp', 'audio/3gpp'],
+  ['3gpp', 'audio/3gpp'],
+  ['3gpp2', 'audio/3gpp2'],
+  ['pdf', 'application/pdf'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['png', 'image/png'],
+  ['webp', 'image/webp'],
+  ['heic', 'image/heic'],
+]);
 
-const withinRange = (range: { min: number; max: number; label: string }) =>
-  numOpt().superRefine((val, ctx) => {
-    if (val === undefined) return;
-    if (val < range.min || val > range.max) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `${range.label} must be between ${range.min} and ${range.max}`
-      });
-    }
-  });
+const ATTACHMENT_DEFAULT_MIME = 'application/octet-stream';
 
-const vitalsSchema = z
-  .object({
-    hr: withinRange(VALID_RANGES.hr),
-    rr: withinRange(VALID_RANGES.rr),
-    temp: withinRange(VALID_RANGES.temp),
-    spo2: withinRange(VALID_RANGES.spo2),
-    sbp: withinRange(VALID_RANGES.sbp),
-    dbp: withinRange(VALID_RANGES.dbp),
-    bgMgDl: withinRange(VALID_RANGES.bgMgDl),
-    bgMmolL: withinRange(VALID_RANGES.bgMmolL),
-    avpu: z.enum(["A", "V", "P", "U"]).optional(),
-    acvpu: z.enum(["A", "C", "V", "P", "U"]).optional(),
-    o2: z.boolean().optional(),
-    o2Device: optionalString(),
-    o2FlowLpm: withinRange(VALID_RANGES.o2FlowLpm),
-    fio2: numOpt().superRefine((val, ctx) => {
-      if (val === undefined) return;
-      const inFraction = val >= 0 && val <= 1;
-      const inPercent = val >= 21 && val <= 100;
-      if (!inFraction && !inPercent) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "FiO2 must be between 0-1 or 21-100"
-        });
-      }
+export const AttachmentSchema: z.ZodType<AttachmentInput> = z.object({
+  url: z
+    .string()
+    .url()
+    .refine((value) => HTTP_URL_RE.test(value), {
+      message: 'Attachment URL must use http/https',
+    }),
+  contentType: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (typeof value !== 'string') return undefined;
+      const normalized = value.trim().toLowerCase();
+      return normalized.length ? normalized : undefined;
     })
-  })
-  .passthrough();
+    .refine((mime) => mime === undefined || ATTACHMENT_MIME_ALLOWLIST.has(mime), {
+      message: 'Unsupported attachment MIME type',
+    }),
+  description: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (typeof value !== 'string') return undefined;
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : undefined;
+    }),
+});
 
-const medicationSchema: z.ZodType<MedicationInput> = z
-  .object({
-    code: z
-      .object({
-        system: optionalString(),
-        code: optionalString(),
-        display: optionalString()
-      })
-      .partial()
-      .optional(),
-    name: optionalString(),
-    dose: z.union([z.number(), z.string()]).optional(),
-    unit: optionalString(),
-    route: optionalString(),
-    when: optionalString(),
-    note: optionalString()
-  })
-  .passthrough();
+const AttachmentArraySchema = AttachmentSchema.array();
 
-const attachmentSchema: z.ZodType<AttachmentInput> = z
-  .object({
-    url: z.string().url().or(z.string().min(1)),
-    contentType: optionalString(),
-    description: optionalString()
-  })
-  .passthrough();
+function inferAttachmentMime(url: string): string | undefined {
+  const clean = url.split('#')[0]?.split('?')[0] ?? '';
+  const ext = clean.includes('.') ? clean.substring(clean.lastIndexOf('.') + 1).toLowerCase() : '';
+  if (!ext) return undefined;
+  const mime = ATTACHMENT_EXTENSION_MIME.get(ext);
+  return mime && ATTACHMENT_MIME_ALLOWLIST.has(mime) ? mime : undefined;
+}
 
-const handoverValuesSchema: z.ZodType<HandoverValues> = z
-  .object({
-    patientId: z.string().min(1),
-    encounterId: optionalString(),
-    vitals: vitalsSchema.optional(),
-    meds: z.array(medicationSchema).optional()
-  })
-  .passthrough();
-
-const handoverInputSchema: z.ZodType<HandoverInput> = z
-  .object({
-    values: handoverValuesSchema,
-    attachments: z.array(attachmentSchema).optional(),
-    meds: z.array(medicationSchema).optional()
-  })
-  .passthrough();
-
-const handoverPayloadSchema = z.union([handoverInputSchema, handoverValuesSchema]);
-type ParsedHandoverPayload = z.infer<typeof handoverPayloadSchema>;
+function resolveAttachmentContentType(att: AttachmentInput): string {
+  if (att.contentType && ATTACHMENT_MIME_ALLOWLIST.has(att.contentType)) {
+    return att.contentType;
+  }
+  const inferred = inferAttachmentMime(att.url);
+  if (inferred) return inferred;
+  return ATTACHMENT_DEFAULT_MIME;
+}
 
 ////////////////////////////////////////////////////
 // Alias de unidades y CODES mínimos para los tests
@@ -746,7 +727,11 @@ function buildO2Note(values: HandoverValues) {
 // DocumentReference desde attachments[]
 /////////////////////////////////////////
 
-function mapDocumentReference(values: HandoverValues, attachments?: AttachmentInput[]): DocumentReference[] {
+function mapDocumentReference(
+  values: HandoverValues,
+  attachments: AttachmentInput[] | undefined,
+  now?: string
+): DocumentReference[] {
   if (!attachments || attachments.length === 0) return [];
   const dr: DocumentReference = {
     resourceType: "DocumentReference",
@@ -754,11 +739,11 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
     status: "current",
     type: { text: "Handover attachments" },
     subject: refPatient(values.patientId),
-    date: nowISO(),
+    date: now ?? nowISO(),
     content: attachments.map(a => ({
       attachment: {
         url: a.url,
-        contentType: a.contentType,
+        contentType: resolveAttachmentContentType(a),
         title: a.description // opcional; si undefined, los visores usan filename del URL
       }
     })),
@@ -771,16 +756,35 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
 // buildHandoverBundle (núcleo de tests)
 /////////////////////////////////////////
 
-export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bundle {
-  const parsed = handoverPayloadSchema.parse(input) as ParsedHandoverPayload;
+export function buildHandoverBundle(
+  input: HandoverInput | HandoverValues,
+  options: BuildOptions = {}
+): Bundle {
+  const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
+  const values: HandoverValues = isWrapped
+    ? (input as HandoverInput).values
+    : (input as HandoverValues);
 
-  const values: HandoverValues = "values" in parsed ? parsed.values : parsed;
+  const attachmentsFromValues = Array.isArray(values.attachments)
+    ? values.attachments
+    : [];
+  const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
+    ? ((input as HandoverInput).attachments as AttachmentInput[])
+    : [];
+  const attachmentsFromOptions = Array.isArray(options.attachments)
+    ? options.attachments
+    : [];
 
-  const attachments: AttachmentInput[] | undefined =
-    "values" in parsed ? parsed.attachments : undefined;
+  const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
+    (att): att is AttachmentInput => Boolean(att)
+  );
+  const attachments = mergedAttachments.length > 0
+    ? AttachmentArraySchema.parse(mergedAttachments)
+    : undefined;
 
-  const medsIn: MedicationInput[] | undefined =
-    "values" in parsed ? parsed.meds ?? parsed.values.meds : parsed.meds ?? values.meds;
+  const medsIn: MedicationInput[] | undefined = isWrapped
+    ? (input as HandoverInput).meds ?? values.meds
+    : values.meds;
 
   const resources: any[] = [];
 
@@ -795,7 +799,7 @@ export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bund
   resources.push(...mapMedicationStatements(values, medsIn));
 
   // 4) DocumentReference desde attachments
-  resources.push(...mapDocumentReference(values, attachments));
+  resources.push(...mapDocumentReference(values, attachments, options.now));
 
   // Devuelve Bundle tipo collection (seguro para tests)
   return {
