@@ -7,6 +7,51 @@
    - Sin dependencias externas, compatible con TS estricto
 */
 
+const LOINC_SYSTEM = "http://loinc.org";
+const SNOMED_SYSTEM = "http://snomed.info/sct";
+const UCUM_SYSTEM = "http://unitsofmeasure.org";
+const OBS_CAT_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
+const OBS_CAT_VITALS = "vital-signs";
+const OBS_CAT_LAB = "laboratory";
+
+const ACVPU_TEXT = {
+  A: "Alert",
+  C: "New confusion",
+  V: "Responds to voice",
+  P: "Responds to pain",
+  U: "Unresponsive"
+} as const;
+
+export const ACVPU_LOINC = {
+  A: { system: LOINC_SYSTEM, code: "LA9340-6", display: ACVPU_TEXT.A },
+  C: { system: LOINC_SYSTEM, code: "LA6560-2", display: ACVPU_TEXT.C },
+  V: { system: LOINC_SYSTEM, code: "LA17108-4", display: ACVPU_TEXT.V },
+  P: { system: LOINC_SYSTEM, code: "LA17107-6", display: ACVPU_TEXT.P },
+  U: { system: LOINC_SYSTEM, code: "LA9343-0", display: ACVPU_TEXT.U }
+} as const;
+
+export const ACVPU_SNOMED = {
+  A: { system: SNOMED_SYSTEM, code: "248234008", display: "Alert (finding)" },
+  C: { system: SNOMED_SYSTEM, code: "1104441000000107", display: "New confusion (finding)" },
+  V: { system: SNOMED_SYSTEM, code: "450847001", display: "Voice responsive (finding)" },
+  P: { system: SNOMED_SYSTEM, code: "450848006", display: "Pain responsive (finding)" },
+  U: { system: SNOMED_SYSTEM, code: "450849003", display: "Unresponsive (finding)" }
+} as const;
+
+const CODES = {
+  PANEL_VS: { system: LOINC_SYSTEM, code: "85353-1", display: "Vital signs, weight, height, head circumference and oxygen saturation panel" },
+  PANEL_BP: { system: LOINC_SYSTEM, code: "85354-9", display: "Blood pressure panel with all children optional" },
+  HR: { system: LOINC_SYSTEM, code: "8867-4", display: "Heart rate" },
+  RR: { system: LOINC_SYSTEM, code: "9279-1", display: "Respiratory rate" },
+  TEMP: { system: LOINC_SYSTEM, code: "8310-5", display: "Body temperature" },
+  SPO2: { system: LOINC_SYSTEM, code: "59408-5", display: "Oxygen saturation in Arterial blood by Pulse oximetry" },
+  SBP: { system: LOINC_SYSTEM, code: "8480-6", display: "Systolic blood pressure" },
+  DBP: { system: LOINC_SYSTEM, code: "8462-4", display: "Diastolic blood pressure" },
+  GLU_MASS_BLD: { system: LOINC_SYSTEM, code: "2339-0", display: "Glucose [Mass/volume] in Blood" },
+  GLU_MOLES_BLDC_GLUCOMETER: { system: LOINC_SYSTEM, code: "14743-9", display: "Glucose [Moles/volume] in Capillary blood by Glucometer" },
+  ACVPU: { system: LOINC_SYSTEM, code: "67775-7", display: "ACVPU scale" }
+} as const;
+
 ///////////////////////////
 // Tipos expuestos (tests)
 ///////////////////////////
@@ -101,16 +146,16 @@ export const __test__ = {
     MMOL_L: "mmol/L"          // alias
   } as const,
   LOINC: {
-    PANEL_VS: "85353-1",
-    BP_PANEL: "85354-9",
-    SBP: "8480-6",
-    DBP: "8462-4",
-    HR: "8867-4",
-    RR: "9279-1",
-    TEMP: "8310-5",
-    SPO2: "59408-5",
-    GLUCOSE_MASS: "2339-0",
-    GLUCOSE_MOLE: "15074-8",
+    PANEL_VS: CODES.PANEL_VS.code,
+    BP_PANEL: CODES.PANEL_BP.code,
+    SBP: CODES.SBP.code,
+    DBP: CODES.DBP.code,
+    HR: CODES.HR.code,
+    RR: CODES.RR.code,
+    TEMP: CODES.TEMP.code,
+    SPO2: CODES.SPO2.code,
+    GLUCOSE_MASS: CODES.GLU_MASS_BLD.code,
+    GLUCOSE_MOLE: CODES.GLU_MOLES_BLDC_GLUCOMETER.code,
     FIO2: "3150-0",
     O2_FLOW: "19849-6",
     ACVPU: "67775-7"
@@ -146,7 +191,16 @@ export const __test__ = {
   } as const,
   SNOMED: {
     O2_ADMINISTRATION: "243120004" // Administration of oxygen (procedure)
-  } as const
+  } as const,
+  LOINC_SYSTEM,
+  UCUM_SYSTEM,
+  OBS_CAT_SYSTEM,
+  OBS_CAT_VITALS,
+  OBS_CAT_LAB,
+  SNOMED_SYSTEM,
+  CODES,
+  ACVPU_LOINC,
+  ACVPU_SNOMED
 } as const;
 
 /////////////////////////////////////
@@ -283,7 +337,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-hr"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.HR, "Heart rate", "Heart rate"),
+      code: codeCC(CODES.HR.system, CODES.HR.code, CODES.HR.display, CODES.HR.display),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -298,7 +352,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-rr"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.RR, "Respiratory rate", "Respiratory rate"),
+      code: codeCC(CODES.RR.system, CODES.RR.code, CODES.RR.display, CODES.RR.display),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -313,7 +367,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-temp"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.TEMP, "Body temperature", "Body temperature"),
+      code: codeCC(CODES.TEMP.system, CODES.TEMP.code, CODES.TEMP.display, CODES.TEMP.display),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -328,7 +382,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-spo2"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.SPO2, "Oxygen saturation in Arterial blood by Pulse oximetry", "SpO2"),
+      code: codeCC(CODES.SPO2.system, CODES.SPO2.code, CODES.SPO2.display, CODES.SPO2.display),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -341,13 +395,13 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
     const components: Observation["component"] = [];
     if (isNum(v.sbp)) {
       components.push({
-        code: codeCC("http://loinc.org", __test__.LOINC.SBP, "Systolic blood pressure", "Systolic"),
+        code: codeCC(CODES.SBP.system, CODES.SBP.code, CODES.SBP.display, "Systolic"),
         valueQuantity: qty(v.sbp!, __test__.UNITS.MMHG)
       });
     }
     if (isNum(v.dbp)) {
       components.push({
-        code: codeCC("http://loinc.org", __test__.LOINC.DBP, "Diastolic blood pressure", "Diastolic"),
+        code: codeCC(CODES.DBP.system, CODES.DBP.code, CODES.DBP.display, "Diastolic"),
         valueQuantity: qty(v.dbp!, __test__.UNITS.MMHG)
       });
     }
@@ -356,7 +410,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-bp"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.BP_PANEL, "Blood pressure panel with all children optional", "Blood pressure"),
+      code: codeCC(CODES.PANEL_BP.system, CODES.PANEL_BP.code, CODES.PANEL_BP.display, "Blood pressure"),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -371,7 +425,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-glu-mass"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.GLUCOSE_MASS, "Glucose [Mass/volume] in Blood", "Blood glucose"),
+      code: codeCC(CODES.GLU_MASS_BLD.system, CODES.GLU_MASS_BLD.code, CODES.GLU_MASS_BLD.display, "Blood glucose"),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -386,7 +440,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       id: newId("obs-glu-mole"),
       status: "final",
       category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.GLUCOSE_MOLE, "Glucose [Moles/volume] in Blood", "Blood glucose"),
+      code: codeCC(CODES.GLU_MOLES_BLDC_GLUCOMETER.system, CODES.GLU_MOLES_BLDC_GLUCOMETER.code, CODES.GLU_MOLES_BLDC_GLUCOMETER.display, "Blood glucose"),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
@@ -408,29 +462,20 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       valueCodeableConcept: { text: v.avpu }
     });
   }
-  if (v.acvpu) {
-    const answerLoinc = __test__.ACVPU_LOINC[v.acvpu];
-    const answerSnomed = __test__.ACVPU_SNOMED[v.acvpu];
-    const coding: FhirCoding[] = [];
-    if (answerSnomed) {
-      coding.push({ system: SNOMED_SYSTEM, code: answerSnomed.code, display: answerSnomed.display });
-    }
-    if (answerLoinc) {
-      coding.push({ system: LOINC_SYSTEM, code: answerLoinc.code, display: answerLoinc.display });
-    }
-
+  if (v.acvpu && ACVPU_LOINC[v.acvpu] && ACVPU_SNOMED[v.acvpu]) {
+    const av = v.acvpu;
     res.push({
       resourceType: "Observation",
       id: newId("obs-acvpu"),
       status: "final",
       category: categoryVital,
-      code: codeCC(LOINC_SYSTEM, __test__.LOINC.ACVPU, __test__.CODES.ACVPU.display, __test__.CODES.ACVPU.display),
+      code: codeCC(CODES.ACVPU.system, CODES.ACVPU.code, CODES.ACVPU.display, CODES.ACVPU.display),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
       valueCodeableConcept: {
-        coding: coding.length ? coding : undefined,
-        text: answerSnomed?.display ?? answerLoinc?.display ?? v.acvpu
+        text: `${av} — ${ACVPU_TEXT[av]}`,
+        coding: [ACVPU_SNOMED[av], ACVPU_LOINC[av]]
       }
     });
   }
@@ -446,7 +491,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
         id: newId("obs-fio2"),
         status: "final",
         category: categoryVital,
-        code: codeCC("http://loinc.org", __test__.LOINC.FIO2, "Inhaled oxygen concentration", "FiO2"),
+        code: codeCC(LOINC_SYSTEM, __test__.LOINC.FIO2, "Inhaled oxygen concentration", "FiO2"),
         subject: subj,
         encounter: enc,
         effectiveDateTime: t,
@@ -460,7 +505,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
         id: newId("obs-o2flow"),
         status: "final",
         category: categoryVital,
-        code: codeCC("http://loinc.org", __test__.LOINC.O2_FLOW, "Oxygen flow rate", "O2 flow"),
+        code: codeCC(LOINC_SYSTEM, __test__.LOINC.O2_FLOW, "Oxygen flow rate", "O2 flow"),
         subject: subj,
         encounter: enc,
         effectiveDateTime: t,
@@ -553,9 +598,10 @@ function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): Device
 
   return [
     {
-      resourceType: "DeviceUseStatement",
-      id: newId("dus-o2"),
-      status: "active",
+      resourceType: "Procedure",
+      id: newId("proc-o2"),
+      status: "completed",
+      code: codeCC(SNOMED_SYSTEM, __test__.SNOMED.O2_ADMINISTRATION, "Administration of oxygen", "Oxygen therapy"),
       subject: subj,
       encounter: enc,
       timingDateTime: when,
