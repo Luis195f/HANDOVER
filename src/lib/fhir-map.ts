@@ -80,6 +80,8 @@ const LOINC_SYSTEM = "http://loinc.org";
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const OBS_CAT_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
 const OBS_CAT_VITALS = "vital-signs";
+const OBS_CAT_LAB = "laboratory";
+const GLUCOSE_CONVERSION_FACTOR = 18.0182;
 
 export const __test__ = {
   UCUM_SYSTEM,
@@ -87,6 +89,7 @@ export const __test__ = {
   SNOMED_SYSTEM,
   OBS_CAT_SYSTEM,
   OBS_CAT_VITALS,
+  OBS_CAT_LAB,
   UNITS: {
     PER_MIN: "/min",
     MMHG: "mm[Hg]",
@@ -110,7 +113,7 @@ export const __test__ = {
     TEMP: "8310-5",
     SPO2: "59408-5",
     GLUCOSE_MASS: "2339-0",
-    GLUCOSE_MOLE: "15074-8",
+    GLUCOSE_MOLE: "14743-9",
     FIO2: "3150-0",
     O2_FLOW: "19849-6",
     ACVPU: "67775-7"
@@ -125,7 +128,7 @@ export const __test__ = {
     TEMP: { code: "8310-5", display: "Body temperature" },
     SPO2: { code: "59408-5", display: "Oxygen saturation" },
     GLU_MASS_BLD: { code: "2339-0", display: "Glucose [Mass/volume] in Blood" },
-    GLU_MOLES_BLDC_GLUCOMETER: { code: "15074-8", display: "Glucose [Moles/volume] in Blood" },
+    GLU_MOLES_BLDC_GLUCOMETER: { code: "14743-9", display: "Glucose [Moles/volume] in Blood" },
     FIO2: { code: "3150-0", display: "Inhaled oxygen concentration" },
     O2_FLOW: { code: "19849-6", display: "Oxygen flow rate" },
     ACVPU: { code: "67775-7", display: "ACVPU level of consciousness" }
@@ -173,6 +176,7 @@ type Observation = {
     code?: string;
   };
   valueCodeableConcept?: FhirCodeableConcept;
+  note?: Array<{ text: string }>;
   component?: Array<{
     code: FhirCodeableConcept;
     valueQuantity?: { value: number; unit?: string; system?: string; code?: string };
@@ -254,6 +258,10 @@ const categoryVital: Observation["category"] = [
   { coding: [{ system: OBS_CAT_SYSTEM, code: OBS_CAT_VITALS, display: "Vital Signs" }] }
 ];
 
+const categoryLab: Observation["category"] = [
+  { coding: [{ system: OBS_CAT_SYSTEM, code: OBS_CAT_LAB, display: "Laboratory" }] }
+];
+
 const codeCC = (system: string, code: string, display?: string, text?: string): FhirCodeableConcept => ({
   coding: [{ system, code, display }],
   ...(text ? { text } : {})
@@ -272,200 +280,279 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
   const res: Observation[] = [];
   const v = values?.vitals ?? {};
+  if (!values?.patientId) return res;
+
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const t = opts?.now ?? nowISO();
+  const effective = opts?.now ?? nowISO();
 
-  // Heart Rate
-  if (isNum(v.hr)) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-hr"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.HR, "Heart rate", "Heart rate"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueQuantity: qty(v.hr!, __test__.UNITS.PER_MIN)
-    });
+  const emitIndividuals = opts?.emitIndividuals ?? true;
+  const emitPanel = opts?.emitPanel ?? false;
+  const emitBpPanel = opts?.emitBpPanel ?? emitPanel;
+
+  const normalizeGlucoseOption = opts?.normalizeGlucoseToMgDl ?? opts?.normalizeGlucoseToMgdl;
+  const normalizeGlucose =
+    typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
+  const glucoseDecimals = opts?.glucoseDecimals ?? 0;
+
+  const buildObservation = (params: {
+    code: FhirCodeableConcept;
+    category?: Observation["category"];
+    valueQuantity?: Observation["valueQuantity"];
+    valueCodeableConcept?: FhirCodeableConcept;
+    component?: Observation["component"];
+    note?: Observation["note"];
+  }): Observation => ({
+    resourceType: "Observation",
+    status: "final",
+    subject: subj,
+    encounter: enc,
+    effectiveDateTime: effective,
+    category: params.category ?? categoryVital,
+    code: params.code,
+    ...(params.valueQuantity ? { valueQuantity: params.valueQuantity } : {}),
+    ...(params.valueCodeableConcept ? { valueCodeableConcept: params.valueCodeableConcept } : {}),
+    ...(params.component ? { component: params.component } : {}),
+    ...(params.note ? { note: params.note } : {})
+  });
+
+  if (emitIndividuals && isNum(v.hr)) {
+    res.push(
+      buildObservation({
+        code: codeCC(LOINC_SYSTEM, __test__.LOINC.HR, "Heart rate", "Heart rate"),
+        valueQuantity: qty(v.hr, __test__.UNITS.PER_MIN)
+      })
+    );
   }
 
-  // Respiratory Rate
-  if (isNum(v.rr)) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-rr"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.RR, "Respiratory rate", "Respiratory rate"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueQuantity: qty(v.rr!, __test__.UNITS.PER_MIN)
-    });
+  if (emitIndividuals && isNum(v.rr)) {
+    res.push(
+      buildObservation({
+        code: codeCC(LOINC_SYSTEM, __test__.LOINC.RR, "Respiratory rate", "Respiratory rate"),
+        valueQuantity: qty(v.rr, __test__.UNITS.PER_MIN)
+      })
+    );
   }
 
-  // Temperature (°C → UCUM: Cel)
-  if (isNum(v.temp)) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-temp"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.TEMP, "Body temperature", "Body temperature"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueQuantity: qty(v.temp!, __test__.UNITS.CEL, "Cel")
-    });
+  if (emitIndividuals && isNum(v.temp)) {
+    res.push(
+      buildObservation({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.TEMP,
+          "Body temperature",
+          "Body temperature"
+        ),
+        valueQuantity: qty(v.temp, __test__.UNITS.CEL, "Cel")
+      })
+    );
   }
 
-  // SpO2 (%)
-  if (isNum(v.spo2)) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-spo2"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.SPO2, "Oxygen saturation in Arterial blood by Pulse oximetry", "SpO2"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueQuantity: qty(v.spo2!, __test__.UNITS.PERCENT, "%")
-    });
+  if (emitIndividuals && isNum(v.spo2)) {
+    res.push(
+      buildObservation({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.SPO2,
+          "Oxygen saturation in Arterial blood by Pulse oximetry",
+          "SpO2"
+        ),
+        valueQuantity: qty(v.spo2, __test__.UNITS.PERCENT, "%")
+      })
+    );
   }
 
-  // Blood Pressure panel con componentes SBP/DBP si existe alguno
-  if (isNum(v.sbp) || isNum(v.dbp)) {
+  if (emitIndividuals && isNum(v.sbp)) {
+    res.push(
+      buildObservation({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.SBP,
+          "Systolic blood pressure",
+          "Systolic blood pressure"
+        ),
+        valueQuantity: qty(v.sbp, __test__.UNITS.MMHG)
+      })
+    );
+  }
+
+  if (emitIndividuals && isNum(v.dbp)) {
+    res.push(
+      buildObservation({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.DBP,
+          "Diastolic blood pressure",
+          "Diastolic blood pressure"
+        ),
+        valueQuantity: qty(v.dbp, __test__.UNITS.MMHG)
+      })
+    );
+  }
+
+  if (emitBpPanel && (isNum(v.sbp) || isNum(v.dbp))) {
     const components: Observation["component"] = [];
     if (isNum(v.sbp)) {
       components.push({
-        code: codeCC("http://loinc.org", __test__.LOINC.SBP, "Systolic blood pressure", "Systolic"),
-        valueQuantity: qty(v.sbp!, __test__.UNITS.MMHG)
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.SBP,
+          "Systolic blood pressure",
+          "Systolic blood pressure"
+        ),
+        valueQuantity: qty(v.sbp, __test__.UNITS.MMHG)
       });
     }
     if (isNum(v.dbp)) {
       components.push({
-        code: codeCC("http://loinc.org", __test__.LOINC.DBP, "Diastolic blood pressure", "Diastolic"),
-        valueQuantity: qty(v.dbp!, __test__.UNITS.MMHG)
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.DBP,
+          "Diastolic blood pressure",
+          "Diastolic blood pressure"
+        ),
+        valueQuantity: qty(v.dbp, __test__.UNITS.MMHG)
       });
     }
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-bp"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.BP_PANEL, "Blood pressure panel with all children optional", "Blood pressure"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      component: components
-    });
+    res.push(
+      buildObservation({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.BP_PANEL,
+          "Blood pressure panel with all children optional",
+          "Blood pressure panel"
+        ),
+        component: components
+      })
+    );
   }
 
-  // Glucose mg/dL
-  if (isNum(v.bgMgDl)) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-glu-mass"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.GLUCOSE_MASS, "Glucose [Mass/volume] in Blood", "Blood glucose"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueQuantity: qty(v.bgMgDl!, __test__.UNITS.MGDL)
-    });
+  const hasBgMgDl = isNum(v.bgMgDl);
+  const hasBgMmolL = isNum(v.bgMmolL);
+
+  if (hasBgMgDl) {
+    res.push(
+      buildObservation({
+        category: categoryLab,
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.GLUCOSE_MASS,
+          "Glucose [Mass/volume] in Blood",
+          "Blood glucose"
+        ),
+        valueQuantity: qty(v.bgMgDl!, __test__.UNITS.MGDL)
+      })
+    );
+  } else if (hasBgMmolL) {
+    if (normalizeGlucose) {
+      const converted = roundTo(v.bgMmolL! * GLUCOSE_CONVERSION_FACTOR, glucoseDecimals);
+      const factor = GLUCOSE_CONVERSION_FACTOR.toFixed(4);
+      res.push(
+        buildObservation({
+          category: categoryLab,
+          code: codeCC(
+            LOINC_SYSTEM,
+            __test__.LOINC.GLUCOSE_MASS,
+            "Glucose [Mass/volume] in Blood",
+            "Blood glucose"
+          ),
+          valueQuantity: qty(converted, __test__.UNITS.MGDL),
+          note: [
+            {
+              text: `Convertido desde ${v.bgMmolL} mmol/L (factor ${factor})`
+            }
+          ]
+        })
+      );
+    } else {
+      res.push(
+        buildObservation({
+          category: categoryLab,
+          code: codeCC(
+            LOINC_SYSTEM,
+            __test__.LOINC.GLUCOSE_MOLE,
+            "Glucose [Moles/volume] in Blood",
+            "Blood glucose"
+          ),
+          valueQuantity: qty(v.bgMmolL!, __test__.UNITS.MMOLL, "mmol/L")
+        })
+      );
+    }
   }
 
-  // Glucose mmol/L
-  if (isNum(v.bgMmolL)) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-glu-mole"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC("http://loinc.org", __test__.LOINC.GLUCOSE_MOLE, "Glucose [Moles/volume] in Blood", "Blood glucose"),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueQuantity: qty(v.bgMmolL!, __test__.UNITS.MMOLL, "mmol/L")
-    });
-  }
+  const rawAcvpu = v.acvpu ?? v.avpu;
+  const acvpuValue =
+    rawAcvpu === "A" ||
+    rawAcvpu === "C" ||
+    rawAcvpu === "V" ||
+    rawAcvpu === "P" ||
+    rawAcvpu === "U"
+      ? (rawAcvpu as "A" | "C" | "V" | "P" | "U")
+      : undefined;
 
-  // AVPU / ACVPU como observaciones cualitativas simples (para tests)
-  if (v.avpu) {
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-avpu"),
-      status: "final",
-      category: categoryVital,
-      code: { text: "AVPU scale" },
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueCodeableConcept: { text: v.avpu }
-    });
-  }
-  if (v.acvpu) {
-    const answerLoinc = __test__.ACVPU_LOINC[v.acvpu];
-    const answerSnomed = __test__.ACVPU_SNOMED[v.acvpu];
+  if (acvpuValue) {
+    const answerLoinc = __test__.ACVPU_LOINC[acvpuValue];
+    const answerSnomed = __test__.ACVPU_SNOMED[acvpuValue];
     const coding: FhirCoding[] = [];
     if (answerSnomed) {
-      coding.push({ system: SNOMED_SYSTEM, code: answerSnomed.code, display: answerSnomed.display });
+      coding.push({
+        system: SNOMED_SYSTEM,
+        code: answerSnomed.code,
+        display: answerSnomed.display
+      });
     }
     if (answerLoinc) {
-      coding.push({ system: LOINC_SYSTEM, code: answerLoinc.code, display: answerLoinc.display });
+      coding.push({
+        system: LOINC_SYSTEM,
+        code: answerLoinc.code,
+        display: answerLoinc.display
+      });
     }
 
-    res.push({
-      resourceType: "Observation",
-      id: newId("obs-acvpu"),
-      status: "final",
-      category: categoryVital,
-      code: codeCC(LOINC_SYSTEM, __test__.LOINC.ACVPU, __test__.CODES.ACVPU.display, __test__.CODES.ACVPU.display),
-      subject: subj,
-      encounter: enc,
-      effectiveDateTime: t,
-      valueCodeableConcept: {
-        coding: coding.length ? coding : undefined,
-        text: answerSnomed?.display ?? answerLoinc?.display ?? v.acvpu
-      }
-    });
+    res.push(
+      buildObservation({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.ACVPU,
+          __test__.CODES.ACVPU.display,
+          __test__.CODES.ACVPU.display
+        ),
+        valueCodeableConcept: {
+          ...(coding.length ? { coding } : {}),
+          text: answerSnomed?.display ?? answerLoinc?.display ?? acvpuValue
+        }
+      })
+    );
   }
 
-  // Oxigenoterapia: Observations (FiO2, Flow) si vienen valores
   const hasO2 = !!v.o2 || isNum(v.fio2) || isNum(v.o2FlowLpm) || !!v.o2Device;
   if (hasO2) {
-    // FiO2 normalizado a %
     if (isNum(v.fio2)) {
-      const fi = normalizeFiO2ToPct(v.fio2!);
-      res.push({
-        resourceType: "Observation",
-        id: newId("obs-fio2"),
-        status: "final",
-        category: categoryVital,
-        code: codeCC("http://loinc.org", __test__.LOINC.FIO2, "Inhaled oxygen concentration", "FiO2"),
-        subject: subj,
-        encounter: enc,
-        effectiveDateTime: t,
-        valueQuantity: qty(fi, __test__.UNITS.PERCENT, "%")
-      });
+      const fi = normalizeFiO2ToPct(v.fio2);
+      res.push(
+        buildObservation({
+          code: codeCC(
+            LOINC_SYSTEM,
+            __test__.LOINC.FIO2,
+            "Inhaled oxygen concentration",
+            "FiO2"
+          ),
+          valueQuantity: qty(fi, __test__.UNITS.PERCENT, "%")
+        })
+      );
     }
-    // Flujo L/min
     if (isNum(v.o2FlowLpm)) {
-      res.push({
-        resourceType: "Observation",
-        id: newId("obs-o2flow"),
-        status: "final",
-        category: categoryVital,
-        code: codeCC("http://loinc.org", __test__.LOINC.O2_FLOW, "Oxygen flow rate", "O2 flow"),
-        subject: subj,
-        encounter: enc,
-        effectiveDateTime: t,
-        valueQuantity: qty(v.o2FlowLpm!, "L/min")
-      });
+      res.push(
+        buildObservation({
+          code: codeCC(
+            LOINC_SYSTEM,
+            __test__.LOINC.O2_FLOW,
+            "Oxygen flow rate",
+            "Oxygen flow rate"
+          ),
+          valueQuantity: qty(v.o2FlowLpm, "L/min")
+        })
+      );
     }
   }
 
@@ -473,8 +560,8 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 }
 
 // Alias requerido por los tests
-export function mapVitalsToObservations(values: HandoverValues) {
-  return mapObservationVitals(values);
+export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOptions) {
+  return mapObservationVitals(values, opts);
 }
 
 /////////////////////////////////////////
@@ -646,6 +733,11 @@ export function buildHandoverBundle(input: HandoverInput | HandoverValues, opts:
 
 function isNum(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n);
+}
+
+function roundTo(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 function normalizeFiO2ToPct(fio2: number): number {
