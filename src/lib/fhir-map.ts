@@ -59,6 +59,18 @@ export type MedicationInput = {
   note?: string;
 };
 
+export type BuildOptions = {
+  now?: string;
+  emitPanel?: boolean;
+  emitIndividuals?: boolean;
+  emitHasMember?: boolean;
+  emitBpPanel?: boolean;
+  normalizeGlucoseToMgDl?: boolean;
+  normalizeGlucoseToMgdl?: boolean;
+  glucoseDecimals?: number;
+  profileUrls?: Record<string, string[] | undefined>;
+};
+
 ////////////////////////////////////////////////////
 // Alias de unidades y CODES mínimos para los tests
 ////////////////////////////////////////////////////
@@ -165,6 +177,17 @@ type Procedure = {
   note?: Array<{ text: string }>;
 };
 
+type DeviceUseStatement = {
+  resourceType: "DeviceUseStatement";
+  id?: string;
+  status: "active" | "completed" | "entered-in-error" | "intended" | "stopped" | "on-hold" | "unknown";
+  subject: FhirRef;
+  encounter?: FhirRef;
+  timingDateTime?: string;
+  reasonCode?: FhirCodeableConcept[];
+  note?: Array<{ text: string }>;
+};
+
 type Bundle = {
   resourceType: "Bundle";
   id?: string;
@@ -204,12 +227,12 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 // Vitals → Observation (núcleo)
 /////////////////////////////////////
 
-export function mapObservationVitals(values: HandoverValues): Observation[] {
+export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
   const res: Observation[] = [];
   const v = values?.vitals ?? {};
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const t = nowISO();
+  const t = opts?.now ?? nowISO();
 
   // Heart Rate
   if (isNum(v.hr)) {
@@ -452,31 +475,37 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 }
 
 /////////////////////////////////////////
-// Oxigenoterapia → Procedure (opcional)
+// Oxigenoterapia → DeviceUseStatement (opcional)
 /////////////////////////////////////////
 
-function mapOxygenProcedure(values: HandoverValues): Procedure[] {
+function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
   const v = values.vitals ?? {};
   const hasO2 = !!v.o2 || isNum(v.fio2) || isNum(v.o2FlowLpm) || !!v.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
+  const when = opts?.now ?? nowISO();
 
-  const used: FhirCodeableConcept[] = [];
-  if (v.o2Device) used.push({ text: v.o2Device });
+  const note = buildO2Note(values);
+
+  const reason = codeCC(
+    "http://snomed.info/sct",
+    "46680005",
+    "Need for supplemental oxygen",
+    "Oxygen support"
+  );
 
   return [
     {
-      resourceType: "Procedure",
-      id: newId("proc-o2"),
-      status: "completed",
-      code: codeCC("http://snomed.info/sct", __test__.SNOMED.O2_ADMINISTRATION, "Administration of oxygen", "Oxygen therapy"),
+      resourceType: "DeviceUseStatement",
+      id: newId("dus-o2"),
+      status: "active",
       subject: subj,
       encounter: enc,
-      performedDateTime: nowISO(),
-      usedCode: used.length ? used : undefined,
-      note: buildO2Note(values)
+      timingDateTime: when,
+      reasonCode: [reason],
+      note
     }
   ];
 }
@@ -520,7 +549,7 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
 // buildHandoverBundle (núcleo de tests)
 /////////////////////////////////////////
 
-export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bundle {
+export function buildHandoverBundle(input: HandoverInput | HandoverValues, opts: BuildOptions = {}): Bundle {
   // Admite ambos (los tests varían)
   const values: HandoverValues = ("values" in (input as any))
     ? (input as any).values
@@ -535,11 +564,11 @@ export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bund
   const resources: any[] = [];
 
   // 1) Observations de signos vitales (incluye FiO2/Flow si presentes)
-  const obs = mapObservationVitals(values);
+  const obs = mapObservationVitals(values, opts);
   resources.push(...obs);
 
-  // 2) Oxigenoterapia como Procedure (si aplica)
-  resources.push(...mapOxygenProcedure(values));
+  // 2) Oxigenoterapia como DeviceUseStatement (si aplica)
+  resources.push(...mapOxygenProcedure(values, opts));
 
   // 3) MedicationStatement desde meds
   resources.push(...mapMedicationStatements(values, medsIn));
