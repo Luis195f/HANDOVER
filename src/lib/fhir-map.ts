@@ -104,11 +104,34 @@ export type MedicationInput = {
   note?: string;
 };
 
+export type BuildOptions = {
+  now?: string;
+  emitPanel?: boolean;
+  emitIndividuals?: boolean;
+  emitHasMember?: boolean;
+  emitBpPanel?: boolean;
+  normalizeGlucoseToMgDl?: boolean;
+  normalizeGlucoseToMgdl?: boolean;
+  glucoseDecimals?: number;
+  profileUrls?: Record<string, string[] | undefined>;
+};
+
 ////////////////////////////////////////////////////
 // Alias de unidades y CODES mínimos para los tests
 ////////////////////////////////////////////////////
 
+const UCUM_SYSTEM = "http://unitsofmeasure.org";
+const LOINC_SYSTEM = "http://loinc.org";
+const SNOMED_SYSTEM = "http://snomed.info/sct";
+const OBS_CAT_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
+const OBS_CAT_VITALS = "vital-signs";
+
 export const __test__ = {
+  UCUM_SYSTEM,
+  LOINC_SYSTEM,
+  SNOMED_SYSTEM,
+  OBS_CAT_SYSTEM,
+  OBS_CAT_VITALS,
   UNITS: {
     PER_MIN: "/min",
     MMHG: "mm[Hg]",
@@ -134,7 +157,37 @@ export const __test__ = {
     GLUCOSE_MASS: CODES.GLU_MASS_BLD.code,
     GLUCOSE_MOLE: CODES.GLU_MOLES_BLDC_GLUCOMETER.code,
     FIO2: "3150-0",
-    O2_FLOW: "19849-6"
+    O2_FLOW: "19849-6",
+    ACVPU: "67775-7"
+  } as const,
+  CODES: {
+    PANEL_VS: { code: "85353-1", display: "Vital signs panel" },
+    PANEL_BP: { code: "85354-9", display: "Blood pressure panel" },
+    SBP: { code: "8480-6", display: "Systolic blood pressure" },
+    DBP: { code: "8462-4", display: "Diastolic blood pressure" },
+    HR: { code: "8867-4", display: "Heart rate" },
+    RR: { code: "9279-1", display: "Respiratory rate" },
+    TEMP: { code: "8310-5", display: "Body temperature" },
+    SPO2: { code: "59408-5", display: "Oxygen saturation" },
+    GLU_MASS_BLD: { code: "2339-0", display: "Glucose [Mass/volume] in Blood" },
+    GLU_MOLES_BLDC_GLUCOMETER: { code: "15074-8", display: "Glucose [Moles/volume] in Blood" },
+    FIO2: { code: "3150-0", display: "Inhaled oxygen concentration" },
+    O2_FLOW: { code: "19849-6", display: "Oxygen flow rate" },
+    ACVPU: { code: "67775-7", display: "ACVPU level of consciousness" }
+  } as const,
+  ACVPU_LOINC: {
+    A: { code: "LA9340-6", display: "Alert" },
+    C: { code: "LA6560-2", display: "Confusion" },
+    V: { code: "LA17108-4", display: "Responds to voice" },
+    P: { code: "LA17107-6", display: "Responds to pain" },
+    U: { code: "LA9343-0", display: "Unresponsive" }
+  } as const,
+  ACVPU_SNOMED: {
+    A: { code: "248234009", display: "Alert (finding)" },
+    C: { code: "162214003", display: "Confused (finding)" },
+    V: { code: "248238005", display: "Responds to voice (finding)" },
+    P: { code: "248241002", display: "Responds to pain (finding)" },
+    U: { code: "420512000", display: "Unresponsive (finding)" }
   } as const,
   SNOMED: {
     O2_ADMINISTRATION: "243120004" // Administration of oxygen (procedure)
@@ -220,6 +273,17 @@ type Procedure = {
   note?: Array<{ text: string }>;
 };
 
+type DeviceUseStatement = {
+  resourceType: "DeviceUseStatement";
+  id?: string;
+  status: "active" | "completed" | "entered-in-error" | "intended" | "stopped" | "on-hold" | "unknown";
+  subject: FhirRef;
+  encounter?: FhirRef;
+  timingDateTime?: string;
+  reasonCode?: FhirCodeableConcept[];
+  note?: Array<{ text: string }>;
+};
+
 type Bundle = {
   resourceType: "Bundle";
   id?: string;
@@ -259,12 +323,12 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 // Vitals → Observation (núcleo)
 /////////////////////////////////////
 
-export function mapObservationVitals(values: HandoverValues): Observation[] {
+export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
   const res: Observation[] = [];
   const v = values?.vitals ?? {};
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const t = nowISO();
+  const t = opts?.now ?? nowISO();
 
   // Heart Rate
   if (isNum(v.hr)) {
@@ -511,19 +575,26 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 }
 
 /////////////////////////////////////////
-// Oxigenoterapia → Procedure (opcional)
+// Oxigenoterapia → DeviceUseStatement (opcional)
 /////////////////////////////////////////
 
-function mapOxygenProcedure(values: HandoverValues): Procedure[] {
+function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
   const v = values.vitals ?? {};
   const hasO2 = !!v.o2 || isNum(v.fio2) || isNum(v.o2FlowLpm) || !!v.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
+  const when = opts?.now ?? nowISO();
 
-  const used: FhirCodeableConcept[] = [];
-  if (v.o2Device) used.push({ text: v.o2Device });
+  const note = buildO2Note(values);
+
+  const reason = codeCC(
+    "http://snomed.info/sct",
+    "46680005",
+    "Need for supplemental oxygen",
+    "Oxygen support"
+  );
 
   return [
     {
@@ -533,9 +604,9 @@ function mapOxygenProcedure(values: HandoverValues): Procedure[] {
       code: codeCC(SNOMED_SYSTEM, __test__.SNOMED.O2_ADMINISTRATION, "Administration of oxygen", "Oxygen therapy"),
       subject: subj,
       encounter: enc,
-      performedDateTime: nowISO(),
-      usedCode: used.length ? used : undefined,
-      note: buildO2Note(values)
+      timingDateTime: when,
+      reasonCode: [reason],
+      note
     }
   ];
 }
@@ -579,7 +650,7 @@ function mapDocumentReference(values: HandoverValues, attachments?: AttachmentIn
 // buildHandoverBundle (núcleo de tests)
 /////////////////////////////////////////
 
-export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bundle {
+export function buildHandoverBundle(input: HandoverInput | HandoverValues, opts: BuildOptions = {}): Bundle {
   // Admite ambos (los tests varían)
   const values: HandoverValues = ("values" in (input as any))
     ? (input as any).values
@@ -594,11 +665,11 @@ export function buildHandoverBundle(input: HandoverInput | HandoverValues): Bund
   const resources: any[] = [];
 
   // 1) Observations de signos vitales (incluye FiO2/Flow si presentes)
-  const obs = mapObservationVitals(values);
+  const obs = mapObservationVitals(values, opts);
   resources.push(...obs);
 
-  // 2) Oxigenoterapia como Procedure (si aplica)
-  resources.push(...mapOxygenProcedure(values));
+  // 2) Oxigenoterapia como DeviceUseStatement (si aplica)
+  resources.push(...mapOxygenProcedure(values, opts));
 
   // 3) MedicationStatement desde meds
   resources.push(...mapMedicationStatements(values, medsIn));
