@@ -75,7 +75,18 @@ export type BuildOptions = {
 // Alias de unidades y CODES mínimos para los tests
 ////////////////////////////////////////////////////
 
+const UCUM_SYSTEM = "http://unitsofmeasure.org";
+const LOINC_SYSTEM = "http://loinc.org";
+const SNOMED_SYSTEM = "http://snomed.info/sct";
+const OBS_CAT_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
+const OBS_CAT_VITALS = "vital-signs";
+
 export const __test__ = {
+  UCUM_SYSTEM,
+  LOINC_SYSTEM,
+  SNOMED_SYSTEM,
+  OBS_CAT_SYSTEM,
+  OBS_CAT_VITALS,
   UNITS: {
     PER_MIN: "/min",
     MMHG: "mm[Hg]",
@@ -90,6 +101,7 @@ export const __test__ = {
     MMOL_L: "mmol/L"          // alias
   } as const,
   LOINC: {
+    PANEL_VS: "85353-1",
     BP_PANEL: "85354-9",
     SBP: "8480-6",
     DBP: "8462-4",
@@ -100,7 +112,37 @@ export const __test__ = {
     GLUCOSE_MASS: "2339-0",
     GLUCOSE_MOLE: "15074-8",
     FIO2: "3150-0",
-    O2_FLOW: "19849-6"
+    O2_FLOW: "19849-6",
+    ACVPU: "67775-7"
+  } as const,
+  CODES: {
+    PANEL_VS: { code: "85353-1", display: "Vital signs panel" },
+    PANEL_BP: { code: "85354-9", display: "Blood pressure panel" },
+    SBP: { code: "8480-6", display: "Systolic blood pressure" },
+    DBP: { code: "8462-4", display: "Diastolic blood pressure" },
+    HR: { code: "8867-4", display: "Heart rate" },
+    RR: { code: "9279-1", display: "Respiratory rate" },
+    TEMP: { code: "8310-5", display: "Body temperature" },
+    SPO2: { code: "59408-5", display: "Oxygen saturation" },
+    GLU_MASS_BLD: { code: "2339-0", display: "Glucose [Mass/volume] in Blood" },
+    GLU_MOLES_BLDC_GLUCOMETER: { code: "15074-8", display: "Glucose [Moles/volume] in Blood" },
+    FIO2: { code: "3150-0", display: "Inhaled oxygen concentration" },
+    O2_FLOW: { code: "19849-6", display: "Oxygen flow rate" },
+    ACVPU: { code: "67775-7", display: "ACVPU level of consciousness" }
+  } as const,
+  ACVPU_LOINC: {
+    A: { code: "LA9340-6", display: "Alert" },
+    C: { code: "LA6560-2", display: "Confusion" },
+    V: { code: "LA17108-4", display: "Responds to voice" },
+    P: { code: "LA17107-6", display: "Responds to pain" },
+    U: { code: "LA9343-0", display: "Unresponsive" }
+  } as const,
+  ACVPU_SNOMED: {
+    A: { code: "248234009", display: "Alert (finding)" },
+    C: { code: "162214003", display: "Confused (finding)" },
+    V: { code: "248238005", display: "Responds to voice (finding)" },
+    P: { code: "248241002", display: "Responds to pain (finding)" },
+    U: { code: "420512000", display: "Unresponsive (finding)" }
   } as const,
   SNOMED: {
     O2_ADMINISTRATION: "243120004" // Administration of oxygen (procedure)
@@ -199,7 +241,7 @@ type Bundle = {
 // Helpers puros (sin dependencias)
 /////////////////////////////////////
 
-const uom = "http://unitsofmeasure.org";
+const uom = UCUM_SYSTEM;
 const nowISO = () => new Date().toISOString();
 const newId = (pfx = "id") =>
   `${pfx}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
@@ -209,7 +251,7 @@ const refEncounter = (encounterId?: string): FhirRef | undefined =>
   encounterId ? { reference: `Encounter/${encounterId}` } : undefined;
 
 const categoryVital: Observation["category"] = [
-  { coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs", display: "Vital Signs" }] }
+  { coding: [{ system: OBS_CAT_SYSTEM, code: OBS_CAT_VITALS, display: "Vital Signs" }] }
 ];
 
 const codeCC = (system: string, code: string, display?: string, text?: string): FhirCodeableConcept => ({
@@ -367,16 +409,29 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
     });
   }
   if (v.acvpu) {
+    const answerLoinc = __test__.ACVPU_LOINC[v.acvpu];
+    const answerSnomed = __test__.ACVPU_SNOMED[v.acvpu];
+    const coding: FhirCoding[] = [];
+    if (answerSnomed) {
+      coding.push({ system: SNOMED_SYSTEM, code: answerSnomed.code, display: answerSnomed.display });
+    }
+    if (answerLoinc) {
+      coding.push({ system: LOINC_SYSTEM, code: answerLoinc.code, display: answerLoinc.display });
+    }
+
     res.push({
       resourceType: "Observation",
       id: newId("obs-acvpu"),
       status: "final",
       category: categoryVital,
-      code: { text: "ACVPU scale" },
+      code: codeCC(LOINC_SYSTEM, __test__.LOINC.ACVPU, __test__.CODES.ACVPU.display, __test__.CODES.ACVPU.display),
       subject: subj,
       encounter: enc,
       effectiveDateTime: t,
-      valueCodeableConcept: { text: v.acvpu }
+      valueCodeableConcept: {
+        coding: coding.length ? coding : undefined,
+        text: answerSnomed?.display ?? answerLoinc?.display ?? v.acvpu
+      }
     });
   }
 
