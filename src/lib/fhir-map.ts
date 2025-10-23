@@ -586,7 +586,7 @@ export function mapObservationVitals(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): Observation[] {
-  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  const optionsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   if (!values?.patientId) return [];
 
   const vitals = normalizeVitalsInput(values.vitals);
@@ -594,14 +594,14 @@ export function mapObservationVitals(
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = resolveNow(options.now) ?? nowISO();
+  const effective = resolveNow(optionsMerged.now) ?? nowISO();
 
-  const emitIndividuals = options.emitIndividuals ?? true;
+  const emitIndividuals = optionsMerged.emitIndividuals ?? true;
 
-  const normalizeGlucoseOption = options.normalizeGlucoseToMgDl ?? options.normalizeGlucoseToMgdl;
+  const normalizeGlucoseOption = optionsMerged.normalizeGlucoseToMgDl ?? optionsMerged.normalizeGlucoseToMgdl;
   const normalizeGlucose =
     typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
-  const glucoseDecimals = options.glucoseDecimals ?? 0;
+  const glucoseDecimals = optionsMerged.glucoseDecimals ?? 0;
 
   const buildObservation = (params: {
     code: FhirCodeableConcept;
