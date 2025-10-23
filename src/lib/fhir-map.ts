@@ -111,6 +111,7 @@ export type BuildOptions = {
   attachments?: AttachmentInput[];
   emitVitalsPanel?: boolean;
   emitPanel?: boolean;
+  emitVitalsPanel?: boolean;
   emitIndividuals?: boolean;
   emitHasMember?: boolean;
   emitBpPanel?: boolean;
@@ -526,7 +527,11 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
   if (!values?.patientId) return [];
 
-  const opts2: BuildOptions & typeof DEFAULT_OPTS = { ...DEFAULT_OPTS, ...opts };
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
 
   const vitals = normalizeVitalsInput(values.vitals);
   const observations: Observation[] = [];
@@ -780,7 +785,13 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 
 // Alias requerido por los tests
 export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOptions) {
-  return mapObservationVitals(values, opts);
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
+
+  return mapObservationVitals(values, opts2);
 }
 
 /////////////////////////////////////////
@@ -901,7 +912,12 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 /////////////////////////////////////////
 
 function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
-  const opts2: BuildOptions & typeof DEFAULT_OPTS = { ...DEFAULT_OPTS, ...opts };
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
+
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
@@ -992,8 +1008,13 @@ export function buildHandoverBundle(
     };
   }
 
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...options };
+
+  if (typeof options?.emitPanel === 'boolean' && options.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = options.emitPanel;
+  }
+
   const patientId = values.patientId;
-  const opts2: BuildOptions & typeof DEFAULT_OPTS = { ...DEFAULT_OPTS, ...options };
   const now = opts2.now ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
@@ -1089,9 +1110,8 @@ export function buildHandoverBundle(
     }
   }
 
-  const emitVitalsPanel =
-    opts2.emitVitalsPanel ?? opts2.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
-  const emitBpPanel = opts2.emitBpPanel ?? emitVitalsPanel;
+  const emitPanel = opts2.emitVitalsPanel;
+  const emitBpPanel = opts2.emitBpPanel ?? opts2.emitVitalsPanel;
   const emitHasMember = opts2.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
