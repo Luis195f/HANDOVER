@@ -109,18 +109,18 @@ export type BuildOptions = {
   emitVitalsPanel?: boolean;
   emitBpPanel?: boolean;
   emitHasMember?: boolean;
-  emitIndividuals?: boolean;
   now?: string | Date;
   authorId?: string;
   attachments?: AttachmentInput[];
   emitPanel?: boolean;
+  emitIndividuals?: boolean;
   normalizeGlucoseToMgDl?: boolean;
   normalizeGlucoseToMgdl?: boolean;
   glucoseDecimals?: number;
   profileUrls?: string[] | ProfileUrlMap;
 };
 
-export const DEFAULT_OPTS: Required<
+const DEFAULT_OPTS: Required<
   Pick<BuildOptions, "emitVitalsPanel" | "emitBpPanel" | "emitHasMember">
 > = {
   emitVitalsPanel: false,
@@ -549,7 +549,7 @@ type Bundle = {
 
 const uom = UCUM_SYSTEM;
 const nowISO = () => new Date().toISOString();
-const resolveNowInput = (value?: string | Date) =>
+const resolveNow = (value?: string | Date) =>
   value instanceof Date ? value.toISOString() : value;
 const newId = (pfx = "id") =>
   `${pfx}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
@@ -581,22 +581,24 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 // Vitals → Observation (núcleo)
 /////////////////////////////////////
 
-export function mapObservationVitals(values: HandoverValues, opts: BuildOptions = {}): Observation[] {
+export function mapObservationVitals(
+  values: HandoverValues,
+  opts: BuildOptions = {},
+): Observation[] {
   if (!values?.patientId) return [];
 
-  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
 
-  const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
+  const vitals = normalizeVitalsInput(values.vitals);
   const observations: Observation[] = [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = resolveNowInput(opts2.now) ?? nowISO();
+  const effective = resolveNow(opts2.now) ?? nowISO();
 
   const emitIndividuals = opts2.emitIndividuals ?? true;
 
-  const normalizeGlucoseOption =
-    opts2.normalizeGlucoseToMgDl ?? opts2.normalizeGlucoseToMgdl;
+  const normalizeGlucoseOption = opts2.normalizeGlucoseToMgDl ?? opts2.normalizeGlucoseToMgdl;
   const normalizeGlucose =
     typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
   const glucoseDecimals = opts2.glucoseDecimals ?? 0;
@@ -838,13 +840,11 @@ export function mapObservationVitals(values: HandoverValues, opts: BuildOptions 
 }
 
 // Alias requerido por los tests
-export function mapVitalsToObservations(values: HandoverValues, opts: BuildOptions = {}) {
-  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
-
-  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
-    opts2.emitVitalsPanel = opts.emitPanel;
-  }
-
+export function mapVitalsToObservations(
+  values: HandoverValues,
+  opts: BuildOptions = {},
+) {
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
   return mapObservationVitals(values, opts2);
 }
 
@@ -965,20 +965,18 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 // Oxigenoterapia → DeviceUseStatement (opcional)
 /////////////////////////////////////////
 
-function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
-  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
-
-  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
-    opts2.emitVitalsPanel = opts.emitPanel;
-  }
-
+function mapOxygenProcedure(
+  values: HandoverValues,
+  opts: BuildOptions = {},
+): DeviceUseStatement[] {
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = resolveNowInput(opts2.now) ?? nowISO();
+  const when = resolveNow(opts2.now) ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1046,7 +1044,7 @@ function mapDocumentReference(
 
 export function buildHandoverBundle(
   input: HandoverInput | HandoverValues,
-  options: BuildOptions = {},
+  opts: BuildOptions = {},
 ): Bundle {
   const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
   const values: HandoverValues = isWrapped
@@ -1064,7 +1062,8 @@ export function buildHandoverBundle(
 
   const opts2 = { ...DEFAULT_OPTS, ...options };
   const patientId = values.patientId;
-  const now = resolveNowInput(opts2.now) ?? nowISO();
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
+  const now = resolveNow(opts2.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
@@ -1086,7 +1085,13 @@ export function buildHandoverBundle(
   const normalizedVitals = normalizeVitalsInput(values.vitals);
   const profileExtras = normalizeProfileOptions(opts2.profileUrls);
 
-  const observationOptions: BuildOptions = { ...opts2, now };
+  const observationOptions: BuildOptions = {
+    now,
+    emitIndividuals: opts2.emitIndividuals,
+    normalizeGlucoseToMgDl: opts2.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: opts2.normalizeGlucoseToMgdl,
+    glucoseDecimals: opts2.glucoseDecimals,
+  };
 
   const observationResources = mapVitalsToObservations(values, observationOptions);
   const entries: Array<{
@@ -1153,16 +1158,10 @@ export function buildHandoverBundle(
     }
   }
 
-  const emitPanel = opts2.emitPanel;
-  const emitVitalsPanel = Object.prototype.hasOwnProperty.call(options, 'emitVitalsPanel')
-    ? opts2.emitVitalsPanel
-    : typeof emitPanel === 'boolean'
-      ? emitPanel
-      : opts2.emitVitalsPanel;
-  const emitBpPanel = Object.prototype.hasOwnProperty.call(options, 'emitBpPanel')
-    ? opts2.emitBpPanel
-    : emitPanel;
-  const emitHasMember = opts2.emitHasMember;
+  const emitVitalsPanel =
+    opts2.emitVitalsPanel ?? opts2.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
+  const emitBpPanel = opts2.emitBpPanel ?? emitVitalsPanel;
+  const emitHasMember = opts2.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
     [__test__.CODES.HR.code, __test__.CODES.HR.display],
