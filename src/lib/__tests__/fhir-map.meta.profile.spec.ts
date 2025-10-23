@@ -16,7 +16,7 @@ describe('meta.profile — vitales, bp y laboratorio', () => {
   it('vitales individuales incluyen vitalsigns; panel BP incluye bp+vitalsigns; glucemia no tiene vitalsigns', () => {
     const b = buildHandoverBundle(
       { patientId, vitals: { hr: 80, rr: 16, sbp: 120, dbp: 75, bgMgDl: 104 } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitBpPanel: true, emitHasMember: true }
     );
     const hr = findBy(b, __test__.CODES.HR.code);
     const bpPanel = findBy(b, __test__.CODES.PANEL_BP.code);

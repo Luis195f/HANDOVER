@@ -24,9 +24,15 @@ describe('Panel de Presión Arterial 85354-9 — componentes y coherencia', () =
   const patientId = 'pat-001';
   const now = '2025-10-21T11:00:00Z';
 
+  it('no emite panel por defecto (emitBpPanel undefined)', () => {
+    const bundle = buildHandoverBundle({ patientId, vitals: { sbp: 120, dbp: 75 } }, { now });
+    const bpPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_BP.code);
+    expect(bpPanel).toBeFalsy();
+  });
+
   it('emite BP panel 85354-9 con TAS/TAD cuando ambos están presentes', () => {
     const vitals = { sbp: 118, dbp: 73 };
-    const bundle = buildHandoverBundle({ patientId, vitals }, { now });
+    const bundle = buildHandoverBundle({ patientId, vitals }, { now, emitBpPanel: true });
 
     // Panel BP
     const bpPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_BP.code); // 85354-9
@@ -51,7 +57,7 @@ describe('Panel de Presión Arterial 85354-9 — componentes y coherencia', () =
 
   it('incluye sólo el componente disponible (ej. sólo TAS)', () => {
     const vitals = { sbp: 130 }; // sin dbp
-    const bundle = buildHandoverBundle({ patientId, vitals }, { now });
+    const bundle = buildHandoverBundle({ patientId, vitals }, { now, emitBpPanel: true });
 
     const bpPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_BP.code);
     expect(bpPanel).toBeTruthy();
@@ -75,7 +81,7 @@ describe('Panel de Presión Arterial 85354-9 — componentes y coherencia', () =
   it('añade hasMember si emitHasMember=true', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { sbp: 122, dbp: 78 } },
-      { now, emitHasMember: true }
+      { now, emitBpPanel: true, emitHasMember: true }
     );
     const bpPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_BP.code);
     expect(bpPanel).toBeTruthy();
@@ -86,7 +92,7 @@ describe('Panel de Presión Arterial 85354-9 — componentes y coherencia', () =
   });
 
   it('no crea panel si no hay TAS ni TAD', () => {
-    const bundle = buildHandoverBundle({ patientId, vitals: {} }, { now });
+    const bundle = buildHandoverBundle({ patientId, vitals: {} }, { now, emitBpPanel: true });
     const bpPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_BP.code);
     expect(bpPanel).toBeFalsy();
   });

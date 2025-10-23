@@ -16,7 +16,7 @@ describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
     const vitals = { hr: 80, rr: 16, temp: 37.1, spo2: 97, sbp: 118, dbp: 76 };
     const bundle = buildHandoverBundle(
       { patientId, vitals },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code); // 85353-1
@@ -34,7 +34,7 @@ describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
   it('sólo incluye los miembros disponibles (ej. sólo HR)', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 72 } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
@@ -46,7 +46,7 @@ describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
   it('por defecto no agrega hasMember (emitHasMember=false)', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 65, rr: 14 } },
-      { now } // sin toggle
+      { now, emitPanel: true } // sin toggle emitHasMember
     );
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
     expect(panel?.hasMember).toBeUndefined();

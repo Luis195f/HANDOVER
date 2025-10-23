@@ -16,7 +16,7 @@ describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
   it('incluye ACVPU en hasMember si emitHasMember=true y hay acvpu', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 80, acvpu: 'C' } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
@@ -30,7 +30,7 @@ describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
   it('no incluye ACVPU si no está presente en vitals', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 75 } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);

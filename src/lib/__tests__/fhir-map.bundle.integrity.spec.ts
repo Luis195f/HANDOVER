@@ -37,7 +37,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
       },
       meds: [{ text: 'Paracetamol 1 g v.o. c/8h' }],
       attachments: [{ url: 'https://cdn.example.org/audio.mp3', contentType: 'audio/mpeg', description: 'SBAR' }],
-    }, { now, emitHasMember: true });
+    }, { now, emitPanel: true, emitBpPanel: true, emitHasMember: true });
 
     // 1) Composition existe y tiene secciones esperadas
     const comp = compositionOf(bundle);
@@ -69,7 +69,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const bundle = buildHandoverBundle({
       patientId,
       vitals: { hr: 82, rr: 18, sbp: 118, dbp: 76, temp: 36.9, spo2: 97, bgMmolL: 5.6, acvpu: 'C' },
-    }, { now, emitHasMember: true, glucoseDecimals: 0 });
+    }, { now, emitPanel: true, emitBpPanel: true, emitHasMember: true, glucoseDecimals: 0 });
 
     // 85353-1 — Vital signs panel
     const vsPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
@@ -110,7 +110,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
   it('caso mínimo: sólo HR → se crea panel 85353-1 con un componente, hasMember sólo HR y sin secciones extra', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 70 } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const comp = compositionOf(bundle);
