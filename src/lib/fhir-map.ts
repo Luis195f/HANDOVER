@@ -106,15 +106,14 @@ export type HandoverInput = {
 export type ProfileUrlMap = Record<string, string[] | undefined>;
 
 export type BuildOptions = {
-  now?: string;
+  emitVitalsPanel?: boolean;
+  emitBpPanel?: boolean;
+  emitHasMember?: boolean;
+  emitIndividuals?: boolean;
+  now?: string | Date;
   authorId?: string;
   attachments?: AttachmentInput[];
-  emitVitalsPanel?: boolean;
   emitPanel?: boolean;
-  emitVitalsPanel?: boolean;
-  emitIndividuals?: boolean;
-  emitHasMember?: boolean;
-  emitBpPanel?: boolean;
   normalizeGlucoseToMgDl?: boolean;
   normalizeGlucoseToMgdl?: boolean;
   glucoseDecimals?: number;
@@ -122,9 +121,9 @@ export type BuildOptions = {
 };
 
 export const DEFAULT_OPTS: Required<
-  Pick<BuildOptions, "emitPanel" | "emitBpPanel" | "emitHasMember">
+  Pick<BuildOptions, "emitVitalsPanel" | "emitBpPanel" | "emitHasMember">
 > = {
-  emitPanel: false,
+  emitVitalsPanel: false,
   emitBpPanel: false,
   emitHasMember: false,
 };
@@ -550,6 +549,8 @@ type Bundle = {
 
 const uom = UCUM_SYSTEM;
 const nowISO = () => new Date().toISOString();
+const resolveNowInput = (value?: string | Date) =>
+  value instanceof Date ? value.toISOString() : value;
 const newId = (pfx = "id") =>
   `${pfx}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 
@@ -580,15 +581,17 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 // Vitals → Observation (núcleo)
 /////////////////////////////////////
 
-export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
+export function mapObservationVitals(values: HandoverValues, opts: BuildOptions = {}): Observation[] {
   if (!values?.patientId) return [];
+
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
 
   const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
   const observations: Observation[] = [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = opts2.now ?? nowISO();
+  const effective = resolveNowInput(opts2.now) ?? nowISO();
 
   const emitIndividuals = opts2.emitIndividuals ?? true;
 
@@ -835,7 +838,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 }
 
 // Alias requerido por los tests
-export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOptions) {
+export function mapVitalsToObservations(values: HandoverValues, opts: BuildOptions = {}) {
   const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
 
   if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
@@ -975,7 +978,7 @@ function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): Device
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = opts2.now ?? nowISO();
+  const when = resolveNowInput(opts2.now) ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1061,7 +1064,7 @@ export function buildHandoverBundle(
 
   const opts2 = { ...DEFAULT_OPTS, ...options };
   const patientId = values.patientId;
-  const now = opts2.now ?? nowISO();
+  const now = resolveNowInput(opts2.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
@@ -1085,7 +1088,7 @@ export function buildHandoverBundle(
 
   const observationOptions: BuildOptions = { ...opts2, now };
 
-  const observationResources = mapObservationVitals(values, observationOptions);
+  const observationResources = mapVitalsToObservations(values, observationOptions);
   const entries: Array<{
     fullUrl: string;
     resource: any;
@@ -1151,6 +1154,11 @@ export function buildHandoverBundle(
   }
 
   const emitPanel = opts2.emitPanel;
+  const emitVitalsPanel = Object.prototype.hasOwnProperty.call(options, 'emitVitalsPanel')
+    ? opts2.emitVitalsPanel
+    : typeof emitPanel === 'boolean'
+      ? emitPanel
+      : opts2.emitVitalsPanel;
   const emitBpPanel = Object.prototype.hasOwnProperty.call(options, 'emitBpPanel')
     ? opts2.emitBpPanel
     : emitPanel;
