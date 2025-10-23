@@ -17,7 +17,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
   it('incluye Glucemia (2339-0) cuando llega en mg/dL', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 80, bgMgDl: 104 } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
@@ -33,7 +33,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
   it('normaliza mmol/L→mg/dL por defecto: incluye 2339-0', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { rr: 16, bgMmolL: 5.6 } }, // 5.6 mmol/L ≈ 101 mg/dL
-      { now, emitHasMember: true } // normaliza por defecto
+      { now, emitPanel: true, emitHasMember: true } // normaliza por defecto
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
@@ -47,7 +47,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
   it('si se desactiva la normalización, incluye 14743-9 (mmol/L)', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { spo2: 97, bgMmolL: 6.0 } },
-      { now, emitHasMember: true, normalizeGlucoseToMgDl: false }
+      { now, emitPanel: true, emitHasMember: true, normalizeGlucoseToMgDl: false }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
@@ -61,7 +61,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
   it('no incluye glucemia si no existe', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { hr: 70 } },
-      { now, emitHasMember: true }
+      { now, emitPanel: true, emitHasMember: true }
     );
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
