@@ -586,7 +586,8 @@ export function mapObservationVitals(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): Observation[] {
-  const optionsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   if (!values?.patientId) return [];
 
   const vitals = normalizeVitalsInput(values.vitals);
@@ -844,8 +845,9 @@ export function mapVitalsToObservations(
   values: HandoverValues,
   opts: BuildOptions = {},
 ) {
-  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
-  return mapObservationVitals(values, options);
+  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  return mapObservationVitals(values, optionsMerged);
 }
 
 /////////////////////////////////////////
@@ -969,14 +971,15 @@ function mapOxygenProcedure(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): DeviceUseStatement[] {
-  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = resolveNow(options.now) ?? nowISO();
+  const when = resolveNow(optionsMerged.now) ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1051,7 +1054,8 @@ export function buildHandoverBundle(
     ? (input as HandoverInput).values
     : (input as HandoverValues);
 
-  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
 
   if (!values.patientId) {
     return {
@@ -1063,13 +1067,13 @@ export function buildHandoverBundle(
   }
 
   const patientId = values.patientId;
-  const now = resolveNow(options.now) ?? nowISO();
+  const now = resolveNow(optionsMerged.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
     ? ((input as HandoverInput).attachments as AttachmentInput[])
     : [];
-  const attachmentsFromOptions = Array.isArray(options.attachments) ? options.attachments : [];
+  const attachmentsFromOptions = Array.isArray(optionsMerged.attachments) ? optionsMerged.attachments : [];
 
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
     (att): att is AttachmentInput => Boolean(att),
@@ -1083,14 +1087,14 @@ export function buildHandoverBundle(
     : values.meds;
   const normalizedMeds = normalizeMedicationInputs(medsInput);
   const normalizedVitals = normalizeVitalsInput(values.vitals);
-  const profileExtras = normalizeProfileOptions(options.profileUrls);
+  const profileExtras = normalizeProfileOptions(optionsMerged.profileUrls);
 
   const observationOptions: BuildOptions = {
     now,
-    emitIndividuals: options.emitIndividuals,
-    normalizeGlucoseToMgDl: options.normalizeGlucoseToMgDl,
-    normalizeGlucoseToMgdl: options.normalizeGlucoseToMgdl,
-    glucoseDecimals: options.glucoseDecimals,
+    emitIndividuals: optionsMerged.emitIndividuals,
+    normalizeGlucoseToMgDl: optionsMerged.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: optionsMerged.normalizeGlucoseToMgdl,
+    glucoseDecimals: optionsMerged.glucoseDecimals,
   };
 
   const observationResources = mapVitalsToObservations(values, observationOptions);
@@ -1159,9 +1163,9 @@ export function buildHandoverBundle(
   }
 
   const emitVitalsPanel =
-    options.emitVitalsPanel ?? options.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
-  const emitBpPanel = options.emitBpPanel ?? emitVitalsPanel;
-  const emitHasMember = options.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
+    optionsMerged.emitVitalsPanel ?? optionsMerged.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
+  const emitBpPanel = optionsMerged.emitBpPanel ?? emitVitalsPanel;
+  const emitHasMember = optionsMerged.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
     [__test__.CODES.HR.code, __test__.CODES.HR.display],
