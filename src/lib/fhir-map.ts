@@ -585,6 +585,7 @@ export function mapObservationVitals(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): Observation[] {
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
   if (!values?.patientId) return [];
 
   const opts2 = { ...DEFAULT_OPTS, ...opts };
@@ -1051,6 +1052,8 @@ export function buildHandoverBundle(
     ? (input as HandoverInput).values
     : (input as HandoverValues);
 
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
+
   if (!values.patientId) {
     return {
       resourceType: 'Bundle',
@@ -1062,7 +1065,6 @@ export function buildHandoverBundle(
 
   const opts2 = { ...DEFAULT_OPTS, ...options };
   const patientId = values.patientId;
-  const opts2 = { ...DEFAULT_OPTS, ...opts };
   const now = resolveNow(opts2.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
