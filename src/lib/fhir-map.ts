@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 /* [NURSEOS PRO PATCH 2025-10-22] fhir-map.ts
@@ -16,6 +17,10 @@ const OBS_CAT_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-catego
 const OBS_CAT_VITALS = "vital-signs";
 const OBS_CAT_LAB = "laboratory";
 const GLUCOSE_CONVERSION_FACTOR = 18.0182;
+
+const PROFILE_VITAL_SIGNS = "http://hl7.org/fhir/StructureDefinition/vitalsigns";
+const PROFILE_BP = "http://hl7.org/fhir/StructureDefinition/bp";
+const PROFILE_LAB = "http://hl7.org/fhir/StructureDefinition/observation-lab";
 
 const ACVPU_TEXT = {
   A: "Alert",
@@ -98,6 +103,8 @@ export type HandoverInput = {
   meds?: MedicationInput[]; // permite pasar meds aquí o dentro de values.meds
 };
 
+export type ProfileUrlMap = Record<string, string[] | undefined>;
+
 export type BuildOptions = {
   now?: string;
   authorId?: string;
@@ -106,14 +113,19 @@ export type BuildOptions = {
   emitIndividuals?: boolean;
   emitHasMember?: boolean;
   emitBpPanel?: boolean;
+  normalizeGlucoseToMgDl?: boolean;
   normalizeGlucoseToMgdl?: boolean;
   glucoseDecimals?: number;
-  profileUrls?: string[];
+  profileUrls?: string[] | ProfileUrlMap;
 };
 
+export type MedicationCodeInput = { system?: string; code?: string; display?: string } | string;
+
 export type MedicationInput = {
-  code?: { system?: string; code?: string; display?: string };
-  name?: string;                // si no hay code, se usa como texto
+  code?: MedicationCodeInput;
+  display?: string;
+  text?: string;
+  name?: string;                // si no hay code/text, se usa como texto
   dose?: string | number;
   unit?: string;                // "mg", "mL", etc.
   route?: string;               // "PO", "IV", etc.
@@ -217,6 +229,102 @@ function resolveAttachmentContentType(att: AttachmentInput): string {
   const inferred = inferAttachmentMime(att.url);
   if (inferred) return inferred;
   return ATTACHMENT_DEFAULT_MIME;
+}
+
+///////////////////////////////////////
+// Normalización de Vitals/Input
+///////////////////////////////////////
+
+const ACVPU_ALLOWED = ["A", "C", "V", "P", "U"] as const;
+const AVPU_ALLOWED = ["A", "V", "P", "U", "C"] as const;
+
+const normalizeNumeric = (min: number, max: number) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null || value === "") return undefined;
+      const toNumber = (input: unknown) => {
+        if (typeof input === "number") return input;
+        if (typeof input === "string") {
+          const trimmed = input.trim();
+          if (!trimmed) return undefined;
+          const num = Number(trimmed);
+          return num;
+        }
+        return undefined;
+      };
+
+      const num = toNumber(value);
+      if (typeof num !== "number" || !Number.isFinite(num)) return undefined;
+      if (num < min || num > max) return undefined;
+      return num;
+    },
+    z.union([z.number().min(min).max(max), z.undefined()]),
+  );
+
+const normalizeString = () =>
+  z
+    .preprocess((value) => {
+      if (typeof value !== "string") return undefined;
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : undefined;
+    }, z.string())
+    .optional();
+
+const normalizeBoolean = () =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null || value === "") return undefined;
+      if (typeof value === "boolean") return value;
+      if (typeof value === "string") {
+        const trimmed = value.trim().toLowerCase();
+        if (!trimmed) return undefined;
+        if (["true", "1", "yes", "y"].includes(trimmed)) return true;
+        if (["false", "0", "no", "n"].includes(trimmed)) return false;
+      }
+      return undefined;
+    },
+    z.union([z.boolean(), z.undefined()]),
+  );
+
+const normalizeScale = (allowed: readonly string[]) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null || value === "") return undefined;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return undefined;
+        const upper = trimmed.toUpperCase();
+        if (allowed.includes(upper)) return upper;
+        return undefined;
+      }
+      return undefined;
+    },
+    z.union([z.enum(allowed as [string, ...string[]]), z.undefined()]),
+  );
+
+const VitalsSchema = z
+  .object({
+    hr: normalizeNumeric(0, 300),
+    rr: normalizeNumeric(0, 100),
+    temp: normalizeNumeric(25, 45),
+    spo2: normalizeNumeric(0, 100),
+    sbp: normalizeNumeric(0, 400),
+    dbp: normalizeNumeric(0, 300),
+    bgMgDl: normalizeNumeric(0, 1500),
+    bgMmolL: normalizeNumeric(0, 100),
+    o2: normalizeBoolean(),
+    o2Device: normalizeString(),
+    o2FlowLpm: normalizeNumeric(0, 100),
+    fio2: normalizeNumeric(0, 100),
+    acvpu: normalizeScale(ACVPU_ALLOWED),
+    avpu: normalizeScale(AVPU_ALLOWED),
+  })
+  .passthrough();
+
+type NormalizedVitals = z.infer<typeof VitalsSchema>;
+
+function normalizeVitalsInput(vitals: HandoverValues["vitals"] | undefined): NormalizedVitals {
+  return VitalsSchema.parse(vitals ?? {});
 }
 
 ////////////////////////////////////////////////////
@@ -348,11 +456,28 @@ type DeviceUseStatement = {
   note?: Array<{ text: string }>;
 };
 
+type Composition = {
+  resourceType: "Composition";
+  id?: string;
+  status: "preliminary" | "final" | "amended" | "entered-in-error";
+  type: FhirCodeableConcept;
+  subject: FhirRef;
+  encounter?: FhirRef;
+  date: string;
+  title?: string;
+  identifier?: { system?: string; value?: string };
+  section?: Array<{ title?: string; entry?: Array<{ reference: string }> }>;
+};
+
 type Bundle = {
   resourceType: "Bundle";
   id?: string;
   type: "collection" | "transaction" | "batch";
-  entry: Array<{ resource: any }>;
+  entry: Array<{
+    fullUrl?: string;
+    resource: any;
+    request?: { method: string; url: string; ifNoneExist?: string };
+  }>;
 };
 
 /////////////////////////////////////
@@ -392,17 +517,16 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 /////////////////////////////////////
 
 export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
-  const res: Observation[] = [];
-  const v = values?.vitals ?? {};
-  if (!values?.patientId) return res;
+  if (!values?.patientId) return [];
+
+  const vitals = normalizeVitalsInput(values.vitals);
+  const observations: Observation[] = [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
   const effective = opts?.now ?? nowISO();
 
   const emitIndividuals = opts?.emitIndividuals ?? true;
-  const emitPanel = opts?.emitPanel ?? false;
-  const emitBpPanel = opts?.emitBpPanel ?? emitPanel;
 
   const normalizeGlucoseOption = opts?.normalizeGlucoseToMgDl ?? opts?.normalizeGlucoseToMgdl;
   const normalizeGlucose =
@@ -416,40 +540,47 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
     valueCodeableConcept?: FhirCodeableConcept;
     component?: Observation["component"];
     note?: Observation["note"];
-  }): Observation => ({
-    resourceType: "Observation",
-    status: "final",
-    subject: subj,
-    encounter: enc,
-    effectiveDateTime: effective,
-    category: params.category ?? categoryVital,
-    code: params.code,
-    ...(params.valueQuantity ? { valueQuantity: params.valueQuantity } : {}),
-    ...(params.valueCodeableConcept ? { valueCodeableConcept: params.valueCodeableConcept } : {}),
-    ...(params.component ? { component: params.component } : {}),
-    ...(params.note ? { note: params.note } : {})
-  });
+    profile?: string[];
+  }): Observation => {
+    const profiles = params.profile?.filter(Boolean) ?? [];
+    return {
+      resourceType: "Observation",
+      status: "final",
+      subject: subj,
+      encounter: enc,
+      effectiveDateTime: effective,
+      category: params.category ?? categoryVital,
+      code: params.code,
+      ...(profiles.length ? { meta: { profile: Array.from(new Set(profiles)) } } : {}),
+      ...(params.valueQuantity ? { valueQuantity: params.valueQuantity } : {}),
+      ...(params.valueCodeableConcept ? { valueCodeableConcept: params.valueCodeableConcept } : {}),
+      ...(params.component ? { component: params.component } : {}),
+      ...(params.note ? { note: params.note } : {})
+    };
+  };
 
-  if (emitIndividuals && isNum(v.hr)) {
-    res.push(
+  if (emitIndividuals && typeof vitals.hr === "number") {
+    observations.push(
       buildObservation({
         code: codeCC(LOINC_SYSTEM, __test__.LOINC.HR, "Heart rate", "Heart rate"),
-        valueQuantity: qty(v.hr, __test__.UNITS.PER_MIN)
+        valueQuantity: qty(vitals.hr, __test__.UNITS.PER_MIN),
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  if (emitIndividuals && isNum(v.rr)) {
-    res.push(
+  if (emitIndividuals && typeof vitals.rr === "number") {
+    observations.push(
       buildObservation({
         code: codeCC(LOINC_SYSTEM, __test__.LOINC.RR, "Respiratory rate", "Respiratory rate"),
-        valueQuantity: qty(v.rr, __test__.UNITS.PER_MIN)
+        valueQuantity: qty(vitals.rr, __test__.UNITS.PER_MIN),
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  if (emitIndividuals && isNum(v.temp)) {
-    res.push(
+  if (emitIndividuals && typeof vitals.temp === "number") {
+    observations.push(
       buildObservation({
         code: codeCC(
           LOINC_SYSTEM,
@@ -457,13 +588,14 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
           "Body temperature",
           "Body temperature"
         ),
-        valueQuantity: qty(v.temp, __test__.UNITS.CEL, "Cel")
+        valueQuantity: qty(vitals.temp, __test__.UNITS.CEL, "Cel"),
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  if (emitIndividuals && isNum(v.spo2)) {
-    res.push(
+  if (emitIndividuals && typeof vitals.spo2 === "number") {
+    observations.push(
       buildObservation({
         code: codeCC(
           LOINC_SYSTEM,
@@ -471,13 +603,14 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
           "Oxygen saturation in Arterial blood by Pulse oximetry",
           "SpO2"
         ),
-        valueQuantity: qty(v.spo2, __test__.UNITS.PERCENT, "%")
+        valueQuantity: qty(vitals.spo2, __test__.UNITS.PERCENT, "%"),
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  if (emitIndividuals && isNum(v.sbp)) {
-    res.push(
+  if (emitIndividuals && typeof vitals.sbp === "number") {
+    observations.push(
       buildObservation({
         code: codeCC(
           LOINC_SYSTEM,
@@ -485,13 +618,14 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
           "Systolic blood pressure",
           "Systolic blood pressure"
         ),
-        valueQuantity: qty(v.sbp, __test__.UNITS.MMHG)
+        valueQuantity: qty(vitals.sbp, __test__.UNITS.MMHG),
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  if (emitIndividuals && isNum(v.dbp)) {
-    res.push(
+  if (emitIndividuals && typeof vitals.dbp === "number") {
+    observations.push(
       buildObservation({
         code: codeCC(
           LOINC_SYSTEM,
@@ -499,53 +633,17 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
           "Diastolic blood pressure",
           "Diastolic blood pressure"
         ),
-        valueQuantity: qty(v.dbp, __test__.UNITS.MMHG)
+        valueQuantity: qty(vitals.dbp, __test__.UNITS.MMHG),
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  if (emitBpPanel && (isNum(v.sbp) || isNum(v.dbp))) {
-    const components: Observation["component"] = [];
-    if (isNum(v.sbp)) {
-      components.push({
-        code: codeCC(
-          LOINC_SYSTEM,
-          __test__.LOINC.SBP,
-          "Systolic blood pressure",
-          "Systolic blood pressure"
-        ),
-        valueQuantity: qty(v.sbp, __test__.UNITS.MMHG)
-      });
-    }
-    if (isNum(v.dbp)) {
-      components.push({
-        code: codeCC(
-          LOINC_SYSTEM,
-          __test__.LOINC.DBP,
-          "Diastolic blood pressure",
-          "Diastolic blood pressure"
-        ),
-        valueQuantity: qty(v.dbp, __test__.UNITS.MMHG)
-      });
-    }
-    res.push(
-      buildObservation({
-        code: codeCC(
-          LOINC_SYSTEM,
-          __test__.LOINC.BP_PANEL,
-          "Blood pressure panel with all children optional",
-          "Blood pressure panel"
-        ),
-        component: components
-      })
-    );
-  }
-
-  const hasBgMgDl = isNum(v.bgMgDl);
-  const hasBgMmolL = isNum(v.bgMmolL);
+  const hasBgMgDl = typeof vitals.bgMgDl === "number";
+  const hasBgMmolL = typeof vitals.bgMmolL === "number";
 
   if (hasBgMgDl) {
-    res.push(
+    observations.push(
       buildObservation({
         category: categoryLab,
         code: codeCC(
@@ -554,14 +652,15 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
           "Glucose [Mass/volume] in Blood",
           "Blood glucose"
         ),
-        valueQuantity: qty(v.bgMgDl!, __test__.UNITS.MGDL)
+        valueQuantity: qty(vitals.bgMgDl!, __test__.UNITS.MGDL),
+        profile: [PROFILE_LAB],
       })
     );
   } else if (hasBgMmolL) {
     if (normalizeGlucose) {
-      const converted = roundTo(v.bgMmolL! * GLUCOSE_CONVERSION_FACTOR, glucoseDecimals);
+      const converted = roundTo(vitals.bgMmolL! * GLUCOSE_CONVERSION_FACTOR, glucoseDecimals);
       const factor = GLUCOSE_CONVERSION_FACTOR.toFixed(4);
-      res.push(
+      observations.push(
         buildObservation({
           category: categoryLab,
           code: codeCC(
@@ -573,13 +672,14 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
           valueQuantity: qty(converted, __test__.UNITS.MGDL),
           note: [
             {
-              text: `Convertido desde ${v.bgMmolL} mmol/L (factor ${factor})`
+              text: `Convertido desde ${vitals.bgMmolL} mmol/L (factor ${factor})`,
             }
-          ]
+          ],
+          profile: [PROFILE_LAB],
         })
       );
     } else {
-      res.push(
+      observations.push(
         buildObservation({
           category: categoryLab,
           code: codeCC(
@@ -588,25 +688,18 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
             "Glucose [Moles/volume] in Blood",
             "Blood glucose"
           ),
-          valueQuantity: qty(v.bgMmolL!, __test__.UNITS.MMOLL, "mmol/L")
+          valueQuantity: qty(vitals.bgMmolL!, __test__.UNITS.MMOLL, "mmol/L"),
+          profile: [PROFILE_LAB],
         })
       );
     }
   }
 
-  const rawAcvpu = v.acvpu ?? v.avpu;
-  const acvpuValue =
-    rawAcvpu === "A" ||
-    rawAcvpu === "C" ||
-    rawAcvpu === "V" ||
-    rawAcvpu === "P" ||
-    rawAcvpu === "U"
-      ? (rawAcvpu as "A" | "C" | "V" | "P" | "U")
-      : undefined;
+  const rawAcvpu = (vitals.acvpu ?? vitals.avpu) as NormalizedVitals["acvpu"];
 
-  if (acvpuValue) {
-    const answerLoinc = __test__.ACVPU_LOINC[acvpuValue];
-    const answerSnomed = __test__.ACVPU_SNOMED[acvpuValue];
+  if (rawAcvpu && (ACVPU_ALLOWED as readonly string[]).includes(rawAcvpu)) {
+    const answerLoinc = __test__.ACVPU_LOINC[rawAcvpu as keyof typeof __test__.ACVPU_LOINC];
+    const answerSnomed = __test__.ACVPU_SNOMED[rawAcvpu as keyof typeof __test__.ACVPU_SNOMED];
     const coding: FhirCoding[] = [];
     if (answerSnomed) {
       coding.push({
@@ -623,7 +716,7 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
       });
     }
 
-    res.push(
+    observations.push(
       buildObservation({
         code: codeCC(
           LOINC_SYSTEM,
@@ -633,17 +726,18 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
         ),
         valueCodeableConcept: {
           ...(coding.length ? { coding } : {}),
-          text: answerSnomed?.display ?? answerLoinc?.display ?? acvpuValue
-        }
+          text: answerSnomed?.display ?? answerLoinc?.display ?? rawAcvpu
+        },
+        profile: [PROFILE_VITAL_SIGNS],
       })
     );
   }
 
-  const hasO2 = !!v.o2 || isNum(v.fio2) || isNum(v.o2FlowLpm) || !!v.o2Device;
+  const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (hasO2) {
-    if (isNum(v.fio2)) {
-      const fi = normalizeFiO2ToPct(v.fio2);
-      res.push(
+    if (isNum(vitals.fio2)) {
+      const fi = normalizeFiO2ToPct(vitals.fio2);
+      observations.push(
         buildObservation({
           code: codeCC(
             LOINC_SYSTEM,
@@ -651,12 +745,13 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
             "Inhaled oxygen concentration",
             "FiO2"
           ),
-          valueQuantity: qty(fi, __test__.UNITS.PERCENT, "%")
+          valueQuantity: qty(fi, __test__.UNITS.PERCENT, "%"),
+          profile: [PROFILE_VITAL_SIGNS],
         })
       );
     }
-    if (isNum(v.o2FlowLpm)) {
-      res.push(
+    if (isNum(vitals.o2FlowLpm)) {
+      observations.push(
         buildObservation({
           code: codeCC(
             LOINC_SYSTEM,
@@ -664,13 +759,14 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
             "Oxygen flow rate",
             "Oxygen flow rate"
           ),
-          valueQuantity: qty(v.o2FlowLpm, "L/min")
+          valueQuantity: qty(vitals.o2FlowLpm, "L/min"),
+          profile: [PROFILE_VITAL_SIGNS],
         })
       );
     }
   }
 
-  return res;
+  return observations;
 }
 
 // Alias requerido por los tests
@@ -682,33 +778,94 @@ export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOpti
 // MedicationStatement desde meds[]
 /////////////////////////////////////////
 
+type NormalizedMedication = {
+  concept: FhirCodeableConcept;
+  dosageText?: string;
+  route?: string;
+  doseQuantity?: { value: number; unit?: string; system?: string; code?: string };
+  when?: string;
+  note?: string;
+};
+
+function normalizeMedicationInputs(meds?: MedicationInput[]): NormalizedMedication[] {
+  if (!Array.isArray(meds)) return [];
+
+  const normalized: NormalizedMedication[] = [];
+
+  for (const raw of meds) {
+    if (!raw || typeof raw !== "object") continue;
+
+    const text = trimToUndefined((raw as any).text ?? raw.name);
+    const topDisplay = trimToUndefined(raw.display);
+
+    let codeSystem: string | undefined;
+    let codeValue: string | undefined;
+    let codeDisplay: string | undefined;
+
+    if (typeof raw.code === "string") {
+      codeValue = trimToUndefined(raw.code);
+    } else if (raw.code && typeof raw.code === "object") {
+      codeSystem = trimToUndefined(raw.code.system);
+      codeValue = trimToUndefined(raw.code.code);
+      codeDisplay = trimToUndefined(raw.code.display);
+    }
+
+    const display = topDisplay ?? codeDisplay;
+    const conceptText = text ?? display ?? codeValue;
+
+    if (!conceptText && !codeValue && !display && !codeSystem) continue;
+
+    const codingEntry = [
+      {
+        ...(codeSystem ? { system: codeSystem } : {}),
+        ...(codeValue ? { code: codeValue } : {}),
+        ...(display ? { display } : {}),
+      },
+    ].filter((c) => Object.keys(c).length > 0);
+
+    const concept: FhirCodeableConcept = codingEntry.length
+      ? { coding: codingEntry, text: conceptText ?? "Medication" }
+      : { text: conceptText ?? "Medication" };
+
+    const route = trimToUndefined(raw.route);
+    const note = trimToUndefined(raw.note);
+    const when = trimToUndefined(raw.when);
+    const unit = trimToUndefined(raw.unit);
+
+    const doseNumber = coerceNumber(raw.dose);
+    const doseQuantity = doseNumber !== undefined
+      ? { value: doseNumber, unit, system: uom, code: unit }
+      : undefined;
+
+    const dosageTextParts = [
+      raw.dose !== undefined ? String(raw.dose).trim() : undefined,
+      unit,
+      route,
+    ].filter(Boolean);
+    const dosageText = dosageTextParts.join(" ") || undefined;
+
+    normalized.push({
+      concept,
+      dosageText,
+      route,
+      doseQuantity,
+      when,
+      note,
+    });
+  }
+
+  return normalized;
+}
+
 function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInput[]): MedicationStatement[] {
-  const meds = medsArg ?? values.meds ?? [];
-  if (!meds || meds.length === 0) return [];
+  const meds = normalizeMedicationInputs(medsArg ?? values.meds);
+  if (meds.length === 0) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
   const tFallback = nowISO();
 
   return meds.map<MedicationStatement>((m, i) => {
-    const medCC: FhirCodeableConcept =
-      m.code?.code || m.code?.display
-        ? { coding: [{ system: m.code?.system, code: m.code?.code, display: m.code?.display }], text: m.name ?? m.code?.display }
-        : { text: m.name ?? "Medication" };
-
-    const dosageText = [
-      m.dose !== undefined ? String(m.dose) : undefined,
-      m.unit,
-      m.route
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const doseQuantity =
-      m.dose !== undefined
-        ? { value: Number(m.dose), unit: m.unit, system: uom, code: m.unit }
-        : undefined;
-
     const ms: MedicationStatement = {
       resourceType: "MedicationStatement",
       id: newId("ms"),
@@ -716,12 +873,12 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
       subject: subj,
       encounter: enc,
       effectiveDateTime: m.when ?? tFallback,
-      medicationCodeableConcept: medCC,
+      medicationCodeableConcept: m.concept,
       dosage: [
         {
-          text: dosageText || undefined,
+          text: m.dosageText,
           route: m.route ? { text: m.route } : undefined,
-          doseAndRate: doseQuantity ? [{ doseQuantity }] : undefined
+          doseAndRate: m.doseQuantity ? [{ doseQuantity: m.doseQuantity }] : undefined
         }
       ],
       note: m.note ? [{ text: m.note }] : undefined
@@ -735,15 +892,15 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 /////////////////////////////////////////
 
 function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
-  const v = values.vitals ?? {};
-  const hasO2 = !!v.o2 || isNum(v.fio2) || isNum(v.o2FlowLpm) || !!v.o2Device;
+  const vitals = normalizeVitalsInput(values.vitals);
+  const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
   const when = opts?.now ?? nowISO();
 
-  const note = buildO2Note(values);
+  const note = buildO2Note(vitals);
 
   const reason = codeCC(
     "http://snomed.info/sct",
@@ -754,10 +911,9 @@ function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): Device
 
   return [
     {
-      resourceType: "Procedure",
-      id: newId("proc-o2"),
+      resourceType: "DeviceUseStatement",
+      id: newId("dus-o2"),
       status: "completed",
-      code: codeCC(SNOMED_SYSTEM, __test__.SNOMED.O2_ADMINISTRATION, "Administration of oxygen", "Oxygen therapy"),
       subject: subj,
       encounter: enc,
       timingDateTime: when,
@@ -767,13 +923,11 @@ function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): Device
   ];
 }
 
-function buildO2Note(values: HandoverValues) {
-  const v = values.vitals ?? {};
-  if (!v) return undefined;
+function buildO2Note(vitals: NormalizedVitals) {
   const parts: string[] = [];
-  if (v.o2Device) parts.push(`Device: ${v.o2Device}`);
-  if (isNum(v.o2FlowLpm)) parts.push(`Flow: ${v.o2FlowLpm} L/min`);
-  if (isNum(v.fio2)) parts.push(`FiO2: ${normalizeFiO2ToPct(v.fio2)}%`);
+  if (vitals.o2Device) parts.push(`Device: ${vitals.o2Device}`);
+  if (isNum(vitals.o2FlowLpm)) parts.push(`Flow: ${vitals.o2FlowLpm} L/min`);
+  if (isNum(vitals.fio2)) parts.push(`FiO2: ${normalizeFiO2ToPct(vitals.fio2)}%`);
   return parts.length ? [{ text: parts.join(" | ") }] : undefined;
 }
 
@@ -812,57 +966,295 @@ function mapDocumentReference(
 
 export function buildHandoverBundle(
   input: HandoverInput | HandoverValues,
-  options: BuildOptions = {}
+  options: BuildOptions = {},
 ): Bundle {
   const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
   const values: HandoverValues = isWrapped
     ? (input as HandoverInput).values
     : (input as HandoverValues);
 
-  const attachmentsFromValues = Array.isArray(values.attachments)
-    ? values.attachments
-    : [];
+  if (!values.patientId) {
+    return {
+      resourceType: 'Bundle',
+      id: newId('bundle'),
+      type: 'transaction',
+      entry: [],
+    };
+  }
+
+  const patientId = values.patientId;
+  const now = options.now ?? nowISO();
+
+  const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
     ? ((input as HandoverInput).attachments as AttachmentInput[])
     : [];
-  const attachmentsFromOptions = Array.isArray(options.attachments)
-    ? options.attachments
-    : [];
+  const attachmentsFromOptions = Array.isArray(options.attachments) ? options.attachments : [];
 
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
-    (att): att is AttachmentInput => Boolean(att)
+    (att): att is AttachmentInput => Boolean(att),
   );
   const attachments = mergedAttachments.length > 0
     ? AttachmentArraySchema.parse(mergedAttachments)
     : undefined;
 
-  const medsIn: MedicationInput[] | undefined = isWrapped
+  const medsInput: MedicationInput[] | undefined = isWrapped
     ? (input as HandoverInput).meds ?? values.meds
     : values.meds;
+  const normalizedMeds = normalizeMedicationInputs(medsInput);
+  const normalizedVitals = normalizeVitalsInput(values.vitals);
+  const profileExtras = normalizeProfileOptions(options.profileUrls);
 
-  const resources: any[] = [];
+  const observationOptions: BuildOptions = {
+    now,
+    emitIndividuals: options.emitIndividuals,
+    normalizeGlucoseToMgDl: options.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: options.normalizeGlucoseToMgdl,
+    glucoseDecimals: options.glucoseDecimals,
+  };
 
-  const opts = options ?? {};
+  const observationResources = mapObservationVitals(values, observationOptions);
+  const entries: Array<{
+    fullUrl: string;
+    resource: any;
+    request: { method: string; url: string; ifNoneExist?: string };
+  }> = [];
 
-  // 1) Observations de signos vitales (incluye FiO2/Flow si presentes)
-  const obs = mapObservationVitals(values, opts);
-  resources.push(...obs);
+  const sections = new Map<string, { title: string; entry: Array<{ reference: string }> }>();
+  const addSectionEntry = (title: string, reference: string) => {
+    if (!reference) return;
+    const section = sections.get(title) ?? { title, entry: [] };
+    section.entry.push({ reference });
+    sections.set(title, section);
+  };
 
-  // 2) Oxigenoterapia como DeviceUseStatement (si aplica)
-  resources.push(...mapOxygenProcedure(values, opts));
+  const observationInfo = new Map<string, { resource: Observation; fullUrl: string }>();
+  let acvpuMember: string | undefined;
+  const glucoseMembers: string[] = [];
+  const glucoseMemberSet = new Set<string>();
+  const glucoseLoincCodes = new Set(
+    [__test__.LOINC?.GLUCOSE_MASS, __test__.LOINC?.GLUCOSE_MOLE].filter(
+      (code): code is string => typeof code === "string" && code.length > 0,
+    ),
+  );
+  const acvpuCode = __test__.CODES?.ACVPU?.code ?? __test__.LOINC?.ACVPU;
 
-  // 3) MedicationStatement desde meds
-  resources.push(...mapMedicationStatements(values, medsIn));
+  const addEntry = (
+    resource: any,
+    resourceType: string,
+    fullUrl: string,
+    requestUrl: string,
+    ifNoneExist?: string,
+  ) => {
+    setResourceId(resource, fullUrl);
+    applyExtraProfiles(resource, resourceType, profileExtras);
+    entries.push({
+      fullUrl,
+      resource,
+      request: {
+        method: 'POST',
+        url: requestUrl,
+        ...(ifNoneExist ? { ifNoneExist } : {}),
+      },
+    });
+  };
 
-  // 4) DocumentReference desde attachments
-  resources.push(...mapDocumentReference(values, attachments, options.now));
+  for (const obs of observationResources) {
+    const loincCode = getObservationLoincCode(obs);
+    const fullUrl = buildObservationFullUrl(patientId, obs, loincCode, now);
+    const isLab = isLabObservation(obs);
+    addEntry(obs, 'Observation', fullUrl, 'Observation');
+    addSectionEntry(isLab ? 'Laboratory' : 'Vital signs', fullUrl);
 
-  // Devuelve Bundle tipo collection (seguro para tests)
+    if (loincCode) {
+      observationInfo.set(loincCode, { resource: obs, fullUrl });
+      if (acvpuCode && loincCode === acvpuCode) {
+        acvpuMember = fullUrl;
+      }
+      if (glucoseLoincCodes.has(loincCode) && !glucoseMemberSet.has(fullUrl)) {
+        glucoseMemberSet.add(fullUrl);
+        glucoseMembers.push(fullUrl);
+      }
+    }
+  }
+
+  const emitPanel = options.emitPanel ?? true;
+  const emitBpPanel = options.emitBpPanel ?? (options.emitPanel ?? true);
+  const emitHasMember = options.emitHasMember ?? false;
+
+  const codeDisplayMap = new Map<string, string>([
+    [__test__.CODES.HR.code, __test__.CODES.HR.display],
+    [__test__.CODES.RR.code, __test__.CODES.RR.display],
+    [__test__.CODES.TEMP.code, __test__.CODES.TEMP.display],
+    [__test__.CODES.SPO2.code, __test__.CODES.SPO2.display],
+    [__test__.CODES.SBP.code, __test__.CODES.SBP.display],
+    [__test__.CODES.DBP.code, __test__.CODES.DBP.display],
+  ]);
+
+  const vitalComponentCodes = [
+    __test__.CODES.HR.code,
+    __test__.CODES.RR.code,
+    __test__.CODES.TEMP.code,
+    __test__.CODES.SPO2.code,
+    __test__.CODES.SBP.code,
+    __test__.CODES.DBP.code,
+  ];
+
+  if (emitPanel) {
+    const components: Observation['component'] = [];
+    for (const code of vitalComponentCodes) {
+      const info = observationInfo.get(code);
+      if (!info?.resource.valueQuantity) continue;
+      const display = codeDisplayMap.get(code);
+      components.push({
+        code: codeCC(LOINC_SYSTEM, code, display, display),
+        valueQuantity: info.resource.valueQuantity,
+      });
+    }
+
+    if (components.length > 0) {
+      const panel: Observation = {
+        resourceType: 'Observation',
+        status: 'final',
+        subject: refPatient(patientId),
+        encounter: refEncounter(values.encounterId),
+        effectiveDateTime: now,
+        category: categoryVital,
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.CODES.PANEL_VS.code,
+          __test__.CODES.PANEL_VS.display,
+          __test__.CODES.PANEL_VS.display,
+        ),
+        component: components,
+        meta: { profile: [PROFILE_VITAL_SIGNS] },
+      };
+
+      if (emitHasMember) {
+        const members: Array<{ reference: string }> = [];
+        for (const code of vitalComponentCodes) {
+          const info = observationInfo.get(code);
+          if (info) members.push({ reference: info.fullUrl });
+        }
+        for (const ref of glucoseMembers) members.push({ reference: ref });
+        if (acvpuMember) members.push({ reference: acvpuMember });
+        if (members.length) panel.hasMember = members;
+      }
+
+      const panelFullUrl = `urn:uuid:obs-panel-${__test__.CODES.PANEL_VS.code}-${patientId}`;
+      addEntry(panel, 'Observation', panelFullUrl, 'Observation');
+      addSectionEntry('Vital signs', panelFullUrl);
+    }
+  }
+
+  if (emitBpPanel) {
+    const bpCodes = [__test__.CODES.SBP.code, __test__.CODES.DBP.code];
+    const bpComponents: Observation['component'] = [];
+    for (const code of bpCodes) {
+      const info = observationInfo.get(code);
+      if (!info?.resource.valueQuantity) continue;
+      const display = codeDisplayMap.get(code);
+      bpComponents.push({
+        code: codeCC(LOINC_SYSTEM, code, display, display),
+        valueQuantity: info.resource.valueQuantity,
+      });
+    }
+
+    if (bpComponents.length > 0) {
+      const bpPanel: Observation = {
+        resourceType: 'Observation',
+        status: 'final',
+        subject: refPatient(patientId),
+        encounter: refEncounter(values.encounterId),
+        effectiveDateTime: now,
+        category: categoryVital,
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.CODES.PANEL_BP.code,
+          __test__.CODES.PANEL_BP.display,
+          __test__.CODES.PANEL_BP.display,
+        ),
+        component: bpComponents,
+        meta: { profile: [PROFILE_VITAL_SIGNS, PROFILE_BP] },
+      };
+
+      if (emitHasMember) {
+        const members: Array<{ reference: string }> = [];
+        for (const code of bpCodes) {
+          const info = observationInfo.get(code);
+          if (info) members.push({ reference: info.fullUrl });
+        }
+        if (members.length) bpPanel.hasMember = members;
+      }
+
+      const bpFullUrl = `urn:uuid:obs-panel-${__test__.CODES.PANEL_BP.code}-${patientId}`;
+      addEntry(bpPanel, 'Observation', bpFullUrl, 'Observation');
+      addSectionEntry('Vital signs', bpFullUrl);
+    }
+  }
+
+  const oxygenResources = mapOxygenProcedure(values, { now });
+  oxygenResources.forEach((resource, index) => {
+    const fullUrl = `urn:uuid:oxygen-${patientId}-${index}`;
+    addEntry(resource, 'DeviceUseStatement', fullUrl, 'DeviceUseStatement');
+    addSectionEntry('Oxygen therapy', fullUrl);
+  });
+
+  const medicationResources = mapMedicationStatements(values, medsInput);
+  medicationResources.forEach((resource, index) => {
+    const fullUrl = `urn:uuid:med-${patientId}-${index}`;
+    addEntry(resource, 'MedicationStatement', fullUrl, 'MedicationStatement');
+    addSectionEntry('Medications', fullUrl);
+  });
+
+  const documentRefs = mapDocumentReference(values, attachments, now);
+  documentRefs.forEach((resource, index) => {
+    const fullUrl = `urn:uuid:doc-${patientId}-${index}`;
+    addEntry(resource, 'DocumentReference', fullUrl, 'DocumentReference');
+    addSectionEntry('Attachments', fullUrl);
+  });
+
+  const identifierSeed = {
+    patientId,
+    encounterId: values.encounterId ?? null,
+    now,
+    vitals: normalizedVitals,
+    meds: normalizedMeds,
+    attachments: attachments ?? [],
+  };
+  const identifierValue = deterministicHash(identifierSeed);
+
+  const composition: Composition = {
+    resourceType: 'Composition',
+    status: 'final',
+    type: { text: 'Handover summary' },
+    subject: refPatient(patientId),
+    encounter: refEncounter(values.encounterId),
+    date: now,
+    title: 'Handover summary',
+    identifier: { system: 'urn:uuid', value: identifierValue },
+    section: Array.from(sections.values()),
+  };
+
+  const compositionFullUrl = `urn:uuid:composition-${identifierValue}`;
+  setResourceId(composition, compositionFullUrl);
+  applyExtraProfiles(composition, 'Composition', profileExtras);
+
+  entries.unshift({
+    fullUrl: compositionFullUrl,
+    resource: composition,
+    request: {
+      method: 'POST',
+      url: 'Composition',
+      ifNoneExist: `identifier=urn:uuid|${identifierValue}`,
+    },
+  });
+
   return {
-    resourceType: "Bundle",
-    id: newId("bundle"),
-    type: "collection",
-    entry: resources.map(r => ({ resource: r }))
+    resourceType: 'Bundle',
+    id: newId('bundle'),
+    type: 'transaction',
+    entry: entries,
   };
 }
 
@@ -883,5 +1275,115 @@ function normalizeFiO2ToPct(fio2: number): number {
   // Acepta 0..1 (multiplica x100) o 21..100 (dejar igual); clamp 21..100 por seguridad
   const val = fio2 <= 1 ? fio2 * 100 : fio2;
   return Math.min(100, Math.max(21, Math.round(val)));
+}
+
+function trimToUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+function coerceNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : undefined;
+  }
+  return undefined;
+}
+
+function normalizeProfileOptions(input: BuildOptions["profileUrls"]): ProfileUrlMap {
+  if (!input) return {};
+  const result: ProfileUrlMap = {};
+
+  const assignList = (resourceType: string, list: string[] | undefined) => {
+    if (!list) return;
+    const filtered = list
+      .map(trimToUndefined)
+      .filter((v): v is string => Boolean(v));
+    if (filtered.length) {
+      result[resourceType] = Array.from(new Set(filtered));
+    }
+  };
+
+  if (Array.isArray(input)) {
+    assignList('Observation', input);
+    return result;
+  }
+
+  for (const [resourceType, urls] of Object.entries(input)) {
+    assignList(resourceType, Array.isArray(urls) ? urls : []);
+  }
+
+  return result;
+}
+
+function applyExtraProfiles(resource: any, resourceType: string, extras: ProfileUrlMap) {
+  const list = extras[resourceType];
+  if (!list || list.length === 0) return;
+  const existing = Array.isArray(resource?.meta?.profile) ? resource.meta.profile : [];
+  const combined = Array.from(new Set([...existing, ...list]));
+  if (combined.length) {
+    resource.meta = resource.meta ?? {};
+    resource.meta.profile = combined;
+  }
+}
+
+function getObservationLoincCode(obs: Observation): string | undefined {
+  const coding = obs.code?.coding ?? [];
+  const loinc = coding.find((c) => c.system === LOINC_SYSTEM && c.code);
+  return loinc?.code;
+}
+
+function isLabObservation(obs: Observation): boolean {
+  return (obs.category ?? []).some((cat) =>
+    (cat.coding ?? []).some((c) => c.system === OBS_CAT_SYSTEM && c.code === OBS_CAT_LAB)
+  );
+}
+
+function buildObservationFullUrl(
+  patientId: string,
+  obs: Observation,
+  loincCode: string | undefined,
+  fallbackNow: string,
+): string {
+  const acvpuCode = __test__.CODES?.ACVPU?.code ?? __test__.LOINC?.ACVPU;
+  if (acvpuCode && loincCode === acvpuCode) {
+    const date = (obs.effectiveDateTime ?? fallbackNow).slice(0, 10);
+    return `urn:uuid:obs-acvpu-${patientId}-${date}`;
+  }
+  if (loincCode) {
+    return `urn:uuid:obs-${loincCode}-${patientId}`;
+  }
+  return `urn:uuid:${newId('obs')}`;
+}
+
+function setResourceId(resource: any, fullUrl: string) {
+  if (!resource || typeof resource !== 'object') return;
+  if (typeof fullUrl === 'string' && fullUrl.startsWith('urn:uuid:')) {
+    resource.id = fullUrl.slice('urn:uuid:'.length);
+  }
+}
+
+function stableStringify(value: any): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const entries = Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+  return `{${entries.join(',')}}`;
+}
+
+function deterministicHash(value: any): string {
+  return createHash('sha1').update(stableStringify(value)).digest('hex');
 }
 
