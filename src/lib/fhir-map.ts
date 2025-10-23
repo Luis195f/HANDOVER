@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
+
+import { hashString } from './hash';
 
 /* [NURSEOS PRO PATCH 2025-10-22] fhir-map.ts
    - Tipos y exports alineados con tests (HandoverValues, AttachmentInput, HandoverInput)
@@ -588,8 +589,6 @@ export function mapObservationVitals(
   const opts2 = { ...DEFAULT_OPTS, ...opts };
   if (!values?.patientId) return [];
 
-  const opts2 = { ...DEFAULT_OPTS, ...opts };
-
   const vitals = normalizeVitalsInput(values.vitals);
   const observations: Observation[] = [];
 
@@ -1063,7 +1062,6 @@ export function buildHandoverBundle(
     };
   }
 
-  const opts2 = { ...DEFAULT_OPTS, ...options };
   const patientId = values.patientId;
   const now = resolveNow(opts2.now) ?? nowISO();
 
@@ -1467,6 +1465,6 @@ function stableStringify(value: any): string {
 }
 
 function deterministicHash(value: any): string {
-  return createHash('sha1').update(stableStringify(value)).digest('hex');
+  return hashString(stableStringify(value));
 }
 
