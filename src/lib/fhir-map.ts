@@ -109,6 +109,7 @@ export type BuildOptions = {
   now?: string;
   authorId?: string;
   attachments?: AttachmentInput[];
+  emitVitalsPanel?: boolean;
   emitPanel?: boolean;
   emitVitalsPanel?: boolean;
   emitIndividuals?: boolean;
@@ -1131,7 +1132,7 @@ export function buildHandoverBundle(
     __test__.CODES.DBP.code,
   ];
 
-  if (emitPanel) {
+  if (emitVitalsPanel) {
     const components: Observation['component'] = [];
     for (const code of vitalComponentCodes) {
       const info = observationInfo.get(code);
