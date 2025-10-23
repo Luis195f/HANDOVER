@@ -6,9 +6,22 @@ import {
   useAudioRecorderState,
   AudioModule,
   setAudioModeAsync,
-  RecordingPresets,
   type RecordingOptions,
 } from 'expo-audio';
+import { Audio } from 'expo-av';
+
+type RecorderOptions = Parameters<typeof useAudioRecorder>[0];
+
+function resolveRecorderOptions(): RecorderOptions {
+  const presets = Audio.RecordingOptionsPresets as Record<string, Audio.RecordingOptions | undefined> | undefined;
+  const preset = presets?.HIGH_QUALITY ?? Object.values(presets ?? {}).find((opt): opt is Audio.RecordingOptions => Boolean(opt));
+  if (!preset) {
+    throw new Error('Expo AV recording presets unavailable');
+  }
+  return preset as unknown as RecorderOptions;
+}
+
+const REC_OPTS = resolveRecorderOptions();
 
 type Props = {
   onRecorded: (uri: string) => void;
@@ -21,9 +34,7 @@ export default function AudioAttach({
   startLabel = 'Grabar audio',
   stopLabel = 'Detener y adjuntar',
 }: Props) {
-  const presets = RecordingPresets as Record<string, RecordingOptions | undefined>;
-  const preset = (presets.HIGH_QUALITY ?? presets.LOW_QUALITY ?? Object.values(presets)[0]) as RecordingOptions;
-  const recorder = useAudioRecorder(preset);
+  const recorder = useAudioRecorder(REC_OPTS as RecordingOptions);
   const state = useAudioRecorderState(recorder);
 
   useEffect(() => {
