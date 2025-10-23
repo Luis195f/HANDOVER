@@ -28,9 +28,15 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
   const patientId = 'pat-001';
   const now = '2025-10-21T10:30:00Z';
 
+  it('no emite panel por defecto (emitPanel undefined)', () => {
+    const bundle = buildHandoverBundle({ patientId, vitals: { hr: 72, rr: 16 } }, { now });
+    const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
+    expect(panel).toBeFalsy();
+  });
+
   it('emite panel 85353-1 con HR/RR/Temp/SpO2/SBP/DBP como componentes (valores iguales a los individuales)', () => {
     const vitals = { hr: 88, rr: 18, temp: 37.2, spo2: 96, sbp: 120, dbp: 75 };
-    const bundle = buildHandoverBundle({ patientId, vitals }, { now });
+    const bundle = buildHandoverBundle({ patientId, vitals }, { now, emitPanel: true });
 
     // Panel
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code); // 85353-1
@@ -71,7 +77,7 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
 
   it('incluye sólo los componentes presentes (ej. solo HR)', () => {
     const vitals = { hr: 72 }; // sólo FC
-    const bundle = buildHandoverBundle({ patientId, vitals }, { now });
+    const bundle = buildHandoverBundle({ patientId, vitals }, { now, emitPanel: true });
 
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
     expect(panel).toBeTruthy();
@@ -91,7 +97,7 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
   });
 
   it('no crea panel si no hay ningún vital', () => {
-    const bundle = buildHandoverBundle({ patientId, vitals: {} }, { now });
+    const bundle = buildHandoverBundle({ patientId, vitals: {} }, { now, emitPanel: true });
     const panel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
     expect(panel).toBeFalsy();
   });
