@@ -8,10 +8,15 @@ import { vi } from 'vitest';
  */
 (globalThis as any).__secureStoreMem ??= {} as Record<string, string | null>;
 vi.mock('expo-secure-store', () => ({
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
   getItemAsync: (k: string) =>
     Promise.resolve(((globalThis as any).__secureStoreMem[k]) ?? null),
   setItemAsync: (k: string, v: string) => {
     (globalThis as any).__secureStoreMem[k] = v;
+    return Promise.resolve();
+  },
+  deleteItemAsync: (k: string) => {
+    delete (globalThis as any).__secureStoreMem[k];
     return Promise.resolve();
   },
 }));
