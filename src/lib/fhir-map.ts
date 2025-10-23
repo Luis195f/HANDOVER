@@ -586,7 +586,7 @@ export function mapObservationVitals(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): Observation[] {
-  const opts2 = { ...DEFAULT_OPTS, ...opts };
+  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   if (!values?.patientId) return [];
 
   const vitals = normalizeVitalsInput(values.vitals);
@@ -594,14 +594,14 @@ export function mapObservationVitals(
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = resolveNow(opts2.now) ?? nowISO();
+  const effective = resolveNow(options.now) ?? nowISO();
 
-  const emitIndividuals = opts2.emitIndividuals ?? true;
+  const emitIndividuals = options.emitIndividuals ?? true;
 
-  const normalizeGlucoseOption = opts2.normalizeGlucoseToMgDl ?? opts2.normalizeGlucoseToMgdl;
+  const normalizeGlucoseOption = options.normalizeGlucoseToMgDl ?? options.normalizeGlucoseToMgdl;
   const normalizeGlucose =
     typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
-  const glucoseDecimals = opts2.glucoseDecimals ?? 0;
+  const glucoseDecimals = options.glucoseDecimals ?? 0;
 
   const buildObservation = (params: {
     code: FhirCodeableConcept;
@@ -844,8 +844,8 @@ export function mapVitalsToObservations(
   values: HandoverValues,
   opts: BuildOptions = {},
 ) {
-  const opts2 = { ...DEFAULT_OPTS, ...opts };
-  return mapObservationVitals(values, opts2);
+  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  return mapObservationVitals(values, options);
 }
 
 /////////////////////////////////////////
@@ -969,14 +969,14 @@ function mapOxygenProcedure(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): DeviceUseStatement[] {
-  const opts2 = { ...DEFAULT_OPTS, ...opts };
+  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = resolveNow(opts2.now) ?? nowISO();
+  const when = resolveNow(options.now) ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1051,7 +1051,7 @@ export function buildHandoverBundle(
     ? (input as HandoverInput).values
     : (input as HandoverValues);
 
-  const opts2 = { ...DEFAULT_OPTS, ...opts };
+  const options = { ...DEFAULT_OPTS, ...(opts ?? {}) };
 
   if (!values.patientId) {
     return {
@@ -1063,13 +1063,13 @@ export function buildHandoverBundle(
   }
 
   const patientId = values.patientId;
-  const now = resolveNow(opts2.now) ?? nowISO();
+  const now = resolveNow(options.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
     ? ((input as HandoverInput).attachments as AttachmentInput[])
     : [];
-  const attachmentsFromOptions = Array.isArray(opts2.attachments) ? opts2.attachments : [];
+  const attachmentsFromOptions = Array.isArray(options.attachments) ? options.attachments : [];
 
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
     (att): att is AttachmentInput => Boolean(att),
@@ -1083,14 +1083,14 @@ export function buildHandoverBundle(
     : values.meds;
   const normalizedMeds = normalizeMedicationInputs(medsInput);
   const normalizedVitals = normalizeVitalsInput(values.vitals);
-  const profileExtras = normalizeProfileOptions(opts2.profileUrls);
+  const profileExtras = normalizeProfileOptions(options.profileUrls);
 
   const observationOptions: BuildOptions = {
     now,
-    emitIndividuals: opts2.emitIndividuals,
-    normalizeGlucoseToMgDl: opts2.normalizeGlucoseToMgDl,
-    normalizeGlucoseToMgdl: opts2.normalizeGlucoseToMgdl,
-    glucoseDecimals: opts2.glucoseDecimals,
+    emitIndividuals: options.emitIndividuals,
+    normalizeGlucoseToMgDl: options.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: options.normalizeGlucoseToMgdl,
+    glucoseDecimals: options.glucoseDecimals,
   };
 
   const observationResources = mapVitalsToObservations(values, observationOptions);
@@ -1159,9 +1159,9 @@ export function buildHandoverBundle(
   }
 
   const emitVitalsPanel =
-    opts2.emitVitalsPanel ?? opts2.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
-  const emitBpPanel = opts2.emitBpPanel ?? emitVitalsPanel;
-  const emitHasMember = opts2.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
+    options.emitVitalsPanel ?? options.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
+  const emitBpPanel = options.emitBpPanel ?? emitVitalsPanel;
+  const emitHasMember = options.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
     [__test__.CODES.HR.code, __test__.CODES.HR.display],
