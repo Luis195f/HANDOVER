@@ -106,17 +106,26 @@ export type HandoverInput = {
 export type ProfileUrlMap = Record<string, string[] | undefined>;
 
 export type BuildOptions = {
-  now?: string;
+  emitVitalsPanel?: boolean;
+  emitBpPanel?: boolean;
+  emitHasMember?: boolean;
+  now?: string | Date;
   authorId?: string;
   attachments?: AttachmentInput[];
   emitPanel?: boolean;
   emitIndividuals?: boolean;
-  emitHasMember?: boolean;
-  emitBpPanel?: boolean;
   normalizeGlucoseToMgDl?: boolean;
   normalizeGlucoseToMgdl?: boolean;
   glucoseDecimals?: number;
   profileUrls?: string[] | ProfileUrlMap;
+};
+
+const DEFAULT_OPTS: Required<
+  Pick<BuildOptions, "emitVitalsPanel" | "emitBpPanel" | "emitHasMember">
+> = {
+  emitVitalsPanel: false,
+  emitBpPanel: false,
+  emitHasMember: false,
 };
 
 export type MedicationCodeInput = { system?: string; code?: string; display?: string } | string;
@@ -486,6 +495,8 @@ type Bundle = {
 
 const uom = UCUM_SYSTEM;
 const nowISO = () => new Date().toISOString();
+const resolveNow = (value?: string | Date) =>
+  value instanceof Date ? value.toISOString() : value;
 const newId = (pfx = "id") =>
   `${pfx}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 
@@ -516,22 +527,27 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 // Vitals → Observation (núcleo)
 /////////////////////////////////////
 
-export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
+export function mapObservationVitals(
+  values: HandoverValues,
+  opts: BuildOptions = {},
+): Observation[] {
   if (!values?.patientId) return [];
+
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
 
   const vitals = normalizeVitalsInput(values.vitals);
   const observations: Observation[] = [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = opts?.now ?? nowISO();
+  const effective = resolveNow(opts2.now) ?? nowISO();
 
-  const emitIndividuals = opts?.emitIndividuals ?? true;
+  const emitIndividuals = opts2.emitIndividuals ?? true;
 
-  const normalizeGlucoseOption = opts?.normalizeGlucoseToMgDl ?? opts?.normalizeGlucoseToMgdl;
+  const normalizeGlucoseOption = opts2.normalizeGlucoseToMgDl ?? opts2.normalizeGlucoseToMgdl;
   const normalizeGlucose =
     typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
-  const glucoseDecimals = opts?.glucoseDecimals ?? 0;
+  const glucoseDecimals = opts2.glucoseDecimals ?? 0;
 
   const buildObservation = (params: {
     code: FhirCodeableConcept;
@@ -770,8 +786,12 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 }
 
 // Alias requerido por los tests
-export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOptions) {
-  return mapObservationVitals(values, opts);
+export function mapVitalsToObservations(
+  values: HandoverValues,
+  opts: BuildOptions = {},
+) {
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
+  return mapObservationVitals(values, opts2);
 }
 
 /////////////////////////////////////////
@@ -891,14 +911,18 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 // Oxigenoterapia → DeviceUseStatement (opcional)
 /////////////////////////////////////////
 
-function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
+function mapOxygenProcedure(
+  values: HandoverValues,
+  opts: BuildOptions = {},
+): DeviceUseStatement[] {
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = opts?.now ?? nowISO();
+  const when = resolveNow(opts2.now) ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -966,7 +990,7 @@ function mapDocumentReference(
 
 export function buildHandoverBundle(
   input: HandoverInput | HandoverValues,
-  options: BuildOptions = {},
+  opts: BuildOptions = {},
 ): Bundle {
   const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
   const values: HandoverValues = isWrapped
@@ -983,13 +1007,14 @@ export function buildHandoverBundle(
   }
 
   const patientId = values.patientId;
-  const now = options.now ?? nowISO();
+  const opts2 = { ...DEFAULT_OPTS, ...opts };
+  const now = resolveNow(opts2.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
     ? ((input as HandoverInput).attachments as AttachmentInput[])
     : [];
-  const attachmentsFromOptions = Array.isArray(options.attachments) ? options.attachments : [];
+  const attachmentsFromOptions = Array.isArray(opts2.attachments) ? opts2.attachments : [];
 
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
     (att): att is AttachmentInput => Boolean(att),
@@ -1003,14 +1028,14 @@ export function buildHandoverBundle(
     : values.meds;
   const normalizedMeds = normalizeMedicationInputs(medsInput);
   const normalizedVitals = normalizeVitalsInput(values.vitals);
-  const profileExtras = normalizeProfileOptions(options.profileUrls);
+  const profileExtras = normalizeProfileOptions(opts2.profileUrls);
 
   const observationOptions: BuildOptions = {
     now,
-    emitIndividuals: options.emitIndividuals,
-    normalizeGlucoseToMgDl: options.normalizeGlucoseToMgDl,
-    normalizeGlucoseToMgdl: options.normalizeGlucoseToMgdl,
-    glucoseDecimals: options.glucoseDecimals,
+    emitIndividuals: opts2.emitIndividuals,
+    normalizeGlucoseToMgDl: opts2.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: opts2.normalizeGlucoseToMgdl,
+    glucoseDecimals: opts2.glucoseDecimals,
   };
 
   const observationResources = mapObservationVitals(values, observationOptions);
@@ -1078,9 +1103,10 @@ export function buildHandoverBundle(
     }
   }
 
-  const emitPanel = options.emitPanel ?? true;
-  const emitBpPanel = options.emitBpPanel ?? (options.emitPanel ?? true);
-  const emitHasMember = options.emitHasMember ?? false;
+  const emitVitalsPanel =
+    opts2.emitVitalsPanel ?? opts2.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
+  const emitBpPanel = opts2.emitBpPanel ?? emitVitalsPanel;
+  const emitHasMember = opts2.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
     [__test__.CODES.HR.code, __test__.CODES.HR.display],
@@ -1100,7 +1126,7 @@ export function buildHandoverBundle(
     __test__.CODES.DBP.code,
   ];
 
-  if (emitPanel) {
+  if (emitVitalsPanel) {
     const components: Observation['component'] = [];
     for (const code of vitalComponentCodes) {
       const info = observationInfo.get(code);
