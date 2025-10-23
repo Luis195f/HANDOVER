@@ -239,27 +239,46 @@ const ACVPU_ALLOWED = ["A", "C", "V", "P", "U"] as const;
 const AVPU_ALLOWED = ["A", "V", "P", "U", "C"] as const;
 
 const normalizeNumeric = (min: number, max: number) =>
-  z.preprocess(
-    (value) => {
-      if (value === undefined || value === null || value === "") return undefined;
-      const toNumber = (input: unknown) => {
-        if (typeof input === "number") return input;
-        if (typeof input === "string") {
-          const trimmed = input.trim();
-          if (!trimmed) return undefined;
-          const num = Number(trimmed);
-          return num;
-        }
-        return undefined;
-      };
+  z.any().transform((value, ctx) => {
+    if (value === undefined || value === null) return undefined;
 
-      const num = toNumber(value);
-      if (typeof num !== "number" || !Number.isFinite(num)) return undefined;
-      if (num < min || num > max) return undefined;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      const num = Number(trimmed);
+      if (!Number.isFinite(num)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Expected a numeric value" });
+        return undefined;
+      }
+      if (num < min || num > max) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Value must be between ${min} and ${max}`,
+        });
+        return undefined;
+      }
       return num;
-    },
-    z.union([z.number().min(min).max(max), z.undefined()]),
-  );
+    }
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        return undefined;
+      }
+      if (value < min || value > max) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Value must be between ${min} and ${max}`,
+        });
+        return undefined;
+      }
+      return value;
+    }
+
+    if (value === "") return undefined;
+
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Expected a numeric value" });
+    return undefined;
+  });
 
 const normalizeString = () =>
   z
@@ -271,36 +290,43 @@ const normalizeString = () =>
     .optional();
 
 const normalizeBoolean = () =>
-  z.preprocess(
-    (value) => {
-      if (value === undefined || value === null || value === "") return undefined;
-      if (typeof value === "boolean") return value;
-      if (typeof value === "string") {
-        const trimmed = value.trim().toLowerCase();
-        if (!trimmed) return undefined;
-        if (["true", "1", "yes", "y"].includes(trimmed)) return true;
-        if (["false", "0", "no", "n"].includes(trimmed)) return false;
-      }
+  z.any().transform((value, ctx) => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim().toLowerCase();
+      if (!trimmed) return undefined;
+      if (["true", "1", "yes", "y"].includes(trimmed)) return true;
+      if (["false", "0", "no", "n"].includes(trimmed)) return false;
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid boolean value" });
       return undefined;
-    },
-    z.union([z.boolean(), z.undefined()]),
-  );
+    }
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid boolean value" });
+    return undefined;
+  });
 
 const normalizeScale = (allowed: readonly string[]) =>
-  z.preprocess(
-    (value) => {
-      if (value === undefined || value === null || value === "") return undefined;
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (!trimmed) return undefined;
-        const upper = trimmed.toUpperCase();
-        if (allowed.includes(upper)) return upper;
-        return undefined;
+  z.any().transform((value, ctx) => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      const upper = trimmed.toUpperCase();
+      if (allowed.includes(upper)) {
+        return upper as (typeof allowed)[number];
       }
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Value must be one of: ${allowed.join(", ")}`,
+      });
       return undefined;
-    },
-    z.union([z.enum(allowed as [string, ...string[]]), z.undefined()]),
-  );
+    }
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Value must be one of: ${allowed.join(", ")}`,
+    });
+    return undefined;
+  });
 
 const VitalsSchema = z
   .object({
@@ -323,8 +349,36 @@ const VitalsSchema = z
 
 type NormalizedVitals = z.infer<typeof VitalsSchema>;
 
-function normalizeVitalsInput(vitals: HandoverValues["vitals"] | undefined): NormalizedVitals {
-  return VitalsSchema.parse(vitals ?? {});
+type NormalizeMode = 'strict' | 'lenient';
+
+function normalizeVitalsInput(
+  vitals: HandoverValues["vitals"] | undefined,
+  opts: { mode?: NormalizeMode } = {},
+): NormalizedVitals {
+  const input = vitals ?? {};
+  const result = VitalsSchema.safeParse(input);
+  if (result.success) {
+    return result.data;
+  }
+
+  if (opts.mode === 'lenient') {
+    const clone: Record<string, unknown> = { ...input };
+    for (const issue of result.error.issues) {
+      if (issue.path.length === 1) {
+        const key = issue.path[0];
+        if (typeof key === 'string') {
+          delete clone[key];
+        }
+      }
+    }
+    const retry = VitalsSchema.safeParse(clone);
+    if (retry.success) {
+      return retry.data;
+    }
+    throw retry.error;
+  }
+
+  throw result.error;
 }
 
 ////////////////////////////////////////////////////
@@ -519,7 +573,7 @@ const pushIf = <T>(arr: T[], v: T | undefined | null) => {
 export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions): Observation[] {
   if (!values?.patientId) return [];
 
-  const vitals = normalizeVitalsInput(values.vitals);
+  const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
   const observations: Observation[] = [];
 
   const subj = refPatient(values.patientId);

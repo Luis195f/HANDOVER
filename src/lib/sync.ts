@@ -1,7 +1,13 @@
 // src/lib/sync.ts
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { buildHandoverBundle, type BuildOptions, type HandoverInput, type HandoverValues } from './fhir-map';
+import {
+  buildHandoverBundle,
+  mapObservationVitals,
+  type BuildOptions,
+  type HandoverInput,
+  type HandoverValues,
+} from './fhir-map';
 import { postBundleSmart } from './fhir-client';
 import { z } from 'zod';
 
@@ -81,6 +87,8 @@ function sleep(ms?: number) {
 }
 
 const QUEUE_KEY = '@handover/tx-queue';
+const PATIENT_IDENTIFIER_SYSTEM = 'urn:handover-pro:ids';
+const OBS_IDENTIFIER_SYSTEM = 'urn:handover-pro:obs';
 
 async function loadQueue(): Promise<QueueItem[]> {
   const s = await safeGetItemAsync(QUEUE_KEY);
@@ -100,22 +108,64 @@ async function saveQueue(items: QueueItem[]) {
 /**
  * Encola un bundle ya construido (útil para reintentos fuera del form)
  */
-export async function enqueueBundle(input: {
+type EnqueueBundleInput = {
   id?: string;
   patientId: string;
   bundle: any;
   values?: HandoverValues;
   authorId?: string;
-}) {
-  const id = input.id && isUuidV4(input.id) ? input.id : crypto.randomUUID();
+};
+
+function isRawBundleInput(value: unknown): value is { resourceType?: string; entry?: any[] } {
+  return !!value && typeof value === 'object' && (value as any).resourceType === 'Bundle';
+}
+
+function extractPatientIdFromBundle(bundle: { entry?: any[] }): string | undefined {
+  const entries = Array.isArray(bundle?.entry) ? bundle.entry : [];
+  for (const entry of entries) {
+    const resource = entry?.resource;
+    if (resource?.resourceType !== 'Patient') continue;
+
+    const identifiers = Array.isArray(resource?.identifier) ? resource.identifier : [];
+    for (const identifier of identifiers) {
+      if (
+        identifier &&
+        typeof identifier === 'object' &&
+        identifier.system === PATIENT_IDENTIFIER_SYSTEM &&
+        typeof identifier.value === 'string'
+      ) {
+        return identifier.value;
+      }
+    }
+
+    if (typeof resource?.id === 'string' && resource.id.length > 0) {
+      return resource.id;
+    }
+
+    if (typeof entry?.fullUrl === 'string' && entry.fullUrl.startsWith('urn:uuid:patient-')) {
+      return entry.fullUrl.replace('urn:uuid:patient-', '');
+    }
+  }
+  return undefined;
+}
+
+export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: string; entry?: any[] }) {
+  const normalized: EnqueueBundleInput = isRawBundleInput(input)
+    ? {
+        patientId: extractPatientIdFromBundle(input) ?? 'unknown',
+        bundle: input,
+      }
+    : input;
+
+  const id = normalized.id && isUuidV4(normalized.id) ? normalized.id : crypto.randomUUID();
   const it: QueueItem = {
     id,
     createdAt: new Date().toISOString(),
     payload: {
-      patientId: input.patientId,
-      bundle: input.bundle,
-      values: input.values,
-      authorId: input.authorId,
+      patientId: normalized.patientId ?? 'unknown',
+      bundle: normalized.bundle,
+      values: normalized.values,
+      authorId: normalized.authorId,
     },
   };
   const q = await loadQueue();
@@ -223,8 +273,33 @@ export async function flushQueue(opts?: FlushCompatOptions) {
 /**
  * Compatibilidad con tests: función "flush" que delega en flushQueue.
  */
-export async function flush(sender?: SendFn) {
-  return flushQueue({ sender });
+export async function flush(
+  sender?: SendFn | FlushCompatOptions,
+  clearDraft?: ((patientId: string) => Promise<void> | void) | { baseDelayMs?: number },
+  legacyOptions?: { baseDelayMs?: number },
+) {
+  if (typeof sender === 'object' && sender !== null && !('length' in sender)) {
+    return flushQueue(sender as FlushCompatOptions);
+  }
+
+  const actualSender = typeof sender === 'function' ? sender : undefined;
+
+  let onSent: FlushCompatOptions['onSent'] | undefined;
+  let delayMs: number | undefined;
+
+  if (typeof clearDraft === 'function') {
+    onSent = async ({ patientId }) => {
+      await clearDraft(patientId);
+    };
+  } else if (clearDraft && typeof clearDraft === 'object') {
+    delayMs = clearDraft.baseDelayMs;
+  }
+
+  if (legacyOptions && typeof legacyOptions.baseDelayMs === 'number') {
+    delayMs = legacyOptions.baseDelayMs;
+  }
+
+  return flushQueue({ sender: actualSender, onSent, delayMs });
 }
 
 /**
@@ -233,51 +308,108 @@ export async function flush(sender?: SendFn) {
  * (Útil para suites de test que quieran inspeccionar la forma del bundle
  * que termina llegando al sender.)
  */
-export async function buildTransactionBundleForQueue() {
-  const items = await loadQueue();
-  const entries = items.flatMap((it) => {
-    const b = it.payload?.bundle;
-    const arr = Array.isArray(b?.entry) ? b.entry : [];
-    return arr;
-  });
+export function buildTransactionBundleForQueue(
+  input: HandoverInput | HandoverValues,
+  opts: BuildOptions = {},
+) {
+  const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
+  const values: HandoverValues = isWrapped ? (input as HandoverInput).values : (input as HandoverValues);
 
-  const tx: any = {
-    resourceType: 'Bundle',
-    type: 'transaction',
-    entry: [] as any[],
-  };
-
-  // Reinyectar cada recurso como operación transaction
-  for (const e of entries) {
-    const r = e?.resource;
-    if (!r || typeof r !== 'object') continue;
-
-    const fullUrl = e?.fullUrl;
-    const method = r.resourceType === 'Patient' ? 'PUT' : 'POST';
-    const url =
-      r.resourceType === 'Patient'
-        ? `Patient?identifier=${encodeURIComponent(
-            (r as any)?.identifier?.[0]?.value ?? 'unknown'
-          )}`
-        : `${r.resourceType}`;
-
-    const entry: any = {
-      request: { method, url },
-      resource: r,
-    };
-
-    if (fullUrl && typeof fullUrl === 'string') {
-      entry.fullUrl = fullUrl;
-    }
-    if (r.resourceType !== 'Patient') {
-      // conditional create por code/subject/issued/identifier si procede
-      // (los tests pueden no necesitarlo; pon lo mínimo necesario)
-    }
-
-    tx.entry.push(entry);
+  const patientId = values.patientId ?? (values as any)?.patient?.id ?? '';
+  if (!patientId) {
+    return { resourceType: 'Bundle', type: 'transaction', entry: [] };
   }
 
-  return tx;
+  const now = opts.now ?? new Date().toISOString();
+  const patientFullUrl = `urn:uuid:patient-${patientId}`;
+  const baseDate = now.slice(0, 10);
+
+  const observationOptions: BuildOptions = {
+    now,
+    emitIndividuals: opts.emitIndividuals,
+    normalizeGlucoseToMgDl: opts.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: opts.normalizeGlucoseToMgdl,
+    glucoseDecimals: opts.glucoseDecimals,
+  };
+
+  const observations = mapObservationVitals(values, observationOptions);
+
+  const entries: Array<{
+    fullUrl: string;
+    resource: any;
+    request: { method: string; url: string; ifNoneExist?: string };
+  }> = [];
+
+  entries.push({
+    fullUrl: patientFullUrl,
+    resource: {
+      resourceType: 'Patient',
+      identifier: [{ system: PATIENT_IDENTIFIER_SYSTEM, value: patientId }],
+    },
+    request: {
+      method: 'POST',
+      url: 'Patient',
+      ifNoneExist: `identifier=${encodeURIComponent(PATIENT_IDENTIFIER_SYSTEM)}|${encodeURIComponent(patientId)}`,
+    },
+  });
+
+  observations.forEach((obs, index) => {
+    const cloned = JSON.parse(JSON.stringify(obs ?? {}));
+    cloned.subject = { reference: patientFullUrl };
+
+    const loinc = Array.isArray(cloned?.code?.coding)
+      ? cloned.code.coding.find((c: any) => c?.system === 'http://loinc.org')?.code
+      : undefined;
+
+    const effective = typeof cloned.effectiveDateTime === 'string' && cloned.effectiveDateTime.length
+      ? cloned.effectiveDateTime
+      : now;
+    const effectiveDate = effective.slice(0, 10) || baseDate;
+
+    const identifierParts = [loinc, effectiveDate, patientId].filter(Boolean);
+    if (identifierParts.length > 0) {
+      const identifierValue = identifierParts.join('|');
+      const existing = Array.isArray(cloned.identifier) ? cloned.identifier : [];
+      cloned.identifier = [
+        ...existing.filter((it: any) => it && typeof it === 'object'),
+        { system: OBS_IDENTIFIER_SYSTEM, value: identifierValue },
+      ];
+    }
+
+    const ifNoneParts: string[] = [];
+    if (identifierParts.length > 0) {
+      const identifierValue = identifierParts.join('|');
+      ifNoneParts.push(
+        `identifier=${encodeURIComponent(OBS_IDENTIFIER_SYSTEM)}|${encodeURIComponent(identifierValue)}`,
+      );
+    }
+
+    ifNoneParts.push(`patient=${encodeURIComponent(patientFullUrl)}`);
+
+    if (loinc) {
+      ifNoneParts.push(`code=${encodeURIComponent('http://loinc.org')}|${encodeURIComponent(loinc)}`);
+    }
+
+    ifNoneParts.push(`effective=eq${effectiveDate}`);
+
+    const fullUrl = `urn:uuid:obs-${loinc ?? 'custom'}-${patientId}-${effectiveDate}-${index}`;
+
+    entries.push({
+      fullUrl,
+      resource: cloned,
+      request: {
+        method: 'POST',
+        url: 'Observation',
+        ifNoneExist: ifNoneParts.join('&'),
+      },
+    });
+  });
+
+  return {
+    resourceType: 'Bundle',
+    type: 'transaction',
+    entry: entries,
+  };
 }
 
 /**
