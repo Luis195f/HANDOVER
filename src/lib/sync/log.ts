@@ -38,9 +38,10 @@ export async function appendLog(db: DBCompat, row: LogRow) {
 
   // Nueva API (expo-sqlite async)
   if (typeof db.withTransactionAsync === "function" && typeof db.runAsync === "function") {
+    const runAsync = db.runAsync.bind(db);
     await db.withTransactionAsync(async () => {
-      await db.runAsync(`CREATE TABLE IF NOT EXISTS ${TABLE} (ts INTEGER, msg TEXT)`);
-      await db.runAsync(`INSERT INTO ${TABLE} (ts, msg) VALUES (?, ?)`, [row.ts, row.msg]);
+      await runAsync(`CREATE TABLE IF NOT EXISTS ${TABLE} (ts INTEGER, msg TEXT)`);
+      await runAsync(`INSERT INTO ${TABLE} (ts, msg) VALUES (?, ?)`, [row.ts, row.msg]);
     });
     return;
   }
@@ -77,9 +78,10 @@ export async function appendLog(db: DBCompat, row: LogRow) {
 export async function ensureSchema(db: DBCompat) {
   if (!db) throw new Error("ensureSchema: db no definido");
   if (typeof db.runAsync === "function") {
-    await db.runAsync(`CREATE TABLE IF NOT EXISTS ${TABLE} (ts INTEGER, msg TEXT)`);
+    const runAsync = db.runAsync.bind(db);
+    await runAsync(`CREATE TABLE IF NOT EXISTS ${TABLE} (ts INTEGER, msg TEXT)`);
     // índice opcional para consultas por fecha
-    await db.runAsync?.(`CREATE INDEX IF NOT EXISTS idx_${TABLE}_ts ON ${TABLE}(ts)`);
+    await runAsync(`CREATE INDEX IF NOT EXISTS idx_${TABLE}_ts ON ${TABLE}(ts)`);
     return;
   }
   // Legacy
@@ -125,7 +127,8 @@ export async function getLogs(
   // Nueva API básica (runAsync)
   if (typeof db.runAsync === "function") {
     await ensureSchema(db);
-    const res = await db.runAsync(sql, params);
+    const runAsync = db.runAsync.bind(db);
+    const res = await runAsync(sql, params);
     const rows: LogRow[] =
       res?.rows?._array ??
       res?.rowsArray ??
@@ -163,7 +166,8 @@ export async function getLogs(
 export async function clearLogs(db: DBCompat) {
   if (!db) throw new Error("clearLogs: db no definido");
   if (typeof db.runAsync === "function") {
-    await db.runAsync(`DELETE FROM ${TABLE}`);
+    const runAsync = db.runAsync.bind(db);
+    await runAsync(`DELETE FROM ${TABLE}`);
     return;
   }
   await new Promise<void>((resolve, reject) => {
@@ -182,7 +186,8 @@ export async function countLogs(db: DBCompat): Promise<number> {
 
   if (typeof db.runAsync === "function") {
     await ensureSchema(db);
-    const res = await db.runAsync(sql);
+    const runAsync = db.runAsync.bind(db);
+    const res = await runAsync(sql);
     const row = res?.rows?._array?.[0] ?? res?.rowsArray?.[0] ?? res?.rows?.[0];
     return Number(row?.n ?? 0);
   }
@@ -222,10 +227,11 @@ export async function pruneLogs(db: DBCompat, maxRows = 5000) {
 
   // Nueva API
   if (typeof db.withTransactionAsync === "function" && typeof db.runAsync === "function") {
+    const runAsync = db.runAsync.bind(db);
     await db.withTransactionAsync(async () => {
       const thr = await thresholdTs(db, maxRows);
       if (thr !== null) {
-        await db.runAsync(`DELETE FROM ${TABLE} WHERE ts < ?`, [thr]);
+        await runAsync(`DELETE FROM ${TABLE} WHERE ts < ?`, [thr]);
       }
     });
     return;
@@ -264,7 +270,8 @@ export async function pruneLogs(db: DBCompat, maxRows = 5000) {
 
 async function thresholdTs(db: DBCompat, keep: number): Promise<number | null> {
   if (typeof db.runAsync === "function") {
-    const res = await db.runAsync(
+    const runAsync = db.runAsync.bind(db);
+    const res = await runAsync(
       `SELECT ts FROM ${TABLE} ORDER BY ts DESC LIMIT 1 OFFSET ?`,
       [Math.max(0, keep - 1)]
     );

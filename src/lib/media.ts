@@ -34,8 +34,9 @@ export type UploadOptions = {
  * ========================= */
 
 export function detectMimeFromUri(uri: string): string {
-  const clean = uri.split("?")[0].split("#")[0];
-  const ext = (clean.split(".").pop() || "").toLowerCase();
+  const first = (uri ?? '').split("?")[0] ?? '';
+  const clean = first.split("#")[0] ?? '';
+  const ext = (clean.split(".").pop() ?? '').toLowerCase();
   switch (ext) {
     case "m4a":
     case "mp4": return "audio/mp4";
@@ -69,7 +70,8 @@ function detectExtFromMime(mime: string): string {
 }
 
 function basename(path: string): string {
-  const clean = path.split("?")[0].split("#")[0];
+  const first = (path ?? '').split("?")[0] ?? '';
+  const clean = first.split("#")[0] ?? '';
   const name = clean.substring(clean.lastIndexOf("/") + 1) || clean;
   return sanitizeFileName(name || "audio");
 }
@@ -220,4 +222,20 @@ export function isSupportedAudioMime(mime: string): boolean {
 /** Normaliza nombre a <base>.<ext> según MIME cuando falta extensión */
 export function ensureFileName(name: string, mime: string): string {
   return withExtension(sanitizeFileName(name || "audio"), mime);
+}
+
+export function fileExtFromUri(uri?: string): string {
+  const first = (uri ?? '').split("?")[0] ?? '';
+  const clean = first.split("#")[0] ?? '';
+  if (!clean) return "";
+  const ext = (clean.split(".").pop() ?? "").toLowerCase();
+  return ext;
+}
+
+export function fileNameFromPath(path?: string): string {
+  const first = (path ?? '').split("?")[0] ?? '';
+  const clean = first.split("#")[0] ?? '';
+  if (!clean) return "";
+  const idx = clean.lastIndexOf("/");
+  return idx >= 0 ? clean.substring(idx + 1) : clean;
 }

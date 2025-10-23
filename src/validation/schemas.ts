@@ -13,9 +13,7 @@ import { z } from 'zod';
  * ---------------------------------*/
 export const zShift = z.enum(['morning', 'evening', 'night']);
 
-export const zACVPU = z.enum(['A', 'C', 'V', 'P', 'U'], {
-  required_error: 'ACVPU es obligatorio',
-});
+export const zACVPU = z.enum(['A', 'C', 'V', 'P', 'U']);
 
 /** Helper opcional: tolera minúsculas/espacios y normaliza a ACVPU estricto */
 export const zACVPU_coerce = z

@@ -4,9 +4,10 @@ import { View, Text, Pressable } from "react-native";
 import {
   useAudioRecorder,
   useAudioRecorderState,
-  RecordingPresets,
   AudioModule,
   setAudioModeAsync,
+  RecordingPresets,
+  type RecordingOptions,
 } from "expo-audio";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./PatientList";
@@ -14,7 +15,9 @@ import type { RootStackParamList } from "./PatientList";
 type Props = NativeStackScreenProps<RootStackParamList, "AudioNote">;
 
 export default function AudioNote({ navigation }: Props) {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const presets = RecordingPresets as Record<string, RecordingOptions | undefined>;
+  const preset = (presets.HIGH_QUALITY ?? presets.LOW_QUALITY ?? Object.values(presets)[0]) as RecordingOptions;
+  const recorder = useAudioRecorder(preset);
   const state = useAudioRecorderState(recorder);
 
   useEffect(() => {

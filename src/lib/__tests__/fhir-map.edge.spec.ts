@@ -26,8 +26,10 @@ describe('mapVitalsToObservations — edge cases', () => {
 
     // Solo Temp debe generarse
     expect(obs).toHaveLength(1);
-    expect(obs[0].code?.coding?.[0]?.code).toBe(LOINC.TEMP);
-    expect(obs[0].valueQuantity?.code).toBe('Cel');
+    const first = obs[0];
+    expect(first).toBeDefined();
+    expect(first?.code?.coding?.[0]?.code).toBe(LOINC.TEMP);
+    expect(first?.valueQuantity?.code).toBe('Cel');
   });
 
   it('valores fuera de rango no rompen y preservan UCUM', () => {
@@ -42,11 +44,17 @@ describe('mapVitalsToObservations — edge cases', () => {
     const codes = obs.map(o => o.code?.coding?.[0]?.code).sort();
     expect(codes).toEqual([LOINC.HR, LOINC.RR, LOINC.TEMP].sort());
 
-    const get = (c: string) => obs.find(o => o.code?.coding?.[0]?.code === c)!;
-    expect(get(LOINC.RR).valueQuantity?.system).toBe('http://unitsofmeasure.org');
-    expect(get(LOINC.RR).valueQuantity?.code).toBe('/min');
-    expect(get(LOINC.HR).valueQuantity?.code).toBe('/min');
-    expect(get(LOINC.TEMP).valueQuantity?.code).toBe('Cel');
+    const get = (c: string) => obs.find(o => o.code?.coding?.[0]?.code === c);
+    const rr = get(LOINC.RR);
+    const hr = get(LOINC.HR);
+    const temp = get(LOINC.TEMP);
+    expect(rr).toBeDefined();
+    expect(hr).toBeDefined();
+    expect(temp).toBeDefined();
+    expect(rr?.valueQuantity?.system).toBe('http://unitsofmeasure.org');
+    expect(rr?.valueQuantity?.code).toBe('/min');
+    expect(hr?.valueQuantity?.code).toBe('/min');
+    expect(temp?.valueQuantity?.code).toBe('Cel');
 
     for (const o of obs) expect(o.effectiveDateTime).toBe(ISO_NOW);
   });
@@ -58,8 +66,10 @@ describe('mapVitalsToObservations — edge cases', () => {
     );
 
     expect(obs).toHaveLength(1);
-    expect(obs[0].code?.coding?.[0]?.code).toBe(LOINC.SBP);
-    expect(obs[0].valueQuantity?.code).toBe('mm[Hg]');
-    expect(String(obs[0].effectiveDateTime)).toMatch(/^\d{4}-\d{2}-\d{2}T.+Z$/);
+    const only = obs[0];
+    expect(only).toBeDefined();
+    expect(only?.code?.coding?.[0]?.code).toBe(LOINC.SBP);
+    expect(only?.valueQuantity?.code).toBe('mm[Hg]');
+    expect(String(only?.effectiveDateTime)).toMatch(/^\d{4}-\d{2}-\d{2}T.+Z$/);
   });
 });

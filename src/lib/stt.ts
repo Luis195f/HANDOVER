@@ -3,7 +3,7 @@
 // y devuelve el texto transcrito. Seguro ante timeouts, reintentos y configuraciones faltantes.
 
 import Constants from 'expo-constants';
-import { CONFIG as CFG } from '../config/env';
+import { ENV } from '../config/env';
 
 type TranscribeOpts = {
   timeoutMs?: number;   // por defecto 45s
@@ -14,8 +14,9 @@ type TranscribeOpts = {
 const pickSttEndpoint = (): string => {
   const envExtra = (Constants?.expoConfig as any)?.extra ?? (Constants?.manifest as any)?.extra ?? {};
   const fromConstants = envExtra?.STT_ENDPOINT;
-  const fromConfig = (CFG as any)?.STT_ENDPOINT;
-  const url = fromConfig || fromConstants;
+  const fromConfig = (ENV as Record<string, unknown>)?.STT_ENDPOINT as string | undefined;
+  const fromProcess = process?.env?.EXPO_PUBLIC_STT_ENDPOINT ?? process?.env?.STT_ENDPOINT;
+  const url = fromConfig || fromConstants || fromProcess;
   if (!url || typeof url !== 'string') {
     throw new Error('STT_ENDPOINT no configurado. Define extra.STT_ENDPOINT en app.json o en CONFIG.');
   }

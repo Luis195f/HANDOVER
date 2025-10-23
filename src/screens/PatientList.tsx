@@ -34,7 +34,7 @@ import {
 } from "@/src/lib/fhir-client";
 
 // RBAC + cola
-import { getSession, scopeByUnits } from "@/src/security/auth";
+import { getSession, scopeByUnits, type Session } from "@/src/security/auth";
 import { flushNow } from "@/src/lib/queueBootstrap";
 
 // Filtros + orden
@@ -156,6 +156,23 @@ export default function PatientList(_props: Props) {
   const [q, setQ] = useState<string>("");
   const [ignoreFilters, setIgnoreFilters] = useState(false);
 
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const current = await getSession();
+        if (active) setSession(current);
+      } catch {
+        if (active) setSession(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   /* --------- Datos (vista) + RAW (para chips) --------- */
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [allPatientsRaw, setAllPatientsRaw] = useState<PatientRow[]>([]); // <- RAW para chips
@@ -164,7 +181,14 @@ export default function PatientList(_props: Props) {
   const [source, setSource] = useState<"FHIR" | "FHIR:fetchAll" | "DEMO">("FHIR");
 
   /* --------- RBAC --------- */
-  const allowedUnitIds = useMemo(() => scopeByUnits(Object.keys(UNITS_BY_ID)), []);
+  const allowedUnitIds = useMemo(() => {
+    if (!session) return [] as string[];
+    const dataset = Object.keys(UNITS_BY_ID).map((unitId) => ({ unitId }));
+    const scoped = scopeByUnits(session, dataset, (item) => item.unitId);
+    return scoped
+      .map((item) => toSlug(item.unitId ?? ""))
+      .filter((id): id is string => Boolean(id));
+  }, [session]);
   const allowed = allowedUnitIds.length > 0;
 
   useEffect(() => {
@@ -217,7 +241,9 @@ export default function PatientList(_props: Props) {
       return Array.isArray(raw) ? (raw as PatientRow[]) : [];
     }
     if (selectedUnits.length === 1) {
-      const raw = await getPatientsByUnit(selectedUnits[0], { fhirBase: FHIR_BASE_URL, token, includeVitals: true });
+      const unitId = selectedUnits[0];
+      if (!unitId) return [];
+      const raw = await getPatientsByUnit(unitId, { fhirBase: FHIR_BASE_URL, token, includeVitals: true });
       return Array.isArray(raw) ? (raw as PatientRow[]) : [];
     }
     return []; // multi-unidad -> fallback

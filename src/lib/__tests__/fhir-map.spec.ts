@@ -1,5 +1,5 @@
 // __tests__/fhir-map.spec.ts
-import { buildHandoverBundle, __test__ } from '../src/lib/fhir-map';
+import { buildHandoverBundle, __test__ } from '../fhir-map';
 
 type Entry = { fullUrl?: string; resource: any; request?: any };
 
@@ -61,14 +61,14 @@ describe('mapVitalsToObservations (vía buildHandoverBundle con emitIndividuals)
 
     // Panel vitales / LOINC 85353-1 con 5 componentes
     const panel = obs.find(o => o.code?.coding?.[0]?.code === '85353-1');
-    expect(panel).toBeTruthy();
-    expect(Array.isArray(panel!.component)).toBe(true);
-    expect(panel!.component).toHaveLength(5);
+    expect(panel).toBeDefined();
+    expect(Array.isArray(panel?.component)).toBe(true);
+    expect(panel?.component).toHaveLength(5);
 
     // DeviceUseStatement por O₂ (SNOMED 46680005)
     const dus = extract(bundle.entry as Entry[], 'DeviceUseStatement');
     expect(dus).toHaveLength(1);
-    const snomed = dus[0].reasonCode?.[0]?.coding?.[0]?.code;
+    const snomed = dus[0]?.reasonCode?.[0]?.coding?.[0]?.code;
     expect(snomed).toBe('46680005');
 
     // UCUM por vital

@@ -12,6 +12,8 @@ export type PatientLike = {
   name?: string;
   unitId?: string;
   specialtyId?: string;
+  location?: string;
+  bed?: string;
   vitals?: Record<string, any>;
   news2?: number;
   latestNews2?: { score?: number };

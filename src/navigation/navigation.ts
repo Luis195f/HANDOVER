@@ -4,10 +4,6 @@ import type { RootStackParamList } from "./RootNavigator";
 // Ref tipado al root navigator
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-// Si una ruta define params como undefined, el parámetro es opcional.
-// En caso contrario, es obligatorio (type-level safety).
-type OptionalParams<T> = undefined extends T ? [params?: T] : [params: T];
-
 // Cola interna para llamadas hechas antes de que el contenedor esté listo.
 const pending: Array<() => void> = [];
 
@@ -41,31 +37,40 @@ export function isReady() {
 /** Navega a una ruta tipada. Si el contenedor no está listo, se encola. */
 export function navigate<T extends keyof RootStackParamList>(
   name: T,
-  ...[params]: OptionalParams<RootStackParamList[T]>
+  params?: RootStackParamList[T]
 ): void {
   runOrQueue(() => {
-    // RN permite undefined para rutas sin params; cast controlado para evitar @ts-expect-error
-    navigationRef.navigate(name as never, params as never);
+    navigationRef.dispatch(
+      CommonActions.navigate({ name: name as never, params: params as never })
+    );
   });
 }
 
 /** Empuja una pantalla en el stack (Native Stack compatible). */
 export function push<T extends keyof RootStackParamList>(
   name: T,
-  ...[params]: OptionalParams<RootStackParamList[T]>
+  params?: RootStackParamList[T]
 ): void {
   runOrQueue(() => {
-    navigationRef.dispatch(StackActions.push(name as never, params as never));
+    navigationRef.dispatch(
+      typeof params === 'undefined'
+        ? StackActions.push(name as never)
+        : StackActions.push(name as never, params as never)
+    );
   });
 }
 
 /** Reemplaza la pantalla actual por otra. */
 export function replace<T extends keyof RootStackParamList>(
   name: T,
-  ...[params]: OptionalParams<RootStackParamList[T]>
+  params?: RootStackParamList[T]
 ): void {
   runOrQueue(() => {
-    navigationRef.dispatch(StackActions.replace(name as never, params as never));
+    navigationRef.dispatch(
+      typeof params === 'undefined'
+        ? StackActions.replace(name as never)
+        : StackActions.replace(name as never, params as never)
+    );
   });
 }
 
@@ -79,7 +84,7 @@ export function goBack(): void {
 /** Resetea el stack a una sola ruta. Útil tras login/logout. */
 export function resetTo<T extends keyof RootStackParamList>(
   name: T,
-  ...[params]: OptionalParams<RootStackParamList[T]>
+  params?: RootStackParamList[T]
 ): void {
   runOrQueue(() => {
     navigationRef.dispatch(

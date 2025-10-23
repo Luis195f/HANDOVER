@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import values from '../../../test/fixtures/handover-values.json';
-import audio from '../../../test/fixtures/audio-url.json';
+import values from '../../../tests/fixtures/handover-values.json';
+import audio from '../../../tests/fixtures/audio-url.json';
 
 let Map: any = {};
 try { Map = await import('@/src/lib/fhir-map'); } catch {}
@@ -28,9 +28,9 @@ const has = (k: string) => Map && Object.prototype.hasOwnProperty.call(Map, k);
   it('usa identificador determinista (uuid v5) para Composition', () => {
     const b1 = buildHandoverBundle(values as any, { authorId: 'nurse-1' });
     const b2 = buildHandoverBundle(values as any, { authorId: 'nurse-1' });
-    const c1 = b1.entry.find((e: any) => e.resource.resourceType === 'Composition')!.resource;
-    const c2 = b2.entry.find((e: any) => e.resource.resourceType === 'Composition')!.resource;
-    expect(c1.identifier?.value).toBeDefined();
-    expect(c1.identifier?.value).toBe(c2.identifier?.value);
+    const c1 = b1.entry.find((e: any) => e.resource.resourceType === 'Composition')?.resource;
+    const c2 = b2.entry.find((e: any) => e.resource.resourceType === 'Composition')?.resource;
+    expect(c1?.identifier?.value).toBeDefined();
+    expect(c1?.identifier?.value).toBe(c2?.identifier?.value);
   });
 });

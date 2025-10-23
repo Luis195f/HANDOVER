@@ -1,66 +1,61 @@
-import * as FileSystem from 'expo-file-system';
+const secureStoreData = new Map<string, string>();
+
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(async (key: string) => secureStoreData.get(key) ?? null),
+  setItemAsync: jest.fn(async (key: string, value: string) => {
+    secureStoreData.set(key, value);
+  }),
+  deleteItemAsync: jest.fn(async (key: string) => {
+    secureStoreData.delete(key);
+  }),
+}));
+
 import * as SecureStore from 'expo-secure-store';
+
 import { enqueueTx, readQueue, removeItem, clearAll, flushQueue, type SendFn, QUEUE_DIR } from './offlineQueue';
-
-vi.mock('expo-secure-store');
-vi.mock('expo-file-system');
-
-const mockFS: Record<string, string> = {};
-(FileSystem.readDirectoryAsync as any).mockImplementation(async (dir: string) =>
-  Object.keys(mockFS)
-    .filter(p => p.startsWith(dir))
-    .map(p => p.substring(dir.length))
-);
-(FileSystem.getInfoAsync as any).mockImplementation(async (path: string) => ({ exists: path in mockFS }));
-(FileSystem.makeDirectoryAsync as any).mockResolvedValue(undefined);
-(FileSystem.deleteAsync as any).mockImplementation(async (path: string) => { delete mockFS[path]; });
-(FileSystem.writeAsStringAsync as any).mockImplementation(async (path: string, content: string) => { mockFS[path] = content; });
-(FileSystem.readAsStringAsync as any).mockImplementation(async (path: string) => mockFS[path]);
-
-(SecureStore.getItemAsync as any).mockResolvedValue(undefined);
-(SecureStore.setItemAsync as any).mockResolvedValue(undefined);
 
 describe('offline queue', () => {
   beforeEach(async () => {
-    for (const k of Object.keys(mockFS)) delete mockFS[k];
-    (SecureStore.getItemAsync as any).mockReset();
-    (SecureStore.getItemAsync as any).mockResolvedValue(undefined);
+    secureStoreData.clear();
+    jest.clearAllMocks();
   });
 
-  it('enqueue → escribe archivo cifrado en QUEUE_DIR', async () => {
-    const it = await enqueueTx({ foo: 'bar' });
-    const path = `${QUEUE_DIR}${it.key}.json`;
-    expect(mockFS[path]).toBeTruthy();
+  it('enqueue → persiste item e índice', async () => {
+    const it = await enqueueTx({ payload: { foo: 'bar' } });
+    const path = `${QUEUE_DIR}:${it.key}`;
+    expect(secureStoreData.has(path)).toBe(true);
+    const idxRaw = secureStoreData.get(`${QUEUE_DIR}:__index__`);
+    expect(idxRaw ? JSON.parse(idxRaw) : []).toContain(it.key);
   });
 
   it('readQueue → devuelve en orden', async () => {
-    const a = await enqueueTx({ a: 1 });
-    const b = await enqueueTx({ b: 2 });
+    const a = await enqueueTx({ payload: { a: 1 } });
+    const b = await enqueueTx({ payload: { b: 2 } });
     const list = await readQueue();
     expect(list.map(i => i.key)).toEqual([a.key, b.key]);
   });
 
   it('removeItem → borra archivo', async () => {
-    const it = await enqueueTx({ x: 1 });
-    const path = `${QUEUE_DIR}${it.key}.json`;
-    expect(mockFS[path]).toBeTruthy();
+    const it = await enqueueTx({ payload: { x: 1 } });
+    const path = `${QUEUE_DIR}:${it.key}`;
+    expect(secureStoreData.has(path)).toBe(true);
     await removeItem(it.key);
-    expect(mockFS[path]).toBeFalsy();
+    expect(secureStoreData.has(path)).toBe(false);
   });
 
   it('clearAll → borra todos los .json', async () => {
-    await enqueueTx({ one: 1 });
-    await enqueueTx({ two: 2 });
+    await enqueueTx({ payload: { one: 1 } });
+    await enqueueTx({ payload: { two: 2 } });
     await clearAll();
-    const files = Object.keys(mockFS).filter(p => p.startsWith(QUEUE_DIR));
-    expect(files.length).toBe(0);
+    const storedKeys = Array.from(secureStoreData.keys()).filter((k) => k.startsWith(QUEUE_DIR));
+    expect(storedKeys.length).toBe(0);
   });
 
   it('flushQueue → borra en éxito 200 y 412; detiene en error', async () => {
-    const i1 = await enqueueTx({ ok: true });
-    const i2 = await enqueueTx({ dup: true });
-    const i3 = await enqueueTx({ fail: true });
-    const i4 = await enqueueTx({ never: true });
+    await enqueueTx({ payload: { ok: true } });
+    await enqueueTx({ payload: { dup: true } });
+    const i3 = await enqueueTx({ payload: { fail: true } });
+    const i4 = await enqueueTx({ payload: { never: true } });
 
     const sender: SendFn = async (tx) => {
       if ((tx as any).payload.ok) return { ok: true, status: 200 };
@@ -70,6 +65,7 @@ describe('offline queue', () => {
 
     await flushQueue(sender);
 
-    expect(await readQueue()).toEqual([i3, i4]);
+    const remaining = await readQueue();
+    expect(remaining.map((it) => it.key)).toEqual([i3.key, i4.key]);
   });
 });

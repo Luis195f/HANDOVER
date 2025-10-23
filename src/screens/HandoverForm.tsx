@@ -20,7 +20,7 @@ import { mark } from "@/src/lib/otel";
 import { buildHandoverBundle, HandoverValues } from "@/src/lib/fhir-map";
 import { enqueueTx, flushQueue } from "@/src/lib/queue";
 import { postTransactionBundle } from "@/src/lib/fhir-client";
-import { ENV } from "@/src/config/env";
+import { ENV, FHIR_BASE_URL } from "@/src/config/env";
 import type { RootStackParamList } from "@/src/navigation/RootNavigator";
 import { useZodForm } from "@/src/validation/form-hooks";
 
@@ -250,7 +250,7 @@ export default function HandoverForm() {
     (async () => {
       const data = await draft.load();
       if (data) reset({ ...getValues(), ...data });
-      const pf = await prefillFromFHIR({ fhirBase: ENV.FHIR_BASE, patientId, token: hasToken ? "mock-token" : undefined });
+      const pf = await prefillFromFHIR({ fhirBase: ENV.FHIR_BASE_URL ?? FHIR_BASE_URL, patientId, token: hasToken ? "mock-token" : undefined });
       const current = getValues();
       reset({ ...current, notes: pf.dxText ? `${pf.dxText}\n\n${current.notes ?? ""}` : current.notes, vitals: { ...(current.vitals ?? {}), ...(pf.vitals ?? {}) } });
     })();
@@ -280,10 +280,11 @@ export default function HandoverForm() {
   }
 
   // Envío (directo a FHIR o vía backend si ENV.API_BASE está definido)
-  async function postBundleSmart(bundle: any) {
+  async function postBundleSmart(bundle: any): Promise<Response | { ok: boolean; status: number }> {
     if (ENV.API_BASE) {
       const r = await fetch(`${ENV.API_BASE}/fhir/transaction`, {
-        method: "POST", headers: {
+        method: "POST",
+        headers: {
           "Content-Type": "application/fhir+json",
           Authorization: ENV.API_TOKEN ? `Bearer ${ENV.API_TOKEN}` : "",
           "X-User-Id": authorId ?? "anonymous",            // 👈 para AuditEvent
@@ -292,16 +293,19 @@ export default function HandoverForm() {
         body: JSON.stringify(bundle),
       });
       if (!r.ok) throw new Error(`Backend ${r.status}`);
-      return await r.json();
-    } else {
-      return await postTransactionBundle({ fhirBase: ENV.FHIR_BASE, bundle, token: hasToken ? "mock-token" : undefined });
+      return r;
     }
+    return await postTransactionBundle({
+      fhirBase: ENV.FHIR_BASE_URL ?? FHIR_BASE_URL,
+      bundle,
+      token: hasToken ? "mock-token" : undefined,
+    });
   }
 
   const onSubmit = handleSubmit(async (values) => {
     const normalized = normalizeUnitId(values.admin.unitId);
     if (normalized && normalized !== values.admin.unitId) { setValue("admin.unitId", normalized, { shouldValidate: true }); values.admin.unitId = normalized; }
-    if (!hasUnitAccess(values.admin.unitId)) { Alert.alert("Alert", "No tienes acceso a esta unidad."); return; }
+    if (!(await hasUnitAccess(values.admin.unitId))) { Alert.alert("Alert", "No tienes acceso a esta unidad."); return; }
     if ((values.close.signedBy?.length ?? 0) > 0 && !values.close.signedAt) values.close.signedAt = new Date().toISOString();
 
     mark("handover.save.start", { unit: values.admin.unitId, patient: values.patientId });
@@ -312,10 +316,16 @@ export default function HandoverForm() {
     bundle = await addAudioUriToBundle(bundle, values.checklistAudioUri, values.patientId, "Notas de checklist");
     bundle = await addAudioUriToBundle(bundle, values.close.audioUri, values.patientId, "Handover (Firmas)");
 
-    await enqueueTx({ type: "handover.save", key: `handover-${values.patientId}-${Date.now()}`, payload: { fhirBase: ENV.FHIR_BASE, bundle } });
+    await enqueueTx({ type: "handover.save", key: `handover-${values.patientId}-${Date.now()}`, payload: { fhirBase: ENV.FHIR_BASE_URL ?? FHIR_BASE_URL, bundle } });
 
     Alert.alert("OK", "Entrega guardada. Si hay conexión se enviará en segundo plano.");
-    flushQueue(async (tx) => { const { bundle } = tx.payload ?? {}; await postBundleSmart(bundle); })
+    flushQueue(async (tx) => {
+      const { bundle } = tx.payload ?? {};
+      if (!bundle) {
+        return { ok: false, status: 400 };
+      }
+      return await postBundleSmart(bundle);
+    })
       .then(() => draft.clear().catch(() => {}))
       .catch((e) => mark("handover.flush.err", { patient: values.patientId, err: String(e) }));
   });

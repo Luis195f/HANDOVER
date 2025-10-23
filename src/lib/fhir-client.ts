@@ -192,6 +192,7 @@ export async function fetchPatientsFromFHIR(opts: FetchOpts): Promise<PatientBas
 
     if (!locDisplay && locRef) {
       const locId = locRef.split("/")[1];
+      if (!locId) throw new Error("Missing location id");
       const loc = locationsMap.get(locId);
       locDisplay = loc?.name || loc?.description;
     }

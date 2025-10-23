@@ -1,5 +1,5 @@
 // src/lib/__tests__/sync.test.ts
-import { describe, it, expect, vi } from "vitest";
+/* eslint-disable @typescript-eslint/no-var-requires */
 
 /**
  * Tests tolerantes para `sync.ts`.
@@ -45,18 +45,16 @@ describe("sync.ts — presencia de export (no romper si aún no está listo)", (
     let syncMod: Record<string, any> | null = null;
     try {
       // Import relativo a este archivo: src/lib/__tests__/sync.test.ts
-      syncMod = await import("../../sync");
+      syncMod = await import("../sync");
     } catch {
       // Módulo aún no disponible en build de tests
       syncMod = null;
     }
     if (!syncMod) {
-      vi.skip();
       return;
     }
     const sender = pickSender(syncMod);
     if (!sender) {
-      vi.skip();
       return;
     }
     // Si existe, sólo smoke-test sin ejecutar red real
@@ -74,7 +72,7 @@ describe("sync.ts — presencia de export (no romper si aún no está listo)", (
 describe.skip("sync.ts — lote mixto 2xx/5xx e idempotencia (activar cuando expongas API final)", () => {
   // Helpers “dummy” que puedes ajustar a tu firma real cuando actives este bloque
   async function importSender() {
-    const mod = await import("../../sync");
+    const mod = await import("../sync");
     const sender = pickSender(mod);
     if (!sender) throw new Error("No se encontró una función exportada en sync.ts");
     return { sender, mod };
@@ -83,7 +81,7 @@ describe.skip("sync.ts — lote mixto 2xx/5xx e idempotencia (activar cuando exp
   it("lote mixto: primer 2xx (limpia draft), segundo 5xx (NO limpia)", async () => {
     const { sender, mod } = await importSender();
     // Si tu sync depende de drafts/queue, puedes stubear aquí:
-    const clearDraft = vi.spyOn(await import("../../drafts"), "clearDraft").mockResolvedValue();
+    const clearDraft = jest.spyOn(await import("../drafts"), "clearDraft").mockResolvedValue();
 
     // Construye un lote con dos entradas (ajusta a tu tipo real)
     const batch = [
@@ -92,7 +90,8 @@ describe.skip("sync.ts — lote mixto 2xx/5xx e idempotencia (activar cuando exp
     ];
 
     // Mockea transporte HTTP interno si tu sync lo usa, o envuelve sender
-    const http = vi.spyOn(mod as any, "httpPost").mockImplementation(async (_url: string, body: any) => {
+    const http = jest.spyOn(mod as any, "httpPost").mockImplementation(async (...args: any[]) => {
+      const body = args[1];
       const entry = (body?.entries ?? [])[0] ?? body; // dependiendo si envías bundle o 1:1
       if (entry?.key === "ok-1") return { ok: true, status: 201 };
       if (entry?.key === "err-5xx") return { ok: false, status: 503 };
@@ -112,7 +111,7 @@ describe.skip("sync.ts — lote mixto 2xx/5xx e idempotencia (activar cuando exp
 
   it("idempotencia: dos items con misma key ⇒ un solo POST efectivo", async () => {
     const { sender, mod } = await importSender();
-    const postSpy = vi
+    const postSpy = jest
       .spyOn(mod as any, "httpPost")
       .mockResolvedValue({ ok: true, status: 200 });
 
@@ -135,9 +134,9 @@ describe.skip("sync.ts — lote mixto 2xx/5xx e idempotencia (activar cuando exp
   it("mixto vía queue: un OK y un 5xx mantienen conteos correctos", async () => {
     // Este caso es útil si expones un `flushQueue` que delega en sync
     const { sender } = await importSender();
-    const { enqueueTx, flushQueue } = await import("../../queue");
+    const { enqueueTx, flushQueue } = await import("../queue");
 
-    const post = vi.fn(async (tx: any) => {
+    const post = jest.fn(async (tx: any) => {
       if (tx?.key?.startsWith("ok-")) return { ok: true, status: 201 };
       if (tx?.key?.startsWith("err-")) return { ok: false, status: 503 };
       return { ok: true, status: 200 };

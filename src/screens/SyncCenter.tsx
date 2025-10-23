@@ -5,15 +5,10 @@ import {
   Pressable, StyleSheet, Alert, useColorScheme, Switch
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { drain, type QueueItemMeta } from '@/src/lib/offlineQueue';
-import { flushQueueNow } from '@/src/lib/sync';
+import { readQueue } from '@/src/lib/offlineQueue';
+import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 
-type GetToken = () => Promise<string | null>;
-type SyncOpts = {
-  fhirBaseUrl: string;
-  getToken: GetToken;
-  backoff?: { retries?: number; minMs?: number; maxMs?: number }
-};
+type QueueItemMeta = { id: string; createdAt: number | string; tries: number; hash?: string };
 
 function resolveSyncOpts(): SyncOpts | null {
   try {
@@ -26,8 +21,8 @@ function resolveSyncOpts(): SyncOpts | null {
     // Auth tolerante
     // @ts-ignore
     const auth = require('@/src/services/AuthService');
-    const getToken: GetToken =
-      (auth?.getToken as GetToken) ?? (auth?.default?.getToken as GetToken) ?? (async () => null);
+    const getToken: SyncOpts["getToken"] =
+      (auth?.getToken as SyncOpts["getToken"]) ?? (auth?.default?.getToken as SyncOpts["getToken"]) ?? (async () => null);
     return { fhirBaseUrl: base, getToken, backoff: { retries: 5, minMs: 500, maxMs: 15000 } };
   } catch {
     return null;
@@ -51,8 +46,14 @@ export default function SyncCenter() {
   const load = React.useCallback(async () => {
     setRefreshing(true);
     try {
-      const idx = await drain();
-      setItems(idx ?? []);
+      const queue = await readQueue();
+      const meta: QueueItemMeta[] = queue.map((item) => ({
+        id: item.key,
+        createdAt: item.createdAt,
+        tries: item.tries,
+        hash: item.hash,
+      }));
+      setItems(meta);
     } finally {
       setRefreshing(false);
     }
@@ -174,7 +175,10 @@ export default function SyncCenter() {
 function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
   const dt = new Date(item.createdAt);
   const when = isFinite(dt.getTime()) ? dt.toLocaleString() : String(item.createdAt);
-  const short = (s: string, n = 16) => (s?.length > n ? s.slice(0, n) + '…' : s);
+  const short = (s: string | undefined, n = 16) => {
+    if (!s) return '';
+    return s.length > n ? `${s.slice(0, n)}…` : s;
+  };
   return (
     <View style={[styles.row, { backgroundColor: C.card, borderColor: C.border }]}>
       <View style={{ flex: 1 }}>
@@ -184,7 +188,7 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={[styles.hash, { color: C.textHint }]}>hash</Text>
-        <Text style={[styles.hashVal, { color: C.textPrimary }]}>{short(item.hash, 24)}</Text>
+        <Text style={[styles.hashVal, { color: C.textPrimary }]}>{short(item.hash, 24) || '—'}</Text>
         <Text style={[styles.state, { color: C.statePending }]}>PENDING</Text>
       </View>
     </View>

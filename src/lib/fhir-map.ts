@@ -68,6 +68,11 @@ const CODES = {
 export type HandoverValues = {
   patientId: string;
   encounterId?: string;
+  notes?: string;
+  close?: {
+    audioUri?: string;
+    // otros campos de cierre si existen
+  };
   vitals?: {
     hr?: number;                // /min
     rr?: number;                // /min
@@ -148,6 +153,9 @@ export type MedicationInput = {
 /////////////////////////////////////
 
 const HTTP_URL_RE = /^https?:\/\//i;
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0;
 
 const ATTACHMENT_MIME_ALLOWLIST = new Set<string>([
   'audio/mpeg',
@@ -469,6 +477,11 @@ type Observation = {
   }>;
 };
 
+type ObsEx = Observation & {
+  meta?: { profile?: string[] };
+  hasMember?: Array<{ reference: string }>;
+};
+
 type MedicationStatement = {
   resourceType: "MedicationStatement";
   id?: string;
@@ -590,7 +603,7 @@ export function mapObservationVitals(
   const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   if (!values?.patientId) return [];
 
-  const vitals = normalizeVitalsInput(values.vitals);
+  const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
   const observations: Observation[] = [];
 
   const subj = refPatient(values.patientId);
@@ -973,7 +986,7 @@ function mapOxygenProcedure(
 ): DeviceUseStatement[] {
   // optionsMerged: única fusión por función; no duplicar (previene bundling error)
   const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
-  const vitals = normalizeVitalsInput(values.vitals);
+  const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
@@ -1116,11 +1129,11 @@ export function buildHandoverBundle(
   let acvpuMember: string | undefined;
   const glucoseMembers: string[] = [];
   const glucoseMemberSet = new Set<string>();
-  const glucoseLoincCodes = new Set(
-    [__test__.LOINC?.GLUCOSE_MASS, __test__.LOINC?.GLUCOSE_MOLE].filter(
-      (code): code is string => typeof code === "string" && code.length > 0,
-    ),
-  );
+  const loincCandidates: Array<unknown> = [
+    __test__.LOINC?.GLUCOSE_MASS,
+    __test__.LOINC?.GLUCOSE_MOLE,
+  ];
+  const glucoseLoincCodes = new Set<string>(loincCandidates.filter(isNonEmptyString));
   const acvpuCode = __test__.CODES?.ACVPU?.code ?? __test__.LOINC?.ACVPU;
 
   const addEntry = (
@@ -1162,10 +1175,19 @@ export function buildHandoverBundle(
     }
   }
 
+  const explicitEmitPanel = typeof opts?.emitPanel === 'boolean' ? opts.emitPanel : undefined;
   const emitVitalsPanel =
-    optionsMerged.emitVitalsPanel ?? optionsMerged.emitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
-  const emitBpPanel = optionsMerged.emitBpPanel ?? emitVitalsPanel;
-  const emitHasMember = optionsMerged.emitHasMember ?? DEFAULT_OPTS.emitHasMember;
+    typeof opts?.emitVitalsPanel === 'boolean'
+      ? opts.emitVitalsPanel
+      : explicitEmitPanel ?? DEFAULT_OPTS.emitVitalsPanel;
+  const emitBpPanel =
+    typeof opts?.emitBpPanel === 'boolean'
+      ? opts.emitBpPanel
+      : explicitEmitPanel ?? DEFAULT_OPTS.emitBpPanel;
+  const emitHasMember =
+    typeof opts?.emitHasMember === 'boolean'
+      ? opts.emitHasMember
+      : DEFAULT_OPTS.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
     [__test__.CODES.HR.code, __test__.CODES.HR.display],
@@ -1198,7 +1220,7 @@ export function buildHandoverBundle(
     }
 
     if (components.length > 0) {
-      const panel: Observation = {
+      const panel: ObsEx = {
         resourceType: 'Observation',
         status: 'final',
         subject: refPatient(patientId),
@@ -1246,7 +1268,7 @@ export function buildHandoverBundle(
     }
 
     if (bpComponents.length > 0) {
-      const bpPanel: Observation = {
+      const bpPanel: ObsEx = {
         resourceType: 'Observation',
         status: 'final',
         subject: refPatient(patientId),
