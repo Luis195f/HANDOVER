@@ -109,7 +109,9 @@ export type BuildOptions = {
   now?: string;
   authorId?: string;
   attachments?: AttachmentInput[];
+  emitVitalsPanel?: boolean;
   emitPanel?: boolean;
+  emitVitalsPanel?: boolean;
   emitIndividuals?: boolean;
   emitHasMember?: boolean;
   emitBpPanel?: boolean;
@@ -781,7 +783,13 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 
 // Alias requerido por los tests
 export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOptions) {
-  return mapObservationVitals(values, opts);
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
+
+  return mapObservationVitals(values, opts2);
 }
 
 /////////////////////////////////////////
@@ -902,13 +910,19 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 /////////////////////////////////////////
 
 function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
+
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = opts?.now ?? nowISO();
+  const when = opts2.now ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1107,7 +1121,7 @@ export function buildHandoverBundle(
     __test__.CODES.DBP.code,
   ];
 
-  if (emitPanel) {
+  if (emitVitalsPanel) {
     const components: Observation['component'] = [];
     for (const code of vitalComponentCodes) {
       const info = observationInfo.get(code);
