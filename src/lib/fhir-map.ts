@@ -109,7 +109,9 @@ export type BuildOptions = {
   now?: string;
   authorId?: string;
   attachments?: AttachmentInput[];
+  emitVitalsPanel?: boolean;
   emitPanel?: boolean;
+  emitVitalsPanel?: boolean;
   emitIndividuals?: boolean;
   emitHasMember?: boolean;
   emitBpPanel?: boolean;
@@ -117,6 +119,14 @@ export type BuildOptions = {
   normalizeGlucoseToMgdl?: boolean;
   glucoseDecimals?: number;
   profileUrls?: string[] | ProfileUrlMap;
+};
+
+export const DEFAULT_OPTS: Required<
+  Pick<BuildOptions, "emitPanel" | "emitBpPanel" | "emitHasMember">
+> = {
+  emitPanel: false,
+  emitBpPanel: false,
+  emitHasMember: false,
 };
 
 export type MedicationCodeInput = { system?: string; code?: string; display?: string } | string;
@@ -578,14 +588,15 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = opts?.now ?? nowISO();
+  const effective = opts2.now ?? nowISO();
 
-  const emitIndividuals = opts?.emitIndividuals ?? true;
+  const emitIndividuals = opts2.emitIndividuals ?? true;
 
-  const normalizeGlucoseOption = opts?.normalizeGlucoseToMgDl ?? opts?.normalizeGlucoseToMgdl;
+  const normalizeGlucoseOption =
+    opts2.normalizeGlucoseToMgDl ?? opts2.normalizeGlucoseToMgdl;
   const normalizeGlucose =
     typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
-  const glucoseDecimals = opts?.glucoseDecimals ?? 0;
+  const glucoseDecimals = opts2.glucoseDecimals ?? 0;
 
   const buildObservation = (params: {
     code: FhirCodeableConcept;
@@ -825,7 +836,13 @@ export function mapObservationVitals(values: HandoverValues, opts?: BuildOptions
 
 // Alias requerido por los tests
 export function mapVitalsToObservations(values: HandoverValues, opts?: BuildOptions) {
-  return mapObservationVitals(values, opts);
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
+
+  return mapObservationVitals(values, opts2);
 }
 
 /////////////////////////////////////////
@@ -946,13 +963,19 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 /////////////////////////////////////////
 
 function mapOxygenProcedure(values: HandoverValues, opts?: BuildOptions): DeviceUseStatement[] {
+  const opts2: BuildOptions = { ...DEFAULT_OPTS, ...opts };
+
+  if (typeof opts?.emitPanel === "boolean" && opts?.emitVitalsPanel === undefined) {
+    opts2.emitVitalsPanel = opts.emitPanel;
+  }
+
   const vitals = normalizeVitalsInput(values.vitals);
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = opts?.now ?? nowISO();
+  const when = opts2.now ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1036,14 +1059,15 @@ export function buildHandoverBundle(
     };
   }
 
+  const opts2 = { ...DEFAULT_OPTS, ...options };
   const patientId = values.patientId;
-  const now = options.now ?? nowISO();
+  const now = opts2.now ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
     ? ((input as HandoverInput).attachments as AttachmentInput[])
     : [];
-  const attachmentsFromOptions = Array.isArray(options.attachments) ? options.attachments : [];
+  const attachmentsFromOptions = Array.isArray(opts2.attachments) ? opts2.attachments : [];
 
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
     (att): att is AttachmentInput => Boolean(att),
@@ -1057,15 +1081,9 @@ export function buildHandoverBundle(
     : values.meds;
   const normalizedMeds = normalizeMedicationInputs(medsInput);
   const normalizedVitals = normalizeVitalsInput(values.vitals);
-  const profileExtras = normalizeProfileOptions(options.profileUrls);
+  const profileExtras = normalizeProfileOptions(opts2.profileUrls);
 
-  const observationOptions: BuildOptions = {
-    now,
-    emitIndividuals: options.emitIndividuals,
-    normalizeGlucoseToMgDl: options.normalizeGlucoseToMgDl,
-    normalizeGlucoseToMgdl: options.normalizeGlucoseToMgdl,
-    glucoseDecimals: options.glucoseDecimals,
-  };
+  const observationOptions: BuildOptions = { ...opts2, now };
 
   const observationResources = mapObservationVitals(values, observationOptions);
   const entries: Array<{
@@ -1132,9 +1150,11 @@ export function buildHandoverBundle(
     }
   }
 
-  const emitPanel = options.emitPanel ?? true;
-  const emitBpPanel = options.emitBpPanel ?? (options.emitPanel ?? true);
-  const emitHasMember = options.emitHasMember ?? false;
+  const emitPanel = opts2.emitPanel;
+  const emitBpPanel = Object.prototype.hasOwnProperty.call(options, 'emitBpPanel')
+    ? opts2.emitBpPanel
+    : emitPanel;
+  const emitHasMember = opts2.emitHasMember;
 
   const codeDisplayMap = new Map<string, string>([
     [__test__.CODES.HR.code, __test__.CODES.HR.display],
@@ -1154,7 +1174,7 @@ export function buildHandoverBundle(
     __test__.CODES.DBP.code,
   ];
 
-  if (emitPanel) {
+  if (emitVitalsPanel) {
     const components: Observation['component'] = [];
     for (const code of vitalComponentCodes) {
       const info = observationInfo.get(code);
