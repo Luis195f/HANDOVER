@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import values from '../../../test/fixtures/handover-values.json';
+import values from '../../../tests/fixtures/handover-values.json';
 
 let Schemas: any = {};
 try { Schemas = await import('@/src/validation/schemas'); } catch {}

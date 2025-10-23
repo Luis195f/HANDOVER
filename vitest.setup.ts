@@ -42,3 +42,40 @@ if (!(globalThis as any).fetch) {
 
 /** (Compat) vi.skip "no-op" si algún test antiguo lo llama */
 (Object.assign(vi as any, { skip: () => {} }));
+
+/**
+ * Compatibilidad mínima para suites migradas a Jest. Mapea `jest.*` → `vi.*`.
+ */
+if (!(globalThis as any).jest) {
+  const jestCompat = {
+    ...vi,
+    fn: vi.fn,
+    spyOn: vi.spyOn,
+    mock: vi.mock,
+    clearAllMocks: vi.clearAllMocks,
+    resetAllMocks: vi.resetAllMocks,
+    restoreAllMocks: vi.restoreAllMocks,
+    useFakeTimers: vi.useFakeTimers.bind(vi),
+    useRealTimers: vi.useRealTimers.bind(vi),
+    advanceTimersByTime: vi.advanceTimersByTime.bind(vi),
+  } as typeof vi & Record<string, unknown>;
+  (globalThis as any).jest = jestCompat;
+}
+
+/** Mock ligero de expo-crypto para entorno Node. */
+vi.mock('expo-crypto', () => ({
+  CryptoDigestAlgorithm: {
+    SHA1: 'SHA-1',
+    SHA256: 'SHA-256',
+    SHA384: 'SHA-384',
+    SHA512: 'SHA-512',
+  },
+  digestStringAsync: vi.fn(async (_alg: string, input: string) => {
+    // usa hash simple determinista para tests (no criptográfico)
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+    }
+    return hash.toString(16);
+  }),
+}));

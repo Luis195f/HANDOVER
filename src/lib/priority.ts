@@ -8,9 +8,13 @@ export type VitalsInput = {
   rr?: number;   // frecuencia respiratoria /min
   hr?: number;   // frecuencia cardiaca /min
   sbp?: number;  // TAS mmHg
+  dbp?: number;  // TAD mmHg (no puntúa pero se propaga)
   temp?: number; // °C
   spo2?: number; // %
   o2?: boolean;  // en O₂ suplementario
+  o2Device?: string; // dispositivo O₂
+  o2FlowLpm?: number; // flujo L/min
+  fio2?: number; // fracción inspirada
   acvpu?: ACVPU; // nivel de consciencia
 };
 

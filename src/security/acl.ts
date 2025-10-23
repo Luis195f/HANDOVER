@@ -23,17 +23,18 @@ export function normalizeUnitId(v?: string) {
 }
 
 /** Devuelve true si el usuario actual tiene acceso a la unidad indicada (tras normalizar). */
-export function hasUnitAccess(unitInput?: string) {
-  // Bypass solo para desarrollo/local si lo necesitas
-  // (No habilitar en producción)
-  // @ts-expect-error __DEV__ lo provee React Native; ignora si no existe en web
-  if (BYPASS_SCOPE && (typeof __DEV__ === 'boolean' ? __DEV__ : true)) {
+export async function hasUnitAccess(unitInput?: string) {
+  const isDev =
+    typeof globalThis !== 'undefined' && typeof (globalThis as any).__DEV__ === 'boolean'
+      ? Boolean((globalThis as any).__DEV__)
+      : process.env.NODE_ENV !== 'production';
+  if (BYPASS_SCOPE && isDev) {
     return true;
   }
 
   if (!unitInput) return false;
 
-  const session = getSession() ?? {};
+  const session = await getSession();
   const unitId = toSlug(unitInput);
   const allowed = (session?.user?.allowedUnits ?? []).map(toSlug);
 
@@ -41,10 +42,10 @@ export function hasUnitAccess(unitInput?: string) {
 }
 
 /** Helper opcional: lanza error con códigos estándar si no hay acceso. */
-export function assertUnitAccessOrThrow(unitInput?: string) {
+export async function assertUnitAccessOrThrow(unitInput?: string) {
   const unitId = normalizeUnitId(unitInput);
   if (!unitId) throw new Error('UNIT_MISSING');
-  if (!hasUnitAccess(unitId)) throw new Error('UNIT_FORBIDDEN');
+  if (!(await hasUnitAccess(unitId))) throw new Error('UNIT_FORBIDDEN');
   return unitId;
 }
 

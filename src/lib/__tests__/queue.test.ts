@@ -1,10 +1,12 @@
 // src/lib/__tests__/queue.test.ts
-import { describe, it, expect, vi, beforeAll } from "vitest";
+/* eslint-disable @typescript-eslint/no-var-requires */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 
 /**
  * Mocks básicos ANTES de importar la cola para evitar parsear RN/Expo.
  */
-vi.mock(
+jest.mock(
   "react-native",
   () => {
     const subscribers = new Set<(...args: any[]) => void>();
@@ -27,7 +29,7 @@ vi.mock(
   { virtual: true }
 );
 
-vi.mock(
+jest.mock(
   "@react-native-community/netinfo",
   () => {
     let listener: ((state: { isConnected: boolean }) => void) | undefined;
@@ -43,15 +45,14 @@ vi.mock(
   { virtual: true }
 );
 
-vi.mock("expo", () => ({ registerRootComponent: () => {}, requireNativeModule: () => ({}) }), { virtual: true });
+jest.mock("expo", () => ({ registerRootComponent: () => {}, requireNativeModule: () => ({}) }), { virtual: true });
 
 /**
  * Importa la cola DESPUÉS de los mocks.
  */
-let enqueueTx: (tx: { key: string; payload?: any }) => Promise<void>;
-let flushQueue: (
-  sender: (tx: any) => Promise<{ ok?: boolean; status?: number } | { ok: boolean; status: number }>
-) => Promise<void>;
+type QueueModule = typeof import("../queue");
+let enqueueTx: QueueModule["enqueueTx"];
+let flushQueue: QueueModule["flushQueue"];
 
 beforeAll(async () => {
   const mod = await import("../queue");
@@ -64,7 +65,7 @@ const uniq = (p = "tx") => `${p}-${Date.now()}-${Math.random().toString(36).slic
 
 // Helpers Response-like
 const ok = (status = 200) => ({ ok: true, status });
-const fail = (status = 0) => ({ ok: false, status });
+const failResp = (status = 0) => ({ ok: false, status });
 
 describe("Queue — idempotencia, backoff, limpieza", () => {
   it("idempotencia: dos enqueue con la misma key se procesan una sola vez", async () => {
@@ -74,7 +75,7 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
     await enqueueTx({ key, payload: { v: 1 } });
     await enqueueTx({ key, payload: { v: 2 } }); // misma key
 
-    const sender = vi.fn(async (tx: any) => {
+    const sender = jest.fn(async (tx: any) => {
       if (tx?.key === key) calls.push({ key: tx.key, payload: tx.payload });
       return ok(200);
     });
@@ -87,13 +88,13 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
 
   it("backoff: ante fallo transitorio, planifica reintento (delays no decrecientes si existen) y finalmente éxito", async () => {
     // Fake timers sólo para este test
-    vi.useFakeTimers();
+    jest.useFakeTimers();
 
     const key = uniq("backoff");
     await enqueueTx({ key, payload: { attempt: 0 } });
 
     let attempts = 0;
-    const sender = vi.fn(async (tx: any) => {
+    const sender = jest.fn(async (tx: any) => {
       if (tx?.key !== key) return ok(204);
       attempts += 1;
       if (attempts === 1) {
@@ -101,20 +102,25 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
         const e: any = new Error("E_TRANSIENT");
         e.transient = true;
         throw e;
-        // Alternativa: return fail(503);
+        // Alternativa: return failResp(503);
       }
       return ok(200);
     });
 
     // Espía de setTimeout sólo si existe en el entorno
     const canSpy = typeof globalThis.setTimeout === "function";
-    const spy = canSpy ? vi.spyOn(globalThis, "setTimeout" as any) : null;
+    const spy = canSpy ? jest.spyOn(globalThis, "setTimeout" as any) : null;
 
     const p = flushQueue(sender);
 
     // Avanza timers si hay backoff planificado con setTimeout
-    await vi.runOnlyPendingTimersAsync();
-    await vi.runAllTimersAsync();
+    if ((jest as any).runOnlyPendingTimersAsync) {
+      await (jest as any).runOnlyPendingTimersAsync();
+      await (jest as any).runAllTimersAsync();
+    } else {
+      jest.runOnlyPendingTimers();
+      jest.runAllTimers();
+    }
     await p;
 
     // La cola puede delegar el retry internamente; al menos 1 intento
@@ -127,13 +133,15 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
       if (delays.length > 0) {
         expect(delays.every((d) => d >= 0)).toBe(true);
         for (let i = 1; i < delays.length; i++) {
-          expect(delays[i]).toBeGreaterThanOrEqual(delays[i - 1]);
+          const prev = delays[i - 1] ?? 0;
+          const curr = delays[i] ?? prev;
+          expect(curr).toBeGreaterThanOrEqual(prev);
         }
       }
       spy.mockRestore();
     }
 
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 
   it("limpieza post-éxito: un segundo flush no reprocesa el mismo item", async () => {
@@ -142,7 +150,7 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
 
     await enqueueTx({ key, payload: { once: true } });
 
-    const sender = vi.fn(async (tx: any) => {
+    const sender = jest.fn(async (tx: any) => {
       if (tx?.key === key) processed += 1;
       return ok(201); // éxito
     });
@@ -155,7 +163,7 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
   });
 
   it("no duplica si se re-encola misma key durante reintentos (race) — avance garantizado", async () => {
-    vi.useFakeTimers();
+    jest.useFakeTimers();
 
     const key = uniq("race");
     await enqueueTx({ key, payload: { v: 1 } });
@@ -163,7 +171,7 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
     let attempts = 0;
     const seenPayloads: any[] = [];
 
-    const sender = vi.fn(async (tx: any) => {
+    const sender = jest.fn(async (tx: any) => {
       if (tx?.key !== key) return ok(204);
 
       attempts += 1;
@@ -175,21 +183,26 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
         const e: any = new Error("E_TRANSIENT");
         e.transient = true;
         throw e;
-        // Alternativa: return fail(503);
+        // Alternativa: return failResp(503);
       }
       return ok(200);
     });
 
     const p = flushQueue(sender);
-    await vi.runOnlyPendingTimersAsync();
-    await vi.runAllTimersAsync();
+    if ((jest as any).runOnlyPendingTimersAsync) {
+      await (jest as any).runOnlyPendingTimersAsync();
+      await (jest as any).runAllTimersAsync();
+    } else {
+      jest.runOnlyPendingTimers();
+      jest.runAllTimers();
+    }
     await p;
 
     expect(seenPayloads.length).toBeLessThanOrEqual(2);
     const last = seenPayloads[seenPayloads.length - 1];
     expect(last).toBeDefined();
 
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 
   // ──────────────────────────────────────────────────────────────
@@ -197,34 +210,34 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
   // ──────────────────────────────────────────────────────────────
 
   it("4xx: no reintenta en errores de cliente (un solo intento)", async () => {
-    vi.useFakeTimers();
+    jest.useFakeTimers();
 
     const key = uniq("no-retry-4xx");
     await enqueueTx({ key, payload: { p: 1 } });
 
     let attempts = 0;
-    const sender = vi.fn(async (tx: any) => {
+    const sender = jest.fn(async (tx: any) => {
       if (tx?.key !== key) return ok(204);
       attempts += 1;
       // 400 Bad Request → no debería reintentarse
-      return fail(400);
+      return failResp(400);
     });
 
     await flushQueue(sender);
 
     expect(attempts).toBe(1);
 
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 
   it("error NO transitorio (throw sin flag) no reintenta", async () => {
-    vi.useFakeTimers();
+    jest.useFakeTimers();
 
     const key = uniq("no-retry-throw");
     await enqueueTx({ key, payload: { p: 2 } });
 
     let attempts = 0;
-    const sender = vi.fn(async (tx: any) => {
+    const sender = jest.fn(async (tx: any) => {
       if (tx?.key !== key) return ok(204);
       attempts += 1;
       // throw normal → la cola no debe hacer backoff para este tipo de error no-transitorio
@@ -235,6 +248,6 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
 
     expect(attempts).toBe(1);
 
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 });

@@ -19,8 +19,12 @@
       "@/*": ["src/*"],
       "@/src/*": ["src/*"]
     },
-    "types": ["vite/client", "react", "react-native"]
+    "types": ["jest", "node"]
   },
-  "include": ["src", "tests", "**/__tests__/**"],
-  "exclude": ["node_modules", "dist", "**/__tests__/**", "tests/**"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", "dist", "tests/**"]
 }

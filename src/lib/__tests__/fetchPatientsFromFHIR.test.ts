@@ -46,12 +46,13 @@ describe("fetchPatientsFromFHIR — Encounter + Patient/Location + (opcional) vi
 
     expect(rows).toHaveLength(1);
     const r = rows[0];
-    expect(r.id).toBe("p1");
-    expect(r.name?.toLowerCase()).toContain("ana");
-    expect((r.location || "").toLowerCase()).toContain("uci");
-    expect((r.bed || "").toLowerCase()).toContain("cama");
-    expect(r.unitId).toBe("uci-adulto");
-    expect((r.specialtyId || "").toLowerCase()).toBe("intensivo");
+    expect(r).toBeDefined();
+    expect(r?.id).toBe("p1");
+    expect(r?.name?.toLowerCase()).toContain("ana");
+    expect((r?.location || "").toLowerCase()).toContain("uci");
+    expect((r?.bed || "").toLowerCase()).toContain("cama");
+    expect(r?.unitId).toBe("uci-adulto");
+    expect((r?.specialtyId || "").toLowerCase()).toBe("intensivo");
 
     // Se llamó una sola vez (sólo Encounter principal)
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -115,10 +116,11 @@ describe("fetchPatientsFromFHIR — Encounter + Patient/Location + (opcional) vi
 
     expect(rows).toHaveLength(1);
     const r = rows[0];
-    expect(r.id).toBe("p2");
-    expect(r.vitals).toBeDefined();
-    expect(r.vitals?.rr).toBe(20);
-    expect(r.vitals?.spo2).toBe(96);
+    expect(r).toBeDefined();
+    expect(r?.id).toBe("p2");
+    expect(r?.vitals).toBeDefined();
+    expect(r?.vitals?.rr).toBe(20);
+    expect(r?.vitals?.spo2).toBe(96);
 
     // Total llamadas: 1 (Encounter) + 3 de prefill
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -143,7 +145,7 @@ describe("fetchPatientsFromFHIR — Encounter + Patient/Location + (opcional) vi
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe("p3");
+    expect(rows[0]?.id).toBe("p3");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

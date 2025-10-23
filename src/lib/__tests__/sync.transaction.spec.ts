@@ -17,14 +17,14 @@ describe('buildTransactionBundleForQueue (FHIR R4 transaction)', () => {
     expect(bundle.type).toBe('transaction');
     expect(Array.isArray(bundle.entry)).toBe(true);
 
-    const patientEntry = bundle.entry[0];
-    expect(patientEntry.resource.resourceType).toBe('Patient');
-    expect(patientEntry.fullUrl).toBe('urn:uuid:patient-pat-001');
-    expect(patientEntry.request.method).toBe('POST');
-    expect(patientEntry.request.url).toBe('Patient');
-    expect(String(patientEntry.request.ifNoneExist)).toContain('identifier=urn%3Ahandover-pro%3Aids|pat-001');
+    const patientEntry = bundle.entry?.[0];
+    expect(patientEntry?.resource?.resourceType).toBe('Patient');
+    expect(patientEntry?.fullUrl).toBe('urn:uuid:patient-pat-001');
+    expect(patientEntry?.request?.method).toBe('POST');
+    expect(patientEntry?.request?.url).toBe('Patient');
+    expect(String(patientEntry?.request?.ifNoneExist ?? '')).toContain('identifier=urn%3Ahandover-pro%3Aids|pat-001');
 
-    const obsEntries = bundle.entry.filter((e: any) => e?.resource?.resourceType === 'Observation');
+    const obsEntries = (bundle.entry ?? []).filter((e: any) => e?.resource?.resourceType === 'Observation');
     expect(obsEntries.length).toBeGreaterThan(0);
 
     for (const e of obsEntries) {

@@ -14,13 +14,7 @@ import NetInfo from '@/src/lib/netinfo';
 import { FhirClient } from '../fhir-client';
 import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
-import {
-  enqueueBundleEncrypted,
-  peekNext,
-  bumpTries,
-  markDone,
-  size as queueSize,
-} from '../offlineQueue';
+import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
 
 // --- mark() tolerante: no-op si el módulo de otel no está disponible ---
 type MarkFn = (name: string, attrs?: Record<string, any>) => void;
@@ -92,14 +86,16 @@ async function sendWithRetry(
   bundle: any,
   idemKey: string,
   opts: SyncOpts
-) {
-  await retryWithBackoff(
+): Promise<Response> {
+  return await retryWithBackoff(
     async (attempt) => {
       mark('sync.http.request', { attempt, idemKey });
       const resp = await client.postBundle(bundle, idemKey);
       mark('sync.http.response', { status: resp.status, attempt });
 
-      if (isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) return;
+      if (isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
+        return resp;
+      }
       if (isRetryable(resp.status)) throw new Error(`Retryable ${resp.status}`);
 
       const body = await resp.text().catch(() => '');
@@ -112,7 +108,7 @@ async function sendWithRetry(
 // --- Encolar cifrado + marca ---
 async function enqueue(bundle: any, idemKey: string) {
   mark('sync.enqueue', { kind: 'FHIR_BUNDLE', idemKey });
-  await enqueueBundleEncrypted(bundle, idemKey);
+  await enqueueTx({ payload: { bundle, meta: { hash: idemKey } } });
 }
 
 // --- Estado de red ---
@@ -133,26 +129,33 @@ function createFlusher(opts: SyncOpts) {
     mark('sync.flush.start');
     let processed = 0;
 
-    let next = await peekNext();
-    while (next) {
-      const { meta, bundle } = next;
-      try {
-        await sendWithRetry(client, bundle, meta.hash, opts);
-        await markDone(meta.id);
+    await runQueueFlush(async (tx) => {
+      const payload = tx.payload ?? {};
+      const bundle = payload.bundle;
+      const hash = payload.meta?.hash ?? tx.key;
+
+      if (!bundle) {
         processed++;
+        return { ok: true, status: 204 };
+      }
+
+      try {
+        const resp = await sendWithRetry(client, bundle, hash, opts);
+        if (resp.ok || isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
+          processed++;
+        }
+        return { ok: resp.ok, status: resp.status };
       } catch (err: any) {
         mark('sync.flush.error', {
           reason: err?.message ?? String(err),
-          tries: meta.tries,
-          id: meta.id,
+          tries: tx.tries,
+          id: tx.key,
         });
-        await bumpTries(meta.id);
-        break; // corta; reintentará en el próximo evento de red
+        return { ok: false, status: 500 };
       }
-      next = await peekNext();
-    }
+    });
 
-    const remaining = await queueSize().catch(() => -1);
+    const remaining = (await readQueue()).length;
     if (processed > 0) {
       mark('sync.flush.success', {
         drained: remaining === 0,
@@ -180,7 +183,7 @@ async function triggerFlush(opts: SyncOpts): Promise<FlushResult> {
 }
 
 export function startSyncDaemon(opts: SyncOpts) {
-  const unsub = NetInfo.addEventListener((state) => {
+  const unsub = NetInfo.addEventListener((state: { isConnected?: boolean | null; isInternetReachable?: boolean | null }) => {
     if (state.isConnected && (state.isInternetReachable ?? true)) {
       // coalesce
       triggerFlush(opts).catch(() => {});
@@ -200,7 +203,8 @@ export async function flushQueueNow(opts: SyncOpts): Promise<FlushResult> {
 /** === Tamaño actual de la cola (para banner/UI) === */
 export async function getQueueSize(): Promise<number> {
   try {
-    return await queueSize();
+    const queue = await readQueue();
+    return queue.length;
   } catch {
     return -1;
   }

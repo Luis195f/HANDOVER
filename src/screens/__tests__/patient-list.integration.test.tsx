@@ -1,26 +1,26 @@
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+/* eslint-disable @typescript-eslint/no-var-requires */
 import TestRenderer, { act } from "react-test-renderer";
 
 // ──────────────────────────────────────────────────────────────
 // Mocks de dependencias que usa la pantalla
 // ──────────────────────────────────────────────────────────────
-const getPatientsBySpecialtyMock = vi.fn();
-const getPatientsByUnitMock = vi.fn();
+const getPatientsBySpecialtyMock = jest.fn();
+const getPatientsByUnitMock = jest.fn();
 
-vi.mock("@/src/lib/fhir-client", () => ({
+jest.mock("@/src/lib/fhir-client", () => ({
   getPatientsBySpecialty: (...args: any[]) => getPatientsBySpecialtyMock(...args),
   getPatientsByUnit: (...args: any[]) => getPatientsByUnitMock(...args),
 }));
 
 // Auth: no filtra nada (scope passthrough)
-vi.mock("@/src/security/auth", () => ({
+jest.mock("@/src/security/auth", () => ({
   getSession: async () => ({ units: ["uci-3", "hospitalizacion"] }),
   scopeByUnits: (_s: any, xs: any[], _sel: any) => xs,
 }));
 
 // Config de especialidades/unidades mínima para los chips (y defaults)
-vi.mock("@/src/config/specialties", () => ({
+jest.mock("@/src/config/specialties", () => ({
   SPECIALTIES: [
     { id: "uci", name: "UCI" },
     { id: "hospitalizacion", name: "Hospitalización" },
@@ -28,7 +28,7 @@ vi.mock("@/src/config/specialties", () => ({
   DEFAULT_SPECIALTY_ID: "uci",
 }));
 
-vi.mock("@/src/config/units", () => ({
+jest.mock("@/src/config/units", () => ({
   UNITS_BY_SPECIALTY: {
     uci: ["uci-3"],
     hospitalizacion: ["hospitalizacion"],
@@ -45,7 +45,7 @@ try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require("../../lib/priority");
 } catch {
-  vi.mock("../../lib/priority", () => ({
+  jest.mock("../../lib/priority", () => ({
     news2Score: (v: any) => {
       // heurística simple para tests si tu real no está disponible
       let s = 0;
@@ -62,7 +62,7 @@ try {
 }
 
 // queueBootstrap.flushNow en header
-vi.mock("@/src/lib/queueBootstrap", () => ({ flushNow: async () => {} }));
+jest.mock("@/src/lib/queueBootstrap", () => ({ flushNow: async () => {} }));
 
 // ──────────────────────────────────────────────────────────────
 // Import de la pantalla después de mocks
@@ -95,7 +95,7 @@ async function flush() {
 
 describe("PatientList — integración con fetch mockeado (filtros + sort)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("ordena por NEWS2 descendente (vitals) y renderiza primero el más crítico", async () => {
@@ -129,14 +129,15 @@ describe("PatientList — integración con fetch mockeado (filtros + sort)", () 
     getPatientsBySpecialtyMock.mockResolvedValueOnce(pts);
 
     const navigation = {
-      setOptions: vi.fn(),
+      setOptions: jest.fn(),
       getState: () => ({ routeNames: ["HandoverForm", "Handover"] }),
-      navigate: vi.fn(),
+      navigate: jest.fn(),
     };
 
     let tree: TestRenderer.ReactTestRenderer;
+    const route = { key: uniq("route"), name: "PatientList", params: undefined } as any;
     await act(async () => {
-      tree = TestRenderer.create(<PatientList navigation={navigation as any} />);
+      tree = TestRenderer.create(<PatientList navigation={navigation as any} route={route} />);
     });
     await flush();
 
@@ -162,14 +163,15 @@ describe("PatientList — integración con fetch mockeado (filtros + sort)", () 
     getPatientsBySpecialtyMock.mockResolvedValueOnce(pts);
 
     const navigation = {
-      setOptions: vi.fn(),
+      setOptions: jest.fn(),
       getState: () => ({ routeNames: ["HandoverForm"] }),
-      navigate: vi.fn(),
+      navigate: jest.fn(),
     };
 
     let tr!: TestRenderer.ReactTestRenderer;
+    const route = { key: uniq("route"), name: "PatientList", params: undefined } as any;
     await act(async () => {
-      tr = TestRenderer.create(<PatientList navigation={navigation as any} />);
+      tr = TestRenderer.create(<PatientList navigation={navigation as any} route={route} />);
     });
     await flush();
 
@@ -177,10 +179,10 @@ describe("PatientList — integración con fetch mockeado (filtros + sort)", () 
     const input = tr.root.findAll(
       (n) => n.type && typeof n.type === "string" && n.type.toLowerCase().includes("textinput")
     )[0];
-    expect(input).toBeTruthy();
+    expect(input).toBeDefined();
 
     await act(async () => {
-      input.props.onChangeText("ana");
+      input?.props?.onChangeText?.("ana");
     });
     await flush();
 

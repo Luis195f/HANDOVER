@@ -194,7 +194,7 @@ export async function enqueueTxFromValues(
   values: HandoverValues,
   opts?: BuildOptions & { authorId?: string }
 ) {
-  const patientId = values.patientId ?? values.patient?.id ?? 'unknown';
+  const patientId = values.patientId ?? 'unknown';
   const bundle = buildHandoverBundle(values as unknown as HandoverInput, {
     now: opts?.now,
     normalizeGlucoseToMgdl: opts?.normalizeGlucoseToMgdl,
@@ -315,17 +315,19 @@ export function buildTransactionBundleForQueue(
   const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
   const values: HandoverValues = isWrapped ? (input as HandoverInput).values : (input as HandoverValues);
 
-  const patientId = values.patientId ?? (values as any)?.patient?.id ?? '';
-  if (!patientId) {
+  const patientIdRaw = values.patientId;
+  const patientId = patientIdRaw ?? 'unknown';
+  if (!patientIdRaw) {
     return { resourceType: 'Bundle', type: 'transaction', entry: [] };
   }
 
-  const now = opts.now ?? new Date().toISOString();
+  const nowSource = opts.now ?? new Date();
+  const nowIso = typeof nowSource === 'string' ? nowSource : nowSource.toISOString();
   const patientFullUrl = `urn:uuid:patient-${patientId}`;
-  const baseDate = now.slice(0, 10);
+  const baseDate = nowIso.slice(0, 10);
 
   const observationOptions: BuildOptions = {
-    now,
+    now: nowSource,
     emitIndividuals: opts.emitIndividuals,
     normalizeGlucoseToMgDl: opts.normalizeGlucoseToMgDl,
     normalizeGlucoseToMgdl: opts.normalizeGlucoseToMgdl,
@@ -363,7 +365,7 @@ export function buildTransactionBundleForQueue(
 
     const effective = typeof cloned.effectiveDateTime === 'string' && cloned.effectiveDateTime.length
       ? cloned.effectiveDateTime
-      : now;
+      : nowIso;
     const effectiveDate = effective.slice(0, 10) || baseDate;
 
     const identifierParts = [loinc, effectiveDate, patientId].filter(Boolean);
@@ -434,8 +436,17 @@ export async function clearQueue() {
  * Encola desde un HandoverInput minimal, usado en pruebas de integración o
  * cuando ya tienes los valores sueltos (no desde el form).
  */
-export async function enqueueTx(input: HandoverInput, opts?: BuildOptions & { authorId?: string }) {
-  const values = input as HandoverValues;
+export async function enqueueTx(
+  input: HandoverInput | HandoverValues,
+  opts?: BuildOptions & { authorId?: string },
+) {
+  if (input && typeof input === 'object' && 'values' in (input as HandoverInput)) {
+    return enqueueTxFromValues((input as HandoverInput).values, opts);
+  }
+  if (typeof input !== 'object' || input === null || !('patientId' in input) || !(input as any).patientId) {
+    throw new Error('patientId required');
+  }
+  const values: HandoverValues = input as any;
   return enqueueTxFromValues(values, opts);
 }
 
