@@ -1,8 +1,8 @@
 // FILE: src/components/withAppFrame.tsx
-import React from 'react';
+import React, { type JSX as JSXNamespace } from 'react';
 import AppFrame from './AppFrame';
 
-export function withAppFrame<P extends Record<string, unknown>>(
+export function withAppFrame<P extends JSXNamespace.IntrinsicAttributes>(
   Screen: React.ComponentType<P>,
 ) {
   const Wrapped: React.FC<P> = (props) => (
