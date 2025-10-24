@@ -23,6 +23,15 @@ def ping(_req):
     return JsonResponse({"pong": True})
 
 
+
+def health(_req):
+    return JsonResponse({"status": "ok"})
+
+
+def ping(_req):
+    return JsonResponse({"pong": True})
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("", health),
