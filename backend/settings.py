@@ -1,13 +1,28 @@
 from pathlib import Path
 import os
+from os import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-placeholder")
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") in {"1", "true", "True"}
-ALLOWED_HOSTS = [host for host in os.environ.get("ALLOWED_HOSTS", "").split(",") if host] or ["*"]
+
+ALLOWED_HOSTS: list[str] = []
+CORS_ALLOW_ALL_ORIGINS = False
+
+LOCAL_IP = environ.get("LOCAL_IP")
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+] + ([f"http://{LOCAL_IP}:8000"] if LOCAL_IP else [])
+
+if DEBUG:
+    ALLOWED_HOSTS = ["*"]
+    CORS_ALLOW_ALL_ORIGINS = True
 
 INSTALLED_APPS = [
+    "corsheaders",
+    "rest_framework",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -17,6 +32,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
