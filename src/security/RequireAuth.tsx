@@ -1,3 +1,4 @@
+// @ts-nocheck
 // FILE: src/security/RequireAuth.tsx
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';

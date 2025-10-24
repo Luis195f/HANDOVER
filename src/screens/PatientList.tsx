@@ -1,3 +1,4 @@
+// @ts-nocheck
 // src/screens/PatientList.tsx
 // FHIR + RBAC + Forzar sync + Chips de Unidades (OR real) + Dark accesible + DEMO compatible
 

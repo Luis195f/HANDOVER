@@ -6,7 +6,6 @@ import {
   useAudioRecorderState,
   AudioModule,
   setAudioModeAsync,
-  type RecordingOptions,
 } from 'expo-audio';
 import { Audio } from 'expo-av';
 
@@ -21,12 +20,7 @@ export default function AudioAttach({
   startLabel = 'Grabar audio',
   stopLabel = 'Detener y adjuntar',
 }: Props) {
-  const preset =
-    Audio.RecordingOptionsPresets.HIGH_QUALITY ??
-    Audio.RecordingOptionsPresets.LOW_QUALITY ??
-    Audio.RecordingOptionsPresets.HIGH_QUALITY;
-  const REC_OPTS: RecordingOptions = preset as unknown as RecordingOptions;
-  const recorder = useAudioRecorder(REC_OPTS);
+  const recorder = useAudioRecorder(Audio.RecordingOptionsPresets.HIGH_QUALITY);
   const state = useAudioRecorderState(recorder);
 
   useEffect(() => {
