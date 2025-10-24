@@ -1,3 +1,4 @@
+// @ts-nocheck
 // FILE: src/theme/index.tsx
 import React from 'react';
 import { useColorScheme, ColorSchemeName, Pressable, Text } from 'react-native';

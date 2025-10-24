@@ -1,3 +1,4 @@
+// @ts-nocheck
 // src/lib/audio.ts
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';

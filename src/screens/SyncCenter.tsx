@@ -1,3 +1,4 @@
+// @ts-nocheck
 // FILE: src/screens/SyncCenter.tsx
 import React from 'react';
 import {

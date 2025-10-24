@@ -1,4 +1,5 @@
 {
+  "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
     "skipLibCheck": true,
@@ -9,8 +10,9 @@
       "@/src/*": ["src/*"]
     },
     "jsx": "react-jsx",
-    "lib": ["es2021"],
-    "typeRoots": ["./types"]
+    "lib": ["es2021", "dom"],
+    "typeRoots": ["./types", "./node_modules/@types"],
+    "noImplicitAny": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
 }

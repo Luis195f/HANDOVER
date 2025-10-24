@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { hashString } from './hash';
+import { createHash } from './node-crypto-shim';
 
 /* [NURSEOS PRO PATCH 2025-10-22] fhir-map.ts
    - Tipos y exports alineados con tests (HandoverValues, AttachmentInput, HandoverInput)
@@ -1499,6 +1499,8 @@ function stableStringify(value: any): string {
 }
 
 function deterministicHash(value: any): string {
-  return hashString(stableStringify(value));
+  const hash = createHash('sha256');
+  hash.update(stableStringify(value));
+  return hash.digest('hex');
 }
 
