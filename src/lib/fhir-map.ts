@@ -115,7 +115,7 @@ export type BuildOptions = {
   emitVitalsPanel?: boolean;
   emitBpPanel?: boolean;
   emitHasMember?: boolean;
-  now?: string | Date;
+  now?: string | Date | (() => string | Date);
   authorId?: string;
   attachments?: AttachmentInput[];
   emitPanel?: boolean;
@@ -126,12 +126,15 @@ export type BuildOptions = {
   profileUrls?: string[] | ProfileUrlMap;
 };
 
+type BuilderOptions = BuildOptions;
+
 const DEFAULT_OPTS: Required<
-  Pick<BuildOptions, "emitVitalsPanel" | "emitBpPanel" | "emitHasMember">
-> = {
+  Pick<BuilderOptions, 'emitVitalsPanel' | 'emitBpPanel' | 'emitHasMember'>
+> & { now: () => Date } = {
   emitVitalsPanel: false,
   emitBpPanel: false,
   emitHasMember: false,
+  now: () => new Date(),
 };
 
 export type MedicationCodeInput = { system?: string; code?: string; display?: string } | string;
@@ -563,8 +566,13 @@ type Bundle = {
 
 const uom = UCUM_SYSTEM;
 const nowISO = () => new Date().toISOString();
-const resolveNow = (value?: string | Date) =>
-  value instanceof Date ? value.toISOString() : value;
+const resolveNow = (value?: string | Date | (() => string | Date)) => {
+  if (typeof value === 'function') {
+    const result = value();
+    return result instanceof Date ? result.toISOString() : result;
+  }
+  return value instanceof Date ? value.toISOString() : value;
+};
 const newId = (pfx = "id") =>
   `${pfx}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 
@@ -599,8 +607,8 @@ export function mapObservationVitals(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): Observation[] {
-  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
-  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  // optsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   if (!values?.patientId) return [];
 
   const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
@@ -608,14 +616,14 @@ export function mapObservationVitals(
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const effective = resolveNow(optionsMerged.now) ?? nowISO();
+  const effective = resolveNow(optsMerged.now) ?? nowISO();
 
-  const emitIndividuals = optionsMerged.emitIndividuals ?? true;
+  const emitIndividuals = optsMerged.emitIndividuals ?? true;
 
-  const normalizeGlucoseOption = optionsMerged.normalizeGlucoseToMgDl ?? optionsMerged.normalizeGlucoseToMgdl;
+  const normalizeGlucoseOption = optsMerged.normalizeGlucoseToMgDl ?? optsMerged.normalizeGlucoseToMgdl;
   const normalizeGlucose =
     typeof normalizeGlucoseOption === "boolean" ? normalizeGlucoseOption : true;
-  const glucoseDecimals = optionsMerged.glucoseDecimals ?? 0;
+  const glucoseDecimals = optsMerged.glucoseDecimals ?? 0;
 
   const buildObservation = (params: {
     code: FhirCodeableConcept;
@@ -858,9 +866,9 @@ export function mapVitalsToObservations(
   values: HandoverValues,
   opts: BuildOptions = {},
 ) {
-  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
-  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
-  return mapObservationVitals(values, optionsMerged);
+  // optsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  return mapObservationVitals(values, optsMerged);
 }
 
 /////////////////////////////////////////
@@ -984,15 +992,15 @@ function mapOxygenProcedure(
   values: HandoverValues,
   opts: BuildOptions = {},
 ): DeviceUseStatement[] {
-  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
-  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  // optsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
   const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (!hasO2) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const when = resolveNow(optionsMerged.now) ?? nowISO();
+  const when = resolveNow(optsMerged.now) ?? nowISO();
 
   const note = buildO2Note(vitals);
 
@@ -1067,8 +1075,8 @@ export function buildHandoverBundle(
     ? (input as HandoverInput).values
     : (input as HandoverValues);
 
-  // optionsMerged: única fusión por función; no duplicar (previene bundling error)
-  const optionsMerged: typeof DEFAULT_OPTS & BuildOptions = { ...DEFAULT_OPTS, ...(opts ?? {}) };
+  // optsMerged: única fusión por función; no duplicar (previene bundling error)
+  const optsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
 
   if (!values.patientId) {
     return {
@@ -1080,13 +1088,13 @@ export function buildHandoverBundle(
   }
 
   const patientId = values.patientId;
-  const now = resolveNow(optionsMerged.now) ?? nowISO();
+  const now = resolveNow(optsMerged.now) ?? nowISO();
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
     ? ((input as HandoverInput).attachments as AttachmentInput[])
     : [];
-  const attachmentsFromOptions = Array.isArray(optionsMerged.attachments) ? optionsMerged.attachments : [];
+  const attachmentsFromOptions = Array.isArray(optsMerged.attachments) ? optsMerged.attachments : [];
 
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
     (att): att is AttachmentInput => Boolean(att),
@@ -1100,14 +1108,14 @@ export function buildHandoverBundle(
     : values.meds;
   const normalizedMeds = normalizeMedicationInputs(medsInput);
   const normalizedVitals = normalizeVitalsInput(values.vitals);
-  const profileExtras = normalizeProfileOptions(optionsMerged.profileUrls);
+  const profileExtras = normalizeProfileOptions(optsMerged.profileUrls);
 
   const observationOptions: BuildOptions = {
     now,
-    emitIndividuals: optionsMerged.emitIndividuals,
-    normalizeGlucoseToMgDl: optionsMerged.normalizeGlucoseToMgDl,
-    normalizeGlucoseToMgdl: optionsMerged.normalizeGlucoseToMgdl,
-    glucoseDecimals: optionsMerged.glucoseDecimals,
+    emitIndividuals: optsMerged.emitIndividuals,
+    normalizeGlucoseToMgDl: optsMerged.normalizeGlucoseToMgDl,
+    normalizeGlucoseToMgdl: optsMerged.normalizeGlucoseToMgdl,
+    glucoseDecimals: optsMerged.glucoseDecimals,
   };
 
   const observationResources = mapVitalsToObservations(values, observationOptions);

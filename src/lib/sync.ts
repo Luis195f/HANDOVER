@@ -313,6 +313,14 @@ export function buildTransactionBundleForQueue(
   opts: BuildOptions = {},
 ) {
   const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
+  if (isWrapped) {
+    const maybeValues = (input as HandoverInput).values;
+    if (!maybeValues || typeof maybeValues.patientId !== 'string' || maybeValues.patientId.length === 0) {
+      throw new Error('patientId required');
+    }
+  } else if (!('patientId' in (input as HandoverValues)) || !(input as HandoverValues).patientId) {
+    throw new Error('patientId required');
+  }
   const values: HandoverValues = isWrapped ? (input as HandoverInput).values : (input as HandoverValues);
 
   const patientIdRaw = values.patientId;
@@ -321,13 +329,14 @@ export function buildTransactionBundleForQueue(
     return { resourceType: 'Bundle', type: 'transaction', entry: [] };
   }
 
-  const nowSource = opts.now ?? new Date();
-  const nowIso = typeof nowSource === 'string' ? nowSource : nowSource.toISOString();
+  const rawNow = opts.now ?? new Date();
+  const resolvedNow = typeof rawNow === 'function' ? rawNow() : rawNow;
+  const nowIso = typeof resolvedNow === 'string' ? resolvedNow : resolvedNow.toISOString();
   const patientFullUrl = `urn:uuid:patient-${patientId}`;
   const baseDate = nowIso.slice(0, 10);
 
   const observationOptions: BuildOptions = {
-    now: nowSource,
+    now: resolvedNow,
     emitIndividuals: opts.emitIndividuals,
     normalizeGlucoseToMgDl: opts.normalizeGlucoseToMgDl,
     normalizeGlucoseToMgdl: opts.normalizeGlucoseToMgdl,
