@@ -12,6 +12,19 @@ import { Audio } from "expo-av";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./PatientList";
 
+type RecorderOptions = Parameters<typeof useAudioRecorder>[0];
+
+function resolveRecorderOptions(): RecorderOptions {
+  const presets = Audio.RecordingOptionsPresets as Record<string, Audio.RecordingOptions | undefined> | undefined;
+  const preset = presets?.HIGH_QUALITY ?? Object.values(presets ?? {}).find((opt): opt is Audio.RecordingOptions => Boolean(opt));
+  if (!preset) {
+    throw new Error("Expo AV recording presets unavailable");
+  }
+  return preset as unknown as RecorderOptions;
+}
+
+const REC_OPTS = resolveRecorderOptions();
+
 type Props = NativeStackScreenProps<RootStackParamList, "AudioNote">;
 
 export default function AudioNote({ navigation }: Props) {
