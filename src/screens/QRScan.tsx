@@ -2,9 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Alert, Pressable } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from './PatientList';
+type QRStackParamList = {
+  QRScan: undefined;
+  HandoverForm:
+    | {
+        patientId?: string;
+        specialty?: string;
+        unit?: string;
+        shift?: string;
+      }
+    | undefined;
+};
 
-type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
+type Props = NativeStackScreenProps<QRStackParamList, 'QRScan'>;
 
 function parsePatientIdFromQR(data: string): string | null {
   try {

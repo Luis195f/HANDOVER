@@ -5,9 +5,16 @@ import PatientList from '@/src/screens/PatientList';
 import HandoverForm from '@/src/screens/HandoverForm';
 import SyncCenter from '@/src/screens/SyncCenter';
 
-export type RootStackParamList = {
+type RootStackParamList = {
   PatientList: undefined;
-  HandoverForm: undefined;
+  HandoverForm:
+    | {
+        patientId?: string;
+        specialty?: string;
+        unit?: string;
+        shift?: string;
+      }
+    | undefined;
   SyncCenter: undefined;
 };
 
@@ -16,11 +23,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export default function RootNavigator() {
   return (
     <Stack.Navigator>
-      <Stack.Screen
-        name="PatientList"
-        component={PatientList}
-        options={{ title: 'Pacientes' }}
-      />
+      <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
       <Stack.Screen
         name="HandoverForm"
         component={HandoverForm}
@@ -34,3 +37,5 @@ export default function RootNavigator() {
     </Stack.Navigator>
   );
 }
+
+export type { RootStackParamList };

@@ -2,42 +2,61 @@ import CryptoJS from 'crypto-js';
 
 type SupportedAlgorithm = 'sha256';
 
-type InputChunk = string | ArrayBuffer | Uint8Array;
+type UpdateInput = string | CryptoJS.lib.WordArray | ArrayBufferView | ArrayBuffer;
 
-function toWordArray(chunk: InputChunk) {
-  if (typeof chunk === 'string') {
-    return CryptoJS.enc.Utf8.parse(chunk);
+const BYTES_PER_WORD = 4;
+
+function toWordArray(bytes: Uint8Array): CryptoJS.lib.WordArray {
+  const words: number[] = [];
+  for (let i = 0; i < bytes.length; i += BYTES_PER_WORD) {
+    words.push(
+      (bytes[i] << 24) |
+        ((bytes[i + 1] ?? 0) << 16) |
+        ((bytes[i + 2] ?? 0) << 8) |
+        (bytes[i + 3] ?? 0)
+    );
   }
-
-  if (chunk instanceof Uint8Array) {
-    return CryptoJS.lib.WordArray.create(chunk);
-  }
-
-  if (chunk instanceof ArrayBuffer) {
-    return CryptoJS.lib.WordArray.create(new Uint8Array(chunk));
-  }
-
-  throw new TypeError('Unsupported data type for hash update');
+  return CryptoJS.lib.WordArray.create(words, bytes.length);
 }
 
-export function createHash(algorithm: SupportedAlgorithm) {
-  if (algorithm !== 'sha256') {
-    throw new Error(`Unsupported hash algorithm: ${algorithm}`);
+class Hash {
+  private buffer = CryptoJS.lib.WordArray.create();
+
+  constructor(private readonly algorithm: SupportedAlgorithm) {
+    if (algorithm !== 'sha256') {
+      throw new Error(`Unsupported algorithm: ${algorithm}`);
+    }
   }
 
-  const hash = CryptoJS.algo.SHA256.create();
+  update(input: UpdateInput): this {
+    let chunk: CryptoJS.lib.WordArray;
 
-  return {
-    update(chunk: InputChunk) {
-      hash.update(toWordArray(chunk));
-      return this;
-    },
-    digest(encoding?: 'hex') {
-      const result = hash.finalize();
-      if (!encoding || encoding === 'hex') {
-        return result.toString(CryptoJS.enc.Hex);
-      }
-      throw new Error(`Unsupported digest encoding: ${encoding}`);
-    },
-  };
+    if (typeof input === 'string') {
+      chunk = CryptoJS.enc.Utf8.parse(input);
+    } else if (input instanceof ArrayBuffer) {
+      chunk = toWordArray(new Uint8Array(input));
+    } else if (ArrayBuffer.isView(input)) {
+      chunk = toWordArray(new Uint8Array(input.buffer, input.byteOffset, input.byteLength));
+    } else {
+      chunk = input;
+    }
+
+    this.buffer = this.buffer.concat(chunk);
+    return this;
+  }
+
+  digest(encoding: 'hex'): string {
+    if (encoding !== 'hex') {
+      throw new Error(`Unsupported encoding: ${encoding}`);
+    }
+
+    const result = CryptoJS.SHA256(this.buffer);
+    return result.toString(CryptoJS.enc.Hex);
+  }
 }
+
+export function createHash(algorithm: SupportedAlgorithm): Pick<Hash, 'update' | 'digest'> {
+  return new Hash(algorithm);
+}
+
+export default createHash;
