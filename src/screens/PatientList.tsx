@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "@/src/navigation/RootNavigator";
 
 // NEWS2 / prioridad
 import { news2Score, priorityLabel } from "@/src/lib/priority";
@@ -54,19 +55,6 @@ import * as EnvMod from "@/src/config/env";
 const ENV: any = (EnvMod as any)?.ENV ?? EnvMod;
 const FHIR_BASE_URL: string =
   ((EnvMod as any)?.FHIR_BASE ?? (ENV && (ENV as any)?.FHIR_BASE) ?? "") as string;
-
-export type RootStackParamList = {
-  PatientList: undefined;
-  HandoverForm: {
-    patientId: string;
-    specialty?: string;
-    unit?: string;
-    shift?: Shift | undefined;
-  };
-  Handover: { patientId: string } | undefined;
-  AudioNote: { onDoneRoute?: string } | undefined;
-  QRScan: undefined;
-};
 
 type Props = NativeStackScreenProps<RootStackParamList, "PatientList">;
 type Shift = "morning" | "evening" | "night";

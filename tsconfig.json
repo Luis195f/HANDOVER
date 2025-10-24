@@ -1,30 +1,16 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "lib": ["ES2021", "DOM"],
-    "jsx": "react-jsx",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "allowJs": false,
-    "checkJs": false,
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["jest", "node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
       "@/src/*": ["src/*"]
     },
-    "types": ["jest", "node"]
+    "jsx": "react-jsx",
+    "lib": ["es2021"],
+    "typeRoots": ["./types"]
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "src/**/*.d.ts"
-  ],
-  "exclude": ["node_modules", "dist", "tests/**"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
 }
