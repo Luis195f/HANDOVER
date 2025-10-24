@@ -6,3 +6,4 @@ Django>=4.2,<5.1
 gunicorn>=21.2
 djangorestframework>=3.14  # si usas API
 psycopg2-binary>=2.9       # si usas Postgres
+django-cors-headers>=4.3
