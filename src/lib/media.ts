@@ -225,16 +225,18 @@ export function ensureFileName(name: string, mime: string): string {
 }
 
 export function fileExtFromUri(uri?: string): string {
-  const first = (uri ?? '').split("?")[0] ?? '';
-  const clean = first.split("#")[0] ?? '';
+  const base = uri ?? "";
+  const beforeQuery = base.split("?")[0] ?? "";
+  const clean = beforeQuery.split("#")[0] ?? "";
   if (!clean) return "";
   const ext = (clean.split(".").pop() ?? "").toLowerCase();
   return ext;
 }
 
 export function fileNameFromPath(path?: string): string {
-  const first = (path ?? '').split("?")[0] ?? '';
-  const clean = first.split("#")[0] ?? '';
+  const base = path ?? "";
+  const beforeQuery = base.split("?")[0] ?? "";
+  const clean = beforeQuery.split("#")[0] ?? "";
   if (!clean) return "";
   const idx = clean.lastIndexOf("/");
   return idx >= 0 ? clean.substring(idx + 1) : clean;

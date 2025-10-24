@@ -28,7 +28,12 @@ const REC_OPTS = resolveRecorderOptions();
 type Props = NativeStackScreenProps<RootStackParamList, "AudioNote">;
 
 export default function AudioNote({ navigation }: Props) {
-  const recorder = useAudioRecorder(REC_OPTS as RecordingOptions);
+  const preset =
+    Audio.RecordingOptionsPresets.HIGH_QUALITY ??
+    Audio.RecordingOptionsPresets.LOW_QUALITY ??
+    Audio.RecordingOptionsPresets.HIGH_QUALITY;
+  const REC_OPTS: RecordingOptions = preset as unknown as RecordingOptions;
+  const recorder = useAudioRecorder(REC_OPTS);
   const state = useAudioRecorderState(recorder);
 
   useEffect(() => {

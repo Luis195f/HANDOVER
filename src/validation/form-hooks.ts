@@ -12,9 +12,8 @@ export function useZodForm<TSchema extends ZodTypeAny>(
   schema: TSchema,
   options?: ZodFormOptions<TSchema>,
 ): UseFormReturn<FormValues<TSchema>> {
-  const resolver = zodResolver(schema as any) as any;
   return useForm<FormValues<TSchema>>({
-    resolver,
+    resolver: zodResolver(schema as any) as any,
     defaultValues: options?.defaultValues,
   });
 }
