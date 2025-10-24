@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+from os import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -9,7 +10,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "0") in {"1", "true", "True"}
 ALLOWED_HOSTS: list[str] = []
 CORS_ALLOW_ALL_ORIGINS = False
 
-LOCAL_IP = os.environ.get("LOCAL_IP")
+LOCAL_IP = environ.get("LOCAL_IP")
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
