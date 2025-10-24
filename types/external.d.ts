@@ -47,7 +47,12 @@ declare module 'react-native' {
   export const Alert: any;
   export const Switch: any;
   export const StyleSheet: any;
+  export const SafeAreaView: any;
   export const Platform: { OS: string };
+  export type ColorSchemeName = 'light' | 'dark' | null;
+  export function useColorScheme(): ColorSchemeName;
+  export type ViewStyle = any;
+  export type TextStyle = any;
 }
 
 declare module 'react-native-gesture-handler' {}
@@ -65,6 +70,8 @@ declare module '@react-navigation/native' {
   export const CommonActions: { navigate(payload: { name: string; params?: any }): NavigationAction; reset(state: any): NavigationAction };
   export const StackActions: { push(name: string, params?: any): NavigationAction; replace(name: string, params?: any): NavigationAction };
   export const NavigationContainer: React.FC<{ ref?: any; children?: React.ReactNode }>;
+  export function useNavigation<T = any>(): T;
+  export function useFocusEffect(effect: () => void): void;
 }
 
 declare module '@react-navigation/native-stack' {
@@ -166,6 +173,7 @@ declare module 'expo-av' {
     const RecordingOptionsPresets: Record<string, any>;
     type Recording = any;
   }
+  export type Recording = Audio.Recording;
 }
 
 declare module 'expo-camera' {

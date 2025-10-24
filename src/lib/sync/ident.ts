@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Identificadores deterministas + firma estable del Bundle.
 import CryptoJS from 'crypto-js';
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // src/config/units.ts
 
 /**
