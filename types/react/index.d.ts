@@ -2,6 +2,9 @@ export type ReactNode = any;
 export interface FC<P = {}> {
   (props: P & { children?: ReactNode }): ReactNode;
 }
+export interface ComponentType<P = any> {
+  (props: P): ReactNode;
+}
 export function useState<T>(initial: T): [T, (value: T) => void];
 export function useEffect(effect: () => void | (() => void), deps?: any[]): void;
 export function useMemo<T>(factory: () => T, deps: any[]): T;
@@ -27,3 +30,8 @@ const React: {
 };
 export default React;
 export type ReactElement = any;
+declare namespace React {
+  type ReactNode = any;
+  type ComponentType<P = any> = (props: P) => any;
+  type FC<P = {}> = (props: P & { children?: ReactNode }) => ReactNode;
+}

@@ -39,6 +39,7 @@ declare module 'react-native' {
   export const Text: any;
   export const StatusBar: any;
   export const Pressable: any;
+  export const SafeAreaView: any;
   export const FlatList: any;
   export const ScrollView: any;
   export const TextInput: any;
@@ -65,8 +66,10 @@ declare module '@react-navigation/native' {
     canGoBack(): boolean;
     goBack(): void;
     getCurrentRoute(): { name: keyof T; params?: T[keyof T] } | undefined;
+    navigate(name: keyof T, params?: T[keyof T]): void;
   }
-  export function createNavigationContainerRef<T extends Record<string, any> = Record<string, any>>(): NavigationRef<T>;
+  export type NavigationContainerRef<T extends Record<string, any> = Record<string, any>> = NavigationRef<T>;
+  export function createNavigationContainerRef<T extends Record<string, any> = Record<string, any>>(): NavigationContainerRef<T>;
   export const CommonActions: { navigate(payload: { name: string; params?: any }): NavigationAction; reset(state: any): NavigationAction };
   export const StackActions: { push(name: string, params?: any): NavigationAction; replace(name: string, params?: any): NavigationAction };
   export const NavigationContainer: React.FC<{ ref?: any; children?: React.ReactNode }>;
@@ -170,8 +173,15 @@ declare module 'expo-audio' {
 
 declare module 'expo-av' {
   export namespace Audio {
-    const RecordingOptionsPresets: Record<string, any>;
-    type Recording = any;
+    export const RecordingOptionsPresets: Record<string, any>;
+    export class Recording {
+      prepareToRecordAsync(options: any): Promise<void>;
+      startAsync(): Promise<void>;
+      stopAndUnloadAsync(): Promise<void>;
+      getURI(): string | null;
+    }
+    export function requestPermissionsAsync(): Promise<{ status: string }>;
+    export function setAudioModeAsync(config: any): Promise<void>;
   }
   export type Recording = Audio.Recording;
 }
@@ -208,6 +218,13 @@ declare module 'react-native-svg' {
 
 declare module 'uuid' {
   export function v4(): string;
+}
+
+declare module 'react-test-renderer' {
+  export type ReactTestRendererJSON = any;
+  export type ReactTestRenderer = { toJSON(): ReactTestRendererJSON | ReactTestRendererJSON[] | null };
+  export const act: (cb: () => void | Promise<void>) => Promise<void>;
+  export function create(element: any): ReactTestRenderer;
 }
 
 declare module '@hookform/resolvers/zod' {

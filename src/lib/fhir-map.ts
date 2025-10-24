@@ -1505,6 +1505,8 @@ function stableStringify(value: any): string {
 }
 
 function deterministicHash(value: any): string {
-  return hashString(stableStringify(value));
+  const hash = createHash('sha256');
+  hash.update(stableStringify(value));
+  return hash.digest('hex');
 }
 

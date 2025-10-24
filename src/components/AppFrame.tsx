@@ -1,3 +1,4 @@
+// @ts-nocheck
 // FILE: src/components/AppFrame.tsx
 // @ts-nocheck
 import React from 'react';

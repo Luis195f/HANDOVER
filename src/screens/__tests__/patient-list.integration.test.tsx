@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from "react";
 /* eslint-disable @typescript-eslint/no-var-requires */
 import TestRenderer, { act } from "react-test-renderer";

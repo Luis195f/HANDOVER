@@ -14,3 +14,7 @@ declare module 'react/jsx-runtime' {
   export const jsxs: any;
   export const Fragment: any;
 }
+
+declare class DOMException extends Error {
+  constructor(message?: string, name?: string);
+}
