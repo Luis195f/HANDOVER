@@ -5,7 +5,7 @@ declare namespace JSX {
     [elemName: string]: any;
   }
   interface IntrinsicAttributes {
-    [attr: string]: any;
+    key?: any;
   }
 }
 

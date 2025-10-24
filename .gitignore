@@ -2,6 +2,9 @@
 
 # dependencies
 node_modules/
+!node_modules/expo/
+!node_modules/expo/tsconfig.base
+!node_modules/expo/tsconfig.base.json
 
 # Expo
 .expo/

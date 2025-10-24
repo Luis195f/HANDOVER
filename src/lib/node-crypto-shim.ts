@@ -1,25 +1,23 @@
-import SHA256 from "crypto-js/sha256";
-import encHex from "crypto-js/enc-hex";
+import SHA256 from 'crypto-js/sha256';
+import encHex from 'crypto-js/enc-hex';
 
 class HashShim {
-  private data = "";
+  private data = '';
 
   update(chunk: string): this {
-    this.data += String(chunk ?? "");
+    this.data += String(chunk);
     return this;
   }
 
-  digest(encoding: "hex" | "utf8" = "hex"): string {
+  digest(encoding: 'hex' | 'utf8' = 'hex'): string {
     const hash = SHA256(this.data);
-    return encoding === "hex" ? hash.toString(encHex) : hash.toString();
+    return encoding === 'hex' ? hash.toString(encHex) : hash.toString();
   }
 }
 
-export function createHash(algorithm: "sha256"): HashShim {
-  if (algorithm !== "sha256") {
-    throw new Error("Only sha256");
+export function createHash(algorithm: 'sha256') {
+  if (algorithm !== 'sha256') {
+    throw new Error('Only sha256');
   }
   return new HashShim();
 }
-
-export default createHash;

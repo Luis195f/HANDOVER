@@ -1,12 +1,7 @@
 // src/components/AudioAttach.tsx
 import React, { useEffect } from 'react';
 import { View, Button, Alert } from 'react-native';
-import {
-  useAudioRecorder,
-  useAudioRecorderState,
-  AudioModule,
-  setAudioModeAsync,
-} from 'expo-audio';
+import { useAudioRecorder, useAudioRecorderState, AudioModule, setAudioModeAsync } from 'expo-audio';
 import { Audio } from 'expo-av';
 
 type Props = {

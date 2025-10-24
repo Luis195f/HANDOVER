@@ -48,8 +48,9 @@ declare module 'react-native' {
   export const Alert: any;
   export const Switch: any;
   export const StyleSheet: any;
+  export const SafeAreaView: any;
   export const Platform: { OS: string };
-  export type ColorSchemeName = 'light' | 'dark' | null | undefined;
+  export type ColorSchemeName = 'light' | 'dark' | null;
   export function useColorScheme(): ColorSchemeName;
   export type ViewStyle = any;
   export type TextStyle = any;
@@ -72,8 +73,8 @@ declare module '@react-navigation/native' {
   export const CommonActions: { navigate(payload: { name: string; params?: any }): NavigationAction; reset(state: any): NavigationAction };
   export const StackActions: { push(name: string, params?: any): NavigationAction; replace(name: string, params?: any): NavigationAction };
   export const NavigationContainer: React.FC<{ ref?: any; children?: React.ReactNode }>;
-  export function useFocusEffect(effect: (fn: () => void | (() => void)) => void): void;
   export function useNavigation<T = any>(): T;
+  export function useFocusEffect(effect: () => void): void;
 }
 
 declare module '@react-navigation/native-stack' {
@@ -182,12 +183,7 @@ declare module 'expo-av' {
     export function requestPermissionsAsync(): Promise<{ status: string }>;
     export function setAudioModeAsync(config: any): Promise<void>;
   }
-  export const Audio: {
-    Recording: typeof Audio.Recording;
-    RecordingOptionsPresets: typeof Audio.RecordingOptionsPresets;
-    requestPermissionsAsync: typeof Audio.requestPermissionsAsync;
-    setAudioModeAsync: typeof Audio.setAudioModeAsync;
-  };
+  export type Recording = Audio.Recording;
 }
 
 declare module 'expo-camera' {

@@ -41,13 +41,12 @@ export function isReady() {
 }
 
 /** Navega a una ruta tipada. Si el contenedor no está listo, se encola. */
-export function navigate<N extends keyof RootStackParamList>(
-  name: N,
-  params?: RootStackParamList[N]
-): void {
-  runOrQueue(() => {
+export function navigate<N extends keyof RootStackParamList>(name: N, params?: RootStackParamList[N]) {
+  if (navigationRef.isReady()) {
     navigationRef.navigate(name, params as any);
-  });
+  } else {
+    runOrQueue(() => navigate(name, params));
+  }
 }
 
 /** Empuja una pantalla en el stack (Native Stack compatible). */
@@ -57,9 +56,9 @@ export function push<T extends keyof RootStackParamList>(
 ): void {
   runOrQueue(() => {
     navigationRef.dispatch(
-      typeof params === 'undefined'
-        ? StackActions.push(name as never)
-        : StackActions.push(name as never, params as never)
+      typeof params === "undefined"
+        ? StackActions.push(name as any)
+        : StackActions.push(name as any, params as any)
     );
   });
 }
@@ -71,9 +70,9 @@ export function replace<T extends keyof RootStackParamList>(
 ): void {
   runOrQueue(() => {
     navigationRef.dispatch(
-      typeof params === 'undefined'
-        ? StackActions.replace(name as never)
-        : StackActions.replace(name as never, params as never)
+      typeof params === "undefined"
+        ? StackActions.replace(name as any)
+        : StackActions.replace(name as any, params as any)
     );
   });
 }
@@ -94,7 +93,7 @@ export function resetTo<T extends keyof RootStackParamList>(
     navigationRef.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: name as never, params: params as never }],
+        routes: [{ name: name as any, params: params as any }],
       })
     );
   });

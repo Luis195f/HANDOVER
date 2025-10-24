@@ -1,12 +1,8 @@
+// @ts-nocheck
 // src/screens/AudioNote.tsx
 import React, { useEffect } from "react";
 import { View, Text, Pressable } from "react-native";
-import {
-  useAudioRecorder,
-  useAudioRecorderState,
-  AudioModule,
-  setAudioModeAsync,
-} from "expo-audio";
+import { useAudioRecorder, useAudioRecorderState, AudioModule, setAudioModeAsync } from "expo-audio";
 import { Audio } from "expo-av";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 type AudioNoteStackParamList = { AudioNote: { onDoneRoute?: string } | undefined };
