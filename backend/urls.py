@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view
 
 
 def health(_req):
-    return JsonResponse({"status": "ok", "app": "handover-backend"})
+    return JsonResponse({"status": "ok"})
 
 
 @api_view(["GET"])
@@ -15,6 +15,6 @@ def ping(_req):
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("", health),  # GET /  -> {"status":"ok",...}
-    path("api/ping", ping),  # GET /api/ping -> {"pong": true}
+    path("", health),
+    path("api/ping", ping),
 ]
