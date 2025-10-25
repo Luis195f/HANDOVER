@@ -4,7 +4,19 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import PatientList from '@/src/screens/PatientList';
 import HandoverForm from '@/src/screens/HandoverForm';
 import SyncCenter from '@/src/screens/SyncCenter';
-import type { RootStackParamList } from './navigation';
+
+type RootStackParamList = {
+  PatientList: undefined;
+  HandoverForm:
+    | {
+        patientId?: string;
+        specialty?: string;
+        unit?: string;
+        shift?: string;
+      }
+    | undefined;
+  SyncCenter: undefined;
+};
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
