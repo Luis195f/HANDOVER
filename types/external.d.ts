@@ -171,21 +171,6 @@ declare module 'expo-audio' {
   export function setAudioModeAsync(config: any): Promise<void>;
 }
 
-declare module 'expo-av' {
-  export namespace Audio {
-    export const RecordingOptionsPresets: Record<string, any>;
-    export class Recording {
-      prepareToRecordAsync(options: any): Promise<void>;
-      startAsync(): Promise<void>;
-      stopAndUnloadAsync(): Promise<void>;
-      getURI(): string | null;
-    }
-    export function requestPermissionsAsync(): Promise<{ status: string }>;
-    export function setAudioModeAsync(config: any): Promise<void>;
-  }
-  export type Recording = Audio.Recording;
-}
-
 declare module 'expo-camera' {
   export const Camera: any;
   export type CameraType = any;

@@ -3,7 +3,7 @@
 // fechas inicio/fin (con botón "Ahora"), grabar/reproducir audios, autosave local,
 // adjuntar audios a FHIR como DocumentReference, y envío directo a FHIR o vía backend.
 
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import {
   View, Text, TextInput, Button, ScrollView, Switch, KeyboardAvoidingView, Keyboard,
   Platform, TouchableOpacity, Pressable, StyleSheet, Alert, useColorScheme, StatusBar
@@ -12,7 +12,7 @@ import { useRoute, RouteProp } from "@react-navigation/native";
 import { z } from "zod";
 import { Controller } from "react-hook-form";
 import * as FileSystem from "expo-file-system";
-import { Audio } from "expo-av";
+import { useAudioPlayer } from "expo-audio";
 import { v4 as uuidv4 } from "uuid";
 
 import { UNITS } from "@/src/catalogs/units";
@@ -269,16 +269,6 @@ export default function HandoverForm() {
     [rr, hr, sbp, dbp, temp, spo2, o2, acvpu, o2Device, o2FlowLpm, fio2, checklist, census]);
   const { level, color } = news2PriorityTag(score);
 
-  // Playback util
-  async function playFromUri(uri?: string) {
-    if (!uri) return;
-    const sound = new Audio.Sound();
-    try {
-      await sound.loadAsync({ uri }, { shouldPlay: true });
-      sound.setOnPlaybackStatusUpdate((st) => { if (!st.isLoaded) return; if (st.didJustFinish) sound.unloadAsync().catch(() => {}); });
-    } catch { try { await sound.unloadAsync(); } catch {} }
-  }
-
   // Envío (directo a FHIR o vía backend si ENV.API_BASE está definido)
   async function postBundleSmart(bundle: any): Promise<Response | { ok: boolean; status: number }> {
     if (ENV.API_BASE) {
@@ -440,7 +430,7 @@ export default function HandoverForm() {
 
                 <SectionSubtitle text="Adjuntar audio de incidencias (opcional)" labelColor={labelColor} />
                 <AudioAttach onRecorded={(uri) => setValue("incidentsAudioUri", uri)} />
-                {!!incidentsAudioUriLocal && <AudioRow uri={incidentsAudioUriLocal} onPlay={() => playFromUri(incidentsAudioUriLocal)} />}
+                {!!incidentsAudioUriLocal && <AudioRow uri={incidentsAudioUriLocal} />}
               </>
             )}
 
@@ -543,7 +533,7 @@ export default function HandoverForm() {
 
                 <SectionSubtitle text="Adjuntar audio (opcional)" labelColor={labelColor} />
                 <AudioAttach onRecorded={(uri) => setValue("notesAudioUri", uri)} />
-                {!!notesAudioUriLocal && <AudioRow uri={notesAudioUriLocal} onPlay={() => playFromUri(notesAudioUriLocal)} />}
+                {!!notesAudioUriLocal && <AudioRow uri={notesAudioUriLocal} />}
               </>
             )}
 
@@ -557,7 +547,7 @@ export default function HandoverForm() {
 
                 <SectionSubtitle text="Notas de checklist: audio (opcional)" labelColor={labelColor} />
                 <AudioAttach onRecorded={(uri) => setValue("checklistAudioUri", uri)} />
-                {!!checklistAudioUriLocal && <AudioRow uri={checklistAudioUriLocal} onPlay={() => playFromUri(checklistAudioUriLocal)} />}
+                {!!checklistAudioUriLocal && <AudioRow uri={checklistAudioUriLocal} />}
               </>
             )}
 
@@ -577,7 +567,7 @@ export default function HandoverForm() {
 
                 <SectionSubtitle text="Audio de cierre (opcional)" labelColor={labelColor} />
                 <AudioAttach onRecorded={(uri) => setValue("close.audioUri", uri)} />
-                {!!closeAudioUriLocal && <AudioRow uri={closeAudioUriLocal} onPlay={() => playFromUri(closeAudioUriLocal)} />}
+                {!!closeAudioUriLocal && <AudioRow uri={closeAudioUriLocal} />}
               </>
             )}
 
@@ -640,12 +630,19 @@ function Chips({ options, value, onChange }: { options: readonly { code: string;
     </View>
   );
 }
-function AudioRow({ uri, onPlay }: { uri: string; onPlay: () => void }) {
+function AudioRow({ uri }: { uri: string }) {
+  const player = useAudioPlayer(null);
+  const handlePlay = useCallback(() => {
+    try {
+      player.replace({ uri });
+      player.play();
+    } catch {}
+  }, [player, uri]);
   const name = uri.split("/").pop() ?? "audio.m4a";
   return (
     <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Text style={{ color: "#64748b", flex: 1 }} numberOfLines={1}>Archivo: {name}</Text>
-      <TouchableOpacity onPress={onPlay} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#e5e7eb", borderRadius: 6 }}>
+      <TouchableOpacity onPress={handlePlay} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#e5e7eb", borderRadius: 6 }}>
         <Text style={{ fontWeight: "700" }}>▶ Reproducir</Text>
       </TouchableOpacity>
     </View>

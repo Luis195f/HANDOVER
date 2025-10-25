@@ -1,6 +1,6 @@
 // @ts-nocheck
 // src/lib/stt.ts
-// Cliente STT para Handover: envía audio (expo-av / m4a) a un endpoint FastAPI/Whisper
+// Cliente STT para Handover: envía audio (expo-audio / m4a) a un endpoint FastAPI/Whisper
 // y devuelve el texto transcrito. Seguro ante timeouts, reintentos y configuraciones faltantes.
 
 import Constants from 'expo-constants';
