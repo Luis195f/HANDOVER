@@ -1,11 +1,5 @@
-// @ts-nocheck
 import { createNavigationContainerRef, CommonActions, StackActions } from "@react-navigation/native";
-
-export type RootStackParamList = {
-  PatientList: undefined;
-  HandoverForm: { patientId?: string } | undefined;
-  SyncCenter: undefined;
-};
+import type { RootStackParamList } from "./RootNavigator";
 
 // Ref tipado al root navigator
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -41,12 +35,15 @@ export function isReady() {
 }
 
 /** Navega a una ruta tipada. Si el contenedor no está listo, se encola. */
-export function navigate<N extends keyof RootStackParamList>(name: N, params?: RootStackParamList[N]) {
-  if (navigationRef.isReady()) {
-    navigationRef.navigate(name, params as any);
-  } else {
-    runOrQueue(() => navigate(name, params));
-  }
+export function navigate<T extends keyof RootStackParamList>(
+  name: T,
+  params?: RootStackParamList[T]
+): void {
+  runOrQueue(() => {
+    navigationRef.dispatch(
+      CommonActions.navigate({ name: name as never, params: params as never })
+    );
+  });
 }
 
 /** Empuja una pantalla en el stack (Native Stack compatible). */
@@ -56,9 +53,9 @@ export function push<T extends keyof RootStackParamList>(
 ): void {
   runOrQueue(() => {
     navigationRef.dispatch(
-      typeof params === "undefined"
-        ? StackActions.push(name as any)
-        : StackActions.push(name as any, params as any)
+      typeof params === 'undefined'
+        ? StackActions.push(name as never)
+        : StackActions.push(name as never, params as never)
     );
   });
 }
@@ -70,9 +67,9 @@ export function replace<T extends keyof RootStackParamList>(
 ): void {
   runOrQueue(() => {
     navigationRef.dispatch(
-      typeof params === "undefined"
-        ? StackActions.replace(name as any)
-        : StackActions.replace(name as any, params as any)
+      typeof params === 'undefined'
+        ? StackActions.replace(name as never)
+        : StackActions.replace(name as never, params as never)
     );
   });
 }
@@ -93,7 +90,7 @@ export function resetTo<T extends keyof RootStackParamList>(
     navigationRef.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: name as any, params: params as any }],
+        routes: [{ name: name as never, params: params as never }],
       })
     );
   });
