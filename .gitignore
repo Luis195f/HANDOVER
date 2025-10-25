@@ -3,11 +3,15 @@ node_modules/
 .expo/
 dist/
 
-# Env
-.env
-
 # Python/Django
 .venv/
+.venv-stt/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 *.sqlite3
+
+# Env
+.env
+.env.*
