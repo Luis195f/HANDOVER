@@ -1,8 +1,25 @@
 // src/components/AudioAttach.tsx
 import React, { useEffect } from 'react';
 import { View, Button, Alert } from 'react-native';
-import { useAudioRecorder, useAudioRecorderState, AudioModule, setAudioModeAsync } from 'expo-audio';
-import { Audio } from 'expo-av';
+import {
+  useAudioRecorder,
+  useAudioRecorderState,
+  AudioModule,
+  setAudioModeAsync,
+  RecordingPresets,
+  type RecordingOptions,
+} from 'expo-audio';
+
+const FALLBACK_PRESET =
+  RecordingPresets.HIGH_QUALITY ??
+  RecordingPresets.LOW_QUALITY ??
+  Object.values(RecordingPresets)[0];
+
+if (!FALLBACK_PRESET) {
+  throw new Error('Expo audio recording presets unavailable');
+}
+
+const DEFAULT_RECORDING_OPTIONS = FALLBACK_PRESET as RecordingOptions;
 
 type Props = {
   onRecorded: (uri: string) => void;
@@ -15,7 +32,7 @@ export default function AudioAttach({
   startLabel = 'Grabar audio',
   stopLabel = 'Detener y adjuntar',
 }: Props) {
-  const recorder = useAudioRecorder(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder(DEFAULT_RECORDING_OPTIONS);
   const state = useAudioRecorderState(recorder);
 
   useEffect(() => {

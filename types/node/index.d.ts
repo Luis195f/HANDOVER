@@ -246,10 +246,6 @@ declare module '@react-native-community/*' {
   export = Module;
 }
 
-declare module 'expo-av' {
-  export const Audio: any;
-}
-
 declare module 'expo-audio' {
   export const AudioModule: any;
   export const setAudioModeAsync: (...args: any[]) => Promise<void>;

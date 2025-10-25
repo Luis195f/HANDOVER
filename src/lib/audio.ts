@@ -1,49 +1,58 @@
 // @ts-nocheck
 // src/lib/audio.ts
-import { Audio } from 'expo-av';
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  type AudioRecorder,
+  type RecordingOptions,
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
+
+const FALLBACK_PRESET =
+  RecordingPresets.HIGH_QUALITY ??
+  RecordingPresets.LOW_QUALITY ??
+  Object.values(RecordingPresets)[0];
+
+if (!FALLBACK_PRESET) {
+  throw new Error('Expo Audio recording presets unavailable');
+}
+
+const DEFAULT_RECORDING_OPTIONS = FALLBACK_PRESET as RecordingOptions;
 
 /**
  * Solicita permisos de micrófono si aún no están concedidos.
  */
 export async function ensureAudioPermissions(): Promise<boolean> {
-  const { status } = await Audio.requestPermissionsAsync();
-  return status === 'granted';
+  const status = await AudioModule.requestRecordingPermissionsAsync();
+  return status.granted;
 }
 
 /**
- * Inicia la grabación con el preset de alta calidad de expo-av@16.
- * (Antes: Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY)
+ * Inicia la grabación con el preset de alta calidad de expo-audio.
  */
-export async function startRecording(): Promise<Audio.Recording> {
+export async function startRecording(): Promise<AudioRecorder> {
   const hasPerm = await ensureAudioPermissions();
   if (!hasPerm) throw new Error('Permiso de micrófono denegado');
 
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
-    playsInSilentModeIOS: true,
-    interruptionModeIOS: 1, // default
-    shouldDuckAndroid: true,
-    staysActiveInBackground: false,
-  });
+  await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
 
-  const recording = new Audio.Recording();
-  // 👇 Nuevo nombre en expo-av 16
-  await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-  await recording.startAsync();
-  return recording;
+  const recorder = new AudioModule.AudioRecorder(DEFAULT_RECORDING_OPTIONS);
+  await recorder.prepareToRecordAsync(DEFAULT_RECORDING_OPTIONS);
+  recorder.record();
+  return recorder;
 }
 
 /**
  * Detiene la grabación y devuelve la URI del archivo (o null).
  */
-export async function stopRecording(recording: Audio.Recording): Promise<string | null> {
+export async function stopRecording(recording: AudioRecorder): Promise<string | null> {
   try {
-    await recording.stopAndUnloadAsync();
+    await recording.stop();
   } catch {
     // si ya estaba parada, ignoramos
   }
-  const uri = recording.getURI() ?? null;
+  const uri = recording.uri ?? null;
   return uri;
 }
 
