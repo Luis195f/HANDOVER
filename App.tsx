@@ -1,17 +1,24 @@
-import 'react-native-gesture-handler';
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import RootNavigator from '@/src/navigation/RootNavigator';
-import { navigationRef } from '@/src/navigation/navigation';
+import React from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { NavigationContainer } from "@react-navigation/native";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { AppThemeProvider } from "@/src/theme";
+import HomeScreen from "@/src/screens/HomeScreen";
+import HandoverScreen from "@/src/screens/HandoverScreen";
 
-try {
-  require('./src/lib/sync');
-} catch {}
+const Stack = createNativeStackNavigator();
 
 export default function App() {
   return (
-    <NavigationContainer ref={navigationRef}>
-      <RootNavigator />
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <AppThemeProvider>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen name="Handover" component={HandoverScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </AppThemeProvider>
+    </SafeAreaProvider>
   );
 }
