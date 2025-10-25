@@ -5,20 +5,16 @@ from os import environ
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-placeholder")
-DEBUG = os.environ.get("DJANGO_DEBUG", "0") in {"1", "true", "True"}
+DEBUG = True
 
-ALLOWED_HOSTS: list[str] = []
-CORS_ALLOW_ALL_ORIGINS = False
+ALLOWED_HOSTS: list[str] = ["*"]
+CORS_ALLOW_ALL_ORIGINS = True
 
 LOCAL_IP = environ.get("LOCAL_IP")
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ] + ([f"http://{LOCAL_IP}:8000"] if LOCAL_IP else [])
-
-if DEBUG:
-    ALLOWED_HOSTS = ["*"]
-    CORS_ALLOW_ALL_ORIGINS = True
 
 INSTALLED_APPS = [
     "corsheaders",
