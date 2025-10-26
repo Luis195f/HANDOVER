@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import PatientList from '@/src/screens/PatientList';
 import HandoverForm from '@/src/screens/HandoverForm';
+import QRScan from '@/src/screens/QRScan';
 import SyncCenter from '@/src/screens/SyncCenter';
 
 type RootStackParamList = {
@@ -13,6 +14,11 @@ type RootStackParamList = {
         specialty?: string;
         unit?: string;
         shift?: string;
+      }
+    | undefined;
+  QRScan:
+    | {
+        returnTo?: 'HandoverForm';
       }
     | undefined;
   SyncCenter: undefined;
@@ -29,6 +35,7 @@ export default function RootNavigator() {
         component={HandoverForm}
         options={{ title: 'Entrega de turno' }}
       />
+      <Stack.Screen name="QRScan" component={QRScan} options={{ title: 'Escanear' }} />
       <Stack.Screen
         name="SyncCenter"
         component={SyncCenter}

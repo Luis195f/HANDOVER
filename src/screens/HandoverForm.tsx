@@ -1,12 +1,14 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Alert, Button, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Controller } from "react-hook-form";
 
 import { useZodForm } from "@/src/validation/form-hooks";
 import { zHandover } from "@/src/validation/schemas";
 import { buildHandoverBundle } from "@/src/lib/fhir-map";
 import type { RootStackParamList } from "@/src/navigation/RootNavigator";
+
+type Props = NativeStackScreenProps<RootStackParamList, "HandoverForm">;
 
 const styles = StyleSheet.create({
   container: {
@@ -34,21 +36,37 @@ const styles = StyleSheet.create({
   },
   buttonWrapper: {
     marginTop: 12
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  flex: {
+    flex: 1,
+  },
+  spacer: {
+    width: 12
   }
 });
 
-export default function HandoverForm() {
-  const route = useRoute<RouteProp<RootStackParamList, "HandoverForm">>();
-  const patientIdFromParams = route.params?.patientId ?? "";
+export default function HandoverForm({ navigation, route }: Props) {
+  const patientIdFromParams = route.params?.patientId;
 
   const form = useZodForm(zHandover, {
     unitId: "",
     start: new Date().toISOString(),
     end: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-    patientId: patientIdFromParams,
+    patientId: patientIdFromParams ?? "",
     staffIn: "",
     staffOut: ""
   });
+
+  useEffect(() => {
+    const current = form.getValues('patientId');
+    if (patientIdFromParams && current !== patientIdFromParams && !form.formState.isDirty) {
+      form.setValue("patientId", patientIdFromParams, { shouldValidate: true, shouldDirty: true });
+    }
+  }, [form, patientIdFromParams]);
 
   const { control, formState: { errors } } = form;
 
@@ -142,20 +160,30 @@ export default function HandoverForm() {
         {errors.staffOut && <Text style={styles.error}>{errors.staffOut.message as string}</Text>}
 
         <Text style={styles.label}>Paciente</Text>
-        <Controller
-          control={control}
-          name="patientId"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={styles.input}
-              placeholder="ID del paciente"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <Controller
+              control={control}
+              name="patientId"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  placeholder="patientId"
+                  onBlur={onBlur}
+                  onChangeText={onChange}
+                  value={value ?? ''}
+                  autoCapitalize="none"
+                />
+              )}
             />
-          )}
-        />
-        {errors.patientId && <Text style={styles.error}>{errors.patientId.message as string}</Text>}
+            {errors.patientId && <Text style={styles.error}>{errors.patientId.message as string}</Text>}
+          </View>
+          <View style={styles.spacer} />
+          <Button
+            title="Escanear"
+            onPress={() => navigation.navigate('QRScan', { returnTo: 'HandoverForm' })}
+          />
+        </View>
       </View>
 
       <View style={styles.buttonWrapper}>
