@@ -7,6 +7,8 @@ import { useZodForm } from "@/src/validation/form-hooks";
 import { zHandover } from "@/src/validation/schemas";
 import { buildHandoverBundle } from "@/src/lib/fhir-map";
 import type { RootStackParamList } from "@/src/navigation/RootNavigator";
+import AudioAttach from "@/src/components/AudioAttach";
+import { transcribeAudio } from "@/src/lib/stt";
 
 type Props = NativeStackScreenProps<RootStackParamList, "HandoverForm">;
 
@@ -66,7 +68,10 @@ export default function HandoverForm({ navigation, route }: Props) {
     end: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
     patientId: patientIdFromParams ?? "",
     staffIn: "",
-    staffOut: ""
+    staffOut: "",
+    dxMedical: "",
+    dxNursing: "",
+    evolution: ""
   });
 
   useEffect(() => {
@@ -76,7 +81,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   }, [form, patientIdFromParams]);
 
-  const { control, formState: { errors } } = form;
+  const { control, formState: { errors }, setValue, getValues } = form;
 
   const parseNumericInput = (value: string) => {
     if (value === "") {
@@ -88,7 +93,20 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
-    const bundle = buildHandoverBundle(values as any);
+    const splitCsv = (s?: string) =>
+      (s ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+    const dxMed = splitCsv(values.dxMedical);
+    const dxNur = splitCsv(values.dxNursing);
+
+    const bundle = buildHandoverBundle({
+      ...values,
+      dxMedical: dxMed,
+      dxNursing: dxNur
+    } as any);
     console.log("BUNDLE_READY", JSON.stringify(bundle, null, 2));
     Alert.alert("Entrega guardada (stub) y validada por Zod.");
   });
@@ -201,6 +219,70 @@ export default function HandoverForm({ navigation, route }: Props) {
             onPress={() => navigation.navigate('QRScan', { returnTo: 'HandoverForm' })}
           />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.h2}>Diagnóstico / Evolución</Text>
+
+        <Text style={styles.label}>Dx médicos</Text>
+        <Controller
+          control={control}
+          name="dxMedical"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="Dx médicos, separados por coma"
+              onBlur={onBlur}
+              onChangeText={onChange}
+              value={value ?? ""}
+            />
+          )}
+        />
+        {errors.dxMedical && <Text style={styles.error}>{errors.dxMedical.message as string}</Text>}
+
+        <Text style={styles.label}>Dx enfermería</Text>
+        <Controller
+          control={control}
+          name="dxNursing"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="Dx enfermería, separados por coma"
+              onBlur={onBlur}
+              onChangeText={onChange}
+              value={value ?? ""}
+            />
+          )}
+        />
+        {errors.dxNursing && <Text style={styles.error}>{errors.dxNursing.message as string}</Text>}
+
+        <Text style={styles.label}>Evolución</Text>
+        <Controller
+          control={control}
+          name="evolution"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={[styles.input, { minHeight: 120, textAlignVertical: "top" }]}
+              placeholder="Evolución"
+              onBlur={onBlur}
+              onChangeText={onChange}
+              value={value ?? ""}
+              multiline
+            />
+          )}
+        />
+        {errors.evolution && <Text style={styles.error}>{errors.evolution.message as string}</Text>}
+
+        <AudioAttach
+          onRecorded={async (uri) => {
+            setValue("audioUri", uri, { shouldDirty: true });
+            const transcript = await transcribeAudio(uri);
+            const previous = getValues("evolution") ?? "";
+            const trimmed = previous.trim();
+            const nextEvolution = trimmed.length ? `${trimmed}\n${transcript}` : transcript;
+            setValue("evolution", nextEvolution, { shouldDirty: true, shouldValidate: true });
+          }}
+        />
       </View>
 
       <View style={styles.section}>
