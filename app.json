@@ -6,20 +6,23 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
-
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-
     "plugins": [
       "expo-sqlite",
       "expo-secure-store",
       "expo-notifications",
-      ["expo-audio", { "microphonePermission": "Permitir a Handover usar el micrófono." }]
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Permitir a Handover usar el micrófono."
+        }
+      ],
+      "expo-barcode-scanner"
     ],
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -29,11 +32,16 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "useNextNotificationsApi": true
+      "useNextNotificationsApi": true,
+      "package": "com.anonymous.handoverpro"
     },
-
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -42,7 +50,6 @@
         "NSUserTrackingUsageDescription": "Se usa para mejorar la experiencia del turno"
       }
     },
-
     "extra": {
       "eas": {
         "projectId": "00000000-0000-0000-0000-000000000000"
