@@ -32,7 +32,7 @@ describe('mapVitalsToObservations — edge cases', () => {
     expect(first?.valueQuantity?.code).toBe('Cel');
   });
 
-  it('valores fuera de rango no rompen y preservan UCUM', () => {
+  it('filtra valores fuera de rango y mantiene UCUM en los válidos', () => {
     const obs = mapVitalsToObservations(
       {
         patientId: 'pat-EDG-2',
@@ -42,18 +42,11 @@ describe('mapVitalsToObservations — edge cases', () => {
     ).sort(byCode);
 
     const codes = obs.map(o => o.code?.coding?.[0]?.code).sort();
-    expect(codes).toEqual([LOINC.HR, LOINC.RR, LOINC.TEMP].sort());
+    expect(codes).toEqual([LOINC.TEMP]);
 
     const get = (c: string) => obs.find(o => o.code?.coding?.[0]?.code === c);
-    const rr = get(LOINC.RR);
-    const hr = get(LOINC.HR);
     const temp = get(LOINC.TEMP);
-    expect(rr).toBeDefined();
-    expect(hr).toBeDefined();
     expect(temp).toBeDefined();
-    expect(rr?.valueQuantity?.system).toBe('http://unitsofmeasure.org');
-    expect(rr?.valueQuantity?.code).toBe('/min');
-    expect(hr?.valueQuantity?.code).toBe('/min');
     expect(temp?.valueQuantity?.code).toBe('Cel');
 
     for (const o of obs) expect(o.effectiveDateTime).toBe(ISO_NOW);
