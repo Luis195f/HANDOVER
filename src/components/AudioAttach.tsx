@@ -22,13 +22,15 @@ if (!FALLBACK_PRESET) {
 const DEFAULT_RECORDING_OPTIONS = FALLBACK_PRESET as RecordingOptions;
 
 type Props = {
-  onRecorded: (uri: string) => void;
+  onRecorded?: (uri: string) => void;
+  onAttach?: (uri: string) => void;
   startLabel?: string;        // "Adjuntar audio de incidencias", etc.
   stopLabel?: string;         // "Detener y adjuntar"
 };
 
 export default function AudioAttach({
   onRecorded,
+  onAttach,
   startLabel = 'Grabar audio',
   stopLabel = 'Detener y adjuntar',
 }: Props) {
@@ -49,7 +51,10 @@ export default function AudioAttach({
   const onPress = async () => {
     if (state.isRecording) {
       await recorder.stop();
-      if (recorder.uri) onRecorded(recorder.uri);
+      if (recorder.uri) {
+        onRecorded?.(recorder.uri);
+        onAttach?.(recorder.uri);
+      }
       return;
     }
     await recorder.prepareToRecordAsync();

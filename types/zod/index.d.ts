@@ -1,5 +1,6 @@
 declare module 'zod' {
   export type ZodTypeAny = any;
+  export type ZodType<TOutput = any, TDef = any, TInput = any> = any;
   export type RefinementCtx = { addIssue(issue: { code: string; message?: string }): void };
   export type infer<T> = any;
   export type output<T> = any;
