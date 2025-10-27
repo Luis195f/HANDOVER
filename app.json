@@ -17,7 +17,12 @@
       "expo-sqlite",
       "expo-secure-store",
       "expo-notifications",
-      ["expo-audio", { "microphonePermission": "Permitir a Handover usar el micrófono." }]
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Permitir a Handover usar el micrófono."
+        }
+      ]
     ],
 
     "android": {
