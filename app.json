@@ -6,25 +6,20 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
-
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-
     "plugins": [
       "expo-sqlite",
       "expo-secure-store",
       "expo-notifications",
       [
         "expo-audio",
-        {
-          "microphonePermission": "Permitir a Handover usar el micrófono."
-        }
+        { "microphonePermission": "Permitir a Handover usar el micrófono." }
       ]
     ],
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -38,7 +33,6 @@
       ],
       "useNextNotificationsApi": true
     },
-
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -47,7 +41,6 @@
         "NSUserTrackingUsageDescription": "Se usa para mejorar la experiencia del turno"
       }
     },
-
     "extra": {
       "eas": {
         "projectId": "00000000-0000-0000-0000-000000000000"

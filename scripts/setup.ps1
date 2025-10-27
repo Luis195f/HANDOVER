@@ -8,4 +8,4 @@ pnpm add expo-notifications expo-audio expo-camera expo-file-system expo-secure-
 Write-Host "Asegurando tipos y utilidades" -ForegroundColor Cyan
 pnpm add -D @types/node
 
-Write-Host "Listo. Recuerda ajustar FHIR_BASE_URL y STT_ENDPOINT en app.json -> extra."
+Write-Host "Listo. Recuerda ajustar FHIR_BASE_URL y STT_ENDPOINT en app.json -> expo.extra." 
