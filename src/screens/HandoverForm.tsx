@@ -6,7 +6,7 @@ import { Controller } from "react-hook-form";
 import { useZodForm } from "@/src/validation/form-hooks";
 import { zHandover } from "@/src/validation/schemas";
 import { buildHandoverBundle } from "@/src/lib/fhir-map";
-import type { RootStackParamList } from "@/src/navigation/RootNavigator";
+import type { RootStackParamList } from "@/src/navigation/types";
 import AudioAttach from "@/src/components/AudioAttach";
 import { transcribeAudio } from "@/src/lib/stt";
 
@@ -60,13 +60,13 @@ const styles = StyleSheet.create({
 });
 
 export default function HandoverForm({ navigation, route }: Props) {
-  const patientIdFromParams = route.params?.patientId;
+  const { patientId, unitId, specialtyId } = route.params;
 
   const form = useZodForm(zHandover, {
-    unitId: "",
+    unitId: unitId ?? "",
     start: new Date().toISOString(),
     end: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-    patientId: patientIdFromParams ?? "",
+    patientId: patientId ?? "",
     staffIn: "",
     staffOut: "",
     dxMedical: "",
@@ -76,10 +76,14 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   useEffect(() => {
     const current = form.getValues('patientId');
-    if (patientIdFromParams && current !== patientIdFromParams && !form.formState.isDirty) {
-      form.setValue("patientId", patientIdFromParams, { shouldValidate: true, shouldDirty: true });
+    if (patientId && current !== patientId && !form.formState.isDirty) {
+      form.setValue("patientId", patientId, { shouldValidate: true, shouldDirty: true });
     }
-  }, [form, patientIdFromParams]);
+    const currentUnit = form.getValues('unitId');
+    if (unitId && currentUnit !== unitId && !form.formState.isDirty) {
+      form.setValue("unitId", unitId, { shouldValidate: true, shouldDirty: true });
+    }
+  }, [form, patientId, unitId]);
 
   const { control, formState: { errors }, setValue, getValues } = form;
 
@@ -104,6 +108,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     const bundle = buildHandoverBundle({
       ...values,
+      specialtyId,
       dxMedical: dxMed,
       dxNursing: dxNur
     } as any);
@@ -203,35 +208,28 @@ export default function HandoverForm({ navigation, route }: Props) {
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
                   style={styles.input}
-                  placeholder="patientId"
+                  placeholder="Paciente"
                   onBlur={onBlur}
                   onChangeText={onChange}
-                  value={value ?? ''}
-                  autoCapitalize="none"
+                  value={value ?? ""}
                 />
               )}
             />
-            {errors.patientId && <Text style={styles.error}>{errors.patientId.message as string}</Text>}
           </View>
           <View style={styles.spacer} />
-          <Button
-            title="Escanear"
-            onPress={() => navigation.navigate('QRScan', { returnTo: 'HandoverForm' })}
-          />
+          <Button title="Escanear" onPress={() => navigation.navigate('QRScan', { returnTo: 'HandoverForm' })} />
         </View>
-      </View>
+        {errors.patientId && <Text style={styles.error}>{errors.patientId.message as string}</Text>}
 
-      <View style={styles.section}>
-        <Text style={styles.h2}>Diagnóstico / Evolución</Text>
-
-        <Text style={styles.label}>Dx médicos</Text>
+        <Text style={styles.h2}>Diagnósticos</Text>
+        <Text style={styles.label}>Médicos (separados por coma)</Text>
         <Controller
           control={control}
           name="dxMedical"
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
-              style={styles.input}
-              placeholder="Dx médicos, separados por coma"
+              style={[styles.input, errors.dxMedical ? styles.inputError : undefined]}
+              placeholder="Diagnósticos médicos"
               onBlur={onBlur}
               onChangeText={onChange}
               value={value ?? ""}
@@ -240,14 +238,14 @@ export default function HandoverForm({ navigation, route }: Props) {
         />
         {errors.dxMedical && <Text style={styles.error}>{errors.dxMedical.message as string}</Text>}
 
-        <Text style={styles.label}>Dx enfermería</Text>
+        <Text style={styles.label}>Enfermería (separados por coma)</Text>
         <Controller
           control={control}
           name="dxNursing"
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
-              style={styles.input}
-              placeholder="Dx enfermería, separados por coma"
+              style={[styles.input, errors.dxNursing ? styles.inputError : undefined]}
+              placeholder="Diagnósticos de enfermería"
               onBlur={onBlur}
               onChangeText={onChange}
               value={value ?? ""}
@@ -256,175 +254,35 @@ export default function HandoverForm({ navigation, route }: Props) {
         />
         {errors.dxNursing && <Text style={styles.error}>{errors.dxNursing.message as string}</Text>}
 
-        <Text style={styles.label}>Evolución</Text>
+        <Text style={styles.h2}>Evolución</Text>
         <Controller
           control={control}
           name="evolution"
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
-              style={[styles.input, { minHeight: 120, textAlignVertical: "top" }]}
-              placeholder="Evolución"
+              style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
+              multiline
+              placeholder="Notas de evolución"
               onBlur={onBlur}
               onChangeText={onChange}
               value={value ?? ""}
-              multiline
             />
           )}
         />
         {errors.evolution && <Text style={styles.error}>{errors.evolution.message as string}</Text>}
 
-        <AudioAttach
-          onRecorded={async (uri) => {
-            setValue("audioUri", uri, { shouldDirty: true });
-            const transcript = await transcribeAudio(uri);
-            const previous = getValues("evolution") ?? "";
-            const trimmed = previous.trim();
-            const nextEvolution = trimmed.length ? `${trimmed}\n${transcript}` : transcript;
-            setValue("evolution", nextEvolution, { shouldDirty: true, shouldValidate: true });
-          }}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.h2}>Signos vitales</Text>
-
-        <Controller
-          control={control}
-          name="vitals.hr"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Frecuencia cardíaca (/min)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.rr"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Frecuencia respiratoria (/min)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.temp"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Temperatura (°C)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.spo2"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="SpO₂ (%)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.sbp"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Tensión sistólica (mmHg)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.dbp"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Tensión diastólica (mmHg)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.bgMgDl"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Glucemia (mg/dL)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
-            </>
-          )}
-        />
-
-        <View
-          testID="vitals-trend"
-          style={{
-            height: 140,
-            borderWidth: 1,
-            borderColor: "#E5E7EB",
-            borderRadius: 8,
-            marginTop: 8,
-            alignItems: "center",
-            justifyContent: "center"
-          }}
-        >
-          <Text>Trend chart placeholder</Text>
+        <View style={styles.buttonWrapper}>
+          <Button title="Guardar" onPress={onSubmit} />
         </View>
       </View>
 
-      <View style={styles.buttonWrapper}>
-        <Button title="GUARDAR" onPress={onSubmit} />
+      <View style={styles.section}>
+        <AudioAttach
+          onAttach={async (uri) => {
+            const text = await transcribeAudio(uri);
+            setValue('evolution', `${getValues('evolution')}${text ? `\n${text}` : ''}`);
+          }}
+        />
       </View>
     </ScrollView>
   );
