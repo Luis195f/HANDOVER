@@ -3,7 +3,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import { BarCodeScanner } from 'expo-barcode-scanner';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import type { RootStackParamList } from '@/src/navigation/RootNavigator';
+import type { RootStackParamList } from '@/src/navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
@@ -46,7 +46,7 @@ export default function QRScan({ navigation, route }: Props) {
       return;
     }
     const target = route.params?.returnTo ?? 'HandoverForm';
-    navigation.navigate(target, { patientId });
+    navigation.navigate(target, { patientId, unitId: '', specialtyId: '' });
   };
 
   if (hasPermission === null) {

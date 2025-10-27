@@ -5,24 +5,7 @@ import PatientList from '@/src/screens/PatientList';
 import HandoverForm from '@/src/screens/HandoverForm';
 import QRScan from '@/src/screens/QRScan';
 import SyncCenter from '@/src/screens/SyncCenter';
-
-type RootStackParamList = {
-  PatientList: undefined;
-  HandoverForm:
-    | {
-        patientId?: string;
-        specialty?: string;
-        unit?: string;
-        shift?: string;
-      }
-    | undefined;
-  QRScan:
-    | {
-        returnTo?: 'HandoverForm';
-      }
-    | undefined;
-  SyncCenter: undefined;
-};
+import type { RootStackParamList } from '@/src/navigation/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
