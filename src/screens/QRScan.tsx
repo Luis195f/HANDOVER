@@ -1,22 +1,43 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '@/src/navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
+type ScanResult = { data: string };
+
 export default function QRScan({ navigation, route }: Props) {
+  const [permission, requestPermission] = useCameraPermissions();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
-  }, []);
+    let cancelled = false;
+
+    const ensurePermission = async () => {
+      if (!permission) {
+        if (hasPermission !== null) return;
+        const result = await requestPermission();
+        if (!cancelled) {
+          setHasPermission(result?.granted ?? false);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        setHasPermission(permission.granted);
+      }
+    };
+
+    void ensurePermission();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasPermission, permission, requestPermission]);
 
   const extractPatientId = useCallback((payload: string): string | null => {
     try {
@@ -36,7 +57,7 @@ export default function QRScan({ navigation, route }: Props) {
     return null;
   }, []);
 
-  const onScan = ({ data }: { data: string }) => {
+  const onScan = ({ data }: ScanResult) => {
     if (scanned) return;
     setScanned(true);
     const patientId = extractPatientId(data);
@@ -67,7 +88,12 @@ export default function QRScan({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <BarCodeScanner style={styles.scanner} onBarCodeScanned={scanned ? undefined : onScan} />
+      <CameraView
+        style={styles.scanner}
+        facing="back"
+        onBarcodeScanned={scanned ? undefined : onScan}
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+      />
     </View>
   );
 }

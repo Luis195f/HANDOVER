@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Alert,
   FlatList,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
+import Chip from "@/src/components/Chip";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import type { RootStackParamList } from "@/src/navigation/types";
@@ -59,6 +60,15 @@ export function filterPatients(
 type Props = NativeStackScreenProps<RootStackParamList, "PatientList">;
 
 type PickerOption = { label: string; value: string };
+
+type ChipItem = {
+  id: string;
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+};
+
+const FilterChip = Chip as unknown as ComponentType<any>;
 
 type PickerProps = {
   label: string;
@@ -127,6 +137,15 @@ export default function PatientList({ navigation }: Props) {
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const [selectedUnitId, setSelectedUnitId] = useState<string>(ALL_UNITS_OPTION);
 
+  const onSpecialtyChange = useCallback((value: string) => {
+    setSelectedSpecialtyId(value);
+    setSelectedUnitId(ALL_UNITS_OPTION);
+  }, []);
+
+  const onUnitChange = useCallback((value: string) => {
+    setSelectedUnitId(value);
+  }, []);
+
   useEffect(() => {
     mark("patientlist.filter.change", {
       specialtyId: selectedSpecialtyId === ALL_SPECIALTIES_OPTION ? undefined : selectedSpecialtyId,
@@ -160,19 +179,44 @@ export default function PatientList({ navigation }: Props) {
     return options;
   }, [availableUnits]);
 
+  const specialtyChips = useMemo<ChipItem[]>(() => {
+    return [
+      {
+        id: ALL_SPECIALTIES_OPTION,
+        label: "Todas las especialidades",
+        selected: selectedSpecialtyId === ALL_SPECIALTIES_OPTION,
+        onPress: () => onSpecialtyChange(ALL_SPECIALTIES_OPTION),
+      },
+      ...SPECIALTIES.map((specialty: Specialty) => ({
+        id: specialty.id,
+        label: specialty.name,
+        selected: selectedSpecialtyId === specialty.id,
+        onPress: () => onSpecialtyChange(specialty.id),
+      })),
+    ];
+  }, [onSpecialtyChange, selectedSpecialtyId]);
+
+  const unitChips = useMemo<ChipItem[]>(() => {
+    return [
+      {
+        id: ALL_UNITS_OPTION,
+        label: "Todas las unidades",
+        selected: selectedUnitId === ALL_UNITS_OPTION,
+        onPress: () => onUnitChange(ALL_UNITS_OPTION),
+      },
+      ...availableUnits.map((unit) => ({
+        id: unit.id,
+        label: unit.name,
+        selected: selectedUnitId === unit.id,
+        onPress: () => onUnitChange(unit.id),
+      })),
+    ];
+  }, [availableUnits, onUnitChange, selectedUnitId]);
+
   const patients = useMemo(
     () => filterPatients(PATIENTS_MOCK, UNITS_BY_ID, selectedSpecialtyId, selectedUnitId),
     [selectedSpecialtyId, selectedUnitId]
   );
-
-  const onSpecialtyChange = useCallback((value: string) => {
-    setSelectedSpecialtyId(value);
-    setSelectedUnitId(ALL_UNITS_OPTION);
-  }, []);
-
-  const onUnitChange = useCallback((value: string) => {
-    setSelectedUnitId(value);
-  }, []);
 
   const handlePatientPress = useCallback(
     async (patient: PatientListItem) => {
@@ -214,6 +258,22 @@ export default function PatientList({ navigation }: Props) {
           onValueChange={onUnitChange}
           disabled={availableUnits.length === 0 && selectedSpecialtyId !== ALL_SPECIALTIES_OPTION}
         />
+        <View style={styles.chipSection}>
+          <Text style={styles.chipLabel}>Especialidades</Text>
+          <View style={styles.chipGroup}>
+            {specialtyChips.map((chip) => (
+              <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
+            ))}
+          </View>
+        </View>
+        <View style={styles.chipSection}>
+          <Text style={styles.chipLabel}>Unidades</Text>
+          <View style={styles.chipGroup}>
+            {unitChips.map((chip) => (
+              <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
+            ))}
+          </View>
+        </View>
       </View>
 
       <FlatList
@@ -244,6 +304,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 12,
+  },
+  chipSection: {
+    gap: 8,
+  },
+  chipLabel: {
+    fontWeight: "600",
+    color: "#1f2a44",
+  },
+  chipGroup: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 0,
   },
   pickerContainer: {
     gap: 6,

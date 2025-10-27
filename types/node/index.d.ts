@@ -244,6 +244,19 @@ declare module 'expo-*' {
   export = ExpoModule;
 }
 
+declare module 'expo-av/build/Audio/Recording.types' {
+  export type RecordingOptions = any;
+}
+
+declare module 'expo-av/build/Audio/RecordingConstants' {
+  import type { RecordingOptions } from 'expo-av/build/Audio/Recording.types';
+
+  export const RecordingOptionsPresets: Record<string, RecordingOptions> & {
+    HIGH_QUALITY?: RecordingOptions;
+    LOW_QUALITY?: RecordingOptions;
+  };
+}
+
 declare module '@react-native-community/*' {
   const Module: any;
   export = Module;
