@@ -7,7 +7,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@/src/*": ["src/*"]
+      "@/src/*": ["src/*"],
+      "expo-audio": ["src/lib/expo-audio-shim"]
     },
     "jsx": "react-jsx",
     "lib": ["es2021", "dom"],
