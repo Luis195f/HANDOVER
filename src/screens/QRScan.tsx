@@ -1,79 +1,43 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Alert, StyleSheet, View } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useIsFocused } from '@react-navigation/native';
 
-import type { RootStackParamList } from '@/src/navigation/RootNavigator';
-
-type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
-
-export default function QRScan({ navigation, route }: Props) {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+export default function QRScan() {
+  const [perm, requestPerm] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const isFocused = useIsFocused();
 
+  // Pide permisos al montar
   useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
-  }, []);
+    if (!perm?.granted) requestPerm();
+  }, [perm, requestPerm]);
 
-  const extractPatientId = useCallback((payload: string): string | null => {
-    try {
-      const obj = JSON.parse(payload);
-      if (obj?.resourceType === 'Patient' && obj.id) return String(obj.id);
-      const ref = obj?.patient?.reference ?? obj?.subject?.reference;
-      const matchedRef = typeof ref === 'string' ? ref.match(/Patient\/([\w\-.]+)/) : null;
-      if (matchedRef) return matchedRef[1];
-    } catch (error) {
-      // Ignored: payload is not JSON or parsing failed.
-    }
+  // Cuando la pantalla vuelve a estar enfocada, habilita el escaneo otra vez
+  useEffect(() => {
+    if (isFocused) setScanned(false);
+  }, [isFocused]);
 
-    const match = payload.match(/Patient\/([\w\-.]+)/);
-    if (match) return match[1];
-
-    if (/^[A-Za-z0-9.\-]+$/.test(payload)) return payload;
-    return null;
-  }, []);
-
-  const onScan = ({ data }: { data: string }) => {
-    if (scanned) return;
+  const onScanned = useCallback(({ data }: { data: string }) => {
     setScanned(true);
-    const patientId = extractPatientId(data);
-    if (!patientId) {
-      Alert.alert('QR no válido', 'No se pudo obtener un Patient.id');
-      setScanned(false);
-      return;
-    }
-    const target = route.params?.returnTo ?? 'HandoverForm';
-    navigation.navigate(target, { patientId });
-  };
+    // TODO: maneja tu QR aquí
+    Alert.alert('QR leído', data, [{ text: 'OK', onPress: () => setScanned(false) }]);
+  }, []);
 
-  if (hasPermission === null) {
-    return (
-      <View style={styles.center}>
-        <Text>Solicitando permiso…</Text>
-      </View>
-    );
-  }
-
-  if (hasPermission === false) {
-    return (
-      <View style={styles.center}>
-        <Text>Permiso de cámara denegado</Text>
-      </View>
-    );
-  }
+  if (!perm?.granted) return <View style={styles.container} />;
 
   return (
     <View style={styles.container}>
-      <BarCodeScanner style={styles.scanner} onBarCodeScanned={scanned ? undefined : onScan} />
+      <CameraView
+        style={StyleSheet.absoluteFill}
+        // Solo QR. Puedes añadir otros tipos si lo necesitas
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        onBarcodeScanned={scanned ? undefined : onScanned}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scanner: { flex: 1 },
+  container: { flex: 1, backgroundColor: 'black' },
 });

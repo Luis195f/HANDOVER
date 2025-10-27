@@ -15,13 +15,7 @@
       "expo-sqlite",
       "expo-secure-store",
       "expo-notifications",
-      [
-        "expo-audio",
-        {
-          "microphonePermission": "Permitir a Handover usar el micrófono."
-        }
-      ],
-      "expo-barcode-scanner"
+      ["expo-audio", { "microphonePermission": "Permitir a Handover usar el micrófono." }]
     ],
     "android": {
       "adaptiveIcon": {
@@ -30,10 +24,6 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.POST_NOTIFICATIONS",
@@ -51,9 +41,7 @@
       }
     },
     "extra": {
-      "eas": {
-        "projectId": "00000000-0000-0000-0000-000000000000"
-      },
+      "eas": { "projectId": "00000000-0000-0000-0000-000000000000" },
       "FHIR_BASE_URL": "http://192.168.0.16:8080/fhir",
       "STT_ENDPOINT": "http://192.168.0.16:8091/stt",
       "ENCRYPTION_NAMESPACE": "handover-pro"
