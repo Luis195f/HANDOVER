@@ -1,70 +1,98 @@
 // src/screens/LoginScreen.tsx
-import React, { useMemo } from 'react';
-import { View, Text, Pressable, Alert } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useEffect } from "react";
+import { View, Text, Pressable } from "react-native";
+import { UNITS_BY_ID } from "@/src/config/units";
+import { login, getSession, logout } from "@/src/security/auth";
 
-import { login } from '@/src/security/auth';
-import { UNITS_BY_ID } from '@/src/config/units';
-import type { RootStackParamList } from '@/src/navigation/types';
+export default function LoginScreen({ navigation }: any) {
+  // Todos los slugs de unidades disponibles en la app
+  const ALL_UNITS = Object.keys(UNITS_BY_ID);
 
-type Nav = ReturnType<typeof useNavigation<import('@react-navigation/native-stack').NativeStackNavigationProp<RootStackParamList>>>
+  const grantFullAccess = async () => {
+    // Sesión demo con acceso total – RBAC “abierto”
+    await login({
+      user: {
+        id: "nurse-1",
+        name: "Demo Nurse",
+        // redundante pero explícito: el usuario también las lleva
+        units: ALL_UNITS,
+        allowedUnits: ALL_UNITS,
+      },
+      // y a nivel raíz de sesión también
+      units: ALL_UNITS,
+      allowedUnits: ALL_UNITS,
+      token: "mock-token",
+    });
 
-export default function LoginScreen() {
-  const navigation = useNavigation() as Nav;
-
-  // Todos los slugs de unidad disponibles en la app (demo con acceso total)
-  const ALL_UNITS = useMemo(() => Object.keys(UNITS_BY_ID), []);
-
-  const onLogin = async () => {
-    try {
-      await login({
-        user: { id: 'nurse-1', name: 'Demo Nurse' },
-        units: ALL_UNITS,          // acceso total para la demo
-        allowedUnits: ALL_UNITS,   // redundante pero explícito
-        token: 'mock-token',
-      });
-
-      // Ir a la lista (el Stack inicia ahí, pero navegamos por claridad)
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'PatientList' }],
-      });
-    } catch (err: any) {
-      Alert.alert('Error al iniciar', err?.message ?? String(err));
-    }
+    // Ir directo al listado
+    navigation.reset({ index: 0, routes: [{ name: "PatientList" }] });
   };
 
+  // Si hay sesión previa y no tiene todas las unidades, la “sube” automáticamente (DEV)
+  useEffect(() => {
+    (async () => {
+      try {
+        const s: any = (await (getSession?.() ?? Promise.resolve(null))) || null;
+        const allowed = new Set<string>([
+          ...(s?.units ?? []),
+          ...(s?.allowedUnits ?? []),
+          ...(s?.user?.units ?? []),
+          ...(s?.user?.allowedUnits ?? []),
+        ]);
+        const missing = ALL_UNITS.some((u) => !allowed.has(u));
+        if (__DEV__ && (missing || !s)) {
+          await grantFullAccess();
+        }
+      } catch {
+        // En cualquier duda, abrimos todo
+        if (__DEV__) grantFullAccess();
+      }
+    })();
+  }, []);
+
   return (
-    <View
-      style={{
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 12,
-        padding: 24,
-      }}
-    >
-      <Text style={{ fontSize: 22, fontWeight: '600' }}>Acceder</Text>
+    <View style={{ flex: 1, padding: 16, gap: 12, justifyContent: "center" }}>
+      <Text style={{ fontSize: 22, fontWeight: "700", marginBottom: 6 }}>
+        Handover · Demo
+      </Text>
+      <Text style={{ opacity: 0.7, marginBottom: 12 }}>
+        Acceso total a todas las unidades para pruebas.
+      </Text>
 
       <Pressable
-        onPress={onLogin}
-        style={({ pressed }) => ({
-          backgroundColor: pressed ? '#2a6af1' : '#2979ff',
-          paddingHorizontal: 18,
-          paddingVertical: 12,
+        onPress={grantFullAccess}
+        style={{
+          backgroundColor: "#1e88e5",
+          paddingVertical: 14,
           borderRadius: 12,
-          elevation: 2,
-        })}
+          alignItems: "center",
+        }}
       >
-        <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-          Entrar (demo, acceso a todas las unidades)
+        <Text style={{ color: "white", fontWeight: "700" }}>
+          Entrar (todas las unidades)
         </Text>
       </Pressable>
 
-      <Text style={{ opacity: 0.7, textAlign: 'center' }}>
-        Se otorga acceso a todas las unidades para evitar el diálogo “Sin acceso
-        a la unidad” durante la demo.
-      </Text>
+      {__DEV__ && (
+        <Pressable
+          onPress={async () => {
+            try {
+              await logout?.();
+            } catch {}
+            await grantFullAccess();
+          }}
+          style={{
+            marginTop: 8,
+            paddingVertical: 12,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: "#d0d0d0",
+            alignItems: "center",
+          }}
+        >
+          <Text>Resetear permisos (DEV)</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
