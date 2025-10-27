@@ -44,7 +44,7 @@ export default function SyncCenter() {
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [lastRun, setLastRun] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async () => {
+  const refresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
       const queue = await readQueue();
@@ -60,12 +60,14 @@ export default function SyncCenter() {
     }
   }, []);
 
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => {
+    void refresh();
+  }, [refresh]);
   React.useEffect(() => {
     if (isFocused) {
-      void load();
+      void refresh();
     }
-  }, [isFocused, load]);
+  }, [isFocused, refresh]);
 
   const doFlush = React.useCallback(async () => {
     const opts = resolveSyncOpts();
@@ -76,7 +78,7 @@ export default function SyncCenter() {
     setBusy(true);
     try {
       const res = await flushQueueNow(opts);
-      await load();
+      await refresh();
       setLastRun(new Date().toLocaleTimeString());
       return res;
     } catch (e: any) {
@@ -85,7 +87,7 @@ export default function SyncCenter() {
     } finally {
       setBusy(false);
     }
-  }, [load]);
+  }, [refresh]);
 
   // Inicia/detiene interval cuando la pantalla está enfocada
   React.useEffect(() => {
@@ -168,7 +170,7 @@ export default function SyncCenter() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={load}
+            onRefresh={refresh}
             tintColor={C.textSecondary}
             colors={[C.accent]}
           />
