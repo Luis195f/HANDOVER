@@ -357,13 +357,13 @@ const normalizeScale = (allowed: readonly string[]) =>
 
 const VitalsSchema = z
   .object({
-    hr: normalizeNumeric(0, 300),
-    rr: normalizeNumeric(0, 100),
-    temp: normalizeNumeric(25, 45),
-    spo2: normalizeNumeric(0, 100),
-    sbp: normalizeNumeric(0, 400),
-    dbp: normalizeNumeric(0, 300),
-    bgMgDl: normalizeNumeric(0, 1500),
+    hr: normalizeNumeric(30, 220),
+    rr: normalizeNumeric(5, 60),
+    temp: normalizeNumeric(30, 45),
+    spo2: normalizeNumeric(50, 100),
+    sbp: normalizeNumeric(50, 260),
+    dbp: normalizeNumeric(30, 160),
+    bgMgDl: normalizeNumeric(20, 600),
     bgMmolL: normalizeNumeric(0, 100),
     o2: normalizeBoolean(),
     o2Device: normalizeString(),
