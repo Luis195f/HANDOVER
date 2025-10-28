@@ -86,11 +86,8 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   }, [form, patientId, unitId]);
 
-  const { control, formState: { errors }, setValue, getValues } = form;
-
-  const { control } = form;
-  const formState = form.formState as { errors?: Record<string, any> };
-  const errors = formState?.errors ?? {};
+  const { control, formState, setValue, getValues } = form;
+  const errors = (formState as any)?.errors ?? {};
 
   const parseNumericInput = (value: string) => {
     if (value === "") {
