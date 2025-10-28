@@ -1,43 +1,43 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useIsFocused } from '@react-navigation/native';
+// src/screens/QRScan.tsx
+import React, { useState } from 'react';
+import { Alert, Button, Text, TextInput, View } from 'react-native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '@/src/navigation/RootNavigator';
 
-export default function QRScan() {
-  const [perm, requestPerm] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const isFocused = useIsFocused();
+type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
-  // Pide permisos al montar
-  useEffect(() => {
-    if (!perm?.granted) requestPerm();
-  }, [perm, requestPerm]);
+export default function QRScan({ navigation, route }: Props) {
+  const [value, setValue] = useState('');
+  const returnTo = route.params?.returnTo ?? 'HandoverForm';
 
-  // Cuando la pantalla vuelve a estar enfocada, habilita el escaneo otra vez
-  useEffect(() => {
-    if (isFocused) setScanned(false);
-  }, [isFocused]);
-
-  const onScanned = useCallback(({ data }: { data: string }) => {
-    setScanned(true);
-    // TODO: maneja tu QR aquí
-    Alert.alert('QR leído', data, [{ text: 'OK', onPress: () => setScanned(false) }]);
-  }, []);
-
-  if (!perm?.granted) return <View style={styles.container} />;
+  const onDone = (id: string) => {
+    const trimmed = id.trim();
+    if (!trimmed) {
+      Alert.alert('Escaneo', 'Ingresa o simula un ID de paciente válido.');
+      return;
+    }
+    // Vuelve a la pantalla objetivo con el patientId
+    navigation.navigate(returnTo as any, { patientId: trimmed } as any);
+  };
 
   return (
-    <View style={styles.container}>
-      <CameraView
-        style={StyleSheet.absoluteFill}
-        // Solo QR. Puedes añadir otros tipos si lo necesitas
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-        onBarcodeScanned={scanned ? undefined : onScanned}
+    <View style={{ flex: 1, padding: 16, gap: 12 }}>
+      <Text style={{ fontSize: 18, fontWeight: '600' }}>Escanear código (modo demo)</Text>
+      <Text style={{ color: '#666' }}>
+        Por ahora sin cámara: pega/escribe el ID del paciente y confirma. (Cámara se puede activar luego.)
+      </Text>
+
+      <TextInput
+        placeholder="ej: pat-001"
+        value={value}
+        onChangeText={setValue}
+        style={{ borderWidth: 1, borderColor: '#ccc', padding: 12, borderRadius: 8 }}
+        autoCapitalize="none"
+        autoCorrect={false}
       />
+
+      <Button title="Aceptar" onPress={() => onDone(value)} />
+      <Button title="Probar con pat-001" onPress={() => onDone('pat-001')} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'black' },
-});
