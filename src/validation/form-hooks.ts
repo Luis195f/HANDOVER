@@ -1,10 +1,13 @@
-import { useForm } from "react-hook-form";
+import { useForm, type UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import type { ZodType } from "zod";
+import type { ZodTypeAny } from "zod";
 
-export function useZodForm<TSchema extends ZodType<any, any, any>>(schema: TSchema, defaultValues?: any) {
+export function useZodForm<TSchema extends ZodTypeAny>(
+  schema: TSchema,
+  defaultValues?: unknown
+): UseFormReturn<any> {
   return useForm<any>({
     resolver: zodResolver(schema as any),
-    defaultValues,
-  }) as any;
+    defaultValues: defaultValues as any
+  });
 }

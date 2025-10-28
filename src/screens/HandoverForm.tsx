@@ -75,9 +75,10 @@ export default function HandoverForm({ navigation, route }: Props) {
   });
 
   useEffect(() => {
-    const current = form.getValues('patientId');
-    if (patientId && current !== patientId && !form.formState.isDirty) {
-      form.setValue("patientId", patientId, { shouldValidate: true, shouldDirty: true });
+    const current = form.getValues("patientId");
+    const isDirty = Boolean((form.formState as { isDirty?: boolean })?.isDirty);
+    if (patientIdFromParams && current !== patientIdFromParams && !isDirty) {
+      form.setValue("patientId", patientIdFromParams, { shouldValidate: true, shouldDirty: true });
     }
     const currentUnit = form.getValues('unitId');
     if (unitId && currentUnit !== unitId && !form.formState.isDirty) {
@@ -86,6 +87,10 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [form, patientId, unitId]);
 
   const { control, formState: { errors }, setValue, getValues } = form;
+
+  const { control } = form;
+  const formState = form.formState as { errors?: Record<string, any> };
+  const errors = formState?.errors ?? {};
 
   const parseNumericInput = (value: string) => {
     if (value === "") {
@@ -277,12 +282,145 @@ export default function HandoverForm({ navigation, route }: Props) {
       </View>
 
       <View style={styles.section}>
-        <AudioAttach
-          onAttach={async (uri) => {
-            const text = await transcribeAudio(uri);
-            setValue('evolution', `${getValues('evolution')}${text ? `\n${text}` : ''}`);
-          }}
+        <Text style={styles.h2}>Signos vitales</Text>
+
+        <Controller
+          control={control}
+          name="vitals.hr"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="Frecuencia cardíaca (/min)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
         />
+
+        <Controller
+          control={control}
+          name="vitals.rr"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="Frecuencia respiratoria (/min)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="vitals.temp"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="Temperatura (°C)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="vitals.spo2"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="SpO₂ (%)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="vitals.sbp"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="Tensión sistólica (mmHg)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="vitals.dbp"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="Tensión diastólica (mmHg)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="vitals.bgMgDl"
+          render={({ field, fieldState }) => (
+            <>
+              <TextInput
+                placeholder="Glucemia (mg/dL)"
+                keyboardType="numeric"
+                value={field.value?.toString() ?? ""}
+                onChangeText={(t) => field.onChange(parseNumericInput(t))}
+                style={[styles.input, fieldState.error && styles.inputError]}
+              />
+              {!!fieldState.error && <Text style={styles.error}>{fieldState.error.message}</Text>}
+            </>
+          )}
+        />
+
+        <View
+          testID="vitals-trend"
+          style={{
+            height: 140,
+            borderWidth: 1,
+            borderColor: "#E5E7EB",
+            borderRadius: 8,
+            marginTop: 8,
+            alignItems: "center",
+            justifyContent: "center"
+          }}
+        >
+          <Text>Trend chart placeholder</Text>
+        </View>
+      </View>
+
+      <View style={styles.buttonWrapper}>
+        <Button title="GUARDAR" onPress={onSubmit} />
       </View>
     </ScrollView>
   );
