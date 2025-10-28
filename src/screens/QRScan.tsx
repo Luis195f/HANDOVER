@@ -1,43 +1,106 @@
 // src/screens/QRScan.tsx
-import React, { useState } from 'react';
-import { Alert, Button, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, StyleSheet, Text, View } from 'react-native';
+import { BarCodeScanner, type BarCodeScannerResult } from 'expo-barcode-scanner';
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import type { RootStackParamList } from '@/src/navigation/RootNavigator';
+import { handleScanResult } from '@/src/screens/qrScan.utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
-export default function QRScan({ navigation, route }: Props) {
-  const [value, setValue] = useState('');
-  const returnTo = route.params?.returnTo ?? 'HandoverForm';
+export default function QRScan({ navigation }: Props) {
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [scanned, setScanned] = useState(false);
+  const isFocused = useIsFocused();
 
-  const onDone = (id: string) => {
-    const trimmed = id.trim();
-    if (!trimmed) {
-      Alert.alert('Escaneo', 'Ingresa o simula un ID de paciente válido.');
-      return;
+  useEffect(() => {
+    (async () => {
+      const { status } = await BarCodeScanner.requestPermissionsAsync();
+      setHasPermission(status === 'granted');
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setScanned(false);
     }
-    // Vuelve a la pantalla objetivo con el patientId
-    navigation.navigate(returnTo as any, { patientId: trimmed } as any);
-  };
+  }, [isFocused]);
+
+  const onBarCodeScanned = useCallback(
+    (result: BarCodeScannerResult) => {
+      if (scanned) {
+        return;
+      }
+
+      setScanned(true);
+
+      handleScanResult({
+        data: result.data,
+        navigate: (patientId) => {
+          navigation.navigate('PatientList', { patientId });
+        },
+        onUnrecognized: () => {
+          Alert.alert(
+            'QR no reconocido',
+            'No se pudo extraer un Patient ID válido. Intenta nuevamente.',
+          );
+          setScanned(false);
+        },
+      });
+    },
+    [navigation, scanned],
+  );
+
+  if (hasPermission === null) {
+    return (
+      <View style={styles.center}>
+        <Text>Solicitando permisos…</Text>
+      </View>
+    );
+  }
+
+  if (hasPermission === false) {
+    return (
+      <View style={styles.center}>
+        <Text>Sin permiso de cámara</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      <Text style={{ fontSize: 18, fontWeight: '600' }}>Escanear código (modo demo)</Text>
-      <Text style={{ color: '#666' }}>
-        Por ahora sin cámara: pega/escribe el ID del paciente y confirma. (Cámara se puede activar luego.)
-      </Text>
-
-      <TextInput
-        placeholder="ej: pat-001"
-        value={value}
-        onChangeText={setValue}
-        style={{ borderWidth: 1, borderColor: '#ccc', padding: 12, borderRadius: 8 }}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-
-      <Button title="Aceptar" onPress={() => onDone(value)} />
-      <Button title="Probar con pat-001" onPress={() => onDone('pat-001')} />
+    <View style={styles.container}>
+      {isFocused && (
+        <BarCodeScanner onBarCodeScanned={onBarCodeScanned} style={StyleSheet.absoluteFillObject} />
+      )}
+      <View style={styles.overlay}>
+        <Text style={styles.hint}>Apunta al QR/CB del paciente</Text>
+      </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  overlay: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  hint: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    color: 'white',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+

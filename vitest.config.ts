@@ -10,6 +10,7 @@ export default defineConfig({
       '**/__tests__/**/fhir-map.*.(spec|test).ts',
       '**/__tests__/**/sync.*.(spec|test).ts',
       'tests/patientlist-*.test.ts',
+      'tests/qr-scan.test.ts',
     ],
     exclude: [
       'src/screens/**',
