@@ -6,35 +6,28 @@ import { login, getSession, logout } from "@/src/security/auth";
 import type { Session } from "@/src/security/auth";
 
 export default function LoginScreen({ navigation }: any) {
-  // Todos los slugs de unidades disponibles en la app
   const ALL_UNITS = Object.keys(UNITS_BY_ID);
 
   const grantFullAccess = async () => {
-    // Sesión demo con acceso total – RBAC “abierto”
     await login({
       user: {
         id: "nurse-1",
         name: "Demo Nurse",
-        // redundante pero explícito: el usuario también las lleva
         units: ALL_UNITS,
         allowedUnits: ALL_UNITS,
       },
-      // y a nivel raíz de sesión también
       units: ALL_UNITS,
       allowedUnits: ALL_UNITS,
       token: "mock-token",
     });
-
-    // Ir directo al listado
     navigation.reset({ index: 0, routes: [{ name: "PatientList" }] });
   };
 
-  // Si hay sesión previa y no tiene todas las unidades, la “sube” automáticamente (DEV)
   useEffect(() => {
     (async () => {
       try {
         const s = (await getSession()) as Partial<Session> | null;
-        // 👇 Log que me pediste
+        // 👇 Log solicitado
         console.log("[dev] session", s?.units, s?.user?.allowedUnits);
 
         const allowed = new Set<string>([
@@ -43,13 +36,12 @@ export default function LoginScreen({ navigation }: any) {
           ...(s?.user?.units ?? []),
           ...(s?.user?.allowedUnits ?? []),
         ]);
-
         const missing = ALL_UNITS.some((u) => !allowed.has(u));
+
         if (__DEV__ && (missing || !s)) {
           await grantFullAccess();
         }
       } catch {
-        // En cualquier duda, abrimos todo en DEV
         if (__DEV__) await grantFullAccess();
       }
     })();
