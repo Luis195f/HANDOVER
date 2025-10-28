@@ -1,10 +1,8 @@
 // src/security/acl.ts
 //
 // RBAC por unidades con bypass seguro para DEV.
-// - Si EXPO_PUBLIC_ALLOW_ALL_UNITS=1 => no se bloquea ninguna unidad (demo).
-// - En caso contrario, se respeta la lista de unidades permitidas.
-//
-// Mantiene nombres y firma para no romper imports existentes.
+// Si EXPO_PUBLIC_ALLOW_ALL_UNITS=1 => se permite toda unidad (demo/local).
+// En caso contrario, se respeta RBAC real a partir de la sesión.
 
 import { toSlug } from "@/src/utils/taxonomy";
 import type { Session } from "@/src/security/auth";
@@ -18,19 +16,16 @@ export function hasUnitAccess(
   unitId?: string | null,
   session?: Partial<Session> | null
 ): boolean {
-  // Sin unidad concreta: no bloquees la UI.
-  if (!unitId) return true;
+  if (!unitId) return true;        // sin unidad concreta, no bloquees UI
+  if (ALLOW_ALL) return true;      // 🔓 bypass DEV
 
-  // Bypass explícito para demo/dev.
-  if (ALLOW_ALL) return true;
-
-  // RBAC real: normaliza y compara contra las unidades permitidas.
+  // RBAC real
   const normalized = toSlug(unitId);
   const allowed = allowedUnitsFrom(session);
   return allowed.has(normalized);
 }
 
-/** Variante que devuelve la unidad si es válida; si no, null (útil en guardas). */
+/** Devuelve la unidad si es válida; si no, null (útil en guardas). */
 export function ensureUnit<T extends string | null | undefined>(
   unitId: T,
   session?: Partial<Session> | null
@@ -39,6 +34,6 @@ export function ensureUnit<T extends string | null | undefined>(
   return null;
 }
 
-/** Alias histórico por si en algún lugar se usaba este nombre. */
+/** Alias histórico por compatibilidad si en algún sitio existía este nombre. */
 export const canAccessUnit = hasUnitAccess;
 
