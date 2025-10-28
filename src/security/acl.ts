@@ -1,59 +1,44 @@
 // src/security/acl.ts
-// Control de acceso por unidad (scope) con normalización consistente.
 //
-// - Normaliza lo que el usuario escribe (ej. "Cardiología") a un slug ("cardiologia").
-// - Compara contra user.allowedUnits del getSession() igualmente normalizados.
-// - Incluye un bypass de desarrollo si EXPO_PUBLIC_BYPASS_SCOPE=1.
+// RBAC por unidades con bypass seguro para DEV.
+// - Si EXPO_PUBLIC_ALLOW_ALL_UNITS=1 => no se bloquea ninguna unidad (demo).
+// - En caso contrario, se respeta la lista de unidades permitidas.
 //
-// Uso típico en tu handler de guardado:
-//   const unitId = normalizeUnitId(values.unitId || values.unitName);
-//   if (!hasUnitAccess(unitId)) { Alert.alert('Alert', 'No tienes acceso a esta unidad.'); return; }
+// Mantiene nombres y firma para no romper imports existentes.
 
-import { getSession } from './auth'; // Ajusta la ruta si tu archivo está en otra carpeta
-import { toSlug } from '@/src/utils/slug';
+import { toSlug } from "@/src/utils/taxonomy";
+import type { Session } from "@/src/security/auth";
+import { allowedUnitsFrom } from "@/src/security/auth";
 
-// Bypass opcional para desarrollo (ej. en simuladores)
-const BYPASS_SCOPE =
-  process.env.EXPO_PUBLIC_BYPASS_SCOPE === '1' ||
-  process.env.BYPASS_SCOPE === '1';
+const ALLOW_ALL =
+  (process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS ?? "").toString().trim() === "1";
 
-/** Normaliza un nombre/ID de unidad a slug estable (sin acentos, minúsculas, guiones). */
-export function normalizeUnitId(v?: string) {
-  return v ? toSlug(v) : undefined;
+/** ¿El usuario puede acceder a la unidad? (bypass si ALLOW_ALL) */
+export function hasUnitAccess(
+  unitId?: string | null,
+  session?: Partial<Session> | null
+): boolean {
+  // Sin unidad concreta: no bloquees la UI.
+  if (!unitId) return true;
+
+  // Bypass explícito para demo/dev.
+  if (ALLOW_ALL) return true;
+
+  // RBAC real: normaliza y compara contra las unidades permitidas.
+  const normalized = toSlug(unitId);
+  const allowed = allowedUnitsFrom(session);
+  return allowed.has(normalized);
 }
 
-/** Devuelve true si el usuario actual tiene acceso a la unidad indicada (tras normalizar). */
-export async function hasUnitAccess(unitInput?: string) {
-  const isDev =
-    typeof globalThis !== 'undefined' && typeof (globalThis as any).__DEV__ === 'boolean'
-      ? Boolean((globalThis as any).__DEV__)
-      : process.env.NODE_ENV !== 'production';
-  if (BYPASS_SCOPE && isDev) {
-    return true;
-  }
-
-  if (!unitInput) return false;
-
-  const session = await getSession();
-  const unitId = toSlug(unitInput);
-  const allowed = (session?.user?.allowedUnits ?? []).map(toSlug);
-
-  return allowed.includes(unitId);
+/** Variante que devuelve la unidad si es válida; si no, null (útil en guardas). */
+export function ensureUnit<T extends string | null | undefined>(
+  unitId: T,
+  session?: Partial<Session> | null
+): T | null {
+  if (unitId && hasUnitAccess(unitId, session)) return unitId;
+  return null;
 }
 
-/** Helper opcional: lanza error con códigos estándar si no hay acceso. */
-export async function assertUnitAccessOrThrow(unitInput?: string) {
-  const unitId = normalizeUnitId(unitInput);
-  if (!unitId) throw new Error('UNIT_MISSING');
-  if (!(await hasUnitAccess(unitId))) throw new Error('UNIT_FORBIDDEN');
-  return unitId;
-}
+/** Alias histórico por si en algún lugar se usaba este nombre. */
+export const canAccessUnit = hasUnitAccess;
 
-/** Traduce errores de assertUnitAccessOrThrow a mensajes de UI. */
-export function aclErrorToMessage(err: unknown) {
-  if (err instanceof Error) {
-    if (err.message === 'UNIT_FORBIDDEN') return 'No tienes acceso a esta unidad.';
-    if (err.message === 'UNIT_MISSING') return 'Unidad no especificada.';
-  }
-  return 'No autorizado.';
-}
