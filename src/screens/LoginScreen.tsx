@@ -3,6 +3,7 @@ import React, { useEffect } from "react";
 import { View, Text, Pressable } from "react-native";
 import { UNITS_BY_ID } from "@/src/config/units";
 import { login, getSession, logout } from "@/src/security/auth";
+import type { Session } from "@/src/security/auth";
 
 export default function LoginScreen({ navigation }: any) {
   // Todos los slugs de unidades disponibles en la app
@@ -32,22 +33,27 @@ export default function LoginScreen({ navigation }: any) {
   useEffect(() => {
     (async () => {
       try {
-        const s: any = (await (getSession?.() ?? Promise.resolve(null))) || null;
+        const s = (await getSession()) as Partial<Session> | null;
+        // 👇 Log que me pediste
+        console.log("[dev] session", s?.units, s?.user?.allowedUnits);
+
         const allowed = new Set<string>([
           ...(s?.units ?? []),
           ...(s?.allowedUnits ?? []),
           ...(s?.user?.units ?? []),
           ...(s?.user?.allowedUnits ?? []),
         ]);
+
         const missing = ALL_UNITS.some((u) => !allowed.has(u));
         if (__DEV__ && (missing || !s)) {
           await grantFullAccess();
         }
       } catch {
-        // En cualquier duda, abrimos todo
-        if (__DEV__) grantFullAccess();
+        // En cualquier duda, abrimos todo en DEV
+        if (__DEV__) await grantFullAccess();
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
