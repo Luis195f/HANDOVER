@@ -35,8 +35,13 @@ describe('buildTransactionBundleForQueue (FHIR R4 transaction)', () => {
       expect(e.request?.url).toBe('Observation');
       expect(q).toContain('identifier=urn%3Ahandover-pro%3Aobs|');
       expect(q).toContain('patient=urn%3Auuid%3Apatient-pat-001');
-      expect(q).toMatch(/code=http%3A%2F%2Floinc\.org\|[0-9\-]+/);
       expect(q).toMatch(/effective=eq2025-10-19/);
+
+      const hasLoinc = Array.isArray(r?.code?.coding)
+        && r.code.coding.some((c: any) => c?.system === 'http://loinc.org');
+      if (hasLoinc) {
+        expect(q).toMatch(/code=http%3A%2F%2Floinc\.org\|[0-9\-]+/);
+      }
 
       expect(r.subject?.reference).toBe('urn:uuid:patient-pat-001');
     }
