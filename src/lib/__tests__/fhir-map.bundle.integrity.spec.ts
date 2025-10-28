@@ -45,7 +45,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const sections = comp?.section ?? [];
     const titles = sections.map((s: any) => s.title).sort();
     expect(titles).toEqual([
-      'Attachments','Laboratory','Medications','Oxygen therapy','Vital signs'
+      'Attachments','Medications','Oxygen therapy','Vitals'
     ].sort());
 
     // 2) Todas las referencias de las secciones existen en el Bundle
@@ -116,7 +116,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const comp = compositionOf(bundle);
     const sections = comp?.section ?? [];
     const titles = sections.map((s: any) => s.title).sort();
-    expect(titles).toEqual(['Vital signs']);
+    expect(titles).toEqual(['Vitals']);
 
     const vsPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
     expect(vsPanel).toBeTruthy();

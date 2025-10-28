@@ -75,8 +75,10 @@ export type HandoverValues = {
   patientId: string;
   encounterId?: string;
   notes?: string;
+  recordedAt?: string;
   close?: {
     audioUri?: string;
+    audioTitle?: string;
     // otros campos de cierre si existen
   };
   vitals?: {
@@ -95,10 +97,17 @@ export type HandoverValues = {
     o2Device?: string;          // p.ej. "Nasal cannula", "Non-rebreather mask"
     o2FlowLpm?: number;         // L/min
     fio2?: number;              // 0..1 o 21..100 (se normaliza a %)
+    o2Start?: string;
+    o2StartedAt?: string;
+    o2Since?: string;
+    insertedAt?: string;
+    recordedAt?: string;
   };
   // Opcional: medicaciones administradas durante el turno
   meds?: MedicationInput[];
+  devices?: DeviceInput[];
   attachments?: AttachmentInput[];
+  audioUri?: string;
 };
 
 // attachments: description opcional (lo piden los tests)
@@ -154,6 +163,22 @@ export type MedicationInput = {
   unit?: string;                // "mg", "mL", etc.
   route?: string;               // "PO", "IV", etc.
   when?: string;                // ISO timestamp; si falta, se usa now
+  note?: string;
+};
+
+export type DeviceCodeInput = { system?: string; code?: string; display?: string } | string;
+
+export type DeviceInput = {
+  id?: string;
+  code?: DeviceCodeInput;
+  type?: DeviceCodeInput;
+  name?: string;
+  text?: string;
+  status?: string;
+  insertedAt?: string;
+  startedAt?: string;
+  whenUsedStart?: string;
+  bodySite?: string;
   note?: string;
 };
 
@@ -451,7 +476,8 @@ export const __test__ = {
   ACVPU_LOINC,
   ACVPU_SNOMED,
   SNOMED: {
-    O2_ADMINISTRATION: "243120004" // Administration of oxygen (procedure)
+    O2_ADMINISTRATION: "243120004", // Administration of oxygen (procedure)
+    OXYGEN_THERAPY: "371906007"
   } as const
 } as const;
 
@@ -489,6 +515,15 @@ type Observation = {
 type ObsEx = Observation & {
   meta?: { profile?: string[] };
   hasMember?: Array<{ reference: string }>;
+};
+
+type Device = {
+  resourceType: "Device";
+  id?: string;
+  status?: "active" | "inactive" | "entered-in-error" | "unknown";
+  type?: FhirCodeableConcept;
+  identifier?: Array<{ system?: string; value?: string }>;
+  deviceName?: Array<{ name: string; type: string }>;
 };
 
 type MedicationStatement = {
@@ -537,8 +572,12 @@ type DeviceUseStatement = {
   status: "active" | "completed" | "entered-in-error" | "intended" | "stopped" | "on-hold" | "unknown";
   subject: FhirRef;
   encounter?: FhirRef;
+  device?: FhirRef;
+  whenUsed?: { start?: string; end?: string };
+  recordedOn?: string;
   timingDateTime?: string;
   reasonCode?: FhirCodeableConcept[];
+  bodySiteCodeableConcept?: FhirCodeableConcept;
   note?: Array<{ text: string }>;
 };
 
@@ -579,9 +618,6 @@ const resolveNow = (value?: string | Date | (() => string | Date)) => {
   }
   return value instanceof Date ? value.toISOString() : value;
 };
-const newId = (pfx = "id") =>
-  `${pfx}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
-
 const refPatient = (patientId: string): FhirRef => ({ reference: `Patient/${patientId}` });
 const refEncounter = (encounterId?: string): FhirRef | undefined =>
   encounterId ? { reference: `Encounter/${encounterId}` } : undefined;
@@ -833,6 +869,7 @@ export function mapObservationVitals(
 
   const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
   if (hasO2) {
+    const oxygenComponents: Observation['component'] = [];
     if (isNum(vitals.fio2)) {
       const fi = normalizeFiO2ToPct(vitals.fio2);
       observations.push(
@@ -847,6 +884,15 @@ export function mapObservationVitals(
           profile: [PROFILE_VITAL_SIGNS],
         })
       );
+      oxygenComponents.push({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.FIO2,
+          "Inhaled oxygen concentration",
+          "FiO2",
+        ),
+        valueQuantity: qty(fi, __test__.UNITS.PERCENT, "%"),
+      });
     }
     if (isNum(vitals.o2FlowLpm)) {
       observations.push(
@@ -861,7 +907,29 @@ export function mapObservationVitals(
           profile: [PROFILE_VITAL_SIGNS],
         })
       );
+      oxygenComponents.push({
+        code: codeCC(
+          LOINC_SYSTEM,
+          __test__.LOINC.O2_FLOW,
+          "Oxygen flow rate",
+          "Oxygen flow rate",
+        ),
+        valueQuantity: qty(vitals.o2FlowLpm, "L/min"),
+      });
     }
+
+    observations.push(
+      buildObservation({
+        code: codeCC(
+          SNOMED_SYSTEM,
+          __test__.SNOMED.OXYGEN_THERAPY,
+          "Oxygen therapy (procedure)",
+          "Oxygen therapy",
+        ),
+        component: oxygenComponents.length ? oxygenComponents : undefined,
+        profile: [PROFILE_VITAL_SIGNS],
+      })
+    );
   }
 
   return observations;
@@ -888,6 +956,16 @@ type NormalizedMedication = {
   doseQuantity?: { value: number; unit?: string; system?: string; code?: string };
   when?: string;
   note?: string;
+};
+
+type NormalizedDevice = {
+  concept: FhirCodeableConcept;
+  status: DeviceUseStatement["status"];
+  start?: string;
+  bodySite?: string;
+  note?: string;
+  identifier?: string;
+  name?: string;
 };
 
 function normalizeMedicationInputs(meds?: MedicationInput[]): NormalizedMedication[] {
@@ -940,12 +1018,10 @@ function normalizeMedicationInputs(meds?: MedicationInput[]): NormalizedMedicati
       ? { value: doseNumber, unit, system: uom, code: unit }
       : undefined;
 
-    const dosageTextParts = [
-      raw.dose !== undefined ? String(raw.dose).trim() : undefined,
-      unit,
-      route,
-    ].filter(Boolean);
-    const dosageText = dosageTextParts.join(" ") || undefined;
+    const doseText = raw.dose !== undefined
+      ? [String(raw.dose).trim(), unit].filter(Boolean).join(" ")
+      : undefined;
+    const dosageText = [doseText, route].filter(Boolean).join(" • ") || undefined;
 
     normalized.push({
       concept,
@@ -960,18 +1036,72 @@ function normalizeMedicationInputs(meds?: MedicationInput[]): NormalizedMedicati
   return normalized;
 }
 
-function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInput[]): MedicationStatement[] {
+function normalizeDeviceInputs(devices?: DeviceInput[]): NormalizedDevice[] {
+  if (!Array.isArray(devices)) return [];
+
+  const normalized: NormalizedDevice[] = [];
+
+  for (const raw of devices) {
+    if (!raw || typeof raw !== "object") continue;
+
+    const typeInput = (raw.type ?? raw.code) as DeviceCodeInput | undefined;
+    let concept: FhirCodeableConcept | undefined;
+
+    if (typeof typeInput === "string") {
+      const text = trimToUndefined(typeInput);
+      if (text) {
+        concept = { text };
+      }
+    } else if (typeInput && typeof typeInput === "object") {
+      const system = trimToUndefined(typeInput.system);
+      const code = trimToUndefined(typeInput.code);
+      const display = trimToUndefined(typeInput.display);
+      const coding = [
+        {
+          ...(system ? { system } : {}),
+          ...(code ? { code } : {}),
+          ...(display ? { display } : {}),
+        },
+      ].filter((entry) => Object.keys(entry).length > 0);
+
+      if (coding.length > 0) {
+        concept = { coding, text: display ?? trimToUndefined(raw.text) ?? trimToUndefined(raw.name) };
+      }
+    }
+
+    if (!concept) {
+      const text = trimToUndefined(raw.text) ?? trimToUndefined(raw.name);
+      if (text) {
+        concept = { text };
+      }
+    }
+
+    if (!concept) continue;
+
+    const status = normalizeDeviceUseStatus(raw.status);
+    const start = trimToUndefined(raw.whenUsedStart ?? raw.startedAt ?? raw.insertedAt);
+    const bodySite = trimToUndefined(raw.bodySite);
+    const note = trimToUndefined(raw.note);
+    const identifier = trimToUndefined(raw.id);
+    const name = trimToUndefined(raw.name) ?? concept.text;
+
+    normalized.push({ concept, status, start, bodySite, note, identifier, name });
+  }
+
+  return normalized;
+}
+
+function mapMedicationStatements(values: HandoverValues, medsArg: MedicationInput[] | undefined, now: string): MedicationStatement[] {
   const meds = normalizeMedicationInputs(medsArg ?? values.meds);
   if (meds.length === 0) return [];
 
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
-  const tFallback = nowISO();
+  const tFallback = now;
 
   return meds.map<MedicationStatement>((m, i) => {
     const ms: MedicationStatement = {
       resourceType: "MedicationStatement",
-      id: newId("ms"),
       status: "completed",
       subject: subj,
       encounter: enc,
@@ -994,9 +1124,41 @@ function mapMedicationStatements(values: HandoverValues, medsArg?: MedicationInp
 // Oxigenoterapia → DeviceUseStatement (opcional)
 /////////////////////////////////////////
 
+function mapOxygenDevice(values: HandoverValues): Device | undefined {
+  const vitals = normalizeVitalsInput(values.vitals, { mode: 'lenient' });
+  const hasO2 = Boolean(vitals.o2) || isNum(vitals.fio2) || isNum(vitals.o2FlowLpm) || !!vitals.o2Device;
+  if (!hasO2) return undefined;
+
+  const display = trimToUndefined(values.vitals?.o2Device) ?? "Oxygen delivery device";
+  const status = vitals.o2 ? "active" : "inactive";
+
+  const device: Device = {
+    resourceType: "Device",
+    status,
+    type: { text: display },
+    deviceName: display ? [{ name: display, type: "user-friendly-name" }] : undefined,
+  };
+
+  return device;
+}
+
+function resolveOxygenStart(values: HandoverValues, fallback: string): string | undefined {
+  const vitalsRaw = values.vitals ?? {};
+  return (
+    trimToUndefined((vitalsRaw as any).o2Start) ??
+    trimToUndefined((vitalsRaw as any).o2StartedAt) ??
+    trimToUndefined((vitalsRaw as any).o2Since) ??
+    trimToUndefined((vitalsRaw as any).insertedAt) ??
+    trimToUndefined((vitalsRaw as any).recordedAt) ??
+    trimToUndefined(values.recordedAt) ??
+    fallback
+  );
+}
+
 function mapOxygenProcedure(
   values: HandoverValues,
   opts: BuildOptions = {},
+  deviceReference?: string,
 ): DeviceUseStatement[] {
   // optsMerged: única fusión por función; no duplicar (previene bundling error)
   const optsMerged = { ...DEFAULT_OPTS, ...(opts ?? {}) };
@@ -1007,6 +1169,7 @@ function mapOxygenProcedure(
   const subj = refPatient(values.patientId);
   const enc = refEncounter(values.encounterId);
   const when = resolveNow(optsMerged.now) ?? nowISO();
+  const start = resolveOxygenStart(values, when);
 
   const note = buildO2Note(vitals);
 
@@ -1017,13 +1180,17 @@ function mapOxygenProcedure(
     "Oxygen support"
   );
 
+  const status = vitals.o2 ? "active" : "completed";
+
   return [
     {
       resourceType: "DeviceUseStatement",
-      id: newId("dus-o2"),
-      status: "completed",
+      status,
       subject: subj,
       encounter: enc,
+      device: deviceReference ? { reference: deviceReference } : undefined,
+      whenUsed: start ? { start } : undefined,
+      recordedOn: when,
       timingDateTime: when,
       reasonCode: [reason],
       note
@@ -1051,9 +1218,8 @@ function mapDocumentReference(
   if (!attachments || attachments.length === 0) return [];
   const dr: DocumentReference = {
     resourceType: "DocumentReference",
-    id: newId("docref"),
     status: "current",
-    type: { text: "Handover attachments" },
+    type: { text: "Nursing handover attachments" },
     subject: refPatient(values.patientId),
     date: now ?? nowISO(),
     content: attachments.map(a => ({
@@ -1087,14 +1253,19 @@ export function buildHandoverBundle(
   if (!values.patientId) {
     return {
       resourceType: 'Bundle',
-      id: newId('bundle'),
+      id: 'bundle-empty',
       type: 'transaction',
       entry: [],
     };
   }
 
   const patientId = values.patientId;
-  const now = resolveNow(optsMerged.now) ?? nowISO();
+  const resolvedNow = resolveNow(optsMerged.now);
+  const now =
+    resolvedNow ??
+    trimToUndefined(values.recordedAt) ??
+    trimToUndefined(values.vitals?.recordedAt) ??
+    '1970-01-01T00:00:00Z';
 
   const attachmentsFromValues = Array.isArray(values.attachments) ? values.attachments : [];
   const attachmentsFromInput = isWrapped && Array.isArray((input as HandoverInput).attachments)
@@ -1105,6 +1276,16 @@ export function buildHandoverBundle(
   const mergedAttachments = [...attachmentsFromValues, ...attachmentsFromInput, ...attachmentsFromOptions].filter(
     (att): att is AttachmentInput => Boolean(att),
   );
+
+  const audioUri = trimToUndefined(values.audioUri ?? values.close?.audioUri);
+  const audioTitle = trimToUndefined(values.close?.audioTitle);
+  if (audioUri) {
+    mergedAttachments.unshift({
+      url: audioUri,
+      contentType: 'audio/m4a',
+      description: audioTitle ?? 'Nursing handover audio note',
+    });
+  }
   const attachments = mergedAttachments.length > 0
     ? AttachmentArraySchema.parse(mergedAttachments)
     : undefined;
@@ -1114,6 +1295,7 @@ export function buildHandoverBundle(
     : values.meds;
   const normalizedMeds = normalizeMedicationInputs(medsInput);
   const normalizedVitals = normalizeVitalsInput(values.vitals);
+  const normalizedDevices = normalizeDeviceInputs(values.devices);
   const profileExtras = normalizeProfileOptions(optsMerged.profileUrls);
 
   const observationOptions: BuildOptions = {
@@ -1128,9 +1310,10 @@ export function buildHandoverBundle(
   const entries: Array<{
     fullUrl: string;
     resource: any;
-    request: { method: string; url: string; ifNoneExist?: string };
+    request: { method: string; url: string };
   }> = [];
 
+  const sectionOrder = ['Vitals', 'Medications', 'Devices', 'Oxygen therapy', 'Attachments'];
   const sections = new Map<string, { title: string; entry: Array<{ reference: string }> }>();
   const addSectionEntry = (title: string, reference: string) => {
     if (!reference) return;
@@ -1151,31 +1334,47 @@ export function buildHandoverBundle(
   const acvpuCode = __test__.CODES?.ACVPU?.code ?? __test__.LOINC?.ACVPU;
 
   const addEntry = (
-    resource: any,
     resourceType: string,
-    fullUrl: string,
-    requestUrl: string,
-    ifNoneExist?: string,
-  ) => {
-    setResourceId(resource, fullUrl);
+    resource: any,
+    key: unknown,
+    sectionTitle?: string,
+    options: { prepend?: boolean } = {},
+  ): string => {
+    const id = resolveResourceId(resourceType, resource, patientId, key, now);
+    resource.id = id;
     applyExtraProfiles(resource, resourceType, profileExtras);
-    entries.push({
+    const fullUrl = `urn:uuid:${id}`;
+    const entry = {
       fullUrl,
       resource,
       request: {
-        method: 'POST',
-        url: requestUrl,
-        ...(ifNoneExist ? { ifNoneExist } : {}),
+        method: 'PUT',
+        url: `${resourceType}/${id}`,
       },
-    });
+    };
+    if (options.prepend) {
+      entries.unshift(entry);
+    } else {
+      entries.push(entry);
+    }
+    if (sectionTitle) addSectionEntry(sectionTitle, fullUrl);
+    return fullUrl;
   };
 
   for (const obs of observationResources) {
     const loincCode = getObservationLoincCode(obs);
-    const fullUrl = buildObservationFullUrl(patientId, obs, loincCode, now);
-    const isLab = isLabObservation(obs);
-    addEntry(obs, 'Observation', fullUrl, 'Observation');
-    addSectionEntry(isLab ? 'Laboratory' : 'Vital signs', fullUrl);
+    const hasOxygenTherapy = (obs.code?.coding ?? []).some(
+      (coding) => coding.system === SNOMED_SYSTEM && coding.code === __test__.SNOMED.OXYGEN_THERAPY,
+    );
+    const sectionTitle = hasOxygenTherapy ? 'Oxygen therapy' : 'Vitals';
+    const key = {
+      code: loincCode ?? obs.code,
+      effective: obs.effectiveDateTime ?? now,
+      value: obs.valueQuantity,
+      component: obs.component,
+      note: obs.note,
+    };
+    const fullUrl = addEntry('Observation', obs, key, sectionTitle);
 
     if (loincCode) {
       observationInfo.set(loincCode, { resource: obs, fullUrl });
@@ -1262,9 +1461,11 @@ export function buildHandoverBundle(
         if (members.length) panel.hasMember = members;
       }
 
-      const panelFullUrl = `urn:uuid:obs-panel-${__test__.CODES.PANEL_VS.code}-${patientId}`;
-      addEntry(panel, 'Observation', panelFullUrl, 'Observation');
-      addSectionEntry('Vital signs', panelFullUrl);
+      addEntry('Observation', panel, {
+        code: __test__.CODES.PANEL_VS.code,
+        effective: now,
+        component: components,
+      }, 'Vitals');
     }
   }
 
@@ -1308,31 +1509,86 @@ export function buildHandoverBundle(
         if (members.length) bpPanel.hasMember = members;
       }
 
-      const bpFullUrl = `urn:uuid:obs-panel-${__test__.CODES.PANEL_BP.code}-${patientId}`;
-      addEntry(bpPanel, 'Observation', bpFullUrl, 'Observation');
-      addSectionEntry('Vital signs', bpFullUrl);
+      addEntry('Observation', bpPanel, {
+        code: __test__.CODES.PANEL_BP.code,
+        effective: now,
+        component: bpComponents,
+      }, 'Vitals');
     }
   }
 
-  const oxygenResources = mapOxygenProcedure(values, { now });
-  oxygenResources.forEach((resource, index) => {
-    const fullUrl = `urn:uuid:oxygen-${patientId}-${index}`;
-    addEntry(resource, 'DeviceUseStatement', fullUrl, 'DeviceUseStatement');
-    addSectionEntry('Oxygen therapy', fullUrl);
+  const oxygenDevice = mapOxygenDevice(values);
+  const oxygenDeviceFullUrl = oxygenDevice
+    ? addEntry('Device', oxygenDevice, {
+        type: oxygenDevice.type,
+        status: oxygenDevice.status,
+        name: oxygenDevice.deviceName,
+      }, 'Oxygen therapy')
+    : undefined;
+
+  const oxygenResources = mapOxygenProcedure(values, { now }, oxygenDeviceFullUrl);
+  oxygenResources.forEach((resource) => {
+    addEntry('DeviceUseStatement', resource, {
+      device: resource.device?.reference ?? oxygenDeviceFullUrl,
+      status: resource.status,
+      whenUsed: resource.whenUsed,
+      recordedOn: resource.recordedOn,
+    }, 'Oxygen therapy');
   });
 
-  const medicationResources = mapMedicationStatements(values, medsInput);
+  normalizedDevices.forEach((device) => {
+    const deviceResource: Device = {
+      resourceType: 'Device',
+      status: device.status === 'active' ? 'active' : 'inactive',
+      type: device.concept,
+      deviceName: device.name ? [{ name: device.name, type: 'user-friendly-name' }] : undefined,
+      identifier: device.identifier ? [{ value: device.identifier }] : undefined,
+    };
+
+    const deviceFullUrl = addEntry('Device', deviceResource, {
+      concept: device.concept,
+      identifier: device.identifier,
+      name: device.name,
+    });
+
+    const deviceUse: DeviceUseStatement = {
+      resourceType: 'DeviceUseStatement',
+      status: device.status,
+      subject: refPatient(patientId),
+      encounter: refEncounter(values.encounterId),
+      device: { reference: deviceFullUrl, display: device.name ?? device.concept.text },
+      whenUsed: device.start ? { start: device.start } : undefined,
+      recordedOn: now,
+      bodySiteCodeableConcept: device.bodySite ? { text: device.bodySite } : undefined,
+      note: device.note ? [{ text: device.note }] : undefined,
+    };
+
+    addEntry('DeviceUseStatement', deviceUse, {
+      device: deviceFullUrl,
+      status: device.status,
+      whenUsed: deviceUse.whenUsed,
+      recordedOn: deviceUse.recordedOn,
+      bodySite: device.bodySite,
+      note: device.note,
+    }, 'Devices');
+  });
+
+  const medicationResources = mapMedicationStatements(values, medsInput, now);
   medicationResources.forEach((resource, index) => {
-    const fullUrl = `urn:uuid:med-${patientId}-${index}`;
-    addEntry(resource, 'MedicationStatement', fullUrl, 'MedicationStatement');
-    addSectionEntry('Medications', fullUrl);
+    addEntry('MedicationStatement', resource, {
+      concept: resource.medicationCodeableConcept,
+      when: resource.effectiveDateTime,
+      dosage: resource.dosage,
+    }, 'Medications');
   });
 
   const documentRefs = mapDocumentReference(values, attachments, now);
   documentRefs.forEach((resource, index) => {
-    const fullUrl = `urn:uuid:doc-${patientId}-${index}`;
-    addEntry(resource, 'DocumentReference', fullUrl, 'DocumentReference');
-    addSectionEntry('Attachments', fullUrl);
+    addEntry('DocumentReference', resource, {
+      content: resource.content,
+      date: resource.date,
+      description: resource.description,
+    }, 'Attachments');
   });
 
   const identifierSeed = {
@@ -1341,39 +1597,47 @@ export function buildHandoverBundle(
     now,
     vitals: normalizedVitals,
     meds: normalizedMeds,
+    devices: normalizedDevices,
     attachments: attachments ?? [],
   };
   const identifierValue = deterministicHash(identifierSeed);
 
+  const compositionSections = sectionOrder
+    .map((title) => sections.get(title))
+    .filter((section): section is { title: string; entry: Array<{ reference: string }> } =>
+      Boolean(section && section.entry.length),
+    );
+
   const composition: Composition = {
     resourceType: 'Composition',
     status: 'final',
-    type: { text: 'Handover summary' },
+    type: { text: 'Nursing handover' },
     subject: refPatient(patientId),
     encounter: refEncounter(values.encounterId),
     date: now,
-    title: 'Handover summary',
+    title: 'Nursing handover',
     identifier: { system: 'urn:uuid', value: identifierValue },
-    section: Array.from(sections.values()),
+    section: compositionSections,
   };
 
-  const compositionFullUrl = `urn:uuid:composition-${identifierValue}`;
-  setResourceId(composition, compositionFullUrl);
+  const compositionId = deterministicResourceId('Composition', patientId, identifierValue);
+  composition.id = compositionId;
   applyExtraProfiles(composition, 'Composition', profileExtras);
+
+  const compositionFullUrl = `urn:uuid:${compositionId}`;
 
   entries.unshift({
     fullUrl: compositionFullUrl,
     resource: composition,
     request: {
-      method: 'POST',
-      url: 'Composition',
-      ifNoneExist: `identifier=urn:uuid|${identifierValue}`,
+      method: 'PUT',
+      url: `Composition/${compositionId}`,
     },
   });
 
   return {
     resourceType: 'Bundle',
-    id: newId('bundle'),
+    id: deterministicResourceId('Bundle', patientId, identifierValue),
     type: 'transaction',
     entry: entries,
   };
@@ -1396,6 +1660,31 @@ function normalizeFiO2ToPct(fio2: number): number {
   // Acepta 0..1 (multiplica x100) o 21..100 (dejar igual); clamp 21..100 por seguridad
   const val = fio2 <= 1 ? fio2 * 100 : fio2;
   return Math.min(100, Math.max(21, Math.round(val)));
+}
+
+function normalizeDeviceUseStatus(status: unknown): DeviceUseStatement["status"] {
+  if (typeof status === "string") {
+    const normalized = status.trim().toLowerCase();
+    switch (normalized) {
+      case "active":
+      case "in-progress":
+        return "active";
+      case "intended":
+        return "intended";
+      case "stopped":
+        return "stopped";
+      case "on-hold":
+        return "on-hold";
+      case "unknown":
+        return "unknown";
+      case "completed":
+      case "inactive":
+      case "removed":
+      case "finished":
+        return "completed";
+    }
+  }
+  return "completed";
 }
 
 function trimToUndefined(value: unknown): string | undefined {
@@ -1461,36 +1750,6 @@ function getObservationLoincCode(obs: Observation): string | undefined {
   return loinc?.code;
 }
 
-function isLabObservation(obs: Observation): boolean {
-  return (obs.category ?? []).some((cat) =>
-    (cat.coding ?? []).some((c) => c.system === OBS_CAT_SYSTEM && c.code === OBS_CAT_LAB)
-  );
-}
-
-function buildObservationFullUrl(
-  patientId: string,
-  obs: Observation,
-  loincCode: string | undefined,
-  fallbackNow: string,
-): string {
-  const acvpuCode = __test__.CODES?.ACVPU?.code ?? __test__.LOINC?.ACVPU;
-  if (acvpuCode && loincCode === acvpuCode) {
-    const date = (obs.effectiveDateTime ?? fallbackNow).slice(0, 10);
-    return `urn:uuid:obs-acvpu-${patientId}-${date}`;
-  }
-  if (loincCode) {
-    return `urn:uuid:obs-${loincCode}-${patientId}`;
-  }
-  return `urn:uuid:${newId('obs')}`;
-}
-
-function setResourceId(resource: any, fullUrl: string) {
-  if (!resource || typeof resource !== 'object') return;
-  if (typeof fullUrl === 'string' && fullUrl.startsWith('urn:uuid:')) {
-    resource.id = fullUrl.slice('urn:uuid:'.length);
-  }
-}
-
 function stableStringify(value: any): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value);
@@ -1508,5 +1767,58 @@ function deterministicHash(value: any): string {
   const hash = createHash('sha256');
   hash.update(stableStringify(value));
   return hash.digest('hex');
+}
+
+function deterministicResourceId(resourceType: string, patientId: string, key: unknown): string {
+  const hash = deterministicHash({ patientId, resourceType, key });
+  return `${resourceType.toLowerCase()}-${hash.slice(0, 24)}`;
+}
+
+function resolveResourceId(
+  resourceType: string,
+  resource: any,
+  patientId: string,
+  key: unknown,
+  now: string,
+): string {
+  if (resourceType === 'Observation') {
+    const loincCode = getObservationLoincCode(resource);
+    const acvpuCode = __test__.CODES?.ACVPU?.code ?? __test__.LOINC?.ACVPU;
+    if (acvpuCode && loincCode === acvpuCode) {
+      const effective = (resource.effectiveDateTime ?? now).slice(0, 10);
+      return `obs-acvpu-${patientId}-${effective}`;
+    }
+    if (loincCode) {
+      return `obs-${loincCode}-${patientId}`;
+    }
+    const oxygenCoding = (resource.code?.coding ?? []).find(
+      (coding: FhirCoding) => coding.system === SNOMED_SYSTEM && coding.code === __test__.SNOMED.OXYGEN_THERAPY,
+    );
+    if (oxygenCoding) {
+      return `obs-oxygen-${patientId}`;
+    }
+  }
+
+  if (resourceType === 'MedicationStatement') {
+    return `med-${deterministicHash({ patientId, key }).slice(0, 24)}`;
+  }
+
+  if (resourceType === 'Device') {
+    return `device-${deterministicHash({ patientId, key }).slice(0, 24)}`;
+  }
+
+  if (resourceType === 'DeviceUseStatement') {
+    return `deviceuse-${deterministicHash({ patientId, key }).slice(0, 24)}`;
+  }
+
+  if (resourceType === 'DocumentReference') {
+    return `doc-${deterministicHash({ patientId, key }).slice(0, 24)}`;
+  }
+
+  if (resourceType === 'Composition') {
+    return `composition-${deterministicHash({ patientId, key }).slice(0, 24)}`;
+  }
+
+  return deterministicResourceId(resourceType, patientId, key);
 }
 
