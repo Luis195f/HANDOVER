@@ -4,7 +4,7 @@ import {
   View, Text, FlatList, RefreshControl,
   Pressable, StyleSheet, Alert, useColorScheme, Switch
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import { readQueue } from '@/src/lib/offlineQueue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 
@@ -33,6 +33,7 @@ export default function SyncCenter() {
   const scheme = useColorScheme();
   const C = scheme === 'dark' ? D_COLORS : L_COLORS;
 
+  const isFocused = useIsFocused();
   const [items, setItems] = React.useState<QueueItemMeta[]>([]);
   const [refreshing, setRefreshing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -43,7 +44,7 @@ export default function SyncCenter() {
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [lastRun, setLastRun] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async () => {
+  const refresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
       const queue = await readQueue();
@@ -59,7 +60,14 @@ export default function SyncCenter() {
     }
   }, []);
 
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  React.useEffect(() => {
+    if (isFocused) {
+      void refresh();
+    }
+  }, [isFocused, refresh]);
 
   const doFlush = React.useCallback(async () => {
     const opts = resolveSyncOpts();
@@ -70,7 +78,7 @@ export default function SyncCenter() {
     setBusy(true);
     try {
       const res = await flushQueueNow(opts);
-      await load();
+      await refresh();
       setLastRun(new Date().toLocaleTimeString());
       return res;
     } catch (e: any) {
@@ -79,23 +87,30 @@ export default function SyncCenter() {
     } finally {
       setBusy(false);
     }
-  }, [load]);
+  }, [refresh]);
 
   // Inicia/detiene interval cuando la pantalla está enfocada
-  useFocusEffect(
-    React.useCallback(() => {
-      if (autoRetry) {
-        intervalRef.current = setInterval(() => {
-          // flush coalescente en sync/index.ts; es seguro llamarlo seguido
-          void doFlush();
-        }, Math.max(5, Math.min(60, intervalSec)) * 1000);
-      }
-      return () => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
+  React.useEffect(() => {
+    if (!isFocused || !autoRetry) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
         intervalRef.current = null;
-      };
-    }, [autoRetry, intervalSec, doFlush])
-  );
+      }
+      return;
+    }
+
+    intervalRef.current = setInterval(() => {
+      // flush coalescente en sync/index.ts; es seguro llamarlo seguido
+      void doFlush();
+    }, Math.max(5, Math.min(60, intervalSec)) * 1000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [autoRetry, intervalSec, doFlush, isFocused]);
 
   const decInterval = () => setIntervalSec((s) => Math.max(5, s - 5));
   const incInterval = () => setIntervalSec((s) => Math.min(60, s + 5));
@@ -155,7 +170,7 @@ export default function SyncCenter() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={load}
+            onRefresh={refresh}
             tintColor={C.textSecondary}
             colors={[C.accent]}
           />

@@ -1,79 +1,43 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+// src/screens/QRScan.tsx
+import React, { useState } from 'react';
+import { Alert, Button, Text, TextInput, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-
 import type { RootStackParamList } from '@/src/navigation/RootNavigator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
 export default function QRScan({ navigation, route }: Props) {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [scanned, setScanned] = useState(false);
+  const [value, setValue] = useState('');
+  const returnTo = route.params?.returnTo ?? 'HandoverForm';
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
-  }, []);
-
-  const extractPatientId = useCallback((payload: string): string | null => {
-    try {
-      const obj = JSON.parse(payload);
-      if (obj?.resourceType === 'Patient' && obj.id) return String(obj.id);
-      const ref = obj?.patient?.reference ?? obj?.subject?.reference;
-      const matchedRef = typeof ref === 'string' ? ref.match(/Patient\/([\w\-.]+)/) : null;
-      if (matchedRef) return matchedRef[1];
-    } catch (error) {
-      // Ignored: payload is not JSON or parsing failed.
-    }
-
-    const match = payload.match(/Patient\/([\w\-.]+)/);
-    if (match) return match[1];
-
-    if (/^[A-Za-z0-9.\-]+$/.test(payload)) return payload;
-    return null;
-  }, []);
-
-  const onScan = ({ data }: { data: string }) => {
-    if (scanned) return;
-    setScanned(true);
-    const patientId = extractPatientId(data);
-    if (!patientId) {
-      Alert.alert('QR no válido', 'No se pudo obtener un Patient.id');
-      setScanned(false);
+  const onDone = (id: string) => {
+    const trimmed = id.trim();
+    if (!trimmed) {
+      Alert.alert('Escaneo', 'Ingresa o simula un ID de paciente válido.');
       return;
     }
-    const target = route.params?.returnTo ?? 'HandoverForm';
-    navigation.navigate(target, { patientId });
+    // Vuelve a la pantalla objetivo con el patientId
+    navigation.navigate(returnTo as any, { patientId: trimmed } as any);
   };
 
-  if (hasPermission === null) {
-    return (
-      <View style={styles.center}>
-        <Text>Solicitando permiso…</Text>
-      </View>
-    );
-  }
-
-  if (hasPermission === false) {
-    return (
-      <View style={styles.center}>
-        <Text>Permiso de cámara denegado</Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
-      <BarCodeScanner style={styles.scanner} onBarCodeScanned={scanned ? undefined : onScan} />
+    <View style={{ flex: 1, padding: 16, gap: 12 }}>
+      <Text style={{ fontSize: 18, fontWeight: '600' }}>Escanear código (modo demo)</Text>
+      <Text style={{ color: '#666' }}>
+        Por ahora sin cámara: pega/escribe el ID del paciente y confirma. (Cámara se puede activar luego.)
+      </Text>
+
+      <TextInput
+        placeholder="ej: pat-001"
+        value={value}
+        onChangeText={setValue}
+        style={{ borderWidth: 1, borderColor: '#ccc', padding: 12, borderRadius: 8 }}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      <Button title="Aceptar" onPress={() => onDone(value)} />
+      <Button title="Probar con pat-001" onPress={() => onDone('pat-001')} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scanner: { flex: 1 },
-});

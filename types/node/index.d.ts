@@ -132,6 +132,7 @@ declare module 'react-native' {
   export const TextInput: ComponentType<any>;
   export const ActivityIndicator: ComponentType<any>;
   export const RefreshControl: ComponentType<any>;
+  export const Modal: ComponentType<any>;
   export const StatusBar: ComponentType<any>;
   export const Button: ComponentType<any>;
   export const Switch: ComponentType<any>;
@@ -178,6 +179,7 @@ declare module '@react-navigation/native' {
   export const NavigationContainer: ComponentType<{ children?: any; ref?: any }>;
   export function useNavigation<T = any>(): T;
   export function useRoute<T = any>(): T;
+  export function useIsFocused(): boolean;
   export type RouteProp<P, K extends keyof P> = { key: string; name: K; params: P[K] };
 }
 
@@ -216,6 +218,7 @@ declare module '@hookform/resolvers/zod' {
 declare module 'zod' {
   export const z: any;
   export type ZodTypeAny = any;
+  export type ZodType<TOutput = any, TDef = any, TInput = any> = any;
   export namespace z {
     type infer<T> = any;
     type output<T> = any;
@@ -241,16 +244,49 @@ declare module 'expo-*' {
   export = ExpoModule;
 }
 
+declare module 'expo-av/build/Audio/Recording.types' {
+  export type RecordingOptions = any;
+}
+
+declare module 'expo-av/build/Audio/RecordingConstants' {
+  import type { RecordingOptions } from 'expo-av/build/Audio/Recording.types';
+
+  export const RecordingOptionsPresets: Record<string, RecordingOptions> & {
+    HIGH_QUALITY?: RecordingOptions;
+    LOW_QUALITY?: RecordingOptions;
+  };
+}
+
 declare module '@react-native-community/*' {
   const Module: any;
   export = Module;
 }
 
+declare module 'expo-av' {
+  export namespace Audio {
+    type RecordingOptions = any;
+    const RecordingOptionsPresets: Record<string, RecordingOptions> & {
+      HIGH_QUALITY?: RecordingOptions;
+      LOW_QUALITY?: RecordingOptions;
+    };
+  }
+  export const Audio: {
+    RecordingOptions: Audio.RecordingOptions;
+    RecordingOptionsPresets: typeof Audio.RecordingOptionsPresets;
+  };
+}
+
 declare module 'expo-audio' {
+  export type RecordingOptions = any;
+  export const RecordingPresets: Record<string, RecordingOptions> & {
+    HIGH_QUALITY?: RecordingOptions;
+    LOW_QUALITY?: RecordingOptions;
+  };
   export const AudioModule: any;
   export const setAudioModeAsync: (...args: any[]) => Promise<void>;
-  export function useAudioRecorder(options: any): any;
+  export function useAudioRecorder(options: RecordingOptions): any;
   export function useAudioRecorderState(recorder: any): any;
+  export const Audio: any;
 }
 
 declare module 'expo-camera' {

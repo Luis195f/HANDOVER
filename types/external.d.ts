@@ -46,6 +46,7 @@ declare module 'react-native' {
   export const ActivityIndicator: any;
   export const RefreshControl: any;
   export const Alert: any;
+  export const Modal: any;
   export const Switch: any;
   export const StyleSheet: any;
   export const SafeAreaView: any;
@@ -75,6 +76,7 @@ declare module '@react-navigation/native' {
   export const NavigationContainer: React.FC<{ ref?: any; children?: React.ReactNode }>;
   export function useNavigation<T = any>(): T;
   export function useFocusEffect(effect: () => void): void;
+  export function useIsFocused(): boolean;
 }
 
 declare module '@react-navigation/native-stack' {
@@ -163,12 +165,34 @@ declare module 'expo-file-system' {
   export function readAsStringAsync(uri: string, options?: { encoding?: string }): Promise<string>;
 }
 
+declare module 'expo-av' {
+  export namespace Audio {
+    type RecordingOptions = any;
+    const RecordingOptionsPresets: Record<string, RecordingOptions> & {
+      HIGH_QUALITY?: RecordingOptions;
+      LOW_QUALITY?: RecordingOptions;
+    };
+  }
+  export const Audio: {
+    RecordingOptions: Audio.RecordingOptions;
+    RecordingOptionsPresets: typeof Audio.RecordingOptionsPresets;
+  };
+}
+
 declare module 'expo-audio' {
   export type RecordingOptions = any;
-  export const AudioModule: { requestRecordingPermissionsAsync(): Promise<{ granted: boolean }> };
+  export const RecordingPresets: Record<string, RecordingOptions> & {
+    HIGH_QUALITY?: RecordingOptions;
+    LOW_QUALITY?: RecordingOptions;
+  };
+  export const AudioModule: {
+    AudioRecorder: new (...args: any[]) => any;
+    requestRecordingPermissionsAsync(): Promise<{ granted: boolean }>;
+  };
   export function useAudioRecorder(options: RecordingOptions): any;
   export function useAudioRecorderState(recorder: any): any;
   export function setAudioModeAsync(config: any): Promise<void>;
+  export const Audio: any;
 }
 
 declare module 'expo-camera' {

@@ -6,7 +6,9 @@ import { Controller } from "react-hook-form";
 import { useZodForm } from "@/src/validation/form-hooks";
 import { zHandover } from "@/src/validation/schemas";
 import { buildHandoverBundle } from "@/src/lib/fhir-map";
-import type { RootStackParamList } from "@/src/navigation/RootNavigator";
+import type { RootStackParamList } from "@/src/navigation/types";
+import AudioAttach from "@/src/components/AudioAttach";
+import { transcribeAudio } from "@/src/lib/stt";
 
 type Props = NativeStackScreenProps<RootStackParamList, "HandoverForm">;
 
@@ -58,15 +60,18 @@ const styles = StyleSheet.create({
 });
 
 export default function HandoverForm({ navigation, route }: Props) {
-  const patientIdFromParams = route.params?.patientId;
+  const { patientId, unitId, specialtyId } = route.params;
 
   const form = useZodForm(zHandover, {
-    unitId: "",
+    unitId: unitId ?? "",
     start: new Date().toISOString(),
     end: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-    patientId: patientIdFromParams ?? "",
+    patientId: patientId ?? "",
     staffIn: "",
-    staffOut: ""
+    staffOut: "",
+    dxMedical: "",
+    dxNursing: "",
+    evolution: ""
   });
 
   useEffect(() => {
@@ -75,7 +80,13 @@ export default function HandoverForm({ navigation, route }: Props) {
     if (patientIdFromParams && current !== patientIdFromParams && !isDirty) {
       form.setValue("patientId", patientIdFromParams, { shouldValidate: true, shouldDirty: true });
     }
-  }, [form, patientIdFromParams]);
+    const currentUnit = form.getValues('unitId');
+    if (unitId && currentUnit !== unitId && !form.formState.isDirty) {
+      form.setValue("unitId", unitId, { shouldValidate: true, shouldDirty: true });
+    }
+  }, [form, patientId, unitId]);
+
+  const { control, formState: { errors }, setValue, getValues } = form;
 
   const { control } = form;
   const formState = form.formState as { errors?: Record<string, any> };
@@ -91,7 +102,21 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
-    const bundle = buildHandoverBundle(values as any);
+    const splitCsv = (s?: string) =>
+      (s ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+    const dxMed = splitCsv(values.dxMedical);
+    const dxNur = splitCsv(values.dxNursing);
+
+    const bundle = buildHandoverBundle({
+      ...values,
+      specialtyId,
+      dxMedical: dxMed,
+      dxNursing: dxNur
+    } as any);
     console.log("BUNDLE_READY", JSON.stringify(bundle, null, 2));
     Alert.alert("Entrega guardada (stub) y validada por Zod.");
   });
@@ -188,21 +213,71 @@ export default function HandoverForm({ navigation, route }: Props) {
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
                   style={styles.input}
-                  placeholder="patientId"
+                  placeholder="Paciente"
                   onBlur={onBlur}
                   onChangeText={onChange}
-                  value={value ?? ''}
-                  autoCapitalize="none"
+                  value={value ?? ""}
                 />
               )}
             />
-            {errors.patientId && <Text style={styles.error}>{errors.patientId.message as string}</Text>}
           </View>
           <View style={styles.spacer} />
-          <Button
-            title="Escanear"
-            onPress={() => navigation.navigate('QRScan', { returnTo: 'HandoverForm' })}
-          />
+          <Button title="Escanear" onPress={() => navigation.navigate('QRScan', { returnTo: 'HandoverForm' })} />
+        </View>
+        {errors.patientId && <Text style={styles.error}>{errors.patientId.message as string}</Text>}
+
+        <Text style={styles.h2}>Diagnósticos</Text>
+        <Text style={styles.label}>Médicos (separados por coma)</Text>
+        <Controller
+          control={control}
+          name="dxMedical"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={[styles.input, errors.dxMedical ? styles.inputError : undefined]}
+              placeholder="Diagnósticos médicos"
+              onBlur={onBlur}
+              onChangeText={onChange}
+              value={value ?? ""}
+            />
+          )}
+        />
+        {errors.dxMedical && <Text style={styles.error}>{errors.dxMedical.message as string}</Text>}
+
+        <Text style={styles.label}>Enfermería (separados por coma)</Text>
+        <Controller
+          control={control}
+          name="dxNursing"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={[styles.input, errors.dxNursing ? styles.inputError : undefined]}
+              placeholder="Diagnósticos de enfermería"
+              onBlur={onBlur}
+              onChangeText={onChange}
+              value={value ?? ""}
+            />
+          )}
+        />
+        {errors.dxNursing && <Text style={styles.error}>{errors.dxNursing.message as string}</Text>}
+
+        <Text style={styles.h2}>Evolución</Text>
+        <Controller
+          control={control}
+          name="evolution"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
+              multiline
+              placeholder="Notas de evolución"
+              onBlur={onBlur}
+              onChangeText={onChange}
+              value={value ?? ""}
+            />
+          )}
+        />
+        {errors.evolution && <Text style={styles.error}>{errors.evolution.message as string}</Text>}
+
+        <View style={styles.buttonWrapper}>
+          <Button title="Guardar" onPress={onSubmit} />
         </View>
       </View>
 

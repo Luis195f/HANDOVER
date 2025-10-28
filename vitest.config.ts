@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   test: {
     environment: 'node',
+    globals: true,
     include: [
       '**/__tests__/**/fhir-map.*.(spec|test).ts',
       '**/__tests__/**/sync.*.(spec|test).ts',
+      'tests/patientlist-*.test.ts',
     ],
     exclude: [
       'src/screens/**',
