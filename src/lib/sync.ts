@@ -13,16 +13,14 @@ import { postBundleSmart } from './fhir-client';
 import { z } from 'zod';
 
 export type QueueItem = {
-  id: string;
+  patientId: string;
+  bundle: { resourceType: 'Bundle'; type: 'transaction'; entry?: any[] };
+  attempts: number;
+  nextAttemptAt: string;
   createdAt: string;
-  // payload: encolamos el bundle ya construido + metadatos
-  payload: {
-    patientId: string;
-    // opcionalmente, dejamos el HandoverValues crudo para depurar
-    values?: HandoverValues;
-    bundle: any;
-    authorId?: string;
-  };
+  updatedAt: string;
+  values?: HandoverValues;
+  authorId?: string;
 };
 
 export type SenderResult = Response | { ok: boolean; status: number };
@@ -33,7 +31,7 @@ export type FlushCompatOptions = {
   sender?: SendFn;
   /**
    * Si se indica, intenta limpiar el borrador de este patientId cuando
-   * el envío del Bundle termine en 201 Created / 200 OK o 412 Already exists.
+   * el envío del Bundle termine en 201 Created / 200 OK o 409/412 Already exists.
    */
   onSent?: (input: { patientId: string }) => Promise<void> | void;
   /**
@@ -77,12 +75,6 @@ async function safeGetItemAsync(key: string) {
   return null;
 }
 
-const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isUuidV4(id: string) {
-  return UUID_V4_RE.test(id);
-}
-
 function sleep(ms?: number) {
   return new Promise((r) => setTimeout(r, ms ?? 0));
 }
@@ -91,12 +83,88 @@ const QUEUE_KEY = '@handover/tx-queue';
 const PATIENT_IDENTIFIER_SYSTEM = 'urn:handover-pro:ids';
 const OBS_IDENTIFIER_SYSTEM = 'urn:handover-pro:obs';
 
+const BASE_BACKOFF_MS = 1_000;
+const MAX_BACKOFF_MS = 60_000;
+
+function asNumber(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function computeNextAttempt(attempts: number, now = Date.now()) {
+  const exp = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** Math.max(0, attempts - 1));
+  const jitter = Math.floor(Math.random() * BASE_BACKOFF_MS);
+  return new Date(now + exp + jitter).toISOString();
+}
+
+function ensureTransactionBundle(
+  bundle: any,
+): { resourceType: 'Bundle'; type: 'transaction'; entry?: any[] } {
+  if (!bundle || typeof bundle !== 'object') {
+    return { resourceType: 'Bundle', type: 'transaction', entry: [] };
+  }
+  const normalized: any = Array.isArray(bundle.entry)
+    ? { ...bundle, resourceType: 'Bundle', type: 'transaction', entry: bundle.entry }
+    : { ...bundle, resourceType: 'Bundle', type: 'transaction', entry: [] };
+  normalized.resourceType = 'Bundle';
+  normalized.type = 'transaction';
+  if (!Array.isArray(normalized.entry)) {
+    normalized.entry = [];
+  }
+  return normalized;
+}
+
+function migrateLegacyQueueItem(raw: any): QueueItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  if ('patientId' in raw && 'bundle' in raw) {
+    const patientId = typeof raw.patientId === 'string' ? raw.patientId : 'unknown';
+    const attempts = asNumber(raw.attempts, 0);
+    const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
+    const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt;
+    const nextAttemptAt =
+      typeof raw.nextAttemptAt === 'string' ? raw.nextAttemptAt : new Date().toISOString();
+    return {
+      patientId,
+      bundle: ensureTransactionBundle(raw.bundle),
+      attempts: attempts >= 0 ? attempts : 0,
+      nextAttemptAt,
+      createdAt,
+      updatedAt,
+      values: raw.values,
+      authorId: raw.authorId,
+    };
+  }
+
+  if ('payload' in raw && typeof raw.payload === 'object' && raw.payload) {
+    const payload = raw.payload as any;
+    const patientId = typeof payload.patientId === 'string' ? payload.patientId : 'unknown';
+    const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
+    return {
+      patientId,
+      bundle: ensureTransactionBundle(payload.bundle),
+      attempts: 0,
+      nextAttemptAt: new Date().toISOString(),
+      createdAt,
+      updatedAt: createdAt,
+      values: payload.values,
+      authorId: payload.authorId,
+    };
+  }
+
+  return null;
+}
+
 async function loadQueue(): Promise<QueueItem[]> {
   const s = await safeGetItemAsync(QUEUE_KEY);
   if (!s) return [];
   try {
     const arr = JSON.parse(s);
-    return Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) return [];
+    const migrated = arr
+      .map((raw) => migrateLegacyQueueItem(raw))
+      .filter((it): it is QueueItem => !!it);
+    return migrated;
   } catch {
     return [];
   }
@@ -110,7 +178,6 @@ async function saveQueue(items: QueueItem[]) {
  * Encola un bundle ya construido (útil para reintentos fuera del form)
  */
 type EnqueueBundleInput = {
-  id?: string;
   patientId: string;
   bundle: any;
   values?: HandoverValues;
@@ -158,21 +225,31 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
       }
     : input;
 
-  const id = normalized.id && isUuidV4(normalized.id) ? normalized.id : crypto.randomUUID();
-  const it: QueueItem = {
-    id,
-    createdAt: new Date().toISOString(),
-    payload: {
-      patientId: normalized.patientId ?? 'unknown',
-      bundle: normalized.bundle,
-      values: normalized.values,
-      authorId: normalized.authorId,
-    },
+  const patientId = normalized.patientId ?? 'unknown';
+  const nowIso = new Date().toISOString();
+  const queue = await loadQueue();
+  const bundle = ensureTransactionBundle(normalized.bundle);
+
+  const existingIndex = queue.findIndex((it) => it.patientId === patientId);
+  const updated: QueueItem = {
+    patientId,
+    bundle,
+    attempts: 0,
+    nextAttemptAt: nowIso,
+    createdAt: existingIndex >= 0 ? queue[existingIndex].createdAt : nowIso,
+    updatedAt: nowIso,
+    values: normalized.values,
+    authorId: normalized.authorId,
   };
-  const q = await loadQueue();
-  q.push(it);
-  await saveQueue(q);
-  return it;
+
+  if (existingIndex >= 0) {
+    queue[existingIndex] = updated;
+  } else {
+    queue.push(updated);
+  }
+
+  await saveQueue(queue);
+  return updated;
 }
 
 /**
@@ -218,49 +295,82 @@ export async function enqueueTxFromValues(
 /**
  * Envía la cola con un "sender" (por defecto usa postBundleSmart)
  * - 201/200: éxito → elimina el elemento
- * - 412: duplicado → considera éxito lógico y elimina el elemento
+ * - 409/412: conflicto (ya existe) → considera entregado y elimina el elemento
  * - Otros: deja el elemento para reintento y sigue con el siguiente
  */
 export async function flushQueue(opts?: FlushCompatOptions) {
   const sender: SendFn =
     opts?.sender ??
     (async (tx) => {
-      const { bundle } = tx.payload ?? {};
+      const { bundle } = tx;
       return postBundleSmart(bundle);
     });
 
-  let queue = await loadQueue();
-  if (queue.length === 0) return { total: 0, sent: 0, skipped: 0 };
+  const initialQueue = await loadQueue();
+  if (initialQueue.length === 0) {
+    return { total: 0, sent: 0, skipped: 0 };
+  }
 
   let sent = 0;
   let skipped = 0;
+  let queue = initialQueue;
 
-  for (const tx of queue) {
+  const sorted = queue
+    .slice()
+    .sort(
+      (a, b) => new Date(a.nextAttemptAt).getTime() - new Date(b.nextAttemptAt).getTime(),
+    );
+
+  for (const candidate of sorted) {
+    const now = Date.now();
+    queue = await loadQueue();
+    const current = queue.find((it) => it.patientId === candidate.patientId);
+    if (!current) continue;
+
+    if (new Date(current.nextAttemptAt).getTime() > now) {
+      continue;
+    }
+
     try {
-      const res = await sender(tx);
-      const status = 'status' in res ? res.status : (res as Response)?.status;
+      const res = await sender(current);
+      const status =
+        typeof (res as any)?.status === 'number'
+          ? (res as any).status
+          : res instanceof Response
+            ? res.status
+            : 0;
+      const ok =
+        (res as any)?.ok === true ||
+        (res instanceof Response ? res.ok : status >= 200 && status < 300);
 
-      if (res.ok || status === 201 || status === 200) {
-        // éxito
+      if (ok || status === 200 || status === 201 || status === 409 || status === 412) {
+        queue = queue.filter((it) => it.patientId !== current.patientId);
+        await saveQueue(queue);
         sent++;
-        // limpia de la cola
-        queue = (await loadQueue()).filter((it) => it.id !== tx.id);
-        await saveQueue(queue);
-        // callback opcional para limpiar borradores
-        const patientId = tx.payload?.patientId ?? 'unknown';
-        await opts?.onSent?.({ patientId });
-      } else if (status === 412) {
-        // duplicado, lo consideramos éxito para no bloquear
-        skipped++;
-        queue = (await loadQueue()).filter((it) => it.id !== tx.id);
-        await saveQueue(queue);
-        const patientId = tx.payload?.patientId ?? 'unknown';
-        await opts?.onSent?.({ patientId });
+        await opts?.onSent?.({ patientId: current.patientId });
       } else {
-        // otro error → se mantiene en cola
+        const attempts = (current.attempts ?? 0) + 1;
+        const nextAttemptAt = computeNextAttempt(attempts);
+        const updated: QueueItem = {
+          ...current,
+          attempts,
+          nextAttemptAt,
+          updatedAt: new Date().toISOString(),
+        };
+        queue = queue.map((it) => (it.patientId === current.patientId ? updated : it));
+        await saveQueue(queue);
       }
     } catch {
-      // error de red o del sender → no eliminar, dejar para reintento
+      const attempts = (current.attempts ?? 0) + 1;
+      const nextAttemptAt = computeNextAttempt(attempts);
+      const updated: QueueItem = {
+        ...current,
+        attempts,
+        nextAttemptAt,
+        updatedAt: new Date().toISOString(),
+      };
+      queue = queue.map((it) => (it.patientId === current.patientId ? updated : it));
+      await saveQueue(queue);
     }
 
     if (opts?.delayMs && opts.delayMs > 0) {
@@ -268,7 +378,7 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     }
   }
 
-  return { total: sent + skipped + queue.length, sent, skipped };
+  return { total: initialQueue.length, sent, skipped };
 }
 
 /**

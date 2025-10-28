@@ -36,7 +36,7 @@ describe('cola offline + flush(sender)', () => {
     expect(clearDraft).toHaveBeenCalledWith('pat-001');
   });
 
-  it('duplicado 412 → skip y clearDraft llamado', async () => {
+  it('conflicto 409 → tratado como entregado y clearDraft llamado', async () => {
     const bundle = buildTransactionBundleForQueue(input, { now: NOW });
     await enqueueBundle(bundle);
 
@@ -44,7 +44,7 @@ describe('cola offline + flush(sender)', () => {
 
     const sender = async () => ({
       ok: false,
-      status: 412,
+      status: 409,
       body: {},
     });
 
