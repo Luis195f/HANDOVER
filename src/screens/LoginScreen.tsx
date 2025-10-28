@@ -1,96 +1,40 @@
 // src/screens/LoginScreen.tsx
-import React, { useEffect } from "react";
-import { View, Text, Pressable } from "react-native";
-import { UNITS_BY_ID } from "@/src/config/units";
-import { login, getSession, logout } from "@/src/security/auth";
-import type { Session } from "@/src/security/auth";
+import React from 'react';
+import { View, Text, Pressable } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { login, getSession } from '@/src/security/auth';
+import { UNITS_BY_ID } from '@/src/config/units';
 
-export default function LoginScreen({ navigation }: any) {
-  const ALL_UNITS = Object.keys(UNITS_BY_ID);
+export default function LoginScreen() {
+  const navigation = useNavigation<any>();
 
-  const grantFullAccess = async () => {
+  const onPress = async () => {
+    const ALL_UNITS = Object.keys(UNITS_BY_ID); // slugs válidos
     await login({
-      user: {
-        id: "nurse-1",
-        name: "Demo Nurse",
-        units: ALL_UNITS,
-        allowedUnits: ALL_UNITS,
-      },
-      units: ALL_UNITS,
-      allowedUnits: ALL_UNITS,
-      token: "mock-token",
+      user: { id: 'nurse-1', name: 'Demo Nurse', allowedUnits: ALL_UNITS },
+      units: ALL_UNITS, // acceso total para demo
+      token: 'mock-token',
     });
-    navigation.reset({ index: 0, routes: [{ name: "PatientList" }] });
+
+    const s = await getSession();
+    console.log('[dev] session', s?.units, s?.user?.allowedUnits);
+    (globalThis as any).__NURSEOS_SESSION_CACHE = s;
+
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'PatientList' }],
+    });
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const s = (await getSession()) as Partial<Session> | null;
-        // 👇 Log solicitado
-        console.log("[dev] session", s?.units, s?.user?.allowedUnits);
-
-        const allowed = new Set<string>([
-          ...(s?.units ?? []),
-          ...(s?.allowedUnits ?? []),
-          ...(s?.user?.units ?? []),
-          ...(s?.user?.allowedUnits ?? []),
-        ]);
-        const missing = ALL_UNITS.some((u) => !allowed.has(u));
-
-        if (__DEV__ && (missing || !s)) {
-          await grantFullAccess();
-        }
-      } catch {
-        if (__DEV__) await grantFullAccess();
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
-    <View style={{ flex: 1, padding: 16, gap: 12, justifyContent: "center" }}>
-      <Text style={{ fontSize: 22, fontWeight: "700", marginBottom: 6 }}>
-        Handover · Demo
-      </Text>
-      <Text style={{ opacity: 0.7, marginBottom: 12 }}>
-        Acceso total a todas las unidades para pruebas.
-      </Text>
-
+    <View style={{ flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ fontSize: 20, fontWeight: '600', marginBottom: 12 }}>Handover Pro</Text>
       <Pressable
-        onPress={grantFullAccess}
-        style={{
-          backgroundColor: "#1e88e5",
-          paddingVertical: 14,
-          borderRadius: 12,
-          alignItems: "center",
-        }}
+        onPress={onPress}
+        style={{ backgroundColor: '#1677ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
       >
-        <Text style={{ color: "white", fontWeight: "700" }}>
-          Entrar (todas las unidades)
-        </Text>
+        <Text style={{ color: 'white', fontWeight: '600' }}>Entrar (demo)</Text>
       </Pressable>
-
-      {__DEV__ && (
-        <Pressable
-          onPress={async () => {
-            try {
-              await logout?.();
-            } catch {}
-            await grantFullAccess();
-          }}
-          style={{
-            marginTop: 8,
-            paddingVertical: 12,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: "#d0d0d0",
-            alignItems: "center",
-          }}
-        >
-          <Text>Resetear permisos (DEV)</Text>
-        </Pressable>
-      )}
     </View>
   );
 }

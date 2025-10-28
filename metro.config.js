@@ -11,3 +11,4 @@ config.resolver.extraNodeModules = {
 };
 
 module.exports = config;
+module.exports = getDefaultConfig(__dirname);
