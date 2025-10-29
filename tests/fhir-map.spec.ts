@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   buildHandoverBundle,
@@ -50,6 +51,171 @@ const baseValues: HandoverValues = {
     title: 'SBAR summary',
   },
 };
+
+const isoUtcString = () =>
+  z.string().refine((value) => value.endsWith('Z'), {
+    message: 'timestamp must be normalized to UTC (ending with Z)',
+  });
+
+const referenceSchema = z.object({
+  reference: z.string().min(1),
+  type: z.string().optional(),
+  display: z.string().optional(),
+});
+
+const quantitySchema = z.object({
+  value: z.number(),
+  system: z.string().optional(),
+  unit: z.string().optional(),
+  code: z.string().optional(),
+});
+
+const observationSchema = z.object({
+  resourceType: z.literal('Observation'),
+  status: z.literal('final'),
+  meta: z.object({ profile: z.array(z.string()).min(1) }),
+  category: z
+    .array(
+      z.object({
+        coding: z.array(z.object({ system: z.string(), code: z.string() })).min(1),
+      }),
+    )
+    .min(1),
+  code: z.object({ coding: z.array(z.object({ system: z.string(), code: z.string() })).min(1) }),
+  subject: referenceSchema,
+  encounter: referenceSchema.optional(),
+  effectiveDateTime: isoUtcString(),
+  issued: isoUtcString(),
+  valueQuantity: quantitySchema.optional(),
+  component: z
+    .array(
+      z.object({
+        code: z.object({ coding: z.array(z.object({ system: z.string(), code: z.string() })).min(1) }),
+        valueQuantity: quantitySchema.optional(),
+      }),
+    )
+    .optional(),
+});
+
+const medicationStatementSchema = z.object({
+  resourceType: z.literal('MedicationStatement'),
+  status: z.enum(['active', 'completed', 'intended']),
+  medicationCodeableConcept: z.object({
+    coding: z.array(z.object({ system: z.string().optional(), code: z.string().optional(), display: z.string().optional() })),
+    text: z.string().optional(),
+  }),
+  subject: referenceSchema,
+  encounter: referenceSchema.optional(),
+  effectivePeriod: z
+    .object({
+      start: isoUtcString(),
+      end: isoUtcString().optional(),
+    })
+    .optional(),
+  dateAsserted: isoUtcString(),
+  note: z.array(z.object({ text: z.string() })).optional(),
+});
+
+const procedureSchema = z.object({
+  resourceType: z.literal('Procedure'),
+  status: z.enum(['in-progress', 'completed']),
+  code: z.object({ coding: z.array(z.object({ system: z.string(), code: z.string() })).min(1) }),
+  subject: referenceSchema,
+  encounter: referenceSchema.optional(),
+  performedDateTime: isoUtcString().optional(),
+  performedPeriod: z
+    .object({
+      start: isoUtcString(),
+      end: isoUtcString().optional(),
+    })
+    .optional(),
+});
+
+const deviceUseStatementSchema = z.object({
+  resourceType: z.literal('DeviceUseStatement'),
+  status: z.enum(['active', 'completed']),
+  subject: referenceSchema,
+  encounter: referenceSchema.optional(),
+  device: referenceSchema,
+  timingPeriod: z
+    .object({
+      start: isoUtcString(),
+      end: isoUtcString().optional(),
+    })
+    .optional(),
+});
+
+const documentReferenceSchema = z.object({
+  resourceType: z.literal('DocumentReference'),
+  status: z.literal('current'),
+  subject: referenceSchema,
+  encounter: referenceSchema.optional(),
+  author: z.array(referenceSchema).min(1),
+  date: isoUtcString(),
+  content: z
+    .array(
+      z.object({
+        attachment: z.object({
+          contentType: z.string().min(1),
+          url: z.string().optional(),
+          data: z.string().optional(),
+          size: z.number().int().positive().optional(),
+          hash: z.string().optional(),
+          title: z.string().optional(),
+        }),
+      }),
+    )
+    .min(1),
+});
+
+const compositionSchema = z.object({
+  resourceType: z.literal('Composition'),
+  status: z.enum(['final', 'amended']),
+  type: z.object({ coding: z.array(z.object({ system: z.string(), code: z.string() })).min(1) }),
+  subject: referenceSchema,
+  encounter: referenceSchema.optional(),
+  date: isoUtcString(),
+  author: z.array(referenceSchema).min(1),
+  title: z.string().min(1),
+  section: z
+    .array(
+      z.object({
+        title: z.string().optional(),
+        entry: z.array(referenceSchema).optional(),
+      }),
+    )
+    .optional(),
+});
+
+const resourceValidators = {
+  Observation: observationSchema,
+  MedicationStatement: medicationStatementSchema,
+  Procedure: procedureSchema,
+  DeviceUseStatement: deviceUseStatementSchema,
+  DocumentReference: documentReferenceSchema,
+  Composition: compositionSchema,
+} as const;
+
+function collectReferenceStrings(resource: unknown): string[] {
+  const refs: string[] = [];
+  const stack = [resource];
+  while (stack.length) {
+    const current = stack.pop();
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    if (current && typeof current === 'object') {
+      if ('reference' in current && typeof (current as any).reference === 'string') {
+        refs.push((current as any).reference);
+      }
+      for (const value of Object.values(current)) {
+        stack.push(value);
+      }
+    }
+  }
+  return refs;
+}
 
 describe('mapObservationVitals', () => {
   it('creates individual observations with correct codings and UTC timestamps', () => {
@@ -122,6 +288,43 @@ describe('buildHandoverBundle', () => {
     });
   });
 
+  it('validates every generated resource against simplified FHIR schemas', () => {
+    const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
+
+    const typeCounts = new Map<string, number>();
+    bundle.entry.forEach((entry) => {
+      typeCounts.set(entry.resource.resourceType, (typeCounts.get(entry.resource.resourceType) ?? 0) + 1);
+      const validator = resourceValidators[
+        entry.resource.resourceType as keyof typeof resourceValidators
+      ];
+      expect(validator, `missing validator for ${entry.resource.resourceType}`).toBeDefined();
+      validator.parse(entry.resource as never);
+      expect(entry.fullUrl).toMatch(/^urn:uuid:[0-9a-f]{32}$/);
+      expect(entry.request).toEqual({ method: 'POST', url: entry.resource.resourceType });
+    });
+
+    expect(typeCounts.get('Observation')).toBeGreaterThanOrEqual(1);
+    expect(typeCounts.get('MedicationStatement')).toBeGreaterThanOrEqual(1);
+    expect(typeCounts.get('Procedure')).toBeGreaterThanOrEqual(1);
+    expect(typeCounts.get('DeviceUseStatement')).toBeGreaterThanOrEqual(1);
+    expect(typeCounts.get('DocumentReference')).toBe(1);
+    expect(typeCounts.get('Composition')).toBe(1);
+  });
+
+  it('resolves all internal references to bundle entries', () => {
+    const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
+    const fullUrlSet = new Set(bundle.entry.map((entry) => entry.fullUrl));
+
+    bundle.entry.forEach((entry) => {
+      const references = collectReferenceStrings(entry.resource);
+      references
+        .filter((reference) => reference.startsWith('urn:uuid:'))
+        .forEach((reference) => {
+          expect(fullUrlSet.has(reference)).toBe(true);
+        });
+    });
+  });
+
   it('produces deterministic fullUrls for repeated builds', () => {
     const first = buildHandoverBundle(baseValues, { now: () => NOW });
     const second = buildHandoverBundle(baseValues, { now: () => NOW });
@@ -129,5 +332,8 @@ describe('buildHandoverBundle', () => {
     const firstUrls = first.entry.map((entry) => entry.fullUrl);
     const secondUrls = second.entry.map((entry) => entry.fullUrl);
     expect(secondUrls).toEqual(firstUrls);
+
+    const combinedUrls = [...first.entry, ...second.entry].map((entry) => entry.fullUrl);
+    expect(new Set(combinedUrls).size).toBe(first.entry.length);
   });
 });

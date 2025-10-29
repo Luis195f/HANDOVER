@@ -3,35 +3,9 @@ import { z } from 'zod';
 
 import { CATEGORY, LOINC, SNOMED } from './codes';
 
-export const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
-export const resolveOptions = (options?: Partial<typeof DEFAULT_OPTS>) =>
+const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
+const resolveOptions = (options?: Partial<typeof DEFAULT_OPTS>) =>
   ({ ...DEFAULT_OPTS, ...options }) as typeof DEFAULT_OPTS;
-
-function ensureIsoDate(value: string | Date): string {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error('Invalid date value provided to options.now');
-  }
-  return date.toISOString();
-}
-
-function normalizeBuildOptions(options?: BuildOptions): Partial<typeof DEFAULT_OPTS> | undefined {
-  if (!options || options.now === undefined) {
-    return options as Partial<typeof DEFAULT_OPTS> | undefined;
-  }
-
-  if (typeof options.now === 'function') {
-    const fn = options.now;
-    return {
-      now: () => ensureIsoDate(fn()),
-    };
-  }
-
-  const nowValue = options.now;
-  return {
-    now: () => ensureIsoDate(nowValue),
-  };
-}
 
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
 
@@ -414,11 +388,7 @@ export type HandoverValues = {
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
 
-type NowInput = string | Date | (() => string | Date);
-
-export type BuildOptions = {
-  now?: NowInput;
-};
+export type BuildOptions = Partial<typeof DEFAULT_OPTS>;
 
 const UCUM = 'http://unitsofmeasure.org';
 
@@ -547,7 +517,7 @@ export function mapObservationVitals(
     return [];
   }
 
-  const optionsMerged = resolveOptions(normalizeBuildOptions(options));
+  const optionsMerged = resolveOptions(options);
   const parsed = ObservationVitalsSchema.parse(values);
   const { effective, issued } = ensureEffectiveDate(parsed, optionsMerged);
   const subject = patientReference(parsed.patientId);
@@ -680,7 +650,7 @@ export function mapMedicationStatements(
   values: MedicationValues,
   options?: BuildOptions,
 ): MedicationStatement[] {
-  const optionsMerged = resolveOptions(normalizeBuildOptions(options));
+  const optionsMerged = resolveOptions(options);
   if (!values.medications || values.medications.length === 0) {
     return [];
   }
@@ -726,7 +696,7 @@ export function mapDeviceUse(
   values: OxygenValues,
   options?: BuildOptions,
 ): Array<Procedure | DeviceUseStatement> {
-  const optionsMerged = resolveOptions(normalizeBuildOptions(options));
+  const optionsMerged = resolveOptions(options);
   if (!values.oxygenTherapy) return [];
   const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
   const subject = patientReference(values.patientId);
@@ -812,7 +782,7 @@ export function mapDocumentReferenceAudio(
   values: DocumentValues,
   options?: BuildOptions,
 ): DocumentReference | undefined {
-  const optionsMerged = resolveOptions(normalizeBuildOptions(options));
+  const optionsMerged = resolveOptions(options);
   if (!values.audioAttachment) return undefined;
   const parsed = AudioAttachmentSchema.parse(values.audioAttachment);
   const subject = patientReference(values.patientId);
@@ -861,7 +831,7 @@ export function buildComposition(
   refs: BundleReferenceIndex,
   options?: BuildOptions,
 ): Composition {
-  const optionsMerged = resolveOptions(normalizeBuildOptions(options));
+  const optionsMerged = resolveOptions(options);
   const authorRef = ensureAuthorReference(values);
   const type = values.composition?.type ?? DEFAULT_COMPOSITION_TYPE;
   const status = values.composition?.status ?? 'final';
@@ -919,7 +889,7 @@ export function buildHandoverBundle(
   options?: BuildOptions,
 ): Bundle {
   const values = 'values' in input ? input.values : input;
-  const optionsMerged = resolveOptions(normalizeBuildOptions(options));
+  const optionsMerged = resolveOptions(options);
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => nowIso };
 
