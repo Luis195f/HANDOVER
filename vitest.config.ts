@@ -7,7 +7,7 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: [
-      '**/tests/fhir-map.spec.ts',
+      'tests/**/*.spec.ts',
       'tests/patientlist-*.test.ts',
       'tests/qr-scan.test.ts',
       'tests/security/**/*.spec.ts',

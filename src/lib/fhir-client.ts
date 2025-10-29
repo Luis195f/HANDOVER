@@ -14,7 +14,95 @@
  * ------------------------------------------------------------
  */
 
+import { FHIR_BASE_URL } from '@/src/config/env';
 import { prefillFromFHIR } from "./prefill";
+
+export type OperationIssue = {
+  severity?: string;
+  code?: string;
+  diagnostics?: string;
+  details?: { text?: string };
+};
+
+export type ResponseLike = {
+  ok: boolean;
+  status: number;
+  json?: unknown;
+  issue?: OperationIssue[];
+  location?: string;
+};
+
+export type Bundle = {
+  resourceType: 'Bundle';
+  type?: string;
+  entry?: Array<{
+    fullUrl?: string;
+    resource?: { [key: string]: unknown };
+  }>;
+};
+
+function ensureBundle(bundle: Bundle): string {
+  if (!bundle || bundle.resourceType !== 'Bundle') {
+    throw new Error('Expected FHIR Bundle');
+  }
+  return JSON.stringify(bundle);
+}
+
+function readOperationOutcome(payload: unknown): OperationIssue[] | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const maybeIssue = (payload as { issue?: unknown }).issue;
+  if (!Array.isArray(maybeIssue)) return undefined;
+  return maybeIssue.filter((issue) => !!issue && typeof issue === 'object') as OperationIssue[];
+}
+
+export async function postBundle(bundle: Bundle, { token }: { token: string }): Promise<ResponseLike> {
+  if (!token) {
+    throw new Error('OAuth token is required');
+  }
+
+  const serialized = ensureBundle(bundle);
+  const response = await fetch(FHIR_BASE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/fhir+json',
+      Accept: 'application/fhir+json',
+    },
+    body: serialized,
+  });
+
+  const location = response.headers?.get?.('location') ?? undefined;
+
+  if (response.ok) {
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      body = undefined;
+    }
+    return {
+      ok: true,
+      status: response.status,
+      json: body,
+      location,
+    };
+  }
+
+  let errorBody: unknown;
+  try {
+    errorBody = await response.json();
+  } catch {
+    errorBody = undefined;
+  }
+
+  return {
+    ok: false,
+    status: response.status,
+    json: errorBody,
+    issue: readOperationOutcome(errorBody),
+    location,
+  };
+}
 
 /** ===== Tipos mínimos FHIR (lectura) ===== */
 export type PatientBasic = {
