@@ -9,10 +9,16 @@ import {
   type HandoverInput,
   type HandoverValues,
 } from './fhir-map';
-import { postBundleSmart } from './fhir-client';
+import {
+  postBundleSmart,
+  postBundle,
+  type Bundle,
+  type OperationIssue,
+  type ResponseLike,
+} from './fhir-client';
 import { z } from 'zod';
 
-export type QueueItem = {
+export type LegacyQueueItem = {
   patientId: string;
   bundle: { resourceType: 'Bundle'; type: 'transaction'; entry?: any[] };
   attempts: number;
@@ -25,7 +31,7 @@ export type QueueItem = {
 
 export type SenderResult = Response | { ok: boolean; status: number };
 
-export type SendFn = (tx: QueueItem) => Promise<SenderResult>;
+export type SendFn = (tx: LegacyQueueItem) => Promise<SenderResult>;
 
 export type FlushCompatOptions = {
   sender?: SendFn;
@@ -75,6 +81,327 @@ async function safeGetItemAsync(key: string) {
   return null;
 }
 
+const SECURE_QUEUE_KEY = 'handover.queue.v1';
+const DEAD_QUEUE_KEY = 'handover.queue.dead.v1';
+const BACKOFF_BASE_MS = 1_000;
+const BACKOFF_MAX_MS = 60_000;
+const JITTER_RATIO = 0.25;
+const GROUP_WINDOW_MS = 10 * 60 * 1000;
+
+export type QueueItem = {
+  id: string;
+  patientId?: string;
+  fullUrls: string[];
+  bundle: Bundle;
+  attempts: number;
+  nextAt: number;
+  windowStart: number;
+  enqueuedAt: number;
+  lastError?: string;
+};
+
+type StoredQueueItem = {
+  id?: unknown;
+  patientId?: unknown;
+  fullUrls?: unknown;
+  bundle?: unknown;
+  attempts?: unknown;
+  nextAt?: unknown;
+  windowStart?: unknown;
+  enqueuedAt?: unknown;
+  lastError?: unknown;
+};
+
+type DeadQueueItem = QueueItem & {
+  failedAt: number;
+  status?: number;
+  issue?: OperationIssue[];
+  error?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function ensureBundleShape(bundle: unknown): Bundle {
+  if (!isRecord(bundle) || bundle.resourceType !== 'Bundle') {
+    throw new Error('Queue expects FHIR Bundle');
+  }
+  const entries = Array.isArray(bundle.entry)
+    ? bundle.entry.filter((entry): entry is NonNullable<Bundle['entry']>[number] => !!entry)
+    : [];
+  return {
+    ...(bundle as Bundle),
+    resourceType: 'Bundle',
+    entry: entries,
+  };
+}
+
+function normalizeFullUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((url): url is string => typeof url === 'string' && url.length > 0)
+    .map((url) => url);
+}
+
+function normalizeQueueItem(value: StoredQueueItem): QueueItem {
+  if (typeof value.id !== 'string' || value.id.length === 0) {
+    throw new Error('Queue item requires id');
+  }
+
+  const attempts = typeof value.attempts === 'number' && Number.isFinite(value.attempts) && value.attempts >= 0
+    ? Math.floor(value.attempts)
+    : 0;
+  const nextAt = typeof value.nextAt === 'number' && Number.isFinite(value.nextAt) ? value.nextAt : Date.now();
+  const windowStart = typeof value.windowStart === 'number' && Number.isFinite(value.windowStart)
+    ? value.windowStart
+    : computeWindowStart(nextAt);
+  const enqueuedAt = typeof value.enqueuedAt === 'number' && Number.isFinite(value.enqueuedAt)
+    ? value.enqueuedAt
+    : Date.now();
+
+  return {
+    id: value.id,
+    patientId: typeof value.patientId === 'string' && value.patientId.length > 0 ? value.patientId : undefined,
+    fullUrls: normalizeFullUrls(value.fullUrls),
+    bundle: ensureBundleShape(value.bundle),
+    attempts,
+    nextAt,
+    windowStart,
+    enqueuedAt,
+    lastError: typeof value.lastError === 'string' && value.lastError.length > 0 ? value.lastError : undefined,
+  };
+}
+
+async function readSecureQueue(): Promise<QueueItem[]> {
+  const raw = await safeGetItemAsync(SECURE_QUEUE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is StoredQueueItem => isRecord(item) && typeof item.id === 'string')
+      .map((item) => normalizeQueueItem(item));
+  } catch {
+    return [];
+  }
+}
+
+async function writeSecureQueue(items: QueueItem[]): Promise<void> {
+  const payload = items.map((item) => ({ ...item }));
+  await safeSetItemAsync(SECURE_QUEUE_KEY, JSON.stringify(payload));
+}
+
+async function pushDeadEntry(item: QueueItem, context?: { response?: ResponseLike; error?: string }) {
+  const raw = await safeGetItemAsync(DEAD_QUEUE_KEY);
+  let existing: DeadQueueItem[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        existing = parsed
+          .filter((value): value is DeadQueueItem => isRecord(value) && typeof value.failedAt === 'number')
+          .map((value) => ({
+            ...normalizeQueueItem(value as StoredQueueItem),
+            failedAt: typeof value.failedAt === 'number' ? value.failedAt : Date.now(),
+            status: typeof value.status === 'number' ? value.status : undefined,
+            issue: Array.isArray(value.issue) ? (value.issue as OperationIssue[]) : undefined,
+            error: typeof value.error === 'string' ? value.error : undefined,
+          }));
+      }
+    } catch {
+      existing = [];
+    }
+  }
+
+  const entry: DeadQueueItem = {
+    ...item,
+    failedAt: Date.now(),
+    status: context?.response?.status,
+    issue: context?.response?.issue,
+    error: context?.error ?? context?.response?.issue?.[0]?.diagnostics,
+  };
+
+  existing.push(entry);
+  if (existing.length > 50) {
+    existing = existing.slice(existing.length - 50);
+  }
+  await safeSetItemAsync(DEAD_QUEUE_KEY, JSON.stringify(existing));
+}
+
+function jitter(ms: number): number {
+  const spread = ms * JITTER_RATIO;
+  const delta = (Math.random() * 2 - 1) * spread;
+  return Math.max(0, Math.round(ms + delta));
+}
+
+function backoff(attempt: number): number {
+  const exp = BACKOFF_BASE_MS * 2 ** Math.max(0, attempt);
+  return Math.min(BACKOFF_MAX_MS, exp);
+}
+
+function computeWindowStart(timestamp: number): number {
+  const window = Math.floor(timestamp / GROUP_WINDOW_MS) * GROUP_WINDOW_MS;
+  return window;
+}
+
+function computeId(fullUrls: string[]): string {
+  if (fullUrls.length === 0) return 'empty';
+  const base = fullUrls.slice().sort().join('|');
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createHash } = require('crypto') as typeof import('crypto');
+    return createHash('sha1').update(base).digest('hex');
+  } catch {
+    let hash = 0;
+    for (let i = 0; i < base.length; i += 1) {
+      hash = (hash << 5) - hash + base.charCodeAt(i);
+      hash |= 0;
+    }
+    return `h${(hash >>> 0).toString(16)}`;
+  }
+}
+
+function collectFullUrls(bundle: Bundle): string[] {
+  if (!Array.isArray(bundle.entry)) return [];
+  return bundle.entry
+    .map((entry) => (typeof entry?.fullUrl === 'string' ? entry.fullUrl : undefined))
+    .filter((url): url is string => !!url);
+}
+
+function samePatientWindow(a: QueueItem, b: QueueItem): boolean {
+  const keyA = a.patientId ?? a.id;
+  const keyB = b.patientId ?? b.id;
+  if (keyA !== keyB) return false;
+  return Math.abs(a.windowStart - b.windowStart) <= GROUP_WINDOW_MS;
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+export async function enqueue(bundle: Bundle, opts?: { patientId?: string }): Promise<void> {
+  const normalized = ensureBundleShape(bundle);
+  const fullUrls = collectFullUrls(normalized);
+  const id = computeId(fullUrls);
+  const now = Date.now();
+  const windowStart = computeWindowStart(now);
+  const queue = await readSecureQueue();
+
+  if (queue.some((item) => item.id === id)) {
+    return;
+  }
+
+  const patientId = opts?.patientId ?? extractPatientIdFromBundle(normalized);
+  if (patientId) {
+    const idx = queue.findIndex(
+      (item) => item.patientId === patientId && Math.abs(item.windowStart - windowStart) <= GROUP_WINDOW_MS,
+    );
+    if (idx >= 0) {
+      queue[idx] = {
+        ...queue[idx],
+        id,
+        bundle: normalized,
+        fullUrls,
+        attempts: 0,
+        nextAt: Math.min(queue[idx].nextAt, now),
+        windowStart,
+        enqueuedAt: now,
+        lastError: undefined,
+      };
+      await writeSecureQueue(queue);
+      return;
+    }
+  }
+
+  queue.push({
+    id,
+    patientId: patientId ?? undefined,
+    fullUrls,
+    bundle: normalized,
+    attempts: 0,
+    nextAt: now,
+    windowStart,
+    enqueuedAt: now,
+    lastError: undefined,
+  });
+
+  await writeSecureQueue(queue);
+}
+
+let drainingSecureQueue = false;
+
+export async function drain(getToken: () => Promise<string>): Promise<void> {
+  if (drainingSecureQueue) return;
+  drainingSecureQueue = true;
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let queue = await readSecureQueue();
+      if (queue.length === 0) break;
+
+      queue = queue.slice().sort((a, b) => a.nextAt - b.nextAt);
+      const now = Date.now();
+      const ready = queue.filter((item) => item.nextAt <= now);
+      if (!ready.length) break;
+
+      const head = ready[0];
+      const cohort = ready.filter((item) => samePatientWindow(item, head));
+
+      for (const item of cohort) {
+        const freshQueue = await readSecureQueue();
+        const index = freshQueue.findIndex((entry) => entry.id === item.id);
+        if (index < 0) continue;
+        const current = freshQueue[index];
+        if (current.nextAt > Date.now()) continue;
+
+        let response: ResponseLike | undefined;
+        try {
+          const token = await getToken();
+          if (!token) throw new Error('OAuth token is required');
+          response = await postBundle(current.bundle, { token });
+        } catch (error) {
+          const attempts = current.attempts + 1;
+          const delay = jitter(backoff(attempts));
+          freshQueue[index] = {
+            ...current,
+            attempts,
+            nextAt: Date.now() + delay,
+            lastError: error instanceof Error ? error.message : String(error),
+          };
+          await writeSecureQueue(freshQueue);
+          continue;
+        }
+
+        if (response.ok) {
+          freshQueue.splice(index, 1);
+          await writeSecureQueue(freshQueue);
+          continue;
+        }
+
+        if (shouldRetryStatus(response.status)) {
+          const attempts = current.attempts + 1;
+          const delay = jitter(backoff(attempts));
+          freshQueue[index] = {
+            ...current,
+            attempts,
+            nextAt: Date.now() + delay,
+            lastError: response.issue?.[0]?.diagnostics ?? `HTTP ${response.status}`,
+          };
+          await writeSecureQueue(freshQueue);
+          continue;
+        }
+
+        const [removed] = freshQueue.splice(index, 1);
+        await writeSecureQueue(freshQueue);
+        await pushDeadEntry(removed, { response });
+      }
+    }
+  } finally {
+    drainingSecureQueue = false;
+  }
+}
+
 function sleep(ms?: number) {
   return new Promise((r) => setTimeout(r, ms ?? 0));
 }
@@ -114,7 +441,7 @@ function ensureTransactionBundle(
   return normalized;
 }
 
-function migrateLegacyQueueItem(raw: any): QueueItem | null {
+function migrateLegacyQueueItem(raw: any): LegacyQueueItem | null {
   if (!raw || typeof raw !== 'object') return null;
 
   if ('patientId' in raw && 'bundle' in raw) {
@@ -155,7 +482,7 @@ function migrateLegacyQueueItem(raw: any): QueueItem | null {
   return null;
 }
 
-async function loadQueue(): Promise<QueueItem[]> {
+async function loadQueue(): Promise<LegacyQueueItem[]> {
   const s = await safeGetItemAsync(QUEUE_KEY);
   if (!s) return [];
   try {
@@ -163,14 +490,14 @@ async function loadQueue(): Promise<QueueItem[]> {
     if (!Array.isArray(arr)) return [];
     const migrated = arr
       .map((raw) => migrateLegacyQueueItem(raw))
-      .filter((it): it is QueueItem => !!it);
+      .filter((it): it is LegacyQueueItem => !!it);
     return migrated;
   } catch {
     return [];
   }
 }
 
-async function saveQueue(items: QueueItem[]) {
+async function saveQueue(items: LegacyQueueItem[]) {
   await safeSetItemAsync(QUEUE_KEY, JSON.stringify(items));
 }
 
@@ -231,7 +558,7 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
   const bundle = ensureTransactionBundle(normalized.bundle);
 
   const existingIndex = queue.findIndex((it) => it.patientId === patientId);
-  const updated: QueueItem = {
+  const updated: LegacyQueueItem = {
     patientId,
     bundle,
     attempts: 0,
@@ -257,8 +584,8 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
  * Usamos el origen real de la cola (loadQueue) para no acoplar a detalles internos.
  */
 export async function getQueueSize(): Promise<number> {
-  const items = await loadQueue();
-  return items.length ?? 0;
+  const [legacy, secure] = await Promise.all([loadQueue(), readSecureQueue()]);
+  return legacy.length + secure.length;
 }
 
 // Alias de compatibilidad: algunos sitios importan flushQueueNow.
@@ -351,7 +678,7 @@ export async function flushQueue(opts?: FlushCompatOptions) {
       } else {
         const attempts = (current.attempts ?? 0) + 1;
         const nextAttemptAt = computeNextAttempt(attempts);
-        const updated: QueueItem = {
+        const updated: LegacyQueueItem = {
           ...current,
           attempts,
           nextAttemptAt,
@@ -363,7 +690,7 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     } catch {
       const attempts = (current.attempts ?? 0) + 1;
       const nextAttemptAt = computeNextAttempt(attempts);
-      const updated: QueueItem = {
+      const updated: LegacyQueueItem = {
         ...current,
         attempts,
         nextAttemptAt,

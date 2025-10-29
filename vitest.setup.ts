@@ -21,6 +21,12 @@ vi.mock('expo-secure-store', () => ({
   },
 }));
 
+vi.mock('expo-constants', () => ({
+  default: {
+    expoConfig: { extra: {} },
+  },
+}));
+
 /** Mock global de auth para evitar dependencias RN/Expo en tests */
 vi.mock('@/src/security/auth', async () => {
   const actual = await vi.importActual<typeof import('@/src/security/auth')>(
