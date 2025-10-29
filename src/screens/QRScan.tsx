@@ -6,23 +6,18 @@ import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '@/src/navigation/RootNavigator';
-import { handleScanResult } from '@/src/screens/qrScan.utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
-type ScanResult = { data: string };
 
-export default function QRScan({ navigation, route }: Props) {
+export default function QRScan({ navigation }: Props) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const isFocused = useIsFocused();
-  const unitIdParam = route.params?.unitIdParam;
-  const specialtyId = route.params?.specialtyId;
 
   useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
+    BarCodeScanner.requestPermissionsAsync().then(({ status }) => {
       setHasPermission(status === 'granted');
-    })();
+    });
   }, []);
 
   useEffect(() => {
@@ -32,34 +27,45 @@ export default function QRScan({ navigation, route }: Props) {
   }, [isFocused]);
 
   const onBarCodeScanned = useCallback(
-    (result: ScanResult) => {
+    ({ data }: { data: string }) => {
       if (scanned) {
         return;
       }
 
       setScanned(true);
 
-      handleScanResult({
-        data: result.data,
-        navigate: (patientId) => {
-          navigation.navigate('HandoverForm', {
-            patientIdParam: patientId,
-            unitIdParam,
-            specialtyId,
-            patientId,
-            unitId: unitIdParam,
-          });
-        },
-        onUnrecognized: () => {
-          Alert.alert(
-            'QR no reconocido',
-            'No se pudo extraer un Patient ID válido. Intenta nuevamente.',
-          );
+      try {
+        let patientIdParam: string | undefined;
+        let unitIdParam: string | undefined;
+        let specialtyId: string | undefined;
+
+        if (/^Patient\/[\w\-.]+$/i.test(data)) {
+          patientIdParam = data.split('/')[1];
+        } else {
+          try {
+            const parsed = JSON.parse(data);
+            patientIdParam = parsed?.id ?? parsed?.patient?.id ?? undefined;
+            unitIdParam = parsed?.unitId ?? parsed?.context?.unitId ?? undefined;
+            specialtyId = parsed?.specialtyId ?? parsed?.context?.specialtyId ?? undefined;
+          } catch (error) {
+            patientIdParam = data;
+          }
+        }
+
+        if (!patientIdParam) {
+          Alert.alert('QR no válido', 'No se detectó un ID de paciente en el código.');
           setScanned(false);
-        },
-      });
+          return;
+        }
+
+        navigation.navigate('HandoverForm', { patientIdParam, unitIdParam, specialtyId });
+      } catch (error) {
+        console.error(error);
+        Alert.alert('Error', 'No se pudo procesar el QR.');
+        setScanned(false);
+      }
     },
-    [navigation, scanned, specialtyId, unitIdParam],
+    [navigation, scanned],
   );
 
   if (hasPermission === null) {
