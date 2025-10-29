@@ -1,7 +1,7 @@
 // src/screens/QRScan.tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { BarCodeScanner, type BarCodeScannerResult } from 'expo-barcode-scanner';
+import { BarCodeScanner } from 'expo-barcode-scanner';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -9,11 +9,14 @@ import type { RootStackParamList } from '@/src/navigation/RootNavigator';
 import { handleScanResult } from '@/src/screens/qrScan.utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
+type ScanResult = { data: string };
 
-export default function QRScan({ navigation }: Props) {
+export default function QRScan({ navigation, route }: Props) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const isFocused = useIsFocused();
+  const unitIdParam = route.params?.unitIdParam;
+  const specialtyId = route.params?.specialtyId;
 
   useEffect(() => {
     (async () => {
@@ -29,7 +32,7 @@ export default function QRScan({ navigation }: Props) {
   }, [isFocused]);
 
   const onBarCodeScanned = useCallback(
-    (result: BarCodeScannerResult) => {
+    (result: ScanResult) => {
       if (scanned) {
         return;
       }
@@ -39,7 +42,13 @@ export default function QRScan({ navigation }: Props) {
       handleScanResult({
         data: result.data,
         navigate: (patientId) => {
-          navigation.navigate('PatientList', { patientId });
+          navigation.navigate('HandoverForm', {
+            patientIdParam: patientId,
+            unitIdParam,
+            specialtyId,
+            patientId,
+            unitId: unitIdParam,
+          });
         },
         onUnrecognized: () => {
           Alert.alert(
@@ -50,7 +59,7 @@ export default function QRScan({ navigation }: Props) {
         },
       });
     },
-    [navigation, scanned],
+    [navigation, scanned, specialtyId, unitIdParam],
   );
 
   if (hasPermission === null) {

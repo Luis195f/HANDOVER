@@ -9,9 +9,15 @@ import QRScan from '@/src/screens/QRScan';
 export type RootStackParamList = {
   PatientList: undefined;
   AudioNote: { onDoneRoute?: string } | undefined;
-  HandoverForm: { patientId?: string } | undefined;
+  HandoverForm: { patientIdParam?: string; unitIdParam?: string; specialtyId?: string };
   // Enviamos a qué pantalla volver después del escaneo (por defecto HandoverForm)
-  QRScan: { returnTo?: 'HandoverForm' | 'PatientList' | 'AudioNote' } | undefined;
+  QRScan:
+    | {
+        returnTo?: 'HandoverForm' | 'PatientList' | 'AudioNote';
+        unitIdParam?: string;
+        specialtyId?: string;
+      }
+    | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
