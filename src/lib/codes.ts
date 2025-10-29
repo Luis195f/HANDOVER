@@ -20,3 +20,12 @@ export const CATEGORY = {
     code: 'vital-signs',
   },
 } as const;
+
+export const ALERT_CODES = {
+  news2: 'alert.news2',
+  catheterOverdue: 'alert.catheter.overdue',
+  allergyConflict: 'alert.allergy.medication',
+  dressingOverdue: 'alert.dressing.overdue',
+  drainOverdue: 'alert.drain.overdue',
+  oxygenProlonged: 'alert.oxygen.prolonged',
+} as const;
