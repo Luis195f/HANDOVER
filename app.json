@@ -38,7 +38,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Escaneo de pulsera y códigos clínicos",
+        "NSCameraUsageDescription": "Usamos la cámara para escanear códigos QR de pacientes.",
         "NSMicrophoneUsageDescription": "Grabación de notas de audio del turno",
         "NSUserTrackingUsageDescription": "Se usa para mejorar la experiencia del turno"
       }
