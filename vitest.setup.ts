@@ -22,9 +22,15 @@ vi.mock('expo-secure-store', () => ({
 }));
 
 /** Mock global de auth para evitar dependencias RN/Expo en tests */
-vi.mock('@/src/security/auth', () => ({
-  getSession: async () => ({ token: '' }),
-}));
+vi.mock('@/src/security/auth', async () => {
+  const actual = await vi.importActual<typeof import('@/src/security/auth')>(
+    '@/src/security/auth'
+  );
+  return {
+    ...actual,
+    getSession: async () => ({ token: '' }),
+  };
+});
 
 /** (Opcional) Polyfill de fetch si el entorno no lo trae */
 if (!(globalThis as any).fetch) {

@@ -11,6 +11,7 @@ export default defineConfig({
       '**/__tests__/**/sync.*.(spec|test).ts',
       'tests/patientlist-*.test.ts',
       'tests/qr-scan.test.ts',
+      'tests/security/**/*.spec.ts',
     ],
     exclude: [
       'src/screens/**',
