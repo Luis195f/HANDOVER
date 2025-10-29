@@ -60,30 +60,32 @@ export default function HandoverForm({ navigation, route }: Props) {
     evolution: "",
   });
 
-  // Sincroniza params -> form SOLO si no está dirty (evita pisar cambios del usuario)
+  // Sincroniza params -> campos desde QR sin ensuciar el formulario
   useEffect(() => {
-    const isDirty = Boolean((form.formState as { isDirty?: boolean })?.isDirty);
-
     if (patientIdParam) {
-      const currentPid = form.getValues("patientId");
-      if (!isDirty && currentPid !== patientIdParam) {
+      const fieldState = form.getFieldState?.("patientId");
+      const current = form.getValues("patientId");
+      if (!fieldState?.isDirty && current !== patientIdParam) {
         form.setValue("patientId", patientIdParam, {
           shouldValidate: true,
-          shouldDirty: true,
+          shouldDirty: false,
         });
       }
     }
+  }, [patientIdParam, form]);
 
+  useEffect(() => {
     if (unitIdParam) {
-      const currentUnit = form.getValues("unitId");
-      if (!isDirty && currentUnit !== unitIdParam) {
+      const fieldState = form.getFieldState?.("unitId");
+      const current = form.getValues("unitId");
+      if (!fieldState?.isDirty && current !== unitIdParam) {
         form.setValue("unitId", unitIdParam, {
           shouldValidate: true,
-          shouldDirty: true,
+          shouldDirty: false,
         });
       }
     }
-  }, [form, patientIdParam, unitIdParam]);
+  }, [unitIdParam, form]);
 
   const { control, formState } = form;
   const errors = (formState as any)?.errors ?? {};

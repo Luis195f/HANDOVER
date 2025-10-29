@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { RootStackParamList } from '@/src/navigation/types';
 import { extractPatientId, handleScanResult } from '@/src/screens/qrScan.utils';
 
 describe('extractPatientId', () => {
@@ -64,6 +65,37 @@ describe('handleScanResult', () => {
     expect(processed).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
     expect(onUnrecognized).toHaveBeenCalledTimes(1);
+  });
+
+  it('construye los params esperados para HandoverForm', () => {
+    const navigationNavigate = vi.fn();
+    const unitIdParam = 'unit-icu-1';
+    const specialtyId = 'spec-cardio';
+
+    const handled = handleScanResult({
+      data: 'https://example.test/Patient/pat-001',
+      navigate: (patientId) => {
+        const params: RootStackParamList['HandoverForm'] = {
+          patientIdParam: patientId,
+          unitIdParam,
+          specialtyId,
+          patientId,
+          unitId: unitIdParam,
+        };
+
+        navigationNavigate('HandoverForm', params);
+      },
+      onUnrecognized: vi.fn(),
+    });
+
+    expect(handled).toBe(true);
+    expect(navigationNavigate).toHaveBeenCalledWith('HandoverForm', {
+      patientIdParam: 'pat-001',
+      unitIdParam,
+      specialtyId,
+      patientId: 'pat-001',
+      unitId: unitIdParam,
+    });
   });
 });
 

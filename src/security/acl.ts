@@ -16,7 +16,7 @@ export function hasUnitAccess(unitId?: string, session?: Partial<Session> | null
 
   try {
     const s = session ?? (globalThis as any).__NURSEOS_SESSION_CACHE ?? null;
-    const allowed = allowedUnitsFrom(s);
+    const allowed = allowedUnitsFrom((s ?? null) as Session | null);
     return allowed.has(toSlug(unitId));
   } catch {
     // En duda, niega acceso (comportamiento conservador). Si quieres no bloquear en dev, retorna true.

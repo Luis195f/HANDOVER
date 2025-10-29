@@ -185,17 +185,26 @@ export function withAuthHeaders(init: { headers?: Record<string, string> } = {})
 /* ------------------------------------------------------------------ */
 
 /** Unifica todas las fuentes de unidades permitidas (raíz y dentro de user). */
-function allowedUnitsFrom(session: Partial<Session> | null | undefined): Set<string> {
+export function allowedUnitsFrom(
+  session: Session | null,
+  env = process.env as { EXPO_PUBLIC_ALLOWED_UNITS?: string } | undefined
+): Set<string> {
   const rootUnits = session?.units ?? [];
-  const userUnits = (session as any)?.user?.units ?? [];
-  const allowed = (session as any)?.user?.allowedUnits ?? [];
-  return new Set(dedupe([...(rootUnits as string[]), ...(userUnits as string[]), ...(allowed as string[])]));
+  const userUnits = session?.user?.units ?? [];
+  const allowed = session?.user?.allowedUnits ?? [];
+  const envUnits = typeof env?.EXPO_PUBLIC_ALLOWED_UNITS === "string"
+    ? env.EXPO_PUBLIC_ALLOWED_UNITS.split(",").map((u) => u.trim()).filter(Boolean)
+    : [];
+
+  return new Set(
+    dedupe([...(rootUnits as string[]), ...(userUnits as string[]), ...(allowed as string[]), ...envUnits])
+  );
 }
 
 /** true si el usuario puede acceder a la unidad dada. */
-export function hasUnitAccess(session: Partial<Session> | null | undefined, unitId?: string): boolean {
+export function hasUnitAccess(session: Session | null | undefined, unitId?: string): boolean {
   if (!unitId) return false;
-  return allowedUnitsFrom(session).has(unitId);
+  return allowedUnitsFrom(session ?? null).has(unitId);
 }
 
 /** Alias compat (tu nombre original) */
@@ -215,7 +224,7 @@ export function scopeByUnits<T>(
   data: T[],
   getUnit: (x: T) => string | undefined
 ): T[] {
-  const allowed = allowedUnitsFrom(session);
+  const allowed = allowedUnitsFrom((session ?? null) as Session | null);
   if (allowed.size === 0) return [];
   return data.filter((x) => {
     const u = getUnit(x);

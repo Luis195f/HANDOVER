@@ -1,6 +1,8 @@
 // src/utils/taxonomy.ts
 import { toSlug } from "./slug";
 
+export { toSlug } from "./slug";
+
 export type Taxonomy = {
   units: string[];         // ids/slug de unidades
   specialties: string[];   // ids/slug de especialidades (si aplican)

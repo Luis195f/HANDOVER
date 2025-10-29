@@ -234,9 +234,11 @@ export default function PatientList({ navigation }: Props) {
 
       mark("patientlist.navigate", { patientId: patient.id, unitId: unit.id });
       navigation.navigate("HandoverForm", {
+        patientIdParam: patient.id,
+        unitIdParam: unit.id,
+        specialtyId: unit.specialtyId,
         patientId: patient.id,
         unitId: unit.id,
-        specialtyId: unit.specialtyId,
       });
     },
     [navigation]

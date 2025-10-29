@@ -145,7 +145,10 @@ declare module 'react-native' {
     alert(title: string, message?: string, buttons?: Array<{ text: string; onPress?: () => void }>): void;
   };
   export function useColorScheme(): 'light' | 'dark' | null;
-  export const StyleSheet: { create<T extends Record<string, any>>(styles: T): T };
+  export const StyleSheet: {
+    create<T extends Record<string, any>>(styles: T): T;
+    absoluteFillObject: Record<string, number>;
+  };
   export type NativeSyntheticEvent<T> = { nativeEvent: T };
   export type ColorValue = string;
   export interface GestureResponderEvent {}
@@ -190,7 +193,7 @@ declare module '@react-navigation/native-stack' {
     route: { key: string; name: RouteName; params: ParamList[RouteName] };
   };
   export function createNativeStackNavigator<ParamList>(): {
-    Navigator: ComponentType<{ children: ReactNode }>;
+    Navigator: ComponentType<{ children: ReactNode; initialRouteName?: keyof ParamList }>;
     Screen: ComponentType<{ name: keyof ParamList; component: ComponentType<any>; options?: Record<string, unknown> }>;
   };
 }
@@ -204,6 +207,7 @@ declare module 'react-hook-form' {
     setValue: (...args: any[]) => any;
     watch: (...args: any[]) => any;
     getValues: (...args: any[]) => any;
+    getFieldState?: (...args: any[]) => any;
     reset: (...args: any[]) => any;
     formState: { errors: Record<string, unknown>; isSubmitting: boolean };
   };
