@@ -204,6 +204,7 @@ declare module 'react-hook-form' {
     setValue: (...args: any[]) => any;
     watch: (...args: any[]) => any;
     getValues: (...args: any[]) => any;
+    getFieldState?: (...args: any[]) => any;
     reset: (...args: any[]) => any;
     formState: { errors: Record<string, unknown>; isSubmitting: boolean };
   };
