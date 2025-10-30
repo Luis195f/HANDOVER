@@ -14,6 +14,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as SQLite from "expo-sqlite";
+import { hashHex } from "./crypto";
 import { mark } from "./otel";
 
 // -------------------------------
@@ -262,4 +263,25 @@ export type Tx = { key: string; payload: any }; // legacy shape
 /** Alias legacy — NO-OP sobre el normalizador actual */
 export async function enqueue(input: Tx) {
   return enqueueTx(input);
+}
+
+type BundleMeta = {
+  patientId?: string;
+  unitId?: string;
+  specialtyId?: string;
+};
+
+export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
+  const patientId = meta.patientId ?? 'unknown';
+  const key = `handover:${hashHex(`${patientId}|${Date.now()}|${Math.random()}`, 32)}`;
+  const payload = {
+    bundle,
+    meta: {
+      patientId,
+      unitId: meta.unitId,
+      specialtyId: meta.specialtyId,
+    },
+    enqueuedAt: new Date().toISOString(),
+  };
+  return enqueueTx({ key, payload });
 }

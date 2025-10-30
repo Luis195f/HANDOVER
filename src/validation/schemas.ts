@@ -3,12 +3,22 @@ import { z } from "zod";
 export const zVitals = z.object({
   hr: z.number().int().min(30).max(220).optional(),
   rr: z.number().int().min(5).max(60).optional(),
-  temp: z.number().min(30).max(45).optional(),
+  tempC: z.number().min(30).max(45).optional(),
   spo2: z.number().int().min(50).max(100).optional(),
   sbp: z.number().int().min(50).max(260).optional(),
   dbp: z.number().int().min(30).max(160).optional(),
-  bgMgDl: z.number().int().min(20).max(600).optional(),
+  glucoseMgDl: z.number().min(20).max(600).optional(),
+  glucoseMmolL: z.number().min(1).max(55).optional(),
+  avpu: z.enum(["A", "C", "V", "P", "U"]).optional(),
 });
+
+export const zOxygen = z
+  .object({
+    flowLMin: z.number().min(0).max(80).optional(),
+    device: z.string().optional(),
+    fio2: z.number().min(0).max(100).optional(),
+  })
+  .partial();
 
 export const zHandover = z.object({
   // Admin
@@ -29,8 +39,17 @@ export const zHandover = z.object({
   dxNursing: z.string().optional(),
   evolution: z.string().optional(),
 
+  sbarSituation: z.string().optional(),
+  sbarBackground: z.string().optional(),
+  sbarAssessment: z.string().optional(),
+  sbarRecommendation: z.string().optional(),
+
+  meds: z.string().optional(),
+
+  oxygenTherapy: zOxygen.optional(),
+
   // Multimedia
-  audioUri: z.string().url().optional()
+  audioUri: z.string().min(1).optional()
 });
 
 export type HandoverValues = z.infer<typeof zHandover>;

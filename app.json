@@ -48,7 +48,17 @@
       "FHIR_BASE_URL": "http://192.168.0.16:8080/fhir",
       "STT_ENDPOINT": "http://192.168.0.16:8091/stt",
       "ENCRYPTION_NAMESPACE": "handover-pro",
-      "ALLOW_ALL_UNITS": "1"
+      "ALLOW_ALL_UNITS": "1",
+      "FEATURES": {
+        "handover": {
+          "showSBAR": "1",
+          "showVitals": "1",
+          "showOxygen": "1",
+          "showMeds": "1",
+          "showAttachments": "1",
+          "enableAlerts": "1"
+        }
+      }
     }
   }
 }

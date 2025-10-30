@@ -1,6 +1,6 @@
 // @ts-nocheck
 // Identificadores deterministas + firma estable del Bundle.
-import CryptoJS from 'crypto-js';
+import { sha256 } from 'js-sha256';
 
 function sortObj<T>(obj: T): T {
   if (obj === null || typeof obj !== 'object') return obj;
@@ -17,7 +17,7 @@ export function stableStringify(obj: unknown): string {
 }
 
 export function sha256Hex(s: string): string {
-  return CryptoJS.SHA256(s).toString(CryptoJS.enc.Hex);
+  return sha256(s);
 }
 
 // ID determinista por recurso (ej.: Observation por (code, subject, effectiveDateTime, value))

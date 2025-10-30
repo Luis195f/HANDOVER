@@ -8,10 +8,18 @@ export const LOINC = {
   dbp: '8462-4',
   glucoseMgDl: '2339-0',
   glucoseMmolL: '15074-8',
+  fio2: '3151-8',
+  o2Flow: '3150-0',
 } as const;
 
 export const SNOMED = {
   oxygenTherapy: '371907003',
+  avpuAssessment: '450063008',
+  avpuAlert: '248234009',
+  avpuVoice: '248235005',
+  avpuPain: '248236006',
+  avpuUnresponsive: '248237002',
+  avpuConfusion: '162846003',
 } as const;
 
 export const CATEGORY = {

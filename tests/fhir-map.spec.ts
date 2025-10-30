@@ -87,6 +87,12 @@ const observationSchema = z.object({
   effectiveDateTime: isoUtcString(),
   issued: isoUtcString(),
   valueQuantity: quantitySchema.optional(),
+  valueCodeableConcept: z
+    .object({
+      coding: z.array(z.object({ system: z.string().optional(), code: z.string().optional(), display: z.string().optional() })).optional(),
+      text: z.string().optional(),
+    })
+    .optional(),
   component: z
     .array(
       z.object({
