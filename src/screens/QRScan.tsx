@@ -1,77 +1,47 @@
 // src/screens/QRScan.tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
 import { useIsFocused } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import type { RootStackParamList } from '@/src/navigation/RootNavigator';
+type ScannerMod = typeof import('expo-barcode-scanner');
 
-type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
-
-export default function QRScan({ navigation }: Props) {
+export default function QRScan() {
+  const isFocused = useIsFocused();
+  const [scanner, setScanner] = useState<ScannerMod | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
-  const isFocused = useIsFocused();
 
+  // Carga dinámica del módulo para evitar resolución en tiempo de bundle
   useEffect(() => {
-    BarCodeScanner.requestPermissionsAsync().then(({ status }) => {
-      setHasPermission(status === 'granted');
-    });
+    let mounted = true;
+    (async () => {
+      try {
+        const mod = await import('expo-barcode-scanner'); // <- no rompe Metro si no se ejecuta
+        if (!mounted) return;
+        setScanner(mod);
+        const { status } = await mod.BarCodeScanner.requestPermissionsAsync();
+        setHasPermission(status === 'granted');
+      } catch (e) {
+        setError(
+          'Falta dependencia expo-barcode-scanner. Instala con: npx expo install expo-barcode-scanner'
+        );
+      }
+    })();
+    return () => { mounted = false; };
   }, []);
 
-  useEffect(() => {
-    if (!isFocused) {
-      setScanned(false);
-    }
-  }, [isFocused]);
+  const onScan = useCallback(({ data, type }: { data: string; type: string }) => {
+    setScanned(true);
+    Alert.alert('QR detectado', `Tipo: ${type}\nDato: ${data}`, [
+      { text: 'OK', onPress: () => setScanned(false) },
+    ]);
+  }, []);
 
-  const onBarCodeScanned = useCallback(
-    ({ data }: { data: string }) => {
-      if (scanned) {
-        return;
-      }
-
-      setScanned(true);
-
-      try {
-        let patientIdParam: string | undefined;
-        let unitIdParam: string | undefined;
-        let specialtyId: string | undefined;
-
-        if (/^Patient\/[\w\-.]+$/i.test(data)) {
-          patientIdParam = data.split('/')[1];
-        } else {
-          try {
-            const parsed = JSON.parse(data);
-            patientIdParam = parsed?.id ?? parsed?.patient?.id ?? undefined;
-            unitIdParam = parsed?.unitId ?? parsed?.context?.unitId ?? undefined;
-            specialtyId = parsed?.specialtyId ?? parsed?.context?.specialtyId ?? undefined;
-          } catch (error) {
-            patientIdParam = data;
-          }
-        }
-
-        if (!patientIdParam) {
-          Alert.alert('QR no válido', 'No se detectó un ID de paciente en el código.');
-          setScanned(false);
-          return;
-        }
-
-        navigation.navigate('HandoverForm', { patientIdParam, unitIdParam, specialtyId });
-      } catch (error) {
-        console.error(error);
-        Alert.alert('Error', 'No se pudo procesar el QR.');
-        setScanned(false);
-      }
-    },
-    [navigation, scanned],
-  );
-
-  if (hasPermission === null) {
+  if (error) {
     return (
       <View style={styles.center}>
-        <Text>Solicitando permisos…</Text>
+        <Text style={styles.err}>{error}</Text>
       </View>
     );
   }
@@ -79,43 +49,38 @@ export default function QRScan({ navigation }: Props) {
   if (hasPermission === false) {
     return (
       <View style={styles.center}>
-        <Text>Sin permiso de cámara</Text>
+        <Text>Permiso de cámara denegado. Revísalo en ajustes.</Text>
       </View>
     );
   }
 
+  if (!scanner || hasPermission == null) {
+    return (
+      <View style={styles.center}>
+        <Text>Cargando escáner…</Text>
+      </View>
+    );
+  }
+
+  const Scanner = scanner.BarCodeScanner;
+  const enabled = isFocused && !scanned;
+
   return (
     <View style={styles.container}>
-      {isFocused && (
-        <BarCodeScanner onBarCodeScanned={onBarCodeScanned} style={StyleSheet.absoluteFillObject} />
+      {enabled ? (
+        <Scanner
+          onBarCodeScanned={onScan}
+          style={StyleSheet.absoluteFillObject}
+        />
+      ) : (
+        <View style={styles.center}><Text>Pausado</Text></View>
       )}
-      <View style={styles.overlay}>
-        <Text style={styles.hint}>Apunta al QR/CB del paciente</Text>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  overlay: {
-    position: 'absolute',
-    bottom: 40,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  hint: {
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    color: 'white',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
+  err: { color: '#c00', textAlign: 'center' },
 });
-
