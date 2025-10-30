@@ -8,6 +8,7 @@ import { vi } from 'vitest';
  */
 (globalThis as any).__secureStoreMem ??= {} as Record<string, string | null>;
 vi.mock('expo-barcode-scanner');
+vi.mock('expo-audio');
 vi.mock('expo-secure-store', () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
   getItemAsync: (k: string) =>
