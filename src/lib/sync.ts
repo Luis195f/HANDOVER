@@ -16,6 +16,7 @@ import {
   type OperationIssue,
   type ResponseLike,
 } from './fhir-client';
+import { hashHex } from './crypto';
 import { z } from 'zod';
 
 export type LegacyQueueItem = {
@@ -248,18 +249,7 @@ function computeWindowStart(timestamp: number): number {
 function computeId(fullUrls: string[]): string {
   if (fullUrls.length === 0) return 'empty';
   const base = fullUrls.slice().sort().join('|');
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { createHash } = require('crypto') as typeof import('crypto');
-    return createHash('sha1').update(base).digest('hex');
-  } catch {
-    let hash = 0;
-    for (let i = 0; i < base.length; i += 1) {
-      hash = (hash << 5) - hash + base.charCodeAt(i);
-      hash |= 0;
-    }
-    return `h${(hash >>> 0).toString(16)}`;
-  }
+  return hashHex(base);
 }
 
 function collectFullUrls(bundle: Bundle): string[] {

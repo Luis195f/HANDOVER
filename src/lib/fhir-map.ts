@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import { CATEGORY, LOINC, SNOMED } from './codes';
+import { hashHex, fhirId } from './crypto';
 
 const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
 const resolveOptions = (options?: Partial<typeof DEFAULT_OPTS>) =>
@@ -460,7 +460,7 @@ function mapAttesters(inputs?: CompositionInput['attesters']): CompositionAttest
 }
 
 function stableHash(...parts: string[]): string {
-  return createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 32);
+  return hashHex(parts.join('|'), 32);
 }
 
 const stableUrn = (...parts: string[]) => `urn:uuid:${stableHash(...parts)}`;
@@ -480,14 +480,26 @@ function stableStringify(value: unknown): string {
     .join(',')}}`;
 }
 
+const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
+  Observation: 'obs-',
+  MedicationStatement: 'ms-',
+  Procedure: 'proc-',
+  DeviceUseStatement: 'dus-',
+  DocumentReference: 'doc-',
+  Composition: 'comp-',
+};
+
 function assignStableIds(
   resource: FhirResource,
   patientId: string,
 ): { resource: FhirResource; fullUrl: string } {
   const { id: _ignored, ...rest } = resource;
-  const hash = stableHash(resource.resourceType, patientId, stableStringify(rest));
-  const withId = { ...resource, id: hash } as FhirResource;
-  return { resource: withId, fullUrl: `urn:uuid:${hash}` };
+  const key = `${resource.resourceType}|${patientId}|${stableStringify(rest)}`;
+  const prefix = FHIR_ID_PREFIX[resource.resourceType] ?? '';
+  const id = fhirId(prefix, key);
+  const urn = `urn:uuid:${hashHex(key, 32)}`;
+  const withId = { ...resource, id } as FhirResource;
+  return { resource: withId, fullUrl: urn };
 }
 
 function ensureEffectiveDate(
