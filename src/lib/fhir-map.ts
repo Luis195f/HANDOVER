@@ -49,6 +49,7 @@ type Period = {
 type ObservationComponent = {
   code: CodeableConcept;
   valueQuantity?: Quantity;
+  valueCodeableConcept?: CodeableConcept;
 };
 
 type Observation = {
@@ -63,6 +64,7 @@ type Observation = {
   effectiveDateTime: string;
   issued?: string;
   valueQuantity?: Quantity;
+  valueCodeableConcept?: CodeableConcept;
   component?: ObservationComponent[];
 };
 
@@ -139,7 +141,8 @@ type CompositionAttester = {
 type CompositionSection = {
   title: string;
   code?: CodeableConcept;
-  entry: Reference[];
+  entry?: Reference[];
+  text?: Narrative;
 };
 
 type Composition = {
@@ -154,6 +157,11 @@ type Composition = {
   title: string;
   attester?: CompositionAttester[];
   section?: CompositionSection[];
+};
+
+type Narrative = {
+  status: 'generated' | 'additional' | 'extensions';
+  div: string;
 };
 
 type FhirResource = Observation | MedicationStatement | Procedure | DeviceUseStatement | DocumentReference | Composition;
@@ -211,6 +219,14 @@ const vitalCategoryConcept: CodeableConcept = {
   ],
 };
 
+const AVPU_MAP = {
+  A: { code: SNOMED.avpuAlert, display: 'Alert' },
+  C: { code: SNOMED.avpuConfusion, display: 'New confusion' },
+  V: { code: SNOMED.avpuVoice, display: 'Responds to voice' },
+  P: { code: SNOMED.avpuPain, display: 'Responds to pain' },
+  U: { code: SNOMED.avpuUnresponsive, display: 'Unresponsive' },
+} as const;
+
 const isoDateTime = z
   .string()
   .datetime({ offset: true })
@@ -229,6 +245,7 @@ const ObservationVitalsSchema = z.object({
   dbp: z.number().min(30).max(160).optional(),
   glucoseMgDl: z.number().min(20).max(1000).optional(),
   glucoseMmolL: z.number().min(1).max(55).optional(),
+  avpu: z.enum(['A', 'C', 'V', 'P', 'U']).optional(),
 });
 
 const MedicationCodingSchema = z.object({
@@ -268,6 +285,9 @@ const OxygenTherapySchema = z
     note: z.string().optional(),
     deviceId: z.string().optional(),
     deviceDisplay: z.string().optional(),
+    device: z.string().optional(),
+    flowLMin: z.number().min(0).max(80).optional(),
+    fio2: z.number().min(0).max(100).optional(),
   })
   .refine((value) => {
     if (!value.start && !value.end) return true;
@@ -350,6 +370,14 @@ type CompositionValues = {
   encounterId?: string;
   author?: AuthorInput;
   composition?: CompositionInput;
+  sbar?: SbarValues;
+};
+
+type SbarValues = {
+  situation?: string;
+  background?: string;
+  assessment?: string;
+  recommendation?: string;
 };
 
 type BundleReferenceIndex = {
@@ -384,6 +412,7 @@ export type HandoverValues = {
   oxygenTherapy?: OxygenTherapyInput | null;
   audioAttachment?: AudioAttachmentInput | null;
   composition?: CompositionInput;
+  sbar?: SbarValues;
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
@@ -478,6 +507,23 @@ function stableStringify(value: unknown): string {
   return `{${entries
     .map(([key, val]) => `${JSON.stringify(key)}:${stableStringify(val)}`)
     .join(',')}}`;
+}
+
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function narrativeFromText(text: string): Narrative {
+  const escaped = escapeHtml(text).replace(/\r?\n/g, '<br/>');
+  return {
+    status: 'generated',
+    div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${escaped}</p></div>`,
+  };
 }
 
 const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
@@ -655,6 +701,40 @@ export function mapObservationVitals(
     });
   }
 
+  if (parsed.avpu !== undefined) {
+    const details = AVPU_MAP[parsed.avpu];
+    observations.push({
+      resourceType: 'Observation',
+      meta: { profile: [PROFILE_VITAL_SIGNS] },
+      status: 'final',
+      category: [vitalCategoryConcept],
+      code: {
+        coding: [
+          {
+            system: 'http://snomed.info/sct',
+            code: SNOMED.avpuAssessment,
+            display: 'AVPU responsiveness scale',
+          },
+        ],
+        text: 'AVPU scale',
+      },
+      subject,
+      encounter,
+      effectiveDateTime: effective,
+      issued,
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: 'http://snomed.info/sct',
+            code: details.code,
+            display: details.display,
+          },
+        ],
+        text: details.display,
+      },
+    });
+  }
+
   return observations;
 }
 
@@ -773,7 +853,8 @@ export function mapDeviceUse(
 
   const resources: Array<Procedure | DeviceUseStatement> = [procedure];
 
-  if (parsed.deviceDisplay || parsed.deviceId) {
+  if (parsed.deviceDisplay || parsed.deviceId || parsed.device) {
+    const deviceDisplay = parsed.deviceDisplay ?? parsed.device ?? 'Oxygen delivery device';
     resources.push({
       resourceType: 'DeviceUseStatement',
       status: parsed.end ? 'completed' : 'active',
@@ -781,13 +862,60 @@ export function mapDeviceUse(
       encounter,
       device: {
         reference: parsed.deviceId ? `Device/${parsed.deviceId}` : 'Device/oxygen-source',
-        display: parsed.deviceDisplay ?? 'Oxygen delivery device',
+        display: deviceDisplay,
       },
       timingPeriod: parsed.end ? { start, end: parsed.end } : { start },
     });
   }
 
   return resources;
+}
+
+export function mapOxygenObservations(
+  values: OxygenValues,
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.oxygenTherapy) return [];
+  const optionsMerged = resolveOptions(options);
+  const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effective = parsed.start ?? optionsMerged.now();
+  const issued = optionsMerged.now();
+
+  const observations: Observation[] = [];
+
+  if (parsed.fio2 !== undefined) {
+    observations.push({
+      resourceType: 'Observation',
+      meta: { profile: [PROFILE_VITAL_SIGNS] },
+      status: 'final',
+      category: [vitalCategoryConcept],
+      code: codingFromLoinc(LOINC.fio2, 'Fraction of inspired oxygen'),
+      subject,
+      encounter,
+      effectiveDateTime: effective,
+      issued,
+      valueQuantity: quantity(parsed.fio2, '%', '%'),
+    });
+  }
+
+  if (parsed.flowLMin !== undefined) {
+    observations.push({
+      resourceType: 'Observation',
+      meta: { profile: [PROFILE_VITAL_SIGNS] },
+      status: 'final',
+      category: [vitalCategoryConcept],
+      code: codingFromLoinc(LOINC.o2Flow, 'Oxygen flow rate'),
+      subject,
+      encounter,
+      effectiveDateTime: effective,
+      issued,
+      valueQuantity: quantity(parsed.flowLMin, 'L/min', 'L/min'),
+    });
+  }
+
+  return observations;
 }
 
 export function mapDocumentReferenceAudio(
@@ -850,6 +978,20 @@ export function buildComposition(
   const title = values.composition?.title ?? 'Clinical handover summary';
   const sections: CompositionSection[] = [];
 
+  const addSbarSection = (label: string, content?: string | null) => {
+    if (!content) return;
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    sections.push({ title: label, text: narrativeFromText(trimmed) });
+  };
+
+  if (values.sbar) {
+    addSbarSection('SBAR - Situation', values.sbar.situation);
+    addSbarSection('SBAR - Background', values.sbar.background);
+    addSbarSection('SBAR - Assessment', values.sbar.assessment);
+    addSbarSection('SBAR - Recommendation', values.sbar.recommendation);
+  }
+
   if (refs.vitals.length > 0) {
     sections.push({
       title: 'Vital signs',
@@ -905,7 +1047,7 @@ export function buildHandoverBundle(
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => nowIso };
 
-  const observations = values.vitals
+  const vitalObservations = values.vitals
     ? mapObservationVitals(
         {
           patientId: values.patientId,
@@ -915,6 +1057,15 @@ export function buildHandoverBundle(
         sharedOptions,
       )
     : [];
+
+  const oxygenObservations = mapOxygenObservations(
+    {
+      patientId: values.patientId,
+      encounterId: values.encounterId,
+      oxygenTherapy: values.oxygenTherapy,
+    },
+    sharedOptions,
+  );
 
   const medications = mapMedicationStatements(
     {
@@ -950,7 +1101,7 @@ export function buildHandoverBundle(
   const oxygenRefs: string[] = [];
   const attachmentRefs: string[] = [];
 
-  observations.forEach((observation) => {
+  vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(observation, values.patientId);
     entries.push({
       fullUrl,
@@ -958,6 +1109,16 @@ export function buildHandoverBundle(
       request: { method: 'POST', url: 'Observation' },
     });
     vitalsRefs.push(fullUrl);
+  });
+
+  oxygenObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    oxygenRefs.push(fullUrl);
   });
 
   medications.forEach((medication) => {
@@ -996,6 +1157,7 @@ export function buildHandoverBundle(
       encounterId: values.encounterId,
       author: values.author,
       composition: values.composition,
+      sbar: values.sbar,
     },
     {
       vitals: vitalsRefs,

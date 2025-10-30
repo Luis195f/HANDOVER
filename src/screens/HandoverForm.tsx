@@ -1,5 +1,4 @@
-// src/screens/HandoverForm.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -8,48 +7,228 @@ import {
   Text,
   TextInput,
   View,
-} from "react-native";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { Controller } from "react-hook-form";
+} from 'react-native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Controller } from 'react-hook-form';
 
-import { useZodForm } from "@/src/validation/form-hooks";
-import { zHandover } from "@/src/validation/schemas";
-import { buildHandoverBundle } from "@/src/lib/fhir-map";
-import type { RootStackParamList } from "@/src/navigation/types";
-import { hasUnitAccess } from "@/src/security/acl";
-import { getSession, type Session } from "@/src/security/auth";
-import { ALL_UNITS_OPTION, useSelectedUnitId } from "@/src/state/filterStore";
-
-type Props = NativeStackScreenProps<RootStackParamList, "HandoverForm">;
+import { isOn } from '@/src/config/flags';
+import AudioAttach from '@/src/components/AudioAttach';
+import { hashHex } from '@/src/lib/crypto';
+import { buildHandoverBundle } from '@/src/lib/fhir-map';
+import { computeNEWS2 } from '@/src/lib/news2';
+import { enqueueBundle } from '@/src/lib/queue';
+import type { RootStackParamList } from '@/src/navigation/types';
+import { hasUnitAccess } from '@/src/security/acl';
+import { getSession, type Session } from '@/src/security/auth';
+import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
+import { useZodForm } from '@/src/validation/form-hooks';
+import { zHandover } from '@/src/validation/schemas';
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
-  section: { marginBottom: 24 },
-  h2: { fontSize: 18, fontWeight: "600", marginBottom: 12 },
-  label: { fontSize: 16, fontWeight: "600", marginBottom: 4 },
+  container: { flexGrow: 1, padding: 16 },
+  section: { marginBottom: 32 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
+  field: { marginBottom: 16 },
+  label: { fontSize: 16, fontWeight: '500', marginBottom: 4 },
   input: {
-    borderColor: "#CBD5F5",
+    borderColor: '#CBD5F5',
     borderWidth: 1,
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
   },
-  inputError: { borderColor: "#DC2626" },
-  error: { color: "#DC2626", marginBottom: 8 },
-  buttonWrapper: { marginTop: 12 },
-  row: { flexDirection: "row", alignItems: "center" },
+  textArea: { height: 120, textAlignVertical: 'top' },
+  error: { color: '#DC2626', marginTop: 4 },
+  row: { flexDirection: 'row', alignItems: 'center' },
   flex: { flex: 1 },
   spacer: { width: 12 },
+  buttonRow: { marginTop: 16 },
+  vitalsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
+  vitalsCell: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
 });
 
-export default function HandoverForm({ navigation, route }: Props) {
-  // Params seguros (si vienen undefined no rompen)
-  const {
-    patientId: patientIdParam,
-    unitId: unitIdParam,
-    specialtyId,
-  } = route.params ?? {};
+type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
 
+async function buildAudioAttachment(uri: string | undefined) {
+  if (!uri) return undefined;
+  if (/^https?:\/\//i.test(uri)) {
+    return { url: uri, contentType: 'audio/m4a', title: 'Audio de entrega' };
+  }
+  try {
+    const FileSystem = await import('expo-file-system');
+    const dataBase64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: 'base64' as any,
+    });
+    const info = await FileSystem.getInfoAsync(uri);
+    const reportedSize = typeof (info as any).size === 'number' ? (info as any).size : undefined;
+    const size = reportedSize ?? Math.floor((dataBase64.length * 3) / 4);
+    return {
+      dataBase64,
+      size,
+      hash: hashHex(dataBase64),
+      contentType: 'audio/m4a',
+      title: 'Audio de entrega',
+    } as const;
+  } catch (error) {
+    console.warn('[handover] audio attachment error', error);
+    return undefined;
+  }
+}
+
+function VitalsGroup({
+  control,
+  parseNumber,
+  errors,
+}: {
+  control: ReturnType<typeof useZodForm>['control'];
+  parseNumber: (value: string) => number | undefined;
+  errors: any;
+}) {
+  const fields: Array<{
+    name: any;
+    label: string;
+    placeholder: string;
+    keyboard?: 'default' | 'numeric';
+    errorPath: string[];
+  }> = [
+    { name: 'vitals.hr', label: 'Frecuencia cardíaca (/min)', placeholder: '80', keyboard: 'numeric', errorPath: ['vitals', 'hr'] },
+    { name: 'vitals.rr', label: 'Frecuencia respiratoria (/min)', placeholder: '16', keyboard: 'numeric', errorPath: ['vitals', 'rr'] },
+    { name: 'vitals.tempC', label: 'Temperatura (°C)', placeholder: '37.2', keyboard: 'numeric', errorPath: ['vitals', 'tempC'] },
+    { name: 'vitals.spo2', label: 'SpO₂ (%)', placeholder: '96', keyboard: 'numeric', errorPath: ['vitals', 'spo2'] },
+    { name: 'vitals.sbp', label: 'TA sistólica (mmHg)', placeholder: '118', keyboard: 'numeric', errorPath: ['vitals', 'sbp'] },
+    { name: 'vitals.dbp', label: 'TA diastólica (mmHg)', placeholder: '75', keyboard: 'numeric', errorPath: ['vitals', 'dbp'] },
+    { name: 'vitals.glucoseMgDl', label: 'Glucemia (mg/dL)', placeholder: '110', keyboard: 'numeric', errorPath: ['vitals', 'glucoseMgDl'] },
+    { name: 'vitals.glucoseMmolL', label: 'Glucemia (mmol/L)', placeholder: '6.1', keyboard: 'numeric', errorPath: ['vitals', 'glucoseMmolL'] },
+  ];
+
+  return (
+    <View>
+      <View style={styles.vitalsGrid}>
+        {fields.map((item) => {
+          const errorMessage = item.errorPath.reduce<any>((acc, key) => acc?.[key], errors)?.message;
+          return (
+            <View key={item.name as string} style={styles.vitalsCell}>
+              <View style={styles.field}>
+                <Text style={styles.label}>{item.label}</Text>
+                <Controller
+                  control={control}
+                  name={item.name}
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={styles.input}
+                      keyboardType={item.keyboard === 'numeric' ? 'numeric' : 'default'}
+                      placeholder={item.placeholder}
+                      onBlur={onBlur}
+                      value={value == null ? '' : String(value)}
+                      onChangeText={(text) => onChange(parseNumber(text))}
+                    />
+                  )}
+                />
+                {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>AVPU</Text>
+        <Controller
+          control={control}
+          name="vitals.avpu"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="A / C / V / P / U"
+              autoCapitalize="characters"
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={(text) => onChange(text.trim().toUpperCase().slice(0, 1) || undefined)}
+            />
+          )}
+        />
+        {errors?.vitals?.avpu?.message ? (
+          <Text style={styles.error}>{errors.vitals.avpu.message}</Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function OxygenGroup({
+  control,
+  parseNumber,
+  errors,
+}: {
+  control: ReturnType<typeof useZodForm>['control'];
+  parseNumber: (value: string) => number | undefined;
+  errors: any;
+}) {
+  const deviceError = errors?.oxygenTherapy?.device?.message as string | undefined;
+  const flowError = errors?.oxygenTherapy?.flowLMin?.message as string | undefined;
+  const fio2Error = errors?.oxygenTherapy?.fio2?.message as string | undefined;
+  return (
+    <View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Dispositivo</Text>
+        <Controller
+          control={control}
+          name="oxygenTherapy.device"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="Cánula / Mascarilla"
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={onChange}
+            />
+          )}
+        />
+        {deviceError ? <Text style={styles.error}>{deviceError}</Text> : null}
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Flujo O₂ (L/min)</Text>
+        <Controller
+          control={control}
+          name="oxygenTherapy.flowLMin"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="2"
+              onBlur={onBlur}
+              value={value == null ? '' : String(value)}
+              onChangeText={(text) => onChange(parseNumber(text))}
+            />
+          )}
+        />
+        {flowError ? <Text style={styles.error}>{flowError}</Text> : null}
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>FiO₂ (%)</Text>
+        <Controller
+          control={control}
+          name="oxygenTherapy.fio2"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="30"
+              onBlur={onBlur}
+              value={value == null ? '' : String(value)}
+              onChangeText={(text) => onChange(parseNumber(text))}
+            />
+          )}
+        />
+        {fio2Error ? <Text style={styles.error}>{fio2Error}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+export default function HandoverForm({ navigation, route }: Props) {
+  const { patientId: patientIdParam, unitId: unitIdParam, specialtyId } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const selectedUnitId = useSelectedUnitId();
 
@@ -70,28 +249,50 @@ export default function HandoverForm({ navigation, route }: Props) {
     };
   }, []);
 
-  // Estado inicial del form
   const form = useZodForm(zHandover, {
-    unitId: unitIdParam ?? "",
+    unitId: unitIdParam ?? '',
     start: new Date().toISOString(),
     end: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-    patientId: patientIdParam ?? "",
-    staffIn: "",
-    staffOut: "",
-    dxMedical: "",
-    dxNursing: "",
-    evolution: "",
+    patientId: patientIdParam ?? '',
+    staffIn: '',
+    staffOut: '',
+    dxMedical: '',
+    dxNursing: '',
+    evolution: '',
+    meds: '',
+    sbarSituation: '',
+    sbarBackground: '',
+    sbarAssessment: '',
+    sbarRecommendation: '',
+    vitals: {},
+    oxygenTherapy: {},
   });
 
-  // Sincroniza params -> campos desde QR sin ensuciar el formulario
+  const { control, formState } = form;
+  const errors: any = formState.errors ?? {};
+  const unitError = errors.unitId?.message as string | undefined;
+  const startError = errors.start?.message as string | undefined;
+  const endError = errors.end?.message as string | undefined;
+  const staffInError = errors.staffIn?.message as string | undefined;
+  const staffOutError = errors.staffOut?.message as string | undefined;
+  const patientError = errors.patientId?.message as string | undefined;
+  const medsError = errors.meds?.message as string | undefined;
+  const dxMedicalError = errors.dxMedical?.message as string | undefined;
+  const dxNursingError = errors.dxNursing?.message as string | undefined;
+  const evolutionError = errors.evolution?.message as string | undefined;
+  const sbarSituationError = errors.sbarSituation?.message as string | undefined;
+  const sbarBackgroundError = errors.sbarBackground?.message as string | undefined;
+  const sbarAssessmentError = errors.sbarAssessment?.message as string | undefined;
+  const sbarRecommendationError = errors.sbarRecommendation?.message as string | undefined;
+
   useEffect(() => {
     if (patientIdParam) {
-      const fieldState = form.getFieldState?.("patientId");
-      const current = form.getValues("patientId");
+      const fieldState = form.getFieldState?.('patientId');
+      const current = form.getValues('patientId');
       if (!fieldState?.isDirty && current !== patientIdParam) {
-        form.setValue("patientId", patientIdParam, {
-          shouldValidate: true,
+        form.setValue('patientId', patientIdParam, {
           shouldDirty: false,
+          shouldValidate: true,
         });
       }
     }
@@ -99,413 +300,437 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   useEffect(() => {
     if (unitIdParam) {
-      const fieldState = form.getFieldState?.("unitId");
-      const current = form.getValues("unitId");
+      const fieldState = form.getFieldState?.('unitId');
+      const current = form.getValues('unitId');
       if (!fieldState?.isDirty && current !== unitIdParam) {
-        form.setValue("unitId", unitIdParam, {
-          shouldValidate: true,
+        form.setValue('unitId', unitIdParam, {
           shouldDirty: false,
+          shouldValidate: true,
         });
       }
     }
   }, [unitIdParam, form]);
 
-  const { control, formState } = form;
-  const errors = (formState as any)?.errors ?? {};
-
-  // Permite 36,5 => 36.5 y vacíos => undefined
   const parseNumericInput = (value: string) => {
-    if (value === "") return undefined;
-    const normalized = value.replace(",", ".");
+    if (value === '') return undefined;
+    const normalized = value.replace(',', '.');
     const parsed = Number(normalized);
     return Number.isNaN(parsed) ? undefined : parsed;
-    // Los límites/validaciones exactos los aplica Zod (schema)
   };
 
   const onScanPress = () => {
-    const routeNames =
-      (navigation as any)?.getState?.()?.routeNames ?? ([] as string[]);
-    if (routeNames.includes("QRScan")) {
-      navigation.navigate("QRScan" as never, { returnTo: "HandoverForm" } as never);
+    const routeNames = (navigation as any)?.getState?.()?.routeNames ?? ([] as string[]);
+    if (routeNames.includes('QRScan')) {
+      navigation.navigate('QRScan' as never, { returnTo: 'HandoverForm' } as never);
     } else {
-      Alert.alert(
-        "Escáner no disponible",
-        "Esta build no incluye la pantalla de QR (opcional para demo)."
-      );
+      Alert.alert('Escáner no disponible', 'Esta build no incluye la pantalla de QR (opcional para demo).');
     }
   };
 
-  const onSubmit = form.handleSubmit(async (values) => {
-    const normalizeUnit = (value?: string | null) => {
-      if (typeof value !== "string") return undefined;
-      const trimmed = value.trim();
-      if (!trimmed) return undefined;
-      if (trimmed === ALL_UNITS_OPTION) return undefined;
-      return trimmed;
-    };
+  const onSubmit = form.handleSubmit(
+    async (values) => {
+      try {
+        const normalizeUnit = (value?: string | null) => {
+          if (typeof value !== 'string') return undefined;
+          const trimmed = value.trim();
+          if (!trimmed || trimmed === ALL_UNITS_OPTION) return undefined;
+          return trimmed;
+        };
 
-    const unitFromForm = normalizeUnit(values.unitId);
-    const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
-    const unitFromStore = normalizeUnit(selectedUnitId);
-    const unitFromPatient = normalizeUnit(route.params?.unitIdParam);
-    const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? unitFromPatient;
+        const unitFromForm = normalizeUnit(values.unitId);
+        const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
+        const unitFromStore = normalizeUnit(selectedUnitId);
+        const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
 
-    const hasAccess = hasUnitAccess(unitEffective, session?.user?.allowedUnits ?? session?.units);
-    if (!hasAccess) {
-      Alert.alert("Sin acceso a la unidad");
-      return;
-    }
+        const hasAccess = hasUnitAccess(unitEffective, session?.user?.allowedUnits ?? session?.units);
+        if (!hasAccess) {
+          Alert.alert('Sin acceso a la unidad');
+          return;
+        }
 
-    const splitCsv = (s?: string) =>
-      (s ?? "")
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean);
+        const meds = (values.meds ?? '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
 
-    const bundle = buildHandoverBundle({
-      ...values,
-      specialtyId,
-      dxMedical: splitCsv(values.dxMedical),
-      dxNursing: splitCsv(values.dxNursing),
-    } as any);
+        const medications = meds.map((med) => ({ status: 'active' as const, display: med }));
+        const oxygenTherapyInput = values.oxygenTherapy ?? {};
+        const hasOxygenValues =
+          oxygenTherapyInput.device ||
+          oxygenTherapyInput.flowLMin != null ||
+          oxygenTherapyInput.fio2 != null;
 
-    console.log("BUNDLE_READY", JSON.stringify(bundle, null, 2));
-    Alert.alert("Entrega guardada (demo)", "Validada con Zod y lista para enviar.");
-  });
+        const oxygenTherapy = hasOxygenValues
+          ? {
+              status: 'in-progress' as const,
+              device: oxygenTherapyInput.device,
+              deviceDisplay: oxygenTherapyInput.device,
+              flowLMin: oxygenTherapyInput.flowLMin,
+              fio2: oxygenTherapyInput.fio2,
+            }
+          : null;
+
+        const audioAttachment = await buildAudioAttachment(values.audioUri);
+
+        const nowIso = new Date().toISOString();
+        const bundle = buildHandoverBundle(
+          {
+            patientId: values.patientId,
+            author: session?.user?.id
+              ? { id: session.user.id, display: session.user.name }
+              : undefined,
+            vitals: values.vitals,
+            medications,
+            oxygenTherapy,
+            audioAttachment: audioAttachment ?? undefined,
+            composition: { title: 'Clinical handover summary' },
+            sbar: {
+              situation: values.sbarSituation,
+              background: values.sbarBackground,
+              assessment: values.sbarAssessment,
+              recommendation: values.sbarRecommendation,
+            },
+          },
+          { now: () => nowIso },
+        );
+
+        await enqueueBundle(bundle, {
+          patientId: values.patientId,
+          unitId: unitEffective,
+          specialtyId,
+        });
+
+        let successMessage = 'Entrega encolada para envío.';
+        if (isOn('ENABLE_ALERTS')) {
+          const alerts: string[] = [];
+          const vitals = values.vitals ?? {};
+          const newsInput = {
+            rr: vitals.rr,
+            spo2: vitals.spo2,
+            temp: vitals.tempC,
+            sbp: vitals.sbp,
+            hr: vitals.hr,
+            o2: hasOxygenValues,
+            avpu: vitals.avpu as any,
+          };
+          const breakdown = computeNEWS2(newsInput);
+          if (breakdown.total >= 5 || breakdown.anyThree) {
+            alerts.push(`NEWS2 ${breakdown.total} (${breakdown.band})`);
+          }
+          if (typeof vitals.spo2 === 'number' && vitals.spo2 < 90) {
+            alerts.push('SpO₂ menor a 90%');
+          }
+          if (alerts.length > 0) {
+            successMessage = `${successMessage}\n\nAlertas:\n- ${alerts.join('\n- ')}`;
+          }
+        }
+
+        Alert.alert('OK', successMessage);
+        navigation.goBack();
+      } catch (error: any) {
+        const message = error?.message ?? 'No se pudo guardar';
+        Alert.alert('Error', message);
+      }
+    },
+    (error) => {
+      const message = error?.message ?? 'No se pudo guardar';
+      Alert.alert('Error', message);
+    },
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.section}>
-        <Text style={styles.label}>Unidad</Text>
-        <Controller
-          control={control}
-          name="unitId"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.unitId && styles.inputError]}
-              placeholder="Unidad"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.unitId && (
-          <Text style={styles.error}>{errors.unitId.message as string}</Text>
-        )}
+        <View style={styles.field}>
+          <Text style={styles.label}>Unidad</Text>
+          <Controller
+            control={control}
+            name="unitId"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                placeholder="Unidad"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Inicio</Text>
+          <Controller
+            control={control}
+            name="start"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                placeholder="Inicio (ISO)"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {startError ? <Text style={styles.error}>{startError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Fin</Text>
+          <Controller
+            control={control}
+            name="end"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                placeholder="Fin (ISO)"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {endError ? <Text style={styles.error}>{endError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Enfermería entrante</Text>
+          <Controller
+            control={control}
+            name="staffIn"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                placeholder="Entrante"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {staffInError ? <Text style={styles.error}>{staffInError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Enfermería saliente</Text>
+          <Controller
+            control={control}
+            name="staffOut"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                placeholder="Saliente"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {staffOutError ? <Text style={styles.error}>{staffOutError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Paciente</Text>
+          <View style={styles.row}>
+            <View style={styles.flex}>
+              <Controller
+                control={control}
+                name="patientId"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Paciente"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+            </View>
+            <View style={styles.spacer} />
+            <Button title="Escanear" onPress={onScanPress} />
+          </View>
+          {patientError ? <Text style={styles.error}>{patientError}</Text> : null}
+        </View>
+      </View>
 
-        <Text style={styles.label}>Inicio</Text>
-        <Controller
-          control={control}
-          name="start"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.start && styles.inputError]}
-              placeholder="Inicio (ISO)"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.start && (
-          <Text style={styles.error}>{errors.start.message as string}</Text>
-        )}
-
-        <Text style={styles.label}>Fin</Text>
-        <Controller
-          control={control}
-          name="end"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.end && styles.inputError]}
-              placeholder="Fin (ISO)"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.end && (
-          <Text style={styles.error}>{errors.end.message as string}</Text>
-        )}
-
-        <Text style={styles.label}>Enfermería entrante</Text>
-        <Controller
-          control={control}
-          name="staffIn"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.staffIn && styles.inputError]}
-              placeholder="Entrante"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.staffIn && (
-          <Text style={styles.error}>{errors.staffIn.message as string}</Text>
-        )}
-
-        <Text style={styles.label}>Enfermería saliente</Text>
-        <Controller
-          control={control}
-          name="staffOut"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.staffOut && styles.inputError]}
-              placeholder="Saliente"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.staffOut && (
-          <Text style={styles.error}>{errors.staffOut.message as string}</Text>
-        )}
-
-        <Text style={styles.label}>Paciente</Text>
-        <View style={styles.row}>
-          <View style={styles.flex}>
+      {isOn('SHOW_SBAR') && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>SBAR</Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>SBAR - Situation</Text>
             <Controller
               control={control}
-              name="patientId"
+              name="sbarSituation"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  style={[styles.input, errors.patientId && styles.inputError]}
-                  placeholder="Paciente"
+                  style={[styles.input, styles.textArea]}
+                  multiline
                   onBlur={onBlur}
+                  value={value ?? ''}
                   onChangeText={onChange}
-                  value={value ?? ""}
                 />
               )}
             />
+            {sbarSituationError ? <Text style={styles.error}>{sbarSituationError}</Text> : null}
           </View>
-          <View style={styles.spacer} />
-          <Button title="ESCANEAR" onPress={onScanPress} />
+          <View style={styles.field}>
+            <Text style={styles.label}>SBAR - Background</Text>
+            <Controller
+              control={control}
+              name="sbarBackground"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  multiline
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {sbarBackgroundError ? <Text style={styles.error}>{sbarBackgroundError}</Text> : null}
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>SBAR - Assessment</Text>
+            <Controller
+              control={control}
+              name="sbarAssessment"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  multiline
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {sbarAssessmentError ? <Text style={styles.error}>{sbarAssessmentError}</Text> : null}
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>SBAR - Recommendation</Text>
+            <Controller
+              control={control}
+              name="sbarRecommendation"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  multiline
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
+          </View>
         </View>
-        {errors.patientId && (
-          <Text style={styles.error}>{errors.patientId.message as string}</Text>
-        )}
+      )}
 
-        <Text style={styles.h2}>Diagnósticos</Text>
-
-        <Text style={styles.label}>Médicos (separados por coma)</Text>
-        <Controller
-          control={control}
-          name="dxMedical"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.dxMedical && styles.inputError]}
-              placeholder="Diagnósticos médicos"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.dxMedical && (
-          <Text style={styles.error}>{errors.dxMedical.message as string}</Text>
-        )}
-
-        <Text style={styles.label}>Enfermería (separados por coma)</Text>
-        <Controller
-          control={control}
-          name="dxNursing"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, errors.dxNursing && styles.inputError]}
-              placeholder="Diagnósticos de enfermería"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.dxNursing && (
-          <Text style={styles.error}>{errors.dxNursing.message as string}</Text>
-        )}
-
-        <Text style={styles.h2}>Evolución</Text>
-        <Controller
-          control={control}
-          name="evolution"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, { height: 120, textAlignVertical: "top" }]}
-              multiline
-              placeholder="Notas de evolución"
-              onBlur={onBlur}
-              onChangeText={onChange}
-              value={value ?? ""}
-            />
-          )}
-        />
-        {errors.evolution && (
-          <Text style={styles.error}>{errors.evolution.message as string}</Text>
-        )}
-
-        <View style={styles.buttonWrapper}>
-          <Button title="Guardar" onPress={onSubmit} />
+      {isOn('SHOW_VITALS') && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Signos vitales</Text>
+          <VitalsGroup control={control} parseNumber={parseNumericInput} errors={errors} />
         </View>
-      </View>
+      )}
+
+      {isOn('SHOW_OXY') && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Oxigenoterapia</Text>
+          <OxygenGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+        </View>
+      )}
+
+      {isOn('SHOW_MEDS') && (
+        <View style={styles.section}>
+          <View style={styles.field}>
+            <Text style={styles.label}>Medicaciones (separadas por coma)</Text>
+            <Controller
+              control={control}
+              name="meds"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  multiline
+                  placeholder="Paracetamol 1g, Omeprazol 20mg"
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {medsError ? <Text style={styles.error}>{medsError}</Text> : null}
+          </View>
+        </View>
+      )}
+
+      {isOn('SHOW_ATTACH') && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Adjuntos</Text>
+          <AudioAttach
+            onRecorded={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
+            onAttach={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
+          />
+        </View>
+      )}
 
       <View style={styles.section}>
-        <Text style={styles.h2}>Signos vitales</Text>
-
-        <Controller
-          control={control}
-          name="vitals.hr"
-          render={({ field, fieldState }) => (
-            <>
+        <View style={styles.field}>
+          <Text style={styles.label}>Diagnósticos médicos</Text>
+          <Controller
+            control={control}
+            name="dxMedical"
+            render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
-                placeholder="Frecuencia cardíaca (/min)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
+                style={[styles.input, styles.textArea]}
+                multiline
+                placeholder="Diagnósticos médicos"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
               />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.rr"
-          render={({ field, fieldState }) => (
-            <>
+            )}
+          />
+          {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Diagnósticos de enfermería</Text>
+          <Controller
+            control={control}
+            name="dxNursing"
+            render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
-                placeholder="Frecuencia respiratoria (/min)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
+                style={[styles.input, styles.textArea]}
+                multiline
+                placeholder="Diagnósticos de enfermería"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
               />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.temp"
-          render={({ field, fieldState }) => (
-            <>
+            )}
+          />
+          {dxNursingError ? <Text style={styles.error}>{dxNursingError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Evolución</Text>
+          <Controller
+            control={control}
+            name="evolution"
+            render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
-                placeholder="Temperatura (°C)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
+                style={[styles.input, styles.textArea]}
+                multiline
+                placeholder="Notas de evolución"
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
               />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.spo2"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="SpO₂ (%)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.sbp"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Tensión sistólica (mmHg)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.dbp"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Tensión diastólica (mmHg)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <Controller
-          control={control}
-          name="vitals.bgMgDl"
-          render={({ field, fieldState }) => (
-            <>
-              <TextInput
-                placeholder="Glucemia (mg/dL)"
-                keyboardType="numeric"
-                value={field.value?.toString() ?? ""}
-                onChangeText={(t) => field.onChange(parseNumericInput(t))}
-                style={[styles.input, fieldState.error && styles.inputError]}
-              />
-              {!!fieldState.error && (
-                <Text style={styles.error}>{fieldState.error.message}</Text>
-              )}
-            </>
-          )}
-        />
-
-        <View
-          testID="vitals-trend"
-          style={{
-            height: 140,
-            borderWidth: 1,
-            borderColor: "#E5E7EB",
-            borderRadius: 8,
-            marginTop: 8,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text>Trend chart placeholder</Text>
+            )}
+          />
+          {evolutionError ? <Text style={styles.error}>{evolutionError}</Text> : null}
         </View>
       </View>
 
-      <View style={styles.buttonWrapper}>
-        <Button title="GUARDAR" onPress={onSubmit} />
+      <View style={styles.buttonRow}>
+        <Button title="Guardar" onPress={onSubmit} />
       </View>
     </ScrollView>
   );
