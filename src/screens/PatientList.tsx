@@ -15,7 +15,15 @@ import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { hasUnitAccess } from "@/src/security/acl";
+import { getSession, type Session } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
+import {
+  ALL_UNITS_OPTION,
+  setSelectedUnitId,
+  useSelectedUnitId,
+} from "@/src/state/filterStore";
+
+export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 
 export type PatientListItem = {
   id: string;
@@ -37,8 +45,6 @@ const PATIENTS_MOCK: PatientListItem[] = [
 ];
 
 export const ALL_SPECIALTIES_OPTION = "all";
-export const ALL_UNITS_OPTION = "all";
-
 export function filterPatients(
   patients: PatientListItem[],
   unitsById: Record<string, Unit>,
@@ -135,7 +141,8 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 
 export default function PatientList({ navigation }: Props) {
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
-  const [selectedUnitId, setSelectedUnitId] = useState<string>(ALL_UNITS_OPTION);
+  const [session, setSession] = useState<Session | null>(null);
+  const selectedUnitId = useSelectedUnitId();
 
   const onSpecialtyChange = useCallback((value: string) => {
     setSelectedSpecialtyId(value);
@@ -144,6 +151,23 @@ export default function PatientList({ navigation }: Props) {
 
   const onUnitChange = useCallback((value: string) => {
     setSelectedUnitId(value);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const sess = await getSession();
+        if (!active) return;
+        setSession(sess);
+      } catch {
+        if (!active) return;
+        setSession(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -219,14 +243,14 @@ export default function PatientList({ navigation }: Props) {
   );
 
   const handlePatientPress = useCallback(
-    async (patient: PatientListItem) => {
+    (patient: PatientListItem) => {
       const unit = UNITS_BY_ID[patient.unitId];
       if (!unit) {
         Alert.alert("Unidad desconocida", "No se encontró la unidad del paciente.");
         return;
       }
 
-      const allowed = await hasUnitAccess(unit.id);
+      const allowed = hasUnitAccess(unit.id, session?.user?.allowedUnits ?? session?.units);
       if (!allowed) {
         Alert.alert("Sin acceso a la unidad");
         return;
@@ -238,10 +262,10 @@ export default function PatientList({ navigation }: Props) {
         unitIdParam: unit.id,
         specialtyId: unit.specialtyId,
         patientId: patient.id,
-        unitId: unit.id,
+        unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
       });
     },
-    [navigation]
+    [navigation, selectedUnitId, session]
   );
 
   return (
