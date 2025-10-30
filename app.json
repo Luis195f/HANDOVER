@@ -38,7 +38,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Usamos la cámara para escanear códigos QR de pacientes.",
+        "NSCameraUsageDescription": "Se requiere la cámara para escanear códigos QR en Handover.",
         "NSMicrophoneUsageDescription": "Grabación de notas de audio del turno",
         "NSUserTrackingUsageDescription": "Se usa para mejorar la experiencia del turno"
       }

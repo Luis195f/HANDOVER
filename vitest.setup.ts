@@ -7,6 +7,7 @@ import { vi } from 'vitest';
  *   (globalThis as any).__secureStoreMem = {}
  */
 (globalThis as any).__secureStoreMem ??= {} as Record<string, string | null>;
+vi.mock('expo-barcode-scanner');
 vi.mock('expo-secure-store', () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
   getItemAsync: (k: string) =>
@@ -26,6 +27,13 @@ vi.mock('expo-constants', () => ({
     expoConfig: { extra: {} },
   },
 }));
+
+vi.mock('js-sha256', async () => {
+  const { createHash } = await import('node:crypto');
+  return {
+    sha256: (input: string) => createHash('sha256').update(input).digest('hex'),
+  };
+});
 
 /** Mock global de auth para evitar dependencias RN/Expo en tests */
 vi.mock('@/src/security/auth', async () => {
