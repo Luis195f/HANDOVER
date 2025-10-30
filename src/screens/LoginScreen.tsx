@@ -9,10 +9,10 @@ export default function LoginScreen() {
   const navigation = useNavigation<any>();
 
   const onPress = async () => {
-    const ALL_UNITS = Object.keys(UNITS_BY_ID); // slugs válidos
+    const allowedUnits = ["icu-a", "icu-b"];
     await login({
-      user: { id: 'nurse-1', name: 'Demo Nurse', allowedUnits: ALL_UNITS },
-      units: ALL_UNITS, // acceso total para demo
+      user: { id: 'nurse-1', name: 'Demo Nurse', allowedUnits },
+      units: allowedUnits, // acceso demo restringido a unidades base
       token: 'mock-token',
     });
 
