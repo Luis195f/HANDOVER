@@ -4,9 +4,9 @@ import { View, Text, Pressable } from "react-native";
 import {
   useAudioRecorder,
   useAudioRecorderState,
-  AudioModule,
   setAudioModeAsync,
   RecordingPresets,
+  usePermissions,
   type RecordingOptions,
 } from "expo-audio";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -29,22 +29,27 @@ type Props = NativeStackScreenProps<AudioNoteStackParamList, "AudioNote">;
 export default function AudioNote({ navigation }: Props) {
   const recorder = useAudioRecorder(REC_OPTS);
   const state = useAudioRecorderState(recorder);
+  const [permission, requestPermission] = usePermissions();
 
   useEffect(() => {
     (async () => {
-      const perm = await AudioModule.requestRecordingPermissionsAsync();
-      if (!perm.granted) return;
+      const current = permission ?? (await requestPermission());
+      if (!current?.granted) return;
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
     })();
-  }, []);
+  }, [permission, requestPermission]);
 
   const onToggle = async () => {
     if (state.isRecording) {
       await recorder.stop();
       return;
     }
-    await recorder.prepareToRecordAsync();
-    recorder.record();
+    if (typeof recorder.prepareToRecordAsync === "function") {
+      await recorder.prepareToRecordAsync();
+    }
+    if (typeof recorder.record === "function") {
+      recorder.record();
+    }
   };
 
   const accept = () => {

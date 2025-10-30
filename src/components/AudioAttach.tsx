@@ -1,31 +1,16 @@
-// src/components/AudioAttach.tsx
 import React, { useEffect } from 'react';
-import { View, Button, Alert } from 'react-native';
+import { Button } from 'react-native';
 import {
   useAudioRecorder,
-  useAudioRecorderState,
-  AudioModule,
-  setAudioModeAsync,
   RecordingPresets,
-  type RecordingOptions,
+  usePermissions,
 } from 'expo-audio';
-
-const FALLBACK_PRESET =
-  RecordingPresets.HIGH_QUALITY ??
-  RecordingPresets.LOW_QUALITY ??
-  Object.values(RecordingPresets)[0];
-
-if (!FALLBACK_PRESET) {
-  throw new Error('Expo audio recording presets unavailable');
-}
-
-const DEFAULT_RECORDING_OPTIONS = FALLBACK_PRESET as RecordingOptions;
 
 type Props = {
   onRecorded?: (uri: string) => void;
   onAttach?: (uri: string) => void;
-  startLabel?: string;        // "Adjuntar audio de incidencias", etc.
-  stopLabel?: string;         // "Detener y adjuntar"
+  startLabel?: string;
+  stopLabel?: string;
 };
 
 export default function AudioAttach({
@@ -34,39 +19,35 @@ export default function AudioAttach({
   startLabel = 'Grabar audio',
   stopLabel = 'Detener y adjuntar',
 }: Props) {
-  const recorder = useAudioRecorder(DEFAULT_RECORDING_OPTIONS);
-  const state = useAudioRecorderState(recorder);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY as any);
+  const [permission, requestPermission] = usePermissions();
 
   useEffect(() => {
-    (async () => {
-      const status = await AudioModule.requestRecordingPermissionsAsync();
-      if (!status.granted) {
-        Alert.alert('Permiso', 'Debes conceder permiso de micrófono para grabar.');
-        return;
-      }
-      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-    })();
-  }, []);
-
-  const onPress = async () => {
-    if (state.isRecording) {
-      await recorder.stop();
-      if (recorder.uri) {
-        onRecorded?.(recorder.uri);
-        onAttach?.(recorder.uri);
-      }
-      return;
+    if (!permission?.granted) {
+      void requestPermission();
     }
-    await recorder.prepareToRecordAsync();
-    recorder.record();
-  };
+  }, [permission, requestPermission]);
 
   return (
-    <View>
-      <Button
-        title={state.isRecording ? stopLabel : startLabel}
-        onPress={onPress}
-      />
-    </View>
+    <Button
+      title={recorder.isRecording ? stopLabel : startLabel}
+      onPress={async () => {
+        if (recorder.isRecording) {
+          await recorder.stop();
+          const uri = recorder.uri ?? undefined;
+          if (uri) {
+            onRecorded?.(uri);
+            onAttach?.(uri);
+          }
+        } else {
+          if (typeof recorder.prepareToRecordAsync === 'function') {
+            await recorder.prepareToRecordAsync();
+          }
+          if (typeof recorder.record === 'function') {
+            recorder.record();
+          }
+        }
+      }}
+    />
   );
 }

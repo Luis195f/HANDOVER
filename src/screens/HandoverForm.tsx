@@ -1,5 +1,5 @@
 // src/screens/HandoverForm.tsx
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -16,6 +16,9 @@ import { useZodForm } from "@/src/validation/form-hooks";
 import { zHandover } from "@/src/validation/schemas";
 import { buildHandoverBundle } from "@/src/lib/fhir-map";
 import type { RootStackParamList } from "@/src/navigation/types";
+import { hasUnitAccess } from "@/src/security/acl";
+import { getSession, type Session } from "@/src/security/auth";
+import { ALL_UNITS_OPTION, useSelectedUnitId } from "@/src/state/filterStore";
 
 type Props = NativeStackScreenProps<RootStackParamList, "HandoverForm">;
 
@@ -46,6 +49,26 @@ export default function HandoverForm({ navigation, route }: Props) {
     unitId: unitIdParam,
     specialtyId,
   } = route.params ?? {};
+
+  const [session, setSession] = useState<Session | null>(null);
+  const selectedUnitId = useSelectedUnitId();
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const sess = await getSession();
+        if (!alive) return;
+        setSession(sess);
+      } catch {
+        if (!alive) return;
+        setSession(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Estado inicial del form
   const form = useZodForm(zHandover, {
@@ -113,6 +136,26 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const onSubmit = form.handleSubmit(async (values) => {
+    const normalizeUnit = (value?: string | null) => {
+      if (typeof value !== "string") return undefined;
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      if (trimmed === ALL_UNITS_OPTION) return undefined;
+      return trimmed;
+    };
+
+    const unitFromForm = normalizeUnit(values.unitId);
+    const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
+    const unitFromStore = normalizeUnit(selectedUnitId);
+    const unitFromPatient = normalizeUnit(route.params?.unitIdParam);
+    const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? unitFromPatient;
+
+    const hasAccess = hasUnitAccess(unitEffective, session?.user?.allowedUnits ?? session?.units);
+    if (!hasAccess) {
+      Alert.alert("Sin acceso a la unidad");
+      return;
+    }
+
     const splitCsv = (s?: string) =>
       (s ?? "")
         .split(",")

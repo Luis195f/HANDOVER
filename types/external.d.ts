@@ -165,36 +165,6 @@ declare module 'expo-file-system' {
   export function readAsStringAsync(uri: string, options?: { encoding?: string }): Promise<string>;
 }
 
-declare module 'expo-av' {
-  export namespace Audio {
-    type RecordingOptions = any;
-    const RecordingOptionsPresets: Record<string, RecordingOptions> & {
-      HIGH_QUALITY?: RecordingOptions;
-      LOW_QUALITY?: RecordingOptions;
-    };
-  }
-  export const Audio: {
-    RecordingOptions: Audio.RecordingOptions;
-    RecordingOptionsPresets: typeof Audio.RecordingOptionsPresets;
-  };
-}
-
-declare module 'expo-audio' {
-  export type RecordingOptions = any;
-  export const RecordingPresets: Record<string, RecordingOptions> & {
-    HIGH_QUALITY?: RecordingOptions;
-    LOW_QUALITY?: RecordingOptions;
-  };
-  export const AudioModule: {
-    AudioRecorder: new (...args: any[]) => any;
-    requestRecordingPermissionsAsync(): Promise<{ granted: boolean }>;
-  };
-  export function useAudioRecorder(options: RecordingOptions): any;
-  export function useAudioRecorderState(recorder: any): any;
-  export function setAudioModeAsync(config: any): Promise<void>;
-  export const Audio: any;
-}
-
 declare module 'expo-camera' {
   export const Camera: any;
   export type CameraType = any;

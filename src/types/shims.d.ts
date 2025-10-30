@@ -7,25 +7,6 @@ declare module 'expo-sqlite';
 declare module 'expo-secure-store';
 declare module 'expo-notifications';
 
-declare module 'expo-audio' {
-  export type RecordingOptions = Record<string, unknown>;
-  export const RecordingPresets: Record<string, RecordingOptions>;
-
-  export interface AudioRecorder {
-    prepareToRecordAsync(): Promise<void>;
-    record(): void;
-    stop(): Promise<void>;
-    uri?: string;
-  }
-
-  export function useAudioRecorder(options?: RecordingOptions): AudioRecorder;
-  export function useAudioRecorderState(recorder: AudioRecorder): { isRecording: boolean };
-  export const AudioModule: {
-    requestRecordingPermissionsAsync(): Promise<{ granted: boolean }>;
-  };
-  export function setAudioModeAsync(config: { playsInSilentMode?: boolean; allowsRecording?: boolean }): Promise<void>;
-}
-
 declare module 'expo-barcode-scanner' {
   import type { ComponentType } from 'react';
   export const BarCodeScanner: ComponentType<any> & {
