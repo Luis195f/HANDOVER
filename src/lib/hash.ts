@@ -1,7 +1,7 @@
-import { createHash } from './node-crypto-shim';
+import { hashHex } from './crypto';
 
 export async function sha256Hex(input: string): Promise<string> {
-  return Promise.resolve(createHash('sha256').update(input).digest('hex'));
+  return Promise.resolve(hashHex(input));
 }
 
 // Hash no-criptográfico y determinístico (djb2) para IDs locales en RN.
