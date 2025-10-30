@@ -8,7 +8,7 @@ module.exports = function (api) {
       {
         root: ['./'],
         alias: {
-          'expo-audio': './src/lib/expo-audio-shim',
+          'expo-audio': './src/lib/expo-audio-wrapper',
           '@/src': './src',
         },
         extensions: ['.tsx', '.ts', '.jsx', '.js', '.json'],

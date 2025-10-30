@@ -248,49 +248,9 @@ declare module 'expo-*' {
   export = ExpoModule;
 }
 
-declare module 'expo-av/build/Audio/Recording.types' {
-  export type RecordingOptions = any;
-}
-
-declare module 'expo-av/build/Audio/RecordingConstants' {
-  import type { RecordingOptions } from 'expo-av/build/Audio/Recording.types';
-
-  export const RecordingOptionsPresets: Record<string, RecordingOptions> & {
-    HIGH_QUALITY?: RecordingOptions;
-    LOW_QUALITY?: RecordingOptions;
-  };
-}
-
 declare module '@react-native-community/*' {
   const Module: any;
   export = Module;
-}
-
-declare module 'expo-av' {
-  export namespace Audio {
-    type RecordingOptions = any;
-    const RecordingOptionsPresets: Record<string, RecordingOptions> & {
-      HIGH_QUALITY?: RecordingOptions;
-      LOW_QUALITY?: RecordingOptions;
-    };
-  }
-  export const Audio: {
-    RecordingOptions: Audio.RecordingOptions;
-    RecordingOptionsPresets: typeof Audio.RecordingOptionsPresets;
-  };
-}
-
-declare module 'expo-audio' {
-  export type RecordingOptions = any;
-  export const RecordingPresets: Record<string, RecordingOptions> & {
-    HIGH_QUALITY?: RecordingOptions;
-    LOW_QUALITY?: RecordingOptions;
-  };
-  export const AudioModule: any;
-  export const setAudioModeAsync: (...args: any[]) => Promise<void>;
-  export function useAudioRecorder(options: RecordingOptions): any;
-  export function useAudioRecorderState(recorder: any): any;
-  export const Audio: any;
 }
 
 declare module 'expo-camera' {
