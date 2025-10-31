@@ -12,7 +12,7 @@ export type RetryOptions =
 // RequestInit extendido con opciones reales de red
 export type FetchOptions = RequestInit & {
   timeoutMs?: number;
-  retry?: RetryOptions;         // <- acepta número u objeto
+  retry?: RetryOptions; // <- acepta número u objeto
   fetchImpl?: typeof fetch;
   signal?: AbortSignal | null;
 };
@@ -35,14 +35,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function safeFetch(url: string, options: FetchOptions = {}): Promise<Response> {
   const {
     timeoutMs = 10_000,
-    retry,                         // puede ser número u objeto
+    retry, // puede ser número u objeto
     fetchImpl = fetch,
     signal,
     ...init
   } = options;
 
   const { retries, baseDelayMs, maxDelayMs } = normalizeRetry(retry);
-
   let attempt = 0;
   let lastError: unknown;
 
@@ -125,18 +124,19 @@ export function fetchWithRetry(
   init?: RequestInit,
   legacyRetry?: RetryOptions
 ): Promise<Response>;
+
 export function fetchWithRetry(
   url: string,
   a?: RequestInit | FetchOptions,
   b?: RetryOptions
 ): Promise<Response> {
-  const opts: FetchOptions =
-    (a ? { ...(a as any) } : {}) as FetchOptions;
-
+  const opts: FetchOptions = a ? { ...(a as any) } : {};
+  
   if (typeof b !== 'undefined') {
     // compat triple-arg: el tercer parámetro es retry
-    (opts as any).retry = b;
+    opts.retry = b;
   }
+  
   return safeFetch(url, opts);
 }
 
