@@ -1,5 +1,4 @@
 // safeFetch con timeout + backoff y AbortController por intento
-import { fetchWithRetry } from '@/src/lib/net';
 export async function safeFetch(
   url: string,
   options: {
@@ -20,7 +19,6 @@ export async function safeFetch(
   let attempt = 0;
   let lastError: unknown;
 
-  // Funciones auxiliares (usa las que ya tengas si existen)
   const isRetryableStatus = (s: number) => s === 502 || s === 503 || s === 504;
   const backoff = (n: number) => Math.min(1000 * 2 ** n, 8000);
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -32,7 +30,7 @@ export async function safeFetch(
       controller.abort(new DOMException('Timeout', 'AbortError'));
     }, timeoutMs);
 
-    // Si nos pasan un signal externo, compónalo con el local
+    // Componer signal externo con el local
     const composedSignal =
       signal && signal !== controller.signal
         ? (() => {
@@ -45,7 +43,7 @@ export async function safeFetch(
         : controller.signal;
 
     try {
-      // HTTPS obligatorio en prod (si ya lo validas en otro lado, puedes omitir)
+      // HTTPS obligatorio en prod (no afecta a Jest/Node por el typeof window)
       if (
         typeof window !== 'undefined' &&
         process.env.NODE_ENV === 'production' &&
@@ -67,7 +65,6 @@ export async function safeFetch(
     } catch (err: any) {
       clearTimeout(timer);
 
-      // Abort/timeout → reintenta si quedan intentos
       const aborted =
         err?.name === 'AbortError' ||
         (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError');
@@ -79,7 +76,6 @@ export async function safeFetch(
         continue;
       }
 
-      // Lanza el error final tipado según tu modelo
       lastError = err;
       break;
     }
@@ -87,6 +83,8 @@ export async function safeFetch(
 
   throw lastError ?? new Error('Network error');
 }
+
+// Compat: algunos tests importan fetchWithRetry con otra firma (url, init, opts)
 export function fetchWithRetry(
   url: string,
   init?: RequestInit,
@@ -97,4 +95,3 @@ export function fetchWithRetry(
   };
   return safeFetch(url, merged);
 }
-
