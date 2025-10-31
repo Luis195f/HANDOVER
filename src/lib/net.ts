@@ -1,12 +1,17 @@
+// src/lib/net.ts
+
+// Extiende RequestInit con las opciones de red que usamos en runtime
+export type FetchOptions = RequestInit & {
+  timeoutMs?: number;
+  retry?: number;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal | null; // mantenlo explícito para claridad en tests
+};
+
 // safeFetch con timeout + backoff y AbortController por intento
 export async function safeFetch(
   url: string,
-  options: {
-    timeoutMs?: number;
-    retry?: number;
-    fetchImpl?: typeof fetch;
-    signal?: AbortSignal | null;
-  } & RequestInit = {}
+  options: FetchOptions = {}
 ): Promise<Response> {
   const {
     timeoutMs = 10_000,
@@ -24,13 +29,13 @@ export async function safeFetch(
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   while (attempt <= retry) {
-    // 🔴 nuevo controller/timeout EN CADA INTENTO
+    // 🔁 AbortController nuevo por intento
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort(new DOMException('Timeout', 'AbortError'));
     }, timeoutMs);
 
-    // Componer signal externo con el local
+    // compón señal externa + local
     const composedSignal =
       signal && signal !== controller.signal
         ? (() => {
@@ -43,7 +48,7 @@ export async function safeFetch(
         : controller.signal;
 
     try {
-      // HTTPS obligatorio en prod (no afecta a Jest/Node por el typeof window)
+      // HTTPS obligatorio en prod (no afecta a Jest/Node)
       if (
         typeof window !== 'undefined' &&
         process.env.NODE_ENV === 'production' &&
@@ -83,5 +88,7 @@ export async function safeFetch(
 
   throw lastError ?? new Error('Network error');
 }
-export { safeFetch as fetchWithRetry };
+
+// ⬅️ Exporta un **único** alias fuertemente tipado
+export const fetchWithRetry: (url: string, options?: FetchOptions) => Promise<Response> = safeFetch;
 
