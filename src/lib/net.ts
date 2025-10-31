@@ -12,7 +12,7 @@ export type RetryOptions =
 // RequestInit extendido con opciones reales de red
 export type FetchOptions = RequestInit & {
   timeoutMs?: number;
-  retry?: RetryOptions; // <- acepta número u objeto
+  retry?: RetryOptions; // <- CRÍTICO: acepta número U objeto
   fetchImpl?: typeof fetch;
   signal?: AbortSignal | null;
 };
@@ -35,7 +35,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function safeFetch(url: string, options: FetchOptions = {}): Promise<Response> {
   const {
     timeoutMs = 10_000,
-    retry, // puede ser número u objeto
+    retry,
     fetchImpl = fetch,
     signal,
     ...init
@@ -48,18 +48,15 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
   const isRetryableStatus = (s: number) => s === 502 || s === 503 || s === 504;
 
   while (attempt <= retries) {
-    // controller/timeout NUEVOS por intento
     const controller = new AbortController();
     const timer = setTimeout(() => {
       try {
-        // DOMException puede no existir en algunos entornos de Node
         controller.abort(new DOMException('Timeout', 'AbortError'));
       } catch {
         controller.abort(new Error('Timeout') as any);
       }
     }, timeoutMs);
 
-    // compón señal externa + local
     const composedSignal =
       signal && signal !== controller.signal
         ? (() => {
@@ -72,7 +69,6 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
         : controller.signal;
 
     try {
-      // HTTPS obligatorio en prod (no afecta a Jest/Node)
       if (
         typeof window !== 'undefined' &&
         process.env.NODE_ENV === 'production' &&
@@ -116,9 +112,7 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
 }
 
 // --- API pública (compat) -----------------------------------------------
-// Overload 1: firma moderna (dos parámetros)
 export function fetchWithRetry(url: string, options?: FetchOptions): Promise<Response>;
-// Overload 2: firma antigua (tres parámetros); el 3º se fusiona como `retry`
 export function fetchWithRetry(
   url: string,
   init?: RequestInit,
@@ -130,10 +124,9 @@ export function fetchWithRetry(
   a?: RequestInit | FetchOptions,
   b?: RetryOptions
 ): Promise<Response> {
-  const opts: FetchOptions = a ? { ...(a as any) } : {};
+  const opts: FetchOptions = a ? { ...a } : {};
   
   if (typeof b !== 'undefined') {
-    // compat triple-arg: el tercer parámetro es retry
     opts.retry = b;
   }
   
