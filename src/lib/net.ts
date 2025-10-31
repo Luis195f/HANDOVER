@@ -95,3 +95,5 @@ export function fetchWithRetry(
   };
   return safeFetch(url, merged);
 }
+export { safeFetch as fetchWithRetry };
+
