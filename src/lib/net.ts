@@ -86,3 +86,14 @@ export async function safeFetch(
 
   throw lastError ?? new Error('Network error');
 }
+export function fetchWithRetry(
+  url: string,
+  init?: RequestInit,
+  opts?: { timeoutMs?: number; retry?: number; fetchImpl?: typeof fetch; signal?: AbortSignal | null }
+) {
+  const merged = { ...(init ?? {}), ...(opts ?? {}) } as RequestInit & {
+    timeoutMs?: number; retry?: number; fetchImpl?: typeof fetch; signal?: AbortSignal | null;
+  };
+  return safeFetch(url, merged);
+}
+
