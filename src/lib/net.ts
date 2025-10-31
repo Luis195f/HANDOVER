@@ -12,7 +12,7 @@ export type RetryOptions =
 // RequestInit extendido con opciones reales de red
 export type FetchOptions = RequestInit & {
   timeoutMs?: number;
-  retry?: RetryOptions; // <- CRÍTICO: acepta número U objeto
+  retry?: RetryOptions;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal | null;
 };
@@ -50,11 +50,7 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
   while (attempt <= retries) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      try {
-        controller.abort(new DOMException('Timeout', 'AbortError'));
-      } catch {
-        controller.abort(new Error('Timeout') as any);
-      }
+      controller.abort();
     }, timeoutMs);
 
     const composedSignal =
@@ -132,6 +128,7 @@ export function fetchWithRetry(
   
   return safeFetch(url, opts);
 }
+
 
 
 
