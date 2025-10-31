@@ -1,9 +1,13 @@
 // src/lib/net.ts
 
-// RequestInit extendido con las opciones que usamos realmente
+export type RetryOptions =
+  | number
+  | { retries?: number; baseDelayMs?: number; maxDelayMs?: number };
+
+// RequestInit extendido con opciones reales de red
 export type FetchOptions = RequestInit & {
   timeoutMs?: number;
-  retry?: number;
+  retry?: RetryOptions;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal | null;
 };
@@ -21,21 +25,28 @@ export async function safeFetch(
     ...init
   } = options;
 
+  // Soporta retry como número o como objeto
+  const retries =
+    typeof retry === 'number' ? retry : retry?.retries ?? 2;
+  const baseDelay =
+    typeof retry === 'number' ? 200 : retry?.baseDelayMs ?? 200;
+  const maxDelay =
+    typeof retry === 'number' ? 8000 : retry?.maxDelayMs ?? 8000;
+
   let attempt = 0;
   let lastError: unknown;
 
   const isRetryableStatus = (s: number) => s === 502 || s === 503 || s === 504;
-  const backoff = (n: number) => Math.min(1000 * 2 ** n, 8000);
+  const backoff = (n: number) => Math.min(baseDelay * 2 ** n, maxDelay);
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  while (attempt <= retry) {
-    // controller/timeout NUEVOS por intento
+  while (attempt <= retries) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      controller.abort(new DOMException('Timeout', 'AbortError'));
+      try { controller.abort(new DOMException('Timeout', 'AbortError')); }
+      catch { controller.abort(new Error('Timeout') as any); }
     }, timeoutMs);
 
-    // compón señal externa + local
     const composedSignal =
       signal && signal !== controller.signal
         ? (() => {
@@ -48,7 +59,6 @@ export async function safeFetch(
         : controller.signal;
 
     try {
-      // HTTPS obligatorio en prod (no afecta a Jest/Node)
       if (
         typeof window !== 'undefined' &&
         process.env.NODE_ENV === 'production' &&
@@ -60,7 +70,7 @@ export async function safeFetch(
       const res = await fetchImpl(url, { ...init, signal: composedSignal });
       clearTimeout(timer);
 
-      if (!res.ok && isRetryableStatus(res.status) && attempt < retry) {
+      if (!res.ok && isRetryableStatus(res.status) && attempt < retries) {
         await wait(backoff(attempt));
         attempt += 1;
         continue;
@@ -74,7 +84,7 @@ export async function safeFetch(
         err?.name === 'AbortError' ||
         (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError');
 
-      if ((aborted || err?.code === 'ECONNRESET') && attempt < retry) {
+      if ((aborted || err?.code === 'ECONNRESET') && attempt < retries) {
         await wait(backoff(attempt));
         attempt += 1;
         lastError = err;
@@ -89,8 +99,9 @@ export async function safeFetch(
   throw lastError ?? new Error('Network error');
 }
 
-// ✅ ÚNICO export: firma (url, options?: FetchOptions)
-// Esto hace que en los tests funcione { fetchImpl: mockFetch } como 2º parámetro.
-export const fetchWithRetry: (url: string, options?: FetchOptions) => Promise<Response> = safeFetch;
+/** ÚNICO export público compatible con los tests */
+export function fetchWithRetry(url: string, options?: FetchOptions) {
+  return safeFetch(url, options);
+}
 
 
