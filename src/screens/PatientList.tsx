@@ -17,6 +17,7 @@ import type { RootStackParamList } from "@/src/navigation/types";
 import { hasUnitAccess } from "@/src/security/acl";
 import { getSession, type Session } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
+import type { User } from "@/src/lib/auth";
 import {
   ALL_UNITS_OPTION,
   setSelectedUnitId,
@@ -24,6 +25,31 @@ import {
 } from "@/src/state/filterStore";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
+
+function sessionToUser(session: Session | null): User | null {
+  const rawUser = session?.user;
+  if (!rawUser?.id) {
+    return null;
+  }
+  const units = [
+    ...(rawUser.allowedUnits ?? []),
+    ...(rawUser.units ?? []),
+    ...(session?.units ?? []),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const roleCandidate = rawUser.roles?.[0];
+  const normalizedRole = roleCandidate === "chief" ? "admin" : roleCandidate;
+  const role: User["role"] = normalizedRole === "admin" || normalizedRole === "nurse" ? normalizedRole : "viewer";
+  return {
+    sub: rawUser.id,
+    name: rawUser.name,
+    email: undefined,
+    role,
+    unitIds: Array.from(new Set(units)),
+  };
+}
 
 export type PatientListItem = {
   id: string;
@@ -250,7 +276,7 @@ export default function PatientList({ navigation }: Props) {
         return;
       }
 
-      const allowed = hasUnitAccess(unit.id, session?.user?.allowedUnits ?? session?.units);
+      const allowed = hasUnitAccess(unit.id, sessionToUser(session));
       if (!allowed) {
         Alert.alert("Sin acceso a la unidad");
         return;

@@ -2,14 +2,13 @@
 import React from "react";
 import { View, Text, Button } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useAuth } from "../lib/auth";
+import { loginWithMockUser } from '@/src/lib/auth';
 
 export default function LoginMock() {
-  const { loginMock } = useAuth();
   const nav = useNavigation();
 
   const onLogin = async () => {
-    await loginMock();
+    await loginWithMockUser();
     // tras login: a la lista de pacientes
     // @ts-ignore
     nav.replace("Patients");
