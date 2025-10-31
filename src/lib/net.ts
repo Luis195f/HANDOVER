@@ -83,17 +83,5 @@ export async function safeFetch(
 
   throw lastError ?? new Error('Network error');
 }
-
-// Compat: algunos tests importan fetchWithRetry con otra firma (url, init, opts)
-export function fetchWithRetry(
-  url: string,
-  init?: RequestInit,
-  opts?: { timeoutMs?: number; retry?: number; fetchImpl?: typeof fetch; signal?: AbortSignal | null }
-) {
-  const merged = { ...(init ?? {}), ...(opts ?? {}) } as RequestInit & {
-    timeoutMs?: number; retry?: number; fetchImpl?: typeof fetch; signal?: AbortSignal | null;
-  };
-  return safeFetch(url, merged);
-}
 export { safeFetch as fetchWithRetry };
 
