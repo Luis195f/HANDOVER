@@ -2,6 +2,10 @@
 // src/lib/sync.ts
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import NetInfo from './netinfo';
+import { NetworkError, TimeoutError, HTTPError } from './net';
+import { v4 as uuidv4 } from 'uuid';
+import { FHIR_BASE_URL } from '../config/env';
 import {
   buildHandoverBundle,
   mapObservationVitals,
@@ -28,6 +32,8 @@ export type LegacyQueueItem = {
   updatedAt: string;
   values?: HandoverValues;
   authorId?: string;
+  txId: string;
+  lastError?: string;
 };
 
 export type SenderResult = Response | { ok: boolean; status: number };
@@ -46,6 +52,122 @@ export type FlushCompatOptions = {
    */
   delayMs?: number;
 };
+
+const TX_IDENTIFIER_SYSTEM = 'urn:handover-pro:tx';
+const OFFLINE_RETRY_DELAY_MS = 30_000;
+const OFFLINE_ERROR_MESSAGE = 'Sin conexión a la red. Reintentaremos automáticamente al recuperar conectividad.';
+
+let isOffline = false;
+let offlineSince: number | null = null;
+let connectivityUnsubscribe: (() => void) | null = null;
+let pendingDrain: Promise<void> | null = null;
+let lastTokenProvider: (() => Promise<string>) | null = null;
+
+function isOnlineState(state: { isConnected?: boolean | null; isInternetReachable?: boolean | null } | null | undefined) {
+  return !!(state?.isConnected && (state?.isInternetReachable ?? true));
+}
+
+function ensureConnectivityListener() {
+  if (connectivityUnsubscribe || !NetInfo?.addEventListener) return;
+  connectivityUnsubscribe = NetInfo.addEventListener((state: { isConnected?: boolean | null; isInternetReachable?: boolean | null }) => {
+    if (isOnlineState(state)) {
+      isOffline = false;
+      offlineSince = null;
+      if (lastTokenProvider && !pendingDrain) {
+        pendingDrain = drain(lastTokenProvider)
+          .catch(() => {})
+          .finally(() => {
+            pendingDrain = null;
+          });
+      }
+    } else {
+      isOffline = true;
+      if (offlineSince == null) offlineSince = Date.now();
+    }
+  });
+}
+
+function markOffline() {
+  isOffline = true;
+  if (offlineSince == null) offlineSince = Date.now();
+  ensureConnectivityListener();
+}
+
+function handleNetworkFailure(error: unknown): boolean {
+  if (error instanceof TimeoutError || error instanceof NetworkError) {
+    markOffline();
+    return true;
+  }
+  if (error instanceof HTTPError) {
+    const status = error.payload?.status ?? error.response?.status ?? 0;
+    if (status === 502 || status === 503 || status === 504) {
+      markOffline();
+      return true;
+    }
+  }
+  return false;
+}
+
+function shouldPauseQueue(): boolean {
+  return isOffline;
+}
+
+function scheduleOfflineRetry(item: LegacyQueueItem): LegacyQueueItem {
+  const next = new Date(Date.now() + OFFLINE_RETRY_DELAY_MS).toISOString();
+  return {
+    ...item,
+    attempts: item.attempts + 1,
+    nextAttemptAt: next,
+    updatedAt: new Date().toISOString(),
+    lastError: OFFLINE_ERROR_MESSAGE,
+  };
+}
+
+function scheduleSecureOfflineRetry(item: QueueItem): QueueItem {
+  const next = Date.now() + OFFLINE_RETRY_DELAY_MS;
+  return {
+    ...item,
+    attempts: item.attempts + 1,
+    nextAt: next,
+    lastError: OFFLINE_ERROR_MESSAGE,
+  };
+}
+
+function attachTxIdToEntry(entry: any, txId: string, index: number) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const request = entry.request && typeof entry.request === 'object' ? { ...entry.request } : undefined;
+  if (!request) return entry;
+  const current = typeof request.ifNoneExist === 'string' ? request.ifNoneExist : '';
+  const suffix = `${txId}-${index}`;
+  const token = `identifier=${encodeURIComponent(TX_IDENTIFIER_SYSTEM)}|${encodeURIComponent(suffix)}`;
+  const alreadyHas = current.includes(TX_IDENTIFIER_SYSTEM);
+  const nextIfNoneExist = alreadyHas ? current : current ? `${current}&${token}` : token;
+  return {
+    ...entry,
+    request: {
+      ...request,
+      ifNoneExist: nextIfNoneExist,
+    },
+  };
+}
+
+function ensureBundleTx(bundle: { resourceType: 'Bundle'; entry?: any[]; identifier?: any }, existingTxId?: string) {
+  const txId = typeof existingTxId === 'string' && existingTxId.length > 0 ? existingTxId : uuidv4();
+  const entries = Array.isArray(bundle.entry) ? bundle.entry.map((entry, index) => attachTxIdToEntry(entry, txId, index)) : [];
+  const identifier =
+    bundle.identifier && typeof bundle.identifier === 'object'
+      ? { ...bundle.identifier, system: TX_IDENTIFIER_SYSTEM, value: txId }
+      : { system: TX_IDENTIFIER_SYSTEM, value: txId };
+
+  return {
+    txId,
+    bundle: {
+      ...bundle,
+      entry: entries,
+      identifier,
+    },
+  };
+}
 
 /**
  * Utilidades simples para SecureStore:
@@ -322,11 +444,14 @@ export async function enqueue(bundle: Bundle, opts?: { patientId?: string }): Pr
 let drainingSecureQueue = false;
 
 export async function drain(getToken: () => Promise<string>): Promise<void> {
-  if (drainingSecureQueue) return;
+  lastTokenProvider = getToken;
+  ensureConnectivityListener();
+  if (drainingSecureQueue || shouldPauseQueue()) return;
   drainingSecureQueue = true;
   try {
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      if (shouldPauseQueue()) break;
       let queue = await readSecureQueue();
       if (queue.length === 0) break;
 
@@ -351,6 +476,11 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
           if (!token) throw new Error('OAuth token is required');
           response = await postBundle(current.bundle, { token });
         } catch (error) {
+          if (handleNetworkFailure(error)) {
+            freshQueue[index] = scheduleSecureOfflineRetry(current);
+            await writeSecureQueue(freshQueue);
+            break;
+          }
           const attempts = current.attempts + 1;
           const delay = jitter(backoff(attempts));
           freshQueue[index] = {
@@ -385,6 +515,7 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
         const [removed] = freshQueue.splice(index, 1);
         await writeSecureQueue(freshQueue);
         await pushDeadEntry(removed, { response });
+        if (shouldPauseQueue()) break;
       }
     }
   } finally {
@@ -441,15 +572,20 @@ function migrateLegacyQueueItem(raw: any): LegacyQueueItem | null {
     const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt;
     const nextAttemptAt =
       typeof raw.nextAttemptAt === 'string' ? raw.nextAttemptAt : new Date().toISOString();
+    const normalizedBundle = ensureTransactionBundle(raw.bundle);
+    const { txId, bundle } = ensureBundleTx(normalizedBundle, typeof raw.txId === 'string' ? raw.txId : undefined);
+    const lastError = typeof raw.lastError === 'string' ? raw.lastError : undefined;
     return {
       patientId,
-      bundle: ensureTransactionBundle(raw.bundle),
+      bundle,
       attempts: attempts >= 0 ? attempts : 0,
       nextAttemptAt,
       createdAt,
       updatedAt,
       values: raw.values,
       authorId: raw.authorId,
+      txId,
+      lastError,
     };
   }
 
@@ -457,15 +593,20 @@ function migrateLegacyQueueItem(raw: any): LegacyQueueItem | null {
     const payload = raw.payload as any;
     const patientId = typeof payload.patientId === 'string' ? payload.patientId : 'unknown';
     const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
+    const normalizedBundle = ensureTransactionBundle(payload.bundle);
+    const { txId, bundle } = ensureBundleTx(normalizedBundle, typeof payload.txId === 'string' ? payload.txId : undefined);
+    const lastError = typeof payload.lastError === 'string' ? payload.lastError : undefined;
     return {
       patientId,
-      bundle: ensureTransactionBundle(payload.bundle),
+      bundle,
       attempts: 0,
       nextAttemptAt: new Date().toISOString(),
       createdAt,
       updatedAt: createdAt,
       values: payload.values,
       authorId: payload.authorId,
+      txId,
+      lastError,
     };
   }
 
@@ -545,9 +686,11 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
   const patientId = normalized.patientId ?? 'unknown';
   const nowIso = new Date().toISOString();
   const queue = await loadQueue();
-  const bundle = ensureTransactionBundle(normalized.bundle);
+  const ensured = ensureTransactionBundle(normalized.bundle);
 
   const existingIndex = queue.findIndex((it) => it.patientId === patientId);
+  const existingTxId = existingIndex >= 0 ? queue[existingIndex].txId : undefined;
+  const { txId, bundle } = ensureBundleTx(ensured, existingTxId);
   const updated: LegacyQueueItem = {
     patientId,
     bundle,
@@ -557,6 +700,8 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
     updatedAt: nowIso,
     values: normalized.values,
     authorId: normalized.authorId,
+    txId,
+    lastError: undefined,
   };
 
   if (existingIndex >= 0) {
@@ -616,16 +761,21 @@ export async function enqueueTxFromValues(
  * - Otros: deja el elemento para reintento y sigue con el siguiente
  */
 export async function flushQueue(opts?: FlushCompatOptions) {
+  ensureConnectivityListener();
   const sender: SendFn =
     opts?.sender ??
     (async (tx) => {
       const { bundle } = tx;
-      return postBundleSmart(bundle);
+      return postBundleSmart({ fhirBase: FHIR_BASE_URL, bundle });
     });
 
   const initialQueue = await loadQueue();
   if (initialQueue.length === 0) {
     return { total: 0, sent: 0, skipped: 0 };
+  }
+
+  if (shouldPauseQueue()) {
+    return { total: initialQueue.length, sent: 0, skipped: initialQueue.length };
   }
 
   let sent = 0;
@@ -634,17 +784,15 @@ export async function flushQueue(opts?: FlushCompatOptions) {
 
   const sorted = queue
     .slice()
-    .sort(
-      (a, b) => new Date(a.nextAttemptAt).getTime() - new Date(b.nextAttemptAt).getTime(),
-    );
+    .sort((a, b) => new Date(a.nextAttemptAt).getTime() - new Date(b.nextAttemptAt).getTime());
 
   for (const candidate of sorted) {
-    const now = Date.now();
+    if (shouldPauseQueue()) break;
     queue = await loadQueue();
     const current = queue.find((it) => it.patientId === candidate.patientId);
     if (!current) continue;
 
-    if (new Date(current.nextAttemptAt).getTime() > now) {
+    if (new Date(current.nextAttemptAt).getTime() > Date.now()) {
       continue;
     }
 
@@ -665,19 +813,9 @@ export async function flushQueue(opts?: FlushCompatOptions) {
         await saveQueue(queue);
         sent++;
         await opts?.onSent?.({ patientId: current.patientId });
-      } else {
-        const attempts = (current.attempts ?? 0) + 1;
-        const nextAttemptAt = computeNextAttempt(attempts);
-        const updated: LegacyQueueItem = {
-          ...current,
-          attempts,
-          nextAttemptAt,
-          updatedAt: new Date().toISOString(),
-        };
-        queue = queue.map((it) => (it.patientId === current.patientId ? updated : it));
-        await saveQueue(queue);
+        continue;
       }
-    } catch {
+
       const attempts = (current.attempts ?? 0) + 1;
       const nextAttemptAt = computeNextAttempt(attempts);
       const updated: LegacyQueueItem = {
@@ -685,9 +823,31 @@ export async function flushQueue(opts?: FlushCompatOptions) {
         attempts,
         nextAttemptAt,
         updatedAt: new Date().toISOString(),
+        lastError: `HTTP ${status}`,
       };
       queue = queue.map((it) => (it.patientId === current.patientId ? updated : it));
       await saveQueue(queue);
+      skipped++;
+    } catch (error) {
+      if (handleNetworkFailure(error)) {
+        const updated = scheduleOfflineRetry(current);
+        queue = queue.map((it) => (it.patientId === current.patientId ? updated : it));
+        await saveQueue(queue);
+        skipped++;
+        break;
+      }
+      const attempts = (current.attempts ?? 0) + 1;
+      const nextAttemptAt = computeNextAttempt(attempts);
+      const updated: LegacyQueueItem = {
+        ...current,
+        attempts,
+        nextAttemptAt,
+        updatedAt: new Date().toISOString(),
+        lastError: error instanceof Error ? error.message : String(error),
+      };
+      queue = queue.map((it) => (it.patientId === current.patientId ? updated : it));
+      await saveQueue(queue);
+      skipped++;
     }
 
     if (opts?.delayMs && opts.delayMs > 0) {
@@ -844,11 +1004,13 @@ export function buildTransactionBundleForQueue(
     });
   });
 
-  return {
+  const baseBundle = {
     resourceType: 'Bundle',
     type: 'transaction',
     entry: entries,
   };
+
+  return ensureBundleTx(baseBundle).bundle;
 }
 
 /**
