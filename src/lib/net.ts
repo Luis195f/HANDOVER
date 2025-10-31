@@ -31,28 +31,37 @@ function normalizeRetry(r?: RetryOptions) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** ⚠️ En producción, bloquea URLs http:// salvo loopback */
+function assertHttpsIfProd(urlStr: string) {
+  if (process.env.NODE_ENV !== 'production') return;
+  try {
+    const u = new URL(urlStr);
+    const isLoopback =
+      u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1';
+    if (u.protocol === 'http:' && !isLoopback) {
+      throw new Error('HTTPS is required in production');
+    }
+  } catch {
+    // URLs relativas: sin control aquí (usa origen actual)
+  }
+}
+
 // --- Implementación ------------------------------------------------------
 export async function safeFetch(url: string, options: FetchOptions = {}): Promise<Response> {
-  const {
-    timeoutMs = 10_000,
-    retry,
-    fetchImpl = fetch,
-    signal,
-    ...init
-  } = options;
+  const { timeoutMs = 10_000, retry, fetchImpl = fetch, signal, ...init } = options;
 
   const { retries, baseDelayMs, maxDelayMs } = normalizeRetry(retry);
   let attempt = 0;
   let lastError: unknown;
 
-  const isRetryableStatus = (s: number) => s === 502 || s === 503 || s === 504;
+  // incluye 500 como transitorio
+  const isRetryableStatus = (s: number) => s === 500 || s === 502 || s === 503 || s === 504;
 
   while (attempt <= retries) {
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    // compón señal externa + local
     const composedSignal =
       signal && signal !== controller.signal
         ? (() => {
@@ -65,13 +74,8 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
         : controller.signal;
 
     try {
-      if (
-        typeof window !== 'undefined' &&
-        process.env.NODE_ENV === 'production' &&
-        window.location.protocol !== 'https:'
-      ) {
-        throw new Error('HTTPS is required in production');
-      }
+      // aplica en Node/Jest y en runtime
+      assertHttpsIfProd(url);
 
       const res = await fetchImpl(url, { ...init, signal: composedSignal });
       clearTimeout(timer);
@@ -114,18 +118,13 @@ export function fetchWithRetry(
   init?: RequestInit,
   legacyRetry?: RetryOptions
 ): Promise<Response>;
-
 export function fetchWithRetry(
   url: string,
   a?: RequestInit | FetchOptions,
   b?: RetryOptions
 ): Promise<Response> {
-  const opts: FetchOptions = a ? { ...a } : {};
-  
-  if (typeof b !== 'undefined') {
-    opts.retry = b;
-  }
-  
+  const opts: FetchOptions = a ? { ...(a as any) } : {};
+  if (typeof b !== 'undefined') opts.retry = b;
   return safeFetch(url, opts);
 }
 
