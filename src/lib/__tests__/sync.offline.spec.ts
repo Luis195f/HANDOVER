@@ -24,6 +24,22 @@ describe('sync.ts offline queue determinism & retries', () => {
     vi.restoreAllMocks();
   });
 
+  it('genera txId y propaga ifNoneExist con el identificador de transacción', async () => {
+    await enqueueTxFromValues({ patientId: 'tx-check' } as any);
+
+    const state = await readQueueState();
+    expect(state.size).toBe(1);
+    const [item] = state.items;
+    expect(item.txId).toMatch(/[0-9a-fA-F-]{36}/);
+    const entries = item.bundle.entry ?? [];
+    expect(entries.length).toBeGreaterThan(0);
+    entries.forEach((entry, index) => {
+      const clause = entry?.request?.ifNoneExist ?? '';
+      expect(clause).toContain('identifier=urn%3Ahandover-pro%3Atx');
+      expect(clause).toContain(`${item.txId}-${index}`);
+    });
+  });
+
   it('mantiene un único bundle por paciente y IDs deterministas en re-enqueue', async () => {
     const patientId = 'pat-deterministic';
     const values = {

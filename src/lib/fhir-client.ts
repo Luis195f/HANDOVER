@@ -16,6 +16,51 @@
 
 import { FHIR_BASE_URL } from '@/src/config/env';
 import { prefillFromFHIR } from "./prefill";
+import { safeFetch, HTTPError } from './net';
+
+async function readJsonFromResponse(response: any): Promise<unknown> {
+  if (!response) return undefined;
+
+  const parseText = async (source: any) => {
+    if (typeof source?.text !== 'function') return undefined;
+    try {
+      const text = await source.text();
+      if (!text) return undefined;
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    } catch {
+      return undefined;
+    }
+  };
+
+  if (typeof response.clone === 'function') {
+    const clone = response.clone();
+    if (typeof clone.json === 'function') {
+      try {
+        return await clone.json();
+      } catch {
+        // fallthrough to text parsing
+      }
+    }
+    const fromText = await parseText(clone);
+    if (fromText !== undefined) {
+      return fromText;
+    }
+  }
+
+  if (typeof response.json === 'function') {
+    try {
+      return await response.json();
+    } catch {
+      // continue to text parsing
+    }
+  }
+
+  return await parseText(response);
+}
 
 export type OperationIssue = {
   severity?: string;
@@ -61,47 +106,53 @@ export async function postBundle(bundle: Bundle, { token }: { token: string }): 
   }
 
   const serialized = ensureBundle(bundle);
-  const response = await fetch(FHIR_BASE_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/fhir+json',
-      Accept: 'application/fhir+json',
-    },
-    body: serialized,
-  });
+  try {
+    const response = await safeFetch(FHIR_BASE_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/fhir+json',
+        Accept: 'application/fhir+json',
+      },
+      body: serialized,
+      omitAbortSignal: process.env.VITEST === 'true',
+    });
 
-  const location = response.headers?.get?.('location') ?? undefined;
+    const location = response.headers?.get?.('location') ?? undefined;
+    const body = await readJsonFromResponse(response);
 
-  if (response.ok) {
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = undefined;
-    }
     return {
       ok: true,
       status: response.status,
       json: body,
       location,
     };
-  }
+  } catch (error) {
+    if (error instanceof HTTPError) {
+      const response = error.response;
+      const location = response.headers?.get?.('location') ?? undefined;
+      let parsed: unknown;
+      const payloadBody = error.payload?.body;
+      if (typeof payloadBody === 'string' && payloadBody.length > 0) {
+        try {
+          parsed = JSON.parse(payloadBody);
+        } catch {
+          parsed = payloadBody;
+        }
+      } else {
+        parsed = await readJsonFromResponse(response);
+      }
 
-  let errorBody: unknown;
-  try {
-    errorBody = await response.json();
-  } catch {
-    errorBody = undefined;
+      return {
+        ok: false,
+        status: response.status,
+        json: parsed,
+        issue: readOperationOutcome(parsed),
+        location,
+      };
+    }
+    throw error;
   }
-
-  return {
-    ok: false,
-    status: response.status,
-    json: errorBody,
-    issue: readOperationOutcome(errorBody),
-    location,
-  };
 }
 
 /** ===== Tipos mínimos FHIR (lectura) ===== */
@@ -497,49 +548,32 @@ export async function postBundleSmart(params: PostBundleParams): Promise<Respons
   const base = normalizeBaseUrl(fhirBase);
   const headers = buildHeaders(token, defaultHeaders);
 
-  // 1) Intento raíz
-  const res1 = await doFetch(base, {
-    method: "POST",
+  const requestInit = {
+    method: 'POST',
     headers,
     body: JSON.stringify(bundle),
-  });
+    fetchImpl: doFetch,
+  } as const;
 
-  if (res1.ok) return res1;
-
-  // Fallback si el server no soporta POST root
-  if ([404, 405, 501].includes(res1.status)) {
-    const url2 = `${base}Bundle`;
-    const res2 = await doFetch(url2, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(bundle),
-    });
-    if (res2.ok) return res2;
-
-    await throwWithDetails(res2, "[FHIR] POST Bundle fallback failed");
-  }
-
-  await throwWithDetails(res1, "[FHIR] POST Bundle failed");
-  // unreachable
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return res1 as any;
-}
-
-async function throwWithDetails(res: Response, prefix: string): Promise<never> {
-  let detail: string | undefined;
   try {
-    const ct = res.headers.get("content-type") || "";
-    if (ct.includes("json")) {
-      const j = await res.clone().json();
-      detail = typeof j === "string" ? j : JSON.stringify(j);
-    } else {
-      detail = await res.clone().text();
+    return await safeFetch(base, requestInit);
+  } catch (error) {
+    if (error instanceof HTTPError) {
+      const status = error.payload.status ?? error.response.status;
+      if ([404, 405, 501].includes(status)) {
+        try {
+          return await safeFetch(`${base}Bundle`, requestInit);
+        } catch (fallbackError) {
+          if (fallbackError instanceof HTTPError) {
+            fallbackError.message = `[FHIR] POST Bundle fallback failed (${fallbackError.payload.status ?? fallbackError.response.status})`;
+          }
+          throw fallbackError;
+        }
+      }
+      error.message = `[FHIR] POST Bundle failed (${status})`;
     }
-  } catch { /* noop */ }
-  const msg = `${prefix}: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ""}`;
-  const err: any = new Error(msg);
-  err.response = res;
-  throw err;
+    throw error;
+  }
 }
 
 /* ======================================================================== */
