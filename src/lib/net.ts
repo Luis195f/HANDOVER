@@ -1,100 +1,88 @@
-export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-export type RetryOptions = {
-  retries?: number;
-  baseDelayMs?: number;
-  maxDelayMs?: number;
-};
-
-export type SecureFetchOptions = RequestInit & {
-  timeoutMs?: number;
-  retry?: RetryOptions | number;
-  fetchImpl?: FetchLike;
-};
-
-function resolveRetries(option?: RetryOptions | number): Required<RetryOptions> {
-  if (typeof option === 'number') {
-    return { retries: option, baseDelayMs: 250, maxDelayMs: 4000 };
-  }
-  return {
-    retries: option?.retries ?? 2,
-    baseDelayMs: option?.baseDelayMs ?? 250,
-    maxDelayMs: option?.maxDelayMs ?? 4000,
-  };
-}
-
-async function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function ensureHttps(url: string): void {
-  if (/^https:\/\//i.test(url)) {
-    return;
-  }
-  if (
-    process.env.NODE_ENV !== 'production' &&
-    /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.)/i.test(url)
-  ) {
-    return;
-  }
-  throw new Error('Insecure URL blocked: HTTPS is required in production');
-}
-
-export async function fetchWithRetry(url: string, options: SecureFetchOptions = {}): Promise<Response> {
-  ensureHttps(url);
-  const { timeoutMs = 5000, retry, fetchImpl, signal, ...init } = options;
-  const controller = new AbortController();
-  const composedSignal = signal
-    ? createCompositeSignal(signal, controller.signal)
-    : controller.signal;
-
-  const { retries, baseDelayMs, maxDelayMs } = resolveRetries(retry);
-  const fetchFn: FetchLike = fetchImpl ?? fetch;
+// safeFetch con timeout + backoff y AbortController por intento
+export async function safeFetch(
+  url: string,
+  options: {
+    timeoutMs?: number;
+    retry?: number;
+    fetchImpl?: typeof fetch;
+    signal?: AbortSignal | null;
+  } & RequestInit = {}
+): Promise<Response> {
+  const {
+    timeoutMs = 10_000,
+    retry = 2,
+    fetchImpl = fetch,
+    signal,
+    ...init
+  } = options;
 
   let attempt = 0;
   let lastError: unknown;
 
-  while (attempt <= retries) {
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  // Funciones auxiliares (usa las que ya tengas si existen)
+  const isRetryableStatus = (s: number) => s === 502 || s === 503 || s === 504;
+  const backoff = (n: number) => Math.min(1000 * 2 ** n, 8000);
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  while (attempt <= retry) {
+    // 🔴 nuevo controller/timeout EN CADA INTENTO
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException('Timeout', 'AbortError'));
+    }, timeoutMs);
+
+    // Si nos pasan un signal externo, compónalo con el local
+    const composedSignal =
+      signal && signal !== controller.signal
+        ? (() => {
+            const anyAbort = new AbortController();
+            const onAbort = () => anyAbort.abort();
+            signal.addEventListener('abort', onAbort, { once: true });
+            controller.signal.addEventListener('abort', onAbort, { once: true });
+            return anyAbort.signal;
+          })()
+        : controller.signal;
+
     try {
-      const response = await fetchFn(url, { ...init, signal: composedSignal });
-      if ((response.status === 429 || response.status >= 500) && attempt < retries) {
-        const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
-        await delay(backoff);
+      // HTTPS obligatorio en prod (si ya lo validas en otro lado, puedes omitir)
+      if (
+        typeof window !== 'undefined' &&
+        process.env.NODE_ENV === 'production' &&
+        window.location.protocol !== 'https:'
+      ) {
+        throw new Error('HTTPS is required in production');
+      }
+
+      const res = await fetchImpl(url, { ...init, signal: composedSignal });
+      clearTimeout(timer);
+
+      if (!res.ok && isRetryableStatus(res.status) && attempt < retry) {
+        await wait(backoff(attempt));
         attempt += 1;
         continue;
       }
-      return response;
-    } catch (error) {
-      lastError = error;
-      if (attempt >= retries) {
-        break;
+
+      return res;
+    } catch (err: any) {
+      clearTimeout(timer);
+
+      // Abort/timeout → reintenta si quedan intentos
+      const aborted =
+        err?.name === 'AbortError' ||
+        (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError');
+
+      if ((aborted || err?.code === 'ECONNRESET') && attempt < retry) {
+        await wait(backoff(attempt));
+        attempt += 1;
+        lastError = err;
+        continue;
       }
-      const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
-      await delay(backoff);
-      attempt += 1;
-    } finally {
-      clearTimeout(timeout);
+
+      // Lanza el error final tipado según tu modelo
+      lastError = err;
+      break;
     }
   }
 
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-  throw new Error('fetchWithRetry failed without specific error');
-}
-
-function createCompositeSignal(...signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') {
-    return AbortSignal.any(signals);
-  }
-  const controller = new AbortController();
-  for (const sig of signals) {
-    if (sig.aborted) {
-      controller.abort();
-      return controller.signal;
-    }
-    sig.addEventListener('abort', () => controller.abort(), { once: true });
-  }
-  return controller.signal;
+  throw lastError ?? new Error('Network error');
 }
