@@ -1,11 +1,11 @@
 // src/lib/net.ts
 
-// Extiende RequestInit con las opciones de red que usamos en runtime
+// RequestInit extendido con las opciones que usamos realmente
 export type FetchOptions = RequestInit & {
   timeoutMs?: number;
   retry?: number;
   fetchImpl?: typeof fetch;
-  signal?: AbortSignal | null; // mantenlo explícito para claridad en tests
+  signal?: AbortSignal | null;
 };
 
 // safeFetch con timeout + backoff y AbortController por intento
@@ -29,7 +29,7 @@ export async function safeFetch(
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   while (attempt <= retry) {
-    // 🔁 AbortController nuevo por intento
+    // controller/timeout NUEVOS por intento
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort(new DOMException('Timeout', 'AbortError'));
@@ -89,6 +89,8 @@ export async function safeFetch(
   throw lastError ?? new Error('Network error');
 }
 
-// ⬅️ Exporta un **único** alias fuertemente tipado
+// ✅ ÚNICO export: firma (url, options?: FetchOptions)
+// Esto hace que en los tests funcione { fetchImpl: mockFetch } como 2º parámetro.
 export const fetchWithRetry: (url: string, options?: FetchOptions) => Promise<Response> = safeFetch;
+
 
