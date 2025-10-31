@@ -1,4 +1,5 @@
 // safeFetch con timeout + backoff y AbortController por intento
+import { fetchWithRetry } from '@/src/lib/net';
 export async function safeFetch(
   url: string,
   options: {
