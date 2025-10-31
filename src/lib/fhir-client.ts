@@ -1,4 +1,3 @@
-// @ts-nocheck
 /* src/lib/fhir-client.ts
  * ------------------------------------------------------------
  * LECTURA desde FHIR (Patient/Encounter/Location) + PREFILL
@@ -15,6 +14,7 @@
  */
 
 import { FHIR_BASE_URL } from '@/src/config/env';
+import { ensureFreshToken, logout } from '@/src/lib/auth';
 import { prefillFromFHIR } from "./prefill";
 
 export type OperationIssue = {
@@ -55,8 +55,18 @@ function readOperationOutcome(payload: unknown): OperationIssue[] | undefined {
   return maybeIssue.filter((issue) => !!issue && typeof issue === 'object') as OperationIssue[];
 }
 
-export async function postBundle(bundle: Bundle, { token }: { token: string }): Promise<ResponseLike> {
-  if (!token) {
+async function resolveAccessToken(provided?: string): Promise<string> {
+  if (provided && provided.trim()) {
+    return provided;
+  }
+  return ensureFreshToken();
+}
+
+export type PostBundleOptions = { token?: string };
+
+export async function postBundle(bundle: Bundle, { token }: PostBundleOptions = {}): Promise<ResponseLike> {
+  const resolvedToken = await resolveAccessToken(token);
+  if (!resolvedToken) {
     throw new Error('OAuth token is required');
   }
 
@@ -64,7 +74,7 @@ export async function postBundle(bundle: Bundle, { token }: { token: string }): 
   const response = await fetch(FHIR_BASE_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${resolvedToken}`,
       'Content-Type': 'application/fhir+json',
       Accept: 'application/fhir+json',
     },
@@ -173,6 +183,32 @@ async function fhirGet(
   });
   if (!res.ok) throw new Error(`FHIR GET ${path} -> ${res.status}`);
   return res.json();
+}
+
+export type FetchFHIRInit = RequestInit & {
+  token?: string;
+  fetchImpl?: typeof fetch;
+};
+
+export async function fetchFHIR(path: string, init: FetchFHIRInit = {}): Promise<Response> {
+  const { fetchImpl, token: providedToken, headers, ...rest } = init;
+  const token = await resolveAccessToken(providedToken);
+  const mergedHeaders = new Headers(headers ?? {});
+  if (!mergedHeaders.has('Accept')) {
+    mergedHeaders.set('Accept', 'application/fhir+json');
+  }
+  mergedHeaders.set('Authorization', `Bearer ${token}`);
+  const fetchFn = fetchImpl ?? fetch;
+  const requestInit: RequestInit = {
+    ...rest,
+    headers: mergedHeaders,
+  };
+  const response = await fetchFn(fhirUrl(FHIR_BASE_URL, path), requestInit);
+  if (response.status === 401 || response.status === 403) {
+    await logout();
+    throw new Error(`FHIR request unauthorized (${response.status})`);
+  }
+  return response;
 }
 
 /** ===== Helpers de parsing ===== */

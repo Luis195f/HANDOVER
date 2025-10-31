@@ -23,6 +23,33 @@ import { getSession, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover } from '@/src/validation/schemas';
+import type { User } from '@/src/lib/auth';
+
+function sessionToUser(session: Session | null): User | null {
+  const rawUser = session?.user;
+  if (!rawUser?.id) {
+    return null;
+  }
+  const unitCandidates = [
+    ...(rawUser.allowedUnits ?? []),
+    ...(rawUser.units ?? []),
+    ...(session?.units ?? []),
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const unitIds = Array.from(new Set(unitCandidates));
+  const primaryRole = rawUser.roles?.[0];
+  const normalizedRole = primaryRole === 'chief' ? 'admin' : primaryRole;
+  const role: User['role'] = normalizedRole === 'admin' || normalizedRole === 'nurse' ? normalizedRole : 'viewer';
+  return {
+    sub: rawUser.id,
+    name: rawUser.name,
+    email: undefined,
+    role,
+    unitIds,
+  };
+}
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -342,7 +369,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         const unitFromStore = normalizeUnit(selectedUnitId);
         const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
 
-        const hasAccess = hasUnitAccess(unitEffective, session?.user?.allowedUnits ?? session?.units);
+        const hasAccess = hasUnitAccess(unitEffective, sessionToUser(session));
         if (!hasAccess) {
           Alert.alert('Sin acceso a la unidad');
           return;
