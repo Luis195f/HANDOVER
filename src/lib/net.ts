@@ -1,10 +1,81 @@
-const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_RETRIES = 2;
-const DEFAULT_BASE_DELAY_MS = 300;
-const DEFAULT_MAX_DELAY_MS = 5_000;
-const RETRYABLE_STATUS = new Set([502, 503, 504]);
-const ERROR_BODY_LIMIT = 2_048;
-const TX_RETRYABLE_HEADERS = ['retry-after'];
+// src/lib/net.ts
+
+// --- Tipos ---------------------------------------------------------------
+export type RetryOptions =
+  | number
+  | {
+      retries?: number;
+      baseDelayMs?: number;
+      maxDelayMs?: number;
+    };
+
+export type FetchOptions = RequestInit & {
+  timeoutMs?: number;
+  retry?: RetryOptions;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal | null;
+};
+
+// Normaliza retry (número u objeto) a una config concreta
+function normalizeRetry(r?: RetryOptions) {
+  if (typeof r === 'number') return { retries: r, baseDelayMs: 1000, maxDelayMs: 8000 };
+  return {
+    retries: r?.retries ?? 2,
+    baseDelayMs: r?.baseDelayMs ?? 1000,
+    maxDelayMs: r?.maxDelayMs ?? 8000,
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** En producción, bloquea http:// salvo loopback (localhost/127.0.0.1/::1) */
+function assertHttpsIfProd(urlStr: string) {
+  const nodeEnv = String((globalThis as any)?.process?.env?.NODE_ENV ?? '');
+  if (nodeEnv !== 'production') return;
+
+  // Solo capturamos errores de parseo, no el throw de política
+  let u: URL;
+  try {
+    u = new URL(urlStr);
+  } catch {
+    // URL relativa: no validamos aquí
+    return;
+  }
+
+  const host = u.hostname.toLowerCase();
+  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (u.protocol === 'http:' && !isLoopback) {
+    throw new Error('HTTPS is required in production');
+  }
+}
+
+// --- Implementación ------------------------------------------------------
+export async function safeFetch(url: string, options: FetchOptions = {}): Promise<Response> {
+  const { timeoutMs = 10_000, retry, fetchImpl = fetch, signal, ...init } = options;
+
+  const { retries, baseDelayMs, maxDelayMs } = normalizeRetry(retry);
+  let attempt = 0;
+  let lastError: unknown;
+
+  // Transitorios: 408/429 y 5xx (incluye 500)
+  const isTransient = (s: number) => s === 408 || s === 429 || (s >= 500 && s < 600);
+
+  while (attempt <= retries) {
+    // AbortController NUEVO por intento
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    // Componer señal externa + local por intento
+    const composedSignal =
+      signal && signal !== controller.signal
+        ? (() => {
+            const anyAbort = new AbortController();
+            const onAbort = () => anyAbort.abort();
+            signal.addEventListener('abort', onAbort, { once: true });
+            controller.signal.addEventListener('abort', onAbort, { once: true });
+            return anyAbort.signal;
+          })()
+        : controller.signal;
 
 export type SafeFetchOptions = RequestInit & {
   timeoutMs?: number;
@@ -81,255 +152,60 @@ function combineSignals(signalA?: AbortSignal | null, signalB?: AbortSignal | nu
   const abortFrom = (signal: AbortSignal) => {
     if (controller.signal.aborted) return;
     try {
-      controller.abort((signal as any).reason ?? createAbortError());
-    } catch {
-      controller.abort(createAbortError());
-    }
-  };
-  for (const sig of signals) {
-    if (sig.aborted) {
-      abortFrom(sig);
-      break;
-    }
-    sig.addEventListener('abort', () => abortFrom(sig), { once: true });
-  }
-  return controller.signal;
-}
+      // Bloqueo HTTP en producción (funciona en Node/Jest y en runtime)
+      assertHttpsIfProd(url);
 
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function computeBackoffDelay(attempt: number, base: number, cap: number, random: () => number): number {
-  const exp = Math.min(cap, base * 2 ** attempt);
-  const jitter = Math.max(0, Math.floor(random() * exp));
-  return Math.min(cap, jitter);
-}
-
-function parseRetryAfter(header: string | null | undefined): number | null {
-  if (!header) return null;
-  const trimmed = header.trim();
-  if (!trimmed) return null;
-  const numeric = Number(trimmed);
-  if (Number.isFinite(numeric) && numeric >= 0) {
-    return numeric * 1_000;
-  }
-  const parsedDate = Date.parse(trimmed);
-  if (Number.isNaN(parsedDate)) return null;
-  const diff = parsedDate - Date.now();
-  return diff > 0 ? diff : 0;
-}
-
-function truncateBody(body: string): string {
-  if (body.length <= ERROR_BODY_LIMIT) return body;
-  return `${body.slice(0, ERROR_BODY_LIMIT)}…`;
-}
-
-async function extractErrorBody(response: Response | any): Promise<string | undefined> {
-  try {
-    if (response && typeof response.clone === 'function') {
-      const clone = response.clone();
-      const contentType = clone.headers?.get?.('content-type') ?? '';
-      if (contentType.includes('json') && typeof clone.json === 'function') {
-        const json = await clone.json();
-        const serialized = typeof json === 'string' ? json : JSON.stringify(json);
-        return truncateBody(serialized);
-      }
-      if (typeof clone.text === 'function') {
-        const text = await clone.text();
-        if (!text) return undefined;
-        return truncateBody(text);
-      }
-    }
-
-    if (response && typeof response.text === 'function') {
-      const text = await response.text();
-      if (!text) return undefined;
-      return truncateBody(text);
-    }
-
-    if (response && typeof response.json === 'function') {
-      const json = await response.json();
-      const serialized = typeof json === 'string' ? json : JSON.stringify(json);
-      return truncateBody(serialized);
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isProduction(): boolean {
-  if (typeof __DEV__ === 'boolean') {
-    return !__DEV__;
-  }
-  return process.env.NODE_ENV === 'production';
-}
-
-function isAllowedInsecureHost(hostname: string): boolean {
-  return (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '10.0.2.2' ||
-    hostname.startsWith('192.168.')
-  );
-}
-
-function enforceHttps(url: string, method: string): void {
-  if (!isProduction()) return;
-  if (!url.startsWith('http://')) return;
-  try {
-    const parsed = new URL(url);
-    if (isAllowedInsecureHost(parsed.hostname)) {
-      return;
-    }
-  } catch {
-    // If URL parsing fails, fall back to generic error
-  }
-  throw new NetworkError('Insecure HTTP URLs are blocked in production builds', {
-    url,
-    method,
-  });
-}
-
-function ensureFetchImplementation(fetchImpl?: typeof fetch): typeof fetch {
-  const impl = fetchImpl ?? (typeof fetch === 'function' ? fetch : undefined);
-  if (!impl) {
-    throw new Error('No fetch implementation available for safeFetch');
-  }
-  return impl;
-}
-
-export async function safeFetch(url: string, options: SafeFetchOptions = {}): Promise<Response> {
-  const {
-    timeoutMs = DEFAULT_TIMEOUT_MS,
-    maxRetries: explicitMaxRetries,
-    retry,
-    fetchImpl,
-    retryStatuses = Array.from(RETRYABLE_STATUS),
-    baseDelayMs = DEFAULT_BASE_DELAY_MS,
-    maxDelayMs = DEFAULT_MAX_DELAY_MS,
-    random = Math.random,
-    signal,
-    method: rawMethod,
-    omitAbortSignal = false,
-    ...init
-  } = options;
-
-  const method = (rawMethod ?? 'GET').toUpperCase();
-  const maxRetries =
-    typeof explicitMaxRetries === 'number'
-      ? explicitMaxRetries
-      : typeof retry === 'number'
-        ? retry
-        : DEFAULT_MAX_RETRIES;
-  enforceHttps(url, method);
-
-  const doFetch = ensureFetchImplementation(fetchImpl);
-  const retryable = new Set(retryStatuses);
-  let lastNetworkError: unknown;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    let didTimeout = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    try {
-      let response: Response;
-      if (omitAbortSignal) {
-        response = await Promise.race([
-          doFetch(url, { ...init, method, signal: signal ?? undefined }),
-          new Promise<Response>((_, reject) => {
-            timer = setTimeout(() => {
-              didTimeout = true;
-              reject(new TimeoutError(`Request timed out after ${timeoutMs}ms`, { url, method }));
-            }, timeoutMs);
-          }),
-        ]);
-      } else {
-        const timeoutController = new AbortController();
-        const combinedSignal = combineSignals(signal ?? undefined, timeoutController.signal);
-        timer = setTimeout(() => {
-          didTimeout = true;
-          try {
-            timeoutController.abort(createAbortError());
-          } catch {
-            timeoutController.abort();
-          }
-        }, timeoutMs);
-        response = await doFetch(url, { ...init, method, signal: combinedSignal });
-      }
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-
-      if (!response.ok) {
-        if (retryable.has(response.status) && attempt < maxRetries) {
-          const retryAfterHeader = TX_RETRYABLE_HEADERS.map((header) => response.headers.get(header)).find(Boolean);
-          const retryAfterMs = parseRetryAfter(retryAfterHeader ?? null);
-          const delayMs = retryAfterMs ?? computeBackoffDelay(attempt, baseDelayMs, maxDelayMs, random);
-          await sleep(delayMs);
-          continue;
-        }
-
-        const body = await extractErrorBody(response);
-        throw new HTTPError(`Request failed with status ${response.status}`, {
-          url,
-          method,
-          status: response.status,
-          statusText: response.statusText,
-          body,
-        }, response);
-      }
-
-      return response;
-    } catch (error: any) {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-
-      if (error instanceof HTTPError) {
-        throw error;
-      }
-
-      if (error instanceof TimeoutError) {
-        if (attempt < maxRetries) {
-          const delayMs = computeBackoffDelay(attempt, baseDelayMs, maxDelayMs, random);
-          await sleep(delayMs);
-          continue;
-        }
-        throw error;
-      }
-
-      const hasDomException = typeof DOMException !== 'undefined';
-      const isAbort = error?.name === 'AbortError' || (hasDomException && error instanceof DOMException);
-      if (isAbort) {
-        if (didTimeout) {
-          if (attempt < maxRetries) {
-            const delayMs = computeBackoffDelay(attempt, baseDelayMs, maxDelayMs, random);
-            await sleep(delayMs);
-            continue;
-          }
-          throw new TimeoutError(`Request timed out after ${timeoutMs}ms`, { url, method });
-        }
-        throw new NetworkError('Request was aborted', { url, method });
-      }
-
-      lastNetworkError = error;
-
-      if (attempt < maxRetries) {
-        const delayMs = computeBackoffDelay(attempt, baseDelayMs, maxDelayMs, random);
-        await sleep(delayMs);
+      // Decide reintento por STATUS, no por res.ok
+      if (isTransient(res.status) && attempt < retries) {
+        const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+        attempt += 1;
+        await sleep(delay);
         continue;
       }
 
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new NetworkError(reason || 'Network request failed', { url, method });
+      return res;
+    } catch (err: any) {
+      clearTimeout(timer);
+
+      // Abort/ECONNRESET: también reintenta
+      const isAbort =
+        err?.name === 'AbortError' ||
+        (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') ||
+        err?.code === 'ECONNRESET';
+
+      if (isAbort && attempt < retries) {
+        const delay = Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+        attempt += 1;
+        await sleep(delay);
+        lastError = err;
+        continue;
+      }
+
+      lastError = err;
+      break;
     }
   }
 
-  const fallbackReason = lastNetworkError instanceof Error ? lastNetworkError.message : 'Network request failed';
-  throw new NetworkError(fallbackReason, { url, method });
+  throw lastError ?? new Error('Network error');
 }
+
+// --- API pública (compat) -----------------------------------------------
+// Firma moderna (url, options) y heredada (url, init, retry)
+export function fetchWithRetry(url: string, options?: FetchOptions): Promise<Response>;
+export function fetchWithRetry(url: string, init?: RequestInit, legacyRetry?: RetryOptions): Promise<Response>;
+export function fetchWithRetry(url: string, a?: RequestInit | FetchOptions, b?: RetryOptions): Promise<Response> {
+  const opts: FetchOptions = a ? { ...(a as any) } : {};
+  if (typeof b !== 'undefined') opts.retry = b;
+  return safeFetch(url, opts);
+}
+
+
+
+
+
+

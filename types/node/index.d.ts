@@ -26,8 +26,15 @@ declare function setInterval(handler: (...args: any[]) => void, timeout?: number
 declare function clearInterval(handle?: number): void;
 
 interface Headers {
+  append(name: string, value: string): void;
+  delete(name: string): void;
   get(name: string): string | null;
+  has(name: string): boolean;
+  set(name: string, value: string): void;
+  forEach(callback: (value: string, key: string) => void): void;
 }
+
+type HeadersInit = Headers | Record<string, string> | Array<[string, string]>;
 
 type RequestInfo = string;
 
@@ -43,11 +50,12 @@ interface Response {
 
 interface RequestInit {
   method?: string;
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   body?: any;
+  signal?: AbortSignal | null;
 }
 
-declare function fetch(input: string, init?: RequestInit): Promise<Response>;
+declare function fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
 
 declare class AbortController {
   readonly signal: any;

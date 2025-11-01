@@ -14,11 +14,12 @@
     "typeRoots": ["./types", "./node_modules/@types"],
     "noImplicitAny": false
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "jest-tests/**/*.ts"],
   "exclude": [
-    "src/**/__tests__/**",
-    "src/**/*.test.ts",
-    "src/**/*.test.tsx",
-    "tests/**"
+    "node_modules",
+    "tests/**",
+    "src/lib/__tests__/**",
+    "src/lib/**/*.spec.ts",
+    "src/lib/**/*.test.ts"
   ]
 }
