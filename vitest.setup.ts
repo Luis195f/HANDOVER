@@ -1,14 +1,17 @@
 // vitest.setup.ts
+import 'whatwg-fetch';
 import '@testing-library/jest-native/extend-expect';
 import { vi } from 'vitest';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-import * as SecureStoreMock from './__mocks__/expo-secure-store';
+process.env.OIDC_ISSUER ??= 'https://oidc.test';
+process.env.OIDC_CLIENT_ID ??= 'test-client';
+process.env.OIDC_SCOPE ??= 'openid profile email';
 
 vi.mock('expo-barcode-scanner');
 vi.mock('expo-audio');
-vi.mock('expo-secure-store', () => SecureStoreMock);
+vi.mock('expo-secure-store', () => import('./__mocks__/expo-secure-store'));
 vi.mock('expo-auth-session', () => import('./__mocks__/expo-auth-session'));
 
 vi.mock('expo-constants', () => ({
@@ -35,22 +38,8 @@ vi.mock('@/src/security/auth', async () => {
   };
 });
 
-/** (Opcional) Polyfill de fetch si el entorno no lo trae */
-if (!(globalThis as any).fetch) {
-  (globalThis as any).fetch = async () =>
-    ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        resourceType: 'Bundle',
-        type: 'transaction-response',
-        entry: [],
-      }),
-    } as any);
-}
-
 /** (Compat) vi.skip "no-op" si algún test antiguo lo llama */
-(Object.assign(vi as any, { skip: () => {} }));
+Object.assign(vi as any, { skip: () => {} });
 
 /**
  * Compatibilidad mínima para suites migradas a Jest. Mapea `jest.*` → `vi.*`.

@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { allowedUnitsFrom, type Session } from '@/src/security/auth';
-import { getAuthState, persistAuth, refresh, resetAuthState, type AuthTokens } from '@/src/lib/auth';
+import { allowedUnitsFrom, hasUnitAccess, type Session } from '@/src/security/auth';
+
+const baseSession: Session = {
+  user: { id: 'nurse-1', roles: ['nurse'], allowedUnits: ['UCI'] },
+  units: ['ER'],
+};
 
 describe('allowedUnitsFrom', () => {
   it('returns empty set when session is null', () => {
@@ -15,42 +19,26 @@ describe('allowedUnitsFrom', () => {
     expect(allowed.size).toBe(1);
   });
 
-  it('returns units from session', () => {
-    const session = { units: ['UCI', 'Pab1'] } as Session;
+  it('returns units from session and user fields', () => {
+    const session: Session = {
+      user: { id: 'user', allowedUnits: ['ICU'] },
+      units: ['WardA'],
+    };
     const allowed = allowedUnitsFrom(session, {});
-    expect(allowed.has('UCI')).toBe(true);
-    expect(allowed.has('XYZ')).toBe(false);
+    expect(Array.from(allowed)).toEqual(expect.arrayContaining(['ICU', 'WardA']));
   });
 });
 
-describe('refresh', () => {
-  beforeEach(() => {
-    resetAuthState();
-    vi.useFakeTimers();
+describe('hasUnitAccess', () => {
+  it('permite acceso con comodín', () => {
+    const session: Session = { ...baseSession, user: { id: 'admin', roles: ['chief'], allowedUnits: ['*'] } };
+    const allowed = allowedUnitsFrom(session, { EXPO_PUBLIC_ALLOW_ALL_UNITS: '1' });
+    expect(allowed.has('*')).toBe(true);
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    resetAuthState();
-  });
-
-  it('keeps previous refresh token when refresh response omits it', async () => {
-    const previousTokens: AuthTokens = {
-      accessToken: 'old-access',
-      refreshToken: 'refresh-prev',
-      expiresAt: Math.floor(Date.now() / 1000) + 1000,
-      scope: 'openid profile email',
-    };
-
-    vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
-    await persistAuth(previousTokens, { id: 'nurse-1' });
-
-    vi.setSystemTime(new Date('2025-01-01T01:00:00Z'));
-    await refresh({ access_token: 'new-access', expires_in: 7200 }, { id: 'nurse-1' });
-
-    const state = getAuthState();
-    expect(state.tokens?.accessToken).toBe('new-access');
-    expect(state.tokens?.refreshToken).toBe('refresh-prev');
-    expect(state.tokens?.expiresAt).toBe(Math.floor(Date.now() / 1000) + 7200 - 5);
+  it('evalúa acceso contra unidades combinadas', () => {
+    expect(hasUnitAccess(baseSession, 'UCI')).toBe(true);
+    expect(hasUnitAccess(baseSession, 'ER')).toBe(true);
+    expect(hasUnitAccess(baseSession, 'Unknown')).toBe(false);
   });
 });

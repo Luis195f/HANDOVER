@@ -40,7 +40,12 @@ vi.mock('@/src/security/acl', () => ({
 
 vi.mock('@/src/security/auth', () => ({
   getSession: vi.fn(async () => ({
-    user: { id: 'nurse-1', name: 'Nurse Jane' },
+    user: {
+      id: 'nurse-1',
+      name: 'Nurse Jane',
+      roles: ['nurse'],
+      allowedUnits: ['icu-west'],
+    },
   })),
 }));
 
@@ -141,7 +146,14 @@ describe('HandoverForm', () => {
       submitButton.props.onPress();
     });
 
-    expect(hasUnitAccess).toHaveBeenCalledWith('icu-west', undefined);
+    expect(hasUnitAccess).toHaveBeenCalledWith(
+      'icu-west',
+      expect.objectContaining({
+        sub: 'nurse-1',
+        role: 'nurse',
+        unitIds: expect.arrayContaining(['icu-west']),
+      })
+    );
     expect(buildHandoverBundle).toHaveBeenCalledTimes(1);
     expect(buildHandoverBundle.mock.calls[0]?.[0]).toMatchObject({
       patientId: 'pat-001',

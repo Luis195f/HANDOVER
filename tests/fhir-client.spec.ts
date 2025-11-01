@@ -41,15 +41,19 @@ describe('postBundle', () => {
 
     const result = await postBundle(bundle, { token: 'token-123' });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://fhir.test/api', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer token-123',
-        'Content-Type': 'application/fhir+json',
-        Accept: 'application/fhir+json',
-      },
-      body: JSON.stringify(bundle),
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://fhir.test/api',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer token-123',
+          'Content-Type': 'application/fhir+json',
+          Accept: 'application/fhir+json',
+        },
+        body: JSON.stringify(bundle),
+        signal: expect.any(AbortSignal),
+      })
+    );
     expect(result).toEqual({
       ok: true,
       status: 201,

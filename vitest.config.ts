@@ -57,6 +57,14 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./tests/__mocks__/react-native.ts', import.meta.url)),
       },
       {
+        find: 'expo-secure-store',
+        replacement: fileURLToPath(new URL('./__mocks__/expo-secure-store.ts', import.meta.url)),
+      },
+      {
+        find: 'whatwg-fetch',
+        replacement: fileURLToPath(new URL('./tests/polyfills/whatwg-fetch.ts', import.meta.url)),
+      },
+      {
         find: '@testing-library/jest-native/extend-expect',
         replacement: fileURLToPath(new URL('./tests/jest-native.ts', import.meta.url)),
       },

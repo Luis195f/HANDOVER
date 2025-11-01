@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NetworkError, safeFetch } from '@/src/lib/net';
 import { __test__ as syncTestUtils } from '@/src/lib/sync';
@@ -10,15 +10,21 @@ vi.mock('@/src/config/env', () => ({
   ENV: { FHIR_BASE_URL: 'https://fhir.test', API_BASE: '', API_TOKEN: '' },
 }));
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe('safeFetch', () => {
   it('reintenta solicitudes que agotan el timeout', async () => {
     vi.useFakeTimers();
     let attempt = 0;
     const fetchMock = vi.fn((_: string, init?: RequestInit) => {
       attempt += 1;
+      const signal = init?.signal as AbortSignal | undefined;
+      expect(signal).toBeInstanceOf(AbortSignal);
       if (attempt === 1) {
         return new Promise<Response>((_, reject) => {
-          const signal = init?.signal as AbortSignal | undefined;
           signal?.addEventListener('abort', () => {
             reject(new DOMException('Aborted', 'AbortError'));
           });
@@ -36,17 +42,19 @@ describe('safeFetch', () => {
     });
 
     await vi.advanceTimersByTimeAsync(15);
+    await vi.runAllTimersAsync();
     const response = await promise;
 
     expect(response.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
   });
 
   it('vuelve a intentar ante respuestas HTTP retryable', async () => {
     vi.useFakeTimers();
     let attempt = 0;
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_: string, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      expect(signal).toBeInstanceOf(AbortSignal);
       attempt += 1;
       if (attempt === 1) {
         return new Response('busy', { status: 503, headers: { 'retry-after': '0.01' } });
@@ -67,7 +75,6 @@ describe('safeFetch', () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
   });
 
   it('bloquea HTTP sin cifrar en producción', async () => {

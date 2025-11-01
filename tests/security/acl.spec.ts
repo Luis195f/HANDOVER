@@ -1,33 +1,34 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { hasUnitAccess } from '@/src/security/acl';
-import type { Session } from '@/src/security/auth';
+import type { User } from '@/src/lib/auth';
 
-const ORIGINAL_FLAG = process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-
-afterEach(() => {
-  if (ORIGINAL_FLAG === undefined) {
-    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-  } else {
-    process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = ORIGINAL_FLAG;
-  }
-});
+function createUser(overrides: Partial<User> = {}): User {
+  return {
+    sub: 'nurse-1',
+    role: 'nurse',
+    unitIds: ['UCI'],
+    ...overrides,
+  };
+}
 
 describe('hasUnitAccess', () => {
-  it('allows access when env flag enables wildcard', () => {
-    process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = '1';
-    expect(hasUnitAccess('AnyUnit')).toBe(true);
+  it('returns false when user is missing', () => {
+    expect(hasUnitAccess('UCI', null)).toBe(false);
   });
 
-  it('allows access when unit is included in session', () => {
-    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-    const session = { units: ['UCI'] } as Session;
-    expect(hasUnitAccess('UCI', session)).toBe(true);
+  it('allows access when user is admin regardless of unit list', () => {
+    const admin = createUser({ role: 'admin', unitIds: [] });
+    expect(hasUnitAccess('AnyUnit', admin)).toBe(true);
+  });
+
+  it('allows access when unit is included in user unitIds', () => {
+    const nurse = createUser({ unitIds: ['UCI', 'Pab1'] });
+    expect(hasUnitAccess('Pab1', nurse)).toBe(true);
   });
 
   it('denies access when unit not allowed', () => {
-    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-    const session = { units: ['UCI'] } as Session;
-    expect(hasUnitAccess('XYZ', session)).toBe(false);
+    const nurse = createUser({ unitIds: ['UCI'] });
+    expect(hasUnitAccess('XYZ', nurse)).toBe(false);
   });
 });
