@@ -13,6 +13,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
+    "vitest": "vitest",
     "validate:fhir": "pnpm dlx tsx@4.15.2 scripts/validate-fhir.ts"
   },
   "dependencies": {
@@ -66,7 +67,8 @@
     "jsdom": "^27.0.0",
     "react-test-renderer": "^19.2.0",
     "ts-jest": "^29.4.5",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
   },
   "pnpm": {
     "overrides": {

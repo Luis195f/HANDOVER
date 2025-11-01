@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NetworkError, safeFetch } from '@/src/lib/net';
+import { ConfigError, safeFetch } from '@/src/lib/net';
 import { __test__ as syncTestUtils } from '@/src/lib/sync';
 
 vi.mock('@/src/config/env', () => ({
@@ -84,7 +84,7 @@ describe('safeFetch', () => {
 
     await expect(
       safeFetch('http://malicious.example.com/data', { fetchImpl: fetchMock })
-    ).rejects.toBeInstanceOf(NetworkError);
+    ).rejects.toBeInstanceOf(ConfigError);
 
     process.env.NODE_ENV = previous;
     expect(fetchMock).not.toHaveBeenCalled();

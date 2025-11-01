@@ -13,6 +13,10 @@ declare module 'zod' {
   export function array<T>(schema: T): any;
   export function union<T extends any[]>(schemas: T): any;
   export function nativeEnum<T>(en: T): any;
+  export function discriminatedUnion<T extends string, U extends any[]>(
+    discriminator: T,
+    schemas: U,
+  ): any;
   export function record<T>(value: T): any;
   export function any(): any;
   export function unknown(): any;
@@ -30,6 +34,7 @@ declare module 'zod' {
     array: typeof array;
     union: typeof union;
     nativeEnum: typeof nativeEnum;
+    discriminatedUnion: typeof discriminatedUnion;
     record: typeof record;
     any: typeof any;
     unknown: typeof unknown;
@@ -49,6 +54,11 @@ declare module 'zod' {
     output: <T>(schema: T) => any;
     ZodIssueCode: typeof ZodIssueCode;
   };
+
+  export namespace z {
+    export type infer<T> = any;
+    export type output<T> = any;
+  }
 
   export { z as default };
   export { z };

@@ -1,5 +1,11 @@
 // src/theme/index.tsx
-import React, {createContext, useContext, useMemo, useState} from 'react';
+import React, {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import {Text, useColorScheme} from 'react-native';
 
 type Theme = 'light' | 'dark';
@@ -7,7 +13,7 @@ type Ctx = { theme: Theme; toggle: () => void };
 
 const Ctx = createContext<Ctx | null>(null);
 
-export function AppThemeProvider({children}: {children: React.ReactNode}) {
+export function AppThemeProvider({ children }: { children: ReactNode }) {
   const system = (useColorScheme() ?? 'light') as Theme;
   const [theme, setTheme] = useState<Theme>(system);
   const value = useMemo(

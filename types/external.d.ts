@@ -22,8 +22,10 @@ declare module 'react' {
     useContext: typeof useContext;
     useLayoutEffect: typeof useLayoutEffect;
     createContext: typeof createContext;
+    ReactNode: ReactNode;
   };
   export default React;
+  export as namespace React;
 }
 
 declare namespace React {

@@ -46,6 +46,14 @@ export class HTTPError extends SafeFetchError {
   }
 }
 
+export class ConfigError extends Error {
+  readonly kind = 'config';
+
+  constructor(message: string, public meta?: Record<string, unknown>) {
+    super(message);
+  }
+}
+
 function normalizeRetry(retry?: RetryOptions) {
   if (typeof retry === 'number') {
     return { retries: retry, baseDelayMs: 1000, maxDelayMs: 8000 };
@@ -73,11 +81,11 @@ function assertHttpsIfProd(urlStr: string, method: string) {
   const host = parsed.hostname.toLowerCase();
   const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
   if (parsed.protocol === 'http:' && !isLoopback) {
-    throw new NetworkError('HTTPS is required in production', { url: urlStr, method });
+    throw new ConfigError('HTTPS is required in production', { url: urlStr, method });
   }
 }
 
-const isTransientStatus = (status: number) => status === 408 || status === 429 || (status >= 500 && status < 600);
+const RETRYABLE_HTTP_STATUSES = new Set([502, 503, 504]);
 const toMethod = (method?: string) => (method ? method.toUpperCase() : 'GET');
 
 const isAbortError = (error: unknown) => {
@@ -138,7 +146,7 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
       if (timeout) clearTimeout(timeout);
 
       if (!response.ok) {
-        if (isTransientStatus(response.status) && attempt < retries) {
+        if (RETRYABLE_HTTP_STATUSES.has(response.status) && attempt < retries) {
           attempt += 1;
           const delay = Math.min(delayBase * 2 ** (attempt - 1), delayMax);
           await sleep(delay);
@@ -161,11 +169,34 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
     } catch (error) {
       if (timeout) clearTimeout(timeout);
 
+      if (error instanceof ConfigError) {
+        throw error;
+      }
+
       if (error instanceof HTTPError) {
         throw error;
       }
 
+      if (error instanceof TimeoutError) {
+        lastError = error;
+        if (attempt < retries) {
+          attempt += 1;
+          const delay = Math.min(delayBase * 2 ** (attempt - 1), delayMax);
+          await sleep(delay);
+          continue;
+        }
+        throw error;
+      }
+
       if (error instanceof NetworkError) {
+        lastError = error;
+        if (attempt < retries) {
+          attempt += 1;
+          const jitter = 1 + (random?.() ?? Math.random()) * 0.1;
+          const delay = Math.min(delayBase * 2 ** (attempt - 1) * jitter, delayMax);
+          await sleep(delay);
+          continue;
+        }
         throw error;
       }
 
@@ -181,20 +212,21 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
       }
 
       lastError = error;
-      if (attempt < retries) {
-        attempt += 1;
-        const jitter = 1 + (random?.() ?? Math.random()) * 0.1;
-        const delay = Math.min(delayBase * 2 ** (attempt - 1) * jitter, delayMax);
-        await sleep(delay);
-        continue;
-      }
-
       const message = (error as Error)?.message ?? 'Network error';
       throw new NetworkError(message, { url, method });
     }
   }
 
   const message = (lastError as Error)?.message ?? 'Network error';
+  if (isAbortError(lastError)) {
+    throw new TimeoutError('Request aborted by timeout', { url, method });
+  }
+  if (lastError instanceof ConfigError) {
+    throw lastError;
+  }
+  if (lastError instanceof NetworkError || lastError instanceof TimeoutError) {
+    throw lastError;
+  }
   throw new NetworkError(message, { url, method });
 }
 
