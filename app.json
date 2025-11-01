@@ -46,7 +46,7 @@
     },
     "extra": {
       "eas": { "projectId": "00000000-0000-0000-0000-000000000000" },
-      "FHIR_BASE_URL": "http://192.168.0.16:8080/fhir",
+      "FHIR_BASE_URL": "https://fhir.example.com",
       "STT_ENDPOINT": "http://192.168.0.16:8091/stt",
       "ENCRYPTION_NAMESPACE": "handover-pro",
       "ALLOW_ALL_UNITS": "1",
