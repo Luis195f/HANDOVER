@@ -3,13 +3,15 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:cov": "vitest run --coverage"
+    "start": "pnpm exec expo start",
+    "android": "pnpm exec expo run:android",
+    "ios": "pnpm exec expo run:ios",
+    "web": "pnpm exec expo start --web",
+    "typecheck": "pnpm exec tsc --noEmit",
+    "lint": "pnpm exec expo lint",
+    "test": "pnpm exec vitest run --reporter=verbose",
+    "test:watch": "pnpm exec vitest",
+    "test:cov": "pnpm exec vitest run --coverage"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -21,7 +23,9 @@
     "expo": "54.0.20",
     "expo-audio": "~1.0.13",
     "expo-camera": "~17.0.8",
+    "expo-auth-session": "~7.0.8",
     "expo-file-system": "~19.0.17",
+    "expo-linking": "~8.0.8",
     "expo-network": "~8.0.7",
     "expo-notifications": "^0.32.12",
     "expo-router": "^6.0.12",
