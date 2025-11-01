@@ -12,37 +12,30 @@ concurrency:
 
 jobs:
   ci:
-    name: Install + typecheck + lint + vitest
     runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
     steps:
       - uses: actions/checkout@v4
 
-      # Node 20 + cache + registry explícito (evita 403)
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-          cache: 'pnpm'
-
-      # PNPM v10 sin auto-install; instalamos nosotros
+      # pnpm 10 explícito
       - uses: pnpm/action-setup@v3
         with:
           version: 10
-          run_install: false
 
-      # Configuración pnpm para evitar 403 y peers estrictos
-      - name: Configure pnpm
-        run: |
-          pnpm config set registry https://registry.npmjs.org/
-          pnpm config set auto-install-peers true
-          pnpm config set strict-peer-dependencies false
-          pnpm config set ignore-scripts false
-          pnpm config set prefer-offline true
-          pnpm config set store-dir ~/.pnpm-store
+      # Node 20 + cache PNPM + registry npmjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
 
-      # Instalación usando el lockfile del repo
-      - name: Install dependencies
-        run: pnpm -w install --frozen-lockfile --prefer-offline
+      - name: Versions
+        run: node -v && pnpm -v && npm -v
+
+      - name: Install
+        run: pnpm -w install --no-frozen-lockfile
 
       - name: Typecheck
         run: pnpm -w typecheck
@@ -50,5 +43,5 @@ jobs:
       - name: Lint
         run: pnpm -w lint
 
-      - name: Vitest
+      - name: Tests (Vitest)
         run: pnpm -w vitest run --reporter=verbose
