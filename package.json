@@ -12,7 +12,8 @@
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "precommit": "pnpm typecheck && pnpm lint && pnpm test"
+    "precommit": "pnpm typecheck && pnpm lint && pnpm test",
+    "validate:fhir": "pnpm dlx tsx@4.15.2 scripts/validate-fhir.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",

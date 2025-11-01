@@ -100,9 +100,13 @@ function readOperationOutcome(payload: unknown): OperationIssue[] | undefined {
   return maybeIssue.filter((issue) => !!issue && typeof issue === 'object') as OperationIssue[];
 }
 
-async function resolveAccessToken(provided?: string): Promise<string> {
-  if (provided && provided.trim()) {
-    return provided;
+async function resolveAccessToken(provided?: string | null): Promise<string> {
+  if (provided !== undefined && provided !== null) {
+    const trimmed = String(provided).trim();
+    if (!trimmed) {
+      throw new Error('OAuth token is required');
+    }
+    return trimmed;
   }
   return ensureFreshToken();
 }
@@ -116,16 +120,16 @@ export async function postBundle(bundle: Bundle, { token }: PostBundleOptions = 
   }
 
   const serialized = ensureBundle(bundle);
-  const response = await fetch(FHIR_BASE_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resolvedToken}`,
-      'Content-Type': 'application/fhir+json',
-      Accept: 'application/fhir+json',
-    },
-    body: serialized,
-  });
-
+  try {
+    const response = await safeFetch(FHIR_BASE_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resolvedToken}`,
+        'Content-Type': 'application/fhir+json',
+        Accept: 'application/fhir+json',
+      },
+      body: serialized,
+    });
     const location = response.headers?.get?.('location') ?? undefined;
     const body = await readJsonFromResponse(response);
 

@@ -1,13 +1,36 @@
-# Backend Django
+# Handover Pro — Release Candidate Guide
 
-## Guía rápida
+Handover Pro es una app móvil (Expo/React Native + TypeScript) respaldada por un backend Django que sincroniza reportes clínicos con servidores FHIR compatibles. Este documento resume cómo preparar tu entorno, autenticarte y ejecutar las verificaciones necesarias para el Release Candidate `v0.4.0-rc.1`.
 
-1. Copia `.env.example` a `.env` y ajusta las variables necesarias:
+## Requisitos
+
+| Herramienta                | Versión recomendada |
+| -------------------------- | ------------------- |
+| Node.js                    | 20.x                |
+| pnpm                       | 10.x                |
+| Expo CLI                   | 10+ (viene con `pnpm expo`) |
+| Python                     | 3.11/3.12 (para backend Django) |
+| Java JDK (Android opcional)| 17                  |
+
+> 💡 Asegúrate de tener permisos de red para acceder al registro de npm y, si compilas Android/iOS, instala los SDK correspondientes.
+
+## Variables de entorno y credenciales
+
+1. Copia el archivo de ejemplo y personaliza tus valores:
    ```bash
    cp .env.example .env
-   # edita EXPO_PUBLIC_API_BASE_URL si tu backend corre en otra IP
    ```
-2. Inicia el backend de Django:
+2. Configura un proveedor OIDC con permisos `openid profile email offline_access` y registra una app con redirect URI `handoverpro://callback` (o el esquema definido en `OIDC_REDIRECT_SCHEME`).
+3. Solicita a tu administrador el `FHIR_BASE_URL` de tu entorno (sandbox o producción) y verifica que tengas permisos `Bundle.write` sobre el servidor.
+4. Para pruebas locales puedes reutilizar usuarios de desarrollo; la app requiere acceso a micrófono, cámara y almacenamiento para adjuntar audio o imágenes.
+
+## Instalación y ejecución
+
+1. **Dependencias frontend**
+   ```bash
+   pnpm install
+   ```
+2. **Backend Django (opcional para pruebas end-to-end)**
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -15,49 +38,45 @@
    python manage.py migrate
    python manage.py runserver 0.0.0.0:8000
    ```
-3. Levanta el frontend móvil con Expo:
+3. **Iniciar Expo**
    ```bash
-   pnpm install
-   pnpm expo start -c
+   pnpm expo start --tunnel
    ```
-4. Verifica conectividad haciendo `GET` a `http://127.0.0.1:8000/api/ping` (o la IP que definas).
+   Desde la app Expo Go o un emulador podrás escanear el QR. Configura el mismo `FHIR_BASE_URL` que uses en backend/sandbox.
 
-## Requisitos
-- Python 3.10/3.11/3.12
+### Notas sobre permisos móviles
 
-## Desarrollo local (Windows)
-```bash
-python -m venv .venv
-. .venv/Scripts/activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
-```
+- Android: acepta permisos de micrófono, cámara y almacenamiento para adjuntar audio. Si usas modo offline, habilita `WRITE_EXTERNAL_STORAGE` en el dispositivo.
+- iOS: el flujo requiere autorización de micrófono para la grabadora SBAR.
+- Si tu organización aplica MDM, solicita whitelisting para el esquema `handoverpro://` y los endpoints del servidor FHIR.
 
-CI
+## Pruebas y chequeos de calidad
 
-GitHub Actions usa Python 3.10/3.11/3.12.
+| Comando | Descripción |
+| ------- | ----------- |
+| `pnpm typecheck` | Ejecuta `tsc --noEmit` sobre el workspace. |
+| `pnpm lint` | Ejecuta ESLint con la configuración del monorepo. |
+| `pnpm vitest run --reporter=verbose` | Corre las pruebas unitarias/Vitest (incluye la validación FHIR). |
+| `pnpm validate:fhir path/al/bundle.json` | Valida un Bundle FHIR generado fuera del runner de pruebas (utiliza `scripts/validate-fhir.ts`). |
 
-Despliegue (Render/Railway)
+> ✅ Definition of Done del RC: los tres comandos anteriores deben pasar sin errores. Añade `pnpm validate:fhir` en CI cuando quieras validar bundles exportados desde pipelines externos.
 
-Procfile + runtime.txt
-ENV:
+## Flujo de autenticación
 
-DJANGO_SETTINGS_MODULE=backend.settings
+1. La app inicia sesión vía Auth0/Keycloak (cualquier servidor OIDC) usando `expo-auth-session`.
+2. Se espera un token con scope `offline_access` para refrescar credenciales sin intervención del usuario.
+3. El backend Django expone endpoints REST protegidos con el mismo JWT. Para depurar, puedes usar `curl -H "Authorization: Bearer <token>" http://localhost:8000/api/ping`.
 
-SECRET_KEY=...
+## Sincronización y modo offline
 
-ALLOWED_HOSTS=*
-## Desarrollo local y móvil
-```bash
-# Windows
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
-```
-- Abre desde el móvil en la misma Wi-Fi: http://TU_IP_LOCAL:8000/
-- Endpoints: `/` y `/api/ping`
+- Los formularios se guardan en una cola local (SQLite) y se reintentan con backoff exponencial.
+- En modo offline, la app almacena los bundles en espera. Al recuperar conexión, usa la cola para sincronizar con el servidor FHIR definido en `FHIR_BASE_URL`.
+- Puedes monitorear el estado en la pantalla **Sync Center** (menú lateral).
 
+## Recursos adicionales
 
+- [docs/DEPLOY.md](docs/DEPLOY.md): pasos detallados para compilar Android/iOS/Web y generar artefactos.
+- [CHANGELOG.md](CHANGELOG.md) y [RELEASE_NOTES.md](RELEASE_NOTES.md): resumen de cambios del Release Candidate.
+- `.github/workflows/ci.yml`: pipeline con typecheck, lint y pruebas.
+
+¡Listo! Con este flujo deberías poder preparar builds de validación clínica y entregar el Release Candidate `v0.4.0-rc.1`.
