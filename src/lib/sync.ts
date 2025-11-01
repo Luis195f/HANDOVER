@@ -1063,3 +1063,7 @@ export function validateHandoverInput(input: unknown) {
   return S.parse(input);
 }
 
+export const __test__ = {
+  ensureBundleTx,
+};
+

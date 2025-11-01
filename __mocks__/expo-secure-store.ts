@@ -1,11 +1,28 @@
-const store = new Map<string, string>();
+const store: Record<string, string> = {};
 
-export const getItemAsync = jest.fn(async (key: string) => (store.has(key) ? (store.get(key) as string) : null));
-export const setItemAsync = jest.fn(async (key: string, value: string) => {
-  store.set(key, value);
-});
-export const deleteItemAsync = jest.fn(async (key: string) => {
-  store.delete(key);
-});
+export const AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY = 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY';
 
-export const __store = store;
+export async function getItemAsync(key: string): Promise<string | null> {
+  return key in store ? store[key] : null;
+}
+
+export async function setItemAsync(key: string, value: string): Promise<void> {
+  store[key] = value;
+}
+
+export async function deleteItemAsync(key: string): Promise<void> {
+  delete store[key];
+}
+
+export function __reset(): void {
+  for (const key of Object.keys(store)) {
+    delete store[key];
+  }
+}
+
+export default {
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  getItemAsync,
+  setItemAsync,
+  deleteItemAsync,
+};

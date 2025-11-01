@@ -6,7 +6,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    setupFiles: ['./vitest.setup.ts'],
     include: [
+      '__tests__/**/*.spec.ts',
+      '__tests__/**/*.spec.tsx',
       'tests/**/*.spec.ts',
       'tests/patientlist-*.test.ts',
       'tests/qr-scan.test.ts',
@@ -25,13 +28,39 @@ export default defineConfig({
       'src/**/__tests__/**/patient-filters.test.ts',
       'src/**/__tests__/**/drafts.test.ts',
     ],
-    setupFiles: ['./vitest.setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: './coverage/unit',
+      include: [
+        'src/lib/auth.ts',
+        'src/lib/net.ts',
+        'src/screens/HandoverForm.tsx',
+        'src/validation/schemas.ts',
+        'src/components/Chip.tsx',
+      ],
+      thresholds: {
+        lines: 40,
+        statements: 40,
+        functions: 40,
+        branches: 30,
+      },
+    },
   },
   resolve: {
-    alias: {
-      '@/src': path.resolve(__dirname, 'src'),
-      'react-native': fileURLToPath(new URL('./tests/__mocks__/react-native.ts', import.meta.url)),
-    },
+    alias: [
+      { find: '@/src', replacement: path.resolve(__dirname, 'src') },
+      { find: '@/', replacement: `${path.resolve(__dirname, 'src')}/` },
+      { find: '@', replacement: path.resolve(__dirname, 'src') },
+      {
+        find: 'react-native',
+        replacement: fileURLToPath(new URL('./tests/__mocks__/react-native.ts', import.meta.url)),
+      },
+      {
+        find: '@testing-library/jest-native/extend-expect',
+        replacement: fileURLToPath(new URL('./tests/jest-native.ts', import.meta.url)),
+      },
+    ],
   },
   optimizeDeps: { exclude: ['react-native'] },
   ssr: { external: ['react-native'] },

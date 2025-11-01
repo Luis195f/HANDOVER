@@ -1,27 +1,15 @@
 // vitest.setup.ts
+import '@testing-library/jest-native/extend-expect';
 import { vi } from 'vitest';
 
-/**
- * Mock global de expo-secure-store (exports con nombre).
- * Usa un "almacén" en memoria que puedes resetear por test con:
- *   (globalThis as any).__secureStoreMem = {}
- */
-(globalThis as any).__secureStoreMem ??= {} as Record<string, string | null>;
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+import * as SecureStoreMock from './__mocks__/expo-secure-store';
+
 vi.mock('expo-barcode-scanner');
 vi.mock('expo-audio');
-vi.mock('expo-secure-store', () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
-  getItemAsync: (k: string) =>
-    Promise.resolve(((globalThis as any).__secureStoreMem[k]) ?? null),
-  setItemAsync: (k: string, v: string) => {
-    (globalThis as any).__secureStoreMem[k] = v;
-    return Promise.resolve();
-  },
-  deleteItemAsync: (k: string) => {
-    delete (globalThis as any).__secureStoreMem[k];
-    return Promise.resolve();
-  },
-}));
+vi.mock('expo-secure-store', () => SecureStoreMock);
+vi.mock('expo-auth-session', () => import('./__mocks__/expo-auth-session'));
 
 vi.mock('expo-constants', () => ({
   default: {
