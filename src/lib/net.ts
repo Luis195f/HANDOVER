@@ -77,12 +77,88 @@ export async function safeFetch(url: string, options: FetchOptions = {}): Promis
           })()
         : controller.signal;
 
+export type SafeFetchOptions = RequestInit & {
+  timeoutMs?: number;
+  maxRetries?: number;
+  retry?: number;
+  fetchImpl?: typeof fetch;
+  retryStatuses?: number[];
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  random?: () => number;
+  omitAbortSignal?: boolean;
+};
+
+export type SafeFetchErrorPayload = {
+  url: string;
+  method: string;
+  status?: number;
+  statusText?: string;
+  body?: string;
+};
+
+class SafeFetchError extends Error {
+  readonly payload: SafeFetchErrorPayload;
+
+  constructor(message: string, payload: SafeFetchErrorPayload) {
+    super(message);
+    this.payload = payload;
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export class NetworkError extends SafeFetchError {}
+export class TimeoutError extends SafeFetchError {}
+export class HTTPError extends SafeFetchError {
+  readonly response: Response;
+
+  constructor(message: string, payload: SafeFetchErrorPayload, response: Response) {
+    super(message, payload);
+    this.response = response;
+  }
+}
+
+export function isNetworkError(error: unknown): error is NetworkError {
+  return error instanceof NetworkError;
+}
+
+export function isTimeoutError(error: unknown): error is TimeoutError {
+  return error instanceof TimeoutError;
+}
+
+export function isHTTPError(error: unknown): error is HTTPError {
+  return error instanceof HTTPError;
+}
+
+function createAbortError(): Error {
+  if (typeof DOMException === 'function') {
+    return new DOMException('Aborted', 'AbortError');
+  }
+  const abortError = new Error('Aborted');
+  (abortError as any).name = 'AbortError';
+  return abortError;
+}
+
+function combineSignals(signalA?: AbortSignal | null, signalB?: AbortSignal | null): AbortSignal | undefined {
+  const signals = [signalA, signalB].filter(Boolean) as AbortSignal[];
+  if (signals.length === 0) {
+    return undefined;
+  }
+  if (signals.length === 1) {
+    return signals[0];
+  }
+  const controller = new AbortController();
+  const abortFrom = (signal: AbortSignal) => {
+    if (controller.signal.aborted) return;
     try {
       // Bloqueo HTTP en producción (funciona en Node/Jest y en runtime)
       assertHttpsIfProd(url);
 
-      const res = await fetchImpl(url, { ...init, signal: composedSignal });
-      clearTimeout(timer);
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
       // Decide reintento por STATUS, no por res.ok
       if (isTransient(res.status) && attempt < retries) {
