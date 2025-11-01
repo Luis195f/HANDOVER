@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "codex/**", "release/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    name: Install dependencies
+    runs-on: ubuntu-latest
+    outputs:
+      pnpm-store-path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Restore pnpm cache
+        id: pnpm-cache
+        run: |
+          pnpm config set store-dir ~/.pnpm-store
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+      - name: Install workspace dependencies
+        run: pnpm -w install --frozen-lockfile
+      - name: Upload pnpm store
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+  typecheck:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Restore pnpm store
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ needs.setup.outputs.pnpm-store-path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm -w install --frozen-lockfile
+      - run: pnpm -w typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Restore pnpm store
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ needs.setup.outputs.pnpm-store-path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm -w install --frozen-lockfile
+      - run: pnpm -w lint
+
+  test:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Restore pnpm store
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ needs.setup.outputs.pnpm-store-path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm -w install --frozen-lockfile
+      - run: pnpm -w vitest run --reporter=verbose
