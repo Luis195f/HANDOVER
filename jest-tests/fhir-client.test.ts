@@ -1,80 +1,91 @@
-jest.mock('@/src/lib/auth', () => ({
-  ensureFreshToken: jest.fn(async () => 'auto-token'),
-  logout: jest.fn(async () => undefined),
+jest.mock('@/src/lib/net', () => ({
+  fetchWithRetry: jest.fn(),
 }));
 
-import { ensureFreshToken, logout } from '@/src/lib/auth';
+import { fetchWithRetry } from '@/src/lib/net';
+import { configureFHIRClient, fetchFHIR, postBundle } from '@/src/lib/fhir-client';
 
 describe('fhir-client', () => {
+  const ensureFreshToken = jest.fn(async () => 'auto-token');
+  const logout = jest.fn(async () => {});
+
   beforeEach(() => {
-    (globalThis.fetch as jest.Mock).mockReset();
+    ensureFreshToken.mockReset();
+    ensureFreshToken.mockImplementation(async () => 'auto-token');
+    logout.mockReset();
+    (fetchWithRetry as jest.Mock).mockReset();
+    configureFHIRClient({
+      ensureFreshToken,
+      logout,
+      getBaseUrl: () => 'https://fhir.test',
+    });
   });
 
   test('postBundle uses ensureFreshToken when token omitted', async () => {
-    const { postBundle } = await import('@/src/lib/fhir-client');
-    (globalThis.fetch as jest.Mock).mockResolvedValue({
+    (fetchWithRetry as jest.Mock).mockResolvedValue({
       ok: true,
       status: 200,
-      headers: { get: jest.fn().mockReturnValue('Observation/1') },
-      json: jest.fn().mockResolvedValue({ resourceType: 'Bundle' }),
+      text: jest.fn().mockResolvedValue(JSON.stringify({ resourceType: 'Bundle' })),
+      headers: { get: jest.fn() },
     });
     await postBundle({ resourceType: 'Bundle' }, {});
     expect(ensureFreshToken).toHaveBeenCalled();
+    const [, init] = (fetchWithRetry as jest.Mock).mock.calls[0];
+    expect(init.headers.Authorization).toBe('Bearer auto-token');
   });
 
   test('postBundle returns error issues on failure', async () => {
-    const { postBundle } = await import('@/src/lib/fhir-client');
-    (globalThis.fetch as jest.Mock).mockResolvedValue({
+    (fetchWithRetry as jest.Mock).mockResolvedValue({
       ok: false,
       status: 400,
-      headers: { get: jest.fn().mockReturnValue(null) },
-      json: jest.fn().mockResolvedValue({ issue: [{ code: 'invalid' }] }),
+      text: jest.fn().mockResolvedValue(JSON.stringify({ issue: [{ code: 'invalid' }] })),
+      headers: { get: jest.fn() },
     });
     const result = await postBundle({ resourceType: 'Bundle' }, { token: 'manual' });
     expect(result.ok).toBe(false);
-    expect(result.issue?.[0].code).toBe('invalid');
+    expect(result.issues?.[0].code).toBe('invalid');
   });
 
   test('fetchFHIR injects authorization header', async () => {
-    const { fetchFHIR } = await import('@/src/lib/fhir-client');
-    (globalThis.fetch as jest.Mock).mockResolvedValue({
+    (fetchWithRetry as jest.Mock).mockResolvedValue({
       ok: true,
       status: 200,
-      json: jest.fn(),
-      headers: { get: jest.fn().mockReturnValue(null) },
+      text: jest.fn().mockResolvedValue(JSON.stringify({ resourceType: 'Patient' })),
+      headers: { get: jest.fn() },
     });
-    await fetchFHIR('/Patient');
-    const [url, init] = (globalThis.fetch as jest.Mock).mock.calls[0];
-    expect(String(url)).toContain('https://fhir.test');
-    expect((init.headers as Headers).get('Authorization')).toBe('Bearer auto-token');
+    const result = await fetchFHIR({ path: '/Patient' });
+    const [url, init] = (fetchWithRetry as jest.Mock).mock.calls[0];
+    expect(String(url)).toBe('https://fhir.test/Patient');
+    expect(init.headers.Authorization).toBe('Bearer auto-token');
+    expect(result.ok).toBe(true);
   });
 
   test('fetchFHIR triggers logout on unauthorized', async () => {
-    const { fetchFHIR } = await import('@/src/lib/fhir-client');
-    (globalThis.fetch as jest.Mock).mockResolvedValue({
+    (fetchWithRetry as jest.Mock).mockResolvedValue({
       ok: false,
       status: 401,
-      json: jest.fn(),
-      headers: { get: jest.fn().mockReturnValue(null) },
+      text: jest.fn().mockResolvedValue(''),
+      headers: { get: jest.fn() },
     });
-    await expect(fetchFHIR('/Encounter')).rejects.toThrow(/unauthorized/);
+    const result = await fetchFHIR({ path: '/Encounter' });
+    expect(result.ok).toBe(false);
     expect(logout).toHaveBeenCalled();
   });
 
   test('fetchFHIR allows custom token and headers', async () => {
-    const { fetchFHIR } = await import('@/src/lib/fhir-client');
-    (globalThis.fetch as jest.Mock).mockResolvedValue({
+    (fetchWithRetry as jest.Mock).mockResolvedValue({
       ok: true,
       status: 200,
-      json: jest.fn(),
-      headers: { get: jest.fn().mockReturnValue(null) },
+      text: jest.fn().mockResolvedValue(''),
+      headers: { get: jest.fn() },
     });
-    await fetchFHIR('/Observation', {
+    await fetchFHIR({
+      path: '/Observation',
       token: 'custom-token',
       headers: { 'X-Test': 'value' },
     });
-    const [, init] = (globalThis.fetch as jest.Mock).mock.calls[0];
-    expect((init.headers as Headers).get('Authorization')).toBe('Bearer custom-token');
-    expect((init.headers as Headers).get('X-Test')).toBe('value');
+    const [, init] = (fetchWithRetry as jest.Mock).mock.calls[0];
+    expect(init.headers.Authorization).toBe('Bearer custom-token');
+    expect(init.headers['X-Test']).toBe('value');
   });
 });

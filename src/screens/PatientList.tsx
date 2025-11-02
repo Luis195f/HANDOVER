@@ -14,10 +14,8 @@ import Chip from "@/src/components/Chip";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import type { RootStackParamList } from "@/src/navigation/types";
-import { hasUnitAccess } from "@/src/security/acl";
-import { getSession, type Session } from "@/src/security/auth";
+import { currentUser, hasUnitAccess } from "@/src/security/acl";
 import { mark } from "@/src/lib/otel";
-import type { User } from "@/src/lib/auth";
 import {
   ALL_UNITS_OPTION,
   setSelectedUnitId,
@@ -25,31 +23,6 @@ import {
 } from "@/src/state/filterStore";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
-
-function sessionToUser(session: Session | null): User | null {
-  const rawUser = session?.user;
-  if (!rawUser?.id) {
-    return null;
-  }
-  const units = [
-    ...(rawUser.allowedUnits ?? []),
-    ...(rawUser.units ?? []),
-    ...(session?.units ?? []),
-  ]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const roleCandidate = rawUser.roles?.[0];
-  const normalizedRole = roleCandidate === "chief" ? "admin" : roleCandidate;
-  const role: User["role"] = normalizedRole === "admin" || normalizedRole === "nurse" ? normalizedRole : "viewer";
-  return {
-    sub: rawUser.id,
-    name: rawUser.name,
-    email: undefined,
-    role,
-    unitIds: Array.from(new Set(units)),
-  };
-}
 
 export type PatientListItem = {
   id: string;
@@ -167,7 +140,6 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 
 export default function PatientList({ navigation }: Props) {
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
-  const [session, setSession] = useState<Session | null>(null);
   const selectedUnitId = useSelectedUnitId();
 
   const onSpecialtyChange = useCallback((value: string) => {
@@ -177,23 +149,6 @@ export default function PatientList({ navigation }: Props) {
 
   const onUnitChange = useCallback((value: string) => {
     setSelectedUnitId(value);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const sess = await getSession();
-        if (!active) return;
-        setSession(sess);
-      } catch {
-        if (!active) return;
-        setSession(null);
-      }
-    })();
-    return () => {
-      active = false;
-    };
   }, []);
 
   useEffect(() => {
@@ -268,7 +223,7 @@ export default function PatientList({ navigation }: Props) {
     [selectedSpecialtyId, selectedUnitId]
   );
 
-  const handlePatientPress = useCallback(
+  const onOpenPatient = useCallback(
     (patient: PatientListItem) => {
       const unit = UNITS_BY_ID[patient.unitId];
       if (!unit) {
@@ -276,9 +231,9 @@ export default function PatientList({ navigation }: Props) {
         return;
       }
 
-      const allowed = hasUnitAccess(unit.id, sessionToUser(session));
-      if (!allowed) {
-        Alert.alert("Sin acceso a la unidad");
+      const user = currentUser();
+      if (!hasUnitAccess(unit.id, user)) {
+        Alert.alert("Sin acceso", "No tienes acceso a esta unidad.");
         return;
       }
 
@@ -291,7 +246,7 @@ export default function PatientList({ navigation }: Props) {
         unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
       });
     },
-    [navigation, selectedUnitId, session]
+    [navigation, selectedUnitId]
   );
 
   return (
@@ -336,7 +291,7 @@ export default function PatientList({ navigation }: Props) {
         renderItem={({ item }) => {
           const unit = UNITS_BY_ID[item.unitId];
           return (
-            <Pressable onPress={() => handlePatientPress(item)} style={styles.patientCard}>
+            <Pressable onPress={() => onOpenPatient(item)} style={styles.patientCard}>
               <Text style={styles.patientName}>{item.name}</Text>
               <Text style={styles.patientMeta}>{unit?.name ?? item.unitId}</Text>
             </Pressable>
