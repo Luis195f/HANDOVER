@@ -4,6 +4,14 @@ import { clearAuthState, getAuthState, setAuthState, subscribe, type AuthTokens 
 
 export type { AuthTokens } from '@/src/state/auth-store';
 
+export type Tokens = {
+  access_token: string;
+  refresh_token?: string | null;
+  expires_at: number;
+  id_token?: string;
+  scope?: string;
+};
+
 type DiscoveryDocument = {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
@@ -46,10 +54,12 @@ export type User = {
   unitIds: string[];
 };
 
+type SecureStoreOptions = { keychainService?: string };
+
 type SecureStoreModule = {
-  getItemAsync(key: string): Promise<string | null>;
-  setItemAsync(key: string, value: string): Promise<void>;
-  deleteItemAsync(key: string): Promise<void>;
+  getItemAsync(key: string, options?: SecureStoreOptions): Promise<string | null>;
+  setItemAsync(key: string, value: string, options?: SecureStoreOptions): Promise<void>;
+  deleteItemAsync(key: string, options?: SecureStoreOptions): Promise<void>;
 };
 
 function loadSecureStore(): SecureStoreModule | null {
@@ -71,16 +81,18 @@ const memoryStore = new Map<string, string>();
 
 const TOKEN_EXPIRY_SAFETY_WINDOW = 5;
 
+const SECURE_STORE_OPTIONS: SecureStoreOptions = { keychainService: 'handoverpro' };
+
 async function storeSet(key: string, value: string | null): Promise<void> {
   if (!value) {
     if (secureStore) {
-      await secureStore.deleteItemAsync(key);
+      await secureStore.deleteItemAsync(key, SECURE_STORE_OPTIONS);
     }
     memoryStore.delete(key);
     return;
   }
   if (secureStore) {
-    await secureStore.setItemAsync(key, value);
+    await secureStore.setItemAsync(key, value, SECURE_STORE_OPTIONS);
   } else {
     memoryStore.set(key, value);
   }
@@ -88,7 +100,7 @@ async function storeSet(key: string, value: string | null): Promise<void> {
 
 async function storeGet(key: string): Promise<string | null> {
   if (secureStore) {
-    return secureStore.getItemAsync(key);
+    return secureStore.getItemAsync(key, SECURE_STORE_OPTIONS);
   }
   return memoryStore.has(key) ? (memoryStore.get(key) as string) : null;
 }

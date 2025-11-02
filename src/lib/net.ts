@@ -12,6 +12,7 @@ export type RetryOptions =
 export type FetchOptions = RequestInit & {
   timeoutMs?: number;
   retry?: RetryOptions;
+  retries?: number;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal | null;
 };
@@ -51,9 +52,9 @@ function assertHttpsIfProd(urlStr: string) {
 
 // --- Implementación ------------------------------------------------------
 export async function safeFetch(url: string, options: FetchOptions = {}): Promise<Response> {
-  const { timeoutMs = 10_000, retry, fetchImpl = fetch, signal, ...init } = options;
+  const { timeoutMs = 10_000, retry, retries: retryCount, fetchImpl = fetch, signal, ...init } = options;
 
-  const { retries, baseDelayMs, maxDelayMs } = normalizeRetry(retry);
+  const { retries, baseDelayMs, maxDelayMs } = normalizeRetry(retry ?? retryCount);
   let attempt = 0;
   let lastError: unknown;
 
