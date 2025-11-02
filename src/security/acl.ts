@@ -13,3 +13,9 @@ export function hasUnitAccess(unitId: string | undefined, user: User | null): bo
 export function requireRole(user: User | null, roles: User['role'][]): boolean {
   return Boolean(user && roles.includes(user.role));
 }
+
+export function guardUnit(unitId: string | undefined, user: User | null): void {
+  if (!hasUnitAccess(unitId, user)) {
+    throw new Error('ACCESS_DENIED_UNIT');
+  }
+}

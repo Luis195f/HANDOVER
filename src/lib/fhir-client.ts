@@ -18,6 +18,8 @@ import { ensureFreshToken, logout } from '@/src/lib/auth';
 import { prefillFromFHIR } from "./prefill";
 import { safeFetch, HTTPError } from './net';
 
+const FHIR_BASE = process.env.FHIR_BASE_URL ?? FHIR_BASE_URL;
+
 async function readJsonFromResponse(response: any): Promise<unknown> {
   if (!response) return undefined;
 
@@ -161,6 +163,22 @@ export async function postBundle(bundle: Bundle, { token }: PostBundleOptions = 
     }
     throw error;
   }
+}
+
+export async function fetchFHIR(path: string, init?: RequestInit): Promise<Response> {
+  const token = await ensureFreshToken();
+  const response = await safeFetch(`${FHIR_BASE}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/fhir+json',
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('AUTH_REQUIRED');
+  }
+  return response;
 }
 
 /** ===== Tipos mínimos FHIR (lectura) ===== */

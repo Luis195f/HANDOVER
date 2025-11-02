@@ -53,3 +53,13 @@ export async function ensureMediaPermissions(): Promise<boolean> {
   const results = await ensurePermissions('camera', 'microphone');
   return results.camera.granted && results.microphone.granted;
 }
+
+export async function ensureCameraPermission(): Promise<boolean> {
+  const result = await ensurePermissions('camera');
+  return result.camera.granted;
+}
+
+export async function ensureAudioPermission(): Promise<boolean> {
+  const result = await ensurePermissions('microphone');
+  return result.microphone.granted;
+}
