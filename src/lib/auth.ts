@@ -2,6 +2,8 @@ import * as AuthSession from 'expo-auth-session';
 import Constants from 'expo-constants';
 import { clearAuthState, getAuthState, setAuthState, subscribe, type AuthTokens } from '@/src/state/auth-store';
 
+export type { AuthTokens } from '@/src/state/auth-store';
+
 type DiscoveryDocument = {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
@@ -16,6 +18,16 @@ type TokenResponse = {
   idToken?: string;
   scope?: string;
 };
+
+type OAuthTokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  id_token?: string;
+  scope?: string;
+};
+
+type AnyTokenResponse = TokenResponse & OAuthTokenResponse;
 
 type AuthRequestLike = {
   codeVerifier?: string;
@@ -56,6 +68,8 @@ function loadSecureStore(): SecureStoreModule | null {
 
 const secureStore = loadSecureStore();
 const memoryStore = new Map<string, string>();
+
+const TOKEN_EXPIRY_SAFETY_WINDOW = 5;
 
 async function storeSet(key: string, value: string | null): Promise<void> {
   if (!value) {
@@ -300,7 +314,7 @@ function buildUserFromClaims(claims: Record<string, unknown> | null): User | nul
   };
 }
 
-async function persistAuth(tokens: AuthTokens, user: User | null): Promise<void> {
+export async function persistAuth(tokens: AuthTokens, user: User | null): Promise<void> {
   await Promise.all([
     storeSet(ACCESS_KEY, tokens.accessToken),
     storeSet(REFRESH_KEY, tokens.refreshToken ?? null),
@@ -309,6 +323,42 @@ async function persistAuth(tokens: AuthTokens, user: User | null): Promise<void>
     storeSet(USER_KEY, user ? JSON.stringify(user) : null),
   ]);
   setAuthState({ user, tokens });
+}
+
+export async function refresh(
+  response: AnyTokenResponse,
+  user: User | null = null
+): Promise<AuthTokens> {
+  await hydrateFromStorage();
+  const state = getAuthState();
+  if (!state.tokens) {
+    throw new Error('Cannot refresh tokens without an existing session');
+  }
+
+  const normalized = normalizeTokenResponse(response);
+  const accessToken = normalized.accessToken ?? state.tokens.accessToken;
+  if (!accessToken) {
+    throw new Error('Missing access token in refresh response');
+  }
+
+  const baseTokens = buildTokens({
+    accessToken,
+    refreshToken: normalized.refreshToken ?? undefined,
+    expiresIn: normalized.expiresIn ?? undefined,
+    idToken: normalized.idToken ?? undefined,
+    scope: normalized.scope ?? undefined,
+  });
+
+  const tokens: AuthTokens = {
+    ...baseTokens,
+    refreshToken: normalized.refreshToken ?? state.tokens.refreshToken,
+    idToken: normalized.idToken ?? state.tokens.idToken,
+    scope: normalized.scope ?? state.tokens.scope,
+  };
+
+  const nextUser = user ?? state.user;
+  await persistAuth(tokens, nextUser);
+  return tokens;
 }
 
 async function revokeToken(refreshToken: string | null): Promise<void> {
@@ -362,13 +412,23 @@ async function fetchUserInfo(accessToken: string, discovery: DiscoveryDocument):
 
 function buildTokens(response: TokenResponse): AuthTokens {
   const now = Math.floor(Date.now() / 1000);
-  const expiresIn = response.expiresIn ?? 3600;
+  const expiresIn = Math.max((response.expiresIn ?? 3600) - TOKEN_EXPIRY_SAFETY_WINDOW, 0);
   return {
     accessToken: response.accessToken ?? '',
     refreshToken: response.refreshToken ?? null,
     expiresAt: now + expiresIn,
     idToken: response.idToken ?? undefined,
     scope: response.scope ?? undefined,
+  };
+}
+
+function normalizeTokenResponse(response: AnyTokenResponse): TokenResponse {
+  return {
+    accessToken: response.accessToken ?? response.access_token,
+    refreshToken: response.refreshToken ?? response.refresh_token,
+    expiresIn: response.expiresIn ?? response.expires_in,
+    idToken: response.idToken ?? response.id_token,
+    scope: response.scope,
   };
 }
 
@@ -500,6 +560,28 @@ export async function logout(): Promise<void> {
   pendingAuthRequest = null;
 }
 
+export function resetAuthState(): void {
+  hydrationPromise = null;
+  hydrated = false;
+  pendingAuthRequest = null;
+  cachedDiscovery = null;
+  discoveryPromise = null;
+  memoryStore.clear();
+  clearAuthState();
+
+  if (secureStore) {
+    void Promise.all([
+      secureStore.deleteItemAsync(ACCESS_KEY),
+      secureStore.deleteItemAsync(REFRESH_KEY),
+      secureStore.deleteItemAsync(EXP_KEY),
+      secureStore.deleteItemAsync(ID_TOKEN_KEY),
+      secureStore.deleteItemAsync(USER_KEY),
+    ]).catch((error) => {
+      console.warn('Failed to reset secure storage', error);
+    });
+  }
+}
+
 export function getCurrentUser(): User | null {
   return getAuthState().user;
 }
@@ -527,3 +609,5 @@ export async function loginWithMockUser(overrides: Partial<User> = {}): Promise<
   };
   await persistAuth(tokens, user);
 }
+
+export { getAuthState };
