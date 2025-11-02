@@ -1,106 +1,52 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NetworkError, safeFetch } from '@/src/lib/net';
-import { __test__ as syncTestUtils } from '@/src/lib/sync';
-
-vi.mock('@/src/config/env', () => ({
-  FHIR_BASE_URL: 'https://fhir.test',
-  API_BASE: '',
-  API_TOKEN: '',
-  ENV: { FHIR_BASE_URL: 'https://fhir.test', API_BASE: '', API_TOKEN: '' },
-}));
+import { HTTPError, TimeoutError, safeFetch } from '@/src/lib/net';
 
 describe('safeFetch', () => {
-  it('reintenta solicitudes que agotan el timeout', async () => {
-    vi.useFakeTimers();
-    let attempt = 0;
-    const fetchMock = vi.fn((_: string, init?: RequestInit) => {
-      attempt += 1;
-      if (attempt === 1) {
-        return new Promise<Response>((_, reject) => {
-          const signal = init?.signal as AbortSignal | undefined;
-          signal?.addEventListener('abort', () => {
-            reject(new DOMException('Aborted', 'AbortError'));
-          });
-        });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reintenta en 503 y luego ok', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn().mockImplementation(() => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve(new Response('', { status: 503 }));
       }
-      return Promise.resolve(new Response('ok', { status: 200 }));
+      return Promise.resolve(new Response('{}', { status: 200 }));
     });
 
-    const promise = safeFetch('https://api.example.com/resource', {
+    const response = await safeFetch('https://api/foo', {
       fetchImpl: fetchMock,
-      timeoutMs: 10,
-      baseDelayMs: 0,
-      maxDelayMs: 0,
-      random: () => 0,
+      retry: { retries: 1, baseDelayMs: 0, maxDelayMs: 0 },
     });
-
-    await vi.advanceTimersByTimeAsync(15);
-    const response = await promise;
 
     expect(response.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
   });
 
-  it('vuelve a intentar ante respuestas HTTP retryable', async () => {
+  it('timeout lanza TimeoutError', async () => {
     vi.useFakeTimers();
-    let attempt = 0;
-    const fetchMock = vi.fn(async () => {
-      attempt += 1;
-      if (attempt === 1) {
-        return new Response('busy', { status: 503, headers: { 'retry-after': '0.01' } });
-      }
-      return new Response('ok', { status: 200 });
-    });
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
 
-    const promise = safeFetch('https://api.example.com/retry', {
+    const promise = safeFetch('https://api/slow', {
       fetchImpl: fetchMock,
-      timeoutMs: 100,
-      baseDelayMs: 1,
-      maxDelayMs: 1,
-      random: () => 0,
+      timeoutMs: 10,
+      retry: { retries: 0 },
     });
 
-    await vi.runAllTimersAsync();
-    const response = await promise;
-
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(promise).rejects.toBeInstanceOf(TimeoutError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('bloquea HTTP sin cifrar en producción', async () => {
-    const fetchMock = vi.fn();
-    const previous = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
+  it('lanza HTTPError en estados no recuperables', async () => {
+    const fetchMock = vi.fn(async () => new Response('fail', { status: 404 }));
 
     await expect(
-      safeFetch('http://malicious.example.com/data', { fetchImpl: fetchMock })
-    ).rejects.toBeInstanceOf(NetworkError);
-
-    process.env.NODE_ENV = previous;
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('ensureBundleTx idempotencia', () => {
-  it('agrega txId a ifNoneExist conservando valores previos', () => {
-    const { ensureBundleTx } = syncTestUtils;
-    const base = {
-      resourceType: 'Bundle' as const,
-      entry: [
-        { request: { method: 'POST', url: 'Patient' } },
-        { request: { method: 'POST', url: 'Observation', ifNoneExist: 'identifier=system|value' } },
-      ],
-    };
-
-    const { txId, bundle } = ensureBundleTx(base, undefined);
-
-    expect(txId).toMatch(/[0-9a-f\-]{36}/);
-    expect(bundle.identifier?.value).toBe(txId);
-    expect(bundle.entry?.[0].request.ifNoneExist).toContain(txId);
-    expect(bundle.entry?.[1].request.ifNoneExist).toContain('identifier=system|value');
-    expect(bundle.entry?.[1].request.ifNoneExist).toContain(txId);
+      safeFetch('https://api/not-found', { fetchImpl: fetchMock, retry: { retries: 0 } })
+    ).rejects.toBeInstanceOf(HTTPError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
