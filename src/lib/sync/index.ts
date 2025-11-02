@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------
 
 import NetInfo from '@/src/lib/netinfo';
-import { FhirClient } from '../fhir-client';
+import { configureFHIRClient, postBundle } from '../fhir-client';
 import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
@@ -60,19 +60,17 @@ export async function syncBundleOrEnqueue(
 ): Promise<'sent' | 'queued'> {
   const online = await hasInternet();
   const idemKey = bundleIdempotencyKey(bundle);
-  const client = new FhirClient({
-    baseUrl: opts.fhirBaseUrl,
-    getToken: opts.getToken,
-    timeoutMs: 15000,
-  });
-
   if (!online) {
     await enqueue(bundle, idemKey);
     return 'queued';
   }
 
   try {
-    await sendWithRetry(client, bundle, idemKey, opts);
+    configureFHIRClient({
+      getBaseUrl: () => opts.fhirBaseUrl,
+      ensureFreshToken: async () => (await opts.getToken()) ?? null,
+    });
+    await sendWithRetry(bundle, idemKey, opts);
     return 'sent';
   } catch {
     await enqueue(bundle, idemKey);
@@ -81,16 +79,13 @@ export async function syncBundleOrEnqueue(
 }
 
 // --- Envío con backoff + marcas por intento ---
-async function sendWithRetry(
-  client: FhirClient,
-  bundle: any,
-  idemKey: string,
-  opts: SyncOpts
-): Promise<Response> {
+async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts) {
   return await retryWithBackoff(
     async (attempt) => {
       mark('sync.http.request', { attempt, idemKey });
-      const resp = await client.postBundle(bundle, idemKey);
+      const resp = await postBundle(bundle, {
+        headers: { 'Idempotency-Key': idemKey },
+      });
       mark('sync.http.response', { status: resp.status, attempt });
 
       if (isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
@@ -98,7 +93,7 @@ async function sendWithRetry(
       }
       if (isRetryable(resp.status)) throw new Error(`Retryable ${resp.status}`);
 
-      const body = await resp.text().catch(() => '');
+      const body = resp.body ? JSON.stringify(resp.body) : '';
       throw new Error(`Non-retryable HTTP ${resp.status} ${body}`);
     },
     opts.backoff
@@ -119,10 +114,9 @@ async function hasInternet(): Promise<boolean> {
 
 /** Factoriza el flush para reuse (daemon + acción manual). */
 function createFlusher(opts: SyncOpts) {
-  const client = new FhirClient({
-    baseUrl: opts.fhirBaseUrl,
-    getToken: opts.getToken,
-    timeoutMs: 15000,
+  configureFHIRClient({
+    getBaseUrl: () => opts.fhirBaseUrl,
+    ensureFreshToken: async () => (await opts.getToken()) ?? null,
   });
 
   return async function flushImpl(): Promise<FlushResult> {
@@ -140,7 +134,7 @@ function createFlusher(opts: SyncOpts) {
       }
 
       try {
-        const resp = await sendWithRetry(client, bundle, hash, opts);
+        const resp = await sendWithRetry(bundle, hash, opts);
         if (resp.ok || isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
           processed++;
         }

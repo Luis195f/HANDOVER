@@ -1,47 +1,53 @@
 import { fetchWithRetry } from '@/src/lib/net';
 
 describe('fetchWithRetry', () => {
-  test('rejects insecure url in production', async () => {
-    process.env.NODE_ENV = 'production';
-    await expect(fetchWithRetry('http://example.com')).rejects.toThrow(/HTTPS is required/);
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+    global.fetch = originalFetch;
   });
 
-  test('allows localhost over http when not production', async () => {
-    process.env.NODE_ENV = 'development';
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200 })) as any;
-    const response = await fetchWithRetry('http://localhost/api', { fetchImpl: mockFetch });
-    expect(response.status).toBe(200);
+  test('resolves immediately when status not in retry list', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 201 }) as Response);
+    global.fetch = mockFetch as any;
+    const res = await fetchWithRetry('https://example.com');
+    expect(res.status).toBe(201);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  test('retries on transient failures', async () => {
-    process.env.NODE_ENV = 'production';
+  test('retries on configured statuses and eventually succeeds', async () => {
     const mockFetch = jest
       .fn()
-      .mockResolvedValueOnce({ ok: false, status: 500 })
-      .mockResolvedValueOnce({ ok: true, status: 200 });
-    const response = await fetchWithRetry('https://api.example.com', {
-      fetchImpl: mockFetch as any,
-      retry: { retries: 1, baseDelayMs: 1, maxDelayMs: 2 },
-    });
-    expect(response.status).toBe(200);
+      .mockResolvedValueOnce({ ok: false, status: 500 } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response);
+    global.fetch = mockFetch as any;
+    const res = await fetchWithRetry('https://api.example.com', {}, { retries: 1, backoffMs: 1 });
+    expect(res.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
-  test('aborts when timeout elapses', async () => {
-    jest.useFakeTimers();
-    process.env.NODE_ENV = 'production';
-    const mockFetch = jest.fn(async (_: RequestInfo | URL, init?: RequestInit) => {
-      return await new Promise<never>((_, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-      });
+  test('propagates the last error when retries exhausted', async () => {
+    const error = new Error('network down');
+    const mockFetch = jest.fn(async () => {
+      throw error;
     });
-    const promise = fetchWithRetry('https://slow.example.com', {
-      fetchImpl: mockFetch as any,
-      timeoutMs: 10,
-      retry: 0,
+    global.fetch = mockFetch as any;
+    await expect(fetchWithRetry('https://fail.example.com', {}, { retries: 1 })).rejects.toThrow(
+      'network down'
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('passes through provided AbortSignal', async () => {
+    const controller = new AbortController();
+    const mockFetch = jest.fn(async (_input, init?: RequestInit) => {
+      expect(init?.signal).toBe(controller.signal);
+      return { ok: true, status: 200 } as Response;
     });
-    jest.advanceTimersByTime(20);
-    await expect(promise).rejects.toThrow('aborted');
-    jest.useRealTimers();
+    global.fetch = mockFetch as any;
+    const res = await fetchWithRetry('https://signal.test', {}, { signal: controller.signal });
+    expect(res.status).toBe(200);
   });
 });

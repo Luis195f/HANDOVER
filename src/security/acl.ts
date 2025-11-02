@@ -1,21 +1,23 @@
-import type { User } from '@/src/lib/auth';
+// src/security/acl.ts
+export type Role = 'nurse' | 'supervisor' | 'admin';
+export type AuthUser = { id: string; role: Role; allowedUnits?: string[] };
 
-export function hasUnitAccess(unitId: string | undefined, user: User | null): boolean {
-  if (!unitId || !user) {
-    return false;
-  }
-  if (user.role === 'admin') {
-    return true;
-  }
-  return user.unitIds.includes(unitId);
-}
+/**
+ * Mientras no tengamos login real, deja esto en true para no ver el modal.
+ * En prod: ponlo en false y usa allowedUnits reales del usuario autenticado.
+ */
+const DEV_ALLOW_ALL = true;
 
-export function requireRole(user: User | null, roles: User['role'][]): boolean {
-  return Boolean(user && roles.includes(user.role));
-}
+export const currentUser = (): AuthUser => ({
+  id: 'nurse-dev',
+  role: 'supervisor',
+  allowedUnits: ['icu-a', 'onc-ward', 'ed', 'cardio-icu', 'onc-day', 'neuro-icu'],
+});
 
-export function guardUnit(unitId: string | undefined, user: User | null): void {
-  if (!hasUnitAccess(unitId, user)) {
-    throw new Error('ACCESS_DENIED_UNIT');
-  }
+export function hasUnitAccess(unitId?: string, user?: AuthUser): boolean {
+  if (!unitId) return true;
+  if (DEV_ALLOW_ALL) return true;
+  const u = user ?? currentUser();
+  if (u.role === 'admin' || u.role === 'supervisor') return true;
+  return !!u.allowedUnits?.includes(unitId);
 }

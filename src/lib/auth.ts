@@ -496,16 +496,19 @@ async function exchangeCodeForTokens(
   discovery: DiscoveryDocument
 ): Promise<void> {
   const redirectUri = request.redirectUri ?? AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme });
-  const tokenResponse = await AuthSession.exchangeCodeAsync(
+  const extraParams = {
+    ...(oidcConfig.audience ? { audience: oidcConfig.audience } : {}),
+    ...(request.codeVerifier ? { code_verifier: request.codeVerifier } : {}),
+  };
+  const tokenResponse = (await AuthSession.exchangeCodeAsync(
     {
       clientId: oidcConfig.clientId,
       code,
       redirectUri,
-      extraParams: oidcConfig.audience ? { audience: oidcConfig.audience } : undefined,
+      extraParams: Object.keys(extraParams).length ? extraParams : undefined,
     },
-    discovery,
-    { code_verifier: request.codeVerifier }
-  ) as TokenResponse;
+    discovery
+  )) as TokenResponse;
   await handleTokenResponse(tokenResponse, discovery);
   pendingAuthRequest = null;
 }
@@ -518,7 +521,7 @@ export async function handleRedirect(url: string): Promise<void> {
   }
   try {
     const discovery = await getDiscovery();
-    const parsed = AuthSession.parse(url);
+    const parsed = (AuthSession as any).parse?.(url) ?? { queryParams: {}, params: {} };
     const code = parsed.queryParams?.code ?? parsed.params?.code;
     if (!code) {
       const error = parsed.queryParams?.error_description ?? parsed.params?.error_description;

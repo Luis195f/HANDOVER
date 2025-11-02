@@ -1,4 +1,4 @@
-import { postBundleSmart } from './fhir-client';
+import { configureFHIRClient, postBundle } from './fhir-client';
 import { ENV, FHIR_BASE_URL } from '../config/env';
 import { startSyncDaemon, flushQueueNow, type SyncOpts } from './sync/index';
 
@@ -7,7 +7,11 @@ export async function postTransactionBundle(
   opts?: { fhirBase?: string; token?: string }
 ) {
   const fhirBase = opts?.fhirBase ?? ENV.FHIR_BASE_URL ?? FHIR_BASE_URL;
-  return await postBundleSmart({ fhirBase, bundle, token: opts?.token });
+  configureFHIRClient({
+    getBaseUrl: () => fhirBase,
+    ensureFreshToken: async () => opts?.token ?? null,
+  });
+  return await postBundle(bundle, { token: opts?.token ?? undefined });
 }
 
 export type QueueSyncOptions = {
