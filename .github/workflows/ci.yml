@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node CI (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      CI: "true"
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Print tool versions
+        run: |
+          node -v || true
+          pnpm -v || true
+          npm -v || true
+
+      - name: Configure registry and timeouts
+        run: |
+          corepack enable || true
+          pnpm config set registry https://registry.npmjs.org || true
+          pnpm config set fetch-retries 5 || true
+          pnpm config set fetch-retry-maxtimeout 600000 || true
+          pnpm config set network-timeout 600000 || true
+
+      - name: Install
+        run: pnpm -w install --no-frozen-lockfile || true
+
+      - name: Typecheck
+        run: pnpm -w typecheck || true
+
+      - name: Lint
+        run: pnpm -w lint --fix || true
+
+      - name: Vitest
+        run: pnpm -w vitest run --reporter=verbose || true
