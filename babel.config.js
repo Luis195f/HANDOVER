@@ -9,8 +9,9 @@ module.exports = function (api) {
         alias: { '@': './src', '@src': './src' },
         extensions: ['.tsx', '.ts', '.jsx', '.js', '.json'],
       }],
-      'react-native-css-interop/babel',   // ✅ plugin válido y estable
-      'react-native-reanimated/plugin',   // ✅ SIEMPRE el último
+      // Usamos css-interop (NativeWind v4) y dejamos Reanimated al FINAL
+      'react-native-css-interop/babel',
+      'react-native-reanimated/plugin',
     ],
   };
 };
