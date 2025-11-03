@@ -1,3 +1,4 @@
+// babel.config.js
 module.exports = function (api) {
   api.cache(true);
   return {
@@ -8,8 +9,8 @@ module.exports = function (api) {
         alias: { '@': './src', '@src': './src' },
         extensions: ['.tsx', '.ts', '.jsx', '.js', '.json'],
       }],
-      'nativewind/babel',
-      'react-native-reanimated/plugin', // ← SIEMPRE EL ÚLTIMO
+      'react-native-css-interop/babel',   // ✅ plugin válido y estable
+      'react-native-reanimated/plugin',   // ✅ SIEMPRE el último
     ],
   };
 };
