@@ -6,93 +6,182 @@ type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;
   logout?: () => void;
   getBaseUrl?: () => string | undefined;
+  /** Compat: algunos callers pasan baseUrl directo */
+  baseUrl?: string;
 };
 
 let hooks: AuthHooks = {};
 
+/** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
 export function configureFHIRClient(h: AuthHooks) {
-  hooks = { ...hooks, ...h };
+  // Si pasan baseUrl sin getBaseUrl, lo normalizamos
+  const mapped: AuthHooks = { ...h };
+  if (mapped.baseUrl && !mapped.getBaseUrl) {
+    const fixed = mapped.baseUrl.replace(/\/$/, '');
+    mapped.getBaseUrl = () => fixed;
+  }
+  hooks = { ...hooks, ...mapped };
 }
 
 function getBaseUrl(): string {
-  // 1) hook, 2) env, 3) fallback
   const fromHook = hooks.getBaseUrl?.();
   const fromEnv = (process.env as any)?.FHIR_BASE_URL as string | undefined;
   return (fromHook || fromEnv || 'https://example.invalid/fhir').replace(/\/$/, '');
 }
 
 export type FetchFHIRParams = {
-  path: string; // '/Observation' | 'http...'
+  path: string;
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: any;
-  token?: string; // fuerza token custom
+  token?: string;
   headers?: Record<string, string>;
   signal?: AbortSignal;
 };
 
-export async function fetchFHIR(params: FetchFHIRParams) {
-  const { path, method = 'GET', body, token, headers, signal } = params;
+// === Sobrecargas para que los tests puedan llamar fetchFHIR('/Patient', {...})
+export async function fetchFHIR(
+  path: string,
+  opts?: Omit<FetchFHIRParams, 'path'>
+): Promise<{ ok: boolean; response: Response; data: any }>;
+export async function fetchFHIR(
+  params: FetchFHIRParams
+): Promise<{ ok: boolean; response: Response; data: any }>;
 
-  // token preferente -> si no, pedimos uno fresco
+/** Client FHIR con inyección de Authorization + manejo de 401/403. */
+export async function fetchFHIR(
+  arg1: string | FetchFHIRParams,
+  arg2?: Omit<FetchFHIRParams, 'path'>
+) {
+  const p: FetchFHIRParams =
+    typeof arg1 === 'string' ? { path: arg1, ...(arg2 || {}) } : arg1;
+
+  const { path, method = 'GET', body, token, headers, signal } = p;
+
+  // Token preferente → si no, pedimos uno fresco (si hay hook)
   const authToken = token ?? (await hooks.ensureFreshToken?.() ?? undefined);
 
   const url = /^https?:\/\//i.test(path)
     ? path
     : `${getBaseUrl()}/${path.replace(/^\//, '')}`;
 
-  try {
-    const res = await fetchWithRetry(
-      url,
-      {
-        method,
-        headers: {
-          Accept: 'application/fhir+json',
-          ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          ...headers,
-        },
-        body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
-        signal,
+  const res = await fetchWithRetry(
+    url,
+    {
+      method,
+      headers: {
+        Accept: 'application/fhir+json',
+        ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...headers,
       },
-      { retries: 2 }
-    );
+      body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+      signal,
+    }
+  );
 
-    if (res.status === 401 || res.status === 403) {
-      // Los tests esperan logout en 401/403
-      hooks.logout?.();
+  // Comportamiento esperado por los tests
+  if (res.status === 401 || res.status === 403) {
+    hooks.logout?.();
+    throw new Error('unauthorized');
+  }
+
+  // Soporta mocks que no implementan text()
+  let json: any = undefined;
+  const anyRes = res as any;
+  if (typeof anyRes?.json === 'function') {
+    json = await anyRes.json();
+  } else if (typeof anyRes?.text === 'function') {
+    const text = await anyRes.text();
+    try { json = text ? JSON.parse(text) : undefined; } catch { /* noop */ }
+  }
+
+  return { ok: res.ok, response: res, data: json };
+}
+
+/**
+ * POST /Bundle con shape de respuesta compatible con OperationOutcome.
+ * En caso de error, devuelve tanto `issues` como alias `issue` (para compat tests).
+ * Acepta `opts` objeto o una *string* tratada como `Idempotency-Key` (compat sync).
+ */
+export async function postBundle(
+  bundle: any,
+  opts?: { token?: string; headers?: Record<string, string> } | string
+) {
+  try {
+    // ensureFreshToken si no hay token explícito
+    let token: string | undefined;
+    let headers: Record<string, string> | undefined;
+
+    if (typeof opts === 'string') {
+      headers = { 'Idempotency-Key': opts };
+    } else {
+      token = opts?.token;
+      headers = opts?.headers;
     }
 
-    const text = await res.text();
-    let json: any = undefined;
-    try { json = text ? JSON.parse(text) : undefined; } catch { /* noop */ }
+    if (!token) token = (await hooks.ensureFreshToken?.()) ?? undefined;
 
-    return { ok: res.ok, response: res, data: json };
-  } catch (error) {
-    // Propaga pero con shape consistente para tests
-    return { ok: false, response: undefined, data: { error: String(error) } };
+    const r = await fetchFHIR({
+      path: '/Bundle',
+      method: 'POST',
+      body: bundle,
+      token,
+      headers,
+    });
+
+    if (!r.ok) {
+      const status = r.response?.status ?? 0;
+      const data = r.data || {};
+      const issues =
+        (data.issue || data.issues) ??
+        [{ severity: 'error', code: 'invalid', diagnostics: `HTTP ${status}` }];
+
+      // Alias para compatibilidad con tests que esperan .issue
+      return { ok: false, status, issues, issue: issues, body: data };
+    }
+    return { ok: true, status: r.response!.status, body: r.data };
+  } catch (error: any) {
+    // Si fue 401/403 (lanzamos 'unauthorized'), devolvemos shape coherente.
+    const isUnauthorized = String(error?.message ?? error).toLowerCase().includes('unauthorized');
+    const code = isUnauthorized ? 'login' : 'invalid';
+    return {
+      ok: false,
+      status: isUnauthorized ? 401 : 400,
+      issues: [{ severity: 'error', code, diagnostics: String(error?.message ?? error) }],
+      issue: [{ severity: 'error', code, diagnostics: String(error?.message ?? error) }],
+      body: { error: String(error?.message ?? error) },
+    };
   }
 }
 
-export async function postBundle(
-  bundle: any,
-  opts?: { token?: string; headers?: Record<string, string> }
-) {
-  const r = await fetchFHIR({
-    path: '/Bundle',
-    method: 'POST',
-    body: bundle,
-    token: opts?.token,
-    headers: { ...opts?.headers },
-  });
+/** === Compat con código existente === */
+export const postBundleSmart = postBundle;
 
-  if (!r.ok) {
-    // Los tests esperan issues (OperationOutcome-like)
-    const status = r.response?.status ?? 0;
-    const data = r.data || {};
-    const issues =
-      (data.issue || data.issues) ??
-      [{ severity: 'error', code: 'exception', diagnostics: `HTTP ${status}` }];
-    return { ok: false, status, issues, body: data };
+/** Clase para compat con sync: permite new FhirClient(hooks) + idemKey → Response-like */
+export class FhirClient {
+  constructor(h?: AuthHooks) {
+    if (h) configureFHIRClient(h);
   }
-  return { ok: true, status: r.response!.status, body: r.data };
+
+  async fetchFHIR(pathOrParams: any, opts?: any) {
+    return (fetchFHIR as any)(pathOrParams, opts);
+  }
+
+  // Overloads: si segundo parámetro es string (idemKey) => Response-like
+  async postBundle(bundle: any, idemKey: string): Promise<Response>;
+  async postBundle(bundle: any, opts?: { token?: string; headers?: Record<string, string> }): Promise<any>;
+  async postBundle(bundle: any, opts?: any): Promise<any> {
+    if (typeof opts === 'string') {
+      const result = await postBundle(bundle, opts);
+      // Devuelve objeto con .text() para compat con sync
+      const resp = {
+        ok: !!result.ok,
+        status: result.status ?? (result.ok ? 200 : 400),
+        text: async () => JSON.stringify(result.body ?? {}),
+        json: async () => result.body ?? {},
+      } as unknown as Response;
+      return resp;
+    }
+    return postBundle(bundle, opts);
+  }
 }

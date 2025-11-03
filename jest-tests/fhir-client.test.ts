@@ -67,8 +67,7 @@ describe('fhir-client', () => {
       text: jest.fn().mockResolvedValue(''),
       headers: { get: jest.fn() },
     });
-    const result = await fetchFHIR({ path: '/Encounter' });
-    expect(result.ok).toBe(false);
+    await expect(fetchFHIR({ path: '/Encounter' })).rejects.toThrow('unauthorized');
     expect(logout).toHaveBeenCalled();
   });
 
