@@ -1,28 +1,15 @@
-// babel.config.js
 module.exports = function (api) {
   api.cache(true);
-
-  const plugins = [
-    [
-      'module-resolver',
-      {
+  return {
+    presets: ['babel-preset-expo'],
+    plugins: [
+      ['module-resolver', {
         root: ['./'],
-        alias: {
-          '@/src': './src',
-        },
+        alias: { '@': './src', '@src': './src' },
         extensions: ['.tsx', '.ts', '.jsx', '.js', '.json'],
-      },
+      }],
+      'nativewind/babel',
+      'react-native-reanimated/plugin', // ← SIEMPRE EL ÚLTIMO
     ],
-  ];
-
-  plugins.push('nativewind/babel'); // INSTALAR: nativewind
-
-  // Debe ir el ÚLTIMO y solo si existe: evita crashear si aún no está instalado
-  try {
-    require.resolve('react-native-reanimated/plugin');
-    plugins.push('react-native-reanimated/plugin');
-  } catch {}
-
-  return { presets: ['babel-preset-expo'], plugins };
+  };
 };
-
