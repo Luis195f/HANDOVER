@@ -230,7 +230,7 @@ function Cierre({sb,v,meds,disps,ox}:{sb:{s:string;b:string;a:string;r:string}; 
       <Label>Adjuntos</Label>
       <AudioAttach onRecorded={(uri)=>console.log('Audio:', uri)} />
       <View style={{height:12}} />
-      <Button title="Guardar y Enviar (solo UI)" onPress={()=>console.log('Enviar bundle (UI): listo para integrar FHIR)'} />
+      <Button title="Guardar y Enviar (solo UI)" onPress={()=>console.log('Enviar bundle (UI): listo para integrar FHIR')} />
       <Text style={{marginTop:8,color:'#64748b',fontSize:12}}>
         * Esta pantalla no envía aún a FHIR: integraremos con buildHandoverBundle y cola offline en el siguiente paso.
       </Text>
