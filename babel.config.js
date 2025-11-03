@@ -15,6 +15,8 @@ module.exports = function (api) {
     ],
   ];
 
+  plugins.push('nativewind/babel'); // INSTALAR: nativewind
+
   // Debe ir el ÚLTIMO y solo si existe: evita crashear si aún no está instalado
   try {
     require.resolve('react-native-reanimated/plugin');

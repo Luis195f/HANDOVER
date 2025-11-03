@@ -294,6 +294,16 @@ export default function PatientList({ navigation }: Props) {
             <Pressable onPress={() => onOpenPatient(item)} style={styles.patientCard}>
               <Text style={styles.patientName}>{item.name}</Text>
               <Text style={styles.patientMeta}>{unit?.name ?? item.unitId}</Text>
+              <Pressable
+                style={styles.handoverButton}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  navigation.navigate('HandoverMain', { patientId: item.id });
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.handoverButtonText}>Dashboard clínico</Text>
+              </Pressable>
             </Pressable>
           );
         }}
@@ -393,5 +403,22 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: "#4b5563",
+  },
+  handoverButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  handoverButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });
