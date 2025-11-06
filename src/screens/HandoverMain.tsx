@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Button, SafeAreaView, StyleSheet, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Button, StyleSheet, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { VictoryChart, VictoryLine, VictoryTheme } from 'victory-native'; // INSTALAR: victory-native (y react-native-svg)
 import * as Speech from 'expo-speech'; // INSTALAR: expo-speech
 import Chip from '@/src/components/Chip';
@@ -258,7 +259,9 @@ const s = StyleSheet.create({
   badge:{paddingVertical:8,paddingHorizontal:12,borderRadius:999},
   noteBox:{backgroundColor:'#EEF2FF',borderRadius:12,padding:12},
   noteTitle:{fontSize:12,fontWeight:'700',color:'#6366F1',marginBottom:4},
-  noteText:{color:'#312e81'}
+  noteText:{color:'#312e81'},
+  chipsWrap:{flexDirection:'row',flexWrap:'wrap',marginTop:8},
+  divider:{height:1,backgroundColor:'#e2e8f0',width:'100%'}
 });
 
 
