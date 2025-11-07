@@ -21,11 +21,17 @@
       "expo-notifications",
       [
         "expo-audio",
-        { "microphonePermission": "Permitir a Handover usar el micrófono." }
+        {
+          "microphonePermission": "Permitir a Handover usar el micrófono."
+        }
       ],
       [
         "expo-build-properties",
-        { "android": { "javaVersion": "11" } }
+        {
+          "android": {
+            "javaVersion": "11"
+          }
+        }
       ],
       "expo-router"
     ],
@@ -37,7 +43,8 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "useNextNotificationsApi": true,
       "package": "com.anonymous.handoverpro"
@@ -64,12 +71,11 @@
           "showAttachments": "1",
           "enableAlerts": "1"
         }
+      },
+      "router": {},
+      "eas": {
+        "projectId": "4341b7e0-da12-42a3-8452-745c68996e36"
       }
-      /* 👇 IMPORTANTE:
-         Quitamos "extra.eas.projectId" a propósito.
-         Así EAS podrá re-vincular y escribir el GUID real
-         (evitamos el 00000000-0000-... que te daba error). */
     }
   }
 }
-
