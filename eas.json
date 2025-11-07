@@ -10,6 +10,7 @@
       "distribution": "internal",
       "android": { "buildType": "apk" }
     },
-    "production": { "autoIncrement": "version" }
+    "production": { "autoIncrement": true }
   }
 }
+

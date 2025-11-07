@@ -76,9 +76,7 @@
     "typescript": "5.9.3"
   },
   "pnpm": {
-    "overrides": {
-      "expo-auth-session": "5.5.2"
-    }
+    "overrides": {}
   },
   "private": true
 }
