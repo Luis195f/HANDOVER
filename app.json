@@ -20,6 +20,12 @@
       [
         "expo-audio",
         { "microphonePermission": "Permitir a Handover usar el micrófono." }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": { "javaVersion": "11" }
+        }
       ]
     ],
     "android": {
