@@ -1,4 +1,3 @@
-// babel.config.js
 module.exports = function (api) {
   api.cache(true);
   return {
@@ -8,8 +7,8 @@ module.exports = function (api) {
         'module-resolver',
         {
           root: ['./'],
-          alias: { '@': './src', '@src': './src' },
-          extensions: ['.tsx', '.ts', '.jsx', '.js', '.json'],
+          alias: { '@': './src' },
+          extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
         },
       ],
       'nativewind/babel',
