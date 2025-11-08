@@ -1,6 +1,6 @@
-// babel.config.js
 module.exports = function (api) {
   api.cache(true);
+
   return {
     presets: ['babel-preset-expo'],
     plugins: [
@@ -12,9 +12,9 @@ module.exports = function (api) {
           extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
         },
       ],
-      // Para NativeWind v3/v4
+      // Necesario para NativeWind v3/v4
       'nativewind/babel',
-      // SIEMPRE al final
+      // SIEMPRE el último
       'react-native-reanimated/plugin',
     ],
   };
