@@ -29,15 +29,12 @@
         "expo-build-properties",
         {
           "android": {
-            "targetSdkVersion": 35,
-            "minSdkVersion": 24,
-            "compileSdkVersion": 35,
-            "kotlinVersion": "1.9.24",
-            "javaVersion": "11"
+            "kotlinVersion": "2.0.21"
           }
         }
       ],
-      "expo-router"
+      "expo-router",
+      "expo-asset"
     ],
     "android": {
       "adaptiveIcon": {
@@ -50,7 +47,6 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "useNextNotificationsApi": true,
       "package": "com.anonymous.handoverpro"
     },
     "ios": {
