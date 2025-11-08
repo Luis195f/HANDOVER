@@ -2,16 +2,23 @@
   "cli": { "version": ">= 15.0.0", "appVersionSource": "remote" },
   "build": {
     "development": {
+      "workflow": "managed",
       "developmentClient": true,
       "distribution": "internal",
       "android": { "buildType": "apk" }
     },
     "preview": {
+      "workflow": "managed",
       "distribution": "internal",
       "android": { "buildType": "apk" }
     },
-    "production": { "autoIncrement": true }
-  }
+    "production": {
+      "workflow": "managed",
+      "autoIncrement": true
+    }
+  },
+  "submit": { "production": {} }
 }
+
 
 
