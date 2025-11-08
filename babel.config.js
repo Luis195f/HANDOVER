@@ -3,13 +3,17 @@ module.exports = function (api) {
   return {
     presets: ["babel-preset-expo"],
     plugins: [
-      ["module-resolver", {
-        root: ["./"],
-        alias: { "@": "./src" },
-        extensions: [".ts", ".tsx", ".js", ".jsx", ".json"],
-      }],
+      [
+        "module-resolver",
+        {
+          root: ["./"],
+          alias: { "@": "./src" },
+          extensions: [".ts", ".tsx", ".js", ".jsx", ".json"]
+        }
+      ],
       "react-native-css-interop/babel",
-      "react-native-reanimated/plugin" // SIEMPRE EL ÚLTIMO
-    ],
+      "react-native-reanimated/plugin"
+    ]
   };
 };
+
