@@ -1,5 +1,4 @@
-// Metro config — Expo 54 (RN 0.81) sin transformadores custom
-const { getDefaultConfig } = require('@expo/metro-config');
-
-module.exports = getDefaultConfig(__dirname);
-
+// metro.config.js
+const { getDefaultConfig } = require('expo/metro-config');
+const config = getDefaultConfig(__dirname);
+module.exports = config;
