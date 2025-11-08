@@ -8,27 +8,19 @@ config.transformer = {
   ...config.transformer,
   babelTransformerPath: require.resolve("metro-react-native-babel-transformer"),
 };
+// metro.config.js
+const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 
-// Suele ser útil permitir .cjs en dependencias
-config.resolver = {
-  ...config.resolver,
-  sourceExts: Array.from(new Set([...(config.resolver?.sourceExts ?? []), "cjs"])),
-};
+module.exports = (async () => {
+  const defaultConfig = await getDefaultConfig(__dirname);
 
-// Integra NativeWind en Metro si está instalado (vale para v3 y v4)
-try {
-  const { withNativeWind } = require("nativewind/metro");
-  const fs = require("fs");
-  const path = require("path");
-  // Usa un css si existe (opcional). No rompe si no está.
-  const cssCandidates = ["./global.css", "./src/styles/global.css"];
-  const cssInput =
-    cssCandidates.map((p) => path.resolve(__dirname, p)).find((p) => fs.existsSync(p));
-
-  config = withNativeWind(config, cssInput ? { input: path.relative(__dirname, cssInput) } : {});
-} catch {
-  // NativeWind no instalado: seguimos con config por defecto.
-}
-
-module.exports = config;
+  // Config mínima compatible con Expo SDK 54 / RN 0.81
+  return mergeConfig(defaultConfig, {
+    transformer: {
+      // Evita errores con require.context en dependencias
+      unstable_allowRequireContext: true,
+    },
+    // Nada de babelTransformerPath personalizado (quitamos css-interop aquí)
+  });
+})();
 
