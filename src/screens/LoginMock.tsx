@@ -11,7 +11,7 @@ export default function LoginMock() {
     await loginWithMockUser();
     // tras login: a la lista de pacientes
     // @ts-ignore
-    nav.replace("Patients");
+    nav.replace("PatientList");
   };
 
   return (
