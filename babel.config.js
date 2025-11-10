@@ -1,4 +1,3 @@
-/** Expo + RN 0.81 + Reanimated + NativeWind + alias "@/src" */
 module.exports = function (api) {
   api.cache(true);
   return {
@@ -6,10 +5,7 @@ module.exports = function (api) {
     plugins: [
       ['module-resolver', {
         root: ['./'],
-        alias: {
-          '@/src': './src',
-          '@': './'              // opcional, por si usaste "@/*"
-        },
+        alias: { '@/src': './src', '@': './' },
         extensions: ['.ts', '.tsx', '.js', '.jsx', '.json']
       }],
       'nativewind/babel',
