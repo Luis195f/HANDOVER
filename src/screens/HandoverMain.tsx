@@ -116,7 +116,7 @@ function Vitales({v,setV,news2}:{v:Vitales; setV:(nv:Vitales)=>void; news2:{scor
     <View style={s.card}>
       <Text style={s.h1}>Signos Vitales</Text>
       <VictoryChart theme={VictoryTheme.material} height={200}>
-        <VictoryLine data={hrData} style={{ data: { stroke: '#EF4444', strokeWidth: 2 } }} />
+        {([<VictoryLine key="hr" data={hrData} style={{ data: { stroke: '#EF4444', strokeWidth: 2 } }} />] as any)}
       </VictoryChart>
       <View style={s.grid2}>
         <Field label="Frecuencia cardíaca (/min)" value={String(v.hr??'')} onChangeText={t=>setV({...v,hr:Number(t)})} />

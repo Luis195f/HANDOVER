@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/fhir-client.ts
+import { ensureFreshToken as ensureFreshTokenDefault } from './auth';
 import { fetchWithRetry } from './net';
 
 type AuthHooks = {
@@ -10,7 +11,9 @@ type AuthHooks = {
   baseUrl?: string;
 };
 
-let hooks: AuthHooks = {};
+let hooks: AuthHooks = {
+  ensureFreshToken: async () => ensureFreshTokenDefault(),
+};
 
 /** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
 export function configureFHIRClient(h: AuthHooks) {
@@ -25,7 +28,8 @@ export function configureFHIRClient(h: AuthHooks) {
 
 function getBaseUrl(): string {
   const fromHook = hooks.getBaseUrl?.();
-  const fromEnv = (process.env as any)?.FHIR_BASE_URL as string | undefined;
+  const fromEnv =
+    process.env.EXPO_PUBLIC_FHIR_BASE_URL ?? ((process.env as any)?.FHIR_BASE_URL as string | undefined);
   return (fromHook || fromEnv || 'https://example.invalid/fhir').replace(/\/$/, '');
 }
 

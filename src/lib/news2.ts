@@ -1,3 +1,9 @@
+import * as Notifications from 'expo-notifications';
+
+const { Vibration } = require('react-native') as {
+  Vibration: { vibrate: (pattern: number | number[]) => void };
+};
+
 export type ACVPU = 'A' | 'C' | 'V' | 'P' | 'U';
 
 export type NEWS2Input = {
@@ -102,4 +108,14 @@ export function computeNEWS2(inp: NEWS2Input): NEWS2Breakdown {
   else if (total >= 1) band = 'MEDIA';
 
   return { rr, spo2, o2, temp, sbp, hr, avpu, total, anyThree, band };
+}
+
+export async function alertIfCritical(score: number) {
+  if (score >= 7) {
+    Vibration.vibrate(800);
+    await Notifications.scheduleNotificationAsync({
+      content: { title: '¡Paciente crítico!', body: `NEWS2 = ${score}` },
+      trigger: null,
+    });
+  }
 }
