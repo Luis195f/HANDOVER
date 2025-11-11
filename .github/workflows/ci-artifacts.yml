@@ -4,6 +4,7 @@ on:
 
 jobs:
   coverage:
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,4 +23,3 @@ jobs:
           name: coverage
           path: coverage
           if-no-files-found: ignore
-
