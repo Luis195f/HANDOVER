@@ -1,28 +1,25 @@
 name: CI Artifacts
 on:
-  pull_request:
-  push:
-    branches: ["main"]
+  pull_request:    # solo en PRs (no en push a main)
 
 jobs:
   coverage:
     runs-on: ubuntu-latest
-    continue-on-error: true   # que no bloquee el PR
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        with: { version: 9 }
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
       - run: pnpm -s i --frozen-lockfile
       - run: pnpm -s test -- --coverage || true
+      - run: mkdir -p coverage
       - name: upload coverage
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage
+          if-no-files-found: ignore
 
