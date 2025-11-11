@@ -1,0 +1,5 @@
+appId: com.handover.app
+name: Handover Basic (stub)
+steps:
+  - launchApp
+  - assertVisible: "Login OIDC (stub)"

@@ -17,3 +17,5 @@ __pycache__/
 .env.*
 
 android/
+src/security/*.bak
+src/security/*.bak
