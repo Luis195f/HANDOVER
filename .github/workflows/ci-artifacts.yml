@@ -7,11 +7,12 @@ on:
 jobs:
   coverage:
     runs-on: ubuntu-latest
-    continue-on-error: true  # temporal, para no bloquear
+    continue-on-error: true   # que no bloquee el PR
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -24,3 +25,4 @@ jobs:
         with:
           name: coverage
           path: coverage
+
