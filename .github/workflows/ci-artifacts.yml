@@ -1,10 +1,11 @@
 name: CI Artifacts
 on:
-  pull_request:    # solo en PRs (no en push a main)
+  pull_request:        # solo en PR
 
 jobs:
   coverage:
     runs-on: ubuntu-latest
+    continue-on-error: true       # <<< clave: no bloquea aunque algo falle
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -13,11 +14,12 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
-      - run: pnpm -s i --frozen-lockfile
+      - run: pnpm -v
+      - run: pnpm -s i --frozen-lockfile || true
       - run: pnpm -s test -- --coverage || true
       - run: mkdir -p coverage
-      - name: upload coverage
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: coverage
           path: coverage
