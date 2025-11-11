@@ -1,43 +1,18 @@
-import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import React from "react";
+import { Platform } from "react-native";
 
-import { getTokens } from '@/src/lib/auth';
+/**
+ * Bypass de autenticación SOLO para desarrollo.
+ * Cuando se implemente OAuth real, restaurar el archivo original desde .bak.
+ */
+type Props = { children: React.ReactNode };
 
-type Props = {
-  children: React.ReactNode;
-};
+const DEV_BYPASS =
+  __DEV__ && (process.env.DEV_BYPASS_AUTH === "1" || Platform.OS === "web");
 
 export default function RequireAuth({ children }: Props) {
-  const nav = useNavigation<any>();
-  const [ready, setReady] = React.useState(false);
-
-  useFocusEffect(
-    React.useCallback(() => {
-      let active = true;
-      (async () => {
-        const tokens = await getTokens();
-        if (!active) return;
-        if (!tokens?.access_token) {
-          nav.reset({ index: 0, routes: [{ name: 'Login' as never }] });
-        } else {
-          setReady(true);
-        }
-      })();
-      return () => {
-        active = false;
-        setReady(false);
-      };
-    }, [nav])
-  );
-
-  if (!ready) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  return <>{children}</>;
+  if (DEV_BYPASS) return <>{children}</>;
+  // Fallback: si no hay bypass, mostramos el login mock para no romper navegación
+  const LoginMock = require("../screens/LoginMock").default;
+  return <LoginMock />;
 }
