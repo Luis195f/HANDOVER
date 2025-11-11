@@ -1,0 +1,1 @@
+export const LOINC={HR:"8867-4",RR:"9279-1",BP_PANEL:"85354-9",SBP:"8480-6",DBP:"8462-4",SPO2:"59408-5",TEMP:"8310-5"} as const;

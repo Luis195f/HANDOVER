@@ -1,17 +1,1 @@
-export type Specialty = {
-  id: string;
-  name: string;
-};
-
-export const SPECIALTIES: Specialty[] = [
-  { id: 'icu', name: 'UCI Adulto' },
-  { id: 'ed', name: 'Urgencias' },
-  { id: 'onc', name: 'Oncología' },
-  { id: 'neph', name: 'Nefrología/Diálisis' },
-  { id: 'ped', name: 'Pediatría' },
-  { id: 'ob', name: 'Obstetricia' },
-  { id: 'neuroicu', name: 'Neuro UCI' },
-  { id: 'cvicu', name: 'Cardio UCI' },
-];
-
-export const DEFAULT_SPECIALTY_ID = 'icu';
+export const SPECIALTIES=["Oncología","UCI","Medicina Interna","Cirugía"] as const;export type Specialty=typeof SPECIALTIES[number];export const UNITS_BY_SPECIALTY:Record<Specialty,{id:string;name:string}[]>={Oncología:[{id:"ONC-HOSP",name:"Oncología Hospitalaria"}],UCI:[{id:"UCI-ADUL",name:"UCI Adultos"}],"Medicina Interna":[{id:"MI-GEN",name:"Medicina Interna General"}],Cirugía:[{id:"CIRG",name:"Cirugía General"}]};

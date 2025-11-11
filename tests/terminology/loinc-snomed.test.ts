@@ -1,0 +1,1 @@
+import {LOINC} from "../../src/lib/terminology/loinc";test("loinc hr",()=>{expect(LOINC.HR).toBe("8867-4");});
