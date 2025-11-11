@@ -1,0 +1,1 @@
+export const mapVitalsToObservation=(_:any)=>[];export const mapDevicesToExtensions=(d:string[])=>d.map(x=>({system:"http://snomed.info/sct",code:x,display:x}));
