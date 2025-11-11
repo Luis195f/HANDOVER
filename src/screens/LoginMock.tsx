@@ -1,26 +1,51 @@
-// src/screens/LoginMock.tsx
 import React from "react";
-import { View, Text, Button } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { loginWithMockUser } from '@/src/lib/auth';
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+
+type RootStackParamList = {
+  PatientList: undefined;
+  HandoverMain: undefined;
+};
 
 export default function LoginMock() {
-  const nav = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const onLogin = async () => {
-    await loginWithMockUser();
-    // tras login: a la lista de pacientes
+  const goIn = () => {
+    // Intento principal
+    try {
+      navigation.reset({ index: 0, routes: [{ name: "PatientList" as any }] });
+      return;
+    } catch {}
+    // Fallback si el nombre de ruta fuera distinto
+    try {
+      navigation.reset({ index: 0, routes: [{ name: "HandoverMain" as any }] });
+      return;
+    } catch {}
+    // Último recurso: navega "a lo que haya"
+    // (evita quedar bloqueado si el stack cambia)
     // @ts-ignore
-    nav.replace("PatientList");
+    navigation.goBack?.();
   };
 
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <Text style={{ fontSize: 20, fontWeight: "600", marginBottom: 12 }}>Ingreso (Mock)</Text>
-      <Text style={{ textAlign: "center", marginBottom: 24 }}>
+    <View style={styles.container}>
+      <Text style={styles.title}>Ingreso (Mock)</Text>
+      <Text style={styles.subtitle}>
         Este login simula OIDC/SMART en FASE 0. Se reemplazará por OAuth real.
       </Text>
-      <Button title="Entrar como enfermera" onPress={onLogin} />
+
+      <Pressable onPress={goIn} style={({pressed}) => [styles.btn, pressed && {opacity:0.8}]}>
+        <Text style={styles.btnText}>ENTRAR COMO ENFERMERA</Text>
+      </Pressable>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, backgroundColor:"#fff" },
+  title: { fontSize: 28, fontWeight: "700", marginBottom: 8 },
+  subtitle: { fontSize: 16, textAlign: "center", opacity: 0.8, marginBottom: 24 },
+  btn: { backgroundColor: "#2196F3", paddingVertical: 14, paddingHorizontal: 22, borderRadius: 6, elevation: 4 },
+  btnText: { color: "#fff", fontWeight: "600", letterSpacing: 0.5 }
+});
