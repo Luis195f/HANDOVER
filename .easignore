@@ -1,0 +1,14 @@
+node_modules
+.expo
+dist
+web-build
+ios
+android
+coverage
+__tests__
+jest-tests
+tests
+.vscode
+*.log
+*.bak
+.maestro/**

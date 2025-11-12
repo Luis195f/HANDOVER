@@ -19,3 +19,5 @@ __pycache__/
 android/
 src/security/*.bak
 src/security/*.bak
+
+.maestro/
