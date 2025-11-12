@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "handover-pro",
+    "name": "HANDOVER",
     "slug": "handover-pro",
     "owner": "enfermero1",
     "jsEngine": "hermes",
@@ -21,17 +21,11 @@
       "expo-notifications",
       [
         "expo-audio",
-        {
-          "microphonePermission": "Permitir a Handover usar el micrófono."
-        }
+        { "microphonePermission": "Permitir a Handover usar el micrófono." }
       ],
       [
         "expo-build-properties",
-        {
-          "android": {
-            "kotlinVersion": "2.0.21"
-          }
-        }
+        { "android": { "kotlinVersion": "2.0.21" } }
       ],
       "expo-router",
       "expo-asset"
@@ -47,15 +41,21 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "package": "com.anonymous.handoverpro"
+      "package": "com.handover.app"
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.handover.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Se requiere la cámara para escanear códigos QR en Handover.",
         "NSMicrophoneUsageDescription": "Grabación de notas de audio del turno",
         "NSUserTrackingUsageDescription": "Se usa para mejorar la experiencia del turno"
       }
+    },
+    "runtimeVersion": { "policy": "appVersion" },
+    "updates": {
+      "url": "https://u.expo.dev/4341b7e0-da12-42a3-8452-745c68996e36"
     },
     "extra": {
       "FHIR_BASE_URL": "https://fhir.example.com",
@@ -79,3 +79,4 @@
     }
   }
 }
+
