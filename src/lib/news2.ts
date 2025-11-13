@@ -1,121 +1,180 @@
-import * as Notifications from 'expo-notifications';
-
-const { Vibration } = require('react-native') as {
-  Vibration: { vibrate: (pattern: number | number[]) => void };
-};
-
-export type ACVPU = 'A' | 'C' | 'V' | 'P' | 'U';
+// BEGIN HANDOVER: NEWS2
+export type ACVPU = "A" | "C" | "V" | "P" | "U";
 
 export type NEWS2Input = {
-  rr?: number;
-  spo2?: number;
-  temp?: number;
-  sbp?: number;
-  hr?: number;
-  o2?: boolean;        // ¿usa oxígeno suplementario?
-  avpu?: ACVPU;        // A/C/V/P/U (C es nueva confusión)
-  scale2?: boolean;    // usar SpO2 Scale 2 (hipercápnicos, COPD, etc.)
+  rr?: number | null;
+  spo2?: number | null;
+  temp?: number | null;
+  sbp?: number | null;
+  hr?: number | null;
+  o2?: boolean | null;
+  avpu?: ACVPU | null;
+  scale2?: boolean | null;
+};
+
+type ScoreParts = {
+  rr: number;
+  spo2: number;
+  temp: number;
+  sbp: number;
+  hr: number;
+  avpu: number;
+  o2: number;
+};
+
+type Band = "BAJA" | "MEDIA" | "ALTA" | "CRÍTICA";
+
+type Risk = "low" | "medium" | "high" | "critical";
+
+const BAND_TO_RISK: Record<Band, { risk: Risk; level: string }> = {
+  BAJA: { risk: "low", level: "Bajo" },
+  MEDIA: { risk: "medium", level: "Moderado" },
+  ALTA: { risk: "high", level: "Alto" },
+  CRÍTICA: { risk: "critical", level: "Crítico" },
 };
 
 export type NEWS2Breakdown = {
-  rr: number; spo2: number; o2: number; temp: number; sbp: number; hr: number; avpu: number;
   total: number;
-  anyThree: boolean;
-  band: 'BAJA' | 'MEDIA' | 'ALTA' | 'CRÍTICA';
+  score: number;
+  value: number;
+  band: Band;
+  risk: Risk;
+  level: string;
+  components: ScoreParts;
+  modifiers: {
+    supplementalO2: boolean;
+    spo2Scale2: boolean;
+  };
 };
 
-function sRR(rr?: number) {
-  if (rr == null) return 0;
-  if (rr <= 8) return 3;
-  if (rr >= 9 && rr <= 11) return 1;
-  if (rr >= 12 && rr <= 20) return 0;
-  if (rr >= 21 && rr <= 24) return 2;
-  return 3; // >=25
+function sanitiseNumber(value?: number | null): number | undefined {
+  if (value == null) return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
 }
 
-function sSpO2_scale1(spo2?: number) {
-  if (spo2 == null) return 0;
-  if (spo2 <= 91) return 3;
-  if (spo2 <= 93) return 2;     // 92–93
-  if (spo2 <= 95) return 1;     // 94–95
-  return 0;                     // >=96
+function scoreRespiratoryRate(value?: number) {
+  if (value == null) return 0;
+  if (value <= 8) return 3;
+  if (value <= 11) return 1;
+  if (value <= 20) return 0;
+  if (value <= 24) return 2;
+  return 3;
 }
 
-// Scale 2 (NEWS2): usar solo si clínicamente indicado (ej. objetivo 88–92%).
-// Umbrales según gráfico oficial RCP (Chart 1). Ver notas.
-function sSpO2_scale2(spo2?: number, onO2?: boolean) {
-  if (spo2 == null) return 0;
-  if (spo2 <= 83) return 3;
-  if (spo2 <= 85) return 2;       // 84–85
-  if (spo2 <= 87) return 1;       // 86–87
-  if (spo2 <= 92) return 0;       // 88–92
-  // >=93: depende del uso de oxígeno
-  if (!onO2) return 1;            // ≥93 en aire
-  if (spo2 <= 96) return 2;       // 93–96 en oxígeno
-  return 3;                       // ≥97 en oxígeno
+function scoreTemperature(value?: number) {
+  if (value == null) return 0;
+  if (value <= 35) return 3;
+  if (value < 36) return 1;
+  if (value <= 38) return 0;
+  if (value <= 39) return 1;
+  return 2;
 }
 
-function sTemp(t?: number) {
-  if (t == null) return 0;
-  if (t <= 35.0) return 3;
-  if (t <= 36.0) return 1;
-  if (t <= 38.0) return 0;
-  if (t <= 39.0) return 1;
-  return 2; // >=39.1
+function scoreSystolicBp(value?: number) {
+  if (value == null) return 0;
+  if (value <= 90) return 3;
+  if (value <= 100) return 2;
+  if (value <= 110) return 1;
+  if (value <= 219) return 0;
+  return 3;
 }
 
-function sSBP(sbp?: number) {
-  if (sbp == null) return 0;
-  if (sbp <= 90) return 3;
-  if (sbp <= 100) return 2;
-  if (sbp <= 110) return 1;
-  if (sbp <= 219) return 0;
-  return 3; // >=220
+function scoreHeartRate(value?: number) {
+  if (value == null) return 0;
+  if (value <= 40) return 3;
+  if (value <= 50) return 1;
+  if (value <= 90) return 0;
+  if (value <= 110) return 1;
+  if (value <= 130) return 2;
+  return 3;
 }
 
-function sHR(hr?: number) {
-  if (hr == null) return 0;
-  if (hr <= 40) return 3;
-  if (hr <= 50) return 1;
-  if (hr <= 90) return 0;
-  if (hr <= 110) return 1;
-  if (hr <= 130) return 2;
-  return 3; // >=131
+function scoreAvpu(value?: ACVPU | null) {
+  if (!value || value === "A") return 0;
+  return 3;
 }
 
-function sAVPU(avpu?: ACVPU) {
-  if (!avpu || avpu === 'A') return 0;
-  return 3; // C, V, P o U
-}
+type Spo2Score = { score: number; scale2: boolean };
 
-export function computeNEWS2(inp: NEWS2Input): NEWS2Breakdown {
-  const rr = sRR(inp.rr);
-  const spo2 = inp.scale2 ? sSpO2_scale2(inp.spo2, inp.o2) : sSpO2_scale1(inp.spo2);
-  const o2 = inp.o2 ? 2 : 0; // fila "Air or oxygen?" = 2 puntos si usa O2
-  const temp = sTemp(inp.temp);
-  const sbp = sSBP(inp.sbp);
-  const hr = sHR(inp.hr);
-  const avpu = sAVPU(inp.avpu);
-
-  const parts = [rr, spo2, o2, temp, sbp, hr, avpu];
-  const total = parts.reduce((a,b)=>a+b, 0);
-  const anyThree = parts.some(x => x === 3);
-
-  // Bandas (RCP): >=7 alto; 5–6 urgente; cualquier 3 es "red flag"
-  let band: NEWS2Breakdown['band'] = 'BAJA';
-  if (total >= 7) band = 'CRÍTICA';
-  else if (total >= 5 || anyThree) band = 'ALTA';
-  else if (total >= 1) band = 'MEDIA';
-
-  return { rr, spo2, o2, temp, sbp, hr, avpu, total, anyThree, band };
-}
-
-export async function alertIfCritical(score: number) {
-  if (score >= 7) {
-    Vibration.vibrate(800);
-    await Notifications.scheduleNotificationAsync({
-      content: { title: '¡Paciente crítico!', body: `NEWS2 = ${score}` },
-      trigger: null,
-    });
+function scoreSpo2(value?: number, scale2?: boolean): Spo2Score {
+  if (value == null) return { score: 0, scale2: Boolean(scale2) };
+  const spo2 = value;
+  if (scale2) {
+    if (spo2 >= 97) return { score: 3, scale2: true };
+    if (spo2 >= 95) return { score: 2, scale2: true };
+    if (spo2 >= 93) return { score: 1, scale2: true };
+    if (spo2 >= 88) return { score: 0, scale2: true };
+    if (spo2 >= 86) return { score: 1, scale2: true };
+    if (spo2 >= 84) return { score: 2, scale2: true };
+    return { score: 3, scale2: true };
   }
+  if (spo2 >= 96) return { score: 0, scale2: false };
+  if (spo2 >= 94) return { score: 1, scale2: false };
+  if (spo2 >= 92) return { score: 2, scale2: false };
+  return { score: 3, scale2: false };
 }
+
+function supplementalO2Score(o2?: boolean | null) {
+  return o2 ? 2 : 0;
+}
+
+function computeBand(score: number): Band {
+  if (score >= 7) return "CRÍTICA";
+  if (score >= 5) return "ALTA";
+  if (score >= 3) return "MEDIA";
+  return "BAJA";
+}
+
+export function computeNEWS2(input: NEWS2Input): NEWS2Breakdown {
+  const rr = sanitiseNumber(input.rr);
+  const spo2Value = sanitiseNumber(input.spo2);
+  const temp = sanitiseNumber(input.temp);
+  const sbp = sanitiseNumber(input.sbp);
+  const hr = sanitiseNumber(input.hr);
+
+  const spo2 = scoreSpo2(spo2Value, Boolean(input.scale2));
+
+  const components: ScoreParts = {
+    rr: scoreRespiratoryRate(rr),
+    spo2: spo2.score,
+    temp: scoreTemperature(temp),
+    sbp: scoreSystolicBp(sbp),
+    hr: scoreHeartRate(hr),
+    avpu: scoreAvpu(input.avpu ?? null),
+    o2: supplementalO2Score(input.o2 ?? null),
+  };
+
+  const total =
+    components.rr +
+    components.spo2 +
+    components.temp +
+    components.sbp +
+    components.hr +
+    components.avpu +
+    components.o2;
+
+  const band = computeBand(total);
+  const { risk, level } = BAND_TO_RISK[band];
+
+  return {
+    total,
+    score: total,
+    value: total,
+    band,
+    risk,
+    level,
+    components,
+    modifiers: {
+      supplementalO2: Boolean(input.o2),
+      spo2Scale2: spo2.scale2,
+    },
+  };
+}
+
+export function scoreNEWS2(input: NEWS2Input): number {
+  return computeNEWS2(input).total;
+}
+
+export default computeNEWS2;
+// END HANDOVER: NEWS2
