@@ -3,14 +3,14 @@ type LegacyHandoverParams = {
   unitId?: string;
 };
 
-type HandoverFormParams = {
+type HandoverParams = {
   patientIdParam?: string;
   unitIdParam?: string;
   specialtyId?: string;
 } & LegacyHandoverParams;
 
 type QRScanParams = {
-  returnTo?: 'HandoverForm' | 'PatientList' | 'AudioNote';
+  returnTo?: 'Handover' | 'PatientList' | 'AudioNote';
   unitIdParam?: string;
   specialtyId?: string;
 };
@@ -19,7 +19,7 @@ export type RootStackParamList = {
   PatientList: undefined;
   AudioNote: { onDoneRoute?: string } | undefined;
   HandoverMain: { patientId: string };
-  HandoverForm: HandoverFormParams;
+  Handover: HandoverParams;
   QRScan: QRScanParams | undefined;
   SyncCenter: undefined;
 };

@@ -34,4 +34,4 @@ export const handoverSchema = z.object({
     .default([]),
 });
 
-export type HandoverFormData = z.infer<typeof handoverSchema>;
+export type HandoverData = z.infer<typeof handoverSchema>;

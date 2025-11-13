@@ -16,19 +16,19 @@ import Chip from '@/src/components/Chip';
 import { postBundle } from '@/src/lib/fhir-client';
 import { mapToFhirBundle } from '@/src/lib/handover';
 import type { RootStackParamList } from '@/src/navigation/types';
-import { handoverSchema, type HandoverFormData } from '@/src/schemas/handover';
+import { handoverSchema, type HandoverData } from '@/src/schemas/handover';
 
 const DIAGNOSIS_OPTIONS = ['Neumonía', 'FA', 'EPOC', 'DM2', 'IAM'] as const;
 const RISK_OPTIONS = ['Caídas', 'Convulsiones', 'Aislamiento', 'CLABSI'] as const;
 
-type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Handover'>;
 
 const defaultRisks = RISK_OPTIONS.reduce<Record<string, boolean>>((acc, key) => {
   acc[key] = false;
   return acc;
 }, {});
 
-const defaultValues: HandoverFormData = {
+const defaultValues: HandoverData = {
   patientId: '',
   admin: { unit: '', staffOut: '', staffIn: '', census: 0 },
   dxList: [],
@@ -38,14 +38,14 @@ const defaultValues: HandoverFormData = {
   meds: [],
 };
 
-export default function HandoverForm({ navigation }: Props) {
+export default function Handover({ navigation }: Props) {
   const {
     control,
     handleSubmit,
     setValue,
     watch,
     formState: { errors },
-  } = useForm<HandoverFormData>({
+  } = useForm<HandoverData>({
     resolver: zodResolver(handoverSchema),
     defaultValues,
   });

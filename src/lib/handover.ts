@@ -1,4 +1,4 @@
-import type { HandoverFormData } from '@/src/schemas/handover';
+import type { HandoverData } from '@/src/schemas/handover';
 
 type BundleEntry = {
   request: { method: 'POST'; url: string };
@@ -15,7 +15,7 @@ function patientReference(id: string) {
   return { reference: `Patient/${id}` };
 }
 
-export function mapToFhirBundle(values: HandoverFormData): Bundle {
+export function mapToFhirBundle(values: HandoverData): Bundle {
   const entries: BundleEntry[] = [];
   const subject = patientReference(values.patientId);
 

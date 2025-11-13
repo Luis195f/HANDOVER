@@ -260,7 +260,7 @@ export default function PatientList({ navigation }: Props) {
       }
 
       mark("patientlist.navigate", { patientId: patient.id, unitId: unit.id });
-      navigation.navigate("HandoverForm", {
+      navigation.navigate("Handover", {
         patientIdParam: patient.id,
         unitIdParam: unit.id,
         specialtyId: unit.specialtyId,
