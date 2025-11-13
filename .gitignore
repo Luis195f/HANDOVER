@@ -16,7 +16,11 @@ __pycache__/
 .env
 .env.*
 
-android/
+android/*
+!android/gradle.properties
+!android/app/
+android/app/*
+!android/app/build.gradle
 src/security/*.bak
 src/security/*.bak
 
