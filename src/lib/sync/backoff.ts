@@ -27,3 +27,6 @@ export async function retryWithBackoff<T>(
   }
   throw lastErr;
 }
+// BEGIN HANDOVER: BACKOFF
+export const backoff=(attempt:number,baseMs=500,capMs=15000)=>Math.min(capMs, baseMs*Math.pow(2,attempt)) + Math.floor(Math.random()*250);
+// END HANDOVER: BACKOFF
