@@ -1,0 +1,3 @@
+// BEGIN HANDOVER: ANDROID_APPID
+android { defaultConfig { applicationId "com.handover.app" } }
+// END HANDOVER: ANDROID_APPID
