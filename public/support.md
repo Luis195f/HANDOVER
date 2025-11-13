@@ -1,0 +1,3 @@
+<!-- BEGIN HANDOVER: SUPPORT -->
+Soporte: soporte@PLACEHOLDER_DOMINIO  | SLA: 48h hábiles
+<!-- END HANDOVER: SUPPORT -->
