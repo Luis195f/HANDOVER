@@ -1,0 +1,20 @@
+{
+  "testRunner": "jest",
+  "runnerConfig": "e2e/jest.e2e.config.js",
+  "apps": {
+    "android.release": {
+      "type": "android.apk",
+      "binaryPath": "android/app/build/outputs/apk/release/app-release.apk",
+      "build": "cd android && ./gradlew assembleRelease && cd .."
+    }
+  },
+  "devices": {
+    "android.emu.release": {
+      "type": "android.emulator",
+      "device": { "avdName": "Pixel_5_API_34" }
+    }
+  },
+  "configurations": {
+    "android.emu.release": { "device": "android.emu.release", "app": "android.release" }
+  }
+}
