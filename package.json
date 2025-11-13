@@ -9,9 +9,9 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --no-error-on-unmatched-pattern",
-    "test": "jest --passWithNoTests",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
+    "test": "jest --config jest.config.cjs --passWithNoTests",
+    "test:watch": "jest --config jest.config.cjs --watch",
+    "test:cov": "jest --config jest.config.cjs --coverage",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
     "validate:fhir": "node --loader ./tools/ts-esm-loader.mjs scripts/validate-fhir.ts"
   },

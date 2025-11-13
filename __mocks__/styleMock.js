@@ -1,0 +1,3 @@
+// BEGIN HANDOVER: JEST_STYLE_MOCK
+module.exports = {};
+// END HANDOVER: JEST_STYLE_MOCK
