@@ -12,3 +12,15 @@ tests
 *.log
 *.bak
 .maestro/**
+# BEGIN HANDOVER: EASIGNORE
+.git
+ios/Pods
+android/.gradle
+android/app/build
+**/*.keystore
+GoogleService-Info.plist
+google-services.json
+.env*
+.DS_Store
+.idea
+# END HANDOVER: EASIGNORE

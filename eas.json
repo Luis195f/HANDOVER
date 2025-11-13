@@ -1,40 +1,20 @@
 {
-  "cli": {
-    "version": ">= 15.0.0",
-    "appVersionSource": "remote"
-  },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "channel": "dev",
-      "android": { "buildType": "apk" },
-      "ios": { "simulator": true },
-      "env": { "EXPO_NO_INPUT": "1" }
-    },
     "preview": {
-      "distribution": "internal",
       "channel": "preview",
-      "android": { "buildType": "apk" },
-      "ios": { "simulator": true },
-      "env": { "EXPO_NO_INPUT": "1" }
+      "distribution": "internal",
+      "android": { "buildType": "app-bundle" }
     },
     "production": {
-      "autoIncrement": true,
       "channel": "production",
-      "android": { "buildType": "app-bundle" },
-      "ios": { "simulator": false },
-      "env": { "EXPO_NO_INPUT": "1" }
+      "autoIncrement": true,
+      "android": { "buildType": "app-bundle" }
     }
   },
   "submit": {
     "production": {
       "android": { "track": "internal" },
-      "ios": {}
+      "ios": { "ascAppId": "PLACEHOLDER_ASC_APP_ID" }
     }
   }
 }
-
-
-
-
