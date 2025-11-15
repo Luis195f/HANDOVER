@@ -23,7 +23,7 @@ import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { currentUser, hasUnitAccess } from "@/src/security/acl";
 import { mark } from "@/src/lib/otel";
-import { logout } from "@/src/lib/auth";
+import { useAuth } from "@/src/lib/auth/AuthContext";
 import {
   ALL_UNITS_OPTION,
   setSelectedUnitId,
@@ -147,12 +147,12 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 }
 
 export default function PatientList({ navigation }: Props) {
+  const { logout } = useAuth();
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
   const handleLogout = useCallback(async () => {
     await logout();
-    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
-  }, [navigation]);
+  }, [logout]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
