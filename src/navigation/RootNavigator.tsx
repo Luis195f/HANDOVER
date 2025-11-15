@@ -1,10 +1,11 @@
 // src/navigation/RootNavigator.tsx 
 import * as React from 'react';
 import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // Pantallas existentes en tu proyecto
-import LoginMock from '@/src/screens/LoginMock';
+import LoginScreen from '@/src/screens/LoginScreen';
 import PatientList from '@/src/screens/PatientList';
 import AudioNote from '@/src/screens/AudioNote';
 import HandoverMain from '@/src/screens/HandoverMain'; // <- versión nueva con pestañas
@@ -12,6 +13,7 @@ import QRScan from '@/src/screens/QRScan';
 
 // Asegúrate de tener este archivo:
 import PatientDashboard from '@/src/screens/PatientDashboard';
+import { useAuth } from '@/src/lib/auth/AuthContext';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -75,43 +77,60 @@ function HandoverRedirect({ route, navigation }: any) {
 }
 
 export default function RootNavigator() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
   return (
-    <Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
-      <Screen name="Login" component={LoginMock} options={{ headerShown: false }} />
+    <Navigator
+      initialRouteName={isAuthenticated ? 'PatientList' : 'Login'}
+      screenOptions={{ headerShown: false }}
+    >
+      {isAuthenticated ? (
+        <>
+          <Screen
+            name="PatientList"
+            component={PatientList}
+            options={{ title: 'Pacientes', headerShown: true }}
+          />
 
-      <Screen
-        name="PatientList"
-        component={PatientList}
-        options={{ title: 'Pacientes', headerShown: true }}
-      />
+          {/* ÚNICA entrega de turno (versión nueva con pestañas) */}
+          <Screen
+            name="Handover"
+            component={HandoverMain}
+            options={{ title: 'Entrega de turno', headerShown: true }}
+          />
 
-      {/* ÚNICA entrega de turno (versión nueva con pestañas) */}
-      <Screen
-        name="Handover"
-        component={HandoverMain}
-        options={{ title: 'Entrega de turno', headerShown: true }}
-      />
+          <Screen
+            name="PatientDashboard"
+            component={PatientDashboard}
+            options={{ title: 'Dashboard clínico', headerShown: true }}
+          />
 
-      <Screen
-        name="PatientDashboard"
-        component={PatientDashboard}
-        options={{ title: 'Dashboard clínico', headerShown: true }}
-      />
+          <Screen
+            name="AudioNote"
+            component={AudioNote}
+            options={{ title: 'Notas de audio', headerShown: true }}
+          />
 
-      <Screen
-        name="AudioNote"
-        component={AudioNote}
-        options={{ title: 'Notas de audio', headerShown: true }}
-      />
+          <Screen
+            name="QRScan"
+            component={QRScan}
+            options={{ title: 'Escanear', headerShown: true }}
+          />
 
-      <Screen
-        name="QRScan"
-        component={QRScan}
-        options={{ title: 'Escanear', headerShown: true }}
-      />
-
-      {/* Compat temporal: rutas viejas a HandoverForm */}
-      <Screen name="HandoverForm" component={HandoverRedirect} options={{ headerShown: false }} />
+          {/* Compat temporal: rutas viejas a HandoverForm */}
+          <Screen name="HandoverForm" component={HandoverRedirect} options={{ headerShown: false }} />
+        </>
+      ) : (
+        <Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+      )}
     </Navigator>
   );
 }
