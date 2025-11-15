@@ -22,6 +22,7 @@ import {
 } from './fhir-client';
 import { hashHex } from './crypto';
 import { z } from 'zod';
+import { logger } from './logger';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -61,7 +62,7 @@ let isOffline = false;
 let offlineSince: number | null = null;
 let connectivityUnsubscribe: (() => void) | null = null;
 let pendingDrain: Promise<void> | null = null;
-let lastTokenProvider: (() => Promise<string>) | null = null;
+let lastTokenProvider: (() => Promise<string | null>) | null = null;
 
 function isOnlineState(state: { isConnected?: boolean | null; isInternetReachable?: boolean | null } | null | undefined) {
   return !!(state?.isConnected && (state?.isInternetReachable ?? true));
@@ -443,7 +444,7 @@ export async function enqueue(bundle: Bundle, opts?: { patientId?: string }): Pr
 
 let drainingSecureQueue = false;
 
-export async function drain(getToken: () => Promise<string>): Promise<void> {
+export async function drain(getToken: () => Promise<string | null>): Promise<void> {
   lastTokenProvider = getToken;
   ensureConnectivityListener();
   if (drainingSecureQueue || shouldPauseQueue()) return;
@@ -452,6 +453,11 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       if (shouldPauseQueue()) break;
+      const sessionToken = await getToken();
+      if (!sessionToken) {
+        logger.info('Offline sync: skipping secure queue drain because no authenticated session');
+        break;
+      }
       let queue = await readSecureQueue();
       if (queue.length === 0) break;
 
@@ -463,6 +469,7 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
       const head = ready[0];
       const cohort = ready.filter((item) => samePatientWindow(item, head));
 
+      let abortDueToAuth = false;
       for (const item of cohort) {
         const freshQueue = await readSecureQueue();
         const index = freshQueue.findIndex((entry) => entry.id === item.id);
@@ -472,13 +479,27 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
 
         let response: ResponseLike | undefined;
         try {
-          const token = await getToken();
-          if (!token) throw new Error('OAuth token is required');
-          response = await postBundle(current.bundle, { token });
+          response = await postBundle(current.bundle, { token: sessionToken });
         } catch (error) {
           if (handleNetworkFailure(error)) {
             freshQueue[index] = scheduleSecureOfflineRetry(current);
             await writeSecureQueue(freshQueue);
+            break;
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          if (message === 'NOT_AUTHENTICATED' || message.toLowerCase().includes('unauthorized')) {
+            freshQueue[index] = {
+              ...current,
+              attempts: current.attempts + 1,
+              nextAt: Number.MAX_SAFE_INTEGER,
+              lastError: message,
+            };
+            await writeSecureQueue(freshQueue);
+            logger.warn('Offline sync: authentication error while sending bundle', {
+              id: current.id,
+              error: message,
+            });
+            abortDueToAuth = true;
             break;
           }
           const attempts = current.attempts + 1;
@@ -491,6 +512,24 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
           };
           await writeSecureQueue(freshQueue);
           continue;
+        }
+
+        if (!response) continue;
+
+        if (response.status === 401 || response.status === 403) {
+          freshQueue[index] = {
+            ...current,
+            attempts: current.attempts + 1,
+            nextAt: Number.MAX_SAFE_INTEGER,
+            lastError: `HTTP ${response.status}`,
+          };
+          await writeSecureQueue(freshQueue);
+          logger.warn('Offline sync: received unauthorized response from FHIR server', {
+            id: current.id,
+            status: response.status,
+          });
+          abortDueToAuth = true;
+          break;
         }
 
         if (response.ok) {
@@ -516,6 +555,10 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
         await writeSecureQueue(freshQueue);
         await pushDeadEntry(removed, { response });
         if (shouldPauseQueue()) break;
+      }
+      if (abortDueToAuth) {
+        logger.info('Offline sync: queue processing paused awaiting refreshed authentication');
+        break;
       }
     }
   } finally {

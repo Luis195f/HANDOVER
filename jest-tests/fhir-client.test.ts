@@ -71,6 +71,13 @@ describe('fhir-client', () => {
     expect(logout).toHaveBeenCalled();
   });
 
+  test('fetchFHIR throws when no access token is available', async () => {
+    ensureFreshToken.mockResolvedValueOnce(null);
+    await expect(fetchFHIR({ path: '/Condition' })).rejects.toThrow('NOT_AUTHENTICATED');
+    expect(fetchWithRetry).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
   test('fetchFHIR allows custom token and headers', async () => {
     (fetchWithRetry as jest.Mock).mockResolvedValue({
       ok: true,

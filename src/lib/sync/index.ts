@@ -12,6 +12,7 @@
 
 import NetInfo from '@/src/lib/netinfo';
 import { configureFHIRClient, postBundle } from '../fhir-client';
+import { logger } from '../logger';
 import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
@@ -53,6 +54,8 @@ type FlushResult = { processed: number; remaining: number };
 // Guardado global para coalescer flushes concurrentes (evita carreras)
 let _currentFlush: Promise<FlushResult> | null = null;
 
+type PostBundleResult = Awaited<ReturnType<typeof postBundle>>;
+
 // --- API principal: intenta enviar o encola si no hay red / error ---
 export async function syncBundleOrEnqueue(
   bundle: any,
@@ -70,23 +73,67 @@ export async function syncBundleOrEnqueue(
       getBaseUrl: () => opts.fhirBaseUrl,
       ensureFreshToken: async () => (await opts.getToken()) ?? null,
     });
-    await sendWithRetry(bundle, idemKey, opts);
+    const token = await opts.getToken();
+    if (!token) {
+      logger.info('Sync: queueing bundle because there is no authenticated session', { idemKey });
+      await enqueue(bundle, idemKey);
+      return 'queued';
+    }
+    const resp = await sendWithRetry(bundle, idemKey, opts);
+    if (resp.status === 401 || resp.status === 403) {
+      logger.warn('Sync: enqueueing bundle after unauthorized response', {
+        idemKey,
+        status: resp.status,
+      });
+      await enqueue(bundle, idemKey);
+      return 'queued';
+    }
     return 'sent';
-  } catch {
+  } catch (error) {
+    logger.warn('Sync: sending bundle failed, queued for later retry', {
+      idemKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
     await enqueue(bundle, idemKey);
     return 'queued';
   }
 }
 
 // --- Envío con backoff + marcas por intento ---
-async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts) {
-  return await retryWithBackoff(
+async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts): Promise<PostBundleResult> {
+  return await retryWithBackoff<PostBundleResult>(
     async (attempt) => {
+      const token = await opts.getToken();
+      if (!token) {
+        logger.info('Sync: aborting HTTP send because session is not authenticated', { attempt, idemKey });
+        return {
+          ok: false,
+          status: 401,
+          body: { error: 'NOT_AUTHENTICATED' },
+          issue: [
+            { severity: 'error', code: 'login', diagnostics: 'NOT_AUTHENTICATED' },
+          ],
+          issues: [
+            { severity: 'error', code: 'login', diagnostics: 'NOT_AUTHENTICATED' },
+          ],
+        } as PostBundleResult;
+      }
+
       mark('sync.http.request', { attempt, idemKey });
       const resp = await postBundle(bundle, {
         headers: { 'Idempotency-Key': idemKey },
+        token,
       });
       mark('sync.http.response', { status: resp.status, attempt });
+
+      if (resp.status === 401 || resp.status === 403) {
+        logger.warn('Sync: unauthorized response received during sendWithRetry', {
+          attempt,
+          status: resp.status,
+          idemKey,
+        });
+        return resp;
+      }
 
       if (isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
         return resp;
@@ -121,6 +168,14 @@ function createFlusher(opts: SyncOpts) {
 
   return async function flushImpl(): Promise<FlushResult> {
     mark('sync.flush.start');
+    const sessionToken = await opts.getToken();
+    if (!sessionToken) {
+      const remaining = (await readQueue()).length;
+      logger.info('Sync: skipping queue flush because there is no authenticated session', {
+        remaining,
+      });
+      return { processed: 0, remaining };
+    }
     let processed = 0;
 
     await runQueueFlush(async (tx) => {

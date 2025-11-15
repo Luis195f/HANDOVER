@@ -1,18 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/fhir-client.ts
-import { ensureFreshToken as ensureFreshTokenDefault } from './auth';
+import { authService } from './auth/AuthService';
 import { fetchWithRetry } from './net';
+import { logger } from './logger';
 
 type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;
-  logout?: () => void;
+  logout?: () => Promise<void> | void;
   getBaseUrl?: () => string | undefined;
   /** Compat: algunos callers pasan baseUrl directo */
   baseUrl?: string;
 };
 
 let hooks: AuthHooks = {
-  ensureFreshToken: async () => ensureFreshTokenDefault(),
+  ensureFreshToken: async () => authService.getAccessToken(),
+  logout: async () => authService.logout(),
 };
 
 /** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
@@ -63,6 +65,10 @@ export async function fetchFHIR(
 
   // Token preferente → si no, pedimos uno fresco (si hay hook)
   const authToken = token ?? (await hooks.ensureFreshToken?.() ?? undefined);
+  if (!authToken) {
+    logger.warn('FHIR client: blocked request without access token', { path });
+    throw new Error('NOT_AUTHENTICATED');
+  }
 
   const url = /^https?:\/\//i.test(path)
     ? path
@@ -75,7 +81,7 @@ export async function fetchFHIR(
       headers: {
         Accept: 'application/fhir+json',
         ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        Authorization: `Bearer ${authToken}`,
         ...headers,
       },
       body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
@@ -85,7 +91,17 @@ export async function fetchFHIR(
 
   // Comportamiento esperado por los tests
   if (res.status === 401 || res.status === 403) {
-    hooks.logout?.();
+    logger.warn('FHIR client: received unauthorized response', { path, status: res.status });
+    // Futuro: aquí podríamos intentar refrescar el token antes de forzar logout.
+    try {
+      await hooks.logout?.();
+    } catch (logoutError) {
+      logger.error('FHIR client: failed to logout after unauthorized response', {
+        path,
+        status: res.status,
+        error: logoutError instanceof Error ? logoutError.message : String(logoutError),
+      });
+    }
     throw new Error('unauthorized');
   }
 
@@ -146,7 +162,9 @@ export async function postBundle(
     return { ok: true, status: r.response!.status, body: r.data };
   } catch (error: any) {
     // Si fue 401/403 (lanzamos 'unauthorized'), devolvemos shape coherente.
-    const isUnauthorized = String(error?.message ?? error).toLowerCase().includes('unauthorized');
+    const normalizedMessage = String(error?.message ?? error).toLowerCase();
+    const isUnauthorized =
+      normalizedMessage.includes('unauthorized') || normalizedMessage.includes('not_authenticated');
     const code = isUnauthorized ? 'login' : 'invalid';
     return {
       ok: false,
