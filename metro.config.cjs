@@ -1,7 +1,12 @@
-// metro.config.cjs
-const { getDefaultConfig } = require('expo/metro-config');
+// metro.config.js
+const { getDefaultConfig } = require("@expo/metro-config");
 
-/** @type {import('metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
+
+// Opcional: alias seguros
+config.resolver.alias = {
+  "@": __dirname,
+  "@src": __dirname + "/src",
+};
 
 module.exports = config;
