@@ -18,8 +18,11 @@
       "expo-notifications",
       [
         "expo-audio",
-        { "microphonePermission": "Permitir a Handover usar el micrófono." }
-      ]
+        {
+          "microphonePermission": "Permitir a Handover usar el micrófono."
+        }
+      ],
+      "expo-asset"
     ],
     "android": {
       "adaptiveIcon": {
@@ -45,7 +48,9 @@
       }
     },
     "extra": {
-      "eas": { "projectId": "00000000-0000-0000-0000-000000000000" },
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      },
       "FHIR_BASE_URL": "https://fhir.example.com",
       "STT_ENDPOINT": "http://192.168.0.16:8091/stt",
       "ENCRYPTION_NAMESPACE": "handover-pro",

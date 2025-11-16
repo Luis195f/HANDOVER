@@ -15,3 +15,5 @@ __pycache__/
 # Env
 .env
 .env.*
+android/
+ios/
