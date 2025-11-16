@@ -1,101 +1,92 @@
-import type { ExpoConfig } from "expo/config";
+import { ExpoConfig, ConfigContext } from "expo/config";
 
-const appJson = require("./app.json");
+export default ({ }: ConfigContext): ExpoConfig => ({
+  name: "HANDOVER",
+  slug: "handover-pro",
+  owner: "enfermero1",
+  scheme: "handoverpro",
+  version: "1.0.0",
+  orientation: "portrait",
+  userInterfaceStyle: "light",
 
-const expo = appJson.expo ?? {};
-const easProjectId = expo?.extra?.eas?.projectId;
+  icon: "./assets/icon.png",
 
-const config: ExpoConfig = ((expo) => {
-  return {
-    ...expo,
-    name: expo?.name ?? "handover-pro",
-    slug: expo?.slug ?? "handover-pro",
+  splash: {
+    image: "./assets/splash-icon.png",
+    resizeMode: "contain",
+    backgroundColor: "#ffffff"
+  },
 
-    // === EAS Update: runtimeVersion requerido ===
-    runtimeVersion: expo.runtimeVersion ?? { policy: "appVersion" },
+  plugins: [
+    "expo-system-ui",
+    "expo-sqlite",
+    "expo-secure-store",
+    "expo-notifications",
+    [
+      "expo-audio",
+      { microphonePermission: "Permitir a Handover usar el micrófono." }
+    ],
+    ["expo-build-properties", { android: { kotlinVersion: "2.0.21" } }],
+    "expo-router",
+    "expo-asset",
+    "expo-camera"
+  ],
 
-    // BEGIN HANDOVER: ANDROID_CONFIG
-    android: {
-      ...(expo.android ?? {}),
-      package: expo.android?.package ?? "com.anonymous.handoverpro",
-      adaptiveIcon: {
-        ...(expo.android?.adaptiveIcon ?? {}),
-        foregroundImage:
-          expo.android?.adaptiveIcon?.foregroundImage ??
-          "./assets/adaptive-icon.png",
-        backgroundColor:
-          expo.android?.adaptiveIcon?.backgroundColor ?? "#ffffff",
-      },
-      permissions: Array.from(
-        new Set([
-          ...(expo.android?.permissions ?? []),
-          "android.permission.CAMERA",
-          "android.permission.RECORD_AUDIO",
-          "android.permission.POST_NOTIFICATIONS",
-          "android.permission.MODIFY_AUDIO_SETTINGS",
-        ])
-      ),
-      edgeToEdgeEnabled: expo.android?.edgeToEdgeEnabled ?? true,
+  android: {
+    adaptiveIcon: {
+      foregroundImage: "./assets/adaptive-icon.png",
+      backgroundColor: "#ffffff"
     },
-    // END HANDOVER: ANDROID_CONFIG
+    edgeToEdgeEnabled: true,
+    permissions: [
+      "android.permission.CAMERA",
+      "android.permission.RECORD_AUDIO",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.MODIFY_AUDIO_SETTINGS"
+    ],
+    package: "com.handover.app",
+    versionCode: 1
+  },
 
-    // BEGIN HANDOVER: IOS_CONFIG
-    ios: {
-      ...(expo.ios ?? {}),
-      supportsTablet: expo.ios?.supportsTablet ?? true,
-      infoPlist: {
-        ...(expo.ios?.infoPlist ?? {}),
-        NSCameraUsageDescription:
-          expo.ios?.infoPlist?.NSCameraUsageDescription ??
-          "Se requiere la cámara para escanear códigos QR en Handover.",
-        NSMicrophoneUsageDescription:
-          expo.ios?.infoPlist?.NSMicrophoneUsageDescription ??
-          "Grabación de notas de audio del turno",
-        NSUserTrackingUsageDescription:
-          expo.ios?.infoPlist?.NSUserTrackingUsageDescription ??
-          "Se usa para mejorar la experiencia del turno",
-      },
+  ios: {
+    supportsTablet: true,
+    bundleIdentifier: "com.handover.app",
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+      NSCameraUsageDescription:
+        "Se requiere la cámara para escanear códigos QR en Handover.",
+      NSMicrophoneUsageDescription:
+        "Grabación de notas de audio del turno",
+      NSUserTrackingUsageDescription:
+        "Se usa para mejorar la experiencia del turno"
     },
-    // END HANDOVER: IOS_CONFIG
+    buildNumber: "1.0.0"
+  },
 
-    // BEGIN HANDOVER: EXTRA_MERGE
-    extra: {
-      ...(expo.extra ?? {}),
-      eas: {
-        ...(expo.extra?.eas ?? {}),
-        projectId: easProjectId,
-      },
-      FEATURES: {
-        ...(expo.extra?.FEATURES ?? {}),
-        handover: {
-          ...(expo.extra?.FEATURES?.handover ?? {}),
-        },
-      },
+  updates: {
+    enabled: true,
+    checkAutomatically: "ON_LOAD"
+  },
+
+  extra: {
+    FHIR_BASE_URL: "https://fhir.example.com",
+    STT_ENDPOINT: "http://192.168.0.16:8091/stt",
+    ENCRYPTION_NAMESPACE: "handover-pro",
+    ALLOW_ALL_UNITS: "1",
+    FEATURES: {
+      handover: {
+        showSBAR: "1",
+        showVitals: "1",
+        showOxygen: "1",
+        showMeds: "1",
+        showAttachments: "1",
+        enableAlerts: "1"
+      }
     },
-    // END HANDOVER: EXTRA_MERGE
+    router: {},
+    eas: { projectId: "4341b7e0-da12-42a3-8452-745c68996e36" }
+  }
+});
 
-    // BEGIN HANDOVER: SPLASH_DEFAULTS
-    splash: {
-      image: expo.splash?.image ?? "./assets/splash-icon.png",
-      resizeMode: expo.splash?.resizeMode ?? "contain",
-      backgroundColor: expo.splash?.backgroundColor ?? "#ffffff",
-    },
-    // END HANDOVER: SPLASH_DEFAULTS
-
-    // BEGIN HANDOVER: UPDATES_URL
-    updates: {
-      ...(expo.updates ?? {}),
-      ...(easProjectId
-        ? { url: `https://u.expo.dev/${easProjectId}` }
-        : {}),
-    },
-    // END HANDOVER: UPDATES_URL
-
-    // Plugins: usamos exactamente los definidos en app.json
-    plugins: expo.plugins ?? [],
-  };
-})(expo);
-
-export default config;
 
 
