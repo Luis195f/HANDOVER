@@ -1,79 +1,74 @@
-# ============================================================
+# ===========================
 # HANDOVER-PRO – .gitignore
-# Expo Managed Workflow + EAS + React Native SDK 54
-# ============================================================
+# Expo + React Native + EAS
+# ===========================
 
-# -------------------------------
-# Node / Expo / React Native
-# -------------------------------
+# Node modules
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-dist/
-build/
-temp/
-.tmp/
 
-# Expo local state (NO se versiona)
+# Expo caches
 .expo/
 .expo-shared/
 .expo/web-build/
-metro-cache/
 
-# React Native / iOS / Android build artifacts
-*.keystore
-*.jks
-*.p12
-*.key
-*.mobileprovision
-*.ipa
-*.apk
-*.aab
-*.app
-*.xcworkspace/
-*.xcodeproj/
+# Other caches
+metro-cache/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.tmp/
+temp/
+
+# Build outputs
+dist/
+build/
+web-build/
 android/
 ios/
 
-# -------------------------------
-# Environment files (privado)
-# -------------------------------
+# Environment variables
 .env
 .env.*
 .env.local
 .env.production
 .env.development
 
-# -------------------------------
-# Python / Backend
-# -------------------------------
+# React Native / Mobile artifacts
+*.apk
+*.aab
+*.ipa
+*.app
+*.keystore
+*.jks
+*.p12
+*.key
+*.mobileprovision
+*.xcworkspace/
+*.xcodeproj/
+
+# Python / backend
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .venv/
 .venv-stt/
-*.sqlite3
 
-# -------------------------------
 # Logs
-# -------------------------------
 *.log
 logs/
 debug.log
 
-# -------------------------------
-# OS-generated files
-# -------------------------------
+# OS files
 .DS_Store
 Thumbs.db
 
-# -------------------------------
-# Tools / caches
-# -------------------------------
+# Jest / Tests / Coverage
 coverage/
 jest-tests/
 pytest-cache/
 .cache/
+
+# Project local tools
+scripts/
+
