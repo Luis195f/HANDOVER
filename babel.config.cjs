@@ -1,10 +1,19 @@
 module.exports = function (api) {
   api.cache(true);
   return {
-    presets: [['babel-preset-expo', { jsxRuntime: 'automatic', development: false }]],
+    presets: ["babel-preset-expo"],
     plugins: [
-      // Actívalo luego si lo necesitas:
-      // 'react-native-reanimated/plugin',
+      [
+        "module-resolver",
+        {
+          alias: {
+            "@": "./",
+            "@src": "./src",
+          },
+          extensions: [".js", ".jsx", ".ts", ".tsx", ".json"],
+        },
+      ],
+      "react-native-reanimated/plugin",
     ],
   };
 };
