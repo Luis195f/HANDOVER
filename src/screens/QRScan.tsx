@@ -1,86 +1,143 @@
 // src/screens/QRScan.tsx
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
+import {
+  CameraView,
+  useCameraPermissions,
+  type BarcodeScanningResult,
+} from 'expo-camera';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/RootNavigator';
 
-type ScannerMod = typeof import('expo-barcode-scanner');
+// Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
+type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
-export default function QRScan() {
+export function QRScanScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
-  const [scanner, setScanner] = useState<ScannerMod | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
 
-  // Carga dinámica del módulo para evitar resolución en tiempo de bundle
+  // Pedir permisos de cámara al entrar
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const mod = await import('expo-barcode-scanner'); // <- no rompe Metro si no se ejecuta
-        if (!mounted) return;
-        setScanner(mod);
-        const { status } = await mod.BarCodeScanner.requestPermissionsAsync();
-        setHasPermission(status === 'granted');
-      } catch (e) {
-        setError(
-          'Falta dependencia expo-barcode-scanner. Instala con: npx expo install expo-barcode-scanner'
-        );
+    if (!permission) {
+      requestPermission();
+    }
+  }, [permission, requestPermission]);
+
+  // Al salir de la pantalla, reseteamos el estado de escaneo
+  useEffect(() => {
+    if (!isFocused && scanned) {
+      setScanned(false);
+    }
+  }, [isFocused, scanned]);
+
+  const handleBarcodeScanned = useCallback(
+    (result: BarcodeScanningResult) => {
+      if (scanned) return; // evita doble disparo
+
+      setScanned(true);
+
+      const data = result.data?.trim();
+      if (!data) {
+        Alert.alert('Código no válido', 'No se pudo leer el código QR.');
+        setScanned(false);
+        return;
       }
-    })();
-    return () => { mounted = false; };
-  }, []);
 
-  const onScan = useCallback(({ data, type }: { data: string; type: string }) => {
-    setScanned(true);
-    Alert.alert('QR detectado', `Tipo: ${type}\nDato: ${data}`, [
-      { text: 'OK', onPress: () => setScanned(false) },
-    ]);
-  }, []);
+      // Aquí decides qué hacer con el contenido del QR.
+      // Ejemplo: asumir que el QR lleva un patientId y navegar al dashboard:
+      navigation.navigate('PatientDashboard', { patientId: data });
+    },
+    [navigation, scanned],
+  );
 
-  if (error) {
+  if (!permission) {
     return (
       <View style={styles.center}>
-        <Text style={styles.err}>{error}</Text>
+        <ActivityIndicator />
+        <Text style={styles.text}>Solicitando permisos de cámara…</Text>
       </View>
     );
   }
 
-  if (hasPermission === false) {
+  if (!permission.granted) {
     return (
       <View style={styles.center}>
-        <Text>Permiso de cámara denegado. Revísalo en ajustes.</Text>
+        <Text style={styles.text}>
+          Necesitamos acceso a la cámara para escanear el código QR del paciente.
+        </Text>
+        <Text style={styles.link} onPress={requestPermission}>
+          Toca aquí para volver a solicitar permisos
+        </Text>
       </View>
     );
   }
-
-  if (!scanner || hasPermission == null) {
-    return (
-      <View style={styles.center}>
-        <Text>Cargando escáner…</Text>
-      </View>
-    );
-  }
-
-  const Scanner = scanner.BarCodeScanner;
-  const enabled = isFocused && !scanned;
 
   return (
     <View style={styles.container}>
-      {enabled ? (
-        <Scanner
-          onBarCodeScanned={onScan}
-          style={StyleSheet.absoluteFillObject}
+      {/* Sólo montamos la cámara cuando la pantalla está enfocada */}
+      {isFocused && (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          onBarcodeScanned={handleBarcodeScanned}
+          barcodeScannerSettings={{
+            barcodeTypes: ['qr'],
+          }}
         />
-      ) : (
-        <View style={styles.center}><Text>Pausado</Text></View>
       )}
+
+      {/* Overlay con instrucciones */}
+      <View style={styles.overlay}>
+        <Text style={styles.title}>Escanea el código QR del paciente</Text>
+        <Text style={styles.subtitle}>
+          Centra el código dentro del recuadro. Se detectará automáticamente.
+        </Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
-  err: { color: '#c00', textAlign: 'center' },
+  container: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  text: {
+    fontSize: 16,
+    textAlign: 'center',
+    color: '#111111',
+  },
+  link: {
+    marginTop: 12,
+    fontSize: 16,
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+    color: '#007AFF',
+  },
+  overlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: 24,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#E5E5E5',
+  },
 });
