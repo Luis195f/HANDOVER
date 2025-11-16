@@ -1,9 +1,10 @@
 import { ExpoConfig, ConfigContext } from "expo/config";
 
 export default ({ }: ConfigContext): ExpoConfig => ({
-  name: "HANDOVER",
+  name: "handover-pro",
   slug: "handover-pro",
   owner: "enfermero1",
+
   scheme: "handoverpro",
   version: "1.0.0",
   orientation: "portrait",
@@ -14,7 +15,7 @@ export default ({ }: ConfigContext): ExpoConfig => ({
   splash: {
     image: "./assets/splash-icon.png",
     resizeMode: "contain",
-    backgroundColor: "#ffffff"
+    backgroundColor: "#ffffff",
   },
 
   plugins: [
@@ -24,18 +25,26 @@ export default ({ }: ConfigContext): ExpoConfig => ({
     "expo-notifications",
     [
       "expo-audio",
-      { microphonePermission: "Permitir a Handover usar el micrófono." }
+      {
+        microphonePermission: "Permitir a Handover usar el micrófono."
+      }
     ],
-    ["expo-build-properties", { android: { kotlinVersion: "2.0.21" } }],
-    "expo-router",
     "expo-asset",
-    "expo-camera"
+    [
+      "expo-build-properties",
+      {
+        android: {
+          kotlinVersion: "2.0.21"
+        }
+      }
+    ]
   ],
 
   android: {
+    package: "com.handover.app",
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
-      backgroundColor: "#ffffff"
+      backgroundColor: "#ffffff",
     },
     edgeToEdgeEnabled: true,
     permissions: [
@@ -44,15 +53,13 @@ export default ({ }: ConfigContext): ExpoConfig => ({
       "android.permission.POST_NOTIFICATIONS",
       "android.permission.MODIFY_AUDIO_SETTINGS"
     ],
-    package: "com.handover.app",
     versionCode: 1
   },
 
   ios: {
-    supportsTablet: true,
     bundleIdentifier: "com.handover.app",
+    supportsTablet: true,
     infoPlist: {
-      ITSAppUsesNonExemptEncryption: false,
       NSCameraUsageDescription:
         "Se requiere la cámara para escanear códigos QR en Handover.",
       NSMicrophoneUsageDescription:
@@ -63,12 +70,10 @@ export default ({ }: ConfigContext): ExpoConfig => ({
     buildNumber: "1.0.0"
   },
 
-  updates: {
-    enabled: true,
-    checkAutomatically: "ON_LOAD"
-  },
-
   extra: {
+    eas: {
+      projectId: "4341b7e0-da12-42a3-8452-745c68996e36"
+    },
     FHIR_BASE_URL: "https://fhir.example.com",
     STT_ENDPOINT: "http://192.168.0.16:8091/stt",
     ENCRYPTION_NAMESPACE: "handover-pro",
@@ -82,11 +87,15 @@ export default ({ }: ConfigContext): ExpoConfig => ({
         showAttachments: "1",
         enableAlerts: "1"
       }
-    },
-    router: {},
-    eas: { projectId: "4341b7e0-da12-42a3-8452-745c68996e36" }
-  }
+    }
+  },
+
+  updates: {
+    fallbackToCacheTimeout: 0,
+    checkAutomatically: "ON_LOAD",
+  },
 });
+
 
 
 
