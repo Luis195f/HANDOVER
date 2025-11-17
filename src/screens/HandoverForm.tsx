@@ -550,10 +550,7 @@ export default function HandoverForm({ navigation, route }: Props) {
                 keyboardType="numeric"
                 onBlur={onBlur}
                 value={value == null ? '' : String(value)}
-                onChangeText={(text) => {
-                  const parsed = Number(text);
-                  onChange(text === '' || Number.isNaN(parsed) ? undefined : parsed);
-                }}
+                onChangeText={(text) => onChange(parseNumericInput(text))}
               />
             )}
           />

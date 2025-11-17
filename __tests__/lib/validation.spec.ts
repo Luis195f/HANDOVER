@@ -12,6 +12,7 @@ describe('Validation schemas', () => {
         staffOut: [],
         shiftStart: '2024-01-01T00:00:00Z',
         shiftEnd: '2024-01-01T04:00:00Z',
+        incidents: ['Sin incidentes'],
       },
       patientId: 'pat-001',
     });
@@ -33,8 +34,30 @@ describe('Validation schemas', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain('Unidad requerida');
+      expect(messages).toContain('La unidad es obligatoria');
+      expect(messages).toContain('Inicio de turno requerido');
+      expect(messages).toContain('Fin de turno requerido');
       expect(messages).toContain('ID paciente requerido');
+    }
+  });
+
+  it('valida censo no negativo y orden de turno', () => {
+    const result = zHandover.safeParse({
+      administrativeData: {
+        unit: 'icu',
+        census: -2,
+        staffIn: ['Alice'],
+        staffOut: ['Bob'],
+        shiftStart: '2024-01-01T04:00:00Z',
+        shiftEnd: '2024-01-01T03:00:00Z',
+      },
+      patientId: 'pat-001',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain('El censo no puede ser negativo');
+      expect(messages).toContain('El fin del turno debe ser posterior al inicio');
     }
   });
 

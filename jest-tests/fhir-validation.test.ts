@@ -19,6 +19,22 @@ describe('HandoverFormSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  test('fails when administrative unit is missing', () => {
+    const result = zHandover.safeParse({
+      ...baseValues,
+      administrativeData: { ...baseValues.administrativeData, unit: '' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test('fails when census is negative', () => {
+    const result = zHandover.safeParse({
+      ...baseValues,
+      administrativeData: { ...baseValues.administrativeData, census: -1 },
+    });
+    expect(result.success).toBe(false);
+  });
+
   test('rejects invalid ACVPU values', () => {
     const invalid = { ...baseValues, vitals: { ...baseValues.vitals, avpu: 'X' } };
     const result = zHandover.safeParse(invalid);
