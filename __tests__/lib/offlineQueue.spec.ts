@@ -9,6 +9,7 @@ import {
   enqueueTx,
   flushQueue,
   readQueue,
+  type SendFn,
 } from '@/src/lib/offlineQueue';
 
 afterEach(async () => {
@@ -246,3 +247,136 @@ describe('offlineQueue deduplicación y errores HTTP', () => {
     expect(queue[0].failedAt).toBeUndefined();
   });
 });
+
+describe('offlineQueue flujo completo offline/online', () => {
+  beforeEach(async () => {
+    await clearAll();
+  });
+
+  it('mantiene las operaciones en cola cuando hay error de red', async () => {
+    const payload = { patientId: 'pat-001', summary: 'Paciente estable' } as any;
+
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload,
+      dedupKey: 'handover:pat-001:shift-1',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+
+    const sender = mockSendBundleAsNetworkError();
+
+    await flushQueue(sender);
+
+    const queue = await readQueue();
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0].payload).toEqual(payload);
+    expect(queue[0].attempts).toBe(1);
+    expect(queue[0].lastAttemptAt).toBeDefined();
+    expect(queue[0].failedAt).toBeUndefined();
+  });
+
+  it('envía en orden FIFO y vacía la cola cuando la red se recupera', async () => {
+    const first = { patientId: 'pat-001', summary: 'Primero' } as any;
+    const second = { patientId: 'pat-002', summary: 'Segundo' } as any;
+
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload: first,
+      dedupKey: 'handover:pat-001',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload: second,
+      dedupKey: 'handover:pat-002',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+
+    const sendSpy = mockSendBundleAsSuccess();
+
+    await flushQueue(sendSpy);
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(0);
+
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+    expect(sendSpy.mock.calls[0]?.[0].payload).toEqual(first);
+    expect(sendSpy.mock.calls[1]?.[0].payload).toEqual(second);
+  });
+
+  it('no envía duplicados cuando se usa dedupKey', async () => {
+    const payload = { patientId: 'pat-003', summary: 'Duplicado' } as any;
+
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload,
+      dedupKey: 'handover:pat-003',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload,
+      dedupKey: 'handover:pat-003',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+
+    const sendSpy = mockSendBundleAsSuccess();
+
+    await flushQueue(sendSpy);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(0);
+  });
+
+  it('marca 4xx como fallo definitivo pero procesa los siguientes items', async () => {
+    const badPayload = { patientId: 'pat-bad', summary: 'Fallo 400' } as any;
+    const okPayload = { patientId: 'pat-ok', summary: 'Debe enviarse' } as any;
+
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload: badPayload,
+      dedupKey: 'handover:bad',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+    await enqueueTx({
+      type: 'handoverBundle',
+      payload: okPayload,
+      dedupKey: 'handover:ok',
+      sensitiveFields: ['patientId', 'summary'],
+    });
+
+    const sendSpy = mockSendBundleSequence([
+      { ok: false, status: 400 },
+      { ok: true, status: 200 },
+    ]);
+
+    await flushQueue(sendSpy);
+
+    const queue = await readQueue();
+
+    expect(queue.some((i) => i.payload.patientId === 'pat-bad' && i.failedAt)).toBe(true);
+    expect(queue.some((i) => i.payload.patientId === 'pat-ok')).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+function mockSendBundleAsNetworkError() {
+  return vi.fn<Parameters<SendFn>, ReturnType<SendFn>>(async () => {
+    throw new Error('Network error');
+  });
+}
+
+function mockSendBundleAsSuccess() {
+  return vi.fn<Parameters<SendFn>, ReturnType<SendFn>>(async () => ({ ok: true, status: 200 }));
+}
+
+function mockSendBundleSequence(responses: Array<{ ok: boolean; status: number }>) {
+  const sendSpy = vi.fn<Parameters<SendFn>, ReturnType<SendFn>>();
+  responses.forEach((res) => {
+    sendSpy.mockResolvedValueOnce(res as Awaited<ReturnType<SendFn>>);
+  });
+  return sendSpy;
+}
