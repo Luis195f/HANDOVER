@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import type { AdministrativeData } from '../types/administrative';
 import { CATEGORY, LOINC, SNOMED } from './codes';
 import { hashHex, fhirId } from './crypto';
 
@@ -371,6 +372,7 @@ type CompositionValues = {
   author?: AuthorInput;
   composition?: CompositionInput;
   sbar?: SbarValues;
+  administrativeData?: AdministrativeData;
 };
 
 type SbarValues = {
@@ -407,6 +409,7 @@ export type HandoverValues = {
   patientId: string;
   encounterId?: string;
   author?: AuthorInput;
+  administrativeData?: AdministrativeData;
   vitals?: VitalsValues;
   medications?: MedicationStatementInput[];
   oxygenTherapy?: OxygenTherapyInput | null;
@@ -524,6 +527,23 @@ function narrativeFromText(text: string): Narrative {
     status: 'generated',
     div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${escaped}</p></div>`,
   };
+}
+
+function administrativeNarrative(data: AdministrativeData): Narrative {
+  const staffIn = data.staffIn?.filter(Boolean) ?? [];
+  const staffOut = data.staffOut?.filter(Boolean) ?? [];
+  const incidents = data.incidents?.filter(Boolean) ?? [];
+  const lines = [
+    `Unit: ${data.unit}`,
+    `Census: ${data.census}`,
+    `Shift: ${data.shiftStart} → ${data.shiftEnd}`,
+    `Incoming staff: ${staffIn.length > 0 ? staffIn.join(', ') : 'N/D'}`,
+    `Outgoing staff: ${staffOut.length > 0 ? staffOut.join(', ') : 'N/D'}`,
+  ];
+  if (incidents.length > 0) {
+    lines.push(`Incidents: ${incidents.join('; ')}`);
+  }
+  return narrativeFromText(lines.join('\n'));
 }
 
 const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
@@ -992,6 +1012,10 @@ export function buildComposition(
     addSbarSection('SBAR - Recommendation', values.sbar.recommendation);
   }
 
+  if (values.administrativeData) {
+    sections.push({ title: 'Administrative data', text: administrativeNarrative(values.administrativeData) });
+  }
+
   if (refs.vitals.length > 0) {
     sections.push({
       title: 'Vital signs',
@@ -1157,6 +1181,7 @@ export function buildHandoverBundle(
       encounterId: values.encounterId,
       author: values.author,
       composition: values.composition,
+      administrativeData: values.administrativeData,
       sbar: values.sbar,
     },
     {

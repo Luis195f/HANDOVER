@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller } from 'react-hook-form';
+import { Controller, type Control, type FieldErrors } from 'react-hook-form';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -21,8 +21,9 @@ import type { RootStackParamList } from '@/src/navigation/types';
 import { currentUser, hasUnitAccess } from '@/src/security/acl';
 import { getSession, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
+import type { AdministrativeData } from '@/src/types/administrative';
 import { useZodForm } from '@/src/validation/form-hooks';
-import { zHandover } from '@/src/validation/schemas';
+import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -50,6 +51,15 @@ const styles = StyleSheet.create({
 });
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
+type HandoverFormControl = Control<HandoverFormValues>;
+type HandoverFormErrors = FieldErrors<HandoverFormValues>;
+
+const staffListToText = (value?: string[]) => (value ?? []).join(', ');
+const staffTextToList = (value: string) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 async function buildAudioAttachment(uri: string | undefined) {
   if (!uri) return undefined;
@@ -82,12 +92,12 @@ function VitalsGroup({
   parseNumber,
   errors,
 }: {
-  control: ReturnType<typeof useZodForm>['control'];
+  control: HandoverFormControl;
   parseNumber: (value: string) => number | undefined;
-  errors: any;
+  errors: HandoverFormErrors;
 }) {
   const fields: Array<{
-    name: any;
+    name: `vitals.${string}`;
     label: string;
     placeholder: string;
     keyboard?: 'default' | 'numeric';
@@ -107,7 +117,16 @@ function VitalsGroup({
     <View>
       <View style={styles.vitalsGrid}>
         {fields.map((item) => {
-          const errorMessage = item.errorPath.reduce<any>((acc, key) => acc?.[key], errors)?.message;
+          const errorValue = item.errorPath.reduce<unknown>((acc, key) => {
+            if (acc && typeof acc === 'object' && key in (acc as Record<string, unknown>)) {
+              return (acc as Record<string, unknown>)[key];
+            }
+            return undefined;
+          }, errors);
+          const errorMessage =
+            typeof (errorValue as { message?: unknown } | undefined)?.message === 'string'
+              ? (errorValue as { message?: string }).message
+              : undefined;
           return (
             <View key={item.name as string} style={styles.vitalsCell}>
               <View style={styles.field}>
@@ -161,9 +180,9 @@ function OxygenGroup({
   parseNumber,
   errors,
 }: {
-  control: ReturnType<typeof useZodForm>['control'];
+  control: HandoverFormControl;
   parseNumber: (value: string) => number | undefined;
-  errors: any;
+  errors: HandoverFormErrors;
 }) {
   const deviceError = errors?.oxygenTherapy?.device?.message as string | undefined;
   const flowError = errors?.oxygenTherapy?.flowLMin?.message as string | undefined;
@@ -250,12 +269,16 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, []);
 
   const form = useZodForm(zHandover, {
-    unitId: unitIdParam ?? '',
-    start: new Date().toISOString(),
-    end: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+    administrativeData: {
+      unit: unitIdParam ?? '',
+      census: 0,
+      staffIn: [],
+      staffOut: [],
+      shiftStart: new Date().toISOString(),
+      shiftEnd: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+      incidents: [],
+    },
     patientId: patientIdParam ?? '',
-    staffIn: '',
-    staffOut: '',
     dxMedical: '',
     dxNursing: '',
     evolution: '',
@@ -269,12 +292,13 @@ export default function HandoverForm({ navigation, route }: Props) {
   });
 
   const { control, formState } = form;
-  const errors: any = formState.errors ?? {};
-  const unitError = errors.unitId?.message as string | undefined;
-  const startError = errors.start?.message as string | undefined;
-  const endError = errors.end?.message as string | undefined;
-  const staffInError = errors.staffIn?.message as string | undefined;
-  const staffOutError = errors.staffOut?.message as string | undefined;
+  const errors: HandoverFormErrors = formState.errors ?? {};
+  const administrativeErrors = errors.administrativeData ?? {};
+  const unitError = administrativeErrors.unit?.message as string | undefined;
+  const startError = administrativeErrors.shiftStart?.message as string | undefined;
+  const endError = administrativeErrors.shiftEnd?.message as string | undefined;
+  const staffInError = administrativeErrors.staffIn?.message as string | undefined;
+  const staffOutError = administrativeErrors.staffOut?.message as string | undefined;
   const patientError = errors.patientId?.message as string | undefined;
   const medsError = errors.meds?.message as string | undefined;
   const dxMedicalError = errors.dxMedical?.message as string | undefined;
@@ -300,10 +324,10 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   useEffect(() => {
     if (unitIdParam) {
-      const fieldState = form.getFieldState?.('unitId');
-      const current = form.getValues('unitId');
+      const fieldState = form.getFieldState?.('administrativeData.unit');
+      const current = form.getValues('administrativeData.unit');
       if (!fieldState?.isDirty && current !== unitIdParam) {
-        form.setValue('unitId', unitIdParam, {
+        form.setValue('administrativeData.unit', unitIdParam, {
           shouldDirty: false,
           shouldValidate: true,
         });
@@ -337,7 +361,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           return trimmed;
         };
 
-        const unitFromForm = normalizeUnit(values.unitId);
+        const unitFromForm = normalizeUnit(values.administrativeData?.unit);
         const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
         const unitFromStore = normalizeUnit(selectedUnitId);
         const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
@@ -373,6 +397,16 @@ export default function HandoverForm({ navigation, route }: Props) {
 
         const audioAttachment = await buildAudioAttachment(values.audioUri);
 
+        const administrativeData: AdministrativeData = {
+          unit: unitEffective ?? values.administrativeData.unit,
+          census: values.administrativeData.census ?? 0,
+          staffIn: (values.administrativeData.staffIn ?? []).filter(Boolean),
+          staffOut: (values.administrativeData.staffOut ?? []).filter(Boolean),
+          shiftStart: values.administrativeData.shiftStart,
+          shiftEnd: values.administrativeData.shiftEnd,
+          incidents: values.administrativeData.incidents?.filter(Boolean),
+        };
+
         const nowIso = new Date().toISOString();
         const bundle = buildHandoverBundle(
           {
@@ -385,6 +419,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             oxygenTherapy,
             audioAttachment: audioAttachment ?? undefined,
             composition: { title: 'Clinical handover summary' },
+            administrativeData,
             sbar: {
               situation: values.sbarSituation,
               background: values.sbarBackground,
@@ -397,7 +432,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
         await enqueueBundle(bundle, {
           patientId: values.patientId,
-          unitId: unitEffective,
+          unitId: administrativeData.unit,
           specialtyId,
         });
 
@@ -446,7 +481,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           <Text style={styles.label}>Unidad</Text>
           <Controller
             control={control}
-            name="unitId"
+            name="administrativeData.unit"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
@@ -463,7 +498,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           <Text style={styles.label}>Inicio</Text>
           <Controller
             control={control}
-            name="start"
+            name="administrativeData.shiftStart"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
@@ -480,7 +515,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           <Text style={styles.label}>Fin</Text>
           <Controller
             control={control}
-            name="end"
+            name="administrativeData.shiftEnd"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
@@ -497,14 +532,14 @@ export default function HandoverForm({ navigation, route }: Props) {
           <Text style={styles.label}>Enfermería entrante</Text>
           <Controller
             control={control}
-            name="staffIn"
+            name="administrativeData.staffIn"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
                 placeholder="Entrante"
                 onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
+                value={staffListToText(value)}
+                onChangeText={(text) => onChange(staffTextToList(text))}
               />
             )}
           />
@@ -514,14 +549,14 @@ export default function HandoverForm({ navigation, route }: Props) {
           <Text style={styles.label}>Enfermería saliente</Text>
           <Controller
             control={control}
-            name="staffOut"
+            name="administrativeData.staffOut"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
                 placeholder="Saliente"
                 onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
+                value={staffListToText(value)}
+                onChangeText={(text) => onChange(staffTextToList(text))}
               />
             )}
           />
