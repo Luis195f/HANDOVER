@@ -5,7 +5,8 @@ import { OFFLINE_QUEUE_KEY, clearAll, enqueueTx, readQueue } from '@/src/lib/off
 
 afterEach(async () => {
   await clearAll();
-  (SecureStore as any).__reset?.();
+  const resettable = SecureStore as { __reset?: () => void };
+  resettable.__reset?.();
   vi.restoreAllMocks();
 });
 
@@ -54,7 +55,7 @@ describe('offlineQueue sensitiveFields', () => {
 
     const setItemSpy = vi.spyOn(SecureStore, 'setItemAsync');
 
-    await enqueueTx({ payload } as any);
+    await enqueueTx({ payload });
 
     const queue = await readQueue();
     expect(queue).toHaveLength(1);
@@ -67,7 +68,7 @@ describe('offlineQueue sensitiveFields', () => {
 
   it('devuelve cola vacía si el contenido cifrado está corrupto', async () => {
     const getItemSpy = vi.spyOn(SecureStore, 'getItemAsync');
-    getItemSpy.mockResolvedValueOnce('NOT_JSON' as any);
+    getItemSpy.mockResolvedValueOnce('NOT_JSON');
 
     const queue = await readQueue();
 
@@ -80,7 +81,7 @@ describe('offlineQueue sensitiveFields', () => {
       summary: 'Paciente con riesgo',
     };
 
-    const item = await enqueueTx({ payload } as any);
+    const item = await enqueueTx({ payload });
     const fromStorage = await readQueue();
 
     expect(fromStorage[0].sensitiveFields).toEqual(item.sensitiveFields);
