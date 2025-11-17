@@ -15,6 +15,12 @@ export interface OfflineQueueItem {
   failedAt?: number;
   hash?: string;
   sensitiveFields?: SensitiveFieldPath[];
+  /**
+   * Clave opcional de idempotencia/deduplicación.
+   * Si dos items tienen el mismo `type` y `dedupKey`, se considera
+   * que representan la misma operación lógica.
+   */
+  dedupKey?: string;
   /** @deprecated usa `attempts` en su lugar */
   tries?: number;
 }
@@ -27,6 +33,7 @@ export interface EnqueuePayload {
   key?: string;
   hash?: string;
   sensitiveFields?: SensitiveFieldPath[];
+  dedupKey?: string;
 }
 
 export type SendFn = (tx: OfflineQueueItem) => Promise<Response | { ok: boolean; status: number }>;
@@ -80,6 +87,14 @@ function findSensitiveFields(payload: unknown): SensitiveFieldPath[] {
   return SENSITIVE_FIELDS.filter((field) => hasPath(payload, field));
 }
 
+function hasPendingDuplicate(queue: OfflineQueue, input: EnqueuePayload): boolean {
+  if (!input.dedupKey) return false;
+
+  return queue.some(
+    (item) => item.type === (input.type ?? 'generic') && item.dedupKey === input.dedupKey && !item.failedAt
+  );
+}
+
 function createQueueItem(input: EnqueuePayload): OfflineQueueItem {
   const id = input.key ?? generateId();
   const type = input.type ?? 'generic';
@@ -100,6 +115,7 @@ function createQueueItem(input: EnqueuePayload): OfflineQueueItem {
     failedAt: undefined,
     hash: input.hash,
     sensitiveFields: sensitiveFields.length > 0 ? sensitiveFields : undefined,
+    dedupKey: input.dedupKey,
   };
 }
 
@@ -133,6 +149,7 @@ function normalizeStoredItem(raw: unknown): OfflineQueueItem | null {
     sensitiveFields: Array.isArray(item.sensitiveFields)
       ? (item.sensitiveFields as SensitiveFieldPath[])
       : undefined,
+    dedupKey: typeof item.dedupKey === 'string' ? item.dedupKey : undefined,
   };
 
   return normalized;
@@ -142,7 +159,53 @@ function syncCompatibilityFields(item: OfflineQueueItem): OfflineQueueItem {
   return { ...item, tries: item.attempts };
 }
 
+type SyncErrorType = 'network' | 'server' | 'client' | 'unknown';
+
+interface SyncErrorInfo {
+  type: SyncErrorType;
+  status?: number;
+  message?: string;
+}
+
+function isSuccessfulResponse(res: Response | { ok: boolean; status: number }): boolean {
+  const status = 'status' in res ? res.status : (res as Response)?.status;
+  const okFlag = 'ok' in res ? res.ok : (res as Response)?.ok;
+
+  return okFlag === true || status === 200 || status === 201 || status === 412;
+}
+
+function getStatus(res: Response | { ok: boolean; status: number }): number {
+  if ('status' in res && typeof res.status === 'number') return res.status;
+  if (res instanceof Response) return res.status;
+  return 0;
+}
+
+async function performSync(item: OfflineQueueItem, sender: SendFn): Promise<SyncErrorInfo | null> {
+  try {
+    const res = await sender(item);
+
+    if (isSuccessfulResponse(res)) {
+      return null;
+    }
+
+    const status = getStatus(res);
+    const type: SyncErrorType = status >= 500 ? 'server' : status >= 400 ? 'client' : 'unknown';
+    const message = res instanceof Response ? res.statusText : undefined;
+
+    return { status, message, type };
+  } catch (e: any) {
+    return {
+      type: 'network',
+      message: e?.message ?? 'Network error',
+    };
+  }
+}
+
 export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): boolean {
+  if (item.failedAt) {
+    return false;
+  }
+
   if (item.attempts >= MAX_ATTEMPTS) {
     return false;
   }
@@ -160,9 +223,16 @@ export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): bool
 
 // Public API
 export async function enqueueTx(input: EnqueuePayload): Promise<OfflineQueueItem> {
-  const item = createQueueItem(input);
-
   const queue = await readStoredQueue();
+
+  if (hasPendingDuplicate(queue, input)) {
+    const duplicate = queue.find(
+      (entry) => entry.type === (input.type ?? 'generic') && entry.dedupKey === input.dedupKey && !entry.failedAt
+    );
+    return duplicate ?? createQueueItem(input);
+  }
+
+  const item = createQueueItem(input);
   const existingIndex = queue.findIndex((entry) => entry.key === item.key);
   if (existingIndex >= 0) {
     queue[existingIndex] = item;
@@ -210,21 +280,17 @@ export async function flushQueue(sender: SendFn): Promise<void> {
       continue;
     }
 
-    try {
-      const res = await sender(current);
-      const status = 'status' in res ? res.status : (res as Response)?.status;
-      if (res.ok || status === 201 || status === 200 || status === 412) {
-        queue = queue.filter((entry) => entry.key !== current.key);
-        mutated = true;
-        continue;
-      }
-    } catch {
-      // el error se gestiona abajo incrementando los intentos
+    const error = await performSync(current, sender);
+    if (!error) {
+      queue = queue.filter((entry) => entry.key !== current.key);
+      mutated = true;
+      continue;
     }
 
     const now = Date.now();
     const attempts = (current.attempts ?? current.tries ?? 0) + 1;
-    const failedAt = attempts >= MAX_ATTEMPTS ? now : current.failedAt;
+    const isFinalClientError = error.type === 'client';
+    const failedAt = isFinalClientError || attempts >= MAX_ATTEMPTS ? now : current.failedAt;
     const updated: OfflineQueueItem = {
       ...current,
       attempts,

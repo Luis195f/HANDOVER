@@ -190,3 +190,59 @@ describe('offlineQueue retries y timestamps', () => {
     vi.useRealTimers();
   });
 });
+
+describe('offlineQueue deduplicación y errores HTTP', () => {
+  it('evita duplicados pendientes con misma dedupKey', async () => {
+    await enqueueTx({ type: 'handoverBundle', dedupKey: 'handover:pat-001:shift-1', payload: { foo: 1 } });
+    await enqueueTx({ type: 'handoverBundle', dedupKey: 'handover:pat-001:shift-1', payload: { foo: 2 } });
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+  });
+
+  it('permite nuevo intento lógico si el previo está marcado como failedAt', async () => {
+    const item = await enqueueTx({
+      type: 'handoverBundle',
+      dedupKey: 'handover:pat-002:shift-1',
+      payload: { foo: 1 },
+    });
+    const failed = [{ ...item, failedAt: Date.now() }];
+    await SecureStore.setItemAsync(OFFLINE_QUEUE_KEY, JSON.stringify(failed));
+
+    await enqueueTx({ type: 'handoverBundle', dedupKey: 'handover:pat-002:shift-1', payload: { foo: 2 } });
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(2);
+    expect(queue.map((q) => q.dedupKey)).toEqual([
+      'handover:pat-002:shift-1',
+      'handover:pat-002:shift-1',
+    ]);
+  });
+
+  it('marca failedAt en errores 4xx y no reintenta', async () => {
+    await enqueueTx({ payload: { fail: 'client' } });
+    const sender = vi.fn(async () => ({ ok: false, status: 400 }));
+
+    await flushQueue(sender);
+    await flushQueue(sender);
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].attempts).toBe(1);
+    expect(queue[0].failedAt).toBeDefined();
+    expect(sender).toHaveBeenCalledTimes(1);
+  });
+
+  it('reintenta en errores 5xx sin marcar failedAt hasta agotar reintentos', async () => {
+    await enqueueTx({ payload: { fail: 'server' } });
+    const sender = vi.fn(async () => ({ ok: false, status: 500 }));
+
+    await flushQueue(sender);
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].attempts).toBe(1);
+    expect(typeof queue[0].lastAttemptAt).toBe('number');
+    expect(queue[0].failedAt).toBeUndefined();
+  });
+});
