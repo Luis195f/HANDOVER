@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, type Control, type FieldErrors } from 'react-hook-form';
+import { Controller, useFieldArray, type Control, type FieldErrors } from 'react-hook-form';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -46,6 +46,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   spacer: { width: 12 },
   buttonRow: { marginTop: 16 },
+  inlineActions: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  secondaryButton: { marginLeft: 12 },
   vitalsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
   vitalsCell: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
 });
@@ -53,13 +55,6 @@ const styles = StyleSheet.create({
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
 type HandoverFormControl = Control<HandoverFormValues>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
-
-const staffListToText = (value?: string[]) => (value ?? []).join(', ');
-const staffTextToList = (value: string) =>
-  value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 
 async function buildAudioAttachment(uri: string | undefined) {
   if (!uri) return undefined;
@@ -246,6 +241,53 @@ function OxygenGroup({
   );
 }
 
+function StaffListInput({
+  control,
+  name,
+  label,
+  placeholder,
+  error,
+}: {
+  control: HandoverFormControl;
+  name: 'administrativeData.staffIn' | 'administrativeData.staffOut';
+  label: string;
+  placeholder: string;
+  error?: string;
+}) {
+  const { fields, append, remove } = useFieldArray({ control, name });
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      {fields.map((field, index) => (
+        <View key={field.id} style={[styles.row, { marginBottom: 8 }]}>
+          <View style={styles.flex}>
+            <Controller
+              control={control}
+              name={`${name}.${index}` as const}
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  placeholder={`${placeholder} ${index + 1}`}
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+          </View>
+          <View style={styles.spacer} />
+          <Button title="Eliminar" onPress={() => remove(index)} />
+        </View>
+      ))}
+      <View style={styles.inlineActions}>
+        <Button title="Añadir" onPress={() => append('')} />
+      </View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 export default function HandoverForm({ navigation, route }: Props) {
   const { patientId: patientIdParam, unitId: unitIdParam, specialtyId } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
@@ -295,6 +337,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const errors: HandoverFormErrors = formState.errors ?? {};
   const administrativeErrors = errors.administrativeData ?? {};
   const unitError = administrativeErrors.unit?.message as string | undefined;
+  const censusError = administrativeErrors.census?.message as string | undefined;
   const startError = administrativeErrors.shiftStart?.message as string | undefined;
   const endError = administrativeErrors.shiftEnd?.message as string | undefined;
   const staffInError = administrativeErrors.staffIn?.message as string | undefined;
@@ -477,6 +520,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Datos del turno</Text>
         <View style={styles.field}>
           <Text style={styles.label}>Unidad</Text>
           <Controller
@@ -485,7 +529,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
-                placeholder="Unidad"
+                placeholder="UCI Adulto"
                 onBlur={onBlur}
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -495,14 +539,35 @@ export default function HandoverForm({ navigation, route }: Props) {
           {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
         </View>
         <View style={styles.field}>
-          <Text style={styles.label}>Inicio</Text>
+          <Text style={styles.label}>Censo de pacientes</Text>
+          <Controller
+            control={control}
+            name="administrativeData.census"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                placeholder="0"
+                keyboardType="numeric"
+                onBlur={onBlur}
+                value={value == null ? '' : String(value)}
+                onChangeText={(text) => {
+                  const parsed = Number(text);
+                  onChange(text === '' || Number.isNaN(parsed) ? undefined : parsed);
+                }}
+              />
+            )}
+          />
+          {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Inicio de turno</Text>
           <Controller
             control={control}
             name="administrativeData.shiftStart"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
-                placeholder="Inicio (ISO)"
+                placeholder="2024-01-01T08:00"
                 onBlur={onBlur}
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -512,14 +577,14 @@ export default function HandoverForm({ navigation, route }: Props) {
           {startError ? <Text style={styles.error}>{startError}</Text> : null}
         </View>
         <View style={styles.field}>
-          <Text style={styles.label}>Fin</Text>
+          <Text style={styles.label}>Fin de turno</Text>
           <Controller
             control={control}
             name="administrativeData.shiftEnd"
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
-                placeholder="Fin (ISO)"
+                placeholder="2024-01-01T20:00"
                 onBlur={onBlur}
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -528,40 +593,23 @@ export default function HandoverForm({ navigation, route }: Props) {
           />
           {endError ? <Text style={styles.error}>{endError}</Text> : null}
         </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Enfermería entrante</Text>
-          <Controller
-            control={control}
-            name="administrativeData.staffIn"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={styles.input}
-                placeholder="Entrante"
-                onBlur={onBlur}
-                value={staffListToText(value)}
-                onChangeText={(text) => onChange(staffTextToList(text))}
-              />
-            )}
-          />
-          {staffInError ? <Text style={styles.error}>{staffInError}</Text> : null}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Enfermería saliente</Text>
-          <Controller
-            control={control}
-            name="administrativeData.staffOut"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={styles.input}
-                placeholder="Saliente"
-                onBlur={onBlur}
-                value={staffListToText(value)}
-                onChangeText={(text) => onChange(staffTextToList(text))}
-              />
-            )}
-          />
-          {staffOutError ? <Text style={styles.error}>{staffOutError}</Text> : null}
-        </View>
+        <StaffListInput
+          control={control}
+          name="administrativeData.staffIn"
+          label="Personal entrante"
+          placeholder="Nombre"
+          error={staffInError}
+        />
+        <StaffListInput
+          control={control}
+          name="administrativeData.staffOut"
+          label="Personal saliente"
+          placeholder="Nombre"
+          error={staffOutError}
+        />
+      </View>
+
+      <View style={styles.section}>
         <View style={styles.field}>
           <Text style={styles.label}>Paciente</Text>
           <View style={styles.row}>
