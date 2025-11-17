@@ -2,9 +2,14 @@ import { zHandover } from '@/src/validation/schemas';
 
 describe('HandoverFormSchema', () => {
   const baseValues = {
-    unitId: 'icu-1',
-    start: '2024-01-01T07:00:00Z',
-    end: '2024-01-01T15:00:00Z',
+    administrativeData: {
+      unit: 'icu-1',
+      census: 12,
+      staffIn: ['Alice'],
+      staffOut: ['Bob'],
+      shiftStart: '2024-01-01T07:00:00Z',
+      shiftEnd: '2024-01-01T15:00:00Z',
+    },
     patientId: 'patient-1',
     vitals: { rr: 18, hr: 80, spo2: 98 },
   } as const;
