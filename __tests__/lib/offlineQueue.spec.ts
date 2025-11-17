@@ -6,6 +6,7 @@ import { OFFLINE_QUEUE_KEY, clearAll, enqueueTx, readQueue } from '@/src/lib/off
 afterEach(async () => {
   await clearAll();
   (SecureStore as any).__reset?.();
+  vi.restoreAllMocks();
 });
 
 describe('offlineQueue sensitiveFields', () => {
@@ -42,5 +43,46 @@ describe('offlineQueue sensitiveFields', () => {
     expect(lastCall?.[0]).toBe(OFFLINE_QUEUE_KEY);
     expect(typeof lastCall?.[1]).toBe('string');
     expect((lastCall?.[1] as string)?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('persiste y recupera la cola offline mediante SecureStore (round-trip)', async () => {
+    const payload = {
+      patientId: 'pat-001',
+      summary: 'Paciente estable, monitorizar',
+      vitals: { heartRate: 80 },
+    };
+
+    const setItemSpy = vi.spyOn(SecureStore, 'setItemAsync');
+
+    await enqueueTx({ payload } as any);
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+
+    const item = queue[0];
+    expect(item.payload).toEqual(payload);
+
+    expect(setItemSpy).toHaveBeenCalledWith(OFFLINE_QUEUE_KEY, expect.any(String));
+  });
+
+  it('devuelve cola vacía si el contenido cifrado está corrupto', async () => {
+    const getItemSpy = vi.spyOn(SecureStore, 'getItemAsync');
+    getItemSpy.mockResolvedValueOnce('NOT_JSON' as any);
+
+    const queue = await readQueue();
+
+    expect(queue).toEqual([]);
+  });
+
+  it('mantiene los metadatos sensitiveFields tras cifrar y leer la cola', async () => {
+    const payload = {
+      patientId: 'pat-002',
+      summary: 'Paciente con riesgo',
+    };
+
+    const item = await enqueueTx({ payload } as any);
+    const fromStorage = await readQueue();
+
+    expect(fromStorage[0].sensitiveFields).toEqual(item.sensitiveFields);
   });
 });
