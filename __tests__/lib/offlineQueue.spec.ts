@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as SecureStore from 'expo-secure-store';
 
-import { OFFLINE_QUEUE_KEY, clearAll, enqueueTx, readQueue } from '@/src/lib/offlineQueue';
+import {
+  MAX_ATTEMPTS,
+  OFFLINE_QUEUE_KEY,
+  RETRY_DELAYS_MS,
+  clearAll,
+  enqueueTx,
+  flushQueue,
+  readQueue,
+} from '@/src/lib/offlineQueue';
 
 afterEach(async () => {
   await clearAll();
@@ -85,5 +93,100 @@ describe('offlineQueue sensitiveFields', () => {
     const fromStorage = await readQueue();
 
     expect(fromStorage[0].sensitiveFields).toEqual(item.sensitiveFields);
+  });
+});
+
+describe('offlineQueue retries y timestamps', () => {
+  it('inicializa createdAt y metadatos de reintento', async () => {
+    const item = await enqueueTx({ payload: { foo: 'bar' } });
+
+    expect(typeof item.createdAt).toBe('number');
+    expect(item.attempts).toBe(0);
+    expect(item.lastAttemptAt).toBeUndefined();
+    expect(item.failedAt).toBeUndefined();
+
+    const [stored] = await readQueue();
+    expect(stored.createdAt).toBe(item.createdAt);
+    expect(stored.attempts).toBe(0);
+    expect(stored.lastAttemptAt).toBeUndefined();
+    expect(stored.failedAt).toBeUndefined();
+  });
+
+  it('incrementa attempts y marca lastAttemptAt en fallo', async () => {
+    await enqueueTx({ payload: { fail: true } });
+    const sender = vi.fn(async () => {
+      throw new Error('network');
+    });
+
+    await flushQueue(sender);
+
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].attempts).toBe(1);
+    expect(typeof queue[0].lastAttemptAt).toBe('number');
+    expect(queue[0].failedAt).toBeUndefined();
+  });
+
+  it('respeta el cooldown y no reintenta demasiado pronto', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2024-01-01T00:00:00Z');
+    vi.setSystemTime(base);
+
+    const item = await enqueueTx({ payload: { foo: 'bar' } });
+    const stored = [
+      {
+        ...item,
+        attempts: 1,
+        tries: 1,
+        lastAttemptAt: Date.now(),
+      },
+    ];
+    await SecureStore.setItemAsync(OFFLINE_QUEUE_KEY, JSON.stringify(stored));
+
+    const sender = vi.fn();
+    await flushQueue(sender);
+
+    expect(sender).not.toHaveBeenCalled();
+    const queue = await readQueue();
+    expect(queue[0].attempts).toBe(1);
+
+    vi.useRealTimers();
+  });
+
+  it('marca failedAt al agotar reintentos y deja de reintentar', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2024-01-02T00:00:00Z');
+    vi.setSystemTime(base);
+
+    const item = await enqueueTx({ payload: { foo: 'bar' } });
+    const stored = [
+      {
+        ...item,
+        attempts: MAX_ATTEMPTS - 1,
+        tries: MAX_ATTEMPTS - 1,
+        lastAttemptAt: Date.now() - (RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1] + 100),
+      },
+    ];
+    await SecureStore.setItemAsync(OFFLINE_QUEUE_KEY, JSON.stringify(stored));
+
+    const sender = vi.fn(async () => {
+      throw new Error('still failing');
+    });
+
+    await flushQueue(sender);
+    expect(sender).toHaveBeenCalledTimes(1);
+
+    let queue = await readQueue();
+    expect(queue[0].attempts).toBe(MAX_ATTEMPTS);
+    expect(queue[0].failedAt).toBeDefined();
+
+    sender.mockClear();
+    await flushQueue(sender);
+    expect(sender).not.toHaveBeenCalled();
+
+    queue = await readQueue();
+    expect(queue[0].attempts).toBe(MAX_ATTEMPTS);
+
+    vi.useRealTimers();
   });
 });
