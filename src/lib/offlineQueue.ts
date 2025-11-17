@@ -1,6 +1,9 @@
 import * as SecureStore from 'expo-secure-store';
 import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '@/security/sensitiveFields';
 
+export const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
+export const MAX_ATTEMPTS = RETRY_DELAYS_MS.length;
+
 export interface OfflineQueueItem {
   id: string;
   key: string;
@@ -9,6 +12,7 @@ export interface OfflineQueueItem {
   createdAt: number;
   attempts: number;
   lastAttemptAt?: number;
+  failedAt?: number;
   hash?: string;
   sensitiveFields?: SensitiveFieldPath[];
   /** @deprecated usa `attempts` en su lugar */
@@ -93,6 +97,7 @@ function createQueueItem(input: EnqueuePayload): OfflineQueueItem {
     attempts,
     tries: attempts,
     lastAttemptAt: undefined,
+    failedAt: undefined,
     hash: input.hash,
     sensitiveFields: sensitiveFields.length > 0 ? sensitiveFields : undefined,
   };
@@ -122,7 +127,8 @@ function normalizeStoredItem(raw: unknown): OfflineQueueItem | null {
     createdAt,
     attempts,
     tries: attempts,
-    lastAttemptAt: item.lastAttemptAt,
+    lastAttemptAt: typeof item.lastAttemptAt === 'number' ? item.lastAttemptAt : undefined,
+    failedAt: typeof item.failedAt === 'number' ? item.failedAt : undefined,
     hash: typeof item.hash === 'string' ? item.hash : undefined,
     sensitiveFields: Array.isArray(item.sensitiveFields)
       ? (item.sensitiveFields as SensitiveFieldPath[])
@@ -134,6 +140,22 @@ function normalizeStoredItem(raw: unknown): OfflineQueueItem | null {
 
 function syncCompatibilityFields(item: OfflineQueueItem): OfflineQueueItem {
   return { ...item, tries: item.attempts };
+}
+
+export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): boolean {
+  if (item.attempts >= MAX_ATTEMPTS) {
+    return false;
+  }
+
+  if (!item.lastAttemptAt) {
+    return true;
+  }
+
+  const delayIndex = Math.min(item.attempts, RETRY_DELAYS_MS.length - 1);
+  const requiredDelay = RETRY_DELAYS_MS[delayIndex];
+  const elapsed = now - item.lastAttemptAt;
+
+  return elapsed >= requiredDelay;
 }
 
 // Public API
@@ -177,31 +199,48 @@ export async function flushQueue(sender: SendFn): Promise<void> {
   let queue = await readStoredQueue();
   queue = [...queue].sort((a, b) => a.createdAt - b.createdAt);
 
+  let mutated = false;
+
   for (const item of [...queue]) {
-    const attempts = (item.attempts ?? item.tries ?? 0) + 1;
-    const updated: OfflineQueueItem = {
-      ...item,
-      attempts,
-      tries: attempts,
-      lastAttemptAt: Date.now(),
-    };
     const index = queue.findIndex((entry) => entry.key === item.key);
-    if (index >= 0) {
-      queue[index] = updated;
-      await writeStoredQueue(queue);
+    if (index < 0) continue;
+    const current = queue[index];
+
+    if (!shouldAttemptNow(current)) {
+      continue;
     }
 
-    const res = await sender(updated);
-    const status = 'status' in res ? res.status : (res as Response)?.status;
-    if (res.ok || status === 201 || status === 200 || status === 412) {
-      queue = queue.filter((entry) => entry.key !== item.key);
-      if (queue.length === 0) {
-        await clearStoredQueue();
-      } else {
-        await writeStoredQueue(queue);
+    try {
+      const res = await sender(current);
+      const status = 'status' in res ? res.status : (res as Response)?.status;
+      if (res.ok || status === 201 || status === 200 || status === 412) {
+        queue = queue.filter((entry) => entry.key !== current.key);
+        mutated = true;
+        continue;
       }
-    } else {
-      break;
+    } catch {
+      // el error se gestiona abajo incrementando los intentos
     }
+
+    const now = Date.now();
+    const attempts = (current.attempts ?? current.tries ?? 0) + 1;
+    const failedAt = attempts >= MAX_ATTEMPTS ? now : current.failedAt;
+    const updated: OfflineQueueItem = {
+      ...current,
+      attempts,
+      tries: attempts,
+      lastAttemptAt: now,
+      failedAt,
+    };
+    queue[index] = updated;
+    mutated = true;
+  }
+
+  if (!mutated) return;
+
+  if (queue.length === 0) {
+    await clearStoredQueue();
+  } else {
+    await writeStoredQueue(queue);
   }
 }
