@@ -1,14 +1,38 @@
 import { z } from "zod";
 
-export const zAdministrativeData = z.object({
-  unit: z.string().min(1, "Unidad requerida"),
-  census: z.number().int().min(0).default(0),
-  staffIn: z.array(z.string()).default([]),
-  staffOut: z.array(z.string()).default([]),
-  shiftStart: z.string().min(10, "Inicio requerido"),
-  shiftEnd: z.string().min(10, "Fin requerido"),
-  incidents: z.array(z.string()).optional(),
-});
+const parseCensus = (value: unknown) => {
+  if (typeof value === "string") {
+    const normalized = value.replace(",", ".").trim();
+    if (!normalized) return undefined;
+    const parsed = Number(normalized);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return value;
+};
+
+export const zAdministrativeData = z
+  .object({
+    unit: z.string().min(1, "La unidad es obligatoria"),
+    census: z
+      .preprocess(parseCensus, z.number().int().min(0, "El censo no puede ser negativo"))
+      .default(0),
+    staffIn: z.array(z.string().min(1, "Nombre requerido")).default([]),
+    staffOut: z.array(z.string().min(1, "Nombre requerido")).default([]),
+    shiftStart: z.string().min(1, "Inicio de turno requerido"),
+    shiftEnd: z.string().min(1, "Fin de turno requerido"),
+    incidents: z.array(z.string().min(1)).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const start = Date.parse(data.shiftStart);
+    const end = Date.parse(data.shiftEnd);
+    if (Number.isFinite(start) && Number.isFinite(end) && end <= start) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El fin del turno debe ser posterior al inicio",
+        path: ["shiftEnd"],
+      });
+    }
+  });
 
 export const zVitals = z.object({
   hr: z.number().int().min(30).max(220).optional(),
