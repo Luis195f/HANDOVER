@@ -13,6 +13,7 @@ import {
   type HandoverInput,
   type HandoverValues,
 } from './fhir-map';
+import type { AdministrativeData } from '../types/administrative';
 import {
   postBundleSmart,
   postBundle,
@@ -30,7 +31,7 @@ export type LegacyQueueItem = {
   nextAttemptAt: string;
   createdAt: string;
   updatedAt: string;
-  values?: HandoverValues;
+  values?: HandoverValues & { administrativeData?: AdministrativeData };
   authorId?: string;
   txId: string;
   lastError?: string;
@@ -638,7 +639,7 @@ async function saveQueue(items: LegacyQueueItem[]) {
 type EnqueueBundleInput = {
   patientId: string;
   bundle: any;
-  values?: HandoverValues;
+  values?: HandoverValues & { administrativeData?: AdministrativeData };
   authorId?: string;
 };
 

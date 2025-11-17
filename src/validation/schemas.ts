@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export const zAdministrativeData = z.object({
+  unit: z.string().min(1, "Unidad requerida"),
+  census: z.number().int().min(0).default(0),
+  staffIn: z.array(z.string()).default([]),
+  staffOut: z.array(z.string()).default([]),
+  shiftStart: z.string().min(10, "Inicio requerido"),
+  shiftEnd: z.string().min(10, "Fin requerido"),
+  incidents: z.array(z.string()).optional(),
+});
+
 export const zVitals = z.object({
   hr: z.number().int().min(30).max(220).optional(),
   rr: z.number().int().min(5).max(60).optional(),
@@ -21,12 +31,7 @@ export const zOxygen = z
   .partial();
 
 export const zHandover = z.object({
-  // Admin
-  unitId: z.string().min(1, "Unidad requerida"),
-  start: z.string().min(10, "Inicio requerido"),
-  end: z.string().min(10, "Fin requerido"),
-  staffIn: z.string().optional(),
-  staffOut: z.string().optional(),
+  administrativeData: zAdministrativeData,
 
   // Paciente (se llena luego en Lote 1B)
   patientId: z.string().min(1, "ID paciente requerido"),

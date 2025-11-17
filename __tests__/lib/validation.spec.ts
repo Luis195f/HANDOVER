@@ -5,16 +5,31 @@ import { zHandover, zVitals, zOxygen } from '@/src/validation/schemas';
 describe('Validation schemas', () => {
   it('acepta valores mínimos requeridos para handover', () => {
     const result = zHandover.safeParse({
-      unitId: 'icu',
-      start: '2024-01-01T00:00:00Z',
-      end: '2024-01-01T04:00:00Z',
+      administrativeData: {
+        unit: 'icu',
+        census: 0,
+        staffIn: [],
+        staffOut: [],
+        shiftStart: '2024-01-01T00:00:00Z',
+        shiftEnd: '2024-01-01T04:00:00Z',
+      },
       patientId: 'pat-001',
     });
     expect(result.success).toBe(true);
   });
 
   it('rechaza handover sin unidad o paciente', () => {
-    const result = zHandover.safeParse({ unitId: '', start: '', end: '', patientId: '' });
+    const result = zHandover.safeParse({
+      administrativeData: {
+        unit: '',
+        census: 0,
+        staffIn: [],
+        staffOut: [],
+        shiftStart: '',
+        shiftEnd: '',
+      },
+      patientId: '',
+    });
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
