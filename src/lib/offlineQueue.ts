@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '@/security/sensitiveFields';
 
 export type QueueItem = {
   key: string;
@@ -6,6 +7,7 @@ export type QueueItem = {
   createdAt: number;
   tries: number;
   hash?: string;
+  sensitiveFields?: SensitiveFieldPath[];
 };
 
 export type SendFn = (tx: QueueItem) => Promise<Response | { ok: boolean; status: number }>;
@@ -33,6 +35,25 @@ function itemKey(key: string): string {
   return `${QUEUE_DIR}:${key}`;
 }
 
+function hasPath(payload: any, path: SensitiveFieldPath): boolean {
+  if (payload == null || typeof payload !== 'object') return false;
+  const segments = path.split('.');
+  let current: any = payload;
+
+  for (const segment of segments) {
+    if (current == null || (typeof current !== 'object' && !Array.isArray(current))) return false;
+    if (!(segment in current)) return false;
+    current = current[segment as keyof typeof current];
+  }
+
+  return current !== undefined;
+}
+
+function findSensitiveFields(payload: any): SensitiveFieldPath[] {
+  if (payload == null || typeof payload !== 'object') return [];
+  return SENSITIVE_FIELDS.filter((field) => hasPath(payload, field));
+}
+
 async function readItem(key: string): Promise<QueueItem | undefined> {
   const raw = await SecureStore.getItemAsync(itemKey(key));
   if (!raw) return undefined;
@@ -53,7 +74,14 @@ async function saveItem(item: QueueItem): Promise<void> {
 export async function enqueueTx(input: { key?: string; payload?: any }): Promise<QueueItem> {
   const key = input.key ?? `tx_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const createdAt = Date.now();
-  const item: QueueItem = { key, payload: input.payload, createdAt, tries: 0 };
+  const sensitiveFields = input.payload ? findSensitiveFields(input.payload) : [];
+  const item: QueueItem = {
+    key,
+    payload: input.payload,
+    createdAt,
+    tries: 0,
+    sensitiveFields: sensitiveFields.length > 0 ? sensitiveFields : undefined,
+  };
 
   const keys = await readIndex();
   if (!keys.includes(key)) {
