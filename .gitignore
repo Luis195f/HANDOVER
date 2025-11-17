@@ -1,5 +1,5 @@
 # ============================================================
-# HANDOVER-PRO – FULL PROFESSIONAL .gitignore
+# HANDOVER-PRO – .gitignore
 # Expo Managed Workflow + EAS + React Native SDK 54
 # ============================================================
 
@@ -7,22 +7,20 @@
 # Node / Expo / React Native
 # -------------------------------
 node_modules/
-npm-debug.log
-yarn-debug.log
-yarn-error.log
-pnpm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 dist/
 build/
 temp/
 .tmp/
 
-# Expo local state (NEVER COMMIT)
+# Expo local state (NO se versiona)
 .expo/
 .expo-shared/
-
-# Metro bundler cache
-metro-cache/
 .expo/web-build/
+metro-cache/
 
 # React Native / iOS / Android build artifacts
 *.keystore
@@ -40,7 +38,7 @@ android/
 ios/
 
 # -------------------------------
-# Environment files (private)
+# Environment files (privado)
 # -------------------------------
 .env
 .env.*
@@ -73,10 +71,9 @@ debug.log
 Thumbs.db
 
 # -------------------------------
-# Tools
+# Tools / caches
 # -------------------------------
 coverage/
 jest-tests/
 pytest-cache/
 .cache/
-
