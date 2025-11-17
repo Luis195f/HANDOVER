@@ -12,7 +12,7 @@ jest.mock('expo-secure-store', () => ({
 
 import * as SecureStore from 'expo-secure-store';
 
-import { enqueueTx, readQueue, removeItem, clearAll, flushQueue, type SendFn, QUEUE_DIR } from './offlineQueue';
+import { OFFLINE_QUEUE_KEY, enqueueTx, readQueue, removeItem, clearAll, flushQueue, type SendFn } from './offlineQueue';
 
 describe('offline queue', () => {
   beforeEach(async () => {
@@ -20,12 +20,11 @@ describe('offline queue', () => {
     jest.clearAllMocks();
   });
 
-  it('enqueue → persiste item e índice', async () => {
+  it('enqueue → persiste item en cola cifrada', async () => {
     const it = await enqueueTx({ payload: { foo: 'bar' } });
-    const path = `${QUEUE_DIR}:${it.key}`;
-    expect(secureStoreData.has(path)).toBe(true);
-    const idxRaw = secureStoreData.get(`${QUEUE_DIR}:__index__`);
-    expect(idxRaw ? JSON.parse(idxRaw) : []).toContain(it.key);
+    const raw = secureStoreData.get(OFFLINE_QUEUE_KEY) ?? '[]';
+    const queue = JSON.parse(raw);
+    expect(queue.some((entry: any) => entry.key === it.key)).toBe(true);
   });
 
   it('readQueue → devuelve en orden', async () => {
@@ -37,18 +36,17 @@ describe('offline queue', () => {
 
   it('removeItem → borra archivo', async () => {
     const it = await enqueueTx({ payload: { x: 1 } });
-    const path = `${QUEUE_DIR}:${it.key}`;
-    expect(secureStoreData.has(path)).toBe(true);
+    expect(secureStoreData.has(OFFLINE_QUEUE_KEY)).toBe(true);
     await removeItem(it.key);
-    expect(secureStoreData.has(path)).toBe(false);
+    const queue = secureStoreData.get(OFFLINE_QUEUE_KEY);
+    expect(queue ? JSON.parse(queue) : []).toHaveLength(0);
   });
 
   it('clearAll → borra todos los .json', async () => {
     await enqueueTx({ payload: { one: 1 } });
     await enqueueTx({ payload: { two: 2 } });
     await clearAll();
-    const storedKeys = Array.from(secureStoreData.keys()).filter((k) => k.startsWith(QUEUE_DIR));
-    expect(storedKeys.length).toBe(0);
+    expect(secureStoreData.size).toBe(0);
   });
 
   it('flushQueue → borra en éxito 200 y 412; detiene en error', async () => {

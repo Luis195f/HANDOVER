@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as SecureStore from 'expo-secure-store';
 
-import { clearAll, enqueueTx, readQueue } from '@/src/lib/offlineQueue';
+import { OFFLINE_QUEUE_KEY, clearAll, enqueueTx, readQueue } from '@/src/lib/offlineQueue';
 
 afterEach(async () => {
   await clearAll();
@@ -31,5 +31,16 @@ describe('offlineQueue sensitiveFields', () => {
     expect(item.sensitiveFields ?? []).toHaveLength(0);
     const [stored] = await readQueue();
     expect(stored?.sensitiveFields ?? []).toHaveLength(0);
+  });
+
+  it('persiste la cola cifrada con SecureStore', async () => {
+    const setItemSpy = vi.spyOn(SecureStore, 'setItemAsync');
+    await enqueueTx({ payload: { foo: 'bar' } });
+
+    expect(setItemSpy).toHaveBeenCalled();
+    const lastCall = setItemSpy.mock.calls.pop();
+    expect(lastCall?.[0]).toBe(OFFLINE_QUEUE_KEY);
+    expect(typeof lastCall?.[1]).toBe('string');
+    expect((lastCall?.[1] as string)?.length ?? 0).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '@/security/sensitiveFields';
 
-export type QueueItem = {
+export type OfflineOperation = {
   key: string;
   payload?: any;
   createdAt: number;
@@ -10,29 +10,34 @@ export type QueueItem = {
   sensitiveFields?: SensitiveFieldPath[];
 };
 
-export type SendFn = (tx: QueueItem) => Promise<Response | { ok: boolean; status: number }>;
+export type SendFn = (tx: OfflineOperation) => Promise<Response | { ok: boolean; status: number }>;
 
-export const QUEUE_DIR = 'handover_queue';
+export const OFFLINE_QUEUE_KEY = 'handover_offline_queue_v1';
 
-const INDEX_KEY = `${QUEUE_DIR}:__index__`;
-
-async function readIndex(): Promise<string[]> {
-  const raw = await SecureStore.getItemAsync(INDEX_KEY);
+async function readStoredQueue(): Promise<OfflineOperation[]> {
+  const raw = await SecureStore.getItemAsync(OFFLINE_QUEUE_KEY);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => ({
+      ...item,
+      createdAt: typeof item?.createdAt === 'number' ? item.createdAt : Date.now(),
+      tries: typeof item?.tries === 'number' ? item.tries : 0,
+    })) as OfflineOperation[];
   } catch {
+    // si hay datos corruptos, empezamos desde cola vacía
     return [];
   }
 }
 
-async function writeIndex(keys: string[]): Promise<void> {
-  await SecureStore.setItemAsync(INDEX_KEY, JSON.stringify(keys));
+async function writeStoredQueue(queue: OfflineOperation[]): Promise<void> {
+  const raw = JSON.stringify(queue);
+  await SecureStore.setItemAsync(OFFLINE_QUEUE_KEY, raw);
 }
 
-function itemKey(key: string): string {
-  return `${QUEUE_DIR}:${key}`;
+async function clearStoredQueue(): Promise<void> {
+  await SecureStore.deleteItemAsync(OFFLINE_QUEUE_KEY);
 }
 
 function hasPath(payload: any, path: SensitiveFieldPath): boolean {
@@ -54,28 +59,11 @@ function findSensitiveFields(payload: any): SensitiveFieldPath[] {
   return SENSITIVE_FIELDS.filter((field) => hasPath(payload, field));
 }
 
-async function readItem(key: string): Promise<QueueItem | undefined> {
-  const raw = await SecureStore.getItemAsync(itemKey(key));
-  if (!raw) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as QueueItem;
-    if (typeof parsed.createdAt !== 'number') parsed.createdAt = Date.now();
-    if (typeof parsed.tries !== 'number') parsed.tries = 0;
-    return parsed;
-  } catch {
-    return undefined;
-  }
-}
-
-async function saveItem(item: QueueItem): Promise<void> {
-  await SecureStore.setItemAsync(itemKey(item.key), JSON.stringify(item));
-}
-
-export async function enqueueTx(input: { key?: string; payload?: any }): Promise<QueueItem> {
+export async function enqueueTx(input: { key?: string; payload?: any }): Promise<OfflineOperation> {
   const key = input.key ?? `tx_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const createdAt = Date.now();
   const sensitiveFields = input.payload ? findSensitiveFields(input.payload) : [];
-  const item: QueueItem = {
+  const item: OfflineOperation = {
     key,
     payload: input.payload,
     createdAt,
@@ -83,59 +71,60 @@ export async function enqueueTx(input: { key?: string; payload?: any }): Promise
     sensitiveFields: sensitiveFields.length > 0 ? sensitiveFields : undefined,
   };
 
-  const keys = await readIndex();
-  if (!keys.includes(key)) {
-    keys.push(key);
-    await writeIndex(keys);
+  const queue = await readStoredQueue();
+  const existingIndex = queue.findIndex((entry) => entry.key === key);
+  if (existingIndex >= 0) {
+    queue[existingIndex] = item;
+  } else {
+    queue.push(item);
   }
 
-  await saveItem(item);
+  await writeStoredQueue(queue);
   return item;
 }
 
-export async function readQueue(): Promise<QueueItem[]> {
-  const keys = await readIndex();
-  const items: QueueItem[] = [];
-  for (const key of keys) {
-    const item = await readItem(key);
-    if (item) items.push(item);
-  }
-  return items.sort((a, b) => a.createdAt - b.createdAt);
+export async function readQueue(): Promise<OfflineOperation[]> {
+  const queue = await readStoredQueue();
+  return [...queue].sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export async function removeItem(key: string): Promise<void> {
-  const keys = await readIndex();
-  const next = keys.filter((k) => k !== key);
-  if (next.length !== keys.length) {
-    await writeIndex(next);
+  const queue = await readStoredQueue();
+  const next = queue.filter((item) => item.key !== key);
+  if (next.length === 0) {
+    await clearStoredQueue();
+    return;
   }
-  await SecureStore.deleteItemAsync(itemKey(key));
+  if (next.length !== queue.length) {
+    await writeStoredQueue(next);
+  }
 }
 
 export async function clearAll(): Promise<void> {
-  const keys = await readIndex();
-  for (const key of keys) {
-    await SecureStore.deleteItemAsync(itemKey(key));
-  }
-  await SecureStore.deleteItemAsync(INDEX_KEY);
+  await clearStoredQueue();
 }
 
 export async function flushQueue(sender: SendFn): Promise<void> {
-  const keys = await readIndex();
-  for (const key of [...keys]) {
-    const item = await readItem(key);
-    if (!item) {
-      await removeItem(key);
-      continue;
-    }
+  let queue = await readStoredQueue();
+  queue = [...queue].sort((a, b) => a.createdAt - b.createdAt);
 
-    const updated: QueueItem = { ...item, tries: (item.tries ?? 0) + 1 };
-    await saveItem(updated);
+  for (const item of [...queue]) {
+    const updated: OfflineOperation = { ...item, tries: (item.tries ?? 0) + 1 };
+    const index = queue.findIndex((entry) => entry.key === item.key);
+    if (index >= 0) {
+      queue[index] = updated;
+      await writeStoredQueue(queue);
+    }
 
     const res = await sender(updated);
     const status = 'status' in res ? res.status : (res as Response)?.status;
     if (res.ok || status === 201 || status === 200 || status === 412) {
-      await removeItem(key);
+      queue = queue.filter((entry) => entry.key !== item.key);
+      if (queue.length === 0) {
+        await clearStoredQueue();
+      } else {
+        await writeStoredQueue(queue);
+      }
     } else {
       break;
     }
