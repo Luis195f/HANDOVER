@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+import {
+  DIET_TYPES,
+  MOBILITY_LEVELS,
+  STOOL_PATTERNS,
+  type EliminationInfo,
+  type FluidBalanceInfo,
+  type MobilityInfo,
+  type NutritionInfo,
+  type SkinInfo,
+} from "../types/handover";
+
 const parseCensus = (value: unknown) => {
   if (typeof value === "string") {
     const normalized = value.replace(",", ".").trim();
@@ -54,6 +65,34 @@ export const zOxygen = z
   })
   .partial();
 
+export const zNutritionInfo: z.ZodSchema<NutritionInfo> = z.object({
+  dietType: z.enum(DIET_TYPES),
+  tolerance: z.string().optional(),
+  intakeMl: z.number().nonnegative().optional(),
+});
+
+export const zEliminationInfo: z.ZodSchema<EliminationInfo> = z.object({
+  urineMl: z.number().nonnegative().optional(),
+  stoolPattern: z.enum(STOOL_PATTERNS).optional(),
+  hasRectalTube: z.boolean().optional(),
+});
+
+export const zMobilityInfo: z.ZodSchema<MobilityInfo> = z.object({
+  mobilityLevel: z.enum(MOBILITY_LEVELS),
+  repositioningPlan: z.string().optional(),
+});
+
+export const zSkinInfo: z.ZodSchema<SkinInfo> = z.object({
+  skinStatus: z.string().min(1, "Estado de piel requerido"),
+  hasPressureInjury: z.boolean().optional(),
+});
+
+export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
+  intakeMl: z.number().nonnegative(),
+  outputMl: z.number().nonnegative(),
+  netBalanceMl: z.number().optional(),
+});
+
 export const zHandover = z.object({
   administrativeData: zAdministrativeData,
 
@@ -76,6 +115,12 @@ export const zHandover = z.object({
   meds: z.string().optional(),
 
   oxygenTherapy: zOxygen.optional(),
+
+  nutrition: zNutritionInfo.optional(),
+  elimination: zEliminationInfo.optional(),
+  mobility: zMobilityInfo.optional(),
+  skin: zSkinInfo.optional(),
+  fluidBalance: zFluidBalanceInfo.optional(),
 
   // Multimedia
   audioUri: z.string().min(1).optional()

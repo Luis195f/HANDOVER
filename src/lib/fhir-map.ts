@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
 import type { AdministrativeData } from '../types/administrative';
+import type {
+  EliminationInfo,
+  FluidBalanceInfo,
+  MobilityInfo,
+  NutritionInfo,
+  SkinInfo,
+} from '../types/handover';
 import { CATEGORY, LOINC, SNOMED } from './codes';
 import { hashHex, fhirId } from './crypto';
 
@@ -416,6 +423,11 @@ export type HandoverValues = {
   audioAttachment?: AudioAttachmentInput | null;
   composition?: CompositionInput;
   sbar?: SbarValues;
+  nutrition?: NutritionInfo;
+  elimination?: EliminationInfo;
+  mobility?: MobilityInfo;
+  skin?: SkinInfo;
+  fluidBalance?: FluidBalanceInfo;
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
