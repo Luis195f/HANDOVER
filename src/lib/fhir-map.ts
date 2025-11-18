@@ -58,6 +58,7 @@ type ObservationComponent = {
   code: CodeableConcept;
   valueQuantity?: Quantity;
   valueCodeableConcept?: CodeableConcept;
+  valueString?: string;
 };
 
 type Observation = {
@@ -73,7 +74,9 @@ type Observation = {
   issued?: string;
   valueQuantity?: Quantity;
   valueCodeableConcept?: CodeableConcept;
+  valueString?: string;
   component?: ObservationComponent[];
+  note?: Annotation[];
 };
 
 type MedicationStatement = {
@@ -225,6 +228,17 @@ const vitalCategoryConcept: CodeableConcept = {
       display: 'Vital Signs',
     },
   ],
+};
+
+const surveyCategoryConcept: CodeableConcept = {
+  coding: [
+    {
+      system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+      code: 'survey',
+      display: 'Survey',
+    },
+  ],
+  text: 'Nursing care',
 };
 
 const AVPU_MAP = {
@@ -394,6 +408,10 @@ type BundleReferenceIndex = {
   medications: string[];
   oxygen: string[];
   attachments: string[];
+  nutrition: string[];
+  elimination: string[];
+  mobilitySkin: string[];
+  fluidBalance: string[];
 };
 
 export type AuthorInput = {
@@ -950,6 +968,324 @@ export function mapOxygenObservations(
   return observations;
 }
 
+type CareValues = { patientId: string; encounterId?: string };
+
+export function mapNutritionCare(
+  values: CareValues & { nutrition?: NutritionInfo },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.nutrition) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+
+  const components: ObservationComponent[] = [
+    {
+      code: { coding: [{ system: 'urn:handover-pro:component', code: 'diet-type', display: 'Diet type' }], text: 'Diet type' },
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: 'urn:handover-pro:diet',
+            code: values.nutrition.dietType,
+            display: values.nutrition.dietType,
+          },
+        ],
+        text: values.nutrition.dietType,
+      },
+    },
+  ];
+
+  if (values.nutrition.tolerance) {
+    components.push({
+      code: {
+        coding: [{ system: 'urn:handover-pro:component', code: 'tolerance', display: 'Tolerance' }],
+        text: 'Tolerance',
+      },
+      valueString: values.nutrition.tolerance,
+    });
+  }
+
+  if (values.nutrition.intakeMl !== undefined) {
+    components.push({
+      code: {
+        coding: [{ system: 'urn:handover-pro:component', code: 'intake', display: 'Intake (mL)' }],
+        text: 'Intake (mL)',
+      },
+      valueQuantity: quantity(values.nutrition.intakeMl, 'mL', 'mL'),
+    });
+  }
+
+  return [
+    {
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          {
+            system: 'http://loinc.org',
+            code: 'TODO-NUTRITION',
+            display: 'Nutrition care',
+          },
+        ],
+        text: 'Nutrition care (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      component: components,
+    },
+  ];
+}
+
+export function mapEliminationCare(
+  values: CareValues & { elimination?: EliminationInfo },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.elimination) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+  const observations: Observation[] = [];
+
+  if (values.elimination.urineMl !== undefined) {
+    observations.push({
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          {
+            system: 'http://loinc.org',
+            code: 'TODO-URINE-OUTPUT',
+            display: 'Urine output',
+          },
+        ],
+        text: 'Urine output (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      valueQuantity: quantity(values.elimination.urineMl, 'mL', 'mL'),
+    });
+  }
+
+  if (values.elimination.stoolPattern) {
+    const note = values.elimination.hasRectalTube !== undefined
+      ? [
+          {
+            text: values.elimination.hasRectalTube ? 'Rectal tube present' : 'No rectal tube',
+          },
+        ]
+      : undefined;
+
+    observations.push({
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          {
+            system: 'http://loinc.org',
+            code: 'TODO-STOOL-PATTERN',
+            display: 'Stool pattern',
+          },
+        ],
+        text: 'Stool pattern (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: 'urn:handover-pro:stool-pattern',
+            code: values.elimination.stoolPattern,
+            display: values.elimination.stoolPattern,
+          },
+        ],
+        text: values.elimination.stoolPattern,
+      },
+      note,
+    });
+  } else if (values.elimination.hasRectalTube !== undefined) {
+    observations.push({
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          {
+            system: 'http://loinc.org',
+            code: 'TODO-RECTAL-TUBE',
+            display: 'Rectal tube status',
+          },
+        ],
+        text: 'Rectal tube status (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: 'urn:handover-pro:boolean',
+            code: values.elimination.hasRectalTube ? 'yes' : 'no',
+            display: values.elimination.hasRectalTube ? 'Present' : 'Absent',
+          },
+        ],
+        text: values.elimination.hasRectalTube ? 'Present' : 'Absent',
+      },
+    });
+  }
+
+  return observations;
+}
+
+export function mapMobilitySkinCare(
+  values: CareValues & { mobility?: MobilityInfo; skin?: SkinInfo },
+  options?: BuildOptions,
+): Observation[] {
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+  const observations: Observation[] = [];
+
+  if (values.mobility) {
+    observations.push({
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          { system: 'http://loinc.org', code: 'TODO-MOBILITY', display: 'Mobility assessment' },
+        ],
+        text: 'Mobility assessment (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: 'urn:handover-pro:mobility-level',
+            code: values.mobility.mobilityLevel,
+            display: values.mobility.mobilityLevel,
+          },
+        ],
+        text: values.mobility.mobilityLevel,
+      },
+      note: values.mobility.repositioningPlan
+        ? [{ text: `Repositioning plan: ${values.mobility.repositioningPlan}` }]
+        : undefined,
+    });
+  }
+
+  if (values.skin) {
+    const components: ObservationComponent[] = [];
+    if (values.skin.hasPressureInjury !== undefined) {
+      components.push({
+        code: {
+          coding: [
+            { system: 'urn:handover-pro:component', code: 'pressure-injury', display: 'Pressure injury' },
+          ],
+          text: 'Pressure injury',
+        },
+        valueCodeableConcept: {
+          coding: [
+            {
+              system: 'urn:handover-pro:boolean',
+              code: values.skin.hasPressureInjury ? 'yes' : 'no',
+              display: values.skin.hasPressureInjury ? 'Present' : 'Absent',
+            },
+          ],
+          text: values.skin.hasPressureInjury ? 'Present' : 'Absent',
+        },
+      });
+    }
+
+    observations.push({
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          { system: 'http://loinc.org', code: 'TODO-SKIN', display: 'Skin assessment' },
+        ],
+        text: 'Skin assessment (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      valueString: values.skin.skinStatus,
+      component: components.length > 0 ? components : undefined,
+    });
+  }
+
+  return observations;
+}
+
+export function mapFluidBalanceCare(
+  values: CareValues & { fluidBalance?: FluidBalanceInfo },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.fluidBalance) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+
+  const components: ObservationComponent[] = [];
+
+  components.push({
+    code: { coding: [{ system: 'urn:handover-pro:component', code: 'intake', display: 'Intake' }], text: 'Intake' },
+    valueQuantity: quantity(values.fluidBalance.intakeMl, 'mL', 'mL'),
+  });
+
+  components.push({
+    code: { coding: [{ system: 'urn:handover-pro:component', code: 'output', display: 'Output' }], text: 'Output' },
+    valueQuantity: quantity(values.fluidBalance.outputMl, 'mL', 'mL'),
+  });
+
+  const net =
+    values.fluidBalance.netBalanceMl !== undefined
+      ? values.fluidBalance.netBalanceMl
+      : values.fluidBalance.intakeMl - values.fluidBalance.outputMl;
+
+  if (Number.isFinite(net)) {
+    components.push({
+      code: { coding: [{ system: 'urn:handover-pro:component', code: 'net', display: 'Net balance' }], text: 'Net balance' },
+      valueQuantity: quantity(net as number, 'mL', 'mL'),
+    });
+  }
+
+  return [
+    {
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: {
+        coding: [
+          {
+            system: 'http://loinc.org',
+            code: 'TODO-FLUID-BALANCE',
+            display: 'Fluid balance',
+          },
+        ],
+        text: 'Fluid balance (TODO code)',
+      },
+      subject,
+      encounter,
+      effectiveDateTime,
+      component: components,
+      note: values.fluidBalance.notes ? [{ text: values.fluidBalance.notes }] : undefined,
+    },
+  ];
+}
+
 export function mapDocumentReferenceAudio(
   values: DocumentValues,
   options?: BuildOptions,
@@ -1050,6 +1386,34 @@ export function buildComposition(
     });
   }
 
+  if (refs.nutrition.length > 0) {
+    sections.push({
+      title: 'Nutrition',
+      entry: refs.nutrition.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.elimination.length > 0) {
+    sections.push({
+      title: 'Elimination',
+      entry: refs.elimination.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.mobilitySkin.length > 0) {
+    sections.push({
+      title: 'Mobility and Skin',
+      entry: refs.mobilitySkin.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.fluidBalance.length > 0) {
+    sections.push({
+      title: 'Fluid balance',
+      entry: refs.fluidBalance.map((reference) => ({ reference })),
+    });
+  }
+
   if (refs.attachments.length > 0) {
     sections.push({
       title: 'Attachments',
@@ -1103,6 +1467,31 @@ export function buildHandoverBundle(
     sharedOptions,
   );
 
+  const nutritionObservations = mapNutritionCare(
+    { patientId: values.patientId, encounterId: values.encounterId, nutrition: values.nutrition },
+    sharedOptions,
+  );
+
+  const eliminationObservations = mapEliminationCare(
+    { patientId: values.patientId, encounterId: values.encounterId, elimination: values.elimination },
+    sharedOptions,
+  );
+
+  const mobilitySkinObservations = mapMobilitySkinCare(
+    {
+      patientId: values.patientId,
+      encounterId: values.encounterId,
+      mobility: values.mobility,
+      skin: values.skin,
+    },
+    sharedOptions,
+  );
+
+  const fluidBalanceObservations = mapFluidBalanceCare(
+    { patientId: values.patientId, encounterId: values.encounterId, fluidBalance: values.fluidBalance },
+    sharedOptions,
+  );
+
   const medications = mapMedicationStatements(
     {
       patientId: values.patientId,
@@ -1136,6 +1525,10 @@ export function buildHandoverBundle(
   const medicationRefs: string[] = [];
   const oxygenRefs: string[] = [];
   const attachmentRefs: string[] = [];
+  const nutritionRefs: string[] = [];
+  const eliminationRefs: string[] = [];
+  const mobilitySkinRefs: string[] = [];
+  const fluidBalanceRefs: string[] = [];
 
   vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(observation, values.patientId);
@@ -1155,6 +1548,46 @@ export function buildHandoverBundle(
       request: { method: 'POST', url: 'Observation' },
     });
     oxygenRefs.push(fullUrl);
+  });
+
+  nutritionObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    nutritionRefs.push(fullUrl);
+  });
+
+  eliminationObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    eliminationRefs.push(fullUrl);
+  });
+
+  mobilitySkinObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    mobilitySkinRefs.push(fullUrl);
+  });
+
+  fluidBalanceObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    fluidBalanceRefs.push(fullUrl);
   });
 
   medications.forEach((medication) => {
@@ -1201,6 +1634,10 @@ export function buildHandoverBundle(
       medications: medicationRefs,
       oxygen: oxygenRefs,
       attachments: attachmentRefs,
+      nutrition: nutritionRefs,
+      elimination: eliminationRefs,
+      mobilitySkin: mobilitySkinRefs,
+      fluidBalance: fluidBalanceRefs,
     },
     sharedOptions,
   );
