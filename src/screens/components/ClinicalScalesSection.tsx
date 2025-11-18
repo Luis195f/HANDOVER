@@ -1,8 +1,19 @@
 import React, { useEffect, useMemo } from 'react';
-import { StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
 
 import type { HandoverValues } from '@/src/validation/schemas';
+
+type BradenSubscaleName =
+  | 'braden.sensoryPerception'
+  | 'braden.moisture'
+  | 'braden.activity'
+  | 'braden.mobility'
+  | 'braden.nutrition'
+  | 'braden.frictionShear';
+
+type BradenOption = { label: string; value: 1 | 2 | 3 | 4 };
+type BradenRiskLevel = 'alto' | 'moderado' | 'bajo' | 'sin_riesgo';
 
 function usePainAssessmentState() {
   const { control, setValue } = useFormContext<HandoverValues>();
@@ -27,14 +38,153 @@ function usePainAssessmentState() {
   return useMemo(() => ({ hasPain: !!hasPain }), [hasPain]);
 }
 
+function computeBradenRiskLevel(total: number): BradenRiskLevel {
+  if (total <= 12) return 'alto';
+  if (total <= 14) return 'moderado';
+  if (total <= 18) return 'bajo';
+  return 'sin_riesgo';
+}
+
+function BradenSubscaleField({
+  label,
+  name,
+  options,
+  error,
+}: {
+  label: string;
+  name: BradenSubscaleName;
+  options: BradenOption[];
+  error?: string;
+}) {
+  const { control } = useFormContext<HandoverValues>();
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field: { onChange, value } }) => (
+          <View style={styles.optionRow}>
+            {options.map((option) => {
+              const selected = value === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  style={[styles.optionButton, selected && styles.optionButtonSelected]}
+                  onPress={() => onChange(option.value)}
+                >
+                  <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 export default function ClinicalScalesSection() {
-  const { control, formState } = useFormContext<HandoverValues>();
+  const { control, formState, setValue } = useFormContext<HandoverValues>();
   const { hasPain } = usePainAssessmentState();
   const errors = formState.errors ?? {};
   const painErrors = errors.painAssessment ?? {};
   const evaScoreError = painErrors?.evaScore?.message as string | undefined;
   const locationError = painErrors?.location?.message as string | undefined;
   const actionsError = painErrors?.actionsTaken?.message as string | undefined;
+  const bradenErrors = errors.braden ?? {};
+
+  const sensoryPerception = useWatch({ control, name: 'braden.sensoryPerception' });
+  const moisture = useWatch({ control, name: 'braden.moisture' });
+  const activity = useWatch({ control, name: 'braden.activity' });
+  const mobility = useWatch({ control, name: 'braden.mobility' });
+  const nutrition = useWatch({ control, name: 'braden.nutrition' });
+  const frictionShear = useWatch({ control, name: 'braden.frictionShear' });
+  const totalScore = useWatch({ control, name: 'braden.totalScore' });
+  const riskLevel = useWatch({ control, name: 'braden.riskLevel' });
+
+  useEffect(() => {
+    const scores = [
+      sensoryPerception,
+      moisture,
+      activity,
+      mobility,
+      nutrition,
+      frictionShear,
+    ];
+    const allFilled = scores.every((score) => typeof score === 'number');
+
+    if (allFilled) {
+      const computedTotal = (scores as number[]).reduce((acc, value) => acc + value, 0);
+      const computedRisk = computeBradenRiskLevel(computedTotal);
+
+      setValue('braden.totalScore', computedTotal, { shouldDirty: false, shouldValidate: true });
+      setValue('braden.riskLevel', computedRisk, { shouldDirty: false, shouldValidate: true });
+      return;
+    }
+
+    setValue('braden.totalScore', undefined as unknown as number, {
+      shouldDirty: false,
+      shouldValidate: false,
+    });
+    setValue('braden.riskLevel', undefined as unknown as BradenRiskLevel, {
+      shouldDirty: false,
+      shouldValidate: false,
+    });
+  }, [activity, frictionShear, mobility, moisture, nutrition, sensoryPerception, setValue]);
+
+  const riskLabelText = useMemo(() => {
+    if (!riskLevel) return '—';
+    const map: Record<NonNullable<typeof riskLevel>, string> = {
+      alto: 'Alto',
+      moderado: 'Moderado',
+      bajo: 'Bajo',
+      sin_riesgo: 'Sin riesgo',
+    };
+    return map[riskLevel];
+  }, [riskLevel]);
+
+  const subscaleOptions: Record<BradenSubscaleName, BradenOption[]> = {
+    'braden.sensoryPerception': [
+      { value: 1, label: '1: Completamente limitado' },
+      { value: 2, label: '2: Muy limitado' },
+      { value: 3, label: '3: Ligeramente limitado' },
+      { value: 4, label: '4: Sin limitación' },
+    ],
+    'braden.moisture': [
+      { value: 1, label: '1: Constantemente húmeda' },
+      { value: 2, label: '2: Muy húmeda' },
+      { value: 3, label: '3: Ocasionalmente húmeda' },
+      { value: 4, label: '4: Rara vez húmeda' },
+    ],
+    'braden.activity': [
+      { value: 1, label: '1: Encamado' },
+      { value: 2, label: '2: Sedentario' },
+      { value: 3, label: '3: Camina ocasionalmente' },
+      { value: 4, label: '4: Camina frecuentemente' },
+    ],
+    'braden.mobility': [
+      { value: 1, label: '1: Completamente inmóvil' },
+      { value: 2, label: '2: Muy limitado' },
+      { value: 3, label: '3: Ligeramente limitado' },
+      { value: 4, label: '4: Sin limitación' },
+    ],
+    'braden.nutrition': [
+      { value: 1, label: '1: Muy pobre' },
+      { value: 2, label: '2: Probablemente inadecuada' },
+      { value: 3, label: '3: Adecuada' },
+      { value: 4, label: '4: Excelente' },
+    ],
+    'braden.frictionShear': [
+      { value: 1, label: '1: Problema importante' },
+      { value: 2, label: '2: Problema potencial' },
+      { value: 3, label: '3: Sin problema aparente' },
+      { value: 4, label: '4: Muy buen control' },
+    ],
+  };
 
   const parseEvaScore = (text: string) => {
     if (text.trim() === '') return null;
@@ -115,6 +265,60 @@ export default function ClinicalScalesSection() {
           </View>
         )}
       />
+
+      <Text style={styles.sectionSubtitle}>Braden – Riesgo de úlceras por presión</Text>
+      <BradenSubscaleField
+        label="Percepción sensorial"
+        name="braden.sensoryPerception"
+        options={subscaleOptions['braden.sensoryPerception']}
+        error={bradenErrors?.sensoryPerception?.message as string | undefined}
+      />
+      <BradenSubscaleField
+        label="Humedad"
+        name="braden.moisture"
+        options={subscaleOptions['braden.moisture']}
+        error={bradenErrors?.moisture?.message as string | undefined}
+      />
+      <BradenSubscaleField
+        label="Actividad"
+        name="braden.activity"
+        options={subscaleOptions['braden.activity']}
+        error={bradenErrors?.activity?.message as string | undefined}
+      />
+      <BradenSubscaleField
+        label="Movilidad"
+        name="braden.mobility"
+        options={subscaleOptions['braden.mobility']}
+        error={bradenErrors?.mobility?.message as string | undefined}
+      />
+      <BradenSubscaleField
+        label="Nutrición"
+        name="braden.nutrition"
+        options={subscaleOptions['braden.nutrition']}
+        error={bradenErrors?.nutrition?.message as string | undefined}
+      />
+      <BradenSubscaleField
+        label="Fricción / cizalla"
+        name="braden.frictionShear"
+        options={subscaleOptions['braden.frictionShear']}
+        error={bradenErrors?.frictionShear?.message as string | undefined}
+      />
+
+      <View style={styles.summaryRow}>
+        <Text style={styles.label}>Puntaje total</Text>
+        <Text style={styles.summaryValue}>{typeof totalScore === 'number' ? totalScore : '—'}</Text>
+      </View>
+      {bradenErrors?.totalScore?.message ? (
+        <Text style={styles.error}>{bradenErrors.totalScore.message as string}</Text>
+      ) : null}
+
+      <View style={styles.summaryRow}>
+        <Text style={styles.label}>Riesgo</Text>
+        <Text style={styles.summaryValue}>{riskLabelText}</Text>
+      </View>
+      {bradenErrors?.riskLevel?.message ? (
+        <Text style={styles.error}>{bradenErrors.riskLevel.message as string}</Text>
+      ) : null}
     </View>
   );
 }
@@ -136,4 +340,25 @@ const styles = StyleSheet.create({
   error: { color: '#DC2626', marginTop: 4 },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   disabledInput: { backgroundColor: '#F3F4F6' },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 },
+  optionButton: {
+    borderColor: '#CBD5F5',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginHorizontal: 4,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+  },
+  optionButtonSelected: { backgroundColor: '#1D4ED8', borderColor: '#1D4ED8' },
+  optionText: { fontSize: 14, color: '#111827' },
+  optionTextSelected: { color: '#fff', fontWeight: '600' },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  summaryValue: { fontSize: 16, fontWeight: '600' },
 });
