@@ -14,6 +14,9 @@ type BradenSubscaleName =
 
 type BradenOption = { label: string; value: 1 | 2 | 3 | 4 };
 type BradenRiskLevel = 'alto' | 'moderado' | 'bajo' | 'sin_riesgo';
+type GlasgowFieldName = 'glasgow.eye' | 'glasgow.verbal' | 'glasgow.motor';
+type GlasgowOption = { label: string; value: number };
+type GlasgowSeverity = 'grave' | 'moderado' | 'leve';
 
 function usePainAssessmentState() {
   const { control, setValue } = useFormContext<HandoverValues>();
@@ -43,6 +46,12 @@ function computeBradenRiskLevel(total: number): BradenRiskLevel {
   if (total <= 14) return 'moderado';
   if (total <= 18) return 'bajo';
   return 'sin_riesgo';
+}
+
+function computeGlasgowSeverity(total: number): GlasgowSeverity {
+  if (total <= 8) return 'grave';
+  if (total <= 12) return 'moderado';
+  return 'leve';
 }
 
 function BradenSubscaleField({
@@ -87,6 +96,48 @@ function BradenSubscaleField({
   );
 }
 
+function GlasgowField({
+  label,
+  name,
+  options,
+  error,
+}: {
+  label: string;
+  name: GlasgowFieldName;
+  options: GlasgowOption[];
+  error?: string;
+}) {
+  const { control } = useFormContext<HandoverValues>();
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Controller
+        control={control}
+        name={name}
+        render={({ field: { onChange, value } }) => (
+          <View style={styles.optionRow}>
+            {options.map((option) => {
+              const selected = value === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  style={[styles.optionButton, selected && styles.optionButtonSelected]}
+                  onPress={() => onChange(option.value)}
+                >
+                  <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 export default function ClinicalScalesSection() {
   const { control, formState, setValue } = useFormContext<HandoverValues>();
   const { hasPain } = usePainAssessmentState();
@@ -96,6 +147,10 @@ export default function ClinicalScalesSection() {
   const locationError = painErrors?.location?.message as string | undefined;
   const actionsError = painErrors?.actionsTaken?.message as string | undefined;
   const bradenErrors = errors.braden ?? {};
+  const glasgowErrors = errors.glasgow ?? {};
+  const eyeError = glasgowErrors?.eye?.message as string | undefined;
+  const verbalError = glasgowErrors?.verbal?.message as string | undefined;
+  const motorError = glasgowErrors?.motor?.message as string | undefined;
 
   const sensoryPerception = useWatch({ control, name: 'braden.sensoryPerception' });
   const moisture = useWatch({ control, name: 'braden.moisture' });
@@ -105,6 +160,11 @@ export default function ClinicalScalesSection() {
   const frictionShear = useWatch({ control, name: 'braden.frictionShear' });
   const totalScore = useWatch({ control, name: 'braden.totalScore' });
   const riskLevel = useWatch({ control, name: 'braden.riskLevel' });
+  const eye = useWatch({ control, name: 'glasgow.eye' });
+  const verbal = useWatch({ control, name: 'glasgow.verbal' });
+  const motor = useWatch({ control, name: 'glasgow.motor' });
+  const glasgowTotal = useWatch({ control, name: 'glasgow.total' });
+  const glasgowSeverity = useWatch({ control, name: 'glasgow.severity' });
 
   useEffect(() => {
     const scores = [
@@ -136,6 +196,29 @@ export default function ClinicalScalesSection() {
     });
   }, [activity, frictionShear, mobility, moisture, nutrition, sensoryPerception, setValue]);
 
+  useEffect(() => {
+    const scores = [eye, verbal, motor];
+    const allFilled = scores.every((score) => typeof score === 'number');
+
+    if (allFilled) {
+      const computedTotal = (scores as number[]).reduce((acc, value) => acc + value, 0);
+      const computedSeverity = computeGlasgowSeverity(computedTotal);
+
+      setValue('glasgow.total', computedTotal, { shouldDirty: false, shouldValidate: true });
+      setValue('glasgow.severity', computedSeverity, { shouldDirty: false, shouldValidate: true });
+      return;
+    }
+
+    setValue('glasgow.total', undefined as unknown as number, {
+      shouldDirty: false,
+      shouldValidate: false,
+    });
+    setValue('glasgow.severity', undefined as unknown as GlasgowSeverity, {
+      shouldDirty: false,
+      shouldValidate: false,
+    });
+  }, [eye, motor, setValue, verbal]);
+
   const riskLabelText = useMemo(() => {
     if (!riskLevel) return '—';
     const map: Record<NonNullable<typeof riskLevel>, string> = {
@@ -146,6 +229,16 @@ export default function ClinicalScalesSection() {
     };
     return map[riskLevel];
   }, [riskLevel]);
+
+  const glasgowSeverityLabel = useMemo(() => {
+    if (!glasgowSeverity) return '—';
+    const map: Record<NonNullable<typeof glasgowSeverity>, string> = {
+      grave: 'Grave',
+      moderado: 'Moderado',
+      leve: 'Leve',
+    };
+    return map[glasgowSeverity];
+  }, [glasgowSeverity]);
 
   const subscaleOptions: Record<BradenSubscaleName, BradenOption[]> = {
     'braden.sensoryPerception': [
@@ -183,6 +276,30 @@ export default function ClinicalScalesSection() {
       { value: 2, label: '2: Problema potencial' },
       { value: 3, label: '3: Sin problema aparente' },
       { value: 4, label: '4: Muy buen control' },
+    ],
+  };
+
+  const glasgowOptions: Record<GlasgowFieldName, GlasgowOption[]> = {
+    'glasgow.eye': [
+      { value: 4, label: '4: Espontánea' },
+      { value: 3, label: '3: Al llamado' },
+      { value: 2, label: '2: Al dolor' },
+      { value: 1, label: '1: Ninguna' },
+    ],
+    'glasgow.verbal': [
+      { value: 5, label: '5: Orientado' },
+      { value: 4, label: '4: Confuso' },
+      { value: 3, label: '3: Palabras inaprop.' },
+      { value: 2, label: '2: Sonidos incompr.' },
+      { value: 1, label: '1: Ninguna' },
+    ],
+    'glasgow.motor': [
+      { value: 6, label: '6: Obedece órdenes' },
+      { value: 5, label: '5: Localiza dolor' },
+      { value: 4, label: '4: Retirada' },
+      { value: 3, label: '3: Flexión anormal' },
+      { value: 2, label: '2: Extensión' },
+      { value: 1, label: '1: Ninguna' },
     ],
   };
 
@@ -318,6 +435,42 @@ export default function ClinicalScalesSection() {
       </View>
       {bradenErrors?.riskLevel?.message ? (
         <Text style={styles.error}>{bradenErrors.riskLevel.message as string}</Text>
+      ) : null}
+
+      <Text style={styles.sectionSubtitle}>Glasgow – Estado neurológico</Text>
+      <GlasgowField
+        label="Apertura ocular"
+        name="glasgow.eye"
+        options={glasgowOptions['glasgow.eye']}
+        error={eyeError}
+      />
+      <GlasgowField
+        label="Respuesta verbal"
+        name="glasgow.verbal"
+        options={glasgowOptions['glasgow.verbal']}
+        error={verbalError}
+      />
+      <GlasgowField
+        label="Respuesta motora"
+        name="glasgow.motor"
+        options={glasgowOptions['glasgow.motor']}
+        error={motorError}
+      />
+
+      <View style={styles.summaryRow}>
+        <Text style={styles.label}>Puntaje total</Text>
+        <Text style={styles.summaryValue}>{typeof glasgowTotal === 'number' ? glasgowTotal : '—'}</Text>
+      </View>
+      {glasgowErrors?.total?.message ? (
+        <Text style={styles.error}>{glasgowErrors.total.message as string}</Text>
+      ) : null}
+
+      <View style={styles.summaryRow}>
+        <Text style={styles.label}>Severidad</Text>
+        <Text style={styles.summaryValue}>{glasgowSeverityLabel}</Text>
+      </View>
+      {glasgowErrors?.severity?.message ? (
+        <Text style={styles.error}>{glasgowErrors.severity.message as string}</Text>
       ) : null}
     </View>
   );

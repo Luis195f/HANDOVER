@@ -78,6 +78,14 @@ export type BradenScale = {
   riskLevel: 'alto' | 'moderado' | 'bajo' | 'sin_riesgo';
 };
 
+export type GlasgowScale = {
+  eye: 1 | 2 | 3 | 4;
+  verbal: 1 | 2 | 3 | 4 | 5;
+  motor: 1 | 2 | 3 | 4 | 5 | 6;
+  total: number;
+  severity: 'grave' | 'moderado' | 'leve';
+};
+
 export type HandoverValues = {
   administrativeData: AdministrativeData;
   patientId: string;
@@ -99,4 +107,5 @@ export type HandoverValues = {
   fluidBalance?: FluidBalanceInfo;
   painAssessment?: PainAssessment;
   braden?: BradenScale;
+  glasgow?: GlasgowScale;
 };

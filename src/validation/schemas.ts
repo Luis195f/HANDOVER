@@ -11,6 +11,7 @@ import {
   type PainAssessment,
   type SkinInfo,
   type BradenScale,
+  type GlasgowScale,
 } from "../types/handover";
 
 const parseCensus = (value: unknown) => {
@@ -129,6 +130,39 @@ export const zBradenScale: z.ZodSchema<BradenScale> = z
     }
   });
 
+export const zGlasgowScale: z.ZodSchema<GlasgowScale> = z
+  .object({
+    eye: z.number().int().min(1).max(4),
+    verbal: z.number().int().min(1).max(5),
+    motor: z.number().int().min(1).max(6),
+    total: z.number().int().min(3).max(15),
+    severity: z.enum(["grave", "moderado", "leve"]),
+  })
+  .superRefine((value, ctx) => {
+    const computedTotal = value.eye + value.verbal + value.motor;
+
+    if (value.total !== computedTotal) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["total"],
+        message: "El puntaje total debe ser igual a la suma de ojo + verbal + motor.",
+      });
+    }
+
+    let expectedSeverity: GlasgowScale["severity"];
+    if (computedTotal <= 8) expectedSeverity = "grave";
+    else if (computedTotal <= 12) expectedSeverity = "moderado";
+    else expectedSeverity = "leve";
+
+    if (value.severity !== expectedSeverity) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["severity"],
+        message: "La severidad no coincide con el puntaje total.",
+      });
+    }
+  });
+
 export const zNutritionInfo: z.ZodSchema<NutritionInfo> = z.object({
   dietType: z.enum(DIET_TYPES),
   tolerance: z.string().optional(),
@@ -199,6 +233,7 @@ export const zHandover = z.object({
   fluidBalance: zFluidBalanceInfo.optional(),
   painAssessment: zPainAssessment.optional(),
   braden: zBradenScale.optional(),
+  glasgow: zGlasgowScale.optional(),
 
   // Multimedia
   audioUri: z.string().min(1).optional()
