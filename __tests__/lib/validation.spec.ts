@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { zHandover, zVitals, zOxygen } from '@/src/validation/schemas';
+import { zGlasgowScale, zHandover, zVitals, zOxygen } from '@/src/validation/schemas';
 
 describe('Validation schemas', () => {
   it('acepta valores mínimos requeridos para handover', () => {
@@ -80,5 +80,20 @@ describe('Validation schemas', () => {
 
     const invalid = zOxygen.safeParse({ flowLMin: 120, fio2: 150 });
     expect(invalid.success).toBe(false);
+  });
+
+  it('valida la escala de Glasgow con puntajes consistentes', () => {
+    const result = zGlasgowScale.safeParse({ eye: 4, verbal: 5, motor: 6, total: 15, severity: 'leve' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rechaza Glasgow cuando total o severidad no coinciden', () => {
+    const result = zGlasgowScale.safeParse({ eye: 2, verbal: 2, motor: 3, total: 15, severity: 'leve' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain('El puntaje total debe ser igual a la suma de ojo + verbal + motor.');
+      expect(messages).toContain('La severidad no coincide con el puntaje total.');
+    }
   });
 });
