@@ -35,6 +35,7 @@ export type FluidBalanceInfo = {
   intakeMl: number;
   outputMl: number;
   netBalanceMl?: number;
+  notes?: string;
 };
 
 export type Vitals = {

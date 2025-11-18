@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -8,7 +8,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Controller, type Control, type FieldErrors } from 'react-hook-form';
+import {
+  Controller,
+  useWatch,
+  type Control,
+  type FieldErrors,
+  type UseFormSetValue,
+} from 'react-hook-form';
 
 import { type DietType, type MobilityLevel, type StoolPattern } from '@/src/types/handover';
 import type { HandoverValues } from '@/src/validation/schemas';
@@ -75,6 +81,7 @@ type Props = {
   control: HandoverFormControl;
   errors: HandoverFormErrors;
   parseNumber: (value: string) => number | undefined;
+  setValue: UseFormSetValue<HandoverValues>;
 };
 
 const dietTypeOptions: Array<Option<DietType>> = [
@@ -98,11 +105,32 @@ const mobilityOptions: Array<Option<MobilityLevel>> = [
   { label: 'Encamado', value: 'bedbound' },
 ];
 
-export function SpecificCareSection({ control, errors, parseNumber }: Props) {
+export function SpecificCareSection({ control, errors, parseNumber, setValue }: Props) {
   const nutritionErrors = errors.nutrition ?? {};
   const eliminationErrors = errors.elimination ?? {};
   const mobilityErrors = errors.mobility ?? {};
   const skinErrors = errors.skin ?? {};
+  const fluidBalanceErrors = errors.fluidBalance ?? {};
+
+  const intakeValue = useWatch({ control, name: 'fluidBalance.intakeMl' });
+  const outputValue = useWatch({ control, name: 'fluidBalance.outputMl' });
+  const netBalanceValue = useWatch({ control, name: 'fluidBalance.netBalanceMl' });
+
+  useEffect(() => {
+    if (typeof intakeValue === 'number' && typeof outputValue === 'number') {
+      setValue('fluidBalance.netBalanceMl', intakeValue - outputValue, {
+        shouldDirty: false,
+        shouldValidate: true,
+      });
+      return;
+    }
+    setValue('fluidBalance.netBalanceMl', undefined, { shouldDirty: false, shouldValidate: true });
+  }, [intakeValue, outputValue, setValue]);
+
+  const netBalanceDisplay =
+    typeof netBalanceValue === 'number'
+      ? `${netBalanceValue > 0 ? '+' : ''}${netBalanceValue} mL`
+      : '—';
 
   return (
     <View>
@@ -207,6 +235,77 @@ export function SpecificCareSection({ control, errors, parseNumber }: Props) {
         )}
       />
 
+      <Text style={styles.sectionSubtitle}>Balance hídrico</Text>
+      <View style={[styles.row, styles.field]}>
+        <View style={styles.flex}>
+          <Text style={styles.label}>Ingresos (mL)</Text>
+          <Controller
+            control={control}
+            name="fluidBalance.intakeMl"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                placeholder="1000"
+                onBlur={onBlur}
+                value={value == null ? '' : String(value)}
+                onChangeText={(text) => onChange(parseNumber(text))}
+              />
+            )}
+          />
+          {fluidBalanceErrors?.intakeMl?.message ? (
+            <Text style={styles.error}>{fluidBalanceErrors.intakeMl.message as string}</Text>
+          ) : null}
+        </View>
+        <View style={styles.spacer} />
+        <View style={styles.flex}>
+          <Text style={styles.label}>Egresos (mL)</Text>
+          <Controller
+            control={control}
+            name="fluidBalance.outputMl"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                placeholder="900"
+                onBlur={onBlur}
+                value={value == null ? '' : String(value)}
+                onChangeText={(text) => onChange(parseNumber(text))}
+              />
+            )}
+          />
+          {fluidBalanceErrors?.outputMl?.message ? (
+            <Text style={styles.error}>{fluidBalanceErrors.outputMl.message as string}</Text>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Balance neto (mL)</Text>
+        <TextInput style={[styles.input, styles.readOnlyInput]} value={netBalanceDisplay} editable={false} />
+        {fluidBalanceErrors?.netBalanceMl?.message ? (
+          <Text style={styles.error}>{fluidBalanceErrors.netBalanceMl.message as string}</Text>
+        ) : null}
+      </View>
+
+      <Controller
+        control={control}
+        name="fluidBalance.notes"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <View style={styles.field}>
+            <Text style={styles.label}>Observaciones</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              multiline
+              placeholder="Balance positivo +1500 ml, vigilar edema"
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={onChange}
+            />
+          </View>
+        )}
+      />
+
       <Text style={styles.sectionSubtitle}>Movilidad</Text>
       <Controller
         control={control}
@@ -279,6 +378,7 @@ export function SpecificCareSection({ control, errors, parseNumber }: Props) {
 const styles = StyleSheet.create({
   field: { marginBottom: 16 },
   label: { fontSize: 16, fontWeight: '500', marginBottom: 4 },
+  textArea: { height: 120, textAlignVertical: 'top' },
   input: {
     borderColor: '#CBD5F5',
     borderWidth: 1,
@@ -325,6 +425,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  flex: { flex: 1 },
+  spacer: { width: 12 },
+  readOnlyInput: { backgroundColor: '#F3F4F6', color: '#111827' },
 });
 
 export default SpecificCareSection;

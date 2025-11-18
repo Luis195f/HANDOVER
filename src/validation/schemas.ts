@@ -88,9 +88,21 @@ export const zSkinInfo: z.ZodSchema<SkinInfo> = z.object({
 });
 
 export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
-  intakeMl: z.number().nonnegative(),
-  outputMl: z.number().nonnegative(),
+  intakeMl: z.number().nonnegative({ message: "No puede ser negativo" }),
+  outputMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   netBalanceMl: z.number().optional(),
+  notes: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (typeof data.netBalanceMl === "number") {
+    const expected = data.intakeMl - data.outputMl;
+    if (data.netBalanceMl !== expected) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El balance neto no coincide con los datos ingresados",
+        path: ["netBalanceMl"],
+      });
+    }
+  }
 });
 
 export const zHandover = z.object({
