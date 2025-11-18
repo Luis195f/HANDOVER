@@ -10,6 +10,7 @@ import {
   type NutritionInfo,
   type PainAssessment,
   type SkinInfo,
+  type BradenScale,
 } from "../types/handover";
 
 const parseCensus = (value: unknown) => {
@@ -83,6 +84,51 @@ export const zPainAssessment: z.ZodSchema<PainAssessment> = z
     }
   });
 
+const zBradenSubscale = z.number().int().min(1).max(4);
+
+export const zBradenScale: z.ZodSchema<BradenScale> = z
+  .object({
+    sensoryPerception: zBradenSubscale,
+    moisture: zBradenSubscale,
+    activity: zBradenSubscale,
+    mobility: zBradenSubscale,
+    nutrition: zBradenSubscale,
+    frictionShear: z.number().int().min(1).max(4),
+    totalScore: z.number().int().min(6).max(24),
+    riskLevel: z.enum(["alto", "moderado", "bajo", "sin_riesgo"]),
+  })
+  .superRefine((value, ctx) => {
+    const computedTotal =
+      value.sensoryPerception +
+      value.moisture +
+      value.activity +
+      value.mobility +
+      value.nutrition +
+      value.frictionShear;
+
+    if (value.totalScore !== computedTotal) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["totalScore"],
+        message: "El puntaje total debe ser igual a la suma de las subescalas.",
+      });
+    }
+
+    let expectedRisk: BradenScale["riskLevel"];
+    if (computedTotal <= 12) expectedRisk = "alto";
+    else if (computedTotal <= 14) expectedRisk = "moderado";
+    else if (computedTotal <= 18) expectedRisk = "bajo";
+    else expectedRisk = "sin_riesgo";
+
+    if (value.riskLevel !== expectedRisk) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["riskLevel"],
+        message: "El nivel de riesgo no coincide con el puntaje total.",
+      });
+    }
+  });
+
 export const zNutritionInfo: z.ZodSchema<NutritionInfo> = z.object({
   dietType: z.enum(DIET_TYPES),
   tolerance: z.string().optional(),
@@ -152,6 +198,7 @@ export const zHandover = z.object({
   skin: zSkinInfo.optional(),
   fluidBalance: zFluidBalanceInfo.optional(),
   painAssessment: zPainAssessment.optional(),
+  braden: zBradenScale.optional(),
 
   // Multimedia
   audioUri: z.string().min(1).optional()

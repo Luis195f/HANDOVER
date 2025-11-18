@@ -63,6 +63,21 @@ export type PainAssessment = {
   actionsTaken?: string | null;
 };
 
+export type BradenSubscaleScore = 1 | 2 | 3 | 4;
+
+// Aunque la subescala de fricción/cizalla suele ir de 1 a 3, dejamos 1–4 para
+// mantener la consistencia con el resto y simplificar la entrada en la app.
+export type BradenScale = {
+  sensoryPerception: BradenSubscaleScore;
+  moisture: BradenSubscaleScore;
+  activity: BradenSubscaleScore;
+  mobility: BradenSubscaleScore;
+  nutrition: BradenSubscaleScore;
+  frictionShear: 1 | 2 | 3 | 4;
+  totalScore: number;
+  riskLevel: 'alto' | 'moderado' | 'bajo' | 'sin_riesgo';
+};
+
 export type HandoverValues = {
   administrativeData: AdministrativeData;
   patientId: string;
@@ -83,4 +98,5 @@ export type HandoverValues = {
   skin?: SkinInfo;
   fluidBalance?: FluidBalanceInfo;
   painAssessment?: PainAssessment;
+  braden?: BradenScale;
 };
