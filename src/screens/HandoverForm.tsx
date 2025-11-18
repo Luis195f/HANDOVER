@@ -332,6 +332,12 @@ export default function HandoverForm({ navigation, route }: Props) {
     sbarRecommendation: '',
     vitals: {},
     oxygenTherapy: {},
+    fluidBalance: {
+      intakeMl: undefined,
+      outputMl: undefined,
+      netBalanceMl: undefined,
+      notes: '',
+    },
   });
 
   const { control, formState } = form;
@@ -723,7 +729,12 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Cuidados específicos</Text>
-        <SpecificCareSection control={control} errors={errors} parseNumber={parseNumericInput} />
+        <SpecificCareSection
+          control={control}
+          errors={errors}
+          parseNumber={parseNumericInput}
+          setValue={form.setValue}
+        />
       </View>
 
       {isOn('SHOW_MEDS') && (
