@@ -24,6 +24,7 @@ import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import SpecificCareSection from './components/SpecificCareSection';
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -719,6 +720,11 @@ export default function HandoverForm({ navigation, route }: Props) {
           <OxygenGroup control={control} parseNumber={parseNumericInput} errors={errors} />
         </View>
       )}
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Cuidados específicos</Text>
+        <SpecificCareSection control={control} errors={errors} parseNumber={parseNumericInput} />
+      </View>
 
       {isOn('SHOW_MEDS') && (
         <View style={styles.section}>
