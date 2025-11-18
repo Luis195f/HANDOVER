@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, useFieldArray, type Control, type FieldErrors } from 'react-hook-form';
+import { Controller, FormProvider, useFieldArray, type Control, type FieldErrors } from 'react-hook-form';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -25,6 +25,7 @@ import type { AdministrativeData } from '@/src/types/administrative';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import SpecificCareSection from './components/SpecificCareSection';
+import ClinicalScalesSection from './components/ClinicalScalesSection';
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -338,6 +339,12 @@ export default function HandoverForm({ navigation, route }: Props) {
       netBalanceMl: undefined,
       notes: '',
     },
+    painAssessment: {
+      hasPain: false,
+      evaScore: null,
+      location: null,
+      actionsTaken: null,
+    },
   });
 
   const { control, formState } = form;
@@ -476,6 +483,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               assessment: values.sbarAssessment,
               recommendation: values.sbarRecommendation,
             },
+            painAssessment: values.painAssessment,
           },
           { now: () => nowIso },
         );
@@ -525,8 +533,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   );
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.section}>
+    <FormProvider {...form}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.section}>
         <Text style={styles.sectionTitle}>Datos del turno</Text>
         <View style={styles.field}>
           <Text style={styles.label}>Unidad</Text>
@@ -737,6 +746,11 @@ export default function HandoverForm({ navigation, route }: Props) {
         />
       </View>
 
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Escalas clínicas</Text>
+        <ClinicalScalesSection />
+      </View>
+
       {isOn('SHOW_MEDS') && (
         <View style={styles.section}>
           <View style={styles.field}>
@@ -831,5 +845,6 @@ export default function HandoverForm({ navigation, route }: Props) {
         <Button title="Guardar" onPress={onSubmit} />
       </View>
     </ScrollView>
+    </FormProvider>
   );
 }

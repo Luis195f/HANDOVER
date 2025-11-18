@@ -56,6 +56,13 @@ export type OxygenTherapy = {
   fio2?: number;
 };
 
+export type PainAssessment = {
+  hasPain: boolean;
+  evaScore?: number | null;
+  location?: string | null;
+  actionsTaken?: string | null;
+};
+
 export type HandoverValues = {
   administrativeData: AdministrativeData;
   patientId: string;
@@ -75,4 +82,5 @@ export type HandoverValues = {
   mobility?: MobilityInfo;
   skin?: SkinInfo;
   fluidBalance?: FluidBalanceInfo;
+  painAssessment?: PainAssessment;
 };

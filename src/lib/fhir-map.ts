@@ -6,6 +6,7 @@ import type {
   FluidBalanceInfo,
   MobilityInfo,
   NutritionInfo,
+  PainAssessment,
   SkinInfo,
 } from '../types/handover';
 import { CATEGORY, LOINC, SNOMED } from './codes';
@@ -446,6 +447,7 @@ export type HandoverValues = {
   mobility?: MobilityInfo;
   skin?: SkinInfo;
   fluidBalance?: FluidBalanceInfo;
+  painAssessment?: PainAssessment; // TODO: map to FHIR in F2-08
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };

@@ -8,6 +8,7 @@ import {
   type FluidBalanceInfo,
   type MobilityInfo,
   type NutritionInfo,
+  type PainAssessment,
   type SkinInfo,
 } from "../types/handover";
 
@@ -64,6 +65,23 @@ export const zOxygen = z
     fio2: z.number().min(0).max(100).optional(),
   })
   .partial();
+
+export const zPainAssessment: z.ZodSchema<PainAssessment> = z
+  .object({
+    hasPain: z.boolean(),
+    evaScore: z.number().min(0).max(10).nullable().optional(),
+    location: z.string().max(200).nullable().optional(),
+    actionsTaken: z.string().max(500).nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.hasPain && value.evaScore == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["evaScore"],
+        message: "Ingrese una EVA entre 0 y 10 cuando el paciente tiene dolor.",
+      });
+    }
+  });
 
 export const zNutritionInfo: z.ZodSchema<NutritionInfo> = z.object({
   dietType: z.enum(DIET_TYPES),
@@ -133,6 +151,7 @@ export const zHandover = z.object({
   mobility: zMobilityInfo.optional(),
   skin: zSkinInfo.optional(),
   fluidBalance: zFluidBalanceInfo.optional(),
+  painAssessment: zPainAssessment.optional(),
 
   // Multimedia
   audioUri: z.string().min(1).optional()
