@@ -1,8 +1,11 @@
 import * as SecureStore from 'expo-secure-store';
 import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '@/security/sensitiveFields';
+import type { ValidationResult } from './fhir-validation';
 
 export const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
 export const MAX_ATTEMPTS = RETRY_DELAYS_MS.length;
+
+type ValidationErrorDetail = ValidationResult['errors'][number];
 
 export interface OfflineQueueItem {
   id: string;
@@ -15,6 +18,7 @@ export interface OfflineQueueItem {
   failedAt?: number;
   hash?: string;
   sensitiveFields?: SensitiveFieldPath[];
+  validationErrors?: ValidationErrorDetail[];
   /**
    * Clave opcional de idempotencia/deduplicación.
    * Si dos items tienen el mismo `type` y `dedupKey`, se considera
@@ -87,6 +91,33 @@ function findSensitiveFields(payload: unknown): SensitiveFieldPath[] {
   return SENSITIVE_FIELDS.filter((field) => hasPath(payload, field));
 }
 
+function isValidationError(value: unknown): value is ValidationErrorDetail {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as any).path === 'string' &&
+    typeof (value as any).message === 'string'
+  );
+}
+
+function detectValidationErrors(payload: unknown): ValidationErrorDetail[] | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const direct = (payload as any)._validationErrors;
+  if (Array.isArray(direct)) {
+    const cleaned = direct.filter(isValidationError);
+    if (cleaned.length > 0) return cleaned;
+  }
+  const maybeBundle = (payload as Record<string, unknown>).bundle;
+  if (maybeBundle && typeof maybeBundle === 'object') {
+    const nested = (maybeBundle as any)._validationErrors;
+    if (Array.isArray(nested)) {
+      const cleaned = nested.filter(isValidationError);
+      if (cleaned.length > 0) return cleaned;
+    }
+  }
+  return undefined;
+}
+
 function hasPendingDuplicate(queue: OfflineQueue, input: EnqueuePayload): boolean {
   if (!input.dedupKey) return false;
 
@@ -102,6 +133,7 @@ function createQueueItem(input: EnqueuePayload): OfflineQueueItem {
   const attempts = 0;
   const sensitiveFields =
     input.sensitiveFields ?? (input.payload ? findSensitiveFields(input.payload) : []);
+  const validationErrors = detectValidationErrors(input.payload);
 
   return {
     id,
@@ -116,6 +148,7 @@ function createQueueItem(input: EnqueuePayload): OfflineQueueItem {
     hash: input.hash,
     sensitiveFields: sensitiveFields.length > 0 ? sensitiveFields : undefined,
     dedupKey: input.dedupKey,
+    validationErrors,
   };
 }
 
@@ -150,6 +183,9 @@ function normalizeStoredItem(raw: unknown): OfflineQueueItem | null {
       ? (item.sensitiveFields as SensitiveFieldPath[])
       : undefined,
     dedupKey: typeof item.dedupKey === 'string' ? item.dedupKey : undefined,
+    validationErrors: Array.isArray(item.validationErrors)
+      ? (item.validationErrors as ValidationErrorDetail[]).filter(isValidationError)
+      : undefined,
   };
 
   return normalized;
