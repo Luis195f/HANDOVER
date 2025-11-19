@@ -60,6 +60,19 @@ describe('FHIR terminology dictionary', () => {
     expect(FHIR_CODES.RISK.SOCIAL_ISOLATION.code).toBe('1144779008');
   });
 
+  it('exposes reusable dictionary entries for vitals and clinical scales', () => {
+    expect(FHIR_CODES.VITALS.HEART_RATE).toMatchObject({
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.hr,
+    });
+    expect(FHIR_CODES.VITALS.BP_PANEL.code).toBe(LOINC.bpPanel);
+    expect(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD.code).toBe(LOINC.glucoseMgDl);
+    expect(FHIR_CODES.SCALES.EVA.code).toBe(LOINC.painEva);
+    expect(FHIR_CODES.SCALES.BRADEN.code).toBe(LOINC.bradenScale);
+    expect(FHIR_CODES.SCALES.GLASGOW.code).toBe(LOINC.glasgowTotal);
+    expect(FHIR_CODES.CARE.NUTRITION.system).toBe(TERMINOLOGY_SYSTEMS.HANDOVER_CARE);
+  });
+
   it('keeps alert identifiers stable for downstream consumers', () => {
     expect(ALERT_CODES.news2).toBe('alert.news2');
     expect(ALERT_CODES.catheterOverdue).toBe('alert.catheter.overdue');
@@ -69,5 +82,6 @@ describe('FHIR terminology dictionary', () => {
   it('exports reusable typing helpers', () => {
     expectTypeOf(CATEGORY.vitalSigns).toMatchTypeOf<TerminologyCode<string>>();
     expectTypeOf(FHIR_CODES.RISK.FALL).toMatchTypeOf<TerminologyCode<string>>();
+    expectTypeOf(FHIR_CODES.VITALS.HEART_RATE).toMatchTypeOf<TerminologyCode<string>>();
   });
 });

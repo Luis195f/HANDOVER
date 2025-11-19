@@ -12,7 +12,7 @@ import type {
   SkinInfo,
   RiskFlags,
 } from '../types/handover';
-import { CATEGORY, FHIR_CODES, LOINC, SNOMED } from './codes';
+import { CATEGORY, FHIR_CODES, LOINC, SNOMED, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
 
 const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
@@ -534,17 +534,24 @@ function encounterReference(encounterId?: string): Reference | undefined {
   return { reference: `Encounter/${encounterId}`, type: 'Encounter' };
 }
 
-function codingFromLoinc(code: string, display: string): CodeableConcept {
-  return {
+function codeableConceptFromCode(
+  code: TerminologyCode<string>,
+  overrideText?: string,
+): CodeableConcept {
+  const text = overrideText ?? code.display;
+  const concept: CodeableConcept = {
     coding: [
       {
-        system: 'http://loinc.org',
-        code,
-        display,
+        system: code.system,
+        code: code.code,
+        display: code.display,
       },
     ],
-    text: display,
   };
+  if (text) {
+    concept.text = text;
+  }
+  return concept;
 }
 
 function quantity(value: number, unit: string, code: string): Quantity {
@@ -709,13 +716,13 @@ export function mapObservationVitals(
     const components: ObservationComponent[] = [];
     if (parsed.sbp !== undefined) {
       components.push({
-        code: codingFromLoinc(LOINC.sbp, 'Systolic blood pressure'),
+        code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_SYSTOLIC),
         valueQuantity: quantity(parsed.sbp, 'mm[Hg]', 'mm[Hg]'),
       });
     }
     if (parsed.dbp !== undefined) {
       components.push({
-        code: codingFromLoinc(LOINC.dbp, 'Diastolic blood pressure'),
+        code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_DIASTOLIC),
         valueQuantity: quantity(parsed.dbp, 'mm[Hg]', 'mm[Hg]'),
       });
     }
@@ -724,7 +731,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_BLOOD_PRESSURE] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.bpPanel, 'Blood pressure panel'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_PANEL),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -739,7 +746,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.hr, 'Heart rate'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.HEART_RATE),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -754,7 +761,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.rr, 'Respiratory rate'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.RESP_RATE),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -769,7 +776,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.temp, 'Body temperature'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.TEMPERATURE),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -784,7 +791,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.spo2, 'Oxygen saturation'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.SPO2),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -799,7 +806,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.glucoseMgDl, 'Glucose [Mass/volume] in Blood'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -814,7 +821,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.glucoseMmolL, 'Glucose [Moles/volume] in Blood'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MOLES_BLD),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -830,16 +837,7 @@ export function mapObservationVitals(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: {
-        coding: [
-          {
-            system: 'http://snomed.info/sct',
-            code: SNOMED.avpuAssessment,
-            display: 'AVPU responsiveness scale',
-          },
-        ],
-        text: 'AVPU scale',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.ACVPU, 'AVPU scale'),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -1013,7 +1011,7 @@ export function mapOxygenObservations(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.fio2, 'Fraction of inspired oxygen'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.FIO2),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -1028,7 +1026,7 @@ export function mapOxygenObservations(
       meta: { profile: [PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
-      code: codingFromLoinc(LOINC.o2Flow, 'Oxygen flow rate'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.O2_FLOW),
       subject,
       encounter,
       effectiveDateTime: effective,
@@ -1093,16 +1091,7 @@ export function mapNutritionCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          {
-            system: 'http://loinc.org',
-            code: 'TODO-NUTRITION',
-            display: 'Nutrition care',
-          },
-        ],
-        text: 'Nutrition care (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.NUTRITION),
       subject,
       encounter,
       effectiveDateTime,
@@ -1127,16 +1116,7 @@ export function mapEliminationCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          {
-            system: 'http://loinc.org',
-            code: 'TODO-URINE-OUTPUT',
-            display: 'Urine output',
-          },
-        ],
-        text: 'Urine output (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.URINE_OUTPUT),
       subject,
       encounter,
       effectiveDateTime,
@@ -1157,16 +1137,7 @@ export function mapEliminationCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          {
-            system: 'http://loinc.org',
-            code: 'TODO-STOOL-PATTERN',
-            display: 'Stool pattern',
-          },
-        ],
-        text: 'Stool pattern (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.STOOL_PATTERN),
       subject,
       encounter,
       effectiveDateTime,
@@ -1187,16 +1158,7 @@ export function mapEliminationCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          {
-            system: 'http://loinc.org',
-            code: 'TODO-RECTAL-TUBE',
-            display: 'Rectal tube status',
-          },
-        ],
-        text: 'Rectal tube status (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.RECTAL_TUBE),
       subject,
       encounter,
       effectiveDateTime,
@@ -1231,12 +1193,7 @@ export function mapMobilitySkinCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          { system: 'http://loinc.org', code: 'TODO-MOBILITY', display: 'Mobility assessment' },
-        ],
-        text: 'Mobility assessment (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.MOBILITY),
       subject,
       encounter,
       effectiveDateTime,
@@ -1283,12 +1240,7 @@ export function mapMobilitySkinCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          { system: 'http://loinc.org', code: 'TODO-SKIN', display: 'Skin assessment' },
-        ],
-        text: 'Skin assessment (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.SKIN),
       subject,
       encounter,
       effectiveDateTime,
@@ -1339,16 +1291,7 @@ export function mapFluidBalanceCare(
       resourceType: 'Observation',
       status: 'final',
       category: [surveyCategoryConcept],
-      code: {
-        coding: [
-          {
-            system: 'http://loinc.org',
-            code: 'TODO-FLUID-BALANCE',
-            display: 'Fluid balance',
-          },
-        ],
-        text: 'Fluid balance (TODO code)',
-      },
+      code: codeableConceptFromCode(FHIR_CODES.CARE.FLUID_BALANCE),
       subject,
       encounter,
       effectiveDateTime,
@@ -1395,16 +1338,7 @@ function mapEvaObservation(
     resourceType: 'Observation',
     status: 'final',
     category: [surveyCategoryConcept],
-    code: {
-      coding: [
-        {
-          system: 'urn:todo:code',
-          code: 'EVA',
-          display: 'Escala EVA del dolor',
-        },
-      ],
-      text: 'Escala EVA del dolor (TODO código LOINC en F2-M3)',
-    },
+    code: codeableConceptFromCode(FHIR_CODES.SCALES.EVA, 'Escala EVA del dolor'),
     subject: context.subject,
     encounter: context.encounter,
     effectiveDateTime: context.effectiveDateTime,
@@ -1485,16 +1419,7 @@ function mapBradenObservation(
     resourceType: 'Observation',
     status: 'final',
     category: [surveyCategoryConcept],
-    code: {
-      coding: [
-        {
-          system: 'urn:todo:code',
-          code: 'BRADEN',
-          display: 'Escala de Braden',
-        },
-      ],
-      text: 'Escala de Braden (TODO código LOINC en F2-M3)',
-    },
+    code: codeableConceptFromCode(FHIR_CODES.SCALES.BRADEN, 'Escala de Braden'),
     subject: context.subject,
     encounter: context.encounter,
     effectiveDateTime: context.effectiveDateTime,
@@ -1544,16 +1469,7 @@ function mapGlasgowObservation(
     resourceType: 'Observation',
     status: 'final',
     category: [surveyCategoryConcept],
-    code: {
-      coding: [
-        {
-          system: 'urn:todo:code',
-          code: 'GLASGOW',
-          display: 'Escala de Glasgow',
-        },
-      ],
-      text: 'Escala de Glasgow (TODO código LOINC en F2-M3)',
-    },
+    code: codeableConceptFromCode(FHIR_CODES.SCALES.GLASGOW, 'Escala de Glasgow'),
     subject: context.subject,
     encounter: context.encounter,
     effectiveDateTime: context.effectiveDateTime,
@@ -1583,16 +1499,7 @@ function mapRiskConditions(
       clinicalStatus: conditionClinicalStatusActive,
       verificationStatus: conditionVerificationStatusUnconfirmed,
       category: [conditionProblemListCategory],
-      code: {
-        coding: [
-          {
-            system: definition.code.system,
-            code: definition.code.code,
-            display: definition.code.display,
-          },
-        ],
-        text: definition.code.display,
-      },
+      code: codeableConceptFromCode(definition.code),
       subject,
       encounter,
       onsetDateTime: effectiveDateTime,
@@ -1681,7 +1588,7 @@ export function buildComposition(
   if (refs.vitals.length > 0) {
     sections.push({
       title: 'Vital signs',
-      code: codingFromLoinc(LOINC.bpPanel, 'Vital signs'),
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.VITAL_SIGNS_PANEL, 'Vital signs'),
       entry: refs.vitals.map((reference) => ({ reference })),
     });
   }
