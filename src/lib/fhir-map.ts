@@ -449,6 +449,7 @@ type CompositionValues = {
   encounterId?: string;
   author?: AuthorInput;
   composition?: CompositionInput;
+  closingSummary?: string | null;
   sbar?: SbarValues;
   administrativeData?: AdministrativeData;
 };
@@ -501,6 +502,7 @@ export type HandoverValues = {
   oxygenTherapy?: OxygenTherapyInput | null;
   audioAttachment?: AudioAttachmentInput | null;
   composition?: CompositionInput;
+  closingSummary?: string | null;
   sbar?: SbarValues;
   nutrition?: NutritionInfo;
   elimination?: EliminationInfo;
@@ -1574,6 +1576,13 @@ export function buildComposition(
     sections.push({ title: label, text: narrativeFromText(trimmed) });
   };
 
+  if (typeof values.closingSummary === 'string') {
+    const trimmed = values.closingSummary.trim();
+    if (trimmed) {
+      sections.push({ title: 'Shift summary', text: narrativeFromText(trimmed) });
+    }
+  }
+
   if (values.sbar) {
     addSbarSection('SBAR - Situation', values.sbar.situation);
     addSbarSection('SBAR - Background', values.sbar.background);
@@ -1909,6 +1918,7 @@ export function buildHandoverBundle(
       encounterId: values.encounterId,
       author: values.author,
       composition: values.composition,
+      closingSummary: values.closingSummary,
       administrativeData: values.administrativeData,
       sbar: values.sbar,
     },
