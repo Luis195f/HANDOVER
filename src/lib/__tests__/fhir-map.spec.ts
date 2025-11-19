@@ -1,5 +1,6 @@
 // __tests__/fhir-map.spec.ts
-import { buildHandoverBundle, __test__ } from '../fhir-map';
+import { buildHandoverBundle } from '../fhir-map';
+import { TEST_SNOMED_CODES, TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 
 type Entry = { fullUrl?: string; resource: any; request?: any };
 
@@ -29,11 +30,14 @@ describe('mapVitalsToObservations (vía buildHandoverBundle con emitIndividuals)
     expect(obs).toHaveLength(2);
 
     const codes = obs.map(o => o.code?.coding?.[0]?.code).sort();
-    expect(codes).toEqual(['8867-4', '9279-1']); // HR, RR
+    expect(codes).toEqual([
+      TEST_VITAL_CODES.HEART_RATE.code,
+      TEST_VITAL_CODES.RESP_RATE.code,
+    ]);
 
     // UCUM: ambos en /min
     for (const o of obs) {
-      expect(o.valueQuantity?.system).toBe('http://unitsofmeasure.org');
+      expect(o.valueQuantity?.system).toBe(TEST_SYSTEMS.UCUM);
       expect(o.valueQuantity?.code).toBe('/min');
     }
 
@@ -60,24 +64,29 @@ describe('mapVitalsToObservations (vía buildHandoverBundle con emitIndividuals)
     expect(obsEntries.length).toBe(6);
 
     // Panel vitales / LOINC 85353-1 con 5 componentes
-    const panel = obs.find(o => o.code?.coding?.[0]?.code === '85353-1');
+    const panel = obs.find(o =>
+      o.code?.coding?.some((coding: any) =>
+        coding.system === TEST_VITAL_CODES.VITAL_SIGNS_PANEL.system &&
+        coding.code === TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code
+      )
+    );
     expect(panel).toBeDefined();
     expect(Array.isArray(panel?.component)).toBe(true);
     expect(panel?.component).toHaveLength(5);
 
-    // DeviceUseStatement por O₂ (SNOMED 46680005)
+    // DeviceUseStatement por O₂ (SNOMED)
     const dus = extract(bundle.entry as Entry[], 'DeviceUseStatement');
     expect(dus).toHaveLength(1);
     const snomed = dus[0]?.reasonCode?.[0]?.coding?.[0]?.code;
-    expect(snomed).toBe('46680005');
+    expect(snomed).toBe(TEST_SNOMED_CODES.oxygenTherapy);
 
     // UCUM por vital
-    const get = (code: string) => obs.find(o => o.code?.coding?.[0]?.code === code);
-    expect(get('9279-1')?.valueQuantity?.code).toBe('/min');     // RR
-    expect(get('8867-4')?.valueQuantity?.code).toBe('/min');     // HR
-    expect(get('8480-6')?.valueQuantity?.code).toBe('mm[Hg]');   // SBP
-    expect(get('8310-5')?.valueQuantity?.code).toBe('Cel');      // Temp
-    expect(get('59408-5')?.valueQuantity?.code).toBe('%');       // SpO2
+    const get = (code: string) => obs.find(o => o.code?.coding?.some((c: any) => c.code === code));
+    expect(get(TEST_VITAL_CODES.RESP_RATE.code)?.valueQuantity?.code).toBe('/min');
+    expect(get(TEST_VITAL_CODES.HEART_RATE.code)?.valueQuantity?.code).toBe('/min');
+    expect(get(TEST_VITAL_CODES.BP_SYSTOLIC.code)?.valueQuantity?.code).toBe('mm[Hg]');
+    expect(get(TEST_VITAL_CODES.TEMPERATURE.code)?.valueQuantity?.code).toBe('Cel');
+    expect(get(TEST_VITAL_CODES.SPO2.code)?.valueQuantity?.code).toBe('%');
   });
 
   test('idempotencia: Composition.identifier y ifNoneExist constantes para mismos inputs', () => {
@@ -108,8 +117,8 @@ describe('mapVitalsToObservations (vía buildHandoverBundle con emitIndividuals)
     );
 
     const obs = extract(bundle.entry as Entry[], 'Observation');
-    const sbp = obs.find(o => o.code?.coding?.[0]?.code === '8480-6')!;
-    const tmp = obs.find(o => o.code?.coding?.[0]?.code === '8310-5')!;
+    const sbp = obs.find(o => o.code?.coding?.[0]?.code === TEST_VITAL_CODES.BP_SYSTOLIC.code)!;
+    const tmp = obs.find(o => o.code?.coding?.[0]?.code === TEST_VITAL_CODES.TEMPERATURE.code)!;
 
     expect(sbp.valueQuantity.unit).toBe('mm[Hg]');
     expect(sbp.valueQuantity.code).toBe('mm[Hg]');

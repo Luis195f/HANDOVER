@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildHandoverBundle } from '../fhir-map';
+import { TEST_SCALE_CODES } from './fhir-map.test-constants';
 
 const NOW = '2025-03-05T08:00:00.000Z';
 
-const findObservation = (entries: Array<{ resource: any; fullUrl: string }>, code: string) =>
+const findObservation = (
+  entries: Array<{ resource: any; fullUrl: string }>,
+  target: typeof TEST_SCALE_CODES[keyof typeof TEST_SCALE_CODES],
+) =>
   entries.find(
     (entry) =>
       entry.resource?.resourceType === 'Observation' &&
-      entry.resource.code?.coding?.some((coding: any) => coding.code === code),
+      entry.resource.code?.coding?.some(
+        (coding: any) => coding.code === target.code && coding.system === target.system,
+      ),
   );
 
 describe('clinical scales mapping', () => {
@@ -44,9 +50,9 @@ describe('clinical scales mapping', () => {
     );
 
     const entries = bundle.entry as Array<{ resource: any; fullUrl: string }>;
-    const evaEntry = findObservation(entries, 'EVA');
-    const bradenEntry = findObservation(entries, 'BRADEN');
-    const glasgowEntry = findObservation(entries, 'GLASGOW');
+    const evaEntry = findObservation(entries, TEST_SCALE_CODES.EVA);
+    const bradenEntry = findObservation(entries, TEST_SCALE_CODES.BRADEN);
+    const glasgowEntry = findObservation(entries, TEST_SCALE_CODES.GLASGOW);
 
     expect(evaEntry?.resource.valueInteger).toBe(7);
     expect(

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildHandoverBundle, __test__ } from '../fhir-map';
+import { buildHandoverBundle } from '../fhir-map';
+import { TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 
 type Entry = { fullUrl?: string; resource?: any };
 
@@ -21,7 +22,7 @@ const listResources = (bundle: any, type: string) =>
 
 const findObsByLoinc = (bundle: any, code: string) =>
   listResources(bundle, 'Observation').find((r: any) =>
-    r?.code?.coding?.some((c: any) => c.system === __test__.LOINC_SYSTEM && String(c.code) === String(code))
+    r?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
   );
 
 describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', () => {
@@ -72,39 +73,39 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     }, { now, emitPanel: true, emitBpPanel: true, emitHasMember: true, glucoseDecimals: 0 });
 
     // 85353-1 — Vital signs panel
-    const vsPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
+    const vsPanel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
     expect(vsPanel).toBeTruthy();
     // debe tener componentes para los vitales presentes
     const compCodes = (vsPanel.component ?? []).flatMap((c: any) => (c.code?.coding ?? []).map((k: any) => k.code));
     expect(new Set(compCodes)).toEqual(new Set([
-      __test__.CODES.HR.code, __test__.CODES.RR.code, __test__.CODES.TEMP.code,
-      __test__.CODES.SPO2.code, __test__.CODES.SBP.code, __test__.CODES.DBP.code,
+      TEST_VITAL_CODES.HEART_RATE.code, TEST_VITAL_CODES.RESP_RATE.code, TEST_VITAL_CODES.TEMPERATURE.code,
+      TEST_VITAL_CODES.SPO2.code, TEST_VITAL_CODES.BP_SYSTOLIC.code, TEST_VITAL_CODES.BP_DIASTOLIC.code,
     ]));
 
     // hasMember: debe incluir individuales + ACVPU + Glucemia (normalizada a 2339-0 por defecto)
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
     const expectedRefs = [
-      `urn:uuid:obs-${__test__.CODES.HR.code}-${patientId}`,
-      `urn:uuid:obs-${__test__.CODES.RR.code}-${patientId}`,
-      `urn:uuid:obs-${__test__.CODES.TEMP.code}-${patientId}`,
-      `urn:uuid:obs-${__test__.CODES.SPO2.code}-${patientId}`,
-      `urn:uuid:obs-${__test__.CODES.SBP.code}-${patientId}`,
-      `urn:uuid:obs-${__test__.CODES.DBP.code}-${patientId}`,
-      `urn:uuid:obs-${__test__.CODES.GLU_MASS_BLD.code}-${patientId}`, // 2339-0
+      `urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`,
+      `urn:uuid:obs-${TEST_VITAL_CODES.RESP_RATE.code}-${patientId}`,
+      `urn:uuid:obs-${TEST_VITAL_CODES.TEMPERATURE.code}-${patientId}`,
+      `urn:uuid:obs-${TEST_VITAL_CODES.SPO2.code}-${patientId}`,
+      `urn:uuid:obs-${TEST_VITAL_CODES.BP_SYSTOLIC.code}-${patientId}`,
+      `urn:uuid:obs-${TEST_VITAL_CODES.BP_DIASTOLIC.code}-${patientId}`,
+      `urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code}-${patientId}`, // 2339-0
       `urn:uuid:obs-acvpu-${patientId}-${now.slice(0,10)}`
     ];
     for (const ref of expectedRefs) expect(members).toContain(ref);
 
     // 85354-9 — Blood pressure panel con hasMember a SBP/DBP
-    const bpPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_BP.code);
+    const bpPanel = findObsByLoinc(bundle, TEST_VITAL_CODES.BP_PANEL.code);
     expect(bpPanel).toBeTruthy();
 
     const bpCompCodes = (bpPanel.component ?? []).flatMap((c: any) => (c.code?.coding ?? []).map((k: any) => k.code));
-    expect(new Set(bpCompCodes)).toEqual(new Set([__test__.CODES.SBP.code, __test__.CODES.DBP.code]));
+    expect(new Set(bpCompCodes)).toEqual(new Set([TEST_VITAL_CODES.BP_SYSTOLIC.code, TEST_VITAL_CODES.BP_DIASTOLIC.code]));
 
     const bpMembers = (bpPanel.hasMember ?? []).map((m: any) => m.reference);
-    expect(bpMembers).toContain(`urn:uuid:obs-${__test__.CODES.SBP.code}-${patientId}`);
-    expect(bpMembers).toContain(`urn:uuid:obs-${__test__.CODES.DBP.code}-${patientId}`);
+    expect(bpMembers).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.BP_SYSTOLIC.code}-${patientId}`);
+    expect(bpMembers).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.BP_DIASTOLIC.code}-${patientId}`);
   });
 
   it('caso mínimo: sólo HR → se crea panel 85353-1 con un componente, hasMember sólo HR y sin secciones extra', () => {
@@ -118,13 +119,13 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const titles = sections.map((s: any) => s.title).sort();
     expect(titles).toEqual(['Vitals']);
 
-    const vsPanel = findObsByLoinc(bundle, __test__.CODES.PANEL_VS.code);
+    const vsPanel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
     expect(vsPanel).toBeTruthy();
 
     const compCodes = (vsPanel.component ?? []).flatMap((c: any) => (c.code?.coding ?? []).map((k: any) => k.code));
-    expect(compCodes).toEqual([__test__.CODES.HR.code]);
+    expect(compCodes).toEqual([TEST_VITAL_CODES.HEART_RATE.code]);
 
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
-    expect(members).toEqual([`urn:uuid:obs-${__test__.CODES.HR.code}-${patientId}`]);
+    expect(members).toEqual([`urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`]);
   });
 });
