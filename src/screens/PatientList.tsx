@@ -5,6 +5,7 @@ import {
   Modal,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
@@ -16,11 +17,18 @@ import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { currentUser, hasUnitAccess } from "@/src/security/acl";
 import { mark } from "@/src/lib/otel";
+import { computePriority, computePriorityList, type PriorityInput, type PrioritizedPatient } from "@/src/lib/priority";
 import {
   ALL_UNITS_OPTION,
   setSelectedUnitId,
   useSelectedUnitId,
 } from "@/src/state/filterStore";
+import type {
+  DeviceSummary,
+  PendingTaskSummary,
+  RiskFlags,
+  VitalsSnapshot,
+} from "@/src/types/handover";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 
@@ -28,19 +36,60 @@ export type PatientListItem = {
   id: string;
   name: string;
   unitId: string;
+  bedLabel?: string;
+  vitals?: VitalsSnapshot;
+  devices?: DeviceSummary[];
+  risks?: RiskFlags;
+  pendingTasks?: PendingTaskSummary[];
+  lastIncidentAt?: string | null;
+  recentIncidentFlag?: boolean;
 };
 
 const PATIENTS_MOCK: PatientListItem[] = [
-  { id: "pat-001", name: "Juan Pérez", unitId: "icu-a" },
-  { id: "pat-002", name: "María López", unitId: "icu-b" },
-  { id: "pat-003", name: "Laura Torres", unitId: "ed-main" },
-  { id: "pat-004", name: "Carlos Ruiz", unitId: "ed-obs" },
-  { id: "pat-005", name: "Ana Rivas", unitId: "onc-ward" },
-  { id: "pat-006", name: "Miguel Soto", unitId: "neph-hd" },
-  { id: "pat-007", name: "Sofía Álvarez", unitId: "ped-ward" },
-  { id: "pat-008", name: "Paula Fernández", unitId: "ob-labor" },
-  { id: "pat-009", name: "Raúl Herrera", unitId: "neuroicu-1" },
-  { id: "pat-010", name: "Lucía Romero", unitId: "cvicu-1" },
+  {
+    id: "pat-002",
+    name: "María López",
+    unitId: "icu-b",
+    bedLabel: "B2",
+    vitals: { rr: 21, spo2: 95, tempC: 38.5, sbp: 108, hr: 98, o2: false, avpu: "A" },
+    devices: [{ id: "dev-cvc", label: "Catéter venoso central", category: "invasive" }],
+    risks: { fall: true },
+    pendingTasks: [{ id: "task-2", title: "Ajuste de perfusión", critical: true }],
+  },
+  {
+    id: "pat-001",
+    name: "Juan Pérez",
+    unitId: "icu-a",
+    bedLabel: "A1",
+    vitals: { rr: 28, spo2: 90, tempC: 39.2, sbp: 88, hr: 135, o2: true, avpu: "V" },
+    devices: [{ id: "dev-vent", label: "Ventilación mecánica", category: "invasive", critical: true }],
+    risks: { isolation: true },
+    pendingTasks: [{ id: "task-1", title: "Gasometría urgente", urgent: true }],
+    recentIncidentFlag: true,
+  },
+  {
+    id: "pat-003",
+    name: "Laura Torres",
+    unitId: "ed-main",
+    bedLabel: "E3",
+    vitals: { rr: 20, spo2: 94, tempC: 37.0, sbp: 118, hr: 105, o2: false, avpu: "A" },
+    pendingTasks: [{ id: "task-3", title: "Analítica en curso", urgent: false }],
+  },
+  {
+    id: "pat-004",
+    name: "Carlos Ruiz",
+    unitId: "ed-obs",
+    bedLabel: "E4",
+    vitals: { rr: 16, spo2: 97, tempC: 36.8, sbp: 120, hr: 82, o2: false, avpu: "A" },
+    risks: { pressureUlcer: false },
+    pendingTasks: [],
+  },
+  { id: "pat-005", name: "Ana Rivas", unitId: "onc-ward", vitals: { rr: 18, spo2: 96, tempC: 37.1, sbp: 118, hr: 88 } },
+  { id: "pat-006", name: "Miguel Soto", unitId: "neph-hd", vitals: { rr: 19, spo2: 95, tempC: 36.9, sbp: 115, hr: 90 } },
+  { id: "pat-007", name: "Sofía Álvarez", unitId: "ped-ward", vitals: { rr: 22, spo2: 97, tempC: 37.2, sbp: 110, hr: 100 } },
+  { id: "pat-008", name: "Paula Fernández", unitId: "ob-labor", vitals: { rr: 18, spo2: 98, tempC: 37.3, sbp: 112, hr: 88 } },
+  { id: "pat-009", name: "Raúl Herrera", unitId: "neuroicu-1", vitals: { rr: 19, spo2: 95, tempC: 37.0, sbp: 118, hr: 92 } },
+  { id: "pat-010", name: "Lucía Romero", unitId: "cvicu-1", vitals: { rr: 17, spo2: 99, tempC: 36.9, sbp: 116, hr: 80 } },
 ];
 
 export const ALL_SPECIALTIES_OPTION = "all";
@@ -141,6 +190,7 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 export default function PatientList({ navigation }: Props) {
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
+  const [sortByPriority, setSortByPriority] = useState(false);
 
   const onSpecialtyChange = useCallback((value: string) => {
     setSelectedSpecialtyId(value);
@@ -223,9 +273,37 @@ export default function PatientList({ navigation }: Props) {
     [selectedSpecialtyId, selectedUnitId]
   );
 
+  const priorityInputs = useMemo<PriorityInput[]>(
+    () =>
+      patients.map(patient => ({
+        patientId: patient.id,
+        displayName: patient.name,
+        bedLabel: patient.bedLabel,
+        vitals: patient.vitals ?? {},
+        devices: patient.devices ?? [],
+        risks: patient.risks ?? {},
+        pendingTasks: patient.pendingTasks ?? [],
+        lastIncidentAt: patient.lastIncidentAt ?? null,
+        recentIncidentFlag: patient.recentIncidentFlag,
+      })),
+    [patients],
+  );
+
+  const prioritizedPatients = useMemo<PrioritizedPatient[]>(() => priorityInputs.map(computePriority), [priorityInputs]);
+  const sortedByPriority = useMemo<PrioritizedPatient[]>(() => computePriorityList(priorityInputs), [priorityInputs]);
+  const patientsForList = sortByPriority ? sortedByPriority : prioritizedPatients;
+
+  const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
+
   const onOpenPatient = useCallback(
-    (patient: PatientListItem) => {
-      const unit = UNITS_BY_ID[patient.unitId];
+    (patientId: string) => {
+      const basePatient = patientById.get(patientId);
+      if (!basePatient) {
+        Alert.alert("Paciente no encontrado", "No se pudo abrir el registro del paciente.");
+        return;
+      }
+
+      const unit = UNITS_BY_ID[basePatient.unitId];
       if (!unit) {
         Alert.alert("Unidad desconocida", "No se encontró la unidad del paciente.");
         return;
@@ -237,17 +315,37 @@ export default function PatientList({ navigation }: Props) {
         return;
       }
 
-      mark("patientlist.navigate", { patientId: patient.id, unitId: unit.id });
+      mark("patientlist.navigate", { patientId: basePatient.id, unitId: unit.id });
       navigation.navigate("HandoverForm", {
-        patientIdParam: patient.id,
+        patientIdParam: basePatient.id,
         unitIdParam: unit.id,
         specialtyId: unit.specialtyId,
-        patientId: patient.id,
+        patientId: basePatient.id,
         unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
       });
     },
-    [navigation, selectedUnitId]
+    [navigation, patientById, selectedUnitId]
   );
+
+  const renderPriorityBadge = useCallback((level: PrioritizedPatient['level']) => {
+    const labelMap: Record<PrioritizedPatient['level'], string> = {
+      critical: "CRÍTICO",
+      high: "ALTO",
+      medium: "MEDIO",
+      low: "BAJO",
+    };
+    const colorMap: Record<PrioritizedPatient['level'], string> = {
+      critical: "#b91c1c",
+      high: "#ea580c",
+      medium: "#ca8a04",
+      low: "#16a34a",
+    };
+    return (
+      <View style={[styles.priorityBadge, { backgroundColor: colorMap[level] }]}> 
+        <Text style={styles.priorityBadgeText}>{labelMap[level]}</Text>
+      </View>
+    );
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -281,24 +379,33 @@ export default function PatientList({ navigation }: Props) {
             ))}
           </View>
         </View>
+        <View style={styles.priorityToggle}>
+          <Text style={styles.priorityToggleLabel}>Ordenar por prioridad clínica</Text>
+          <Switch value={sortByPriority} onValueChange={setSortByPriority} />
+        </View>
       </View>
 
       <FlatList
-        data={patients}
-        keyExtractor={(item) => item.id}
+        data={patientsForList}
+        keyExtractor={(item) => item.patientId}
         contentContainerStyle={patients.length === 0 ? styles.emptyContainer : undefined}
         ListEmptyComponent={<Text style={styles.emptyText}>No hay pacientes para la selección.</Text>}
         renderItem={({ item }) => {
-          const unit = UNITS_BY_ID[item.unitId];
+          const basePatient = patientById.get(item.patientId);
+          const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
           return (
-            <Pressable onPress={() => onOpenPatient(item)} style={styles.patientCard}>
-              <Text style={styles.patientName}>{item.name}</Text>
-              <Text style={styles.patientMeta}>{unit?.name ?? item.unitId}</Text>
+            <Pressable onPress={() => onOpenPatient(item.patientId)} style={styles.patientCard}>
+              <Text style={styles.patientName}>{item.displayName}</Text>
+              <Text style={styles.patientMeta}>{unit?.name ?? basePatient?.unitId ?? "Unidad desconocida"}</Text>
+              <View style={styles.priorityRow}>
+                {renderPriorityBadge(item.level)}
+                <Text style={styles.reasonText}>{item.reasonSummary}</Text>
+              </View>
               <Pressable
                 style={styles.handoverButton}
                 onPress={(event) => {
                   event.stopPropagation();
-                  navigation.navigate('HandoverMain', { patientId: item.id });
+                  navigation.navigate('HandoverMain', { patientId: item.patientId });
                 }}
                 accessibilityRole="button"
               >
@@ -355,6 +462,16 @@ const styles = StyleSheet.create({
   pickerButtonText: {
     color: "#1f2a44",
   },
+  priorityToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+  priorityToggleLabel: {
+    fontWeight: "600",
+    color: "#111827",
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -394,6 +511,25 @@ const styles = StyleSheet.create({
   patientMeta: {
     marginTop: 4,
     color: "#4b5563",
+  },
+  priorityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  priorityBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  priorityBadgeText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  reasonText: {
+    flex: 1,
+    marginLeft: 8,
+    color: "#374151",
   },
   emptyContainer: {
     flexGrow: 1,

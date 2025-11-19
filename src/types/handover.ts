@@ -56,6 +56,32 @@ export type Vitals = {
   avpu?: 'A' | 'C' | 'V' | 'P' | 'U';
 };
 
+export type VitalsSnapshot = {
+  hr?: number;
+  rr?: number;
+  tempC?: number;
+  temp?: number;
+  spo2?: number;
+  sbp?: number;
+  o2?: boolean;
+  avpu?: 'A' | 'C' | 'V' | 'P' | 'U';
+  scale2?: boolean;
+};
+
+export type DeviceSummary = {
+  id: string;
+  label: string;
+  category?: 'invasive' | 'support' | 'monitoring';
+  critical?: boolean;
+};
+
+export type PendingTaskSummary = {
+  id: string;
+  title: string;
+  urgent?: boolean;
+  critical?: boolean;
+};
+
 export type OxygenTherapy = {
   flowLMin?: number;
   device?: string;
