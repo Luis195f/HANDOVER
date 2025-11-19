@@ -1,15 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { mapVitalsToObservations } from '@/src/lib/fhir-map';
+import { TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 
 const NOW = '2025-10-19T12:00:00Z';
-
-const loinc = {
-  RR: '9279-1',
-  HR: '8867-4',
-  SBP: '8480-6',
-  TEMP: '8310-5',
-  SPO2: '59408-5',
-};
 
 function byCode(a: any, b: any) {
   const ca = a?.code?.coding?.[0]?.code ?? '';
@@ -24,11 +17,11 @@ describe('mapVitalsToObservations (helper puro)', () => {
       { now: NOW }
     ).sort(byCode);
 
-    expect(obs.map(o => o.code?.coding?.[0]?.code)).toEqual([loinc.HR, loinc.RR].sort());
+    expect(obs.map(o => o.code?.coding?.[0]?.code)).toEqual([TEST_VITAL_CODES.HEART_RATE.code, TEST_VITAL_CODES.RESP_RATE.code].sort());
 
     for (const o of obs) {
       expect(o.resourceType).toBe('Observation');
-      expect(o.valueQuantity?.system).toBe('http://unitsofmeasure.org');
+      expect(o.valueQuantity?.system).toBe(TEST_SYSTEMS.UCUM);
       expect(o.valueQuantity?.code).toBe('/min');
       expect(o.effectiveDateTime).toBe(NOW);
       expect(o.subject).toBeDefined();
@@ -42,15 +35,15 @@ describe('mapVitalsToObservations (helper puro)', () => {
     ).sort(byCode);
 
     const codes = obs.map(o => o.code?.coding?.[0]?.code).sort();
-    expect(codes).toEqual([loinc.RR, loinc.HR, loinc.SBP, loinc.TEMP, loinc.SPO2].sort());
+    expect(codes).toEqual([TEST_VITAL_CODES.RESP_RATE.code, TEST_VITAL_CODES.HEART_RATE.code, TEST_VITAL_CODES.BP_SYSTOLIC.code, TEST_VITAL_CODES.TEMPERATURE.code, TEST_VITAL_CODES.SPO2.code].sort());
 
     const get = (code: string) => obs.find(o => o.code?.coding?.[0]?.code === code)!;
 
-    expect(get(loinc.RR).valueQuantity?.code).toBe('/min');
-    expect(get(loinc.HR).valueQuantity?.code).toBe('/min');
-    expect(get(loinc.SBP).valueQuantity?.code).toBe('mm[Hg]');
-    expect(get(loinc.TEMP).valueQuantity?.code).toBe('Cel');
-    expect(get(loinc.SPO2).valueQuantity?.code).toBe('%');
+    expect(get(TEST_VITAL_CODES.RESP_RATE.code).valueQuantity?.code).toBe('/min');
+    expect(get(TEST_VITAL_CODES.HEART_RATE.code).valueQuantity?.code).toBe('/min');
+    expect(get(TEST_VITAL_CODES.BP_SYSTOLIC.code).valueQuantity?.code).toBe('mm[Hg]');
+    expect(get(TEST_VITAL_CODES.TEMPERATURE.code).valueQuantity?.code).toBe('Cel');
+    expect(get(TEST_VITAL_CODES.SPO2.code).valueQuantity?.code).toBe('%');
   });
 
   it('idempotencia (estructura estable)', () => {

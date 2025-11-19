@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildHandoverBundle } from '../fhir-map';
+import { TEST_RISK_CODES } from './fhir-map.test-constants';
 
 const NOW = '2025-01-01T08:00:00.000Z';
 
@@ -26,7 +27,11 @@ describe('mapRiskConditions', () => {
     expect(conditions).toHaveLength(3);
 
     const codes = conditions.map((condition) => condition.code?.coding?.[0]?.code).sort();
-    expect(codes).toEqual(['1144779008', '129839007', '714658008']);
+    expect(codes).toEqual([
+      TEST_RISK_CODES.SOCIAL_ISOLATION.code,
+      TEST_RISK_CODES.FALL.code,
+      TEST_RISK_CODES.PRESSURE_ULCER.code,
+    ].sort());
 
     conditions.forEach((condition) => {
       expect(condition.subject?.reference).toBe('Patient/pat-risk-001');
