@@ -6,7 +6,9 @@
    - Fallback offline seguro (no rompe la UI)
 */
 
-import { __test__ } from "./fhir-map";
+import { LOINC, TERMINOLOGY_SYSTEMS } from "./codes";
+
+const LOINC_SYSTEM = TERMINOLOGY_SYSTEMS.LOINC;
 
 // Tipos públicos que usa la UI / tests
 export type PrefillInput = {
@@ -117,8 +119,8 @@ export async function prefillFromFHIR(
 
     const latest = extractLatestVitals(obs);
     const acvpu = findACVPU(obs);
-    const hasFiO2 = !!findByLoinc(obs, __test__.LOINC.FIO2);
-    const hasO2Flow = !!findByLoinc(obs, __test__.LOINC.O2_FLOW);
+    const hasFiO2 = !!findByLoinc(obs, LOINC.fio2);
+    const hasO2Flow = !!findByLoinc(obs, LOINC.o2Flow);
     const o2 = hasFiO2 || hasO2Flow || guessO2FromNotes(obs) || !!latest.fio2Pct;
 
     const vitals: VitalPrefill = {
@@ -243,7 +245,7 @@ function numOrUndefined(x: any): number | undefined {
 
 function findByLoinc(obsList: any[], loincCode: string): any | undefined {
   return obsList.find(o =>
-    (o?.code?.coding ?? []).some((c: any) => c?.system === "http://loinc.org" && c?.code === loincCode)
+    (o?.code?.coding ?? []).some((c: any) => c?.system === LOINC_SYSTEM && c?.code === loincCode)
   );
 }
 
@@ -302,13 +304,13 @@ function extractLatestVitals(obsList: any[]) {
     const codes = (o?.code?.coding ?? []) as any[];
 
     // Panel BP → componentes
-    if (codes.some(c => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.BP_PANEL) && Array.isArray(o?.component)) {
+    if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.bpPanel) && Array.isArray(o?.component)) {
       for (const comp of o.component) {
         const cc = (comp?.code?.coding ?? []) as any[];
-        if (cc.some((c: any) => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.SBP)) {
+        if (cc.some((c: any) => c?.system === LOINC_SYSTEM && c?.code === LOINC.sbp)) {
           setLatest("sbp", o, numOrUndefined(comp?.valueQuantity?.value));
         }
-        if (cc.some((c: any) => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.DBP)) {
+        if (cc.some((c: any) => c?.system === LOINC_SYSTEM && c?.code === LOINC.dbp)) {
           setLatest("dbp", o, numOrUndefined(comp?.valueQuantity?.value));
         }
       }
@@ -316,15 +318,15 @@ function extractLatestVitals(obsList: any[]) {
     }
 
     // Variables simples
-    if (codes.some(c => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.RR)) {
+    if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.rr)) {
       setLatest("rr", o, numOrUndefined(o?.valueQuantity?.value));
-    } else if (codes.some(c => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.SPO2)) {
+    } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.spo2)) {
       setLatest("spo2", o, numOrUndefined(o?.valueQuantity?.value));
-    } else if (codes.some(c => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.TEMP)) {
+    } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.temp)) {
       setLatest("temp", o, numOrUndefined(o?.valueQuantity?.value));
-    } else if (codes.some(c => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.HR)) {
+    } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.hr)) {
       setLatest("hr", o, numOrUndefined(o?.valueQuantity?.value));
-    } else if (codes.some(c => c?.system === "http://loinc.org" && c?.code === __test__.LOINC.FIO2)) {
+    } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.fio2)) {
       // FiO2 → porcentaje (value ya suele venir en %)
       setLatest("fio2Pct", o, numOrUndefined(o?.valueQuantity?.value));
     }
