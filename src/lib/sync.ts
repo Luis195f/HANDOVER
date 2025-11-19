@@ -23,10 +23,11 @@ import {
 } from './fhir-client';
 import { hashHex } from './crypto';
 import { z } from 'zod';
+import { validateBundle as validateFHIRBundle, type ValidationResult } from './fhir-validation';
 
 export type LegacyQueueItem = {
   patientId: string;
-  bundle: { resourceType: 'Bundle'; type: 'transaction'; entry?: any[] };
+  bundle: TransactionBundle;
   attempts: number;
   nextAttemptAt: string;
   createdAt: string;
@@ -53,6 +54,50 @@ export type FlushCompatOptions = {
    */
   delayMs?: number;
 };
+
+type ValidationErrorDetail = ValidationResult['errors'][number];
+type TransactionBundle = {
+  resourceType: 'Bundle';
+  type: 'transaction';
+  entry?: any[];
+  _validationErrors?: ValidationErrorDetail[];
+};
+type BundleWithValidation = Bundle & { _validationErrors?: ValidationErrorDetail[] };
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+function annotateValidationErrors(bundle: any, errors: ValidationErrorDetail[]) {
+  if (!bundle || typeof bundle !== 'object') return;
+  (bundle as any)._validationErrors = errors;
+}
+
+function clearValidationErrors(bundle: any) {
+  if (!bundle || typeof bundle !== 'object') return;
+  if ('_validationErrors' in bundle) {
+    try {
+      delete (bundle as any)._validationErrors;
+    } catch {
+      (bundle as any)._validationErrors = undefined;
+    }
+  }
+}
+
+function enforceBundleValidation(bundle: any, context: string) {
+  const result = validateFHIRBundle(bundle);
+  if (result.isValid) {
+    clearValidationErrors(bundle);
+    return;
+  }
+
+  if (!IS_PRODUCTION) {
+    const error = new Error(`FHIR bundle validation failed (${context}): ${JSON.stringify(result.errors)}`);
+    (error as any).validationErrors = result.errors;
+    throw error;
+  }
+
+  console.error(`FHIR bundle validation failed (${context})`, result.errors);
+  annotateValidationErrors(bundle, result.errors);
+}
 
 const TX_IDENTIFIER_SYSTEM = 'urn:handover-pro:tx';
 const OFFLINE_RETRY_DELAY_MS = 30_000;
@@ -166,6 +211,7 @@ function ensureBundleTx(bundle: { resourceType: 'Bundle'; entry?: any[]; identif
       ...bundle,
       entry: entries,
       identifier,
+      _validationErrors: (bundle as any)._validationErrors,
     },
   };
 }
@@ -216,7 +262,7 @@ export type QueueItem = {
   id: string;
   patientId?: string;
   fullUrls: string[];
-  bundle: Bundle;
+  bundle: BundleWithValidation;
   attempts: number;
   nextAt: number;
   windowStart: number;
@@ -247,7 +293,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function ensureBundleShape(bundle: unknown): Bundle {
+function ensureBundleShape(bundle: unknown): BundleWithValidation {
   if (!isRecord(bundle) || bundle.resourceType !== 'Bundle') {
     throw new Error('Queue expects FHIR Bundle');
   }
@@ -395,6 +441,7 @@ function shouldRetryStatus(status: number): boolean {
 
 export async function enqueue(bundle: Bundle, opts?: { patientId?: string }): Promise<void> {
   const normalized = ensureBundleShape(bundle);
+  enforceBundleValidation(normalized, 'secure-queue enqueue');
   const fullUrls = collectFullUrls(normalized);
   const id = computeId(fullUrls);
   const now = Date.now();
@@ -475,6 +522,7 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
         try {
           const token = await getToken();
           if (!token) throw new Error('OAuth token is required');
+          enforceBundleValidation(current.bundle, 'secure-queue drain');
           response = await postBundle(current.bundle, { token });
         } catch (error) {
           if (handleNetworkFailure(error)) {
@@ -546,9 +594,7 @@ function computeNextAttempt(attempts: number, now = Date.now()) {
   return new Date(now + exp + jitter).toISOString();
 }
 
-function ensureTransactionBundle(
-  bundle: any,
-): { resourceType: 'Bundle'; type: 'transaction'; entry?: any[] } {
+function ensureTransactionBundle(bundle: any): TransactionBundle {
   if (!bundle || typeof bundle !== 'object') {
     return { resourceType: 'Bundle', type: 'transaction', entry: [] };
   }
@@ -688,6 +734,7 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
   const nowIso = new Date().toISOString();
   const queue = await loadQueue();
   const ensured = ensureTransactionBundle(normalized.bundle);
+  enforceBundleValidation(ensured, 'legacy enqueueBundle');
 
   const existingIndex = queue.findIndex((it) => it.patientId === patientId);
   const existingTxId = existingIndex >= 0 ? queue[existingIndex].txId : undefined;
@@ -763,12 +810,18 @@ export async function enqueueTxFromValues(
  */
 export async function flushQueue(opts?: FlushCompatOptions) {
   ensureConnectivityListener();
-  const sender: SendFn =
+  const baseSender: SendFn =
     opts?.sender ??
     (async (tx) => {
       const { bundle } = tx;
       return postBundleSmart({ fhirBase: FHIR_BASE_URL, bundle });
     });
+  const sender: SendFn = async (tx) => {
+    if (tx?.bundle) {
+      enforceBundleValidation(tx.bundle, 'legacy flushQueue sender');
+    }
+    return baseSender(tx);
+  };
 
   const initialQueue = await loadQueue();
   if (initialQueue.length === 0) {

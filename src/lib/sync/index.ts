@@ -12,6 +12,7 @@
 
 import NetInfo from '@/src/lib/netinfo';
 import { configureFHIRClient, postBundle } from '../fhir-client';
+import { validateBundle as validateFHIRBundle, type ValidationResult } from '../fhir-validation';
 import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
@@ -25,6 +26,31 @@ try {
   const mod = require('@/src/lib/otel');
   if (mod?.mark) mark = mod.mark as MarkFn;
 } catch {}
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+type ValidationErrorDetail = ValidationResult['errors'][number];
+
+function enforceBundleValidation(bundle: any, context: string): ValidationErrorDetail[] {
+  const result = validateFHIRBundle(bundle);
+  if (result.isValid) {
+    if (bundle && typeof bundle === 'object' && '_validationErrors' in bundle) {
+      delete (bundle as any)._validationErrors;
+    }
+    return [];
+  }
+
+  if (!IS_PRODUCTION) {
+    const error = new Error(`FHIR bundle validation failed (${context}): ${JSON.stringify(result.errors)}`);
+    (error as any).validationErrors = result.errors;
+    throw error;
+  }
+
+  console.error(`FHIR bundle validation failed (${context})`, result.errors);
+  if (bundle && typeof bundle === 'object') {
+    (bundle as any)._validationErrors = result.errors;
+  }
+  return result.errors;
+}
 try {
   const mod = require('../otel');
   if (mod?.mark) mark = mod.mark as MarkFn;
@@ -58,6 +84,7 @@ export async function syncBundleOrEnqueue(
   bundle: any,
   opts: SyncOpts
 ): Promise<'sent' | 'queued'> {
+  enforceBundleValidation(bundle, 'syncBundleOrEnqueue');
   const online = await hasInternet();
   const idemKey = bundleIdempotencyKey(bundle);
   if (!online) {
@@ -80,6 +107,7 @@ export async function syncBundleOrEnqueue(
 
 // --- Envío con backoff + marcas por intento ---
 async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts) {
+  enforceBundleValidation(bundle, 'sync sendWithRetry');
   return await retryWithBackoff(
     async (attempt) => {
       mark('sync.http.request', { attempt, idemKey });
@@ -103,6 +131,7 @@ async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts) {
 // --- Encolar cifrado + marca ---
 async function enqueue(bundle: any, idemKey: string) {
   mark('sync.enqueue', { kind: 'FHIR_BUNDLE', idemKey });
+  enforceBundleValidation(bundle, 'sync enqueue');
   await enqueueTx({ payload: { bundle, meta: { hash: idemKey } } });
 }
 
