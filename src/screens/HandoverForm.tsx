@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Button,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +17,13 @@ import AudioAttach from '@/src/components/AudioAttach';
 import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { computeNEWS2 } from '@/src/lib/news2';
+import {
+  createSttService,
+  type SttConfig,
+  type SttErrorCode,
+  type SttService,
+  type SttStatus,
+} from '@/src/lib/stt';
 import { enqueueBundle } from '@/src/lib/queue';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { currentUser, hasUnitAccess } from '@/src/security/acl';
@@ -52,11 +60,73 @@ const styles = StyleSheet.create({
   secondaryButton: { marginLeft: 12 },
   vitalsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
   vitalsCell: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
+  dictationRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  micButton: {
+    marginLeft: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#E0E7FF',
+  },
+  micButtonActive: { backgroundColor: '#2563EB' },
+  micButtonDisabled: { opacity: 0.5 },
+  micButtonText: { fontWeight: '600', color: '#1E1B4B' },
+  micButtonTextActive: { color: '#fff' },
+  dictationStatus: { marginTop: 6, color: '#4338CA', fontSize: 14 },
+  dictationError: { marginTop: 6, color: '#B45309', fontSize: 14 },
 });
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
 type HandoverFormControl = Control<HandoverFormValues>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
+
+type DictationField = 'evolution' | 'closingSummary';
+
+const mergeDictationText = (currentValue: string | undefined, dictated: string) => {
+  const addition = dictated.trim();
+  if (!addition) {
+    return currentValue ?? '';
+  }
+  if (!currentValue) {
+    return addition;
+  }
+  const base = currentValue.trimEnd();
+  if (!base) {
+    return addition;
+  }
+  return `${base}\n${addition}`;
+};
+
+function DictationMicButton({
+  active,
+  disabled,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled, busy: active }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.micButton,
+        active && styles.micButtonActive,
+        disabled && styles.micButtonDisabled,
+        pressed && !disabled ? { opacity: 0.85 } : null,
+      ]}
+    >
+      <Text style={[styles.micButtonText, active && styles.micButtonTextActive]}>
+        {active ? 'Detener' : label}
+      </Text>
+    </Pressable>
+  );
+}
 
 async function buildAudioAttachment(uri: string | undefined) {
   if (!uri) return undefined;
@@ -326,6 +396,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     dxMedical: '',
     dxNursing: '',
     evolution: '',
+    closingSummary: '',
     meds: '',
     sbarSituation: '',
     sbarBackground: '',
@@ -361,6 +432,124 @@ export default function HandoverForm({ navigation, route }: Props) {
   const dxMedicalError = errors.dxMedical?.message as string | undefined;
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
+  const closingSummaryError = errors.closingSummary?.message as string | undefined;
+  const sttServiceRef = useRef<SttService | null>(null);
+  if (!sttServiceRef.current) {
+    sttServiceRef.current = createSttService();
+  }
+  const [sttStatus, setSttStatus] = useState<SttStatus>(sttServiceRef.current.getStatus());
+  const [sttError, setSttError] = useState<SttErrorCode | null>(sttServiceRef.current.getLastError());
+  const [activeDictationField, setActiveDictationField] = useState<DictationField | null>(null);
+  const [lastDictationField, setLastDictationField] = useState<DictationField | null>(null);
+  const [dictatedPartial, setDictatedPartial] = useState('');
+  const activeFieldRef = useRef<DictationField | null>(null);
+
+  useEffect(() => {
+    activeFieldRef.current = activeDictationField;
+  }, [activeDictationField]);
+
+  useEffect(() => {
+    const service = sttServiceRef.current ?? createSttService();
+    sttServiceRef.current = service;
+    setSttStatus(service.getStatus());
+    setSttError(service.getLastError());
+    const unsubscribe = service.addListener((result) => {
+      setSttStatus(service.getStatus());
+      setSttError(service.getLastError());
+      const target = activeFieldRef.current;
+      if (!target) {
+        return;
+      }
+      if (!result.isFinal) {
+        setDictatedPartial(result.text);
+        return;
+      }
+      const trimmed = result.text.trim();
+      if (trimmed) {
+        const merged = mergeDictationText(form.getValues(target), trimmed);
+        form.setValue(target, merged, { shouldDirty: true });
+      }
+      setDictatedPartial('');
+      setActiveDictationField(null);
+      setLastDictationField(target);
+    });
+    return () => {
+      unsubscribe();
+      void service.cancel();
+    };
+  }, [form]);
+
+  const dictationUnavailable = sttError === 'UNSUPPORTED' || sttServiceRef.current?.getLastError() === 'UNSUPPORTED';
+
+  const handleDictationPress = async (field: DictationField, config: SttConfig) => {
+    const service = sttServiceRef.current ?? createSttService();
+    sttServiceRef.current = service;
+    if (service.getLastError() === 'UNSUPPORTED') {
+      setSttError('UNSUPPORTED');
+      setActiveDictationField(null);
+      setLastDictationField(field);
+      return;
+    }
+    const togglingSameField = sttStatus === 'listening' && activeDictationField === field;
+    if (togglingSameField) {
+      try {
+        setSttStatus('processing');
+        await service.stop();
+      } catch (error) {
+        console.warn('[handover] stt stop error', error);
+        setSttError(service.getLastError() ?? 'UNKNOWN');
+      } finally {
+        setSttStatus(service.getStatus());
+      }
+      return;
+    }
+
+    setActiveDictationField(field);
+    setLastDictationField(field);
+    setDictatedPartial('');
+    setSttError(null);
+    try {
+      await service.start(config);
+    } catch (error) {
+      console.warn('[handover] stt start error', error);
+      setSttError(service.getLastError() ?? 'UNKNOWN');
+      setActiveDictationField(null);
+    } finally {
+      setSttStatus(service.getStatus());
+      if (service.getStatus() !== 'listening') {
+        setActiveDictationField(null);
+      }
+      setSttError(service.getLastError());
+    }
+  };
+
+  const renderDictationStatus = (field: DictationField) => {
+    if (dictationUnavailable && field === 'evolution') {
+      return (
+        <Text style={styles.dictationError}>
+          La transcripción por voz no está disponible en este dispositivo.
+        </Text>
+      );
+    }
+    if (activeDictationField === field && sttStatus === 'listening') {
+      return (
+        <Text style={styles.dictationStatus}>
+          Escuchando… {dictatedPartial ? `“${dictatedPartial}”` : ''}
+        </Text>
+      );
+    }
+    if (activeDictationField === field && sttStatus === 'processing') {
+      return <Text style={styles.dictationStatus}>Procesando dictado…</Text>;
+    }
+    if (lastDictationField === field && sttError && sttError !== 'UNSUPPORTED') {
+      const message =
+        sttError === 'PERMISSION_DENIED'
+          ? 'Activa los permisos de micrófono para dictar las notas.'
+          : 'No pudimos transcribir en este momento. Puedes escribir manualmente y volver a intentar.';
+      return <Text style={styles.dictationError}>{message}</Text>;
+    }
+    return null;
+  };
   const sbarSituationError = errors.sbarSituation?.message as string | undefined;
   const sbarBackgroundError = errors.sbarBackground?.message as string | undefined;
   const sbarAssessmentError = errors.sbarAssessment?.message as string | undefined;
@@ -477,6 +666,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             audioAttachment: audioAttachment ?? undefined,
             composition: { title: 'Clinical handover summary' },
             administrativeData,
+            closingSummary: values.closingSummary,
             sbar: {
               situation: values.sbarSituation,
               background: values.sbarBackground,
@@ -823,21 +1013,74 @@ export default function HandoverForm({ navigation, route }: Props) {
         </View>
         <View style={styles.field}>
           <Text style={styles.label}>Evolución</Text>
-          <Controller
-            control={control}
-            name="evolution"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                multiline
-                placeholder="Notas de evolución"
-                onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
+          <View style={styles.dictationRow}>
+            <View style={styles.flex}>
+              <Controller
+                control={control}
+                name="evolution"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    placeholder="Notas de evolución"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
               />
-            )}
-          />
+            </View>
+            <DictationMicButton
+              active={activeDictationField === 'evolution' && sttStatus === 'listening'}
+              disabled={dictationUnavailable}
+              label="Dictar evolución"
+              onPress={() =>
+                handleDictationPress('evolution', {
+                  locale: 'es-ES',
+                  interimResults: true,
+                  maxSeconds: 90,
+                })
+              }
+            />
+          </View>
+          {renderDictationStatus('evolution')}
           {evolutionError ? <Text style={styles.error}>{evolutionError}</Text> : null}
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Resumen / cierre de turno</Text>
+          <View style={styles.dictationRow}>
+            <View style={styles.flex}>
+              <Controller
+                control={control}
+                name="closingSummary"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    placeholder="Resumen breve para el equipo entrante"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+            </View>
+            <DictationMicButton
+              active={activeDictationField === 'closingSummary' && sttStatus === 'listening'}
+              disabled={dictationUnavailable}
+              label="Dictar cierre"
+              onPress={() =>
+                handleDictationPress('closingSummary', {
+                  locale: 'es-ES',
+                  interimResults: true,
+                  maxSeconds: 60,
+                })
+              }
+            />
+          </View>
+          {renderDictationStatus('closingSummary')}
+          {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
         </View>
       </View>
 

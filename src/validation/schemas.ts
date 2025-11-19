@@ -225,6 +225,7 @@ export const zHandover = z.object({
   dxMedical: z.string().optional(),
   dxNursing: z.string().optional(),
   evolution: z.string().optional(),
+  closingSummary: z.string().optional(),
 
   sbarSituation: z.string().optional(),
   sbarBackground: z.string().optional(),

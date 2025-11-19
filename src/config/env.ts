@@ -11,7 +11,16 @@ function resolveBaseUrl(): string {
   return raw.replace(/\/+$/, '');
 }
 
+function resolveSttEndpoint(): string | null {
+  const expoValue = Constants.expoConfig?.extra?.STT_ENDPOINT;
+  const envValue = process.env.EXPO_PUBLIC_STT_ENDPOINT ?? process.env.STT_ENDPOINT;
+  const rawSource = typeof expoValue === 'string' ? expoValue : envValue ?? '';
+  const raw = rawSource.trim();
+  return raw.length > 0 ? raw : null;
+}
+
 export const FHIR_BASE_URL: string = resolveBaseUrl();
+export const STT_ENDPOINT: string | null = resolveSttEndpoint();
 
 export const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? process.env.API_BASE ?? '';
 export const API_TOKEN = process.env.EXPO_PUBLIC_API_TOKEN ?? process.env.API_TOKEN ?? '';
@@ -20,6 +29,7 @@ export const ENV = {
   FHIR_BASE_URL,
   API_BASE,
   API_TOKEN,
+  STT_ENDPOINT,
 } as const;
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';

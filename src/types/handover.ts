@@ -99,6 +99,7 @@ export type HandoverValues = {
   dxMedical?: string;
   dxNursing?: string;
   evolution?: string;
+  closingSummary?: string;
   sbarSituation?: string;
   sbarBackground?: string;
   sbarAssessment?: string;
