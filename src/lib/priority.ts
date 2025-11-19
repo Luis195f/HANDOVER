@@ -1,198 +1,192 @@
-import { Alert, AlertSeverity } from "./alerts";
-import { computeNEWS2, ACVPU as NEWS2ACVPU } from "./news2";
+// Fase 3 – Bloque C (prioridad): cálculo de prioridad clínica por paciente.
+import { computeNEWS2 } from './news2';
+import type {
+  DeviceSummary,
+  PendingTaskSummary,
+  RiskFlags,
+  VitalsSnapshot,
+} from '@/src/types/handover';
 
-/** Escala de consciencia (NEWS2). */
-export type ACVPU = NEWS2ACVPU;
+export type PriorityLevel = 'critical' | 'high' | 'medium' | 'low';
 
-/** Vitals de entrada para calcular NEWS2 (escala 1 por defecto). */
-export type VitalsInput = {
-  rr?: number;
-  hr?: number;
-  sbp?: number;
-  dbp?: number;
-  temp?: number;
-  spo2?: number;
-  o2?: boolean;
-  o2Device?: string;
-  o2FlowLpm?: number;
-  fio2?: number;
-  acvpu?: ACVPU;
-  scale2?: boolean;
+export type PriorityReasonCode =
+  | 'HIGH_NEWS2'
+  | 'INVASIVE_DEVICE'
+  | 'RECENT_INCIDENT'
+  | 'PENDING_URGENT_TASK'
+  | 'HIGH_RISK_FLAGS';
+
+export interface PrioritizedPatient {
+  patientId: string;
+  displayName: string;
+  bedLabel?: string;
+  news2Score: number;
+  level: PriorityLevel;
+  reasons: PriorityReasonCode[];
+  reasonSummary: string;
+}
+
+type PrioritizedPatientInternal = PrioritizedPatient & { incidentMs: number | null };
+
+export interface PriorityInput {
+  patientId: string;
+  displayName: string;
+  bedLabel?: string;
+  vitals: VitalsSnapshot;
+  devices: DeviceSummary[];
+  risks: RiskFlags;
+  pendingTasks: PendingTaskSummary[];
+  lastIncidentAt?: string | null;
+  recentIncidentFlag?: boolean;
+  referenceTime?: string | number | Date;
+}
+
+const INCIDENT_RECENCY_THRESHOLD_MS = 18 * 60 * 60 * 1000; // Incidente <18h se considera reciente.
+const levelWeights: Record<PriorityLevel, number> = {
+  critical: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
 };
 
-/** Calcula el puntaje NEWS2 reutilizando computeNEWS2. */
-export function news2Score(v: VitalsInput): number {
-  const breakdown = computeNEWS2({
-    rr: v.rr,
-    spo2: v.spo2,
-    temp: v.temp,
-    sbp: v.sbp,
-    hr: v.hr,
-    o2: v.o2,
-    avpu: v.acvpu,
-    scale2: v.scale2,
-  });
-  return breakdown.total;
+function getReferenceTimeMs(input: PriorityInput): number {
+  if (input.referenceTime) {
+    const ref = new Date(input.referenceTime).getTime();
+    if (!Number.isNaN(ref)) return ref;
+  }
+  return Date.now();
 }
 
-/** Mapea NEWS2 a etiqueta/coloress (ES) para UI existente. */
-export function news2PriorityTag(score: number): {
-  level: "Crítico" | "Alto" | "Moderado" | "Bajo";
-  color: string;
-} {
-  if (score >= 7) return { level: "Crítico", color: "#b91c1c" };
-  if (score >= 5) return { level: "Alto", color: "#ea580c" };
-  if (score >= 3) return { level: "Moderado", color: "#ca8a04" };
-  return { level: "Bajo", color: "#15803d" };
+function isIncidentRecent(input: PriorityInput): { recent: boolean; incidentMs: number | null } {
+  const nowMs = getReferenceTimeMs(input);
+  if (input.recentIncidentFlag) {
+    return { recent: true, incidentMs: nowMs };
+  }
+  if (!input.lastIncidentAt) return { recent: false, incidentMs: null };
+  const incidentMs = new Date(input.lastIncidentAt).getTime();
+  if (Number.isNaN(incidentMs)) return { recent: false, incidentMs: null };
+  const recent = nowMs - incidentMs <= INCIDENT_RECENCY_THRESHOLD_MS;
+  return { recent, incidentMs };
 }
 
-/** Compatibilidad con código previo (no romper). */
-export function priorityLabel(score: number): "Crítico" | "Alto" | "Moderado" | "Bajo" {
-  return news2PriorityTag(score).level;
+function hasInvasiveDevice(devices: DeviceSummary[]): { has: boolean; label?: string } {
+  const device = devices.find(d => d.category === 'invasive' || d.critical);
+  return { has: Boolean(device), label: device?.label };
 }
 
-export function priorityColor(score: number): string {
-  return news2PriorityTag(score).color;
+function countUrgentTasks(tasks: PendingTaskSummary[]): number {
+  return tasks.filter(task => task.urgent || task.critical).length;
 }
 
-/** 🔹 Lo que pediste: nivel simple en inglés para listados (low/medium/high). */
-export type PrioritySimple = "low" | "medium" | "high";
-
-export function priorityFromNews2(score: number): PrioritySimple {
-  if (score >= 7) return "high";
-  if (score >= 5) return "medium";
-  return "low";
+function hasHighRiskFlags(risks: RiskFlags): boolean {
+  return Boolean(risks.fall || risks.pressureUlcer || risks.isolation);
 }
 
-/** 🔹 Lo que pediste: ordena pacientes por criticidad (estable). */
-export function sortByPriority<T extends { id: string; news2: number }>(patients: T[]): T[] {
-  return patients
-    .map((p, i) => ({ p, i }))
-    .sort((a, b) => {
-      if (b.p.news2 !== a.p.news2) return b.p.news2 - a.p.news2;
-      return a.i - b.i; // estabilidad en empates
-    })
-    .map(x => x.p);
-}
+function evaluatePriority(input: PriorityInput): PrioritizedPatientInternal {
+  const news2 = computeNEWS2({
+    rr: input.vitals.rr,
+    spo2: input.vitals.spo2,
+    temp: input.vitals.tempC ?? input.vitals.temp,
+    sbp: input.vitals.sbp,
+    hr: input.vitals.hr,
+    o2: input.vitals.o2,
+    avpu: input.vitals.avpu,
+    scale2: input.vitals.scale2,
+  }).total;
 
-export type ClinicalPatientSummary = {
-  id: string;
-  name: string;
-  news2: number;
-  band?: "BAJA" | "MEDIA" | "ALTA" | "CRÍTICA";
-  alerts?: Alert[];
-  glucoseFlag?: "hypo" | "hyper" | null;
-  oxygen?: {
-    active: boolean;
-    start?: string;
-    prolonged?: boolean;
-  } | null;
-  lastUpdated?: string;
-  recentChangeAt?: string;
-};
+  const reasons: PriorityReasonCode[] = [];
+  const { has: deviceIsInvasive, label: invasiveDeviceLabel } = hasInvasiveDevice(input.devices);
+  if (news2 >= 5) {
+    reasons.push('HIGH_NEWS2'); // NEWS2 >=5 indica deterioro clínico moderado-alto.
+  }
+  if (deviceIsInvasive) {
+    reasons.push('INVASIVE_DEVICE'); // VM, CVC u otro soporte invasivo.
+  }
+  const urgentTasks = countUrgentTasks(input.pendingTasks);
+  if (urgentTasks > 0) {
+    reasons.push('PENDING_URGENT_TASK');
+  }
+  const highRiskFlags = hasHighRiskFlags(input.risks);
+  if (highRiskFlags) {
+    reasons.push('HIGH_RISK_FLAGS');
+  }
+  const { recent: recentIncident, incidentMs } = isIncidentRecent(input);
+  if (recentIncident) {
+    reasons.push('RECENT_INCIDENT');
+  }
 
-export function computePriorityList(
-  patients: ClinicalPatientSummary[],
-): Array<ClinicalPatientSummary & { priority: number; reason: string[] }> {
-  const severityRank: Record<AlertSeverity, number> = {
-    critical: 3,
-    high: 2,
-    moderate: 1,
-    low: 0,
+  let level: PriorityLevel = 'low';
+  if (news2 >= 7 || deviceIsInvasive || recentIncident) {
+    level = 'critical'; // NEWS2 >=7 o soporte invasivo → crítico inmediato.
+  } else if (news2 >= 5) {
+    level = 'high'; // NEWS2 5–6: alto riesgo.
+  } else if (news2 >= 3 && (urgentTasks > 0 || highRiskFlags || deviceIsInvasive)) {
+    level = 'high'; // NEWS2 moderado con otro factor agrava la prioridad.
+  } else if (news2 >= 3 || urgentTasks > 0 || highRiskFlags) {
+    level = 'medium';
+  }
+
+  const parts: string[] = [`NEWS2 ${news2}`];
+  if (deviceIsInvasive) {
+    parts.push(invasiveDeviceLabel ? invasiveDeviceLabel : 'dispositivo invasivo');
+  }
+  if (recentIncident) {
+    parts.push('incidente reciente');
+  }
+  if (urgentTasks > 0) {
+    parts.push(`${urgentTasks} tarea${urgentTasks > 1 ? 's' : ''} crítica${urgentTasks > 1 ? 's' : ''}`);
+  }
+  if (highRiskFlags) {
+    parts.push('riesgo elevado (caídas/UPP/aislamiento)');
+  }
+
+  const reasonSummary = parts.join(', ');
+
+  return {
+    patientId: input.patientId,
+    displayName: input.displayName,
+    bedLabel: input.bedLabel,
+    news2Score: news2,
+    level,
+    reasons,
+    reasonSummary,
+    incidentMs,
   };
-  const glucoseRank: Record<NonNullable<ClinicalPatientSummary["glucoseFlag"]>, number> = {
-    hypo: 2,
-    hyper: 1,
-  };
-  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+}
 
-  const enriched = patients.map(patient => {
-    const band = patient.band ?? (patient.news2 >= 7 ? "CRÍTICA" : patient.news2 >= 5 ? "ALTA" : patient.news2 >= 1 ? "MEDIA" : "BAJA");
-    const maxAlert = (patient.alerts ?? []).reduce<{ alert: Alert | null; rank: number }>(
-      (acc, alert) => {
-        const rank = severityRank[alert.severity];
-        if (rank > acc.rank) return { alert, rank };
-        return acc;
-      },
-      { alert: null, rank: -1 },
-    );
-    const glucoseRankValue = patient.glucoseFlag ? glucoseRank[patient.glucoseFlag] : 0;
-    const oxygenRank = patient.oxygen?.active ? (patient.oxygen.prolonged ? 2 : 1) : 0;
-    const oxygenReason = patient.oxygen?.active
-      ? patient.oxygen.prolonged
-        ? `Oxígeno prolongado desde ${patient.oxygen.start ?? "fecha desconocida"}`
-        : `Oxígeno activo${patient.oxygen.start ? ` desde ${patient.oxygen.start}` : ""}`
-      : undefined;
-    const recentChange = patient.recentChangeAt
-      ? (() => {
-          const ts = new Date(patient.recentChangeAt);
-          if (Number.isNaN(ts.getTime())) return false;
-          const now = new Date();
-          return now.getTime() - ts.getTime() <= SIX_HOURS_MS;
-        })()
-      : false;
-    const lastUpdatedMs = patient.lastUpdated ? new Date(patient.lastUpdated).getTime() : 0;
+export function computePriority(input: PriorityInput): PrioritizedPatient {
+  const { incidentMs: _incidentMs, ...patient } = evaluatePriority(input);
+  return patient;
+}
 
-    const priority =
-      patient.news2 * 10 +
-      maxAlert.rank * 5 +
-      glucoseRankValue * 2 +
-      oxygenRank * 3 +
-      (recentChange ? 1 : 0);
-
-    const reason: string[] = [`NEWS2 ${patient.news2} (${band})`];
-    if (maxAlert.alert) {
-      reason.push(`Alerta ${maxAlert.alert.severity}: ${maxAlert.alert.message}`);
-    }
-    if (patient.glucoseFlag === "hypo") {
-      reason.push("Hipoglucemia reciente");
-    } else if (patient.glucoseFlag === "hyper") {
-      reason.push("Hiperglucemia reciente");
-    }
-    if (oxygenReason) {
-      reason.push(oxygenReason);
-    }
-    if (recentChange) {
-      reason.push("Cambio clínico <6h");
-    }
-
+export function computePriorityList(inputs: PriorityInput[]): PrioritizedPatient[] {
+  const prioritized = inputs.map(input => {
+    const patient = evaluatePriority(input);
     return {
-      ...patient,
-      band,
-      priority,
-      reason,
-      _meta: {
-        maxAlertSeverity: maxAlert.rank,
-        glucoseRank: glucoseRankValue,
-        oxygenRank,
-        recentChange,
-        lastUpdatedMs,
+      patient,
+      meta: {
+        levelWeight: levelWeights[patient.level],
+        incidentMs: patient.incidentMs,
+        lastIncidentAt: input.lastIncidentAt ?? null,
       },
     };
   });
 
-  enriched.sort((a, b) => {
-    if (b.news2 !== a.news2) return b.news2 - a.news2;
-    if (b._meta.maxAlertSeverity !== a._meta.maxAlertSeverity) return b._meta.maxAlertSeverity - a._meta.maxAlertSeverity;
-    if (b._meta.glucoseRank !== a._meta.glucoseRank) return b._meta.glucoseRank - a._meta.glucoseRank;
-    if (b._meta.oxygenRank !== a._meta.oxygenRank) return b._meta.oxygenRank - a._meta.oxygenRank;
-    if (Number(b._meta.recentChange) !== Number(a._meta.recentChange)) return Number(b._meta.recentChange) - Number(a._meta.recentChange);
-    if (b._meta.lastUpdatedMs !== a._meta.lastUpdatedMs) return b._meta.lastUpdatedMs - a._meta.lastUpdatedMs;
-    return a.id.localeCompare(b.id);
+  prioritized.sort((a, b) => {
+    if (b.meta.levelWeight !== a.meta.levelWeight) return b.meta.levelWeight - a.meta.levelWeight;
+    if (b.patient.news2Score !== a.patient.news2Score) return b.patient.news2Score - a.patient.news2Score;
+    const incidentA = a.meta.incidentMs;
+    const incidentB = b.meta.incidentMs;
+    if (incidentA != null && incidentB != null && incidentA !== incidentB) return incidentB - incidentA;
+    if (incidentA == null && incidentB != null) return 1;
+    if (incidentA != null && incidentB == null) return -1;
+    return a.patient.displayName.localeCompare(b.patient.displayName);
   });
 
-  return enriched.map(({ _meta: _meta, ...rest }) => rest);
+  return prioritized.map(({ patient }) => {
+    const { incidentMs: _incidentMs, ...rest } = patient;
+    return rest;
+  });
 }
 
-/** Export por defecto (sigue funcionando con import default). */
-const Priority = {
-  news2Score,
-  news2PriorityTag,
-  priorityLabel,
-  priorityColor,
-  priorityFromNews2,
-  sortByPriority,
-  computePriorityList,
-};
-
-export default Priority;
+export default { computePriority, computePriorityList };

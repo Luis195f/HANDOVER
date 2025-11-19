@@ -24,6 +24,7 @@ export const Text = createPrimitive('Text');
 export const ScrollView = createPrimitive('ScrollView');
 export const SafeAreaView = createPrimitive('SafeAreaView');
 export const ActivityIndicator = createPrimitive('ActivityIndicator');
+export const Modal = createPrimitive('Modal');
 
 export const TextInput = React.forwardRef<any, RNProps>(({ onChangeText, ...props }, ref) =>
   React.createElement('TextInput', {
@@ -39,6 +40,23 @@ export const Pressable: React.FC<RNProps> = ({ children, onPress, ...props }) =>
   return React.createElement('Pressable', { ...props, onPress }, resolvedChildren);
 };
 Pressable.displayName = 'Pressable';
+
+export const FlatList: React.FC<RNProps> = ({ children, ...props }) =>
+  React.createElement('FlatList', { ...props }, children);
+FlatList.displayName = 'FlatList';
+
+export const Switch: React.FC<RNProps & { value?: boolean; onValueChange?: (value: boolean) => void }> = ({
+  value,
+  onValueChange,
+  ...props
+}) =>
+  React.createElement('Switch', {
+    ...props,
+    value,
+    onValueChange,
+    onChange: () => onValueChange?.(!value),
+  });
+Switch.displayName = 'Switch';
 
 export const Button: React.FC<RNProps & { title?: string }> = ({ children, title, onPress, ...props }) =>
   React.createElement('Button', { ...props, title, onPress }, children ?? title ?? null);
@@ -58,8 +76,11 @@ const ReactNative = {
   ScrollView,
   SafeAreaView,
   ActivityIndicator,
+  Modal,
   TextInput,
   Pressable,
+  FlatList,
+  Switch,
   Button,
   Alert,
   useColorScheme,
