@@ -22,4 +22,6 @@ export type RootStackParamList = {
   HandoverForm: HandoverFormParams;
   QRScan: QRScanParams | undefined;
   SyncCenter: undefined;
+  SupervisorDashboard: undefined;
+  PatientDashboard: { patientId: string };
 };

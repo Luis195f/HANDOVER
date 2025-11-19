@@ -14,6 +14,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import Chip from "@/src/components/Chip";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
+import { PATIENTS_MOCK, type PatientListItem } from "@/src/data/mockPatients";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { currentUser, hasUnitAccess } from "@/src/security/acl";
 import { mark } from "@/src/lib/otel";
@@ -23,74 +24,9 @@ import {
   setSelectedUnitId,
   useSelectedUnitId,
 } from "@/src/state/filterStore";
-import type {
-  DeviceSummary,
-  PendingTaskSummary,
-  RiskFlags,
-  VitalsSnapshot,
-} from "@/src/types/handover";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
-
-export type PatientListItem = {
-  id: string;
-  name: string;
-  unitId: string;
-  bedLabel?: string;
-  vitals?: VitalsSnapshot;
-  devices?: DeviceSummary[];
-  risks?: RiskFlags;
-  pendingTasks?: PendingTaskSummary[];
-  lastIncidentAt?: string | null;
-  recentIncidentFlag?: boolean;
-};
-
-const PATIENTS_MOCK: PatientListItem[] = [
-  {
-    id: "pat-002",
-    name: "María López",
-    unitId: "icu-b",
-    bedLabel: "B2",
-    vitals: { rr: 21, spo2: 95, tempC: 38.5, sbp: 108, hr: 98, o2: false, avpu: "A" },
-    devices: [{ id: "dev-cvc", label: "Catéter venoso central", category: "invasive" }],
-    risks: { fall: true },
-    pendingTasks: [{ id: "task-2", title: "Ajuste de perfusión", critical: true }],
-  },
-  {
-    id: "pat-001",
-    name: "Juan Pérez",
-    unitId: "icu-a",
-    bedLabel: "A1",
-    vitals: { rr: 28, spo2: 90, tempC: 39.2, sbp: 88, hr: 135, o2: true, avpu: "V" },
-    devices: [{ id: "dev-vent", label: "Ventilación mecánica", category: "invasive", critical: true }],
-    risks: { isolation: true },
-    pendingTasks: [{ id: "task-1", title: "Gasometría urgente", urgent: true }],
-    recentIncidentFlag: true,
-  },
-  {
-    id: "pat-003",
-    name: "Laura Torres",
-    unitId: "ed-main",
-    bedLabel: "E3",
-    vitals: { rr: 20, spo2: 94, tempC: 37.0, sbp: 118, hr: 105, o2: false, avpu: "A" },
-    pendingTasks: [{ id: "task-3", title: "Analítica en curso", urgent: false }],
-  },
-  {
-    id: "pat-004",
-    name: "Carlos Ruiz",
-    unitId: "ed-obs",
-    bedLabel: "E4",
-    vitals: { rr: 16, spo2: 97, tempC: 36.8, sbp: 120, hr: 82, o2: false, avpu: "A" },
-    risks: { pressureUlcer: false },
-    pendingTasks: [],
-  },
-  { id: "pat-005", name: "Ana Rivas", unitId: "onc-ward", vitals: { rr: 18, spo2: 96, tempC: 37.1, sbp: 118, hr: 88 } },
-  { id: "pat-006", name: "Miguel Soto", unitId: "neph-hd", vitals: { rr: 19, spo2: 95, tempC: 36.9, sbp: 115, hr: 90 } },
-  { id: "pat-007", name: "Sofía Álvarez", unitId: "ped-ward", vitals: { rr: 22, spo2: 97, tempC: 37.2, sbp: 110, hr: 100 } },
-  { id: "pat-008", name: "Paula Fernández", unitId: "ob-labor", vitals: { rr: 18, spo2: 98, tempC: 37.3, sbp: 112, hr: 88 } },
-  { id: "pat-009", name: "Raúl Herrera", unitId: "neuroicu-1", vitals: { rr: 19, spo2: 95, tempC: 37.0, sbp: 118, hr: 92 } },
-  { id: "pat-010", name: "Lucía Romero", unitId: "cvicu-1", vitals: { rr: 17, spo2: 99, tempC: 36.9, sbp: 116, hr: 80 } },
-];
+export type { PatientListItem } from "@/src/data/mockPatients";
 
 export const ALL_SPECIALTIES_OPTION = "all";
 export function filterPatients(
@@ -383,6 +319,16 @@ export default function PatientList({ navigation }: Props) {
           <Text style={styles.priorityToggleLabel}>Ordenar por prioridad clínica</Text>
           <Switch value={sortByPriority} onValueChange={setSortByPriority} />
         </View>
+        <Pressable
+          accessibilityRole="button"
+          style={styles.supervisorButton}
+          onPress={() => navigation.navigate("SupervisorDashboard")}
+        >
+          <Text style={styles.supervisorButtonTitle}>Ver dashboard de turno</Text>
+          <Text style={styles.supervisorButtonSubtitle}>
+            Resumen para supervisores y jefaturas de unidad.
+          </Text>
+        </Pressable>
       </View>
 
       <FlatList
@@ -471,6 +417,26 @@ const styles = StyleSheet.create({
   priorityToggleLabel: {
     fontWeight: "600",
     color: "#111827",
+  },
+  supervisorButton: {
+    backgroundColor: '#0f172a',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  supervisorButtonTitle: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  supervisorButtonSubtitle: {
+    color: '#e5e7eb',
+    marginTop: 2,
   },
   modalBackdrop: {
     flex: 1,
