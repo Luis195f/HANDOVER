@@ -3,6 +3,7 @@ export const TERMINOLOGY_SYSTEMS = {
   SNOMED: 'http://snomed.info/sct',
   UCUM: 'http://unitsofmeasure.org',
   OBSERVATION_CATEGORY: 'http://terminology.hl7.org/CodeSystem/observation-category',
+  HANDOVER_CARE: 'urn:handover-pro:care',
 } as const;
 
 export type TerminologySystem =
@@ -28,6 +29,9 @@ export const LOINC = {
   fio2: '3151-8',
   o2Flow: '3150-0',
   acvpu: '67775-7',
+  painEva: '38208-5',
+  bradenScale: '38876-5',
+  glasgowTotal: '9267-6',
 } as const;
 
 export type LoincCode = (typeof LOINC)[keyof typeof LOINC];
@@ -60,7 +64,132 @@ export const CATEGORY = {
 export type ObservationCategory =
   (typeof CATEGORY)[keyof typeof CATEGORY];
 
+export type FhirCode = TerminologyCode<string>;
+
+type FhirCodeGroup = Record<string, TerminologyCode<string>>;
+
 export const FHIR_CODES = {
+  VITALS: {
+    VITAL_SIGNS_PANEL: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.vitalSignsPanel,
+      display: 'Vital signs panel',
+    },
+    BP_PANEL: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.bpPanel,
+      display: 'Blood pressure panel',
+    },
+    BP_SYSTOLIC: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.sbp,
+      display: 'Systolic blood pressure',
+    },
+    BP_DIASTOLIC: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.dbp,
+      display: 'Diastolic blood pressure',
+    },
+    HEART_RATE: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.hr,
+      display: 'Heart rate',
+    },
+    RESP_RATE: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.rr,
+      display: 'Respiratory rate',
+    },
+    TEMPERATURE: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.temp,
+      display: 'Body temperature',
+    },
+    SPO2: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.spo2,
+      display: 'Oxygen saturation',
+    },
+    GLUCOSE_MASS_BLD: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.glucoseMgDl,
+      display: 'Glucose [Mass/volume] in Blood',
+    },
+    GLUCOSE_MOLES_BLD: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.glucoseMmolL,
+      display: 'Glucose [Moles/volume] in Blood',
+    },
+    FIO2: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.fio2,
+      display: 'Fraction of inspired oxygen',
+    },
+    O2_FLOW: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.o2Flow,
+      display: 'Oxygen flow rate',
+    },
+    ACVPU: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.acvpu,
+      display: 'ACVPU scale',
+    },
+  },
+  SCALES: {
+    EVA: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.painEva,
+      display: 'Pain severity visual analogue score',
+    },
+    BRADEN: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.bradenScale,
+      display: 'Braden scale total score',
+    },
+    GLASGOW: {
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.glasgowTotal,
+      display: 'Glasgow coma scale total score',
+    },
+  },
+  CARE: {
+    NUTRITION: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'nutrition-care',
+      display: 'Nutrition care assessment',
+    },
+    URINE_OUTPUT: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'urine-output',
+      display: 'Urine output',
+    },
+    STOOL_PATTERN: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'stool-pattern',
+      display: 'Stool pattern',
+    },
+    RECTAL_TUBE: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'rectal-tube-status',
+      display: 'Rectal tube status',
+    },
+    MOBILITY: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'mobility-assessment',
+      display: 'Mobility assessment',
+    },
+    SKIN: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'skin-assessment',
+      display: 'Skin assessment',
+    },
+    FLUID_BALANCE: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'fluid-balance',
+      display: 'Fluid balance',
+    },
+  },
   RISK: {
     FALL: {
       system: TERMINOLOGY_SYSTEMS.SNOMED,
@@ -78,10 +207,10 @@ export const FHIR_CODES = {
       display: 'At increased risk for social isolation (finding)',
     },
   },
-} as const satisfies {
-  RISK: Record<string, TerminologyCode<string>>;
-};
+} as const satisfies Record<string, FhirCodeGroup>;
 
+export type FhirVitalCode = (typeof FHIR_CODES.VITALS)[keyof typeof FHIR_CODES.VITALS];
+export type FhirScaleCode = (typeof FHIR_CODES.SCALES)[keyof typeof FHIR_CODES.SCALES];
 export type FhirRiskCode = (typeof FHIR_CODES.RISK)[keyof typeof FHIR_CODES.RISK];
 
 export const ALERT_CODES = {
