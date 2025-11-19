@@ -24,6 +24,7 @@ import {
   type SttService,
   type SttStatus,
 } from '@/src/lib/stt';
+import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { currentUser, hasUnitAccess } from '@/src/security/acl';
@@ -74,6 +75,17 @@ const styles = StyleSheet.create({
   micButtonTextActive: { color: '#fff' },
   dictationStatus: { marginTop: 6, color: '#4338CA', fontSize: 14 },
   dictationError: { marginTop: 6, color: '#B45309', fontSize: 14 },
+  sbarPreview: {
+    borderColor: '#CBD5F5',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    backgroundColor: '#F8FAFF',
+  },
+  sbarTitle: { fontWeight: '700', marginBottom: 8, fontSize: 16 },
+  sbarText: { fontFamily: 'monospace' },
+  helperText: { marginTop: 6, color: '#4B5563' },
 });
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
@@ -443,6 +455,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [lastDictationField, setLastDictationField] = useState<DictationField | null>(null);
   const [dictatedPartial, setDictatedPartial] = useState('');
   const activeFieldRef = useRef<DictationField | null>(null);
+  const [sbarPreview, setSbarPreview] = useState<string | null>(null);
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -587,6 +600,43 @@ export default function HandoverForm({ navigation, route }: Props) {
     const parsed = Number(normalized);
     return Number.isNaN(parsed) ? undefined : parsed;
   };
+
+  const handleGenerateSbar = async () => {
+    const isValid = await form.trigger();
+    if (!isValid) {
+      Alert.alert('Revisa el formulario', 'Completa los campos obligatorios para generar el SBAR.');
+      return;
+    }
+    const values = form.getValues();
+    const summary = generateSbarSummary(values, { locale: 'es', maxCharsPerSection: 280 });
+    const sbarText = formatSbar(summary, 'es');
+    setSbarPreview(sbarText);
+  };
+
+  const applySbarToClosingSummary = (text: string) => {
+    form.setValue('closingSummary', text, { shouldDirty: true, shouldValidate: true });
+    setSbarPreview(text);
+  };
+
+  const handleInsertSbar = () => {
+    if (!sbarPreview) return;
+    const current = form.getValues('closingSummary') ?? '';
+    if (current.trim()) {
+      Alert.alert(
+        'Reemplazar resumen',
+        'Ya existe un resumen escrito. ¿Quieres reemplazarlo por el SBAR sugerido?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Reemplazar', style: 'destructive', onPress: () => applySbarToClosingSummary(sbarPreview) },
+        ],
+        { cancelable: true },
+      );
+      return;
+    }
+    applySbarToClosingSummary(sbarPreview);
+  };
+
+  const handleCloseSbarPreview = () => setSbarPreview(null);
 
   const onScanPress = () => {
     const routeNames = (navigation as any)?.getState?.()?.routeNames ?? ([] as string[]);
@@ -1081,6 +1131,22 @@ export default function HandoverForm({ navigation, route }: Props) {
           </View>
           {renderDictationStatus('closingSummary')}
           {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
+          <View style={styles.inlineActions}>
+            <Button title="Generar SBAR" onPress={handleGenerateSbar} />
+          </View>
+          {sbarPreview ? (
+            <View style={styles.sbarPreview}>
+              <Text style={styles.sbarTitle}>Resumen SBAR sugerido</Text>
+              <Text style={styles.sbarText}>{sbarPreview}</Text>
+              <Text style={styles.helperText}>Revisa y ajusta el contenido según tu criterio clínico.</Text>
+              <View style={styles.inlineActions}>
+                <Button title="Insertar en resumen" onPress={handleInsertSbar} />
+                <View style={styles.secondaryButton}>
+                  <Button title="Cerrar" onPress={handleCloseSbarPreview} />
+                </View>
+              </View>
+            </View>
+          ) : null}
         </View>
       </View>
 
