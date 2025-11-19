@@ -10,8 +10,9 @@ import type {
   BradenScale,
   GlasgowScale,
   SkinInfo,
+  RiskFlags,
 } from '../types/handover';
-import { CATEGORY, LOINC, SNOMED } from './codes';
+import { CATEGORY, FHIR_CODES, LOINC, SNOMED } from './codes';
 import { hashHex, fhirId } from './crypto';
 
 const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
@@ -148,6 +149,19 @@ type DocumentReference = {
   content: DocumentReferenceContent[];
 };
 
+type Condition = {
+  resourceType: 'Condition';
+  id?: string;
+  clinicalStatus: CodeableConcept;
+  verificationStatus: CodeableConcept;
+  category?: CodeableConcept[];
+  code: CodeableConcept;
+  subject: Reference;
+  encounter?: Reference;
+  onsetDateTime?: string;
+  recordedDate?: string;
+};
+
 type CompositionAttester = {
   mode: 'professional' | 'legal' | 'official' | 'personal';
   time?: string;
@@ -180,7 +194,14 @@ type Narrative = {
   div: string;
 };
 
-type FhirResource = Observation | MedicationStatement | Procedure | DeviceUseStatement | DocumentReference | Composition;
+type FhirResource =
+  | Observation
+  | MedicationStatement
+  | Procedure
+  | DeviceUseStatement
+  | DocumentReference
+  | Composition
+  | Condition;
 
 type BundleEntry = {
   fullUrl: string;
@@ -244,6 +265,37 @@ const surveyCategoryConcept: CodeableConcept = {
     },
   ],
   text: 'Nursing care',
+};
+
+const conditionClinicalStatusActive: CodeableConcept = {
+  coding: [
+    {
+      system: 'http://terminology.hl7.org/CodeSystem/condition-clinical',
+      code: 'active',
+      display: 'Active',
+    },
+  ],
+};
+
+const conditionVerificationStatusUnconfirmed: CodeableConcept = {
+  coding: [
+    {
+      system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status',
+      code: 'unconfirmed',
+      display: 'Unconfirmed',
+    },
+  ],
+};
+
+const conditionProblemListCategory: CodeableConcept = {
+  coding: [
+    {
+      system: 'http://terminology.hl7.org/CodeSystem/condition-category',
+      code: 'problem-list-item',
+      display: 'Problem list item',
+    },
+  ],
+  text: 'Problem list item',
 };
 
 const AVPU_MAP = {
@@ -420,6 +472,7 @@ type BundleReferenceIndex = {
   pain: string[];
   braden: string[];
   glasgow: string[];
+  risks: string[];
 };
 
 export type AuthorInput = {
@@ -457,6 +510,7 @@ export type HandoverValues = {
   painAssessment?: PainAssessment;
   braden?: BradenScale;
   glasgow?: GlasgowScale;
+  risks?: RiskFlags;
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
@@ -600,6 +654,7 @@ const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
   DeviceUseStatement: 'dus-',
   DocumentReference: 'doc-',
   Composition: 'comp-',
+  Condition: 'cond-',
 };
 
 function assignStableIds(
@@ -1508,6 +1563,43 @@ function mapGlasgowObservation(
   };
 }
 
+function mapRiskConditions(
+  risks: RiskFlags | undefined,
+  context: MappingContext,
+): Condition[] {
+  if (!risks) return [];
+
+  const { subject, encounter, effectiveDateTime } = context;
+  const definitions = [
+    { enabled: risks.fall, code: FHIR_CODES.RISK.FALL },
+    { enabled: risks.pressureUlcer, code: FHIR_CODES.RISK.PRESSURE_ULCER },
+    { enabled: risks.isolation, code: FHIR_CODES.RISK.SOCIAL_ISOLATION },
+  ];
+
+  return definitions
+    .filter((definition) => definition.enabled)
+    .map((definition) => ({
+      resourceType: 'Condition',
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      category: [conditionProblemListCategory],
+      code: {
+        coding: [
+          {
+            system: definition.code.system,
+            code: definition.code.code,
+            display: definition.code.display,
+          },
+        ],
+        text: definition.code.display,
+      },
+      subject,
+      encounter,
+      onsetDateTime: effectiveDateTime,
+      recordedDate: effectiveDateTime,
+    }));
+}
+
 export function mapDocumentReferenceAudio(
   values: DocumentValues,
   options?: BuildOptions,
@@ -1629,6 +1721,13 @@ export function buildComposition(
     });
   }
 
+  if (refs.risks.length > 0) {
+    sections.push({
+      title: 'Risks',
+      entry: refs.risks.map((reference) => ({ reference })),
+    });
+  }
+
   if (refs.fluidBalance.length > 0) {
     sections.push({
       title: 'Fluid balance',
@@ -1735,6 +1834,7 @@ export function buildHandoverBundle(
   const evaObservation = mapEvaObservation(values.painAssessment, mappingContext);
   const bradenObservation = mapBradenObservation(values.braden, mappingContext);
   const glasgowObservation = mapGlasgowObservation(values.glasgow, mappingContext);
+  const riskConditions = mapRiskConditions(values.risks, mappingContext);
 
   const medications = mapMedicationStatements(
     {
@@ -1776,6 +1876,7 @@ export function buildHandoverBundle(
   const painRefs: string[] = [];
   const bradenRefs: string[] = [];
   const glasgowRefs: string[] = [];
+  const riskRefs: string[] = [];
 
   vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(observation, values.patientId);
@@ -1855,6 +1956,16 @@ export function buildHandoverBundle(
     glasgowRefs.push(fullUrl);
   }
 
+  riskConditions.forEach((condition) => {
+    const { resource, fullUrl } = assignStableIds(condition, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Condition' },
+    });
+    riskRefs.push(fullUrl);
+  });
+
   medications.forEach((medication) => {
     const { resource, fullUrl } = assignStableIds(medication, values.patientId);
     entries.push({
@@ -1906,6 +2017,7 @@ export function buildHandoverBundle(
       pain: painRefs,
       braden: bradenRefs,
       glasgow: glasgowRefs,
+      risks: riskRefs,
     },
     sharedOptions,
   );
@@ -1935,6 +2047,7 @@ export type {
   DeviceUseStatement,
   DocumentReference,
   Composition,
+  Condition,
   Bundle,
 };
 

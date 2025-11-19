@@ -12,6 +12,7 @@ import {
   type SkinInfo,
   type BradenScale,
   type GlasgowScale,
+  type RiskFlags,
 } from "../types/handover";
 
 const parseCensus = (value: unknown) => {
@@ -185,6 +186,14 @@ export const zSkinInfo: z.ZodSchema<SkinInfo> = z.object({
   hasPressureInjury: z.boolean().optional(),
 });
 
+export const zRiskFlags: z.ZodSchema<RiskFlags> = z
+  .object({
+    fall: z.boolean().optional(),
+    pressureUlcer: z.boolean().optional(),
+    isolation: z.boolean().optional(),
+  })
+  .partial();
+
 export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
   intakeMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   outputMl: z.number().nonnegative({ message: "No puede ser negativo" }),
@@ -234,6 +243,7 @@ export const zHandover = z.object({
   painAssessment: zPainAssessment.optional(),
   braden: zBradenScale.optional(),
   glasgow: zGlasgowScale.optional(),
+  risks: zRiskFlags.optional(),
 
   // Multimedia
   audioUri: z.string().min(1).optional()

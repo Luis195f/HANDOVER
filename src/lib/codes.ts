@@ -29,6 +29,28 @@ export const CATEGORY = {
   },
 } as const;
 
+export const FHIR_CODES = {
+  RISK: {
+    FALL: {
+      system: 'http://snomed.info/sct',
+      code: '129839007',
+      display: 'At risk for falls (finding)',
+    },
+    PRESSURE_ULCER: {
+      system: 'http://snomed.info/sct',
+      code: '714658008',
+      display: 'At risk of pressure ulcer (finding)',
+    },
+    SOCIAL_ISOLATION: {
+      system: 'http://snomed.info/sct',
+      code: '1144779008',
+      display: 'At increased risk for social isolation (finding)',
+    },
+  },
+} as const;
+
+export type FhirRiskCode = (typeof FHIR_CODES.RISK)[keyof typeof FHIR_CODES.RISK];
+
 export const ALERT_CODES = {
   news2: 'alert.news2',
   catheterOverdue: 'alert.catheter.overdue',

@@ -31,6 +31,12 @@ export type SkinInfo = {
   hasPressureInjury?: boolean;
 };
 
+export type RiskFlags = {
+  fall?: boolean;
+  pressureUlcer?: boolean;
+  isolation?: boolean;
+};
+
 export type FluidBalanceInfo = {
   intakeMl: number;
   outputMl: number;
@@ -108,4 +114,5 @@ export type HandoverValues = {
   painAssessment?: PainAssessment;
   braden?: BradenScale;
   glasgow?: GlasgowScale;
+  risks?: RiskFlags;
 };
