@@ -7,6 +7,8 @@ import type {
   MobilityInfo,
   NutritionInfo,
   PainAssessment,
+  BradenScale,
+  GlasgowScale,
   SkinInfo,
 } from '../types/handover';
 import { CATEGORY, LOINC, SNOMED } from './codes';
@@ -60,6 +62,7 @@ type ObservationComponent = {
   valueQuantity?: Quantity;
   valueCodeableConcept?: CodeableConcept;
   valueString?: string;
+  valueInteger?: number;
 };
 
 type Observation = {
@@ -76,6 +79,7 @@ type Observation = {
   valueQuantity?: Quantity;
   valueCodeableConcept?: CodeableConcept;
   valueString?: string;
+  valueInteger?: number;
   component?: ObservationComponent[];
   note?: Annotation[];
 };
@@ -413,6 +417,9 @@ type BundleReferenceIndex = {
   elimination: string[];
   mobilitySkin: string[];
   fluidBalance: string[];
+  pain: string[];
+  braden: string[];
+  glasgow: string[];
 };
 
 export type AuthorInput = {
@@ -447,12 +454,20 @@ export type HandoverValues = {
   mobility?: MobilityInfo;
   skin?: SkinInfo;
   fluidBalance?: FluidBalanceInfo;
-  painAssessment?: PainAssessment; // TODO: map to FHIR in F2-08
+  painAssessment?: PainAssessment;
+  braden?: BradenScale;
+  glasgow?: GlasgowScale;
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
 
 export type BuildOptions = Partial<typeof DEFAULT_OPTS>;
+
+type MappingContext = {
+  subject: Reference;
+  encounter?: Reference;
+  effectiveDateTime: string;
+};
 
 const UCUM = 'http://unitsofmeasure.org';
 
@@ -1288,6 +1303,211 @@ export function mapFluidBalanceCare(
   ];
 }
 
+function mapEvaObservation(
+  pain: PainAssessment | undefined,
+  context: MappingContext,
+): Observation | null {
+  if (!pain) return null;
+
+  const components: ObservationComponent[] = [];
+  const note: Annotation[] = [{ text: `Dolor reportado: ${pain.hasPain ? 'Sí' : 'No'}` }];
+
+  if (pain.location) {
+    components.push({
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:component', code: 'pain-location', display: 'Pain location' },
+        ],
+        text: 'Pain location',
+      },
+      valueString: pain.location,
+    });
+  }
+
+  if (pain.actionsTaken) {
+    components.push({
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:component', code: 'pain-actions', display: 'Actions taken' },
+        ],
+        text: 'Actions taken',
+      },
+      valueString: pain.actionsTaken,
+    });
+  }
+
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: {
+      coding: [
+        {
+          system: 'urn:todo:code',
+          code: 'EVA',
+          display: 'Escala EVA del dolor',
+        },
+      ],
+      text: 'Escala EVA del dolor (TODO código LOINC en F2-M3)',
+    },
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    valueInteger: pain.evaScore ?? undefined,
+    component: components.length > 0 ? components : undefined,
+    note,
+  };
+}
+
+function mapBradenObservation(
+  braden: BradenScale | undefined,
+  context: MappingContext,
+): Observation | null {
+  if (!braden) return null;
+
+  const components: ObservationComponent[] = [
+    {
+      code: {
+        coding: [
+          {
+            system: 'urn:handover-pro:braden',
+            code: 'sensory-perception',
+            display: 'Sensory perception',
+          },
+        ],
+        text: 'Sensory perception',
+      },
+      valueInteger: braden.sensoryPerception,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:braden', code: 'moisture', display: 'Moisture' },
+        ],
+        text: 'Moisture',
+      },
+      valueInteger: braden.moisture,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:braden', code: 'activity', display: 'Activity' },
+        ],
+        text: 'Activity',
+      },
+      valueInteger: braden.activity,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:braden', code: 'mobility', display: 'Mobility' },
+        ],
+        text: 'Mobility',
+      },
+      valueInteger: braden.mobility,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:braden', code: 'nutrition', display: 'Nutrition' },
+        ],
+        text: 'Nutrition',
+      },
+      valueInteger: braden.nutrition,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:braden', code: 'friction-shear', display: 'Friction/shear' },
+        ],
+        text: 'Friction/shear',
+      },
+      valueInteger: braden.frictionShear,
+    },
+  ];
+
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: {
+      coding: [
+        {
+          system: 'urn:todo:code',
+          code: 'BRADEN',
+          display: 'Escala de Braden',
+        },
+      ],
+      text: 'Escala de Braden (TODO código LOINC en F2-M3)',
+    },
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    valueInteger: braden.totalScore,
+    component: components,
+    note: [{ text: `Nivel de riesgo: ${braden.riskLevel}` }],
+  };
+}
+
+function mapGlasgowObservation(
+  glasgow: GlasgowScale | undefined,
+  context: MappingContext,
+): Observation | null {
+  if (!glasgow) return null;
+
+  const components: ObservationComponent[] = [
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:glasgow', code: 'eye', display: 'Respuesta ocular' },
+        ],
+        text: 'Respuesta ocular',
+      },
+      valueInteger: glasgow.eye,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:glasgow', code: 'verbal', display: 'Respuesta verbal' },
+        ],
+        text: 'Respuesta verbal',
+      },
+      valueInteger: glasgow.verbal,
+    },
+    {
+      code: {
+        coding: [
+          { system: 'urn:handover-pro:glasgow', code: 'motor', display: 'Respuesta motora' },
+        ],
+        text: 'Respuesta motora',
+      },
+      valueInteger: glasgow.motor,
+    },
+  ];
+
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: {
+      coding: [
+        {
+          system: 'urn:todo:code',
+          code: 'GLASGOW',
+          display: 'Escala de Glasgow',
+        },
+      ],
+      text: 'Escala de Glasgow (TODO código LOINC en F2-M3)',
+    },
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    valueInteger: glasgow.total,
+    component: components,
+    note: [{ text: `Severidad: ${glasgow.severity}` }],
+  };
+}
+
 export function mapDocumentReferenceAudio(
   values: DocumentValues,
   options?: BuildOptions,
@@ -1416,6 +1636,18 @@ export function buildComposition(
     });
   }
 
+  if (refs.pain.length > 0) {
+    sections.push({ title: 'Pain assessment', entry: refs.pain.map((reference) => ({ reference })) });
+  }
+
+  if (refs.braden.length > 0) {
+    sections.push({ title: 'Braden scale', entry: refs.braden.map((reference) => ({ reference })) });
+  }
+
+  if (refs.glasgow.length > 0) {
+    sections.push({ title: 'Glasgow scale', entry: refs.glasgow.map((reference) => ({ reference })) });
+  }
+
   if (refs.attachments.length > 0) {
     sections.push({
       title: 'Attachments',
@@ -1448,6 +1680,12 @@ export function buildHandoverBundle(
   const optionsMerged = resolveOptions(options);
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => nowIso };
+
+  const mappingContext: MappingContext = {
+    subject: patientReference(values.patientId),
+    encounter: encounterReference(values.encounterId),
+    effectiveDateTime: sharedOptions.now(),
+  };
 
   const vitalObservations = values.vitals
     ? mapObservationVitals(
@@ -1494,6 +1732,10 @@ export function buildHandoverBundle(
     sharedOptions,
   );
 
+  const evaObservation = mapEvaObservation(values.painAssessment, mappingContext);
+  const bradenObservation = mapBradenObservation(values.braden, mappingContext);
+  const glasgowObservation = mapGlasgowObservation(values.glasgow, mappingContext);
+
   const medications = mapMedicationStatements(
     {
       patientId: values.patientId,
@@ -1531,6 +1773,9 @@ export function buildHandoverBundle(
   const eliminationRefs: string[] = [];
   const mobilitySkinRefs: string[] = [];
   const fluidBalanceRefs: string[] = [];
+  const painRefs: string[] = [];
+  const bradenRefs: string[] = [];
+  const glasgowRefs: string[] = [];
 
   vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(observation, values.patientId);
@@ -1592,6 +1837,24 @@ export function buildHandoverBundle(
     fluidBalanceRefs.push(fullUrl);
   });
 
+  if (evaObservation) {
+    const { resource, fullUrl } = assignStableIds(evaObservation, values.patientId);
+    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+    painRefs.push(fullUrl);
+  }
+
+  if (bradenObservation) {
+    const { resource, fullUrl } = assignStableIds(bradenObservation, values.patientId);
+    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+    bradenRefs.push(fullUrl);
+  }
+
+  if (glasgowObservation) {
+    const { resource, fullUrl } = assignStableIds(glasgowObservation, values.patientId);
+    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+    glasgowRefs.push(fullUrl);
+  }
+
   medications.forEach((medication) => {
     const { resource, fullUrl } = assignStableIds(medication, values.patientId);
     entries.push({
@@ -1640,6 +1903,9 @@ export function buildHandoverBundle(
       elimination: eliminationRefs,
       mobilitySkin: mobilitySkinRefs,
       fluidBalance: fluidBalanceRefs,
+      pain: painRefs,
+      braden: bradenRefs,
+      glasgow: glasgowRefs,
     },
     sharedOptions,
   );
