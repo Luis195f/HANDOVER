@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Composition",
+  "type": "object",
+  "required": ["resourceType", "status", "type", "subject", "date", "title", "author"],
+  "properties": {
+    "resourceType": { "const": "Composition" },
+    "status": { "type": "string" },
+    "type": { "$ref": "#/definitions/CodeableConcept" },
+    "subject": { "$ref": "#/definitions/Reference" },
+    "encounter": { "$ref": "#/definitions/Reference" },
+    "date": { "type": "string" },
+    "title": { "type": "string" },
+    "author": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Reference" },
+      "minItems": 1
+    },
+    "attester": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Attester" }
+    },
+    "section": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Section" }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "Reference": {
+      "type": "object",
+      "required": ["reference"],
+      "properties": {
+        "reference": { "type": "string" },
+        "type": { "type": "string" },
+        "display": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CodeableConcept": {
+      "type": "object",
+      "required": ["coding"],
+      "properties": {
+        "coding": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["system", "code"],
+            "properties": {
+              "system": { "type": "string" },
+              "code": { "type": "string" },
+              "display": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Attester": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string" },
+        "time": { "type": "string" },
+        "party": { "$ref": "#/definitions/Reference" }
+      },
+      "additionalProperties": true
+    },
+    "Section": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string" },
+        "code": { "$ref": "#/definitions/CodeableConcept" },
+        "entry": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Reference" }
+        },
+        "text": {
+          "type": "object",
+          "required": ["status", "div"],
+          "properties": {
+            "status": { "type": "string" },
+            "div": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

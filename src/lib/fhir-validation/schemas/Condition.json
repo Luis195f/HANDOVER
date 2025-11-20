@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Condition",
+  "type": "object",
+  "required": ["resourceType", "clinicalStatus", "verificationStatus", "code", "subject"],
+  "properties": {
+    "resourceType": { "const": "Condition" },
+    "clinicalStatus": { "$ref": "#/definitions/CodeableConcept" },
+    "verificationStatus": { "$ref": "#/definitions/CodeableConcept" },
+    "category": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CodeableConcept" }
+    },
+    "code": { "$ref": "#/definitions/CodeableConcept" },
+    "subject": { "$ref": "#/definitions/Reference" },
+    "encounter": { "$ref": "#/definitions/Reference" },
+    "onsetDateTime": { "type": "string" },
+    "recordedDate": { "type": "string" }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "CodeableConcept": {
+      "type": "object",
+      "required": ["coding"],
+      "properties": {
+        "coding": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["system", "code"],
+            "properties": {
+              "system": { "type": "string" },
+              "code": { "type": "string" },
+              "display": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Reference": {
+      "type": "object",
+      "required": ["reference"],
+      "properties": {
+        "reference": { "type": "string" },
+        "type": { "type": "string" },
+        "display": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

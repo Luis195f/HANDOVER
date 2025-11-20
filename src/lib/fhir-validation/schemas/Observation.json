@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Observation",
+  "type": "object",
+  "required": ["resourceType", "status", "code", "subject"],
+  "properties": {
+    "resourceType": { "const": "Observation" },
+    "status": { "type": "string" },
+    "category": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CodeableConcept" }
+    },
+    "code": { "$ref": "#/definitions/CodeableConcept" },
+    "subject": { "$ref": "#/definitions/Reference" },
+    "encounter": { "$ref": "#/definitions/Reference" },
+    "effectiveDateTime": { "type": "string" },
+    "issued": { "type": "string" },
+    "valueQuantity": { "$ref": "#/definitions/Quantity" },
+    "valueCodeableConcept": { "$ref": "#/definitions/CodeableConcept" },
+    "valueString": { "type": "string" },
+    "valueInteger": { "type": "integer" },
+    "component": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ObservationComponent" }
+    },
+    "note": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Annotation" }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "Coding": {
+      "type": "object",
+      "required": ["system", "code"],
+      "properties": {
+        "system": { "type": "string" },
+        "code": { "type": "string" },
+        "display": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CodeableConcept": {
+      "type": "object",
+      "required": ["coding"],
+      "properties": {
+        "coding": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Coding" }
+        },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Quantity": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "type": "string" },
+        "system": { "type": "string" },
+        "code": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Reference": {
+      "type": "object",
+      "required": ["reference"],
+      "properties": {
+        "reference": { "type": "string" },
+        "type": { "type": "string" },
+        "display": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "ObservationComponent": {
+      "type": "object",
+      "required": ["code"],
+      "properties": {
+        "code": { "$ref": "#/definitions/CodeableConcept" },
+        "valueQuantity": { "$ref": "#/definitions/Quantity" },
+        "valueCodeableConcept": { "$ref": "#/definitions/CodeableConcept" },
+        "valueString": { "type": "string" },
+        "valueInteger": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+    "Annotation": {
+      "type": "object",
+      "required": ["text"],
+      "properties": { "text": { "type": "string" } },
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateBundle, validateResource } from '../fhir-validation';
+import {
+  validateBundle,
+  validateResourceWithZod,
+  type ValidationResult,
+} from '../fhir-validation';
 
 describe('validateResource', () => {
   const baseObservation = {
@@ -51,7 +55,7 @@ describe('validateResource', () => {
   };
 
   it('returns isValid=true for a valid Observation resource', () => {
-    const result = validateResource(baseObservation);
+    const result: ValidationResult = validateResourceWithZod(baseObservation);
 
     expect(result).toEqual({ isValid: true, errors: [] });
   });
@@ -59,7 +63,7 @@ describe('validateResource', () => {
   it('surfaces readable errors for an Observation missing required values', () => {
     const invalid = { ...baseObservation, valueQuantity: undefined };
 
-    const result = validateResource(invalid);
+    const result = validateResourceWithZod(invalid);
 
     expect(result.isValid).toBe(false);
     expect(result.errors[0]).toMatchObject({
@@ -74,7 +78,7 @@ describe('validateResource', () => {
       device: { display: 'Missing reference' },
     };
 
-    const result = validateResource(invalid);
+    const result = validateResourceWithZod(invalid);
 
     expect(result.isValid).toBe(false);
     expect(result.errors[0]).toMatchObject({
@@ -87,7 +91,7 @@ describe('validateResource', () => {
     const invalid = { ...baseComposition };
     delete (invalid as { subject?: unknown }).subject;
 
-    const result = validateResource(invalid);
+    const result = validateResourceWithZod(invalid);
 
     expect(result.isValid).toBe(false);
     expect(result.errors[0]).toMatchObject({
@@ -104,7 +108,7 @@ describe('validateResource', () => {
       ],
     } as const;
 
-    const result = validateResource(withErrors);
+    const result = validateResourceWithZod(withErrors);
 
     expect(result.isValid).toBe(false);
     expect(result.errors).toEqual([

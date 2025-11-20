@@ -12,7 +12,12 @@
 
 import NetInfo from '@/src/lib/netinfo';
 import { configureFHIRClient, postBundle } from '../fhir-client';
-import { validateBundle as validateFHIRBundle, type ValidationResult } from '../fhir-validation';
+import {
+  validateBundle as validateFHIRBundle,
+  validateResource,
+  type FhirValidationResult,
+  type ValidationResult,
+} from '../fhir-validation';
 import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
@@ -32,24 +37,30 @@ type ValidationErrorDetail = ValidationResult['errors'][number];
 
 function enforceBundleValidation(bundle: any, context: string): ValidationErrorDetail[] {
   const result = validateFHIRBundle(bundle);
-  if (result.isValid) {
-    if (bundle && typeof bundle === 'object' && '_validationErrors' in bundle) {
-      delete (bundle as any)._validationErrors;
-    }
-    return [];
-  }
-
-  if (!IS_PRODUCTION) {
+  if (!result.isValid) {
     const error = new Error(`FHIR bundle validation failed (${context}): ${JSON.stringify(result.errors)}`);
-    (error as any).validationErrors = result.errors;
+    (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = result.errors;
+    if (bundle && typeof bundle === 'object') {
+      (bundle as any)._validationErrors = result.errors;
+    }
     throw error;
   }
 
-  console.error(`FHIR bundle validation failed (${context})`, result.errors);
-  if (bundle && typeof bundle === 'object') {
-    (bundle as any)._validationErrors = result.errors;
+  const fhirValidation: FhirValidationResult = validateResource(bundle, 'Bundle');
+  if (!fhirValidation.ok) {
+    const mappedErrors = fhirValidation.errors.map((message) => ({ path: '$', message }));
+    const error = new Error(`FHIR structure validation failed (${context}): ${fhirValidation.errors.join('; ')}`);
+    (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = mappedErrors;
+    if (bundle && typeof bundle === 'object') {
+      (bundle as any)._validationErrors = mappedErrors;
+    }
+    throw error;
   }
-  return result.errors;
+
+  if (bundle && typeof bundle === 'object' && '_validationErrors' in bundle) {
+    delete (bundle as any)._validationErrors;
+  }
+  return [];
 }
 try {
   const mod = require('../otel');

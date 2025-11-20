@@ -14,6 +14,7 @@ import type {
 } from '../types/handover';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
+import { validateResource as validateFhirResource } from './fhir-validation';
 
 const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
 const resolveOptions = (options?: Partial<typeof DEFAULT_OPTS>) =>
@@ -1950,11 +1951,23 @@ export function buildHandoverBundle(
     request: { method: 'POST', url: 'Composition' },
   });
 
-  return {
+  const bundle: Bundle = {
     resourceType: 'Bundle',
     type: 'transaction',
     entry: entries,
   };
+
+  // BEGIN HANDOVER_FHIR_VALIDATION
+  const validation = validateFhirResource(bundle, 'Bundle');
+  if (!validation.ok) {
+    const message = validation.errors.join('; ');
+    const error = new Error(message);
+    (error as Error & { details: string[] }).details = validation.errors;
+    throw error;
+  }
+  // END HANDOVER_FHIR_VALIDATION
+
+  return bundle;
 }
 
 export type {
