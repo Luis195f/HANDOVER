@@ -1,115 +1,102 @@
+// app.config.ts
+// ================================================
+// ✅ HANDOVER-PRO – Configuración integral de Expo
+// Compatible con EAS Build, Router y FHIR modules
+// ================================================
+
 import { ExpoConfig, ConfigContext } from "expo/config";
+import appJson from "./app.json";
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
-  name: "handover-pro",
-  slug: "handover-pro",
-  owner: "enfermero1",
+export default ({ config }: ConfigContext): ExpoConfig => {
+  const expo = config ?? {};
 
-  scheme: "handoverpro",
-  version: "1.0.0",
-  orientation: "portrait",
-  userInterfaceStyle: "light",
+  return {
+    ...expo,
+    name: appJson.expo?.name ?? "handover-pro",
+    slug: appJson.expo?.slug ?? "handover-pro",
+    version: appJson.expo?.version ?? "1.0.0",
 
-  icon: "./assets/icon.png",
-
-  splash: {
-    image: "./assets/splash-icon.png",
-    resizeMode: "contain",
-    backgroundColor: "#ffffff",
-  },
-
-  // ────────────────────────────────────────────────
-  // 📦 Plugins compatibles con Expo SDK 54 (limpio)
-  // ────────────────────────────────────────────────
-  plugins: [
-    "expo-system-ui",
-    "expo-sqlite",
-    "expo-secure-store",
-    "expo-notifications",
-    [
-      "expo-audio",
-      {
-        microphonePermission: "Permitir a Handover usar el micrófono.",
-      },
-    ],
-    "expo-asset",
-    [
-      "expo-build-properties",
-      {
-        android: {
-          kotlinVersion: "2.0.21",
-        },
-      },
-    ],
-  ],
-
-  // ────────────────────────────────────────────────
-  // 🤖 ANDROID CONFIG
-  // ────────────────────────────────────────────────
-  android: {
-    package: "com.handover.app", // ID limpio para producción
-    adaptiveIcon: {
-      foregroundImage: "./assets/adaptive-icon.png",
-      backgroundColor: "#ffffff",
-    },
-    permissions: [
-      "android.permission.CAMERA",
-      "android.permission.RECORD_AUDIO",
-      "android.permission.POST_NOTIFICATIONS",
-      "android.permission.MODIFY_AUDIO_SETTINGS",
-    ],
-    versionCode: 1,
-    edgeToEdgeEnabled: true,
-  },
-
-  // ────────────────────────────────────────────────
-  // 🍏 iOS CONFIG
-  // ────────────────────────────────────────────────
-  ios: {
-    bundleIdentifier: "com.handover.app",
-    supportsTablet: true,
-    infoPlist: {
-      NSCameraUsageDescription:
-        "Se requiere la cámara para escanear códigos QR en Handover.",
-      NSMicrophoneUsageDescription:
-        "Grabación de notas de audio del turno.",
-      NSUserTrackingUsageDescription:
-        "Se usa para mejorar la experiencia del turno.",
-    },
-    buildNumber: "1.0.0",
-  },
-
-  // ────────────────────────────────────────────────
-  // ⚙️ EXTRA ENVIRONMENT & FEATURES
-  // ────────────────────────────────────────────────
-  extra: {
-    eas: {
-      projectId: "4341b7e0-da12-42a3-8452-745c68996e36",
-    },
-    FHIR_BASE_URL: "https://fhir.example.com",
-    STT_ENDPOINT: "http://192.168.0.16:8091/stt",
-    ENCRYPTION_NAMESPACE: "handover-pro",
-    ALLOW_ALL_UNITS: "1",
-    FEATURES: {
-      handover: {
-        showSBAR: "1",
-        showVitals: "1",
-        showOxygen: "1",
-        showMeds: "1",
-        showAttachments: "1",
-        enableAlerts: "1",
+    // ============================================
+    // 📱 HANDOVER: CONFIGURACIÓN ANDROID MÍNIMA
+    // ============================================
+    android: {
+      ...(expo.android ?? {}),
+      package: "com.handover.app",
+      permissions: Array.from(
+        new Set([
+          ...(expo?.android?.permissions ?? []),
+          "CAMERA",
+          "RECORD_AUDIO",
+          "READ_EXTERNAL_STORAGE",
+          "WRITE_EXTERNAL_STORAGE",
+          "INTERNET",
+        ])
+      ),
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#ffffff",
       },
     },
-  },
 
-  // ────────────────────────────────────────────────
-  // 🔄 UPDATES (EAS UPDATE & OTA READY)
-  // ────────────────────────────────────────────────
-  updates: {
-    fallbackToCacheTimeout: 0,
-    checkAutomatically: "ON_LOAD",
-  },
-});
+    // ============================================
+    // 🍎 HANDOVER: CONFIGURACIÓN iOS
+    // ============================================
+    ios: {
+      ...(expo.ios ?? {}),
+      bundleIdentifier: "com.handover.app",
+      supportsTablet: true,
+      infoPlist: {
+        NSCameraUsageDescription:
+          "La cámara se usa para escanear códigos QR de pacientes y registros clínicos.",
+        NSMicrophoneUsageDescription:
+          "El micrófono se usa para grabar notas de voz en el pase de turno.",
+      },
+    },
+
+    // ============================================
+    // 🔄 HANDOVER: ACTUALIZACIONES OTA (EAS)
+    // ============================================
+    updates: {
+      ...(expo.updates ?? {}),
+      url: "https://u.expo.dev/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", // 🔁 reemplaza con tu ID de proyecto Expo
+      enabled: true,
+      checkAutomatically: "ON_LOAD",
+    },
+
+    runtimeVersion: {
+      policy: "sdkVersion",
+    },
+
+    // ============================================
+    // 🧩 HANDOVER: PLUGINS (Expo Router y otros)
+    // ============================================
+    plugins: [
+      ...(expo.plugins ?? []),
+      "expo-router", // necesario para navegación basada en rutas
+      "expo-camera",
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-sqlite",
+    ],
+
+    // ============================================
+    // 🌐 DEEP LINKS / LINKING
+    // ============================================
+    scheme: "handover",
+    extra: {
+      eas: {
+        projectId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", // 🔁 reemplaza con tu ID real de EAS Project
+      },
+    },
+
+    // ============================================
+    // 🧠 MISC (seguridad, idioma, etc.)
+    // ============================================
+    orientation: "portrait",
+    userInterfaceStyle: "light",
+    assetBundlePatterns: ["**/*"],
+  };
+};
 
 
 
