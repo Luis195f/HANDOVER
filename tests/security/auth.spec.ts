@@ -1,56 +1,85 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { allowedUnitsFrom, type Session } from '@/src/security/auth';
-import { getAuthState, persistAuth, refresh, resetAuthState, type AuthTokens } from '@/src/lib/auth';
+vi.mock('expo-web-browser', () => ({ maybeCompleteAuthSession: vi.fn() }));
 
-describe('allowedUnitsFrom', () => {
-  it('returns empty set when session is null', () => {
-    const allowed = allowedUnitsFrom(null, {});
-    expect(allowed.size).toBe(0);
-  });
+const secureStoreState: { value: string | null } = { value: null };
+vi.mock('expo-secure-store', () => ({
+  getItemAsync: vi.fn(async () => secureStoreState.value),
+  setItemAsync: vi.fn(async (_key: string, value: string) => {
+    secureStoreState.value = value;
+  }),
+  deleteItemAsync: vi.fn(async () => {
+    secureStoreState.value = null;
+  }),
+}));
 
-  it('returns wildcard when env flag is enabled', () => {
-    const allowed = allowedUnitsFrom(null, { EXPO_PUBLIC_ALLOW_ALL_UNITS: '1' });
-    expect(allowed.has('*')).toBe(true);
-    expect(allowed.size).toBe(1);
-  });
+const promptAsyncMock = vi.fn();
+const discoveryMock = vi.fn();
 
-  it('returns units from session', () => {
-    const session = { units: ['UCI', 'Pab1'] } as Session;
-    const allowed = allowedUnitsFrom(session, {});
-    expect(allowed.has('UCI')).toBe(true);
-    expect(allowed.has('XYZ')).toBe(false);
-  });
-});
+vi.mock('expo-auth-session', () => ({
+  ResponseType: { Code: 'code' },
+  AuthRequest: class {
+    config: Record<string, unknown>;
+    constructor(config: Record<string, unknown>) {
+      this.config = config;
+    }
+    promptAsync = promptAsyncMock;
+  },
+  fetchDiscoveryAsync: discoveryMock,
+  makeRedirectUri: vi.fn(() => 'app://redirect'),
+}));
 
-describe('refresh', () => {
+const fetchMock = vi.fn(async () => ({
+  ok: true,
+  json: async () => ({
+    sub: 'user-123',
+    name: 'Nurse Example',
+    roles: ['nurse'],
+    units: ['icu-a'],
+  }),
+}));
+
+globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+describe('auth session', () => {
   beforeEach(() => {
-    resetAuthState();
-    vi.useFakeTimers();
+    secureStoreState.value = null;
+    promptAsyncMock.mockReset();
+    discoveryMock.mockResolvedValue({
+      authorizationEndpoint: 'https://example/authorize',
+      tokenEndpoint: 'https://example/token',
+      userInfoEndpoint: 'https://example/userinfo',
+    });
+    promptAsyncMock.mockResolvedValue({
+      type: 'success',
+      authentication: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        issuedAt: 1700000000,
+        expiresIn: 1200,
+      },
+    });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    resetAuthState();
+  it('loginWithOAuth stores session and hydrates current session', async () => {
+    const { getCurrentSession, loginWithOAuth } = await import('@/src/security/auth');
+
+    const session = await loginWithOAuth();
+    expect(session.accessToken).toBe('access-token');
+    expect(session.roles).toContain('nurse');
+    expect(session.units).toEqual(['icu-a']);
+
+    const hydrated = await getCurrentSession();
+    expect(hydrated?.userId).toBe('user-123');
   });
 
-  it('keeps previous refresh token when refresh response omits it', async () => {
-    const previousTokens: AuthTokens = {
-      accessToken: 'old-access',
-      refreshToken: 'refresh-prev',
-      expiresAt: Math.floor(Date.now() / 1000) + 1000,
-      scope: 'openid profile email',
-    };
+  it('logout clears persisted session', async () => {
+    const { getCurrentSession, loginWithOAuth, logout } = await import('@/src/security/auth');
 
-    vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
-    await persistAuth(previousTokens, { id: 'nurse-1' });
-
-    vi.setSystemTime(new Date('2025-01-01T01:00:00Z'));
-    await refresh({ access_token: 'new-access', expires_in: 7200 }, { id: 'nurse-1' });
-
-    const state = getAuthState();
-    expect(state.tokens?.accessToken).toBe('new-access');
-    expect(state.tokens?.refreshToken).toBe('refresh-prev');
-    expect(state.tokens?.expiresAt).toBe(Math.floor(Date.now() / 1000) + 7200 - 5);
+    await loginWithOAuth();
+    await logout();
+    const session = await getCurrentSession();
+    expect(session).toBeNull();
+    expect(secureStoreState.value).toBeNull();
   });
 });

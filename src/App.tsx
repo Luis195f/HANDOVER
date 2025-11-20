@@ -4,6 +4,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import RootNavigator from "@/src/navigation/RootNavigator";
 import { navigationRef } from "@/src/navigation/navigation";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
+import { AuthProvider } from "@/src/security/auth";
 
 export default function App() {
   // Bootstrap de cola (opcional; no rompe si no existe)
@@ -23,8 +24,10 @@ export default function App() {
   }, []);
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <RootNavigator />
-    </NavigationContainer>
+    <AuthProvider>
+      <NavigationContainer ref={navigationRef}>
+        <RootNavigator />
+      </NavigationContainer>
+    </AuthProvider>
   );
 }

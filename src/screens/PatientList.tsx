@@ -16,7 +16,8 @@ import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { PATIENTS_MOCK, type PatientListItem } from "@/src/data/mockPatients";
 import type { RootStackParamList } from "@/src/navigation/types";
-import { currentUser, hasUnitAccess } from "@/src/security/acl";
+import { ensureUnitAccess } from "@/src/security/acl";
+import { useAuth } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
 import { computePriority, computePriorityList, type PriorityInput, type PrioritizedPatient } from "@/src/lib/priority";
 import {
@@ -230,6 +231,7 @@ export default function PatientList({ navigation }: Props) {
   const patientsForList = sortByPriority ? sortedByPriority : prioritizedPatients;
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
+  const { session } = useAuth();
 
   const onOpenPatient = useCallback(
     (patientId: string) => {
@@ -245,8 +247,9 @@ export default function PatientList({ navigation }: Props) {
         return;
       }
 
-      const user = currentUser();
-      if (!hasUnitAccess(unit.id, user)) {
+      try {
+        ensureUnitAccess(session, unit.id);
+      } catch {
         Alert.alert("Sin acceso", "No tienes acceso a esta unidad.");
         return;
       }
