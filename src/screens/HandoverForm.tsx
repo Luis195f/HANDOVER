@@ -27,7 +27,7 @@ import {
 import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import type { RootStackParamList } from '@/src/navigation/types';
-import { currentUser, hasUnitAccess } from '@/src/security/acl';
+import { ensureUnitAccess } from '@/src/security/acl';
 import { getSession, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
@@ -662,9 +662,10 @@ export default function HandoverForm({ navigation, route }: Props) {
         const unitFromStore = normalizeUnit(selectedUnitId);
         const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
 
-        const user = currentUser();
-        const hasAccess = hasUnitAccess(unitEffective, user);
-        if (!hasAccess) {
+        const activeSession = session ?? (await getSession());
+        try {
+          ensureUnitAccess(activeSession, unitEffective ?? '');
+        } catch {
           Alert.alert('Sin acceso a la unidad');
           return;
         }

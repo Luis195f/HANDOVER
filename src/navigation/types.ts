@@ -24,4 +24,6 @@ export type RootStackParamList = {
   SyncCenter: undefined;
   SupervisorDashboard: undefined;
   PatientDashboard: { patientId: string };
+  Login: undefined;
+  Unauthorized: undefined;
 };

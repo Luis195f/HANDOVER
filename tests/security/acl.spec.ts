@@ -1,33 +1,34 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { hasUnitAccess } from '@/src/security/acl';
-import type { Session } from '@/src/security/auth';
+import type { AuthSession } from '@/src/security/auth-types';
+import { ensureRole, ensureUnitAccess, hasRole } from '@/src/security/acl';
 
-const ORIGINAL_FLAG = process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
+const baseSession: AuthSession = {
+  accessToken: 'token',
+  refreshToken: 'refresh',
+  expiresAt: Math.floor(Date.now() / 1000) + 3600,
+  userId: 'nurse-1',
+  fullName: 'Demo Nurse',
+  roles: ['nurse'],
+  units: ['icu-a', 'med-1'],
+};
 
-afterEach(() => {
-  if (ORIGINAL_FLAG === undefined) {
-    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-  } else {
-    process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = ORIGINAL_FLAG;
-  }
-});
-
-describe('hasUnitAccess', () => {
-  it('allows access when env flag enables wildcard', () => {
-    process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = '1';
-    expect(hasUnitAccess('AnyUnit')).toBe(true);
+describe('ACL helpers', () => {
+  it('hasRole matches against provided roles', () => {
+    expect(hasRole(baseSession, 'nurse')).toBe(true);
+    expect(hasRole(baseSession, 'supervisor')).toBe(false);
+    expect(hasRole({ ...baseSession, roles: ['supervisor'] }, ['supervisor'])).toBe(true);
   });
 
-  it('allows access when unit is included in session', () => {
-    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-    const session = { units: ['UCI'] } as Session;
-    expect(hasUnitAccess('UCI', session)).toBe(true);
+  it('ensureRole throws when role is missing', () => {
+    expect(() => ensureRole(baseSession, 'supervisor')).toThrowError('FORBIDDEN_ROLE');
+    expect(() => ensureRole(null, 'nurse')).toThrowError('NO_SESSION');
   });
 
-  it('denies access when unit not allowed', () => {
-    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
-    const session = { units: ['UCI'] } as Session;
-    expect(hasUnitAccess('XYZ', session)).toBe(false);
+  it('ensureUnitAccess validates unit membership and supervisor bypass', () => {
+    expect(() => ensureUnitAccess(baseSession, 'icu-a')).not.toThrow();
+    expect(() => ensureUnitAccess(baseSession, 'oncology')).toThrowError('FORBIDDEN_UNIT');
+    expect(() => ensureUnitAccess({ ...baseSession, roles: ['supervisor'] }, 'oncology')).not.toThrow();
+    expect(() => ensureUnitAccess(baseSession, '')).toThrowError('INVALID_UNIT');
   });
 });
