@@ -19,6 +19,7 @@ import type { RootStackParamList } from "@/src/navigation/types";
 import { ensureUnitAccess } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
+import { listOfflineQueue, summarizePatientQueueState, type SyncStatus } from "@/src/lib/queue";
 import { computePriority, computePriorityList, type PriorityInput, type PrioritizedPatient } from "@/src/lib/priority";
 import {
   ALL_UNITS_OPTION,
@@ -128,6 +129,23 @@ export default function PatientList({ navigation }: Props) {
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriority, setSortByPriority] = useState(false);
+  const [patientSyncStatuses, setPatientSyncStatuses] = useState<Record<string, SyncStatus>>({});
+
+  const refreshSyncStatuses = useCallback(async () => {
+    const queue = await listOfflineQueue();
+    const groupedItems = queue.reduce<Record<string, typeof queue>>((acc, item) => {
+      if (!acc[item.patientId]) acc[item.patientId] = [];
+      acc[item.patientId]?.push(item);
+      return acc;
+    }, {});
+
+    const nextStatuses = Object.entries(groupedItems).reduce<Record<string, SyncStatus>>((acc, [patientId, items]) => {
+      acc[patientId] = summarizePatientQueueState(items);
+      return acc;
+    }, {});
+
+    setPatientSyncStatuses(nextStatuses);
+  }, []);
 
   const onSpecialtyChange = useCallback((value: string) => {
     setSelectedSpecialtyId(value);
@@ -144,6 +162,12 @@ export default function PatientList({ navigation }: Props) {
       unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
     });
   }, [selectedSpecialtyId, selectedUnitId]);
+
+  useEffect(() => {
+    void refreshSyncStatuses();
+    const interval = setInterval(refreshSyncStatuses, 15_000);
+    return () => clearInterval(interval);
+  }, [refreshSyncStatuses]);
 
   const specialtyOptions = useMemo<PickerOption[]>(() => {
     const base: PickerOption[] = [
@@ -342,10 +366,27 @@ export default function PatientList({ navigation }: Props) {
         renderItem={({ item }) => {
           const basePatient = patientById.get(item.patientId);
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
+          const syncState = patientSyncStatuses[item.patientId] ?? "synced";
           return (
             <Pressable onPress={() => onOpenPatient(item.patientId)} style={styles.patientCard}>
               <Text style={styles.patientName}>{item.displayName}</Text>
               <Text style={styles.patientMeta}>{unit?.name ?? basePatient?.unitId ?? "Unidad desconocida"}</Text>
+              {/* BEGIN HANDOVER_OFFLINE */}
+              <View style={styles.syncRow}>
+                <Text
+                  style={[
+                    styles.syncBadge,
+                    syncState === "error"
+                      ? styles.syncBadgeError
+                      : syncState === "pending"
+                      ? styles.syncBadgePending
+                      : styles.syncBadgeSynced,
+                  ]}
+                >
+                  {syncState === "error" ? "Error de envío" : syncState === "pending" ? "En cola" : "Sincronizado"}
+                </Text>
+              </View>
+              {/* END HANDOVER_OFFLINE */}
               <View style={styles.priorityRow}>
                 {renderPriorityBadge(item.level)}
                 <Text style={styles.reasonText}>{item.reasonSummary}</Text>
@@ -481,6 +522,31 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: "#4b5563",
   },
+  // BEGIN HANDOVER_OFFLINE
+  syncRow: {
+    marginTop: 6,
+    flexDirection: "row",
+  },
+  syncBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  syncBadgePending: {
+    backgroundColor: "#fbbf24",
+    color: "#1f2937",
+  },
+  syncBadgeError: {
+    backgroundColor: "#fca5a5",
+    color: "#7f1d1d",
+  },
+  syncBadgeSynced: {
+    backgroundColor: "#a7f3d0",
+    color: "#064e3b",
+  },
+  // END HANDOVER_OFFLINE
   priorityRow: {
     flexDirection: "row",
     alignItems: "center",
