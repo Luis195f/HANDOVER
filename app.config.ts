@@ -85,7 +85,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: "handover",
     extra: {
       eas: {
-        projectId: "https://u.expo.dev/a1b2c3d4-e5f6-7890-ab12-cd34ef56gh78", // 🔁 reemplaza con tu ID real de EAS Project
+        projectId: "a1b2c3d4-e5f6-7890-ab12-cd34ef56gh78", // 🔁 reemplaza con tu ID real de EAS Project
       },
     },
 
