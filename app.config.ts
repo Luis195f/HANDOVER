@@ -58,7 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // ============================================
     updates: {
       ...(expo.updates ?? {}),
-      url: "https://u.expo.dev/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", // 🔁 reemplaza con tu ID de proyecto Expo
+      url: "https://u.expo.dev/a1b2c3d4-e5f6-7890-ab12-cd34ef56gh78", // 🔁 reemplaza con tu ID de proyecto Expo
       enabled: true,
       checkAutomatically: "ON_LOAD",
     },
@@ -85,7 +85,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: "handover",
     extra: {
       eas: {
-        projectId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", // 🔁 reemplaza con tu ID real de EAS Project
+        projectId: "https://u.expo.dev/a1b2c3d4-e5f6-7890-ab12-cd34ef56gh78", // 🔁 reemplaza con tu ID real de EAS Project
       },
     },
 
