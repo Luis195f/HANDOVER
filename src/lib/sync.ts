@@ -23,7 +23,12 @@ import {
 } from './fhir-client';
 import { hashHex } from './crypto';
 import { z } from 'zod';
-import { validateBundle as validateFHIRBundle, type ValidationResult } from './fhir-validation';
+import {
+  validateBundle as validateFHIRBundle,
+  validateResource,
+  type FhirValidationResult,
+  type ValidationResult,
+} from './fhir-validation';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -82,21 +87,29 @@ function clearValidationErrors(bundle: any) {
   }
 }
 
+function formatFhirErrors(errors: string[]): ValidationResult['errors'] {
+  return errors.map((err) => ({ path: '$', message: err }));
+}
+
 function enforceBundleValidation(bundle: any, context: string) {
   const result = validateFHIRBundle(bundle);
-  if (result.isValid) {
-    clearValidationErrors(bundle);
-    return;
-  }
-
-  if (!IS_PRODUCTION) {
+  if (!result.isValid) {
     const error = new Error(`FHIR bundle validation failed (${context}): ${JSON.stringify(result.errors)}`);
-    (error as any).validationErrors = result.errors;
+    (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = result.errors;
+    annotateValidationErrors(bundle, result.errors);
     throw error;
   }
 
-  console.error(`FHIR bundle validation failed (${context})`, result.errors);
-  annotateValidationErrors(bundle, result.errors);
+  const fhirValidation: FhirValidationResult = validateResource(bundle, 'Bundle');
+  if (!fhirValidation.ok) {
+    const mappedErrors = formatFhirErrors(fhirValidation.errors);
+    const error = new Error(`FHIR structure validation failed (${context}): ${fhirValidation.errors.join('; ')}`);
+    (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = mappedErrors;
+    annotateValidationErrors(bundle, mappedErrors);
+    throw error;
+  }
+
+  clearValidationErrors(bundle);
 }
 
 const TX_IDENTIFIER_SYSTEM = 'urn:handover-pro:tx';

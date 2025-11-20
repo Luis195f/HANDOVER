@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeviceUseStatement",
+  "type": "object",
+  "required": ["resourceType", "status", "subject", "device"],
+  "properties": {
+    "resourceType": { "const": "DeviceUseStatement" },
+    "status": { "type": "string" },
+    "subject": { "$ref": "#/definitions/Reference" },
+    "encounter": { "$ref": "#/definitions/Reference" },
+    "device": { "$ref": "#/definitions/Reference" },
+    "timingPeriod": { "$ref": "#/definitions/Period" },
+    "reasonCode": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CodeableConcept" }
+    },
+    "note": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Annotation" }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "Reference": {
+      "type": "object",
+      "required": ["reference"],
+      "properties": {
+        "reference": { "type": "string" },
+        "type": { "type": "string" },
+        "display": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Period": {
+      "type": "object",
+      "required": ["start"],
+      "properties": {
+        "start": { "type": "string" },
+        "end": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CodeableConcept": {
+      "type": "object",
+      "required": ["coding"],
+      "properties": {
+        "coding": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["system", "code"],
+            "properties": {
+              "system": { "type": "string" },
+              "code": { "type": "string" },
+              "display": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Annotation": {
+      "type": "object",
+      "required": ["text"],
+      "properties": { "text": { "type": "string" } },
+      "additionalProperties": true
+    }
+  }
+}
