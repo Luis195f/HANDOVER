@@ -43,20 +43,189 @@ if (db?.execSync) {
   try { db.execSync("ALTER TABLE tx_queue ADD COLUMN next_at INTEGER NOT NULL DEFAULT 0;"); } catch {}
 }
 
+// BEGIN HANDOVER_OFFLINE
+export type SyncStatus = "pending" | "inFlight" | "synced" | "error";
+
+export interface QueueItem {
+  id: string;
+  createdAt: string;
+  lastAttemptAt?: string;
+  attempts: number;
+  syncStatus: SyncStatus;
+  errorMessage?: string;
+  payloadType: "handover-bundle";
+  payload: string;
+  patientId: string;
+}
+
+type QueueItemInput = Omit<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType"> &
+  Partial<Pick<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt">>;
+
+type QueueItemRow = {
+  id: string;
+  created_at: string;
+  last_attempt_at?: string | null;
+  attempts: number;
+  sync_status: SyncStatus;
+  error_message?: string | null;
+  payload_type: string;
+  payload: string;
+  patient_id: string;
+};
+
+const OFFLINE_TABLE = "handover_offline_queue";
+let memOfflineQueue: QueueItem[] = [];
+
+if (db?.execSync) {
+  db.execSync(`CREATE TABLE IF NOT EXISTS ${OFFLINE_TABLE} (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    last_attempt_at TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL,
+    error_message TEXT,
+    payload_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    patient_id TEXT NOT NULL
+  );`);
+}
+
+function normalizeQueueItem(input: QueueItemInput): QueueItem {
+  const nowIso = input.createdAt ?? new Date().toISOString();
+  return {
+    id: input.id ?? `handover:${hashHex(`${Date.now()}-${Math.random()}`, 16)}`,
+    createdAt: nowIso,
+    lastAttemptAt: input.lastAttemptAt,
+    attempts: input.attempts ?? 0,
+    syncStatus: input.syncStatus ?? "pending",
+    errorMessage: input.errorMessage,
+    payloadType: input.payloadType ?? "handover-bundle",
+    payload: input.payload,
+    patientId: input.patientId,
+  };
+}
+
+function rowToQueueItem(row: QueueItemRow): QueueItem {
+  return {
+    id: String(row.id),
+    createdAt: typeof row.created_at === "string" ? row.created_at : new Date().toISOString(),
+    lastAttemptAt: row.last_attempt_at ?? undefined,
+    attempts: Number.isFinite(row.attempts) ? Number(row.attempts) : 0,
+    syncStatus: row.sync_status,
+    errorMessage: row.error_message ?? undefined,
+    payloadType: (row.payload_type as QueueItem["payloadType"]) ?? "handover-bundle",
+    payload: row.payload,
+    patientId: row.patient_id,
+  };
+}
+
+function persistQueueItem(item: QueueItem): void {
+  if (db?.runSync) {
+    db.runSync(
+      `INSERT OR REPLACE INTO ${OFFLINE_TABLE}(id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id) VALUES(?,?,?,?,?,?,?,?,?)`,
+      [
+        item.id,
+        item.createdAt,
+        item.lastAttemptAt ?? null,
+        item.attempts,
+        item.syncStatus,
+        item.errorMessage ?? null,
+        item.payloadType,
+        item.payload,
+        item.patientId,
+      ]
+    );
+    return;
+  }
+
+  const index = memOfflineQueue.findIndex((row) => row.id === item.id);
+  if (index >= 0) {
+    memOfflineQueue[index] = item;
+  } else {
+    memOfflineQueue.push(item);
+  }
+}
+
+export async function createOfflineQueueItem(input: QueueItemInput): Promise<QueueItem> {
+  const item = normalizeQueueItem(input);
+  persistQueueItem(item);
+  return item;
+}
+
+export async function listOfflineQueue(): Promise<QueueItem[]> {
+  if (db?.getAllSync) {
+    const rows = (db.getAllSync(
+      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
+    ) ?? []) as QueueItemRow[];
+    return rows.map(rowToQueueItem);
+  }
+  return memOfflineQueue
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
+  if (db?.getFirstSync) {
+    const row = db.getFirstSync(
+      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
+      [id]
+    ) as QueueItemRow | undefined;
+    return row ? rowToQueueItem(row) : null;
+  }
+  const found = memOfflineQueue.find((item) => item.id === id);
+  return found ? { ...found } : null;
+}
+
+export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {
+  const current = await getOfflineQueueItem(id);
+  if (!current) return null;
+  const next: QueueItem = {
+    ...current,
+    ...updates,
+    attempts: updates.attempts ?? current.attempts,
+    syncStatus: updates.syncStatus ?? current.syncStatus,
+    payloadType: "handover-bundle",
+  };
+  persistQueueItem(next);
+  return next;
+}
+
+export async function deleteOfflineQueueItem(id: string): Promise<void> {
+  if (db?.runSync) {
+    db.runSync(`DELETE FROM ${OFFLINE_TABLE} WHERE id=?`, [id]);
+  } else {
+    memOfflineQueue = memOfflineQueue.filter((item) => item.id !== id);
+  }
+}
+
+export async function clearOfflineQueue(): Promise<void> {
+  if (db?.runSync) {
+    db.runSync(`DELETE FROM ${OFFLINE_TABLE}`);
+  }
+  memOfflineQueue = [];
+}
+
+export function summarizePatientQueueState(items: QueueItem[]): SyncStatus {
+  if (items.some((item) => item.syncStatus === "error")) return "error";
+  if (items.some((item) => item.syncStatus === "pending" || item.syncStatus === "inFlight")) return "pending";
+  return "synced";
+}
+// END HANDOVER_OFFLINE
+
 // -------------------------------
 // Tipos + estado
 // -------------------------------
-export type QueueItem = {
+export interface LegacyTxQueueItem {
   key: string;
   payload: any;     // { fhirBase, bundle, token? } o lo que el caller necesite
   attempts: number; // mapea a tries
   enqueuedAt: number;
   nextAt?: number;  // timestamp ms para backoff
-};
+}
 
-type SendFn = (item: QueueItem) => Promise<Response | { ok: boolean; status: number }>;
+type SendFn = (item: LegacyTxQueueItem) => Promise<Response | { ok: boolean; status: number }>;
 type FlushOpts = {
-  onSuccess?: (item: QueueItem) => void | Promise<void>;
+  onSuccess?: (item: LegacyTxQueueItem) => void | Promise<void>;
   maxRetries?: number;   // default 3
   baseDelayMs?: number;  // default 0 (tests rápidos). En prod: 1000–2000
 };
@@ -84,7 +253,7 @@ export function setOnline(online: boolean) {
 
 // -------------------------------
 /** Normaliza los inputs (compat con legacy) */
-function _normalizeInput(input: any): QueueItem {
+function _normalizeInput(input: any): LegacyTxQueueItem {
   const key = input?.key || input?.id || `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const payload =
     input?.payload ??
@@ -97,7 +266,7 @@ function _normalizeInput(input: any): QueueItem {
 // -------------------------------
 // Enqueue
 // -------------------------------
-export async function enqueueTx(input: any): Promise<QueueItem> {
+export async function enqueueTx(input: any): Promise<LegacyTxQueueItem> {
   const item = _normalizeInput(input);
 
   if (db?.runSync) {
@@ -131,7 +300,7 @@ export function getQueueLength(): number {
   return memQueue.length;
 }
 
-export function getQueueSnapshot(): QueueItem[] {
+export function getQueueSnapshot(): LegacyTxQueueItem[] {
   if (db?.getAllSync) {
     const rows = db.getAllSync(
       "SELECT key,payload,tries,created_at,next_at FROM tx_queue ORDER BY COALESCE(next_at,0) ASC, id ASC"

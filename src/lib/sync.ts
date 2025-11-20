@@ -29,6 +29,7 @@ import {
   type FhirValidationResult,
   type ValidationResult,
 } from './fhir-validation';
+import { listOfflineQueue, updateOfflineQueueItem, type QueueItem as OfflineQueueItem, type SyncStatus } from './queue';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -115,6 +116,103 @@ function enforceBundleValidation(bundle: any, context: string) {
 const TX_IDENTIFIER_SYSTEM = 'urn:handover-pro:tx';
 const OFFLINE_RETRY_DELAY_MS = 30_000;
 const OFFLINE_ERROR_MESSAGE = 'Sin conexión a la red. Reintentaremos automáticamente al recuperar conectividad.';
+
+// BEGIN HANDOVER_OFFLINE
+export function getNextDelayMs(attempts: number): number {
+  const base = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+  const index = Math.min(Math.max(0, attempts), base.length - 1);
+  return base[index];
+}
+
+type QueueSendResult = { ok: true } | { ok: false; status?: number; message?: string; recoverable?: boolean };
+type QueueSendHandler = (item: OfflineQueueItem) => Promise<QueueSendResult>;
+
+let queueSendHandler: QueueSendHandler = async () => ({ ok: true });
+
+export function setQueueSendHandler(handler: QueueSendHandler): void {
+  queueSendHandler = handler;
+}
+
+function isRecoverableStatus(status?: number): boolean {
+  if (status == null) return true;
+  if (status === 0) return true;
+  return status >= 500;
+}
+
+function buildFailureOutcome(error: unknown): QueueSendResult {
+  if (typeof error === 'object' && error && 'ok' in (error as Record<string, unknown>)) {
+    const candidate = error as { ok?: boolean; status?: number; message?: string; recoverable?: boolean };
+    return {
+      ok: false,
+      status: candidate.status,
+      message: candidate.message ?? (candidate.status ? `HTTP ${candidate.status}` : undefined),
+      recoverable: candidate.recoverable,
+    };
+  }
+
+  if (error instanceof Error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: false, message: typeof error === 'string' ? error : 'Unknown error' };
+}
+
+function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
+  if (item.syncStatus !== 'pending') return false;
+  const reference = item.lastAttemptAt ?? item.createdAt;
+  const base = Date.parse(reference);
+  const baseline = Number.isFinite(base) ? base : 0;
+  const nextAllowed = baseline + getNextDelayMs(item.attempts);
+  return nextAllowed <= now;
+}
+
+export async function processQueueOnce(): Promise<void> {
+  const now = Date.now();
+  const items = await listOfflineQueue();
+  const eligible = items
+    .filter((item) => shouldAttempt(item, now))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  for (const item of eligible) {
+    const startedAt = new Date().toISOString();
+    await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
+
+    let result: QueueSendResult;
+    try {
+      result = await queueSendHandler(item);
+    } catch (error) {
+      result = buildFailureOutcome(error);
+    }
+
+    if (result.ok) {
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'synced',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: undefined,
+      });
+      continue;
+    }
+
+    const recoverable = result.recoverable ?? isRecoverableStatus(result.status);
+    if (recoverable) {
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'pending',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: result.message ?? undefined,
+      });
+      continue;
+    }
+
+    await updateOfflineQueueItem(item.id, {
+      syncStatus: 'error',
+      attempts: item.attempts + 1,
+      lastAttemptAt: startedAt,
+      errorMessage: result.message ?? (result.status ? `HTTP ${result.status}` : undefined),
+    });
+  }
+}
+// END HANDOVER_OFFLINE
 
 let isOffline = false;
 let offlineSince: number | null = null;
