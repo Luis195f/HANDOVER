@@ -12,6 +12,8 @@ export default defineConfig({
       '__tests__/**/*.spec.tsx',
       'tests/**/*.spec.ts',
       'tests/**/*.spec.tsx',
+      'tests/**/*.test.ts',
+      'tests/**/*.test.tsx',
       'tests/patientlist-*.test.ts',
       'tests/qr-scan.test.ts',
       'tests/security/**/*.spec.ts',

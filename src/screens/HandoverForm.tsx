@@ -34,6 +34,7 @@ import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { ExportPdfButton } from './components/ExportPdfButton';
 import SpecificCareSection from './components/SpecificCareSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
 
@@ -824,6 +825,14 @@ export default function HandoverForm({ navigation, route }: Props) {
     },
   );
 
+  const handleValidateForExport = async () => {
+    const isValid = await form.trigger();
+    if (!isValid) {
+      Alert.alert('Revisa el formulario', 'Completa los campos obligatorios antes de exportar el PDF.');
+    }
+    return isValid;
+  };
+
   return (
     <FormProvider {...form}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -1204,6 +1213,9 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       <View style={styles.buttonRow}>
         <Button title="Guardar" onPress={onSubmit} />
+        <View style={styles.secondaryButton}>
+          <ExportPdfButton handover={form.getValues()} onBeforeExport={handleValidateForExport} />
+        </View>
       </View>
     </ScrollView>
     </FormProvider>
