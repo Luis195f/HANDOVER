@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/fhir-client.ts
 import { fetchWithRetry } from './net';
+import type { GeneratedPdf } from './export/export-pdf';
 
 type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;
@@ -156,6 +157,23 @@ export async function postBundle(
 
 /** === Compat con código existente === */
 export const postBundleSmart = postBundle;
+
+export interface PdfUploadContext {
+  patientId: string;
+  handoverId: string;
+}
+
+export async function uploadSignedHandoverPdf(
+  pdf: GeneratedPdf,
+  ctx: PdfUploadContext,
+): Promise<void> {
+  // TODO: cuando el backend exponga endpoint /upload/pdf-to-fhir,
+  // implementar aquí la llamada POST usando el mismo cliente HTTP FHIR.
+  // Por ahora, no hacer nada (stub) para mantener idempotencia.
+  void pdf;
+  void ctx;
+  return;
+}
 
 /** Clase para compat con sync: permite new FhirClient(hooks) + idemKey → Response-like */
 export class FhirClient {
