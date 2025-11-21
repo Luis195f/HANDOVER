@@ -24,6 +24,7 @@ import {
   type SttService,
   type SttStatus,
 } from '@/src/lib/stt';
+import { appendAuditEvent, createAsyncStorageAuditStorage, makeAuditEvent, type AuditStorage } from '@/src/lib/audit';
 import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -376,6 +377,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   const { patientId: patientIdParam, unitId: unitIdParam, specialtyId } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const selectedUnitId = useSelectedUnitId();
+  const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
+  const auditedPatientsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let alive = true;
@@ -638,6 +641,40 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleCloseSbarPreview = () => setSbarPreview(null);
 
+  const patientIdValue = form.watch('patientId');
+
+  const deriveShiftCode = (shiftStartValue?: string | null) => {
+    if (!shiftStartValue) return undefined;
+    const date = new Date(shiftStartValue);
+    const hours = date.getHours();
+    if (Number.isNaN(hours)) return undefined;
+    if (hours >= 6 && hours < 14) return 'MORNING';
+    if (hours >= 14 && hours < 22) return 'AFTERNOON';
+    return 'NIGHT';
+  };
+
+  useEffect(() => {
+    const targetPatientId = typeof patientIdValue === 'string' ? patientIdValue.trim() : '';
+    if (!targetPatientId || auditedPatientsRef.current.has(targetPatientId)) return;
+
+    (async () => {
+      const activeSession = session ?? (await getSession());
+      const userId = activeSession?.userId ?? (activeSession as any)?.user?.id;
+      if (!userId) return;
+      const unitId = activeSession?.units?.[0] ?? (activeSession as any)?.user?.unitId;
+      const shiftCode = deriveShiftCode(form.getValues('administrativeData.shiftStart'));
+      const event = makeAuditEvent({
+        type: 'patient_open',
+        patientId: targetPatientId,
+        userId,
+        unitId: unitId ?? undefined,
+        shiftCode,
+      });
+      await appendAuditEvent(auditStorageRef.current, event);
+      auditedPatientsRef.current.add(targetPatientId);
+    })();
+  }, [form, patientIdValue, session]);
+
   const onScanPress = () => {
     const routeNames = (navigation as any)?.getState?.()?.routeNames ?? ([] as string[]);
     if (routeNames.includes('QRScan')) {
@@ -734,6 +771,20 @@ export default function HandoverForm({ navigation, route }: Props) {
           unitId: administrativeData.unit,
           specialtyId,
         });
+
+        const auditUserId = activeSession?.userId ?? (activeSession as any)?.user?.id;
+        const auditUnitId = activeSession?.units?.[0] ?? (activeSession as any)?.user?.unitId ?? administrativeData.unit;
+        if (auditUserId && values.patientId) {
+          const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
+          const auditEvent = makeAuditEvent({
+            type: 'patient_edit',
+            patientId: values.patientId,
+            userId: auditUserId,
+            unitId: auditUnitId ?? undefined,
+            shiftCode,
+          });
+          await appendAuditEvent(auditStorageRef.current, auditEvent);
+        }
 
         let successMessage = 'Entrega encolada para envío.';
         if (isOn('ENABLE_ALERTS')) {
