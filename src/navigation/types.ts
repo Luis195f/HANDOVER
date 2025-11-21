@@ -23,6 +23,7 @@ export type RootStackParamList = {
   QRScan: QRScanParams | undefined;
   SyncCenter: undefined;
   SupervisorDashboard: undefined;
+  AdminDashboard: undefined;
   PatientDashboard: { patientId: string };
   Login: undefined;
   Unauthorized: undefined;

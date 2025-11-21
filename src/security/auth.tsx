@@ -156,8 +156,8 @@ function extractRoles(profile: Record<string, unknown>): UserRole[] {
     : [];
   const allowed: UserRole[] = [];
   roles.forEach((role) => {
-    if (role === 'nurse' || role === 'supervisor') {
-      allowed.push(role);
+    if (role === 'nurse' || role === 'supervisor' || role === 'admin') {
+      allowed.push(role as UserRole);
     }
   });
   return allowed.length ? allowed : ['nurse'];
