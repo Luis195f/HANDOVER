@@ -3,7 +3,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
-import { AuthSession as SessionModel, UserRole } from './auth-types';
+import { AuthSession, HandoverSession, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -13,6 +13,8 @@ const DEFAULT_AUTH_CONFIG = {
   clientId: process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? 'handover-mobile',
   scopes: (process.env.EXPO_PUBLIC_OIDC_SCOPES ?? 'openid profile email offline_access').split(' '),
 };
+
+type SessionModel = HandoverSession;
 
 const SESSION_KEY = `${process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover'}:auth-session`;
 type AsyncStorageLike = {
@@ -33,16 +35,45 @@ async function getLegacyAsyncStorage(): Promise<AsyncStorageLike | null> {
   }
 }
 
-function parseSession(raw: string | null): SessionModel | null {
+function parseSession(raw: string | null): AuthSession | null {
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as SessionModel;
+    return JSON.parse(raw) as AuthSession;
   } catch {
     return null;
   }
 }
 
-async function migrateFromAsyncStorage(): Promise<SessionModel | null> {
+function normalizeExpiresAt(expiresAt: AuthSession['expiresAt']): string | undefined {
+  if (typeof expiresAt === 'number') {
+    return new Date(expiresAt * 1000).toISOString();
+  }
+  if (!expiresAt) return undefined;
+  const parsed = new Date(expiresAt);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
+}
+
+function normalizeSession(session: AuthSession | null): HandoverSession | null {
+  if (!session) return null;
+  const roles = Array.isArray(session.roles)
+    ? session.roles.filter((role): role is string => typeof role === 'string')
+    : [];
+  const units = Array.isArray(session.units)
+    ? session.units.filter((unit): unit is string => typeof unit === 'string')
+    : [];
+  return {
+    accessToken: session.accessToken,
+    refreshToken: session.refreshToken,
+    expiresAt: normalizeExpiresAt(session.expiresAt),
+    userId: session.userId,
+    displayName: session.displayName ?? session.fullName ?? session.userId,
+    roles,
+    units,
+  };
+}
+
+async function migrateFromAsyncStorage(): Promise<HandoverSession | null> {
   if (migrationAttempted) return null;
   migrationAttempted = true;
   const legacy = await getLegacyAsyncStorage();
@@ -51,12 +82,12 @@ async function migrateFromAsyncStorage(): Promise<SessionModel | null> {
   if (!raw) return null;
   await secureSetItem(SESSION_KEY, raw);
   await legacy.removeItem(SESSION_KEY).catch(() => {});
-  return parseSession(raw);
+  return normalizeSession(parseSession(raw));
 }
 
 let hydrated = false;
-let currentSession: SessionModel | null = null;
-const listeners: Array<(session: SessionModel | null) => void> = [];
+let currentSession: HandoverSession | null = null;
+const listeners: Array<(session: HandoverSession | null) => void> = [];
 
 function notify(session: SessionModel | null) {
   listeners.forEach((listener) => {
@@ -68,20 +99,27 @@ function notify(session: SessionModel | null) {
   });
 }
 
-async function persistSession(session: SessionModel | null): Promise<void> {
+async function persistSession(session: HandoverSession | null): Promise<void> {
   if (!session) {
     await secureDeleteItem(SESSION_KEY);
     return;
   }
-  await secureSetItem(SESSION_KEY, JSON.stringify(session));
+  const normalized: AuthSession = {
+    ...session,
+    displayName: session.displayName ?? session.userId,
+    roles: session.roles ?? [],
+    units: session.units ?? [],
+    expiresAt: normalizeExpiresAt(session.expiresAt),
+  };
+  await secureSetItem(SESSION_KEY, JSON.stringify(normalized));
 }
 
-async function hydrateSession(): Promise<SessionModel | null> {
+async function hydrateSession(): Promise<HandoverSession | null> {
   if (hydrated) return currentSession;
   hydrated = true;
   const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
   if (persisted) {
-    currentSession = parseSession(persisted);
+    currentSession = normalizeSession(parseSession(persisted));
     return currentSession;
   }
 
@@ -92,10 +130,10 @@ async function hydrateSession(): Promise<SessionModel | null> {
   return currentSession;
 }
 
-async function setSession(session: SessionModel | null): Promise<void> {
-  currentSession = session;
-  await persistSession(session);
-  notify(session);
+async function setSession(session: HandoverSession | null): Promise<void> {
+  currentSession = session ? normalizeSession({ ...session }) : null;
+  await persistSession(currentSession);
+  notify(currentSession);
 }
 
 async function fetchUserInfo(userInfoEndpoint: string | undefined, accessToken: string) {
@@ -137,7 +175,7 @@ function extractUnits(profile: Record<string, unknown>): string[] {
   return [];
 }
 
-async function performOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promise<SessionModel> {
+async function performOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promise<HandoverSession> {
   const issuer = config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer;
   const clientId = config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId;
   const scopes = config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes;
@@ -158,20 +196,22 @@ async function performOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promi
   }
 
   const { accessToken, refreshToken, issuedAt, expiresIn } = result.authentication;
-  const expiresAt = issuedAt && expiresIn ? issuedAt + expiresIn : Math.floor(Date.now() / 1000) + 3600;
+  const expiresAtSeconds = issuedAt && expiresIn ? issuedAt + expiresIn : Math.floor(Date.now() / 1000) + 3600;
+  const expiresAt = normalizeExpiresAt(expiresAtSeconds);
 
   const profile = (await fetchUserInfo(discovery.userInfoEndpoint, accessToken)) ?? {};
   const roles = extractRoles(profile);
   const units = extractUnits(profile);
   const userId = (profile['sub'] as string | undefined) ?? 'unknown-user';
-  const fullName = (profile['name'] as string | undefined) ?? (profile['preferred_username'] as string | undefined) ?? 'Unknown';
+  const displayName =
+    (profile['name'] as string | undefined) ?? (profile['preferred_username'] as string | undefined) ?? 'Unknown';
 
   return {
     accessToken,
     refreshToken: refreshToken ?? undefined,
     expiresAt,
     userId,
-    fullName,
+    displayName,
     roles,
     units,
   };
@@ -193,6 +233,10 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
     await hydrateSession();
   }
   return currentSession;
+}
+
+export async function setCurrentSession(session: SessionModel | null): Promise<void> {
+  await setSession(session);
 }
 
 export const getSession = getCurrentSession;
@@ -225,9 +269,9 @@ export async function login(params: {
   const session: SessionModel = {
     accessToken: params.accessToken ?? 'dev-token',
     refreshToken: params.refreshToken,
-    expiresAt: params.expiresAt ?? Math.floor(Date.now() / 1000) + 3600,
+    expiresAt: normalizeExpiresAt(params.expiresAt ?? Math.floor(Date.now() / 1000) + 3600),
     userId: params.user.id,
-    fullName: params.user.name ?? 'Demo User',
+    displayName: params.user.name ?? 'Demo User',
     roles: params.user.roles ?? ['nurse'],
     units: params.user.units ?? [],
   };
