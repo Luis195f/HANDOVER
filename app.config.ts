@@ -71,13 +71,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // 🧩 HANDOVER: PLUGINS (Expo Router y otros)
     // ============================================
     plugins: [
-      ...(expo.plugins ?? []),
-      "expo-router", // necesario para navegación basada en rutas
-      "expo-camera",
-      "expo-notifications",
-      "expo-secure-store",
-      "expo-sqlite",
-    ],
+  ...(expo.plugins ?? []),
+  "expo-router",
+  "expo-camera",
+  "expo-notifications",
+  "expo-secure-store",
+  "expo-sqlite",
+  "expo-web-browser",   // 👈 AÑADIDO
+],
 
     // ============================================
     // 🌐 DEEP LINKS / LINKING
