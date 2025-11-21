@@ -29,6 +29,7 @@ import {
   type FhirValidationResult,
   type ValidationResult,
 } from './fhir-validation';
+import { decryptPayload } from '../security/crypto';
 import { listOfflineQueue, updateOfflineQueueItem, type QueueItem as OfflineQueueItem, type SyncStatus } from './queue';
 
 export type LegacyQueueItem = {
@@ -176,9 +177,12 @@ export async function processQueueOnce(): Promise<void> {
     const startedAt = new Date().toISOString();
     await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
 
+    const decryptedPayload = await decryptPayload(item.payload).catch(() => item.payload);
+    const itemWithPayload = { ...item, payload: decryptedPayload } as OfflineQueueItem;
+
     let result: QueueSendResult;
     try {
-      result = await queueSendHandler(item);
+      result = await queueSendHandler(itemWithPayload);
     } catch (error) {
       result = buildFailureOutcome(error);
     }

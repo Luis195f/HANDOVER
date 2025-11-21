@@ -14,6 +14,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as SQLite from "expo-sqlite";
+import { decryptPayload, encryptPayload } from "../security/crypto";
 import { hashHex } from "./crypto";
 import { mark } from "./otel";
 
@@ -43,6 +44,22 @@ if (db?.execSync) {
   try { db.execSync("ALTER TABLE tx_queue ADD COLUMN next_at INTEGER NOT NULL DEFAULT 0;"); } catch {}
 }
 
+async function encryptQueuePayload(payload: unknown): Promise<string> {
+  try {
+    return await encryptPayload(payload);
+  } catch {
+    return JSON.stringify(payload ?? null);
+  }
+}
+
+async function decryptQueuePayload(payload: string): Promise<unknown> {
+  try {
+    return await decryptPayload(payload);
+  } catch {
+    return safeParse(payload);
+  }
+}
+
 // BEGIN HANDOVER_OFFLINE
 export type SyncStatus = "pending" | "inFlight" | "synced" | "error";
 
@@ -58,8 +75,11 @@ export interface QueueItem {
   patientId: string;
 }
 
-type QueueItemInput = Omit<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType"> &
-  Partial<Pick<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt">>;
+type QueueItemInput =
+  Omit<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType" | "payload"> &
+    Partial<Pick<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt">> & {
+      payload: unknown;
+    };
 
 type QueueItemRow = {
   id: string;
@@ -90,7 +110,7 @@ if (db?.execSync) {
   );`);
 }
 
-function normalizeQueueItem(input: QueueItemInput): QueueItem {
+function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueueItem {
   const nowIso = input.createdAt ?? new Date().toISOString();
   return {
     id: input.id ?? `handover:${hashHex(`${Date.now()}-${Math.random()}`, 16)}`,
@@ -147,7 +167,8 @@ function persistQueueItem(item: QueueItem): void {
 }
 
 export async function createOfflineQueueItem(input: QueueItemInput): Promise<QueueItem> {
-  const item = normalizeQueueItem(input);
+  const encryptedPayload = await encryptQueuePayload(input.payload);
+  const item = normalizeQueueItem({ ...input, payload: encryptedPayload });
   persistQueueItem(item);
   return item;
 }
@@ -179,11 +200,16 @@ export async function getOfflineQueueItem(id: string): Promise<QueueItem | null>
 export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {
   const current = await getOfflineQueueItem(id);
   if (!current) return null;
+  let payload = current.payload;
+  if (updates.payload !== undefined) {
+    payload = typeof updates.payload === "string" ? updates.payload : await encryptQueuePayload(updates.payload);
+  }
   const next: QueueItem = {
     ...current,
     ...updates,
     attempts: updates.attempts ?? current.attempts,
     syncStatus: updates.syncStatus ?? current.syncStatus,
+    payload,
     payloadType: "handover-bundle",
   };
   persistQueueItem(next);
@@ -268,11 +294,12 @@ function _normalizeInput(input: any): LegacyTxQueueItem {
 // -------------------------------
 export async function enqueueTx(input: any): Promise<LegacyTxQueueItem> {
   const item = _normalizeInput(input);
+  const serializedPayload = await encryptQueuePayload(item.payload);
 
   if (db?.runSync) {
     db.runSync(
       "INSERT OR IGNORE INTO tx_queue(key,payload,tries,next_at,created_at) VALUES(?,?,?,?,?)",
-      [item.key, JSON.stringify(item.payload), 0, 0, item.enqueuedAt]
+      [item.key, serializedPayload, 0, 0, item.enqueuedAt]
     );
   } else {
     // fallback memoria
@@ -280,7 +307,7 @@ export async function enqueueTx(input: any): Promise<LegacyTxQueueItem> {
       memQueue.push({
         id: memId++,
         key: item.key,
-        payload: JSON.stringify(item.payload),
+        payload: serializedPayload,
         tries: 0,
         next_at: 0,
         created_at: item.enqueuedAt,
@@ -300,34 +327,40 @@ export function getQueueLength(): number {
   return memQueue.length;
 }
 
-export function getQueueSnapshot(): LegacyTxQueueItem[] {
+export async function getQueueSnapshot(): Promise<LegacyTxQueueItem[]> {
   if (db?.getAllSync) {
     const rows = db.getAllSync(
       "SELECT key,payload,tries,created_at,next_at FROM tx_queue ORDER BY COALESCE(next_at,0) ASC, id ASC"
     ) as any[];
-    return (rows ?? []).map((r) => ({
-      key: r.key,
-      payload: safeParse(r.payload),
-      attempts: Number(r.tries ?? 0),
-      enqueuedAt: Number(r.created_at ?? Date.now()),
-      nextAt: Number(r.next_at ?? 0),
-    }));
+    return Promise.all(
+      (rows ?? []).map(async (r) => ({
+        key: r.key,
+        payload: await decryptQueuePayload(String(r.payload ?? "")),
+        attempts: Number(r.tries ?? 0),
+        enqueuedAt: Number(r.created_at ?? Date.now()),
+        nextAt: Number(r.next_at ?? 0),
+      }))
+    );
   }
-  return memQueue
-    .slice()
-    .sort((a, b) => (a.next_at - b.next_at) || (a.id - b.id))
-    .map((r) => ({
+  const snapshot = memQueue.slice().sort((a, b) => (a.next_at - b.next_at) || (a.id - b.id));
+  return Promise.all(
+    snapshot.map(async (r) => ({
       key: r.key,
-      payload: safeParse(r.payload),
+      payload: await decryptQueuePayload(r.payload),
       attempts: r.tries,
       enqueuedAt: r.created_at,
       nextAt: r.next_at,
-    }));
+    }))
+  );
 }
 
-const safeParse = (s: string) => {
-  try { return JSON.parse(s); } catch { return s; }
-};
+function safeParse(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
+}
 
 // -------------------------------
 // Flush con backoff y 4xx/5xx
@@ -341,9 +374,10 @@ export async function flushQueue(send: SendFn, opts: FlushOpts = {}) {
   _flushing = true;
   try {
     // Traemos snapshot ordenado (respetando next_at)
-    let items = getQueueSnapshot();
+    let items = await getQueueSnapshot();
 
-    for (const item of items) {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
       if (!_online) break;
       // Respetar backoff
       if (item.nextAt && item.nextAt > Date.now()) continue;
@@ -383,7 +417,8 @@ export async function flushQueue(send: SendFn, opts: FlushOpts = {}) {
 
       if (delay > 0) await wait(delay);
       // Recalcular snapshot por si cambió el orden/estado
-      items = getQueueSnapshot();
+      items = await getQueueSnapshot();
+      index = -1;
     }
   } finally {
     _flushing = false;
