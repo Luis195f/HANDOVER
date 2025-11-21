@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { AuthSession as SessionModel, UserRole } from './auth-types';
+import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -14,83 +15,44 @@ const DEFAULT_AUTH_CONFIG = {
 };
 
 const SESSION_KEY = `${process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover'}:auth-session`;
-
-interface StorageAdapter {
+type AsyncStorageLike = {
   getItem: (key: string) => Promise<string | null>;
-  setItem: (key: string, value: string) => Promise<void>;
   removeItem: (key: string) => Promise<void>;
-}
+};
 
-const memoryStore = new Map<string, string>();
+let migrationAttempted = false;
 
-function makeMemoryStore(): StorageAdapter {
-  return {
-    async getItem(key) {
-      return memoryStore.has(key) ? (memoryStore.get(key) as string) : null;
-    },
-    async setItem(key, value) {
-      memoryStore.set(key, value);
-    },
-    async removeItem(key) {
-      memoryStore.delete(key);
-    },
-  };
-}
-
-function makeSecureStore(): StorageAdapter | null {
+async function getLegacyAsyncStorage(): Promise<AsyncStorageLike | null> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('expo-secure-store');
-    const SecureStore = mod?.default ?? mod;
-    if (!SecureStore?.getItemAsync) return null;
-    return {
-      async getItem(key) {
-        try {
-          return await SecureStore.getItemAsync(key);
-        } catch {
-          return null;
-        }
-      },
-      async setItem(key, value) {
-        try {
-          await SecureStore.setItemAsync(key, value);
-        } catch {}
-      },
-      async removeItem(key) {
-        try {
-          await SecureStore.deleteItemAsync(key);
-        } catch {}
-      },
-    };
+    const mod = await import('@react-native-async-storage/async-storage');
+    const storage = (mod as unknown as { default?: AsyncStorageLike }).default ?? (mod as unknown as AsyncStorageLike);
+    if (storage?.getItem && storage?.removeItem) return storage;
+    return null;
   } catch {
     return null;
   }
 }
 
-function makeLocalStorageStore(): StorageAdapter | null {
-  if (typeof localStorage === 'undefined') return null;
-  return {
-    async getItem(key) {
-      try {
-        return localStorage.getItem(key);
-      } catch {
-        return null;
-      }
-    },
-    async setItem(key, value) {
-      try {
-        localStorage.setItem(key, value);
-      } catch {}
-    },
-    async removeItem(key) {
-      try {
-        localStorage.removeItem(key);
-      } catch {}
-    },
-  };
+function parseSession(raw: string | null): SessionModel | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as SessionModel;
+  } catch {
+    return null;
+  }
 }
 
-const storage: StorageAdapter = makeSecureStore() ?? makeLocalStorageStore() ?? makeMemoryStore();
+async function migrateFromAsyncStorage(): Promise<SessionModel | null> {
+  if (migrationAttempted) return null;
+  migrationAttempted = true;
+  const legacy = await getLegacyAsyncStorage();
+  if (!legacy) return null;
+  const raw = await legacy.getItem(SESSION_KEY).catch(() => null);
+  if (!raw) return null;
+  await secureSetItem(SESSION_KEY, raw);
+  await legacy.removeItem(SESSION_KEY).catch(() => {});
+  return parseSession(raw);
+}
 
 let hydrated = false;
 let currentSession: SessionModel | null = null;
@@ -108,23 +70,26 @@ function notify(session: SessionModel | null) {
 
 async function persistSession(session: SessionModel | null): Promise<void> {
   if (!session) {
-    await storage.removeItem(SESSION_KEY);
+    await secureDeleteItem(SESSION_KEY);
     return;
   }
-  await storage.setItem(SESSION_KEY, JSON.stringify(session));
+  await secureSetItem(SESSION_KEY, JSON.stringify(session));
 }
 
 async function hydrateSession(): Promise<SessionModel | null> {
   if (hydrated) return currentSession;
   hydrated = true;
-  const raw = await storage.getItem(SESSION_KEY);
-  if (!raw) return null;
-  try {
-    currentSession = JSON.parse(raw) as SessionModel;
+  const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
+  if (persisted) {
+    currentSession = parseSession(persisted);
     return currentSession;
-  } catch {
-    return null;
   }
+
+  currentSession = await migrateFromAsyncStorage();
+  if (currentSession) {
+    await persistSession(currentSession);
+  }
+  return currentSession;
 }
 
 async function setSession(session: SessionModel | null): Promise<void> {
