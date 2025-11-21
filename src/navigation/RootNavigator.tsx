@@ -10,6 +10,7 @@ import PatientList from '@/src/screens/PatientList';
 import QRScan from '@/src/screens/QRScan';
 import SyncCenter from '@/src/screens/SyncCenter';
 import SupervisorDashboardScreen from '@/src/screens/SupervisorDashboard';
+import { AdminDashboardScreen } from '@/src/screens/admin/AdminDashboardScreen';
 import LoginScreen from '@/src/screens/LoginScreen';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { hasRole } from '@/src/security/acl';
@@ -49,7 +50,7 @@ function AuthGate() {
   }
 
   const canSubmitHandover = hasRole(session, ['nurse', 'supervisor']);
-  const canAdminister = hasRole(session, 'supervisor');
+  const canAdminister = hasRole(session, ['supervisor', 'admin']);
 
   return (
     <Stack.Navigator>
@@ -71,6 +72,13 @@ function AuthGate() {
           name="SupervisorDashboard"
           component={SupervisorDashboardScreen}
           options={{ title: 'Dashboard de turno' }}
+        />
+      ) : null}
+      {canAdminister ? (
+        <Stack.Screen
+          name="AdminDashboard"
+          component={AdminDashboardScreen}
+          options={{ title: 'Dashboard admin' }}
         />
       ) : null}
     </Stack.Navigator>

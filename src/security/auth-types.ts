@@ -1,5 +1,5 @@
 // BEGIN HANDOVER_AUTH
-export type UserRole = 'nurse' | 'supervisor';
+export type UserRole = 'nurse' | 'supervisor' | 'admin';
 
 export interface HandoverSession {
   userId: string;

@@ -1,7 +1,7 @@
 // BEGIN HANDOVER_AUTH
 import { AuthSession, UserRole } from './auth-types';
 
-const ALLOWED_ROLES: ReadonlySet<UserRole> = new Set(['nurse', 'supervisor']);
+const ALLOWED_ROLES: ReadonlySet<UserRole> = new Set(['nurse', 'supervisor', 'admin']);
 
 function normalizeRoles(roles: UserRole | UserRole[]): UserRole[] {
   return Array.isArray(roles) ? roles : [roles];
@@ -35,7 +35,7 @@ export function ensureUnitAccess(session: AuthSession | null, unitId: string): v
   if (!normalized) {
     throw new Error('INVALID_UNIT');
   }
-  if (hasRole(session, 'supervisor')) {
+  if (hasRole(session, ['supervisor', 'admin'])) {
     return;
   }
   if (session.units.includes(normalized)) {
