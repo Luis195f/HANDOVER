@@ -4,6 +4,8 @@ import {
   DIET_TYPES,
   MOBILITY_LEVELS,
   STOOL_PATTERNS,
+  type MedicationItem,
+  type TreatmentItem,
   type EliminationInfo,
   type FluidBalanceInfo,
   type MobilityInfo,
@@ -194,6 +196,42 @@ export const zRiskFlags: z.ZodSchema<RiskFlags> = z
   })
   .partial();
 
+export const zMedicationRoute = z.enum([
+  "oral",
+  "iv",
+  "im",
+  "sc",
+  "inhaled",
+  "topical",
+  "other",
+]);
+
+export const zMedicationItem: z.ZodSchema<MedicationItem> = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  code: z
+    .object({
+      system: z.string().min(1),
+      code: z.string().min(1),
+      display: z.string().min(1),
+    })
+    .optional(),
+  route: zMedicationRoute.optional(),
+  dose: z.string().min(1).optional(),
+  frequency: z.string().min(1).optional(),
+  isContinuous: z.boolean().optional(),
+  isHighAlert: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+
+export const zTreatmentItem: z.ZodSchema<TreatmentItem> = z.object({
+  id: z.string().min(1),
+  type: z.enum(["woundCare", "respiratory", "mobilization", "education", "other"]),
+  description: z.string().min(1),
+  scheduledAt: z.string().datetime().optional(),
+  done: z.boolean().optional(),
+});
+
 // BEGIN HANDOVER: SIGNATURES_DUAL
 const zHandoverSignatureBase = z.object({
   userId: z.string().min(1, "Falta identificador de usuario para la firma"),
@@ -249,6 +287,9 @@ export const zHandover = z.object({
   sbarRecommendation: z.string().optional(),
 
   meds: z.string().optional(),
+
+  medications: z.array(zMedicationItem).default([]),
+  treatments: z.array(zTreatmentItem).default([]),
 
   oxygenTherapy: zOxygen.optional(),
 

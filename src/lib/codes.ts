@@ -4,6 +4,7 @@ export const TERMINOLOGY_SYSTEMS = {
   UCUM: 'http://unitsofmeasure.org',
   OBSERVATION_CATEGORY: 'http://terminology.hl7.org/CodeSystem/observation-category',
   HANDOVER_CARE: 'urn:handover-pro:care',
+  HANDOVER_TREATMENT_TYPE: 'urn:handover-pro:care:treatment-type',
 } as const;
 
 export type TerminologySystem =
@@ -212,6 +213,45 @@ export const FHIR_CODES = {
 export type FhirVitalCode = (typeof FHIR_CODES.VITALS)[keyof typeof FHIR_CODES.VITALS];
 export type FhirScaleCode = (typeof FHIR_CODES.SCALES)[keyof typeof FHIR_CODES.SCALES];
 export type FhirRiskCode = (typeof FHIR_CODES.RISK)[keyof typeof FHIR_CODES.RISK];
+
+export const MEDICATIONS_QUICKPICK_ICU = [
+  {
+    id: 'med-paracetamol',
+    name: 'Paracetamol',
+    code: {
+      system: 'http://www.whocc.no/atc',
+      code: 'N02BE01',
+      display: 'Paracetamol',
+    },
+  },
+  {
+    id: 'med-omeprazole',
+    name: 'Omeprazol',
+    code: {
+      system: 'http://www.whocc.no/atc',
+      code: 'A02BC01',
+      display: 'Omeprazole',
+    },
+  },
+  {
+    id: 'med-norepinephrine',
+    name: 'Noradrenalina',
+    code: {
+      system: 'http://snomed.info/sct',
+      code: '111397005',
+      display: 'Product containing noradrenaline (medicinal product)',
+    },
+  },
+  {
+    id: 'med-vancomycin',
+    name: 'Vancomicina',
+    code: {
+      system: 'http://www.whocc.no/atc',
+      code: 'J01XA01',
+      display: 'Vancomycin',
+    },
+  },
+] as const;
 
 export const ALERT_CODES = {
   news2: 'alert.news2',
