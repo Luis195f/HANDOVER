@@ -4,6 +4,7 @@ import type { AdministrativeData } from '../types/administrative';
 import type {
   EliminationInfo,
   FluidBalanceInfo,
+  HandoverBedsideChecklist,
   HandoverSignature,
   MedicationItem,
   MobilityInfo,
@@ -541,6 +542,9 @@ export type HandoverValues = {
   painAssessment?: PainAssessment;
   braden?: BradenScale;
   glasgow?: GlasgowScale;
+  // BEGIN HANDOVER D1 – BedsideChecklist types
+  bedsideChecklist: HandoverBedsideChecklist;
+  // END HANDOVER D1 – BedsideChecklist types
   risks?: RiskFlags;
   risksStructured?: RiskItem[];
   treatments?: TreatmentItem[];
@@ -1922,6 +1926,7 @@ export function buildHandoverBundle(
     encounter: encounterReference(values.encounterId),
     effectiveDateTime: sharedOptions.now(),
   };
+  // TODO HANDOVER D1: mapear bedsideChecklist a extensiones/observaciones FHIR en un bloque posterior.
 
   const vitalObservations = values.vitals
     ? mapObservationVitals(

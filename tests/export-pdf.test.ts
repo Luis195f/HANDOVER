@@ -18,6 +18,14 @@ const mockHandover: HandoverValues & { id: string } = {
     incidents: [],
   },
   patientId: 'patient-1',
+  bedsideChecklist: {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+  },
 };
 const mockUser: HandoverSession = {
   userId: 'user-1',

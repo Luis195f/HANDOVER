@@ -55,6 +55,18 @@ export type RiskFlags = {
   isolation?: boolean;
 };
 
+// BEGIN HANDOVER D1 – BedsideChecklist types
+export interface HandoverBedsideChecklist {
+  patientIdentityConfirmed: boolean;
+  allergiesReviewed: boolean;
+  linesAndDevicesChecked: boolean;
+  medicationPlanReviewed: boolean;
+  safetyMeasuresApplied: boolean;
+  questionsAnswered: boolean;
+  bedsideNotes?: string;
+}
+// END HANDOVER D1 – BedsideChecklist types
+
 export type FluidBalanceInfo = {
   intakeMl: number;
   outputMl: number;
@@ -165,6 +177,9 @@ export type HandoverValues = {
   painAssessment?: PainAssessment;
   braden?: BradenScale;
   glasgow?: GlasgowScale;
+  // BEGIN HANDOVER D1 – BedsideChecklist types
+  bedsideChecklist: HandoverBedsideChecklist;
+  // END HANDOVER D1 – BedsideChecklist types
   risks?: RiskFlags;
   risksStructured?: RiskItem[];
   signatures?: {

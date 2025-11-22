@@ -38,6 +38,7 @@ import { PatientHeader } from '@/src/components/PatientHeader';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { ExportPdfButton } from './components/ExportPdfButton';
+import { BedsideChecklistSection } from './components/BedsideChecklistSection';
 import SpecificCareSection from './components/SpecificCareSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
 import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
@@ -501,6 +502,17 @@ export default function HandoverForm({ navigation, route }: Props) {
         location: null,
         actionsTaken: null,
       },
+      // BEGIN HANDOVER D1 – BedsideChecklist
+      bedsideChecklist: {
+        patientIdentityConfirmed: false,
+        allergiesReviewed: false,
+        linesAndDevicesChecked: false,
+        medicationPlanReviewed: false,
+        safetyMeasuresApplied: false,
+        questionsAnswered: false,
+        bedsideNotes: '',
+      },
+      // END HANDOVER D1 – BedsideChecklist
       risks: {},
       risksStructured: [],
       signatures: {
@@ -1361,6 +1373,10 @@ export default function HandoverForm({ navigation, route }: Props) {
             </View>
           ) : null}
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <BedsideChecklistSection />
       </View>
 
       {/* BEGIN HANDOVER: SIGNATURES_DUAL_UI */}

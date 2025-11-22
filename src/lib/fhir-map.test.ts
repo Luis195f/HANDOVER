@@ -3,7 +3,15 @@ import { buildHandoverBundle, type HandoverValues } from './fhir-map';
 
 const base: HandoverValues = {
   patientId: 'pat-001',
-  notes: 'Paciente estable. Dx pendiente.'
+  notes: 'Paciente estable. Dx pendiente.',
+  bedsideChecklist: {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+  },
 };
 
 describe('fhir-map bundle', () => {
