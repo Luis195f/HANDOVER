@@ -1,6 +1,6 @@
 // src/screens/QRScan.tsx
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import {
   CameraView,
@@ -9,14 +9,18 @@ import {
 } from 'expo-camera';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/src/navigation/types';
+import { PatientHeader } from '@/src/components/PatientHeader';
 
 // Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
-export function QRScanScreen({ navigation }: Props) {
+export function QRScanScreen({ navigation, route }: Props) {
   const isFocused = useIsFocused();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [scannedPatientId, setScannedPatientId] = useState<string | null>(null);
+
+  const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
 
   // Pedir permisos de cámara al entrar
   useEffect(() => {
@@ -45,12 +49,25 @@ export function QRScanScreen({ navigation }: Props) {
         return;
       }
 
-      // Aquí decides qué hacer con el contenido del QR.
-      // Ejemplo: asumir que el QR lleva un patientId y navegar al dashboard:
-      navigation.navigate('PatientDashboard', { patientId: data });
+      setScannedPatientId(data);
     },
-    [navigation, scanned],
+    [scanned],
   );
+
+  const handleContinue = () => {
+    if (!scannedPatientId) return;
+    const targetRoute = returnTo ?? 'HandoverForm';
+    const params =
+      targetRoute === 'HandoverForm'
+        ? { patientId: scannedPatientId, unitId: unitIdParam, specialtyId }
+        : { patientId: scannedPatientId };
+    navigation.navigate(targetRoute as never, params as never);
+  };
+
+  const handleRescan = () => {
+    setScanned(false);
+    setScannedPatientId(null);
+  };
 
   if (!permission) {
     return (
@@ -90,14 +107,34 @@ export function QRScanScreen({ navigation }: Props) {
 
       {/* Overlay con instrucciones */}
       <View style={styles.overlay}>
-        <Text style={styles.title}>Escanea el código QR del paciente</Text>
-        <Text style={styles.subtitle}>
-          Centra el código dentro del recuadro. Se detectará automáticamente.
-        </Text>
+        {scannedPatientId ? (
+          <>
+            <PatientHeader patientId={scannedPatientId} showId />
+            <Pressable
+              accessibilityRole="button"
+              onPress={handleContinue}
+              style={styles.primaryButton}
+            >
+              <Text style={styles.primaryButtonText}>Continuar con entrega</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={handleRescan}>
+              <Text style={styles.link}>Escanear nuevamente</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Text style={styles.title}>Escanea el código QR del paciente</Text>
+            <Text style={styles.subtitle}>
+              Centra el código dentro del recuadro. Se detectará automáticamente.
+            </Text>
+          </>
+        )}
       </View>
     </View>
   );
 }
+
+export default QRScanScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -129,6 +166,18 @@ const styles = StyleSheet.create({
     bottom: 0,
     padding: 24,
     backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  primaryButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#2563EB',
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
   title: {
     fontSize: 20,

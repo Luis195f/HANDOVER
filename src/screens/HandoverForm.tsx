@@ -32,6 +32,7 @@ import { ensureUnitAccess } from '@/src/security/acl';
 import { getSession, useAuth, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
+import { PatientHeader } from '@/src/components/PatientHeader';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { ExportPdfButton } from './components/ExportPdfButton';
@@ -901,43 +902,46 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <FormProvider {...form}>
       <ScrollView contentContainerStyle={styles.container}>
+        {/* BEGIN HANDOVER: PATIENT_HEADER_IN_HANDOVER_FORM */}
+        <PatientHeader patientId={patientIdValue} showId />
+        {/* END HANDOVER: PATIENT_HEADER_IN_HANDOVER_FORM */}
         <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Datos del turno</Text>
-        <View style={styles.field}>
-          <Text style={styles.label}>Unidad</Text>
-          <Controller
-            control={control}
-            name="administrativeData.unit"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={styles.input}
-                placeholder="UCI Adulto"
-                onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
-              />
-            )}
-          />
-          {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Censo de pacientes</Text>
-          <Controller
-            control={control}
-            name="administrativeData.census"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={styles.input}
-                placeholder="0"
-                keyboardType="numeric"
-                onBlur={onBlur}
-                value={value == null ? '' : String(value)}
-                onChangeText={(text) => onChange(parseNumericInput(text))}
-              />
-            )}
-          />
-          {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
-        </View>
+          <Text style={styles.sectionTitle}>Datos del turno</Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>Unidad</Text>
+            <Controller
+              control={control}
+              name="administrativeData.unit"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  placeholder="UCI Adulto"
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Censo de pacientes</Text>
+            <Controller
+              control={control}
+              name="administrativeData.census"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  placeholder="0"
+                  keyboardType="numeric"
+                  onBlur={onBlur}
+                  value={value == null ? '' : String(value)}
+                  onChangeText={(text) => onChange(parseNumericInput(text))}
+                />
+              )}
+            />
+            {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
+          </View>
         <View style={styles.field}>
           <Text style={styles.label}>Inicio de turno</Text>
           <Controller
