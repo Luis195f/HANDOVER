@@ -21,7 +21,13 @@ import {
   type OperationIssue,
   type ResponseLike,
 } from './fhir-client';
-import { hashHex } from './crypto';
+import {
+  ENCRYPTION_PREFIX,
+  OFFLINE_ENCRYPTION_DISABLED,
+  decryptPayload,
+  encryptPayload,
+  hashHex,
+} from './crypto';
 import { z } from 'zod';
 import {
   validateBundle as validateFHIRBundle,
@@ -29,7 +35,6 @@ import {
   type FhirValidationResult,
   type ValidationResult,
 } from './fhir-validation';
-import { decryptPayload } from '../security/crypto';
 import { listOfflineQueue, updateOfflineQueueItem, type QueueItem as OfflineQueueItem, type SyncStatus } from './queue';
 
 export type LegacyQueueItem = {
@@ -177,8 +182,44 @@ export async function processQueueOnce(): Promise<void> {
     const startedAt = new Date().toISOString();
     await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
 
-    const decryptedPayload = await decryptPayload(item.payload).catch(() => item.payload);
-    const itemWithPayload = { ...item, payload: decryptedPayload } as OfflineQueueItem;
+    let decryptedPayload: string;
+    try {
+      decryptedPayload = await decryptPayload(item.payload);
+    } catch (error) {
+      console.warn('Error al descifrar/parsear item offline', error);
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'error',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: 'Error al descifrar el payload offline',
+      });
+      continue;
+    }
+
+    let parsedPayload: unknown;
+    try {
+      parsedPayload = JSON.parse(decryptedPayload);
+    } catch (error) {
+      console.warn('Error al descifrar/parsear item offline', error);
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'error',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: 'Error al parsear el payload offline',
+      });
+      continue;
+    }
+
+    if (!item.payload.startsWith(ENCRYPTION_PREFIX) && !OFFLINE_ENCRYPTION_DISABLED) {
+      try {
+        const reEncrypted = await encryptPayload(JSON.stringify(parsedPayload));
+        await updateOfflineQueueItem(item.id, { payload: reEncrypted });
+      } catch (error) {
+        console.warn('No se pudo migrar el payload legacy a formato cifrado', error);
+      }
+    }
+
+    const itemWithPayload = { ...item, payload: parsedPayload } as OfflineQueueItem;
 
     let result: QueueSendResult;
     try {
