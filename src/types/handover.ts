@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { AdministrativeData } from './administrative';
-import type { zMedicationItem, zTreatmentItem } from '../validation/schemas';
+import type { zMedicationItem, zRiskItem, zRiskType, zTreatmentItem } from '../validation/schemas';
 
 // BEGIN HANDOVER: SIGNATURES_DUAL_TYPES
 export type HandoverSignature = {
@@ -45,6 +45,9 @@ export type SkinInfo = {
   skinStatus: string;
   hasPressureInjury?: boolean;
 };
+
+export type RiskType = z.infer<typeof zRiskType>;
+export type RiskItem = z.infer<typeof zRiskItem>;
 
 export type RiskFlags = {
   fall?: boolean;
@@ -163,8 +166,11 @@ export type HandoverValues = {
   braden?: BradenScale;
   glasgow?: GlasgowScale;
   risks?: RiskFlags;
+  risksStructured?: RiskItem[];
   signatures?: {
     outgoing?: HandoverSignature;
     incoming?: HandoverSignature;
   };
 };
+
+export type Handover = HandoverValues;

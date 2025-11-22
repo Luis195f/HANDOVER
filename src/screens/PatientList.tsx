@@ -26,6 +26,8 @@ import {
   setSelectedUnitId,
   useSelectedUnitId,
 } from "@/src/state/filterStore";
+import type { Handover } from "@/src/types/handover";
+import { computeAlerts } from "@/src/lib/alerts";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
@@ -252,6 +254,28 @@ export default function PatientList({ navigation }: Props) {
 
   const prioritizedPatients = useMemo<PrioritizedPatient[]>(() => priorityInputs.map(computePriority), [priorityInputs]);
   const sortedByPriority = useMemo<PrioritizedPatient[]>(() => computePriorityList(priorityInputs), [priorityInputs]);
+  const alertsByPatient = useMemo(() => {
+    return patients.reduce<Record<string, ReturnType<typeof computeAlerts>>>((acc, patient) => {
+      const handoverLike: Handover = {
+        administrativeData: {
+          unit: patient.unitId,
+          census: 0,
+          staffIn: [],
+          staffOut: [],
+          shiftStart: new Date().toISOString(),
+          shiftEnd: new Date().toISOString(),
+          incidents: [],
+        },
+        patientId: patient.id,
+        status: 'draft',
+        vitals: patient.vitals,
+        risks: patient.risks,
+        risksStructured: [],
+      };
+      acc[patient.id] = computeAlerts(handoverLike);
+      return acc;
+    }, {});
+  }, [patients]);
   const patientsForList = sortByPriority ? sortedByPriority : prioritizedPatients;
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
@@ -367,6 +391,9 @@ export default function PatientList({ navigation }: Props) {
           const basePatient = patientById.get(item.patientId);
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
           const syncState = patientSyncStatuses[item.patientId] ?? "synced";
+          const alerts = alertsByPatient[item.patientId] ?? [];
+          const hasCriticalAlert = alerts.some(alert => alert.severity === 'critical');
+          const hasWarningAlert = alerts.some(alert => alert.severity === 'warning');
           return (
             <Pressable onPress={() => onOpenPatient(item.patientId)} style={styles.patientCard}>
               <Text style={styles.patientName}>{item.displayName}</Text>
@@ -391,6 +418,20 @@ export default function PatientList({ navigation }: Props) {
                 {renderPriorityBadge(item.level)}
                 <Text style={styles.reasonText}>{item.reasonSummary}</Text>
               </View>
+              {alerts.length > 0 ? (
+                <View style={styles.alertChipRow}>
+                  {hasCriticalAlert ? (
+                    <View style={[styles.alertChip, styles.alertChipCritical]}>
+                      <Text style={styles.alertChipText}>Alerta crítica</Text>
+                    </View>
+                  ) : null}
+                  {hasWarningAlert ? (
+                    <View style={[styles.alertChip, styles.alertChipWarning]}>
+                      <Text style={styles.alertChipText}>Riesgo activo</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               <Pressable
                 style={styles.handoverButton}
                 onPress={(event) => {
@@ -565,6 +606,31 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     color: "#374151",
+  },
+  alertChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  alertChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  alertChipCritical: {
+    backgroundColor: '#fee2e2',
+    borderColor: '#fca5a5',
+  },
+  alertChipWarning: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fcd34d',
+  },
+  alertChipText: {
+    fontWeight: '700',
+    color: '#1f2937',
   },
   emptyContainer: {
     flexGrow: 1,

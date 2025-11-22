@@ -16,6 +16,7 @@ import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
 import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
+import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import {
   createSttService,
@@ -32,6 +33,7 @@ import { ensureUnitAccess } from '@/src/security/acl';
 import { getSession, useAuth, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
+import type { RiskItem } from '@/src/types/handover';
 import { PatientHeader } from '@/src/components/PatientHeader';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
@@ -41,6 +43,7 @@ import ClinicalScalesSection from './components/ClinicalScalesSection';
 import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
 import MedicationSection from './components/MedicationSection';
 import TreatmentsSection from './components/TreatmentsSection';
+import SafetySection from './components/SafetySection';
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -92,6 +95,16 @@ const styles = StyleSheet.create({
   sbarTitle: { fontWeight: '700', marginBottom: 8, fontSize: 16 },
   sbarText: { fontFamily: 'monospace' },
   helperText: { marginTop: 6, color: '#4B5563' },
+  alertList: { gap: 8 },
+  alertCard: {
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  alertTitle: { fontWeight: '700', marginBottom: 4 },
+  alertCritical: { backgroundColor: '#ffebee', borderColor: '#fca5a5' },
+  alertWarning: { backgroundColor: '#fff8e1', borderColor: '#fcd34d' },
+  alertInfo: { backgroundColor: '#e3f2fd', borderColor: '#bfdbfe' },
 });
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
@@ -114,6 +127,25 @@ const mergeDictationText = (currentValue: string | undefined, dictated: string) 
   }
   return `${base}\n${addition}`;
 };
+
+function deriveInitialRisksStructured(values: HandoverFormValues): RiskItem[] {
+  if (Array.isArray(values.risksStructured) && values.risksStructured.length > 0) {
+    return values.risksStructured;
+  }
+
+  const items: RiskItem[] = [];
+  if (values.risks?.fall) {
+    items.push({ type: 'fall', present: true, notes: undefined, actions: [] });
+  }
+  if (values.risks?.pressureUlcer) {
+    items.push({ type: 'pressureUlcer', present: true, notes: undefined, actions: [] });
+  }
+  if (values.risks?.isolation) {
+    items.push({ type: 'isolation', present: true, notes: undefined, actions: [] });
+  }
+
+  return items;
+}
 
 function normalizeSignatureUser(
   session?: (Session & { user?: Record<string, unknown> }) | null,
@@ -431,48 +463,55 @@ export default function HandoverForm({ navigation, route }: Props) {
     };
   }, []);
 
-  const form = useZodForm(zHandover, {
-    administrativeData: {
-      unit: unitIdParam ?? '',
-      census: 0,
-      staffIn: [],
-      staffOut: [],
-      shiftStart: new Date().toISOString(),
-      shiftEnd: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-      incidents: [],
-    },
-    patientId: patientIdParam ?? '',
-    status: 'draft',
-    dxMedical: '',
-    dxNursing: '',
-    evolution: '',
-    closingSummary: '',
-    meds: '',
-    medications: [],
-    treatments: [],
-    sbarSituation: '',
-    sbarBackground: '',
-    sbarAssessment: '',
-    sbarRecommendation: '',
-    vitals: {},
-    oxygenTherapy: {},
-    fluidBalance: {
-      intakeMl: undefined,
-      outputMl: undefined,
-      netBalanceMl: undefined,
-      notes: '',
-    },
-    painAssessment: {
-      hasPain: false,
-      evaScore: null,
-      location: null,
-      actionsTaken: null,
-    },
-    signatures: {
-      outgoing: undefined,
-      incoming: undefined,
-    },
-  });
+  const defaultValues = useMemo<HandoverFormValues>(() => {
+    const base: HandoverFormValues = {
+      administrativeData: {
+        unit: unitIdParam ?? '',
+        census: 0,
+        staffIn: [],
+        staffOut: [],
+        shiftStart: new Date().toISOString(),
+        shiftEnd: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+        incidents: [],
+      },
+      patientId: patientIdParam ?? '',
+      status: 'draft',
+      dxMedical: '',
+      dxNursing: '',
+      evolution: '',
+      closingSummary: '',
+      meds: '',
+      medications: [],
+      treatments: [],
+      sbarSituation: '',
+      sbarBackground: '',
+      sbarAssessment: '',
+      sbarRecommendation: '',
+      vitals: {},
+      oxygenTherapy: {},
+      fluidBalance: {
+        intakeMl: undefined,
+        outputMl: undefined,
+        netBalanceMl: undefined,
+        notes: '',
+      },
+      painAssessment: {
+        hasPain: false,
+        evaScore: null,
+        location: null,
+        actionsTaken: null,
+      },
+      risks: {},
+      risksStructured: [],
+      signatures: {
+        outgoing: undefined,
+        incoming: undefined,
+      },
+    };
+    return { ...base, risksStructured: deriveInitialRisksStructured(base) };
+  }, [patientIdParam, unitIdParam]);
+
+  const form = useZodForm(zHandover, defaultValues);
 
   const { control, formState } = form;
   const errors: HandoverFormErrors = formState.errors ?? {};
@@ -496,6 +535,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   const signatureErrors = errors.signatures ?? {};
   const outgoingSignatureError = (signatureErrors as any)?.outgoing?.message as string | undefined;
   const incomingSignatureError = (signatureErrors as any)?.incoming?.message as string | undefined;
+  const watchedValues = form.watch();
+  const computedAlerts = useMemo(() => computeAlerts(watchedValues as any), [watchedValues]);
   const sttServiceRef = useRef<SttService | null>(null);
   if (!sttServiceRef.current) {
     sttServiceRef.current = createSttService();
@@ -1106,6 +1147,41 @@ export default function HandoverForm({ navigation, route }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Oxigenoterapia</Text>
           <OxygenGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+        </View>
+      )}
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Seguridad y riesgos</Text>
+        <SafetySection control={control} watch={form.watch} />
+      </View>
+
+      {computedAlerts.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Alertas</Text>
+          <View style={styles.alertList}>
+            {computedAlerts.map((alert) => (
+              <View
+                key={alert.id}
+                style={[
+                  styles.alertCard,
+                  alert.severity === 'critical'
+                    ? styles.alertCritical
+                    : alert.severity === 'warning'
+                      ? styles.alertWarning
+                      : styles.alertInfo,
+                ]}
+              >
+                <Text style={styles.alertTitle}>
+                  {alert.severity === 'critical'
+                    ? 'ALERTA CRÍTICA'
+                    : alert.severity === 'warning'
+                      ? 'Alerta'
+                      : 'Información'}
+                </Text>
+                <Text>{alert.message}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       )}
 
