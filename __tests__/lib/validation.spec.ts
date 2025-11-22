@@ -15,6 +15,14 @@ describe('Validation schemas', () => {
         incidents: ['Sin incidentes'],
       },
       patientId: 'pat-001',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: false,
+        medicationPlanReviewed: false,
+        safetyMeasuresApplied: false,
+        questionsAnswered: false,
+      },
     });
     expect(result.success).toBe(true);
   });
@@ -30,6 +38,14 @@ describe('Validation schemas', () => {
         shiftEnd: '',
       },
       patientId: '',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: false,
+        medicationPlanReviewed: false,
+        safetyMeasuresApplied: false,
+        questionsAnswered: false,
+      },
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -52,6 +68,14 @@ describe('Validation schemas', () => {
         shiftEnd: '2024-01-01T03:00:00Z',
       },
       patientId: 'pat-001',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: false,
+        medicationPlanReviewed: false,
+        safetyMeasuresApplied: false,
+        questionsAnswered: false,
+      },
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -96,4 +120,61 @@ describe('Validation schemas', () => {
       expect(messages).toContain('La severidad no coincide con el puntaje total.');
     }
   });
+
+  // BEGIN HANDOVER D1 – BedsideChecklist tests
+  it('requiere confirmar identidad del paciente y revisar alergias', () => {
+    const result = zHandover.safeParse({
+      administrativeData: {
+        unit: 'icu',
+        census: 0,
+        staffIn: [],
+        staffOut: [],
+        shiftStart: '2024-01-01T00:00:00Z',
+        shiftEnd: '2024-01-01T04:00:00Z',
+      },
+      patientId: 'pat-001',
+      bedsideChecklist: {
+        patientIdentityConfirmed: false,
+        allergiesReviewed: false,
+        linesAndDevicesChecked: false,
+        medicationPlanReviewed: false,
+        safetyMeasuresApplied: false,
+        questionsAnswered: false,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        'Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.',
+      );
+    }
+  });
+
+  it('acepta bedside checklist cuando los ítems críticos están confirmados', () => {
+    const result = zHandover.safeParse({
+      administrativeData: {
+        unit: 'icu',
+        census: 0,
+        staffIn: [],
+        staffOut: [],
+        shiftStart: '2024-01-01T00:00:00Z',
+        shiftEnd: '2024-01-01T04:00:00Z',
+      },
+      patientId: 'pat-001',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+        bedsideNotes: 'Paciente con oxígeno y vías en su sitio',
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+  // END HANDOVER D1 – BedsideChecklist tests
 });

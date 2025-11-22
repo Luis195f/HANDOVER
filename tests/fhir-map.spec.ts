@@ -13,6 +13,14 @@ const baseValues: HandoverValues = {
   patientId: 'patient-001',
   encounterId: 'enc-777',
   author: { id: 'nurse-33', display: 'Nurse Test' },
+  bedsideChecklist: {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+  },
   vitals: {
     recordedAt: '2025-01-05T09:45:00+00:00',
     issuedAt: '2025-01-05T09:50:00+00:00',

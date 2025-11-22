@@ -19,6 +19,14 @@ const defaultValues: HandoverValues = {
   },
   patientId: 'pat-001',
   status: 'draft',
+  bedsideChecklist: {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+  },
   risks: {},
   risksStructured: [],
 };

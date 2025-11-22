@@ -4,6 +4,9 @@ import {
   DIET_TYPES,
   MOBILITY_LEVELS,
   STOOL_PATTERNS,
+  // BEGIN HANDOVER D1 – BedsideChecklist types
+  type HandoverBedsideChecklist,
+  // END HANDOVER D1 – BedsideChecklist types
   type MedicationItem,
   type TreatmentItem,
   type EliminationInfo,
@@ -200,6 +203,18 @@ export const zRiskType = z.enum([
 ]);
 export type RiskType = z.infer<typeof zRiskType>;
 
+// BEGIN HANDOVER D1 – BedsideChecklist
+export const zHandoverBedsideChecklist: z.ZodSchema<HandoverBedsideChecklist> = z.object({
+  patientIdentityConfirmed: z.boolean().default(false),
+  allergiesReviewed: z.boolean().default(false),
+  linesAndDevicesChecked: z.boolean().default(false),
+  medicationPlanReviewed: z.boolean().default(false),
+  safetyMeasuresApplied: z.boolean().default(false),
+  questionsAnswered: z.boolean().default(false),
+  bedsideNotes: z.string().max(500).optional(),
+});
+// END HANDOVER D1 – BedsideChecklist
+
 export const zRiskItem = z.object({
   type: zRiskType,
   present: z.boolean(),
@@ -321,6 +336,9 @@ export const zHandover = z.object({
   painAssessment: zPainAssessment.optional(),
   braden: zBradenScale.optional(),
   glasgow: zGlasgowScale.optional(),
+  // BEGIN HANDOVER D1 – BedsideChecklist
+  bedsideChecklist: zHandoverBedsideChecklist,
+  // END HANDOVER D1 – BedsideChecklist
   // Deprecated: usar risksStructured para nuevos flujos
   risks: zRiskFlags.optional(),
   risksStructured: z.array(zRiskItem).default([]),
@@ -335,6 +353,18 @@ export const zHandover = z.object({
   // Multimedia
   audioUri: z.string().min(1).optional()
 }).superRefine((value, ctx) => {
+  // BEGIN HANDOVER D1 – BedsideChecklist rules
+  const checklist = value.bedsideChecklist;
+  if (!checklist.patientIdentityConfirmed || !checklist.allergiesReviewed) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["bedsideChecklist"],
+      message:
+        "Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.",
+    });
+  }
+  // END HANDOVER D1 – BedsideChecklist rules
+
   if (value.status === "final" && !value.signatures?.outgoing) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

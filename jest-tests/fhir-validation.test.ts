@@ -11,6 +11,14 @@ describe('HandoverFormSchema', () => {
       shiftEnd: '2024-01-01T15:00:00Z',
     },
     patientId: 'patient-1',
+    bedsideChecklist: {
+      patientIdentityConfirmed: true,
+      allergiesReviewed: true,
+      linesAndDevicesChecked: false,
+      medicationPlanReviewed: false,
+      safetyMeasuresApplied: false,
+      questionsAnswered: false,
+    },
     vitals: { rr: 18, hr: 80, spo2: 98 },
   } as const;
 

@@ -61,6 +61,14 @@ describe('FHIR terminology consistency checks', () => {
           hasPain: true,
           evaScore: 6,
         },
+        bedsideChecklist: {
+          patientIdentityConfirmed: true,
+          allergiesReviewed: true,
+          linesAndDevicesChecked: false,
+          medicationPlanReviewed: false,
+          safetyMeasuresApplied: false,
+          questionsAnswered: false,
+        },
         risks: { fall: true },
       };
 

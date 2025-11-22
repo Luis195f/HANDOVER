@@ -16,6 +16,14 @@ const baseAdministrativeData = {
 const buildData = (overrides: Partial<HandoverValues>): HandoverValues => ({
   administrativeData: baseAdministrativeData,
   patientId: 'P-001',
+  bedsideChecklist: {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+  },
   ...overrides,
 });
 
