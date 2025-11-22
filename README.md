@@ -16,9 +16,12 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    cp .env.example .env
    ```
    - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE` y `OIDC_REDIRECT_SCHEME` alimentan el flujo de OAuth/OIDC implementado en `src/lib/auth.ts` y las guardias RBAC de `src/security/acl.ts`.
-   - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
-   - `EXPO_PUBLIC_ALLOWED_UNITS` y `EXPO_PUBLIC_ALLOW_ALL_UNITS` filtran el acceso a unidades clínicas específicas.
-   - `EXPO_PUBLIC_BYPASS_SCOPE` habilita cuentas de soporte que omiten filtros RBAC en situaciones operativas.
+    - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
+    - `EXPO_PUBLIC_ALLOWED_UNITS` y `EXPO_PUBLIC_ALLOW_ALL_UNITS` filtran el acceso a unidades clínicas específicas.
+    - `EXPO_PUBLIC_BYPASS_SCOPE` habilita cuentas de soporte que omiten filtros RBAC en situaciones operativas.
+    - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend FastAPI (`main.py`).
+      - `"off"` (por defecto): el backend reenviará los Bundles sin validarlos.
+      - `"remote"`: se invocará `$validate` contra el servidor FHIR (`FHIR_BASE/Bundle/$validate`) antes de reenviar; si se detectan errores `error`/`fatal` se responderá `422` con detalles.
 2. Variables adicionales leídas desde Expo (`app.json > expo.extra`) o el entorno:
    - `EXPO_PUBLIC_API_BASE_URL` (o `API_BASE_URL`) apunta al backend REST si se usa el servidor Django.
    - `EXPO_PUBLIC_API_TOKEN` agrega un token para llamadas autenticadas contra APIs complementarias.

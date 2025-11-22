@@ -3,8 +3,11 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Requ
 from fastapi.middleware.cors import CORSMiddleware
 import os, base64, httpx, datetime
 
+from backend.validation import validate_fhir_bundle
+
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
 FHIR_TOKEN = os.environ.get("FHIR_TOKEN", "")
+HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off")
 
 app = FastAPI(title="handover-api")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -134,6 +137,12 @@ async def fhir_transaction(bundle: dict,
                            x_unit_id: str | None = Header(None)):
     """Proxy transparente: reenvía Transaction Bundle al FHIR y emite un AuditEvent."""
     async with httpx.AsyncClient(timeout=60) as client:
+        await validate_fhir_bundle(
+            bundle=bundle,
+            client=client,
+            base_url=FHIR_BASE,
+            validation_mode=HANDOVER_FHIR_VALIDATION_MODE,
+        )
         r = await client.post(f"{FHIR_BASE}", json=bundle, headers=auth_headers())
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
