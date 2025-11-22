@@ -194,6 +194,20 @@ export const zRiskFlags: z.ZodSchema<RiskFlags> = z
   })
   .partial();
 
+// BEGIN HANDOVER: SIGNATURES_DUAL
+const zHandoverSignatureBase = z.object({
+  userId: z.string().min(1, "Falta identificador de usuario para la firma"),
+  fullName: z.string().min(1, "Falta nombre completo en la firma"),
+  role: z.enum(["nurse", "admin", "supervisor"]).optional(),
+  unitId: z.string().min(1, "Falta unidad clínica en la firma"),
+  signedAt: z.string().datetime().or(z.string()).describe("ISO timestamp de firma"),
+  deviceInfo: z.string().optional(),
+  method: z.enum(["session", "pin", "biometric"]).default("session"),
+});
+
+export const zHandoverSignature = zHandoverSignatureBase;
+// END HANDOVER: SIGNATURES_DUAL
+
 export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
   intakeMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   outputMl: z.number().nonnegative({ message: "No puede ser negativo" }),
@@ -214,6 +228,8 @@ export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
 
 export const zHandover = z.object({
   administrativeData: zAdministrativeData,
+
+  status: z.enum(["draft", "final"]).default("draft"),
 
   // Paciente (se llena luego en Lote 1B)
   patientId: z.string().min(1, "ID paciente requerido"),
@@ -246,8 +262,23 @@ export const zHandover = z.object({
   glasgow: zGlasgowScale.optional(),
   risks: zRiskFlags.optional(),
 
+  signatures: z
+    .object({
+      outgoing: zHandoverSignature.optional(),
+      incoming: zHandoverSignature.optional(),
+    })
+    .optional(),
+
   // Multimedia
   audioUri: z.string().min(1).optional()
+}).superRefine((value, ctx) => {
+  if (value.status === "final" && !value.signatures?.outgoing) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["signatures", "outgoing"],
+      message: "La entrega final debe tener firma de enfermera saliente.",
+    });
+  }
 });
 
 export type HandoverValues = z.infer<typeof zHandover>;

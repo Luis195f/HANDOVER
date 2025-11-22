@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -29,7 +29,7 @@ import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
-import { getSession, type Session } from '@/src/security/auth';
+import { getSession, useAuth, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
 import { useZodForm } from '@/src/validation/form-hooks';
@@ -37,6 +37,7 @@ import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/vali
 import { ExportPdfButton } from './components/ExportPdfButton';
 import SpecificCareSection from './components/SpecificCareSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
+import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -110,6 +111,34 @@ const mergeDictationText = (currentValue: string | undefined, dictated: string) 
   }
   return `${base}\n${addition}`;
 };
+
+function normalizeSignatureUser(
+  session?: (Session & { user?: Record<string, unknown> }) | null,
+): SignatureUser | null {
+  if (!session) return null;
+  const base = (session as any)?.user ?? session;
+  if (!base) return null;
+  const roles: string[] | undefined = Array.isArray((base as any).roles)
+    ? ((base as any).roles as string[])
+    : (base as any).role
+      ? [String((base as any).role)]
+      : undefined;
+  const units: string[] | undefined = Array.isArray((base as any).units)
+    ? ((base as any).units as string[])
+    : undefined;
+
+  return {
+    id: (base as any).id ?? (base as any).userId,
+    userId: (base as any).userId ?? (base as any).id,
+    name: (base as any).name ?? (base as any).displayName,
+    fullName: (base as any).fullName ?? (base as any).name ?? (base as any).displayName,
+    displayName: (base as any).displayName ?? (base as any).name ?? (base as any).fullName,
+    role: (base as any).role,
+    roles,
+    units,
+    activeUnitId: (base as any).activeUnitId ?? units?.[0],
+  };
+}
 
 function DictationMicButton({
   active,
@@ -377,6 +406,7 @@ function StaffListInput({
 export default function HandoverForm({ navigation, route }: Props) {
   const { patientId: patientIdParam, unitId: unitIdParam, specialtyId } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
+  const { session: authSession } = useAuth();
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
@@ -409,6 +439,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       incidents: [],
     },
     patientId: patientIdParam ?? '',
+    status: 'draft',
     dxMedical: '',
     dxNursing: '',
     evolution: '',
@@ -432,6 +463,10 @@ export default function HandoverForm({ navigation, route }: Props) {
       location: null,
       actionsTaken: null,
     },
+    signatures: {
+      outgoing: undefined,
+      incoming: undefined,
+    },
   });
 
   const { control, formState } = form;
@@ -449,6 +484,13 @@ export default function HandoverForm({ navigation, route }: Props) {
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
   const closingSummaryError = errors.closingSummary?.message as string | undefined;
+  const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
+  const administrativeUnitValue = form.watch('administrativeData.unit');
+  const signaturesValue = form.watch('signatures');
+  const outgoingSignature = signaturesValue?.outgoing;
+  const signatureErrors = errors.signatures ?? {};
+  const outgoingSignatureError = (signatureErrors as any)?.outgoing?.message as string | undefined;
+  const incomingSignatureError = (signatureErrors as any)?.incoming?.message as string | undefined;
   const sttServiceRef = useRef<SttService | null>(null);
   if (!sttServiceRef.current) {
     sttServiceRef.current = createSttService();
@@ -685,6 +727,17 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
+  const handleInvalidSubmit = (formErrors: HandoverFormErrors) => {
+    const currentStatus = form.getValues('status');
+    const hasOutgoing = form.getValues('signatures')?.outgoing;
+    if (currentStatus === 'final' && !hasOutgoing) {
+      Alert.alert('Falta firma', 'Para finalizar la entrega falta la firma de enfermera saliente.');
+      return;
+    }
+    const message = (formErrors as any)?.message ?? 'No se pudo guardar';
+    Alert.alert('Error', typeof message === 'string' ? message : 'No se pudo guardar');
+  };
+
   const onSubmit = form.handleSubmit(
     async (values) => {
       try {
@@ -695,6 +748,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           return trimmed;
         };
 
+        const status = values.status ?? 'draft';
         const unitFromForm = normalizeUnit(values.administrativeData?.unit);
         const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
         const unitFromStore = normalizeUnit(selectedUnitId);
@@ -746,14 +800,17 @@ export default function HandoverForm({ navigation, route }: Props) {
         const bundle = buildHandoverBundle(
           {
             patientId: values.patientId,
-            author: session?.user?.id
-              ? { id: session.user.id, display: session.user.name }
-              : undefined,
+            status,
+            author: signatureUser?.userId
+              ? { id: signatureUser.userId, display: signatureUser.fullName ?? signatureUser.displayName }
+              : session?.user?.id
+                ? { id: session.user.id, display: session.user.name }
+                : undefined,
             vitals: values.vitals,
             medications,
             oxygenTherapy,
             audioAttachment: audioAttachment ?? undefined,
-            composition: { title: 'Clinical handover summary' },
+            composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
             administrativeData,
             closingSummary: values.closingSummary,
             sbar: {
@@ -763,6 +820,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               recommendation: values.sbarRecommendation,
             },
             painAssessment: values.painAssessment,
+            signatures: values.signatures,
           },
           { now: () => nowIso },
         );
@@ -819,10 +877,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         Alert.alert('Error', message);
       }
     },
-    (error) => {
-      const message = error?.message ?? 'No se pudo guardar';
-      Alert.alert('Error', message);
-    },
+    handleInvalidSubmit,
   );
 
   const handleValidateForExport = async () => {
@@ -831,6 +886,16 @@ export default function HandoverForm({ navigation, route }: Props) {
       Alert.alert('Revisa el formulario', 'Completa los campos obligatorios antes de exportar el PDF.');
     }
     return isValid;
+  };
+
+  const handleSaveDraft = () => {
+    form.setValue('status', 'draft', { shouldDirty: true, shouldValidate: true });
+    onSubmit();
+  };
+
+  const handleFinalize = () => {
+    form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
+    onSubmit();
   };
 
   return (
@@ -1211,8 +1276,26 @@ export default function HandoverForm({ navigation, route }: Props) {
         </View>
       </View>
 
+      {/* BEGIN HANDOVER: SIGNATURES_DUAL_UI */}
+      <View style={styles.section}>
+        <SignaturesSection
+          value={signaturesValue}
+          onChange={(next) =>
+            form.setValue('signatures', next, { shouldDirty: true, shouldValidate: true })
+          }
+          currentUser={signatureUser}
+          administrativeUnitId={administrativeUnitValue}
+        />
+        {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
+        {incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
+      </View>
+      {/* END HANDOVER: SIGNATURES_DUAL_UI */}
+
       <View style={styles.buttonRow}>
-        <Button title="Guardar" onPress={onSubmit} />
+        <Button title="Guardar borrador" onPress={handleSaveDraft} />
+        <View style={styles.secondaryButton}>
+          <Button title="Finalizar entrega" onPress={handleFinalize} />
+        </View>
         <View style={styles.secondaryButton}>
           <ExportPdfButton handover={form.getValues()} onBeforeExport={handleValidateForExport} />
         </View>
