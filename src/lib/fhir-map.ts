@@ -14,6 +14,7 @@ import type {
   SkinInfo,
   TreatmentItem,
   RiskFlags,
+  RiskItem,
 } from '../types/handover';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
@@ -541,6 +542,7 @@ export type HandoverValues = {
   braden?: BradenScale;
   glasgow?: GlasgowScale;
   risks?: RiskFlags;
+  risksStructured?: RiskItem[];
   treatments?: TreatmentItem[];
   meds?: string | string[] | null;
 };

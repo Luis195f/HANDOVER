@@ -19,7 +19,6 @@ export default defineConfig({
       'tests/security/**/*.spec.ts',
     ],
     exclude: [
-      'src/screens/**',
       'src/validation/**',
       'src/security/**',
       'src/**/__tests__/**/fhir-map.test.ts',

@@ -188,6 +188,26 @@ export const zSkinInfo: z.ZodSchema<SkinInfo> = z.object({
   hasPressureInjury: z.boolean().optional(),
 });
 
+export const zRiskType = z.enum([
+  "fall",
+  "pressureUlcer",
+  "isolation",
+  "seizure",
+  "suicide",
+  "deviceDisconnection",
+  "infection",
+  "other",
+]);
+export type RiskType = z.infer<typeof zRiskType>;
+
+export const zRiskItem = z.object({
+  type: zRiskType,
+  present: z.boolean(),
+  notes: z.string().max(1000).optional(),
+  actions: z.array(z.string()).default([]),
+});
+export type RiskItem = z.infer<typeof zRiskItem>;
+
 export const zRiskFlags: z.ZodSchema<RiskFlags> = z
   .object({
     fall: z.boolean().optional(),
@@ -301,7 +321,9 @@ export const zHandover = z.object({
   painAssessment: zPainAssessment.optional(),
   braden: zBradenScale.optional(),
   glasgow: zGlasgowScale.optional(),
+  // Deprecated: usar risksStructured para nuevos flujos
   risks: zRiskFlags.optional(),
+  risksStructured: z.array(zRiskItem).default([]),
 
   signatures: z
     .object({
