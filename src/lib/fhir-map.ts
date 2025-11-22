@@ -4,6 +4,7 @@ import type { AdministrativeData } from '../types/administrative';
 import type {
   EliminationInfo,
   FluidBalanceInfo,
+  HandoverSignature,
   MobilityInfo,
   NutritionInfo,
   PainAssessment,
@@ -44,6 +45,7 @@ type Reference = {
   reference: string;
   type?: string;
   display?: string;
+  identifier?: { system: string; value: string };
 };
 
 type Meta = {
@@ -418,6 +420,12 @@ const AttesterSchema = z.object({
   time: isoDateTime.optional(),
   partyReference: z.string().optional(),
   partyDisplay: z.string().optional(),
+  partyIdentifier: z
+    .object({
+      system: z.string(),
+      value: z.string(),
+    })
+    .optional(),
 });
 
 type ObservationVitalsInput = z.infer<typeof ObservationVitalsSchema>;
@@ -453,6 +461,7 @@ type CompositionValues = {
   closingSummary?: string | null;
   sbar?: SbarValues;
   administrativeData?: AdministrativeData;
+  signatures?: HandoverSignatures;
 };
 
 type SbarValues = {
@@ -493,11 +502,17 @@ export type CompositionInput = {
 
 export type VitalsValues = Omit<ObservationVitalsInput, 'patientId' | 'encounterId'>;
 
+export type HandoverSignatures = {
+  outgoing?: HandoverSignature;
+  incoming?: HandoverSignature;
+};
+
 export type HandoverValues = {
   patientId: string;
   encounterId?: string;
   author?: AuthorInput;
   administrativeData?: AdministrativeData;
+  status?: 'draft' | 'final';
   vitals?: VitalsValues;
   medications?: MedicationStatementInput[];
   oxygenTherapy?: OxygenTherapyInput | null;
@@ -505,6 +520,7 @@ export type HandoverValues = {
   composition?: CompositionInput;
   closingSummary?: string | null;
   sbar?: SbarValues;
+  signatures?: HandoverSignatures;
   nutrition?: NutritionInfo;
   elimination?: EliminationInfo;
   mobility?: MobilityInfo;
@@ -592,14 +608,35 @@ function mapAttesters(inputs?: CompositionInput['attesters']): CompositionAttest
     if (attester.time) {
       base.time = attester.time;
     }
-    if (attester.partyReference || attester.partyDisplay) {
+    if (attester.partyReference || attester.partyDisplay || attester.partyIdentifier) {
       base.party = {
         reference: attester.partyReference ?? '',
         display: attester.partyDisplay,
       };
+      if (attester.partyIdentifier) {
+        base.party.identifier = attester.partyIdentifier;
+      }
     }
     return base;
   });
+}
+
+function attestersFromSignatures(signatures?: HandoverSignatures): AttesterInput[] {
+  if (!signatures) return [];
+
+  const mapSingle = (signature?: HandoverSignature | null): AttesterInput | null => {
+    if (!signature) return null;
+    return {
+      mode: 'professional',
+      time: signature.signedAt,
+      partyDisplay: signature.fullName,
+      partyIdentifier: { system: 'urn:handover:user-id', value: signature.userId },
+    };
+  };
+
+  return [mapSingle(signatures.outgoing), mapSingle(signatures.incoming)].filter(
+    (value): value is AttesterInput => value != null,
+  );
 }
 
 function stableHash(...parts: string[]): string {
@@ -1569,6 +1606,10 @@ export function buildComposition(
   const status = values.composition?.status ?? 'final';
   const title = values.composition?.title ?? 'Clinical handover summary';
   const sections: CompositionSection[] = [];
+  const attesters = [
+    ...(values.composition?.attesters ?? []),
+    ...attestersFromSignatures(values.signatures),
+  ];
 
   const addSbarSection = (label: string, content?: string | null) => {
     if (!content) return;
@@ -1683,7 +1724,7 @@ export function buildComposition(
     date: optionsMerged.now(),
     author: [authorRef],
     title,
-    attester: mapAttesters(values.composition?.attesters),
+    attester: mapAttesters(attesters),
     section: sections.length > 0 ? sections : undefined,
   };
 }
@@ -1922,6 +1963,7 @@ export function buildHandoverBundle(
       closingSummary: values.closingSummary,
       administrativeData: values.administrativeData,
       sbar: values.sbar,
+      signatures: values.signatures,
     },
     {
       vitals: vitalsRefs,

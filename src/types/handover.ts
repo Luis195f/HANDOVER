@@ -1,5 +1,17 @@
 import type { AdministrativeData } from './administrative';
 
+// BEGIN HANDOVER: SIGNATURES_DUAL_TYPES
+export type HandoverSignature = {
+  userId: string;
+  fullName: string;
+  role?: 'nurse' | 'admin' | 'supervisor';
+  unitId: string;
+  signedAt: string;
+  deviceInfo?: string;
+  method?: 'session' | 'pin' | 'biometric';
+};
+// END HANDOVER: SIGNATURES_DUAL_TYPES
+
 export const DIET_TYPES = ['oral', 'enteral', 'parenteral', 'npo', 'other'] as const;
 export type DietType = (typeof DIET_TYPES)[number];
 
@@ -121,6 +133,7 @@ export type GlasgowScale = {
 export type HandoverValues = {
   administrativeData: AdministrativeData;
   patientId: string;
+  status?: 'draft' | 'final';
   vitals?: Vitals;
   dxMedical?: string;
   dxNursing?: string;
@@ -142,4 +155,8 @@ export type HandoverValues = {
   braden?: BradenScale;
   glasgow?: GlasgowScale;
   risks?: RiskFlags;
+  signatures?: {
+    outgoing?: HandoverSignature;
+    incoming?: HandoverSignature;
+  };
 };

@@ -24,16 +24,41 @@ async def create_audit_event(client: httpx.AsyncClient, *,
     """Crea un AuditEvent R4 mínimo por cada transacción."""
     # intentar sacar PatientId (si viene como campo auxiliar en tu bundle; opcional)
     patient_id = None
+    composition = None
+    outgoing_attester = None
+    incoming_attester = None
     try:
-      for e in (bundle.get("entry") or []):
-          r = (e or {}).get("resource") or {}
-          if r.get("resourceType") == "Patient":
-              pid = r.get("id")
-              if pid:
-                  patient_id = pid
-                  break
+        for e in (bundle.get("entry") or []):
+            r = (e or {}).get("resource") or {}
+            if r.get("resourceType") == "Patient":
+                pid = r.get("id")
+                if pid:
+                    patient_id = pid
+            if r.get("resourceType") == "Composition" and not composition:
+                composition = r
+                attesters = r.get("attester") or []
+                if attesters:
+                    outgoing_attester = attesters[0]
+                    if len(attesters) > 1:
+                        incoming_attester = attesters[1]
     except Exception:
-      pass
+        pass
+
+    def agent_from_attester(attester: dict | None, label: str):
+        if not attester:
+            return None
+        party = attester.get("party") or {}
+        identifier = (party.get("identifier") or {}).get("value")
+        reference = party.get("reference")
+        who_value = identifier or reference
+        if not who_value:
+            return None
+        display = party.get("display") or who_value
+        return {
+            "type": {"text": label},
+            "who": {"identifier": {"system": "urn:handover:user-id", "value": who_value}, "display": display},
+            "requestor": False,
+        }
 
     audit = {
         "resourceType": "AuditEvent",
@@ -64,8 +89,36 @@ async def create_audit_event(client: httpx.AsyncClient, *,
             "observer": {"identifier": {"value": "handover-api"}},
         },
     }
+
+    outgoing_agent = agent_from_attester(outgoing_attester, "outgoing-nurse-signature")
+    incoming_agent = agent_from_attester(incoming_attester, "incoming-nurse-signature")
+    if outgoing_agent:
+        audit["agent"].append(outgoing_agent)
+    if incoming_agent:
+        audit["agent"].append(incoming_agent)
+
     if patient_id:
         audit["entity"] = [{"what": {"reference": f"Patient/{patient_id}"}}]
+
+    has_outgoing_signature = outgoing_agent is not None
+    has_incoming_signature = incoming_agent is not None
+    if composition:
+        composition_id = composition.get("id") or "unknown"
+        signature_value = (
+            ("outgoingSigned" if has_outgoing_signature else "notSigned")
+            + (";incomingSigned" if has_incoming_signature else ";incomingNotSigned")
+        )
+        audit["entity"] = (audit.get("entity") or []) + [
+            {
+                "what": {"reference": f"Composition/{composition_id}"},
+                "detail": [
+                    {
+                        "type": "signature-status",
+                        "valueString": signature_value,
+                    }
+                ],
+            }
+        ]
 
     r = await client.post(f"{FHIR_BASE}/AuditEvent", json=audit, headers=auth_headers())
     # No levantar excepción si el servidor no soporta AuditEvent (no bloquea el MVP)
