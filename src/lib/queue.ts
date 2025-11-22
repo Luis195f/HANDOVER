@@ -14,8 +14,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as SQLite from "expo-sqlite";
-import { decryptPayload, encryptPayload } from "../security/crypto";
-import { hashHex } from "./crypto";
+import { decryptPayload, encryptPayload, hashHex } from "./crypto";
 import { mark } from "./otel";
 
 // -------------------------------
@@ -45,17 +44,21 @@ if (db?.execSync) {
 }
 
 async function encryptQueuePayload(payload: unknown): Promise<string> {
+  const serialized = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
   try {
-    return await encryptPayload(payload);
-  } catch {
-    return JSON.stringify(payload ?? null);
+    return await encryptPayload(serialized);
+  } catch (error) {
+    console.warn("Fallo al cifrar payload offline", error);
+    return serialized;
   }
 }
 
 async function decryptQueuePayload(payload: string): Promise<unknown> {
   try {
-    return await decryptPayload(payload);
-  } catch {
+    const decrypted = await decryptPayload(payload);
+    return safeParse(decrypted);
+  } catch (error) {
+    console.warn("Fallo al descifrar payload offline", error);
     return safeParse(payload);
   }
 }
