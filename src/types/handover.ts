@@ -1,4 +1,7 @@
+import { z } from 'zod';
+
 import type { AdministrativeData } from './administrative';
+import type { zMedicationItem, zTreatmentItem } from '../validation/schemas';
 
 // BEGIN HANDOVER: SIGNATURES_DUAL_TYPES
 export type HandoverSignature = {
@@ -130,6 +133,9 @@ export type GlasgowScale = {
   severity: 'grave' | 'moderado' | 'leve';
 };
 
+export type MedicationItem = z.infer<typeof zMedicationItem>;
+export type TreatmentItem = z.infer<typeof zTreatmentItem>;
+
 export type HandoverValues = {
   administrativeData: AdministrativeData;
   patientId: string;
@@ -144,6 +150,8 @@ export type HandoverValues = {
   sbarAssessment?: string;
   sbarRecommendation?: string;
   meds?: string;
+  medications?: MedicationItem[];
+  treatments?: TreatmentItem[];
   oxygenTherapy?: OxygenTherapy;
   audioUri?: string;
   nutrition?: NutritionInfo;

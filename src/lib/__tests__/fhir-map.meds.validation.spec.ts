@@ -9,7 +9,14 @@ describe('Meds — validación y omisión de entradas vacías', () => {
 
   it('omite meds vacíos y crea MedicationStatement sólo para los válidos', () => {
     const b = buildHandoverBundle(
-      { patientId, meds: [ {}, { text: 'Paracetamol 1 g v.o. c/8h' }, { code: '12345', display: 'Ibuprofen 400 mg tablet' } ] as any },
+      {
+        patientId,
+        medications: [
+          {},
+          { display: 'Paracetamol 1 g v.o. c/8h' },
+          { code: { system: 'sys', code: '12345', display: 'Ibuprofen 400 mg tablet' } },
+        ] as any,
+      },
       { now }
     );
     const meds = list(b, 'MedicationStatement');
@@ -20,7 +27,13 @@ describe('Meds — validación y omisión de entradas vacías', () => {
 
   it('acepta sólo texto (text/dosageText) o sólo code/display', () => {
     const b = buildHandoverBundle(
-      { patientId, meds: [ { text: 'Metamizol 2 g IV' }, { code: '123', display: 'Omeprazole 20 mg' } ] },
+      {
+        patientId,
+        medications: [
+          { display: 'Metamizol 2 g IV' },
+          { code: { system: 'sys', code: '123', display: 'Omeprazole 20 mg' } },
+        ],
+      },
       { now }
     );
     const meds = list(b,'MedicationStatement');

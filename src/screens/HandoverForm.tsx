@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, useFieldArray, type Control, type FieldErrors } from 'react-hook-form';
+import { Controller, FormProvider, type Control, type FieldErrors } from 'react-hook-form';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -39,6 +39,8 @@ import { ExportPdfButton } from './components/ExportPdfButton';
 import SpecificCareSection from './components/SpecificCareSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
 import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
+import MedicationSection from './components/MedicationSection';
+import TreatmentsSection from './components/TreatmentsSection';
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -446,6 +448,8 @@ export default function HandoverForm({ navigation, route }: Props) {
     evolution: '',
     closingSummary: '',
     meds: '',
+    medications: [],
+    treatments: [],
     sbarSituation: '',
     sbarBackground: '',
     sbarAssessment: '',
@@ -763,12 +767,9 @@ export default function HandoverForm({ navigation, route }: Props) {
           return;
         }
 
-        const meds = (values.meds ?? '')
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean);
-
-        const medications = meds.map((med) => ({ status: 'active' as const, display: med }));
+        const medications = values.medications ?? [];
+        const treatments = values.treatments ?? [];
+        const medsText = values.meds;
         const oxygenTherapyInput = values.oxygenTherapy ?? {};
         const hasOxygenValues =
           oxygenTherapyInput.device ||
@@ -809,11 +810,13 @@ export default function HandoverForm({ navigation, route }: Props) {
                 : undefined,
             vitals: values.vitals,
             medications,
+            treatments,
             oxygenTherapy,
             audioAttachment: audioAttachment ?? undefined,
             composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
             administrativeData,
             closingSummary: values.closingSummary,
+            meds: medsText,
             sbar: {
               situation: values.sbarSituation,
               background: values.sbarBackground,
@@ -1123,8 +1126,12 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       {isOn('SHOW_MEDS') && (
         <View style={styles.section}>
-          <View style={styles.field}>
-            <Text style={styles.label}>Medicaciones (separadas por coma)</Text>
+          <MedicationSection control={control} />
+          <View style={{ marginTop: 24 }}>
+            <TreatmentsSection control={control} />
+          </View>
+          <View style={[styles.field, { marginTop: 24 }]}>
+            <Text style={styles.label}>Notas de medicación (texto libre, legado)</Text>
             <Controller
               control={control}
               name="meds"
@@ -1132,7 +1139,7 @@ export default function HandoverForm({ navigation, route }: Props) {
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   multiline
-                  placeholder="Paracetamol 1g, Omeprazol 20mg"
+                  placeholder="Texto libre de medicación (opcional)"
                   onBlur={onBlur}
                   value={value ?? ''}
                   onChangeText={onChange}

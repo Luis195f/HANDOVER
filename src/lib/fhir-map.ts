@@ -5,15 +5,17 @@ import type {
   EliminationInfo,
   FluidBalanceInfo,
   HandoverSignature,
+  MedicationItem,
   MobilityInfo,
   NutritionInfo,
   PainAssessment,
   BradenScale,
   GlasgowScale,
   SkinInfo,
+  TreatmentItem,
   RiskFlags,
 } from '../types/handover';
-import { CATEGORY, FHIR_CODES, LOINC, SNOMED, type TerminologyCode } from './codes';
+import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
 import { validateResource as validateFhirResource } from './fhir-validation';
 
@@ -56,6 +58,10 @@ type Annotation = {
   text: string;
 };
 
+type MedicationDosage = {
+  text?: string;
+};
+
 type Period = {
   start: string;
   end?: string;
@@ -90,6 +96,7 @@ type Observation = {
 
 type MedicationStatement = {
   resourceType: 'MedicationStatement';
+  identifier?: Array<{ system: string; value: string }>;
   id?: string;
   status: 'active' | 'completed' | 'intended';
   medicationCodeableConcept: CodeableConcept;
@@ -98,10 +105,12 @@ type MedicationStatement = {
   effectivePeriod?: Period;
   dateAsserted: string;
   note?: Annotation[];
+  dosage?: MedicationDosage[];
 };
 
 type Procedure = {
   resourceType: 'Procedure';
+  identifier?: Array<{ system: string; value: string }>;
   id?: string;
   status: 'in-progress' | 'completed';
   code: CodeableConcept;
@@ -437,7 +446,8 @@ type AttesterInput = z.infer<typeof AttesterSchema>;
 type MedicationValues = {
   patientId: string;
   encounterId?: string;
-  medications?: MedicationStatementInput[];
+  medications?: Array<MedicationStatementInput | MedicationItem>;
+  meds?: string | string[] | null;
 };
 
 type OxygenValues = {
@@ -474,6 +484,7 @@ type SbarValues = {
 type BundleReferenceIndex = {
   vitals: string[];
   medications: string[];
+  treatments: string[];
   oxygen: string[];
   attachments: string[];
   nutrition: string[];
@@ -514,7 +525,7 @@ export type HandoverValues = {
   administrativeData?: AdministrativeData;
   status?: 'draft' | 'final';
   vitals?: VitalsValues;
-  medications?: MedicationStatementInput[];
+  medications?: Array<MedicationStatementInput | MedicationItem>;
   oxygenTherapy?: OxygenTherapyInput | null;
   audioAttachment?: AudioAttachmentInput | null;
   composition?: CompositionInput;
@@ -530,6 +541,8 @@ export type HandoverValues = {
   braden?: BradenScale;
   glasgow?: GlasgowScale;
   risks?: RiskFlags;
+  treatments?: TreatmentItem[];
+  meds?: string | string[] | null;
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
@@ -898,50 +911,148 @@ export function mapObservationVitals(
   return observations;
 }
 
+const MEDICATION_ROUTE_LABELS: Partial<Record<MedicationItem['route'], string>> = {
+  oral: 'Oral',
+  iv: 'IV',
+  im: 'IM',
+  sc: 'SC',
+  inhaled: 'Inhalada',
+  topical: 'Tópica',
+  other: 'Otra vía',
+};
+
+function structuredDosageText(medication: MedicationItem): string | undefined {
+  const parts = [medication.dose, medication.route ? MEDICATION_ROUTE_LABELS[medication.route] : null, medication.frequency]
+    .filter(Boolean)
+    .join(' ');
+  return parts || undefined;
+}
+
+function isStructuredMedication(
+  input: MedicationStatementInput | MedicationItem,
+): input is MedicationItem {
+  return (input as MedicationItem).name !== undefined;
+}
+
+function mapStructuredMedicationStatement(
+  medication: MedicationItem,
+  subject: Reference,
+  encounter: Reference | undefined,
+  assertedAt: string,
+): MedicationStatement {
+  const concept: CodeableConcept = medication.code
+    ? {
+        coding: [medication.code],
+        text: medication.name,
+      }
+    : {
+        coding: [],
+        text: medication.name,
+      };
+
+  const notes: Annotation[] = [];
+  if (medication.isHighAlert) {
+    notes.push({ text: 'High alert medication' });
+  }
+  if (medication.notes) {
+    notes.push({ text: medication.notes });
+  }
+
+  const dosageText = structuredDosageText(medication);
+
+  return {
+    resourceType: 'MedicationStatement',
+    identifier: [{ system: 'urn:handover-pro:medication-item', value: medication.id }],
+    status: 'active',
+    medicationCodeableConcept: concept,
+    subject,
+    encounter,
+    dateAsserted: assertedAt,
+    note: notes.length > 0 ? notes : undefined,
+    dosage: dosageText ? [{ text: dosageText }] : undefined,
+  };
+}
+
+function mapLegacyMedicationStatement(
+  input: MedicationStatementInput,
+  subject: Reference,
+  encounter: Reference | undefined,
+  assertedAt: string,
+): MedicationStatement | null {
+  const parsedResult = MedicationStatementSchema.safeParse(input);
+  if (!parsedResult.success) return null;
+  const parsed = parsedResult.data;
+  const concept: CodeableConcept = parsed.code
+    ? {
+        coding: [parsed.code],
+        text: parsed.display ?? parsed.code.display,
+      }
+    : {
+        coding: [],
+        text: parsed.display ?? 'Medication',
+      };
+
+  const period: Period | undefined = parsed.start || parsed.end
+    ? {
+        start: parsed.start ?? assertedAt,
+        end: parsed.end ?? undefined,
+      }
+    : undefined;
+
+  const note = parsed.note ? [{ text: parsed.note }] : undefined;
+
+  return {
+    resourceType: 'MedicationStatement',
+    status: parsed.status,
+    medicationCodeableConcept: concept,
+    subject,
+    encounter,
+    effectivePeriod: period,
+    dateAsserted: assertedAt,
+    note,
+  };
+}
+
 export function mapMedicationStatements(
   values: MedicationValues,
   options?: BuildOptions,
 ): MedicationStatement[] {
+  const inputs = values.medications ?? [];
   const optionsMerged = resolveOptions(options);
-  if (!values.medications || values.medications.length === 0) {
-    return [];
-  }
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
-  const nowIso = optionsMerged.now();
+  const assertedAt = optionsMerged.now();
 
-  return values.medications.map((input) => {
-    const parsed = MedicationStatementSchema.parse(input);
-    const concept: CodeableConcept = parsed.code
-      ? {
-          coding: [parsed.code],
-          text: parsed.display ?? parsed.code.display,
-        }
-      : {
-          coding: [],
-          text: parsed.display ?? 'Medication',
-        };
+  const structuredInputs = inputs.filter(isStructuredMedication);
+  const legacyInputs = inputs.filter((item): item is MedicationStatementInput => !isStructuredMedication(item));
 
-    const period: Period | undefined = parsed.start || parsed.end
-      ? {
-          start: parsed.start ?? nowIso,
-          end: parsed.end ?? undefined,
-        }
-      : undefined;
+  const structuredStatements = structuredInputs.map((item) =>
+    mapStructuredMedicationStatement(item, subject, encounter, assertedAt),
+  );
 
-    const note = parsed.note ? [{ text: parsed.note }] : undefined;
+  const legacyStatements = legacyInputs
+    .map((item) => mapLegacyMedicationStatement(item, subject, encounter, assertedAt))
+    .filter((value): value is MedicationStatement => value != null);
 
-    return {
-      resourceType: 'MedicationStatement',
-      status: parsed.status,
-      medicationCodeableConcept: concept,
-      subject,
-      encounter,
-      effectivePeriod: period,
-      dateAsserted: nowIso,
-      note,
-    };
-  });
+  const hasStatements = structuredStatements.length > 0 || legacyStatements.length > 0;
+  const medsText = Array.isArray(values.meds) ? values.meds.join(', ') : values.meds;
+  const trimmedText = typeof medsText === 'string' ? medsText.trim() : '';
+
+  const textFallback: MedicationStatement[] = !hasStatements && trimmedText
+    ? [
+        {
+          resourceType: 'MedicationStatement',
+          status: 'active',
+          medicationCodeableConcept: { coding: [], text: trimmedText },
+          subject,
+          encounter,
+          dateAsserted: assertedAt,
+          note: [{ text: 'Texto libre de medicación transcrito desde handover' }],
+        },
+      ]
+    : [];
+
+  return [...structuredStatements, ...legacyStatements, ...textFallback];
 }
 
 export function mapDeviceUse(
@@ -1079,6 +1190,7 @@ export function mapOxygenObservations(
 }
 
 type CareValues = { patientId: string; encounterId?: string };
+type TreatmentValues = CareValues & { treatments?: TreatmentItem[] };
 
 export function mapNutritionCare(
   values: CareValues & { nutrition?: NutritionInfo },
@@ -1339,6 +1451,54 @@ export function mapFluidBalanceCare(
       note: values.fluidBalance.notes ? [{ text: values.fluidBalance.notes }] : undefined,
     },
   ];
+}
+
+const TREATMENT_TYPE_LABELS: Record<TreatmentItem['type'], string> = {
+  woundCare: 'Curación de heridas',
+  respiratory: 'Respiratorio',
+  mobilization: 'Movilización',
+  education: 'Educación',
+  other: 'Otro',
+};
+
+export function mapTreatments(
+  values: TreatmentValues,
+  _options?: BuildOptions,
+): Procedure[] {
+  if (!values.treatments || values.treatments.length === 0) return [];
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+
+  return values.treatments.map((treatment) => {
+    const status: Procedure['status'] = treatment.done ? 'completed' : 'in-progress';
+    const display = TREATMENT_TYPE_LABELS[treatment.type];
+    const procedure: Procedure = {
+      resourceType: 'Procedure',
+      identifier: [{ system: 'urn:handover-pro:treatment-item', value: treatment.id }],
+      status,
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE,
+            code: treatment.type,
+            display,
+          },
+        ],
+        text: display,
+      },
+      subject,
+      encounter,
+      note: treatment.description ? [{ text: treatment.description }] : undefined,
+    };
+
+    if (treatment.done && treatment.scheduledAt) {
+      procedure.performedDateTime = treatment.scheduledAt;
+    } else if (treatment.scheduledAt) {
+      procedure.performedPeriod = { start: treatment.scheduledAt };
+    }
+
+    return procedure;
+  });
 }
 
 function mapEvaObservation(
@@ -1651,6 +1811,23 @@ export function buildComposition(
     });
   }
 
+  if (refs.treatments.length > 0) {
+    sections.push({
+      title: 'Tratamientos no farmacológicos',
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+            code: 'treatments',
+            display: 'Non-pharmacological treatments',
+          },
+        ],
+        text: 'Non-pharmacological treatments',
+      },
+      entry: refs.treatments.map((reference) => ({ reference })),
+    });
+  }
+
   if (refs.oxygen.length > 0) {
     sections.push({
       title: 'Oxygen therapy',
@@ -1799,7 +1976,13 @@ export function buildHandoverBundle(
       patientId: values.patientId,
       encounterId: values.encounterId,
       medications: values.medications,
+      meds: values.meds,
     },
+    sharedOptions,
+  );
+
+  const treatmentProcedures = mapTreatments(
+    { patientId: values.patientId, encounterId: values.encounterId, treatments: values.treatments },
     sharedOptions,
   );
 
@@ -1825,6 +2008,7 @@ export function buildHandoverBundle(
   const entries: BundleEntry[] = [];
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];
+  const treatmentRefs: string[] = [];
   const oxygenRefs: string[] = [];
   const attachmentRefs: string[] = [];
   const nutritionRefs: string[] = [];
@@ -1934,6 +2118,16 @@ export function buildHandoverBundle(
     medicationRefs.push(fullUrl);
   });
 
+  treatmentProcedures.forEach((procedure) => {
+    const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Procedure' },
+    });
+    treatmentRefs.push(fullUrl);
+  });
+
   oxygenResources.forEach((resource) => {
     const { resource: withId, fullUrl } = assignStableIds(resource, values.patientId);
     entries.push({
@@ -1968,6 +2162,7 @@ export function buildHandoverBundle(
     {
       vitals: vitalsRefs,
       medications: medicationRefs,
+      treatments: treatmentRefs,
       oxygen: oxygenRefs,
       attachments: attachmentRefs,
       nutrition: nutritionRefs,
