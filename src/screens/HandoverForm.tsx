@@ -38,6 +38,7 @@ import type { RiskItem } from '@/src/types/handover';
 import { PatientHeader } from '@/src/components/PatientHeader';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { ExportPdfButton } from './components/ExportPdfButton';
@@ -488,6 +489,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       status: 'draft',
       dxMedical: '',
       dxNursing: '',
+      dxMedicalStructured: [],
+      dxNursingStructured: [],
       evolution: '',
       closingSummary: '',
       meds: '',
@@ -1277,7 +1280,16 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       <View style={styles.section}>
         <View style={styles.field}>
-          <Text style={styles.label}>Diagnósticos médicos</Text>
+          {/* BEGIN HANDOVER D3 – dxMedicalStructured */}
+          <DiagnosisAutocomplete
+            name="dxMedicalStructured"
+            label="Diagnósticos médicos (estructurados)"
+            systemsAllowed={['SNOMED', 'ICD10']}
+          />
+          {/* END HANDOVER D3 – dxMedicalStructured */}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Notas libres de diagnósticos médicos</Text>
           <Controller
             control={control}
             name="dxMedical"
@@ -1285,7 +1297,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 multiline
-                placeholder="Diagnósticos médicos"
+                placeholder="Diagnósticos médicos en texto libre (legado)"
                 onBlur={onBlur}
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -1295,7 +1307,16 @@ export default function HandoverForm({ navigation, route }: Props) {
           {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
         </View>
         <View style={styles.field}>
-          <Text style={styles.label}>Diagnósticos de enfermería</Text>
+          {/* BEGIN HANDOVER D3 – dxNursingStructured */}
+          <DiagnosisAutocomplete
+            name="dxNursingStructured"
+            label="Diagnósticos de enfermería (estructurados)"
+            systemsAllowed={['NANDA']}
+          />
+          {/* END HANDOVER D3 – dxNursingStructured */}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Notas libres de diagnósticos de enfermería</Text>
           <Controller
             control={control}
             name="dxNursing"
@@ -1303,7 +1324,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 multiline
-                placeholder="Diagnósticos de enfermería"
+                placeholder="Diagnósticos de enfermería en texto libre (legado)"
                 onBlur={onBlur}
                 value={value ?? ''}
                 onChangeText={onChange}

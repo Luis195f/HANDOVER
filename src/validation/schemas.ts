@@ -231,6 +231,24 @@ export const zRiskFlags: z.ZodSchema<RiskFlags> = z
   })
   .partial();
 
+// BEGIN HANDOVER D3 – StructuredDiagnosis schema
+export const zHandoverStructuredDiagnosis = z.object({
+  system: z.union([
+    z.literal('NANDA'),
+    z.literal('SNOMED'),
+    z.literal('ICD10'),
+    z.literal('OTHER'),
+  ]),
+  code: z.string().min(1, 'El código no puede estar vacío'),
+  display: z.string().min(1, 'La descripción no puede estar vacía'),
+  freeTextNote: z.string().optional(),
+});
+
+export const zHandoverStructuredDiagnosisArray = z
+  .array(zHandoverStructuredDiagnosis)
+  .optional();
+// END HANDOVER D3 – StructuredDiagnosis schema
+
 export const zMedicationRoute = z.enum([
   "oral",
   "iv",
@@ -313,6 +331,8 @@ export const zHandover = z.object({
   // Diagnóstico/Evolución (se mejora en 1D)
   dxMedical: z.string().optional(),
   dxNursing: z.string().optional(),
+  dxMedicalStructured: zHandoverStructuredDiagnosisArray,
+  dxNursingStructured: zHandoverStructuredDiagnosisArray,
   evolution: z.string().optional(),
   closingSummary: z.string().optional(),
 

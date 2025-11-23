@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 import type { AdministrativeData } from './administrative';
 import type { zMedicationItem, zRiskItem, zRiskType, zTreatmentItem } from '../validation/schemas';
+// BEGIN HANDOVER D3 – StructuredDiagnosis types
+import type { DiagnosisSystem } from '../catalogs/diagnosisCodes';
+// END HANDOVER D3 – StructuredDiagnosis types
 
 // BEGIN HANDOVER: SIGNATURES_DUAL_TYPES
 export type HandoverSignature = {
@@ -40,6 +43,15 @@ export type MobilityInfo = {
   mobilityLevel: MobilityLevel;
   repositioningPlan?: string;
 };
+
+// BEGIN HANDOVER D3 – StructuredDiagnosis types
+export interface HandoverStructuredDiagnosis {
+  system: DiagnosisSystem;
+  code: string;
+  display: string;
+  freeTextNote?: string;
+}
+// END HANDOVER D3 – StructuredDiagnosis types
 
 export type SkinInfo = {
   skinStatus: string;
@@ -158,6 +170,10 @@ export type HandoverValues = {
   vitals?: Vitals;
   dxMedical?: string;
   dxNursing?: string;
+  // BEGIN HANDOVER D3 – StructuredDiagnosis types
+  dxMedicalStructured?: HandoverStructuredDiagnosis[];
+  dxNursingStructured?: HandoverStructuredDiagnosis[];
+  // END HANDOVER D3 – StructuredDiagnosis types
   evolution?: string;
   closingSummary?: string;
   sbarSituation?: string;
