@@ -2,7 +2,7 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { usePatientSummary } from '@/src/hooks/usePatientSummary';
+import { usePatientBasicSummary } from '@/src/hooks/usePatientSummary';
 
 interface PatientHeaderProps {
   patientId?: string;
@@ -10,7 +10,7 @@ interface PatientHeaderProps {
 }
 
 export function PatientHeader({ patientId, showId = false }: PatientHeaderProps) {
-  const { loading, error, summary } = usePatientSummary(patientId);
+  const { loading, error, summary } = usePatientBasicSummary(patientId);
 
   if (!patientId) {
     return (

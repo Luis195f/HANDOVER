@@ -35,13 +35,14 @@ import { getSession, useAuth, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
 import type { RiskItem } from '@/src/types/handover';
-import { PatientHeader } from '@/src/components/PatientHeader';
+import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 // BEGIN HANDOVER D4 – Form imports
 import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
 // END HANDOVER D4 – Form imports
 import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
+import { PatientBanner } from './components/PatientBanner';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { ExportPdfButton } from './components/ExportPdfButton';
@@ -763,6 +764,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleCloseSbarPreview = () => setSbarPreview(null);
 
   const patientIdValue = form.watch('patientId');
+  // BEGIN HANDOVER D6 – HandoverForm PatientBanner
+  const { loading: loadingPatient, error: patientError, summary: patientSummary } = usePatientSummary(
+    typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined,
+  );
+  // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
   const {
@@ -986,9 +992,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <FormProvider {...form}>
       <ScrollView contentContainerStyle={styles.container}>
-        {/* BEGIN HANDOVER: PATIENT_HEADER_IN_HANDOVER_FORM */}
-        <PatientHeader patientId={patientIdValue} showId />
-        {/* END HANDOVER: PATIENT_HEADER_IN_HANDOVER_FORM */}
+        {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
+        <PatientBanner summary={patientSummary} loading={loadingPatient} error={patientError} />
+        {/* END HANDOVER D6 – HandoverForm PatientBanner */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Datos del turno</Text>
           <View style={styles.field}>

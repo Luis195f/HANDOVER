@@ -6,6 +6,173 @@ import type { GeneratedPdf } from './export/export-pdf';
 import { LOINC, TERMINOLOGY_SYSTEMS } from './codes';
 import type { VitalPoint, VitalTrendsData } from '../../types/vitals';
 // END HANDOVER D2 – VitalTrends fhir-client
+// BEGIN HANDOVER D6 – fetchPatientSummary
+export interface PatientSummary {
+  id: string;
+  name: string;
+  gender?: string;
+  age?: number;
+  bed?: string;
+  mrn?: string;
+  allergies?: string[];
+}
+
+/**
+ * Obtiene un resumen de paciente a partir de su ID.
+ * - Lee el recurso Patient (nombre, fecha de nacimiento, género, identificadores MRN).
+ * - Lee Encounter/Location para obtener la cama actual.
+ * - Lee AllergyIntolerance para listar alergias activas.
+ * - Si algo falla o no hay datos, devuelve un objeto con los campos disponibles.
+ * - En entorno __DEV__, si no hay servidor FHIR, devuelve datos mock para no romper la UI.
+ */
+export async function fetchPatientSummary(
+  patientId: string,
+): Promise<PatientSummary> {
+  const baseFromEnv = (process.env as any)?.FHIR_BASE_URL as string | undefined;
+  const baseFromHook = hooks.getBaseUrl?.();
+  if (
+    __DEV__ &&
+    !baseFromHook &&
+    (!baseFromEnv || baseFromEnv.includes('example.invalid'))
+  ) {
+    return {
+      id: patientId,
+      name: 'Paciente Demo',
+      gender: 'female',
+      age: 65,
+      bed: 'A-12',
+      mrn: 'MRN123',
+      allergies: ['Penicilina'],
+    };
+  }
+
+  let patient: any | undefined;
+  let bed: string | undefined;
+  let allergies: string[] | undefined;
+
+  try {
+    const { ok, data } = await fetchFHIR(`Patient/${encodeURIComponent(patientId)}`);
+    if (ok && data) {
+      patient = data;
+    }
+  } catch (error) {
+    console.warn('fetchPatientSummary: error fetching Patient', error);
+  }
+
+  try {
+    const { ok, data } = await fetchFHIR(
+      `Encounter?subject=Patient/${encodeURIComponent(patientId)}&_include=Encounter:location`,
+    );
+    if (ok && data?.resourceType === 'Bundle' && Array.isArray(data.entry)) {
+      const locations = new Map<string, any>();
+      for (const entry of data.entry) {
+        const res = entry?.resource;
+        if (res?.resourceType === 'Location' && res.id) {
+          locations.set(`Location/${res.id}`, res);
+        }
+      }
+
+      const encounterEntry = data.entry.find((entry: any) => entry?.resource?.resourceType === 'Encounter');
+      const encounter = encounterEntry?.resource;
+      const encounterLocations = Array.isArray(encounter?.location) ? encounter.location : [];
+      for (const loc of encounterLocations) {
+        const locRef = loc?.location?.reference as string | undefined;
+        const locDisplay = loc?.location?.display as string | undefined;
+        const locResource = locRef ? locations.get(locRef) : undefined;
+        const identifierValue = Array.isArray(locResource?.identifier)
+          ? locResource.identifier.find((id: any) => {
+              const system = id?.system ?? '';
+              const typeText = id?.type?.text ?? '';
+              return /bed|cama|room/i.test(system) || /bed|cama|habitación/i.test(typeText);
+            })?.value
+          : undefined;
+        bed = locDisplay || identifierValue || bed;
+        if (bed) break;
+      }
+    }
+  } catch (error) {
+    console.warn('fetchPatientSummary: error fetching Encounter/Location', error);
+  }
+
+  try {
+    const { ok, data } = await fetchFHIR(
+      `AllergyIntolerance?patient=Patient/${encodeURIComponent(patientId)}&clinical-status=active`,
+    );
+    if (ok && data?.resourceType === 'Bundle' && Array.isArray(data.entry)) {
+      allergies = data.entry
+        .map((entry: any) => {
+          const resource = entry?.resource;
+          const coding = (resource?.code?.coding ?? []) as any[];
+          const codingDisplay = coding.find((c) => c?.display)?.display as string | undefined;
+          return (resource?.code?.text as string | undefined) || codingDisplay;
+        })
+        .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+    }
+  } catch (error) {
+    console.warn('fetchPatientSummary: error fetching AllergyIntolerance', error);
+  }
+
+  const summary: PatientSummary = {
+    id: patient?.id ?? patientId,
+    name: extractPatientName(patient) ?? `Paciente #${patientId}`,
+    gender: extractGender(patient),
+    age: extractAge(patient),
+    bed,
+    mrn: extractMrn(patient),
+    allergies,
+  };
+
+  return summary;
+}
+
+const extractPatientName = (patient: any): string | undefined => {
+  if (!patient) return undefined;
+  const name = Array.isArray(patient.name) ? patient.name[0] : undefined;
+  if (!name) return undefined;
+  if (name.text) return name.text;
+  const family = name.family ?? '';
+  const given = Array.isArray(name.given) ? name.given.join(' ') : '';
+  const full = `${given} ${family}`.trim();
+  return full || undefined;
+};
+
+const extractGender = (patient: any): string | undefined => {
+  const gender = typeof patient?.gender === 'string' ? patient.gender : undefined;
+  if (!gender || gender === 'unknown') return undefined;
+  return gender;
+};
+
+const extractAge = (patient: any): number | undefined => {
+  const birthDate = patient?.birthDate;
+  if (!birthDate) return undefined;
+  const birth = new Date(birthDate);
+  if (Number.isNaN(birth.getTime())) return undefined;
+  const now = new Date();
+  let years = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  const dayDiff = now.getDate() - birth.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    years -= 1;
+  }
+  return years >= 0 ? years : undefined;
+};
+
+const extractMrn = (patient: any): string | undefined => {
+  const identifiers = Array.isArray(patient?.identifier) ? patient.identifier : [];
+  const mrnIdentifier = identifiers.find((id: any) => {
+    const system = (id?.system as string | undefined)?.toLowerCase() ?? '';
+    const typeText = (id?.type?.text as string | undefined)?.toLowerCase() ?? '';
+    const coding = Array.isArray(id?.type?.coding) ? id.type.coding : [];
+    const codingMatch = coding.some((c: any) => {
+      const code = (c?.code as string | undefined)?.toLowerCase() ?? '';
+      const display = (c?.display as string | undefined)?.toLowerCase() ?? '';
+      return code === 'mr' || display.includes('mrn');
+    });
+    return system.includes('mrn') || typeText.includes('mrn') || codingMatch;
+  });
+  return mrnIdentifier?.value as string | undefined;
+};
+// END HANDOVER D6 – fetchPatientSummary
 
 type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;

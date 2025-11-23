@@ -91,7 +91,7 @@ describe('HandoverForm patient header', () => {
     mockUsePatientSummary.mockReturnValue({
       loading: false,
       error: null,
-      summary: { id: '123', displayName: 'Ana Pérez', ageLabel: 'Edad 30 años', bedLabel: 'Cama 7B' },
+      summary: { id: '123', name: 'Ana Pérez', gender: 'female', age: 30, bed: '7B', mrn: 'MRN-7' },
     });
     mockUseZodForm.mockReturnValue(buildFormMock('123'));
 
@@ -103,7 +103,9 @@ describe('HandoverForm patient header', () => {
     );
 
     expect(getByText('Ana Pérez')).toBeTruthy();
-    expect(getByText('Edad 30 años · Cama 7B')).toBeTruthy();
+    expect(getByText('Femenino, 30 años')).toBeTruthy();
+    expect(getByText('Cama 7B')).toBeTruthy();
+    expect(getByText('MRN MRN-7')).toBeTruthy();
   });
 
   it('indica que no hay paciente vinculado cuando falta patientId', () => {
@@ -115,5 +117,6 @@ describe('HandoverForm patient header', () => {
     );
 
     expect(getByText('Paciente no vinculado')).toBeTruthy();
+    expect(getByText('Asocia un ID para mostrar el banner.')).toBeTruthy();
   });
 });
