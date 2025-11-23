@@ -166,6 +166,7 @@ export type MedicationItem = z.infer<typeof zMedicationItem> & {
   endTime?: string;
   // alias to highlight continuous infusion semantics without breaking existing UI
   isContinuousInfusion?: boolean;
+  signature?: HandoverSignature;
 };
 // END HANDOVER D7 – MedicationModule
 export type TreatmentItem = z.infer<typeof zTreatmentItem>;
