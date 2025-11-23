@@ -114,7 +114,16 @@ type EditingState = { index: number; isNew?: boolean } | null;
 
 type MedicationSectionFormField = keyof Pick<
   MedicationItem,
-  'name' | 'dose' | 'route' | 'frequency' | 'isContinuous' | 'isHighAlert' | 'notes' | 'startTime' | 'endTime'
+  | 'code'
+  | 'name'
+  | 'dose'
+  | 'route'
+  | 'frequency'
+  | 'isContinuous'
+  | 'isHighAlert'
+  | 'notes'
+  | 'startTime'
+  | 'endTime'
 >;
 
 export function MedicationSection({ control, name = 'medications' }: Props) {
@@ -157,14 +166,21 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   const handleSave = async () => {
     if (editing == null) return;
     const basePath = `${name}.${editing.index}` as const;
-    const ok = await trigger([
+    const currentMedication = medications?.[editing.index];
+    const validations: Array<`${typeof name}.${number}.${MedicationSectionFormField}`> = [
       `${basePath}.name`,
-      // BEGIN HANDOVER D7 – MedicationModule
-      `${basePath}.startTime`,
-      `${basePath}.endTime`,
-      // END HANDOVER D7 – MedicationModule
-    ]);
+    ];
+    const requiresSchedule = Boolean(currentMedication?.isContinuous ?? currentMedication?.isContinuousInfusion);
+    if (requiresSchedule) {
+      validations.push(`${basePath}.startTime`, `${basePath}.endTime`);
+    }
+
+    const ok = await trigger(validations);
     if (!ok) return;
+
+    if (currentMedication) {
+      setValue(basePath, { ...currentMedication }, { shouldDirty: true });
+    }
     setEditing(null);
   };
 
@@ -213,6 +229,32 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               </View>
               <Controller
                 control={control}
+                name={`${name}.${index}.code` as const}
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Código</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="SNOMED, LOINC, etc"
+                      onBlur={onBlur}
+                      onChangeText={(text) => {
+                        const trimmed = text?.trim();
+                        const nextValue = trimmed
+                          ? {
+                              system: value?.system ?? 'urn:handover:medication-code',
+                              code: value?.code ?? trimmed,
+                              display: trimmed,
+                            }
+                          : undefined;
+                        onChange(nextValue);
+                      }}
+                      value={value?.display ?? ''}
+                    />
+                  </View>
+                )}
+              />
+              <Controller
+                control={control}
                 name={`${name}.${index}.name` as const}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={styles.field}>
@@ -236,7 +278,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                 render={({ field: { value, onChange } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Vía</Text>
-                    <Pressable style={styles.select} onPress={() => onChange(value ?? undefined)}>
+                    <Pressable style={styles.select} onPress={() => onChange(undefined)}>
                       <Text style={styles.selectText}>
                         {routeOptions.find((opt) => opt.value === value)?.label ?? 'Seleccionar'}
                       </Text>
@@ -273,21 +315,14 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               />
               <Controller
                 control={control}
-                name={`${name}.${index}.frequency` as const}
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <View style={styles.field}>
-                    <Text style={styles.label}>Frecuencia</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="cada 8h"
-                      onBlur={onBlur}
-                      value={value ?? ''}
-                      onChangeText={onChange}
-                    />
+                name={`${name}.${index}.isContinuous` as const}
+                render={({ field: { value, onChange } }) => (
+                  <View style={[styles.field, styles.switchRow]}>
+                    <Text style={styles.label}>Infusión continua</Text>
+                    <Switch value={!!value} onValueChange={onChange} />
                   </View>
                 )}
               />
-              {/* BEGIN HANDOVER D7 – MedicationModule */}
               {showScheduleFields ? (
                 <>
                   <Controller
@@ -330,7 +365,22 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                   />
                 </>
               ) : null}
-              {/* END HANDOVER D7 – MedicationModule */}
+              <Controller
+                control={control}
+                name={`${name}.${index}.frequency` as const}
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Frecuencia</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="cada 8h"
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  </View>
+                )}
+              />
               <Controller
                 control={control}
                 name={`${name}.${index}.notes` as const}
@@ -345,16 +395,6 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                       value={value ?? ''}
                       onChangeText={onChange}
                     />
-                  </View>
-                )}
-              />
-              <Controller
-                control={control}
-                name={`${name}.${index}.isContinuous` as const}
-                render={({ field: { value, onChange } }) => (
-                  <View style={[styles.field, styles.switchRow]}>
-                    <Text style={styles.label}>Infusión continua</Text>
-                    <Switch value={!!value} onValueChange={onChange} />
                   </View>
                 )}
               />

@@ -284,6 +284,7 @@ const zMedicationItemBase: z.ZodSchema<MedicationItem> = z.object({
   endTime: optionalScheduleString,
   isHighAlert: z.boolean().optional(),
   notes: z.string().optional(),
+  signature: z.lazy(() => zHandoverSignature).optional(),
 });
 
 export const zMedicationItem: z.ZodSchema<MedicationItem> = zMedicationItemBase.transform(

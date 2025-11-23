@@ -956,6 +956,9 @@ function mapStructuredMedicationStatement(
   encounter: Reference | undefined,
   assertedAt: string,
 ): MedicationStatement {
+  // TODO HANDOVER D7 – MedicationModule: soportar isContinuous/startTime/endTime para elegir entre
+  // MedicationStatement y MedicationAdministration, agregar extensiones de alto riesgo y reflejar
+  // firmas específicas de medicación si están presentes.
   const concept: CodeableConcept = medication.code
     ? {
         coding: [medication.code],
