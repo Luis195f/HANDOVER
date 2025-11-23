@@ -8,6 +8,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -57,9 +60,13 @@ import SafetySection from './components/SafetySection';
 import { VitalTrendsChart } from './components/VitalTrendsChart';
 import TtsButton from '@/src/components/TtsButton';
 // END HANDOVER D2 – VitalTrends imports
+import { CollapsibleSection } from './components/CollapsibleSection';
+import { SidebarIndex, type SectionInfo } from './components/SidebarIndex';
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   container: { flexGrow: 1, padding: 16 },
+  containerWithSidebar: { paddingRight: 140 },
   section: { marginBottom: 32 },
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
   field: { marginBottom: 16 },
@@ -130,6 +137,27 @@ type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
 type DictationField = 'dxMedical' | 'dxNursing' | 'meds' | 'evolution' | 'closingSummary' | 'incidents';
 
+const sectionsInfo = [
+  { key: 'turno', title: 'Datos del turno' },
+  { key: 'paciente', title: 'Paciente' },
+  { key: 'sbar', title: 'SBAR' },
+  { key: 'signos', title: 'Signos vitales' },
+  { key: 'oxigenoterapia', title: 'Oxigenoterapia' },
+  { key: 'seguridad', title: 'Seguridad y riesgos' },
+  { key: 'alertas', title: 'Alertas' },
+  { key: 'cuidados', title: 'Cuidados específicos' },
+  { key: 'escalas', title: 'Escalas clínicas' },
+  { key: 'medicacion', title: 'Medicación y tratamientos' },
+  { key: 'adjuntos', title: 'Adjuntos' },
+  { key: 'diagnosticos', title: 'Diagnósticos médicos/ enfermería' },
+  { key: 'evolucion', title: 'Evolución' },
+  { key: 'resumen', title: 'Resumen / cierre de turno' },
+  { key: 'bedsideChecklist', title: 'Bedside Checklist' },
+  { key: 'firmas', title: 'Firmas' },
+] as const satisfies readonly SectionInfo[];
+
+type SectionKey = (typeof sectionsInfo)[number]['key'];
+
 const mergeDictationText = (currentValue: string | undefined, dictated: string) => {
   const addition = dictated.trim();
   if (!addition) {
@@ -143,6 +171,29 @@ const mergeDictationText = (currentValue: string | undefined, dictated: string) 
     return addition;
   }
   return `${base}\n${addition}`;
+};
+
+const findActiveSection = (
+  offset: number,
+  positions: Partial<Record<SectionKey, number>>,
+): SectionKey | null => {
+  const entries = sectionsInfo
+    .map(({ key }) => ({ key, y: positions[key] }))
+    .filter((entry): entry is { key: SectionKey; y: number } => typeof entry.y === 'number')
+    .sort((a, b) => a.y - b.y);
+
+  if (entries.length === 0) return null;
+
+  let current: SectionKey = entries[0].key;
+  for (const entry of entries) {
+    if (offset >= entry.y - 24) {
+      current = entry.key;
+    } else {
+      break;
+    }
+  }
+
+  return current;
 };
 
 function deriveInitialRisksStructured(values: HandoverFormValues): RiskItem[] {
@@ -467,6 +518,25 @@ export default function HandoverForm({ navigation, route }: Props) {
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
+  const scrollRef = useRef<ScrollView>(null);
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 900;
+  const sectionRefs = useMemo(
+    () =>
+      sectionsInfo.reduce(
+        (acc, { key }) => {
+          acc[key] = React.createRef<View>();
+          return acc;
+        },
+        {} as Record<SectionKey, React.RefObject<View>>,
+      ),
+    [],
+  );
+  const [sectionPositions, setSectionPositions] = useState<Partial<Record<SectionKey, number>>>({});
+  const [collapsedSections, setCollapsedSections] = useState<Record<SectionKey, boolean>>(() =>
+    sectionsInfo.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
+  );
+  const [activeSection, setActiveSection] = useState<SectionKey | null>(sectionsInfo[0]?.key ?? null);
 
   useEffect(() => {
     let alive = true;
@@ -1066,346 +1136,558 @@ export default function HandoverForm({ navigation, route }: Props) {
     onSubmit();
   };
 
+  const handleSectionLayout = (key: SectionKey) => (event: any) => {
+    const y = event.nativeEvent.layout.y;
+    setSectionPositions((prev) => ({ ...prev, [key]: y }));
+  };
+
+  const toggleSection = (key: SectionKey) => {
+    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleIndexSelect = (key: SectionKey) => {
+    setCollapsedSections((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
+    const y = sectionPositions[key];
+    if (typeof y !== 'number') return;
+
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y, animated: true });
+    });
+  };
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const yOffset = event.nativeEvent.contentOffset.y;
+    const current = findActiveSection(yOffset, sectionPositions);
+    setActiveSection(current);
+  };
+
+  const contentContainerStyle = useMemo(
+    () => [styles.container, isTablet && styles.containerWithSidebar],
+    [isTablet],
+  );
+
   return (
     <FormProvider {...form}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.screen}>
+        <SidebarIndex
+          sectionsInfo={sectionsInfo}
+          sectionPositions={sectionPositions}
+          scrollRef={scrollRef}
+          activeSection={activeSection}
+          isTablet={isTablet}
+          onSelect={handleIndexSelect}
+        />
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={contentContainerStyle}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+        >
         {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
         <PatientBanner summary={patientSummary} loading={loadingPatient} error={patientError} />
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Datos del turno</Text>
-          <View style={styles.buttonRow}>
-            <Button title="Editar detalles del turno" color="#2563EB" onPress={handleShiftDetailsPress} />
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Unidad</Text>
-            <Controller
-              control={control}
-              name="administrativeData.unit"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={styles.input}
-                  placeholder="UCI Adulto"
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Censo de pacientes</Text>
-            <Controller
-              control={control}
-              name="administrativeData.census"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={styles.input}
-                  placeholder="0"
-                  keyboardType="numeric"
-                  onBlur={onBlur}
-                  value={value == null ? '' : String(value)}
-                  onChangeText={(text) => onChange(parseNumericInput(text))}
-                />
-              )}
-            />
-            {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Inicio de turno</Text>
-            <Controller
-              control={control}
-              name="administrativeData.shiftStart"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={styles.input}
-                  placeholder="2024-01-01T08:00"
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {startError ? <Text style={styles.error}>{startError}</Text> : null}
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Fin de turno</Text>
-            <Controller
-              control={control}
-              name="administrativeData.shiftEnd"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={styles.input}
-                  placeholder="2024-01-01T20:00"
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {endError ? <Text style={styles.error}>{endError}</Text> : null}
-          </View>
-          <StaffListInput
-            control={control}
-            name="administrativeData.staffIn"
-            label="Personal entrante"
-            placeholder="Nombre"
-            error={staffInError}
-          />
-          <StaffListInput
-            control={control}
-            name="administrativeData.staffOut"
-            label="Personal saliente"
-            placeholder="Nombre"
-            error={staffOutError}
-          />
-          <View style={styles.field}>
-            <Text style={styles.label}>Observaciones del turno</Text>
-            <View style={styles.dictationRow}>
-              <View style={styles.flex}>
-                <Controller
-                  control={control}
-                  name="administrativeData.incidents"
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      style={[styles.input, styles.textArea]}
-                      multiline
-                      placeholder="Incidentes o novedades del turno (una por línea)"
-                      onBlur={onBlur}
-                      value={Array.isArray(value) ? value.join('\n') : ''}
-                      onChangeText={(text) =>
-                        onChange(
-                          text
-                            .split('\n')
-                            .map((item) => item.trim())
-                            .filter(Boolean),
-                        )
-                      }
-                    />
-                  )}
-                />
-              </View>
-              <DictationMicButton
-                active={activeDictationField === 'incidents' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
-                label="Dictar observaciones"
-                onPress={() =>
-                  handleDictationPress('incidents', {
-                    locale: 'es-ES',
-                    interimResults: true,
-                    maxSeconds: 60,
-                  })
-                }
-              />
+        <View
+          ref={sectionRefs.turno}
+          onLayout={handleSectionLayout('turno')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Datos del turno"
+            isCollapsed={collapsedSections.turno}
+            onToggle={() => toggleSection('turno')}
+          >
+            <View style={styles.buttonRow}>
+              <Button title="Editar detalles del turno" color="#2563EB" onPress={handleShiftDetailsPress} />
             </View>
-            {renderDictationStatus('incidents')}
-            {incidentsError ? <Text style={styles.error}>{incidentsError}</Text> : null}
-            <Text style={styles.helperText}>Separa cada observación en una línea.</Text>
-          </View>
-        </View>
-
-      <View style={styles.section}>
-        <View style={styles.field}>
-          <Text style={styles.label}>Paciente</Text>
-          <View style={styles.row}>
-            <View style={styles.flex}>
+            <View style={styles.field}>
+              <Text style={styles.label}>Unidad</Text>
               <Controller
                 control={control}
-                name="patientId"
+                name="administrativeData.unit"
                 render={({ field: { onChange, onBlur, value } }) => (
                   <TextInput
                     style={styles.input}
-                    placeholder="Paciente"
+                    placeholder="UCI Adulto"
                     onBlur={onBlur}
                     value={value ?? ''}
                     onChangeText={onChange}
                   />
                 )}
               />
+              {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
             </View>
-            <View style={styles.spacer} />
-            <Button title="Escanear" onPress={onScanPress} />
-          </View>
-          {patientError ? <Text style={styles.error}>{patientError}</Text> : null}
+            <View style={styles.field}>
+              <Text style={styles.label}>Censo de pacientes</Text>
+              <Controller
+                control={control}
+                name="administrativeData.census"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="0"
+                    keyboardType="numeric"
+                    onBlur={onBlur}
+                    value={value == null ? '' : String(value)}
+                    onChangeText={(text) => onChange(parseNumericInput(text))}
+                  />
+                )}
+              />
+              {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Inicio de turno</Text>
+              <Controller
+                control={control}
+                name="administrativeData.shiftStart"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="2024-01-01T08:00"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+              {startError ? <Text style={styles.error}>{startError}</Text> : null}
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Fin de turno</Text>
+              <Controller
+                control={control}
+                name="administrativeData.shiftEnd"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="2024-01-01T20:00"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+              {endError ? <Text style={styles.error}>{endError}</Text> : null}
+            </View>
+            <StaffListInput
+              control={control}
+              name="administrativeData.staffIn"
+              label="Personal entrante"
+              placeholder="Nombre"
+              error={staffInError}
+            />
+            <StaffListInput
+              control={control}
+              name="administrativeData.staffOut"
+              label="Personal saliente"
+              placeholder="Nombre"
+              error={staffOutError}
+            />
+            <View style={styles.field}>
+              <Text style={styles.label}>Observaciones del turno</Text>
+              <View style={styles.dictationRow}>
+                <View style={styles.flex}>
+                  <Controller
+                    control={control}
+                    name="administrativeData.incidents"
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <TextInput
+                        style={[styles.input, styles.textArea]}
+                        multiline
+                        placeholder="Incidentes o novedades del turno (una por línea)"
+                        onBlur={onBlur}
+                        value={Array.isArray(value) ? value.join('\n') : ''}
+                        onChangeText={(text) =>
+                          onChange(
+                            text
+                              .split('\n')
+                              .map((item) => item.trim())
+                              .filter(Boolean),
+                          )
+                        }
+                      />
+                    )}
+                  />
+                </View>
+                <DictationMicButton
+                  active={activeDictationField === 'incidents' && sttStatus === 'listening'}
+                  disabled={dictationUnavailable}
+                  label="Dictar observaciones"
+                  onPress={() =>
+                    handleDictationPress('incidents', {
+                      locale: 'es-ES',
+                      interimResults: true,
+                      maxSeconds: 60,
+                    })
+                  }
+                />
+              </View>
+              {renderDictationStatus('incidents')}
+              {incidentsError ? <Text style={styles.error}>{incidentsError}</Text> : null}
+              <Text style={styles.helperText}>Separa cada observación en una línea.</Text>
+            </View>
+          </CollapsibleSection>
         </View>
-      </View>
+
+        <View
+          ref={sectionRefs.paciente}
+          onLayout={handleSectionLayout('paciente')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Paciente"
+            isCollapsed={collapsedSections.paciente}
+            onToggle={() => toggleSection('paciente')}
+          >
+            <View style={styles.field}>
+              <Text style={styles.label}>Paciente</Text>
+              <View style={styles.row}>
+                <View style={styles.flex}>
+                  <Controller
+                    control={control}
+                    name="patientId"
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Paciente"
+                        onBlur={onBlur}
+                        value={value ?? ''}
+                        onChangeText={onChange}
+                      />
+                    )}
+                  />
+                </View>
+                <View style={styles.spacer} />
+                <Button title="Escanear" onPress={onScanPress} />
+              </View>
+              {patientError ? <Text style={styles.error}>{patientError}</Text> : null}
+            </View>
+          </CollapsibleSection>
+        </View>
 
       {isOn('SHOW_SBAR') && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>SBAR</Text>
-          <View style={styles.field}>
-            <Text style={styles.label}>SBAR - Situation</Text>
-            <Controller
-              control={control}
-              name="sbarSituation"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  multiline
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {sbarSituationError ? <Text style={styles.error}>{sbarSituationError}</Text> : null}
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>SBAR - Background</Text>
-            <Controller
-              control={control}
-              name="sbarBackground"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  multiline
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {sbarBackgroundError ? <Text style={styles.error}>{sbarBackgroundError}</Text> : null}
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>SBAR - Assessment</Text>
-            <Controller
-              control={control}
-              name="sbarAssessment"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  multiline
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {sbarAssessmentError ? <Text style={styles.error}>{sbarAssessmentError}</Text> : null}
-          </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>SBAR - Recommendation</Text>
-            <Controller
-              control={control}
-              name="sbarRecommendation"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  multiline
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
-          </View>
+        <View
+          ref={sectionRefs.sbar}
+          onLayout={handleSectionLayout('sbar')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="SBAR"
+            isCollapsed={collapsedSections.sbar}
+            onToggle={() => toggleSection('sbar')}
+          >
+            <View style={styles.field}>
+              <Text style={styles.label}>SBAR - Situation</Text>
+              <Controller
+                control={control}
+                name="sbarSituation"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+              {sbarSituationError ? <Text style={styles.error}>{sbarSituationError}</Text> : null}
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>SBAR - Background</Text>
+              <Controller
+                control={control}
+                name="sbarBackground"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+              {sbarBackgroundError ? <Text style={styles.error}>{sbarBackgroundError}</Text> : null}
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>SBAR - Assessment</Text>
+              <Controller
+                control={control}
+                name="sbarAssessment"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+              {sbarAssessmentError ? <Text style={styles.error}>{sbarAssessmentError}</Text> : null}
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>SBAR - Recommendation</Text>
+              <Controller
+                control={control}
+                name="sbarRecommendation"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+              {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
+            </View>
+          </CollapsibleSection>
         </View>
       )}
 
       {isOn('SHOW_VITALS') && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Signos vitales</Text>
-          <VitalsGroup control={control} parseNumber={parseNumericInput} errors={errors} />
-          {/* BEGIN HANDOVER D2 – VitalTrends section */}
-          <View style={styles.vitalTrendsBlock}>
-            {loadingVitalTrends ? <ActivityIndicator size="small" /> : null}
-            {vitalTrendsError ? (
-              <Text style={styles.vitalTrendsError}>No se pudieron cargar las tendencias de signos vitales.</Text>
-            ) : null}
-            <VitalTrendsChart trends={vitalTrends} />
-          </View>
-          {/* END HANDOVER D2 – VitalTrends section */}
+        <View
+          ref={sectionRefs.signos}
+          onLayout={handleSectionLayout('signos')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Signos vitales"
+            isCollapsed={collapsedSections.signos}
+            onToggle={() => toggleSection('signos')}
+          >
+            <VitalsGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+            {/* BEGIN HANDOVER D2 – VitalTrends section */}
+            <View style={styles.vitalTrendsBlock}>
+              {loadingVitalTrends ? <ActivityIndicator size="small" /> : null}
+              {vitalTrendsError ? (
+                <Text style={styles.vitalTrendsError}>No se pudieron cargar las tendencias de signos vitales.</Text>
+              ) : null}
+              <VitalTrendsChart trends={vitalTrends} />
+            </View>
+            {/* END HANDOVER D2 – VitalTrends section */}
+          </CollapsibleSection>
         </View>
       )}
 
       {isOn('SHOW_OXY') && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Oxigenoterapia</Text>
-          <OxygenGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+        <View
+          ref={sectionRefs.oxigenoterapia}
+          onLayout={handleSectionLayout('oxigenoterapia')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Oxigenoterapia"
+            isCollapsed={collapsedSections.oxigenoterapia}
+            onToggle={() => toggleSection('oxigenoterapia')}
+          >
+            <OxygenGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+          </CollapsibleSection>
         </View>
       )}
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Seguridad y riesgos</Text>
-        <SafetySection control={control} watch={form.watch} />
+      <View
+        ref={sectionRefs.seguridad}
+        onLayout={handleSectionLayout('seguridad')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Seguridad y riesgos"
+          isCollapsed={collapsedSections.seguridad}
+          onToggle={() => toggleSection('seguridad')}
+        >
+          <SafetySection control={control} watch={form.watch} />
+        </CollapsibleSection>
       </View>
 
       {computedAlerts.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Alertas</Text>
-          <View style={styles.alertList}>
-            {computedAlerts.map((alert) => (
-              <View
-                key={alert.id}
-                style={[
-                  styles.alertCard,
-                  alert.severity === 'critical'
-                    ? styles.alertCritical
-                    : alert.severity === 'warning'
-                      ? styles.alertWarning
-                      : styles.alertInfo,
-                ]}
-              >
-                <Text style={styles.alertTitle}>
-                  {alert.severity === 'critical'
-                    ? 'ALERTA CRÍTICA'
-                    : alert.severity === 'warning'
-                      ? 'Alerta'
-                      : 'Información'}
-                </Text>
-                <Text>{alert.message}</Text>
-              </View>
-            ))}
-          </View>
+        <View
+          ref={sectionRefs.alertas}
+          onLayout={handleSectionLayout('alertas')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Alertas"
+            isCollapsed={collapsedSections.alertas}
+            onToggle={() => toggleSection('alertas')}
+          >
+            <View style={styles.alertList}>
+              {computedAlerts.map((alert) => (
+                <View
+                  key={alert.id}
+                  style={[
+                    styles.alertCard,
+                    alert.severity === 'critical'
+                      ? styles.alertCritical
+                      : alert.severity === 'warning'
+                        ? styles.alertWarning
+                        : styles.alertInfo,
+                  ]}
+                >
+                  <Text style={styles.alertTitle}>
+                    {alert.severity === 'critical'
+                      ? 'ALERTA CRÍTICA'
+                      : alert.severity === 'warning'
+                        ? 'Alerta'
+                        : 'Información'}
+                  </Text>
+                  <Text>{alert.message}</Text>
+                </View>
+              ))}
+            </View>
+          </CollapsibleSection>
         </View>
       )}
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Cuidados específicos</Text>
-        <SpecificCareSection
-          control={control}
-          errors={errors}
-          parseNumber={parseNumericInput}
-          setValue={form.setValue}
-        />
+      <View
+        ref={sectionRefs.cuidados}
+        onLayout={handleSectionLayout('cuidados')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Cuidados específicos"
+          isCollapsed={collapsedSections.cuidados}
+          onToggle={() => toggleSection('cuidados')}
+        >
+          <SpecificCareSection
+            control={control}
+            errors={errors}
+            parseNumber={parseNumericInput}
+            setValue={form.setValue}
+          />
+        </CollapsibleSection>
       </View>
 
       {/* BEGIN HANDOVER D4 – Conditional sections */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Escalas clínicas</Text>
-        <ClinicalScalesSection />
-        {features.enablePediatricScales && (
-          // Renderiza escalas pediátricas específicas. Si no existe aún, deja un TODO.
-          <Text style={{ marginVertical: 8 }}>TODO: Escalas pediátricas aquí</Text>
-        )}
-        {features.enableOncoFields && (
-          // Renderiza campos oncológicos adicionales o deja un TODO.
-          <Text style={{ marginVertical: 8 }}>TODO: Campos oncológicos aquí</Text>
-        )}
+      <View
+        ref={sectionRefs.escalas}
+        onLayout={handleSectionLayout('escalas')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Escalas clínicas"
+          isCollapsed={collapsedSections.escalas}
+          onToggle={() => toggleSection('escalas')}
+        >
+          <ClinicalScalesSection />
+          {features.enablePediatricScales && (
+            // Renderiza escalas pediátricas específicas. Si no existe aún, deja un TODO.
+            <Text style={{ marginVertical: 8 }}>TODO: Escalas pediátricas aquí</Text>
+          )}
+          {features.enableOncoFields && (
+            // Renderiza campos oncológicos adicionales o deja un TODO.
+            <Text style={{ marginVertical: 8 }}>TODO: Campos oncológicos aquí</Text>
+          )}
+        </CollapsibleSection>
       </View>
       {/* END HANDOVER D4 – Conditional sections */}
 
       {isOn('SHOW_MEDS') && (
-        <View style={styles.section}>
-          <MedicationSection control={control} />
-          <View style={{ marginTop: 24 }}>
-            <TreatmentsSection control={control} />
+        <View
+          ref={sectionRefs.medicacion}
+          onLayout={handleSectionLayout('medicacion')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Medicación y tratamientos"
+            isCollapsed={collapsedSections.medicacion}
+            onToggle={() => toggleSection('medicacion')}
+          >
+            <MedicationSection control={control} />
+            <View style={{ marginTop: 24 }}>
+              <TreatmentsSection control={control} />
+            </View>
+            <View style={[styles.field, { marginTop: 24 }]}>
+              <Text style={styles.label}>Notas adicionales de medicación (texto libre, legado)</Text>
+              <View style={styles.dictationRow}>
+                <View style={styles.flex}>
+                  <Controller
+                    control={control}
+                    name="meds"
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <TextInput
+                        style={[styles.input, styles.textArea]}
+                        multiline
+                        placeholder="Texto libre de medicación (opcional)"
+                        onBlur={onBlur}
+                        value={value ?? ''}
+                        onChangeText={onChange}
+                      />
+                    )}
+                  />
+                </View>
+                <DictationMicButton
+                  active={activeDictationField === 'meds' && sttStatus === 'listening'}
+                  disabled={dictationUnavailable}
+                  label="Dictar medicación"
+                  onPress={() =>
+                    handleDictationPress('meds', {
+                      locale: 'es-ES',
+                      interimResults: true,
+                      maxSeconds: 90,
+                    })
+                  }
+                />
+              </View>
+              {renderDictationStatus('meds')}
+              {medsError ? <Text style={styles.error}>{medsError}</Text> : null}
+            </View>
+          </CollapsibleSection>
+        </View>
+      )}
+
+      {isOn('SHOW_ATTACH') && (
+        <View
+          ref={sectionRefs.adjuntos}
+          onLayout={handleSectionLayout('adjuntos')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Adjuntos"
+            isCollapsed={collapsedSections.adjuntos}
+            onToggle={() => toggleSection('adjuntos')}
+          >
+            <AudioAttach
+              onRecorded={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
+              onAttach={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
+            />
+          </CollapsibleSection>
+        </View>
+      )}
+
+      <View
+        ref={sectionRefs.diagnosticos}
+        onLayout={handleSectionLayout('diagnosticos')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Diagnósticos médicos/ enfermería"
+          isCollapsed={collapsedSections.diagnosticos}
+          onToggle={() => toggleSection('diagnosticos')}
+        >
+          <View style={styles.field}>
+            {/* BEGIN HANDOVER D3 – dxMedicalStructured */}
+            <DiagnosisAutocomplete
+              name="dxMedicalStructured"
+              label="Diagnósticos médicos (estructurados)"
+              systemsAllowed={['SNOMED', 'ICD10']}
+            />
+            {/* END HANDOVER D3 – dxMedicalStructured */}
           </View>
-          <View style={[styles.field, { marginTop: 24 }]}>
-            <Text style={styles.label}>Notas adicionales de medicación (texto libre, legado)</Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>Notas libres de diagnósticos médicos</Text>
             <View style={styles.dictationRow}>
               <View style={styles.flex}>
                 <Controller
                   control={control}
-                  name="meds"
+                  name="dxMedical"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
                       style={[styles.input, styles.textArea]}
                       multiline
-                      placeholder="Texto libre de medicación (opcional)"
+                      placeholder="Diagnósticos médicos en texto libre (legado)"
                       onBlur={onBlur}
                       value={value ?? ''}
                       onChangeText={onChange}
@@ -1414,11 +1696,11 @@ export default function HandoverForm({ navigation, route }: Props) {
                 />
               </View>
               <DictationMicButton
-                active={activeDictationField === 'meds' && sttStatus === 'listening'}
+                active={activeDictationField === 'dxMedical' && sttStatus === 'listening'}
                 disabled={dictationUnavailable}
-                label="Dictar medicación"
+                label="Dictar dx médico"
                 onPress={() =>
-                  handleDictationPress('meds', {
+                  handleDictationPress('dxMedical', {
                     locale: 'es-ES',
                     interimResults: true,
                     maxSeconds: 90,
@@ -1426,113 +1708,68 @@ export default function HandoverForm({ navigation, route }: Props) {
                 }
               />
             </View>
-            {renderDictationStatus('meds')}
-            {medsError ? <Text style={styles.error}>{medsError}</Text> : null}
+            {renderDictationStatus('dxMedical')}
+            {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
           </View>
-        </View>
-      )}
-
-      {isOn('SHOW_ATTACH') && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Adjuntos</Text>
-          <AudioAttach
-            onRecorded={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
-            onAttach={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
-          />
-        </View>
-      )}
-
-      <View style={styles.section}>
-        <View style={styles.field}>
-          {/* BEGIN HANDOVER D3 – dxMedicalStructured */}
-          <DiagnosisAutocomplete
-            name="dxMedicalStructured"
-            label="Diagnósticos médicos (estructurados)"
-            systemsAllowed={['SNOMED', 'ICD10']}
-          />
-          {/* END HANDOVER D3 – dxMedicalStructured */}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Notas libres de diagnósticos médicos</Text>
-          <View style={styles.dictationRow}>
-            <View style={styles.flex}>
-              <Controller
-                control={control}
-                name="dxMedical"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    placeholder="Diagnósticos médicos en texto libre (legado)"
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
+          <View style={styles.field}>
+            {/* BEGIN HANDOVER D3 – dxNursingStructured */}
+            <DiagnosisAutocomplete
+              name="dxNursingStructured"
+              label="Diagnósticos de enfermería (estructurados)"
+              systemsAllowed={['NANDA']}
+            />
+            {/* END HANDOVER D3 – dxNursingStructured */}
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Notas libres de diagnósticos de enfermería</Text>
+            <View style={styles.dictationRow}>
+              <View style={styles.flex}>
+                <Controller
+                  control={control}
+                  name="dxNursing"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      multiline
+                      placeholder="Diagnósticos de enfermería en texto libre (legado)"
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  )}
+                />
+              </View>
+              <DictationMicButton
+                active={activeDictationField === 'dxNursing' && sttStatus === 'listening'}
+                disabled={dictationUnavailable}
+                label="Dictar dx enfermería"
+                onPress={() =>
+                  handleDictationPress('dxNursing', {
+                    locale: 'es-ES',
+                    interimResults: true,
+                    maxSeconds: 90,
+                  })
+                }
               />
             </View>
-            <DictationMicButton
-              active={activeDictationField === 'dxMedical' && sttStatus === 'listening'}
-              disabled={dictationUnavailable}
-              label="Dictar dx médico"
-              onPress={() =>
-                handleDictationPress('dxMedical', {
-                  locale: 'es-ES',
-                  interimResults: true,
-                  maxSeconds: 90,
-                })
-              }
-            />
+            {renderDictationStatus('dxNursing')}
+            {dxNursingError ? <Text style={styles.error}>{dxNursingError}</Text> : null}
           </View>
-          {renderDictationStatus('dxMedical')}
-          {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
-        </View>
-        <View style={styles.field}>
-          {/* BEGIN HANDOVER D3 – dxNursingStructured */}
-          <DiagnosisAutocomplete
-            name="dxNursingStructured"
-            label="Diagnósticos de enfermería (estructurados)"
-            systemsAllowed={['NANDA']}
-          />
-          {/* END HANDOVER D3 – dxNursingStructured */}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Notas libres de diagnósticos de enfermería</Text>
-          <View style={styles.dictationRow}>
-            <View style={styles.flex}>
-              <Controller
-                control={control}
-                name="dxNursing"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    placeholder="Diagnósticos de enfermería en texto libre (legado)"
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-            </View>
-            <DictationMicButton
-              active={activeDictationField === 'dxNursing' && sttStatus === 'listening'}
-              disabled={dictationUnavailable}
-              label="Dictar dx enfermería"
-              onPress={() =>
-                handleDictationPress('dxNursing', {
-                  locale: 'es-ES',
-                  interimResults: true,
-                  maxSeconds: 90,
-                })
-              }
-            />
-          </View>
-          {renderDictationStatus('dxNursing')}
-          {dxNursingError ? <Text style={styles.error}>{dxNursingError}</Text> : null}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Evolución</Text>
+        </CollapsibleSection>
+      </View>
+
+      <View
+        ref={sectionRefs.evolucion}
+        onLayout={handleSectionLayout('evolucion')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Evolución"
+          isCollapsed={collapsedSections.evolucion}
+          onToggle={() => toggleSection('evolucion')}
+        >
+          <View style={styles.field}>
+            <Text style={styles.label}>Evolución</Text>
           <View style={styles.dictationRow}>
             <View style={styles.flex}>
               <Controller
@@ -1566,82 +1803,115 @@ export default function HandoverForm({ navigation, route }: Props) {
           {renderDictationStatus('evolution')}
           {evolutionError ? <Text style={styles.error}>{evolutionError}</Text> : null}
         </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Resumen / cierre de turno</Text>
-          <View style={styles.dictationRow}>
-            <View style={styles.flex}>
-              <Controller
-                control={control}
-                name="closingSummary"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    placeholder="Resumen breve para el equipo entrante"
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-            </View>
-            <DictationMicButton
-              active={activeDictationField === 'closingSummary' && sttStatus === 'listening'}
-              disabled={dictationUnavailable}
-              label="Dictar cierre"
-              onPress={() =>
-                handleDictationPress('closingSummary', {
-                  locale: 'es-ES',
-                  interimResults: true,
-                  maxSeconds: 60,
-                })
-              }
-            />
-          </View>
-          {renderDictationStatus('closingSummary')}
-          {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
-          <View style={styles.inlineActions}>
-            <TtsButton text={form.watch('closingSummary') ?? ''} label="Escuchar resumen" />
-            <View style={styles.secondaryButton}>
-              <Button title="Generar SBAR" onPress={handleGenerateSbar} />
-            </View>
-          </View>
-          {sbarPreview ? (
-            <View style={styles.sbarPreview}>
-              <Text style={styles.sbarTitle}>Resumen SBAR sugerido</Text>
-              <Text style={styles.sbarText}>{sbarPreview}</Text>
-              <Text style={styles.helperText}>Revisa y ajusta el contenido según tu criterio clínico.</Text>
-              <View style={styles.inlineActions}>
-                <TtsButton text={sbarPreview ?? ''} label="Escuchar SBAR" />
-                <View style={styles.secondaryButton}>
-                  <Button title="Insertar en resumen" onPress={handleInsertSbar} />
-                </View>
-                <View style={styles.secondaryButton}>
-                  <Button title="Cerrar" onPress={handleCloseSbarPreview} />
-                </View>
-              </View>
-            </View>
-          ) : null}
-        </View>
+        </CollapsibleSection>
       </View>
 
-      <View style={styles.section}>
-        <BedsideChecklistSection />
+      <View
+        ref={sectionRefs.resumen}
+        onLayout={handleSectionLayout('resumen')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Resumen / cierre de turno"
+          isCollapsed={collapsedSections.resumen}
+          onToggle={() => toggleSection('resumen')}
+        >
+          <View style={styles.field}>
+            <Text style={styles.label}>Resumen / cierre de turno</Text>
+            <View style={styles.dictationRow}>
+              <View style={styles.flex}>
+                <Controller
+                  control={control}
+                  name="closingSummary"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      multiline
+                      placeholder="Resumen breve para el equipo entrante"
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  )}
+                />
+              </View>
+              <DictationMicButton
+                active={activeDictationField === 'closingSummary' && sttStatus === 'listening'}
+                disabled={dictationUnavailable}
+                label="Dictar cierre"
+                onPress={() =>
+                  handleDictationPress('closingSummary', {
+                    locale: 'es-ES',
+                    interimResults: true,
+                    maxSeconds: 60,
+                  })
+                }
+              />
+            </View>
+            {renderDictationStatus('closingSummary')}
+            {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
+            <View style={styles.inlineActions}>
+              <TtsButton text={form.watch('closingSummary') ?? ''} label="Escuchar resumen" />
+              <View style={styles.secondaryButton}>
+                <Button title="Generar SBAR" onPress={handleGenerateSbar} />
+              </View>
+            </View>
+            {sbarPreview ? (
+              <View style={styles.sbarPreview}>
+                <Text style={styles.sbarTitle}>Resumen SBAR sugerido</Text>
+                <Text style={styles.sbarText}>{sbarPreview}</Text>
+                <Text style={styles.helperText}>Revisa y ajusta el contenido según tu criterio clínico.</Text>
+                <View style={styles.inlineActions}>
+                  <TtsButton text={sbarPreview ?? ''} label="Escuchar SBAR" />
+                  <View style={styles.secondaryButton}>
+                    <Button title="Insertar en resumen" onPress={handleInsertSbar} />
+                  </View>
+                  <View style={styles.secondaryButton}>
+                    <Button title="Cerrar" onPress={handleCloseSbarPreview} />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+          </View>
+        </CollapsibleSection>
+      </View>
+
+      <View
+        ref={sectionRefs.bedsideChecklist}
+        onLayout={handleSectionLayout('bedsideChecklist')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Bedside Checklist"
+          isCollapsed={collapsedSections.bedsideChecklist}
+          onToggle={() => toggleSection('bedsideChecklist')}
+        >
+          <BedsideChecklistSection />
+        </CollapsibleSection>
       </View>
 
       {/* BEGIN HANDOVER: SIGNATURES_DUAL_UI */}
-      <View style={styles.section}>
-        <SignaturesSection
-          value={signaturesValue}
-          onChange={(next) =>
-            form.setValue('signatures', next, { shouldDirty: true, shouldValidate: true })
-          }
-          currentUser={signatureUser}
-          administrativeUnitId={administrativeUnitValue}
-        />
-        {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
-        {incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
+      <View
+        ref={sectionRefs.firmas}
+        onLayout={handleSectionLayout('firmas')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Firmas"
+          isCollapsed={collapsedSections.firmas}
+          onToggle={() => toggleSection('firmas')}
+        >
+          <SignaturesSection
+            value={signaturesValue}
+            onChange={(next) =>
+              form.setValue('signatures', next, { shouldDirty: true, shouldValidate: true })
+            }
+            currentUser={signatureUser}
+            administrativeUnitId={administrativeUnitValue}
+          />
+          {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
+          {incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
+        </CollapsibleSection>
       </View>
       {/* END HANDOVER: SIGNATURES_DUAL_UI */}
 
@@ -1653,8 +1923,9 @@ export default function HandoverForm({ navigation, route }: Props) {
         <View style={styles.secondaryButton}>
           <ExportPdfButton handover={form.getValues()} onBeforeExport={handleValidateForExport} />
         </View>
+        </View>
+      </ScrollView>
       </View>
-    </ScrollView>
     </FormProvider>
   );
 }
