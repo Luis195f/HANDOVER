@@ -96,3 +96,14 @@ Consulta `docs/DEPLOY.md` para builds Android/iOS/Web. Las notas de la versión 
 1. Ejecuta los cheques (`pnpm -w typecheck`, `pnpm -w lint`, `pnpm -w vitest run --reporter=verbose`).
 2. Genera los binarios siguiendo la guía de despliegue.
 3. Crea el tag `v0.4.0-rc.1` y sube artefactos + notas al repositorio.
+
+## Para desarrolladores
+Explora la documentación técnica para conocer la arquitectura, configuración y flujos clave antes de contribuir al proyecto.
+
+- [Arquitectura general](docs/overview-architecture.md)
+- [Guía de onboarding](docs/dev-onboarding.md)
+- [Interoperabilidad FHIR](docs/fhir-and-interoperability.md)
+- [Seguridad y autenticación](docs/security-and-auth.md)
+- [Offline y cola](docs/offline-sync-and-queue.md)
+- [Pruebas y CI](docs/testing-and-ci.md)
+- [Guía de despliegue](docs/DEPLOY.md)
