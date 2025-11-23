@@ -454,7 +454,12 @@ function StaffListInput({
 }
 
 export default function HandoverForm({ navigation, route }: Props) {
-  const { patientId: patientIdParam, unitId: unitIdParam, specialtyId } = route.params ?? {};
+  const {
+    patientId: patientIdParam,
+    unitId: unitIdParam,
+    specialtyId,
+    administrativeData: administrativeDataParam,
+  } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession } = useAuth();
   const selectedUnitId = useSelectedUnitId();
@@ -479,16 +484,18 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, []);
 
   const defaultValues = useMemo<HandoverFormValues>(() => {
+    const administrativeDefaults: AdministrativeData = {
+      unit: administrativeDataParam?.unit ?? unitIdParam ?? selectedUnitId ?? '',
+      census: administrativeDataParam?.census ?? 0,
+      staffIn: administrativeDataParam?.staffIn ?? [],
+      staffOut: administrativeDataParam?.staffOut ?? [],
+      shiftStart: administrativeDataParam?.shiftStart ?? new Date().toISOString(),
+      shiftEnd: administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+      incidents: administrativeDataParam?.incidents ?? [],
+    };
+
     const base: HandoverFormValues = {
-      administrativeData: {
-        unit: unitIdParam ?? '',
-        census: 0,
-        staffIn: [],
-        staffOut: [],
-        shiftStart: new Date().toISOString(),
-        shiftEnd: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-        incidents: [],
-      },
+      administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? '',
       status: 'draft',
       dxMedical: '',
@@ -537,7 +544,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       },
     };
     return { ...base, risksStructured: deriveInitialRisksStructured(base) };
-  }, [patientIdParam, unitIdParam]);
+  }, [patientIdParam, unitIdParam, administrativeDataParam, selectedUnitId]);
 
   const form = useZodForm(zHandover, defaultValues);
 
@@ -558,6 +565,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const closingSummaryError = errors.closingSummary?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const administrativeUnitValue = form.watch('administrativeData.unit');
+  const incidentsValue = form.watch('administrativeData.incidents');
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
   const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
@@ -719,11 +727,33 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   }, [unitIdParam, form]);
 
+  useEffect(() => {
+    if (administrativeDataParam) {
+      const current = form.getValues('administrativeData');
+      const next: AdministrativeData = {
+        ...current,
+        ...administrativeDataParam,
+        staffIn: administrativeDataParam.staffIn ?? current?.staffIn ?? [],
+        staffOut: administrativeDataParam.staffOut ?? current?.staffOut ?? [],
+        incidents: administrativeDataParam.incidents ?? current?.incidents ?? [],
+      };
+
+      form.setValue('administrativeData', next, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [administrativeDataParam, form]);
+
   const parseNumericInput = (value: string) => {
     if (value === '') return undefined;
     const normalized = value.replace(',', '.');
     const parsed = Number(normalized);
     return Number.isNaN(parsed) ? undefined : parsed;
+  };
+
+  const handleShiftDetailsPress = () => {
+    navigation.navigate('ShiftDetails', {
+      returnTo: 'HandoverForm',
+      administrativeData: form.getValues('administrativeData'),
+    });
   };
 
   const handleGenerateSbar = async () => {
@@ -997,6 +1027,9 @@ export default function HandoverForm({ navigation, route }: Props) {
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Datos del turno</Text>
+          <View style={styles.buttonRow}>
+            <Button title="Editar detalles del turno" color="#2563EB" onPress={handleShiftDetailsPress} />
+          </View>
           <View style={styles.field}>
             <Text style={styles.label}>Unidad</Text>
             <Controller
@@ -1032,55 +1065,68 @@ export default function HandoverForm({ navigation, route }: Props) {
             />
             {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
           </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Inicio de turno</Text>
-          <Controller
+          <View style={styles.field}>
+            <Text style={styles.label}>Inicio de turno</Text>
+            <Controller
+              control={control}
+              name="administrativeData.shiftStart"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  placeholder="2024-01-01T08:00"
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {startError ? <Text style={styles.error}>{startError}</Text> : null}
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Fin de turno</Text>
+            <Controller
+              control={control}
+              name="administrativeData.shiftEnd"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  placeholder="2024-01-01T20:00"
+                  onBlur={onBlur}
+                  value={value ?? ''}
+                  onChangeText={onChange}
+                />
+              )}
+            />
+            {endError ? <Text style={styles.error}>{endError}</Text> : null}
+          </View>
+          <StaffListInput
             control={control}
-            name="administrativeData.shiftStart"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={styles.input}
-                placeholder="2024-01-01T08:00"
-                onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
-              />
-            )}
+            name="administrativeData.staffIn"
+            label="Personal entrante"
+            placeholder="Nombre"
+            error={staffInError}
           />
-          {startError ? <Text style={styles.error}>{startError}</Text> : null}
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Fin de turno</Text>
-          <Controller
+          <StaffListInput
             control={control}
-            name="administrativeData.shiftEnd"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={styles.input}
-                placeholder="2024-01-01T20:00"
-                onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
-              />
-            )}
+            name="administrativeData.staffOut"
+            label="Personal saliente"
+            placeholder="Nombre"
+            error={staffOutError}
           />
-          {endError ? <Text style={styles.error}>{endError}</Text> : null}
+          <View style={styles.field}>
+            <Text style={styles.label}>Observaciones del turno</Text>
+            {incidentsValue?.length ? (
+              incidentsValue.map((incident, index) => (
+                <Text key={`${incident}-${index}`} style={styles.helperText}>
+                  • {incident}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.helperText}>Sin observaciones registradas.</Text>
+            )}
+            <Text style={styles.helperText}>Edita las observaciones desde "Editar detalles del turno".</Text>
+          </View>
         </View>
-        <StaffListInput
-          control={control}
-          name="administrativeData.staffIn"
-          label="Personal entrante"
-          placeholder="Nombre"
-          error={staffInError}
-        />
-        <StaffListInput
-          control={control}
-          name="administrativeData.staffOut"
-          label="Personal saliente"
-          placeholder="Nombre"
-          error={staffOutError}
-        />
-      </View>
 
       <View style={styles.section}>
         <View style={styles.field}>
