@@ -1,7 +1,6 @@
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import path
-from django.http import JsonResponse
+from django.urls import include, path
 
 def health(_req): return JsonResponse({"status": "ok"})
 def ping(_req):   return JsonResponse({"pong": True})
@@ -11,4 +10,5 @@ urlpatterns = [
     path("", health),
     path("api/ping", ping),
     path("api/ping/", ping),
+    path("api/", include("backend.api.urls")),
 ]
