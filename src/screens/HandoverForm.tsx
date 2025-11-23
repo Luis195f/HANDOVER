@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Controller, FormProvider, type Control, type FieldErrors } from 'react-hook-form';
+import * as Speech from 'expo-speech';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -54,6 +55,7 @@ import MedicationSection from './components/MedicationSection';
 import TreatmentsSection from './components/TreatmentsSection';
 import SafetySection from './components/SafetySection';
 import { VitalTrendsChart } from './components/VitalTrendsChart';
+import TtsButton from '@/src/components/TtsButton';
 // END HANDOVER D2 – VitalTrends imports
 
 const styles = StyleSheet.create({
@@ -126,7 +128,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
 type HandoverFormControl = Control<HandoverFormValues>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
-type DictationField = 'evolution' | 'closingSummary';
+type DictationField = 'dxMedical' | 'dxNursing' | 'meds' | 'evolution' | 'closingSummary' | 'incidents';
 
 const mergeDictationText = (currentValue: string | undefined, dictated: string) => {
   const addition = dictated.trim();
@@ -557,6 +559,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const endError = administrativeErrors.shiftEnd?.message as string | undefined;
   const staffInError = administrativeErrors.staffIn?.message as string | undefined;
   const staffOutError = administrativeErrors.staffOut?.message as string | undefined;
+  const incidentsError = administrativeErrors.incidents?.message as string | undefined;
   const patientError = errors.patientId?.message as string | undefined;
   const medsError = errors.meds?.message as string | undefined;
   const dxMedicalError = errors.dxMedical?.message as string | undefined;
@@ -565,7 +568,6 @@ export default function HandoverForm({ navigation, route }: Props) {
   const closingSummaryError = errors.closingSummary?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const administrativeUnitValue = form.watch('administrativeData.unit');
-  const incidentsValue = form.watch('administrativeData.incidents');
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
   const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
@@ -578,6 +580,47 @@ export default function HandoverForm({ navigation, route }: Props) {
   const incomingSignatureError = (signatureErrors as any)?.incoming?.message as string | undefined;
   const watchedValues = form.watch();
   const computedAlerts = useMemo(() => computeAlerts(watchedValues as any), [watchedValues]);
+  const dictationAdapters = useMemo(
+    () => ({
+      dxMedical: {
+        get: () => form.getValues('dxMedical') ?? '',
+        set: (text: string) => form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
+      },
+      dxNursing: {
+        get: () => form.getValues('dxNursing') ?? '',
+        set: (text: string) => form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
+      },
+      meds: {
+        get: () => form.getValues('meds') ?? '',
+        set: (text: string) => form.setValue('meds', text, { shouldDirty: true, shouldValidate: true }),
+      },
+      evolution: {
+        get: () => form.getValues('evolution') ?? '',
+        set: (text: string) => form.setValue('evolution', text, { shouldDirty: true, shouldValidate: true }),
+      },
+      closingSummary: {
+        get: () => form.getValues('closingSummary') ?? '',
+        set: (text: string) => form.setValue('closingSummary', text, { shouldDirty: true, shouldValidate: true }),
+      },
+      incidents: {
+        get: () => {
+          const current = form.getValues('administrativeData.incidents');
+          return Array.isArray(current) ? current.join('\n') : '';
+        },
+        set: (text: string) => {
+          const items = text
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
+          form.setValue('administrativeData.incidents', items, {
+            shouldDirty: true,
+            shouldValidate: true,
+          });
+        },
+      },
+    }),
+    [form],
+  );
   const sttServiceRef = useRef<SttService | null>(null);
   if (!sttServiceRef.current) {
     sttServiceRef.current = createSttService();
@@ -603,7 +646,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       setSttStatus(service.getStatus());
       setSttError(service.getLastError());
       const target = activeFieldRef.current;
-      if (!target) {
+      const adapter = target ? dictationAdapters[target] : undefined;
+      if (!target || !adapter) {
         return;
       }
       if (!result.isFinal) {
@@ -612,8 +656,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       }
       const trimmed = result.text.trim();
       if (trimmed) {
-        const merged = mergeDictationText(form.getValues(target), trimmed);
-        form.setValue(target, merged, { shouldDirty: true });
+        const merged = mergeDictationText(adapter.get(), trimmed);
+        adapter.set(merged);
       }
       setDictatedPartial('');
       setActiveDictationField(null);
@@ -623,11 +667,14 @@ export default function HandoverForm({ navigation, route }: Props) {
       unsubscribe();
       void service.cancel();
     };
-  }, [form]);
+  }, [dictationAdapters]);
 
   const dictationUnavailable = sttError === 'UNSUPPORTED' || sttServiceRef.current?.getLastError() === 'UNSUPPORTED';
 
   const handleDictationPress = async (field: DictationField, config: SttConfig) => {
+    Speech.stop();
+    const adapter = dictationAdapters[field];
+    if (!adapter) return;
     const service = sttServiceRef.current ?? createSttService();
     sttServiceRef.current = service;
     if (service.getLastError() === 'UNSUPPORTED') {
@@ -670,7 +717,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const renderDictationStatus = (field: DictationField) => {
-    if (dictationUnavailable && field === 'evolution') {
+    if (dictationUnavailable) {
       return (
         <Text style={styles.dictationError}>
           La transcripción por voz no está disponible en este dispositivo.
@@ -1115,16 +1162,46 @@ export default function HandoverForm({ navigation, route }: Props) {
           />
           <View style={styles.field}>
             <Text style={styles.label}>Observaciones del turno</Text>
-            {incidentsValue?.length ? (
-              incidentsValue.map((incident, index) => (
-                <Text key={`${incident}-${index}`} style={styles.helperText}>
-                  • {incident}
-                </Text>
-              ))
-            ) : (
-              <Text style={styles.helperText}>Sin observaciones registradas.</Text>
-            )}
-            <Text style={styles.helperText}>Edita las observaciones desde "Editar detalles del turno".</Text>
+            <View style={styles.dictationRow}>
+              <View style={styles.flex}>
+                <Controller
+                  control={control}
+                  name="administrativeData.incidents"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      multiline
+                      placeholder="Incidentes o novedades del turno (una por línea)"
+                      onBlur={onBlur}
+                      value={Array.isArray(value) ? value.join('\n') : ''}
+                      onChangeText={(text) =>
+                        onChange(
+                          text
+                            .split('\n')
+                            .map((item) => item.trim())
+                            .filter(Boolean),
+                        )
+                      }
+                    />
+                  )}
+                />
+              </View>
+              <DictationMicButton
+                active={activeDictationField === 'incidents' && sttStatus === 'listening'}
+                disabled={dictationUnavailable}
+                label="Dictar observaciones"
+                onPress={() =>
+                  handleDictationPress('incidents', {
+                    locale: 'es-ES',
+                    interimResults: true,
+                    maxSeconds: 60,
+                  })
+                }
+              />
+            </View>
+            {renderDictationStatus('incidents')}
+            {incidentsError ? <Text style={styles.error}>{incidentsError}</Text> : null}
+            <Text style={styles.helperText}>Separa cada observación en una línea.</Text>
           </View>
         </View>
 
@@ -1319,20 +1396,37 @@ export default function HandoverForm({ navigation, route }: Props) {
           </View>
           <View style={[styles.field, { marginTop: 24 }]}>
             <Text style={styles.label}>Notas adicionales de medicación (texto libre, legado)</Text>
-            <Controller
-              control={control}
-              name="meds"
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  multiline
-                  placeholder="Texto libre de medicación (opcional)"
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
+            <View style={styles.dictationRow}>
+              <View style={styles.flex}>
+                <Controller
+                  control={control}
+                  name="meds"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      multiline
+                      placeholder="Texto libre de medicación (opcional)"
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  )}
                 />
-              )}
-            />
+              </View>
+              <DictationMicButton
+                active={activeDictationField === 'meds' && sttStatus === 'listening'}
+                disabled={dictationUnavailable}
+                label="Dictar medicación"
+                onPress={() =>
+                  handleDictationPress('meds', {
+                    locale: 'es-ES',
+                    interimResults: true,
+                    maxSeconds: 90,
+                  })
+                }
+              />
+            </View>
+            {renderDictationStatus('meds')}
             {medsError ? <Text style={styles.error}>{medsError}</Text> : null}
           </View>
         </View>
@@ -1360,20 +1454,37 @@ export default function HandoverForm({ navigation, route }: Props) {
         </View>
         <View style={styles.field}>
           <Text style={styles.label}>Notas libres de diagnósticos médicos</Text>
-          <Controller
-            control={control}
-            name="dxMedical"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                multiline
-                placeholder="Diagnósticos médicos en texto libre (legado)"
-                onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
+          <View style={styles.dictationRow}>
+            <View style={styles.flex}>
+              <Controller
+                control={control}
+                name="dxMedical"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    placeholder="Diagnósticos médicos en texto libre (legado)"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
               />
-            )}
-          />
+            </View>
+            <DictationMicButton
+              active={activeDictationField === 'dxMedical' && sttStatus === 'listening'}
+              disabled={dictationUnavailable}
+              label="Dictar dx médico"
+              onPress={() =>
+                handleDictationPress('dxMedical', {
+                  locale: 'es-ES',
+                  interimResults: true,
+                  maxSeconds: 90,
+                })
+              }
+            />
+          </View>
+          {renderDictationStatus('dxMedical')}
           {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
         </View>
         <View style={styles.field}>
@@ -1387,20 +1498,37 @@ export default function HandoverForm({ navigation, route }: Props) {
         </View>
         <View style={styles.field}>
           <Text style={styles.label}>Notas libres de diagnósticos de enfermería</Text>
-          <Controller
-            control={control}
-            name="dxNursing"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                multiline
-                placeholder="Diagnósticos de enfermería en texto libre (legado)"
-                onBlur={onBlur}
-                value={value ?? ''}
-                onChangeText={onChange}
+          <View style={styles.dictationRow}>
+            <View style={styles.flex}>
+              <Controller
+                control={control}
+                name="dxNursing"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    placeholder="Diagnósticos de enfermería en texto libre (legado)"
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                  />
+                )}
               />
-            )}
-          />
+            </View>
+            <DictationMicButton
+              active={activeDictationField === 'dxNursing' && sttStatus === 'listening'}
+              disabled={dictationUnavailable}
+              label="Dictar dx enfermería"
+              onPress={() =>
+                handleDictationPress('dxNursing', {
+                  locale: 'es-ES',
+                  interimResults: true,
+                  maxSeconds: 90,
+                })
+              }
+            />
+          </View>
+          {renderDictationStatus('dxNursing')}
           {dxNursingError ? <Text style={styles.error}>{dxNursingError}</Text> : null}
         </View>
         <View style={styles.field}>
@@ -1474,7 +1602,10 @@ export default function HandoverForm({ navigation, route }: Props) {
           {renderDictationStatus('closingSummary')}
           {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
           <View style={styles.inlineActions}>
-            <Button title="Generar SBAR" onPress={handleGenerateSbar} />
+            <TtsButton text={form.watch('closingSummary') ?? ''} label="Escuchar resumen" />
+            <View style={styles.secondaryButton}>
+              <Button title="Generar SBAR" onPress={handleGenerateSbar} />
+            </View>
           </View>
           {sbarPreview ? (
             <View style={styles.sbarPreview}>
@@ -1482,7 +1613,10 @@ export default function HandoverForm({ navigation, route }: Props) {
               <Text style={styles.sbarText}>{sbarPreview}</Text>
               <Text style={styles.helperText}>Revisa y ajusta el contenido según tu criterio clínico.</Text>
               <View style={styles.inlineActions}>
-                <Button title="Insertar en resumen" onPress={handleInsertSbar} />
+                <TtsButton text={sbarPreview ?? ''} label="Escuchar SBAR" />
+                <View style={styles.secondaryButton}>
+                  <Button title="Insertar en resumen" onPress={handleInsertSbar} />
+                </View>
                 <View style={styles.secondaryButton}>
                   <Button title="Cerrar" onPress={handleCloseSbarPreview} />
                 </View>
