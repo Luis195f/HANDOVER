@@ -1,7 +1,7 @@
 // BEGIN HANDOVER: PATIENT_HEADER_HOOK
 import { useEffect, useState } from 'react';
 
-import { fetchFHIR } from '@/src/lib/fhir-client';
+import { fetchFHIR, fetchPatientSummary, type PatientSummary } from '@/src/lib/fhir-client';
 
 type PatientResource = {
   id?: string;
@@ -10,7 +10,7 @@ type PatientResource = {
   identifier?: Array<{ system?: string; type?: { text?: string }; value?: string }>;
 };
 
-export interface PatientSummary {
+export interface PatientBasicSummary {
   id: string;
   displayName: string;
   ageLabel: string;
@@ -20,10 +20,10 @@ export interface PatientSummary {
 interface UsePatientSummaryState {
   loading: boolean;
   error: string | null;
-  summary: PatientSummary | null;
+  summary: PatientBasicSummary | null;
 }
 
-export function usePatientSummary(patientId?: string): UsePatientSummaryState {
+export function usePatientBasicSummary(patientId?: string): UsePatientSummaryState {
   const [state, setState] = useState<UsePatientSummaryState>({
     loading: !!patientId,
     error: null,
@@ -79,7 +79,7 @@ export function usePatientSummary(patientId?: string): UsePatientSummaryState {
 // END HANDOVER: PATIENT_HEADER_HOOK
 
 // BEGIN HANDOVER: PATIENT_HEADER_HELPERS
-export function buildPatientSummaryFromResource(patient: PatientResource): PatientSummary {
+export function buildPatientSummaryFromResource(patient: PatientResource): PatientBasicSummary {
   const id = patient.id ?? 'desconocido';
   const displayName = extractPatientDisplayName(patient);
   const ageLabel = buildAgeLabel(patient.birthDate);
@@ -126,3 +126,36 @@ function extractBedLabel(patient: PatientResource): string {
   return 'Cama no registrada';
 }
 // END HANDOVER: PATIENT_HEADER_HELPERS
+
+// BEGIN HANDOVER D6 – usePatientSummary
+export function usePatientSummary(patientId?: string) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<PatientSummary | null>(null);
+
+  useEffect(() => {
+    if (!patientId) {
+      setSummary(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchPatientSummary(patientId)
+      .then((data) => {
+        if (!cancelled) setSummary(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message ?? 'Error obteniendo paciente');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  return { loading, error, summary };
+}
+// END HANDOVER D6 – usePatientSummary

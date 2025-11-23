@@ -9,7 +9,8 @@ import {
 } from 'expo-camera';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/src/navigation/types';
-import { PatientHeader } from '@/src/components/PatientHeader';
+import { usePatientSummary } from '@/src/hooks/usePatientSummary';
+import { PatientBanner } from './components/PatientBanner';
 
 // Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
@@ -19,6 +20,7 @@ export function QRScanScreen({ navigation, route }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [scannedPatientId, setScannedPatientId] = useState<string | null>(null);
+  const { loading, error, summary } = usePatientSummary(scannedPatientId || undefined);
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
 
@@ -109,7 +111,7 @@ export function QRScanScreen({ navigation, route }: Props) {
       <View style={styles.overlay}>
         {scannedPatientId ? (
           <>
-            <PatientHeader patientId={scannedPatientId} showId />
+            <PatientBanner summary={summary} loading={loading} error={error} />
             <Pressable
               accessibilityRole="button"
               onPress={handleContinue}
