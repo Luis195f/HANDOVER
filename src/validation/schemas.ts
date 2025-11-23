@@ -259,7 +259,13 @@ export const zMedicationRoute = z.enum([
   "other",
 ]);
 
-export const zMedicationItem: z.ZodSchema<MedicationItem> = z.object({
+// BEGIN HANDOVER D7 – MedicationModule
+const optionalScheduleString = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
+
+const zMedicationItemBase: z.ZodSchema<MedicationItem> = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   code: z
@@ -273,9 +279,21 @@ export const zMedicationItem: z.ZodSchema<MedicationItem> = z.object({
   dose: z.string().min(1).optional(),
   frequency: z.string().min(1).optional(),
   isContinuous: z.boolean().optional(),
+  isContinuousInfusion: z.boolean().optional(),
+  startTime: optionalScheduleString,
+  endTime: optionalScheduleString,
   isHighAlert: z.boolean().optional(),
   notes: z.string().optional(),
 });
+
+export const zMedicationItem: z.ZodSchema<MedicationItem> = zMedicationItemBase.transform(
+  (item) => ({
+    ...item,
+    isContinuous: item.isContinuous ?? item.isContinuousInfusion,
+    isContinuousInfusion: item.isContinuousInfusion ?? item.isContinuous,
+  }),
+);
+// END HANDOVER D7 – MedicationModule
 
 export const zTreatmentItem: z.ZodSchema<TreatmentItem> = z.object({
   id: z.string().min(1),

@@ -50,6 +50,70 @@ describe('MedicationSection', () => {
       expect(getByText('Amoxicilina')).toBeTruthy();
     });
   });
+
+  it('muestra campos de horario al activar infusión continua', async () => {
+    const methods = useForm<HandoverFormValues>({ defaultValues });
+    const { getAllByRole, getByPlaceholderText, getByText } = render(
+      <FormProvider {...methods}>
+        <MedicationSection control={methods.control} />
+      </FormProvider>,
+    );
+
+    fireEvent.press(getByText('Añadir medicación'));
+    fireEvent(getAllByRole('switch')[0], 'valueChange', true);
+
+    await waitFor(() => {
+      expect(getByPlaceholderText('HH:MM inicio')).toBeTruthy();
+      expect(getByPlaceholderText('HH:MM fin')).toBeTruthy();
+    });
+  });
+
+  it('permite añadir y eliminar sin afectar otros elementos', async () => {
+    const methods = useForm<HandoverFormValues>({ defaultValues });
+    const { getByPlaceholderText, getByText, getAllByText, queryByText } = render(
+      <FormProvider {...methods}>
+        <MedicationSection control={methods.control} />
+      </FormProvider>,
+    );
+
+    fireEvent.press(getByText('Añadir medicación'));
+    fireEvent.changeText(getByPlaceholderText('Paracetamol'), 'Primera med');
+    fireEvent.press(getByText('Guardar'));
+
+    await waitFor(() => {
+      expect(getByText('Primera med')).toBeTruthy();
+    });
+
+    fireEvent.press(getByText('Añadir medicación'));
+    fireEvent.changeText(getByPlaceholderText('Paracetamol'), 'Segunda med');
+    fireEvent.press(getByText('Guardar'));
+
+    await waitFor(() => {
+      expect(getByText('Segunda med')).toBeTruthy();
+    });
+
+    fireEvent.press(getAllByText('Eliminar')[1]);
+
+    await waitFor(() => {
+      expect(queryByText('Segunda med')).toBeNull();
+      expect(getByText('Primera med')).toBeTruthy();
+    });
+  });
+
+  it('mantiene el control de alto riesgo disponible', async () => {
+    const methods = useForm<HandoverFormValues>({ defaultValues });
+    const { getByText } = render(
+      <FormProvider {...methods}>
+        <MedicationSection control={methods.control} />
+      </FormProvider>,
+    );
+
+    fireEvent.press(getByText('Añadir medicación'));
+
+    await waitFor(() => {
+      expect(getByText('Medicamento de alto riesgo')).toBeTruthy();
+    });
+  });
 });
 
 describe('TreatmentsSection', () => {

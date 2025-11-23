@@ -160,7 +160,14 @@ export type GlasgowScale = {
   severity: 'grave' | 'moderado' | 'leve';
 };
 
-export type MedicationItem = z.infer<typeof zMedicationItem>;
+// BEGIN HANDOVER D7 – MedicationModule
+export type MedicationItem = z.infer<typeof zMedicationItem> & {
+  startTime?: string;
+  endTime?: string;
+  // alias to highlight continuous infusion semantics without breaking existing UI
+  isContinuousInfusion?: boolean;
+};
+// END HANDOVER D7 – MedicationModule
 export type TreatmentItem = z.infer<typeof zTreatmentItem>;
 
 export type HandoverValues = {
