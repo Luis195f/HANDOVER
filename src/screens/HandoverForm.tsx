@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Button,
   Pressable,
   ScrollView,
@@ -37,6 +38,8 @@ import type { RiskItem } from '@/src/types/handover';
 import { PatientHeader } from '@/src/components/PatientHeader';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+// BEGIN HANDOVER D2 – VitalTrends imports
+import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { ExportPdfButton } from './components/ExportPdfButton';
 import { BedsideChecklistSection } from './components/BedsideChecklistSection';
 import SpecificCareSection from './components/SpecificCareSection';
@@ -45,6 +48,8 @@ import { SignaturesSection, type SignatureUser } from './components/SignaturesSe
 import MedicationSection from './components/MedicationSection';
 import TreatmentsSection from './components/TreatmentsSection';
 import SafetySection from './components/SafetySection';
+import { VitalTrendsChart } from './components/VitalTrendsChart';
+// END HANDOVER D2 – VitalTrends imports
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 16 },
@@ -71,6 +76,10 @@ const styles = StyleSheet.create({
   secondaryButton: { marginLeft: 12 },
   vitalsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
   vitalsCell: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
+  // BEGIN HANDOVER D2 – VitalTrends styles
+  vitalTrendsBlock: { marginTop: 8, gap: 6 },
+  vitalTrendsError: { color: '#6B7280', fontSize: 13 },
+  // END HANDOVER D2 – VitalTrends styles
   dictationRow: { flexDirection: 'row', alignItems: 'flex-start' },
   micButton: {
     marginLeft: 12,
@@ -744,6 +753,14 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const patientIdValue = form.watch('patientId');
 
+  // BEGIN HANDOVER D2 – VitalTrends hook usage
+  const {
+    loading: loadingVitalTrends,
+    error: vitalTrendsError,
+    data: vitalTrends,
+  } = useVitalTrends(typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined);
+  // END HANDOVER D2 – VitalTrends hook usage
+
   const deriveShiftCode = (shiftStartValue?: string | null) => {
     if (!shiftStartValue) return undefined;
     const date = new Date(shiftStartValue);
@@ -1152,6 +1169,15 @@ export default function HandoverForm({ navigation, route }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Signos vitales</Text>
           <VitalsGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+          {/* BEGIN HANDOVER D2 – VitalTrends section */}
+          <View style={styles.vitalTrendsBlock}>
+            {loadingVitalTrends ? <ActivityIndicator size="small" /> : null}
+            {vitalTrendsError ? (
+              <Text style={styles.vitalTrendsError}>No se pudieron cargar las tendencias de signos vitales.</Text>
+            ) : null}
+            <VitalTrendsChart trends={vitalTrends} />
+          </View>
+          {/* END HANDOVER D2 – VitalTrends section */}
         </View>
       )}
 

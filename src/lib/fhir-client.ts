@@ -2,6 +2,10 @@
 // src/lib/fhir-client.ts
 import { fetchWithRetry } from './net';
 import type { GeneratedPdf } from './export/export-pdf';
+// BEGIN HANDOVER D2 – VitalTrends fhir-client
+import { LOINC, TERMINOLOGY_SYSTEMS } from './codes';
+import type { VitalPoint, VitalTrendsData } from '../../types/vitals';
+// END HANDOVER D2 – VitalTrends fhir-client
 
 type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;
@@ -174,6 +178,160 @@ export async function uploadSignedHandoverPdf(
   void ctx;
   return;
 }
+
+// BEGIN HANDOVER D2 – VitalTrends fhir-client
+const LOINC_SYSTEM = TERMINOLOGY_SYSTEMS.LOINC;
+
+const createEmptyVitalTrends = (): VitalTrendsData => ({
+  hr: [],
+  sbp: [],
+  rr: [],
+  spo2: [],
+  temp: [],
+});
+
+const getObservationTime = (observation: any): string | null => {
+  const ts =
+    (observation?.effectiveDateTime as string | undefined) ??
+    (observation?.effectiveInstant as string | undefined) ??
+    (observation?.issued as string | undefined);
+  return typeof ts === 'string' ? ts : null;
+};
+
+const pushPoint = (series: VitalPoint[], observation: any, value?: number | null) => {
+  const time = getObservationTime(observation);
+  if (time && typeof value === 'number' && Number.isFinite(value)) {
+    series.push({ time, value });
+  }
+};
+
+const mapObservationToVitalTrends = (
+  observation: any,
+  trends: VitalTrendsData,
+) => {
+  const coding = (observation?.code?.coding ?? []) as any[];
+  const hasCode = (code: string) =>
+    coding.some((c) => c?.code === code && (!c?.system || c?.system === LOINC_SYSTEM));
+
+  if (hasCode(LOINC.bpPanel) && Array.isArray(observation?.component)) {
+    for (const comp of observation.component) {
+      const compCoding = (comp?.code?.coding ?? []) as any[];
+      const compHasCode = (code: string) =>
+        compCoding.some((c) => c?.code === code && (!c?.system || c?.system === LOINC_SYSTEM));
+      if (compHasCode(LOINC.sbp)) {
+        pushPoint(trends.sbp, observation, (comp as any)?.valueQuantity?.value as number | undefined);
+      }
+    }
+    return;
+  }
+
+  if (hasCode(LOINC.hr)) {
+    pushPoint(trends.hr, observation, observation?.valueQuantity?.value as number | undefined);
+  } else if (hasCode(LOINC.sbp)) {
+    pushPoint(trends.sbp, observation, observation?.valueQuantity?.value as number | undefined);
+  } else if (hasCode(LOINC.rr)) {
+    pushPoint(trends.rr, observation, observation?.valueQuantity?.value as number | undefined);
+  } else if (hasCode(LOINC.spo2)) {
+    pushPoint(trends.spo2, observation, observation?.valueQuantity?.value as number | undefined);
+  } else if (hasCode(LOINC.temp)) {
+    pushPoint(trends.temp, observation, observation?.valueQuantity?.value as number | undefined);
+  }
+};
+
+export interface FetchVitalTrendsOptions {
+  hoursBack?: number; // por defecto 24 o 48
+  maxPointsPerSeries?: number; // por defecto 20–30
+}
+
+export async function fetchVitalTrends(
+  patientId: string,
+  options: FetchVitalTrendsOptions = {},
+): Promise<VitalTrendsData> {
+  const hoursBack = options.hoursBack ?? 24;
+  const maxPointsPerSeries = options.maxPointsPerSeries ?? 24;
+  const sinceIso = new Date(Date.now() - hoursBack * 3600 * 1000).toISOString();
+  const count = Math.max(20, maxPointsPerSeries * 5);
+
+  const basePath =
+    `/Observation?category=vital-signs&patient=${encodeURIComponent(patientId)}` +
+    `&date=ge${encodeURIComponent(sinceIso)}&_sort=date&_count=${count}`;
+
+  const fallback = (error?: unknown) => {
+    if (__DEV__) {
+      return buildMockVitalTrendsData();
+    }
+    if (error) {
+      console.warn('[fhir] fetchVitalTrends fallback', error);
+    }
+    return createEmptyVitalTrends();
+  };
+
+  try {
+    const { ok, data } = await fetchFHIR(basePath);
+    if (!ok || !data) {
+      return fallback(!ok ? new Error('fetchVitalTrends response not ok') : undefined);
+    }
+
+    const observations = Array.isArray(data?.entry)
+      ? (data.entry as any[])
+          .map((entry) => entry?.resource)
+          .filter((res) => res?.resourceType === 'Observation')
+      : [];
+
+    if (!observations.length) {
+      return fallback();
+    }
+
+    const trends = createEmptyVitalTrends();
+    for (const obs of observations) {
+      mapObservationToVitalTrends(obs, trends);
+    }
+
+    (Object.keys(trends) as Array<keyof VitalTrendsData>).forEach((key) => {
+      trends[key] = trends[key]
+        .slice()
+        .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+        .slice(-maxPointsPerSeries);
+    });
+
+    const hasAnyData = Object.values(trends).some((series) => series.length > 0);
+    if (!hasAnyData) {
+      return fallback();
+    }
+
+    return trends;
+  } catch (error) {
+    return fallback(error);
+  }
+}
+
+// Solo para desarrollo / demo – no usar en producción
+// BEGIN HANDOVER D2 – VitalTrends mocks
+function buildMockVitalTrendsData(): VitalTrendsData {
+  const trends = createEmptyVitalTrends();
+  const now = Date.now();
+  const buildSeries = (base: number, variance: number) => {
+    const points: VitalPoint[] = [];
+    const totalPoints = 18;
+    for (let i = totalPoints - 1; i >= 0; i -= 1) {
+      const time = new Date(now - i * (3600 * 1000) / 2).toISOString();
+      const drift = (Math.sin(i / 2) * variance) / 2;
+      const value = Math.round(base + drift + (Math.random() - 0.5) * variance * 0.6);
+      points.push({ time, value });
+    }
+    return points;
+  };
+
+  trends.hr = buildSeries(88, 8);
+  trends.sbp = buildSeries(115, 12);
+  trends.rr = buildSeries(18, 4);
+  trends.spo2 = buildSeries(96, 2);
+  trends.temp = buildSeries(37, 0.6);
+
+  return trends;
+}
+// END HANDOVER D2 – VitalTrends mocks
+// END HANDOVER D2 – VitalTrends fhir-client
 
 /** Clase para compat con sync: permite new FhirClient(hooks) + idemKey → Response-like */
 export class FhirClient {
