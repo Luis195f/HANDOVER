@@ -38,6 +38,9 @@ import type { RiskItem } from '@/src/types/handover';
 import { PatientHeader } from '@/src/components/PatientHeader';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+// BEGIN HANDOVER D4 – Form imports
+import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
+// END HANDOVER D4 – Form imports
 import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
@@ -554,6 +557,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   const closingSummaryError = errors.closingSummary?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const administrativeUnitValue = form.watch('administrativeData.unit');
+  // BEGIN HANDOVER D4 – Get active unit
+  const adminUnitId = administrativeUnitValue || '';
+  const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
+  const features = unitConfig.features ?? {};
+  // END HANDOVER D4 – Get active unit
   const signaturesValue = form.watch('signatures');
   const outgoingSignature = signaturesValue?.outgoing;
   const signatureErrors = errors.signatures ?? {};
@@ -1236,10 +1244,20 @@ export default function HandoverForm({ navigation, route }: Props) {
         />
       </View>
 
+      {/* BEGIN HANDOVER D4 – Conditional sections */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Escalas clínicas</Text>
         <ClinicalScalesSection />
+        {features.enablePediatricScales && (
+          // Renderiza escalas pediátricas específicas. Si no existe aún, deja un TODO.
+          <Text style={{ marginVertical: 8 }}>TODO: Escalas pediátricas aquí</Text>
+        )}
+        {features.enableOncoFields && (
+          // Renderiza campos oncológicos adicionales o deja un TODO.
+          <Text style={{ marginVertical: 8 }}>TODO: Campos oncológicos aquí</Text>
+        )}
       </View>
+      {/* END HANDOVER D4 – Conditional sections */}
 
       {isOn('SHOW_MEDS') && (
         <View style={styles.section}>
