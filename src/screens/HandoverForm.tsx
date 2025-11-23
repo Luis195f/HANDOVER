@@ -1272,7 +1272,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             <TreatmentsSection control={control} />
           </View>
           <View style={[styles.field, { marginTop: 24 }]}>
-            <Text style={styles.label}>Notas de medicación (texto libre, legado)</Text>
+            <Text style={styles.label}>Notas adicionales de medicación (texto libre, legado)</Text>
             <Controller
               control={control}
               name="meds"

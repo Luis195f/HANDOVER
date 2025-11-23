@@ -112,7 +112,10 @@ type Props = {
 
 type EditingState = { index: number; isNew?: boolean } | null;
 
-type MedicationSectionFormField = keyof Pick<MedicationItem, 'name' | 'dose' | 'route' | 'frequency' | 'isContinuous' | 'isHighAlert' | 'notes'>;
+type MedicationSectionFormField = keyof Pick<
+  MedicationItem,
+  'name' | 'dose' | 'route' | 'frequency' | 'isContinuous' | 'isHighAlert' | 'notes' | 'startTime' | 'endTime'
+>;
 
 export function MedicationSection({ control, name = 'medications' }: Props) {
   const { setValue, trigger, formState } = useFormContext<HandoverFormValues>();
@@ -133,6 +136,11 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
       route: undefined,
       frequency: '',
       isContinuous: false,
+      // BEGIN HANDOVER D7 – MedicationModule
+      isContinuousInfusion: false,
+      startTime: '',
+      endTime: '',
+      // END HANDOVER D7 – MedicationModule
       isHighAlert: false,
       notes: '',
     });
@@ -149,7 +157,13 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   const handleSave = async () => {
     if (editing == null) return;
     const basePath = `${name}.${editing.index}` as const;
-    const ok = await trigger([`${basePath}.name`]);
+    const ok = await trigger([
+      `${basePath}.name`,
+      // BEGIN HANDOVER D7 – MedicationModule
+      `${basePath}.startTime`,
+      `${basePath}.endTime`,
+      // END HANDOVER D7 – MedicationModule
+    ]);
     if (!ok) return;
     setEditing(null);
   };
@@ -173,6 +187,12 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   const renderModal = () => {
     if (editing == null) return null;
     const index = editing.index;
+    // BEGIN HANDOVER D7 – MedicationModule
+    const currentMedication = medications?.[index];
+    const showScheduleFields = Boolean(
+      currentMedication?.isContinuous ?? currentMedication?.isContinuousInfusion,
+    );
+    // END HANDOVER D7 – MedicationModule
     return (
       <Modal transparent animationType="fade" visible onRequestClose={handleCancel}>
         <Pressable style={styles.modalBackdrop} onPress={handleCancel}>
@@ -267,6 +287,50 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                   </View>
                 )}
               />
+              {/* BEGIN HANDOVER D7 – MedicationModule */}
+              {showScheduleFields ? (
+                <>
+                  <Controller
+                    control={control}
+                    name={`${name}.${index}.startTime` as const}
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <View style={styles.field}>
+                        <Text style={styles.label}>Hora de inicio</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="HH:MM inicio"
+                          onBlur={onBlur}
+                          value={value ?? ''}
+                          onChangeText={onChange}
+                        />
+                        {getErrorForField(index, 'startTime') ? (
+                          <Text style={styles.helper}>{getErrorForField(index, 'startTime')}</Text>
+                        ) : null}
+                      </View>
+                    )}
+                  />
+                  <Controller
+                    control={control}
+                    name={`${name}.${index}.endTime` as const}
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <View style={styles.field}>
+                        <Text style={styles.label}>Hora de fin</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="HH:MM fin"
+                          onBlur={onBlur}
+                          value={value ?? ''}
+                          onChangeText={onChange}
+                        />
+                        {getErrorForField(index, 'endTime') ? (
+                          <Text style={styles.helper}>{getErrorForField(index, 'endTime')}</Text>
+                        ) : null}
+                      </View>
+                    )}
+                  />
+                </>
+              ) : null}
+              {/* END HANDOVER D7 – MedicationModule */}
               <Controller
                 control={control}
                 name={`${name}.${index}.notes` as const}
@@ -329,6 +393,12 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
     const details = [medication.dose, medication.route ? routeOptions.find((r) => r.value === medication.route)?.label : null, medication.frequency]
       .filter(Boolean)
       .join(' · ');
+    // BEGIN HANDOVER D7 – MedicationModule
+    const schedule = medication.startTime || medication.endTime
+      ? [medication.startTime, medication.endTime].filter(Boolean).join(' - ')
+      : null;
+    const isContinuous = medication.isContinuous ?? medication.isContinuousInfusion;
+    // END HANDOVER D7 – MedicationModule
 
     return (
       <View key={medication.id} style={styles.card}>
@@ -336,9 +406,12 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
           <Text style={styles.cardTitle}>{medication.name}</Text>
         </View>
         {details ? <Text style={styles.cardMeta}>{details}</Text> : null}
+        {/* BEGIN HANDOVER D7 – MedicationModule */}
+        {schedule ? <Text style={styles.cardMeta}>{`Horario: ${schedule}`}</Text> : null}
+        {/* END HANDOVER D7 – MedicationModule */}
         {medication.notes ? <Text style={styles.cardMeta}>{medication.notes}</Text> : null}
         <View style={styles.chipRow}>
-          {medication.isContinuous ? renderBadge('Infusión continua') : null}
+          {isContinuous ? renderBadge('Infusión continua') : null}
           {medication.isHighAlert ? renderBadge('Alto riesgo') : null}
         </View>
         <View style={styles.buttonRow}>
