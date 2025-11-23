@@ -1926,6 +1926,13 @@ export function buildHandoverBundle(
     encounter: encounterReference(values.encounterId),
     effectiveDateTime: sharedOptions.now(),
   };
+  // BEGIN HANDOVER D3 – TODO FHIR mapping for structured diagnoses
+  // TODO: mapear `dxMedicalStructured` y `dxNursingStructured` a Condition resources con códigos
+  //       SNOMED/NANDA.
+  //       Cada diagnóstico debería convertirse en un recurso FHIR `Condition` con
+  //       `code.coding = [{ system, code, display }]`.
+  //       Referenciar estas Conditions desde la Composition principal.
+  // END HANDOVER D3 – TODO FHIR mapping for structured diagnoses
   // TODO HANDOVER D1: mapear bedsideChecklist a extensiones/observaciones FHIR en un bloque posterior.
 
   const vitalObservations = values.vitals
