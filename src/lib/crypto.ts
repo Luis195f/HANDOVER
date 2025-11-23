@@ -87,3 +87,37 @@ export async function decryptPayload(ciphertext: string): Promise<string> {
 
   return decrypted;
 }
+
+/**
+ * Cifra borradores reutilizando la misma clave que la cola offline.
+ */
+export async function encryptDraft(plaintext: string): Promise<string> {
+  return encryptPayload(plaintext);
+}
+
+/**
+ * Descifra borradores reutilizando la misma clave que la cola offline. Si el
+ * cifrado está desactivado pero el valor tiene prefijo, igualmente se intenta
+ * descifrar para mantener compatibilidad.
+ */
+export async function decryptDraft(ciphertext: string): Promise<string> {
+  const encryptionDisabledAndPlain = OFFLINE_ENCRYPTION_DISABLED && !ciphertext.startsWith(ENCRYPTION_PREFIX);
+  if (encryptionDisabledAndPlain) {
+    return ciphertext;
+  }
+
+  if (!ciphertext.startsWith(ENCRYPTION_PREFIX)) {
+    return ciphertext;
+  }
+
+  const key = await getOrCreateQueueKey();
+  const raw = ciphertext.slice(ENCRYPTION_PREFIX.length);
+  const bytes = CryptoJS.AES.decrypt(raw, key);
+  const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+
+  if (!decrypted) {
+    throw new Error('No se pudo descifrar el payload offline.');
+  }
+
+  return decrypted;
+}

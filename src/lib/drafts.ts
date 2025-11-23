@@ -1,6 +1,8 @@
 // FILE: src/lib/drafts.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { decryptDraft, encryptDraft, ENCRYPTION_PREFIX, OFFLINE_ENCRYPTION_DISABLED } from './crypto';
+
 /**
  * Almacenamiento de borradores por paciente, con prioridad:
  * SecureStore (Expo) → localStorage (web/tests) → memoria.
@@ -93,26 +95,61 @@ function safeStringify(v: unknown): string {
   return JSON.stringify(v, (_k, value) => (typeof value === 'function' ? undefined : value));
 }
 
+type ParsedDraft<T> = { value: T | null; shouldEncrypt: boolean };
+
+async function parseStoredDraft<T>(raw: string | null): Promise<ParsedDraft<T>> {
+  if (!raw) return { value: null, shouldEncrypt: false };
+
+  if (raw.startsWith(ENCRYPTION_PREFIX)) {
+    const decrypted = await decryptDraft(raw);
+    return { value: safeParse<T>(decrypted), shouldEncrypt: false };
+  }
+
+  const parsed = safeParse<T>(raw);
+  return { value: parsed, shouldEncrypt: parsed !== null };
+}
+
 // ----------------------------
 // API pública
 // ----------------------------
+/**
+ * Lee un borrador (descifra si es necesario). Los borradores legacy sin prefijo
+ * se migran automáticamente al formato cifrado al cargarse.
+ */
 export async function getDraft<T = any>(patientId: string): Promise<T | null> {
   const k1 = keyNorm(patientId);
   const raw1 = await storage.getItem(k1);
-  if (raw1) return safeParse<T>(raw1);
+  const parsed1 = await parseStoredDraft<T>(raw1);
+
+  if (parsed1.value != null) {
+    if (parsed1.shouldEncrypt && !OFFLINE_ENCRYPTION_DISABLED) {
+      const encrypted = await encryptDraft(safeStringify(parsed1.value));
+      try { await storage.setItem(k1, encrypted); } catch {}
+    }
+    return parsed1.value;
+  }
 
   // Compat: intenta la clave legacy si difiere
   const k2 = keyLegacy(patientId);
   if (k2 !== k1) {
     const raw2 = await storage.getItem(k2);
-    if (raw2) return safeParse<T>(raw2);
+    const parsed2 = await parseStoredDraft<T>(raw2);
+    if (parsed2.value != null) {
+      if (parsed2.shouldEncrypt && !OFFLINE_ENCRYPTION_DISABLED) {
+        const encrypted = await encryptDraft(safeStringify(parsed2.value));
+        try { await storage.setItem(k1, encrypted); } catch {}
+      }
+      return parsed2.value;
+    }
   }
   return null;
 }
 
 export async function setDraft<T = any>(patientId: string, data: T): Promise<void> {
   const k1 = keyNorm(patientId);
-  await storage.setItem(k1, safeStringify(data ?? {}));
+  const serialized = safeStringify(data ?? {});
+  const payload = OFFLINE_ENCRYPTION_DISABLED ? serialized : await encryptDraft(serialized);
+  await storage.setItem(k1, payload);
 }
 
 export async function clearDraft(patientId?: string): Promise<void> {
@@ -131,6 +168,8 @@ export const __test__ = {
   normalizePatientId,
   keyNorm,
   keyLegacy,
+  readRaw: (key: string) => storage.getItem(key),
+  writeRaw: (key: string, value: string) => storage.setItem(key, value),
 };
 // Back-compat: algunos lugares llaman saveDraft
 export async function saveDraft(patientId: string, data: any) {
