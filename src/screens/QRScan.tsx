@@ -1,5 +1,5 @@
 // src/screens/QRScan.tsx
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import {
@@ -10,17 +10,84 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
+import { prefillFromFHIR, type PrefillOutput } from '@/src/lib/prefill';
+import { useAuth } from '@/src/security/auth';
 import { PatientBanner } from './components/PatientBanner';
 
 // Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
 
+type ParsedQRCode = {
+  patientId: string;
+  server?: string;
+  unit?: string;
+  bed?: string;
+  visitId?: string;
+  raw: string;
+};
+
+const PATIENT_URL_REGEX = /(?:Patient|patient)\/([^/?#]+)/;
+
+function parseJsonPayload(payload: string): ParsedQRCode | null {
+  if (!payload.trim().startsWith('{') || !payload.trim().endsWith('}')) return null;
+  try {
+    const parsed = JSON.parse(payload);
+    if (!parsed || typeof parsed.patientId !== 'string' || !parsed.patientId.trim()) {
+      return null;
+    }
+    const normalizeOptional = (value: unknown) =>
+      typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+    return {
+      patientId: parsed.patientId.trim(),
+      server: normalizeOptional(parsed.server),
+      unit: normalizeOptional(parsed.unit),
+      bed: normalizeOptional(parsed.bed),
+      visitId: normalizeOptional(parsed.visitId),
+      raw: payload,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseUrlPayload(payload: string): ParsedQRCode | null {
+  const match = PATIENT_URL_REGEX.exec(payload);
+  if (!match?.[1]) return null;
+  const patientId = decodeURIComponent(match[1]);
+  try {
+    const url = new URL(payload);
+    const isHttp = url.protocol.startsWith('http');
+    const basePath = url.pathname.replace(/\/?Patient\/.+$/, '');
+    const server = isHttp ? `${url.origin}${basePath}`.replace(/\/$/, '') : undefined;
+    return { patientId, server, raw: payload };
+  } catch {
+    return { patientId, raw: payload };
+  }
+}
+
+function parseQRCodePayload(payload: string): ParsedQRCode | null {
+  const trimmed = payload.trim();
+  const fromJson = parseJsonPayload(trimmed);
+  if (fromJson) return fromJson;
+  const fromUrl = parseUrlPayload(trimmed);
+  if (fromUrl) return fromUrl;
+  if (trimmed.length > 0) {
+    return { patientId: trimmed, raw: trimmed };
+  }
+  return null;
+}
+
 export function QRScanScreen({ navigation, route }: Props) {
   const isFocused = useIsFocused();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
-  const [scannedPatientId, setScannedPatientId] = useState<string | null>(null);
-  const { loading, error, summary } = usePatientSummary(scannedPatientId || undefined);
+  const [parsedPayload, setParsedPayload] = useState<ParsedQRCode | null>(null);
+  const [prefilledValues, setPrefilledValues] = useState<PrefillOutput | null>(null);
+  const [prefillError, setPrefillError] = useState<string | null>(null);
+  const [prefillLoading, setPrefillLoading] = useState(false);
+  const { loading, error, summary } = usePatientSummary(parsedPayload?.patientId || undefined);
+  const { session } = useAuth();
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
 
@@ -35,8 +102,48 @@ export function QRScanScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!isFocused && scanned) {
       setScanned(false);
+      setParsedPayload(null);
+      setPrefilledValues(null);
+      setPrefillError(null);
     }
   }, [isFocused, scanned]);
+
+  useEffect(() => {
+    if (!parsedPayload?.patientId) return;
+    let cancelled = false;
+    const fhirBase = parsedPayload.server
+      ?? process.env.EXPO_PUBLIC_FHIR_BASE_URL
+      ?? process.env.FHIR_BASE_URL;
+
+    const loadPrefill = async () => {
+      setPrefillLoading(true);
+      setPrefillError(null);
+      try {
+        const values = await prefillFromFHIR(parsedPayload.patientId, {
+          fhirBase,
+          token: session?.accessToken,
+        });
+        if (!cancelled) {
+          setPrefilledValues(values);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setPrefillError(
+            err?.message ?? 'No se pudieron precargar datos clínicos desde FHIR.',
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPrefillLoading(false);
+        }
+      }
+    };
+
+    loadPrefill();
+    return () => {
+      cancelled = true;
+    };
+  }, [parsedPayload, session?.accessToken]);
 
   const handleBarcodeScanned = useCallback(
     (result: BarcodeScanningResult) => {
@@ -51,25 +158,59 @@ export function QRScanScreen({ navigation, route }: Props) {
         return;
       }
 
-      setScannedPatientId(data);
+      const parsed = parseQRCodePayload(data);
+      if (!parsed) {
+        Alert.alert('QR inválido', 'El código no contiene datos de paciente');
+        setScanned(false);
+        return;
+      }
+
+      setParsedPayload(parsed);
     },
     [scanned],
   );
 
   const handleContinue = () => {
-    if (!scannedPatientId) return;
+    if (!parsedPayload?.patientId) return;
     const targetRoute = returnTo ?? 'HandoverForm';
     const params =
       targetRoute === 'HandoverForm'
-        ? { patientId: scannedPatientId, unitId: unitIdParam, specialtyId }
-        : { patientId: scannedPatientId };
+        ? {
+            patientId: parsedPayload.patientId,
+            unitId: parsedPayload.unit ?? unitIdParam,
+            specialtyId,
+            prefilledValues,
+            patientSummary: summary,
+            prefillMeta: {
+              server: parsedPayload.server,
+              unit: parsedPayload.unit ?? unitIdParam,
+              bed: parsedPayload.bed,
+              visitId: parsedPayload.visitId,
+            },
+          }
+        : { patientId: parsedPayload.patientId };
     navigation.navigate(targetRoute as never, params as never);
   };
 
   const handleRescan = () => {
     setScanned(false);
-    setScannedPatientId(null);
+    setParsedPayload(null);
+    setPrefilledValues(null);
+    setPrefillError(null);
   };
+
+  const handleRetryPrefill = () => {
+    if (!parsedPayload) return;
+    setPrefillError(null);
+    setPrefilledValues(null);
+    setPrefillLoading(false);
+    setParsedPayload({ ...parsedPayload });
+  };
+
+  const continueDisabled = useMemo(
+    () => !parsedPayload?.patientId || prefillLoading,
+    [parsedPayload?.patientId, prefillLoading],
+  );
 
   if (!permission) {
     return (
@@ -109,16 +250,31 @@ export function QRScanScreen({ navigation, route }: Props) {
 
       {/* Overlay con instrucciones */}
       <View style={styles.overlay}>
-        {scannedPatientId ? (
+        {parsedPayload ? (
           <>
             <PatientBanner summary={summary} loading={loading} error={error} />
+            {prefillLoading ? (
+              <View style={styles.inlineStatus}>
+                <ActivityIndicator color="#BFDBFE" />
+                <Text style={styles.statusText}>Precargando datos FHIR…</Text>
+              </View>
+            ) : null}
+            {prefillError ? (
+              <Text style={styles.errorText}>{prefillError}</Text>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               onPress={handleContinue}
-              style={styles.primaryButton}
+              style={[styles.primaryButton, continueDisabled && styles.primaryButtonDisabled]}
+              disabled={continueDisabled}
             >
               <Text style={styles.primaryButtonText}>Continuar con entrega</Text>
             </Pressable>
+            {prefillError ? (
+              <Pressable accessibilityRole="button" onPress={handleRetryPrefill}>
+                <Text style={styles.link}>Reintentar precarga</Text>
+              </Pressable>
+            ) : null}
             <Pressable accessibilityRole="button" onPress={handleRescan}>
               <Text style={styles.link}>Escanear nuevamente</Text>
             </Pressable>
@@ -176,10 +332,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#2563EB',
   },
+  primaryButtonDisabled: {
+    opacity: 0.7,
+  },
   primaryButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 16,
+  },
+  inlineStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  statusText: {
+    color: '#E5E7EB',
+    fontSize: 14,
+  },
+  errorText: {
+    color: '#FCA5A5',
+    marginTop: 8,
   },
   title: {
     fontSize: 20,
