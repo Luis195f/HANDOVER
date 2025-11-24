@@ -24,6 +24,7 @@ import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { generateSbarViaBackend } from '@/src/lib/ai-sbar';
+import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import {
   createSttService,
   type SttConfig,
@@ -132,6 +133,12 @@ const styles = StyleSheet.create({
   alertCritical: { backgroundColor: '#ffebee', borderColor: '#fca5a5' },
   alertWarning: { backgroundColor: '#fff8e1', borderColor: '#fcd34d' },
   alertInfo: { backgroundColor: '#e3f2fd', borderColor: '#bfdbfe' },
+  riskBanner: { padding: 12, borderRadius: 10, marginTop: 12 },
+  riskHigh: { backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1 },
+  riskModerate: { backgroundColor: '#fffbeb', borderColor: '#fcd34d', borderWidth: 1 },
+  riskLow: { backgroundColor: '#ecfdf3', borderColor: '#a7f3d0', borderWidth: 1 },
+  riskTitle: { fontWeight: '700', marginBottom: 4 },
+  riskReason: { color: '#374151', marginTop: 2 },
 });
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
@@ -684,8 +691,17 @@ export default function HandoverForm({ navigation, route }: Props) {
   const signatureErrors = errors.signatures ?? {};
   const outgoingSignatureError = (signatureErrors as any)?.outgoing?.message as string | undefined;
   const incomingSignatureError = (signatureErrors as any)?.incoming?.message as string | undefined;
+  const [watchedVitals, watchedBraden, watchedOxygen] = form.watch([
+    'vitals',
+    'braden',
+    'oxygenTherapy',
+  ]);
   const watchedValues = form.watch();
   const computedAlerts = useMemo(() => computeAlerts(watchedValues as any), [watchedValues]);
+  const riskEvaluation = useMemo(
+    () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
+    [watchedBraden, watchedOxygen, watchedVitals],
+  );
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
@@ -1100,6 +1116,17 @@ export default function HandoverForm({ navigation, route }: Props) {
         const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
         const unitFromStore = normalizeUnit(selectedUnitId);
         const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
+
+        const riskBeforeSubmit = deriveRiskEvaluationFromValues(
+          values.vitals,
+          values.braden,
+          values.oxygenTherapy,
+        );
+
+        const confirmed = await confirmHighRiskSubmission(status, riskBeforeSubmit, Alert.alert);
+        if (!confirmed) {
+          return;
+        }
 
         const activeSession = session ?? (await getSession());
         try {
@@ -1585,6 +1612,35 @@ export default function HandoverForm({ navigation, route }: Props) {
               <VitalTrendsChart trends={vitalTrends} />
             </View>
             {/* END HANDOVER D2 – VitalTrends section */}
+            <View
+              style={[
+                styles.riskBanner,
+                riskEvaluation.level === 'high'
+                  ? styles.riskHigh
+                  : riskEvaluation.level === 'moderate'
+                    ? styles.riskModerate
+                    : styles.riskLow,
+              ]}
+            >
+              <Text style={styles.riskTitle}>
+                {riskEvaluation.level === 'high'
+                  ? 'Riesgo alto detectado'
+                  : riskEvaluation.level === 'moderate'
+                    ? 'Riesgo moderado'
+                    : 'Riesgo bajo'}
+              </Text>
+              {riskEvaluation.reasons.length > 0 ? (
+                riskEvaluation.reasons.map((reason) => (
+                  <Text key={reason} style={styles.riskReason}>
+                    • {reason}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.riskReason}>
+                  Completa signos vitales y la escala de Braden para calcular el riesgo.
+                </Text>
+              )}
+            </View>
           </CollapsibleSection>
         </View>
       )}
