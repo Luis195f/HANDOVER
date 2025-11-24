@@ -8,11 +8,12 @@ from django.http import HttpRequest
 from rest_framework.response import Response
 from rest_framework.views import APIView
 try:
+    from fhir.resources.bundle import Bundle
     from fhir.resources.fhirabstractmodel import FHIRValidationError
     from fhir.resources.medicationstatement import MedicationStatement
     from fhir.resources.patient import Patient
 except ImportError:  # pragma: no cover - entorno sin dependencias FHIR
-    Patient = MedicationStatement = FHIRValidationError = None  # type: ignore[assignment]
+    Patient = MedicationStatement = FHIRValidationError = Bundle = None  # type: ignore[assignment]
 
 
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
@@ -38,7 +39,7 @@ def _validate_remotely(resource: Dict[str, Any], resource_type: str) -> Optional
         resp = httpx.post(validate_url, json=resource, headers=auth_headers(), timeout=30)
     except httpx.HTTPError as exc:
         logger.warning("Error al llamar a $validate para %s: %s", resource_type, exc)
-        return None
+        return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
 
     if resp.status_code in (404, 405):
         logger.warning("$validate no soportado para %s: %s", resource_type, resp.text)
@@ -117,3 +118,45 @@ class MedicationStatementView(APIView):
             return validation_response
 
         return _post_to_fhir(medication_statement, "MedicationStatement")
+
+
+class BundleView(APIView):
+    def post(self, request: HttpRequest) -> Response:
+        if Bundle is None or FHIRValidationError is None:
+            return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
+
+        try:
+            bundle_obj = Bundle.parse_obj(request.data)
+        except FHIRValidationError as exc:
+            return Response({"errors": [str(exc)]}, status=422)
+
+        if bundle_obj.type != "transaction":
+            return Response({"errors": ["Solo se permiten bundles de tipo transaction."]}, status=422)
+
+        bundle = bundle_obj.dict(exclude_none=True)
+        bundle_meta = bundle.get("meta") or {}
+        tags = bundle_meta.get("tag") or []
+        tags = tags if isinstance(tags, list) else []
+        tags.append({"system": "urn:handover:tx", "code": str(uuid.uuid4())})
+        bundle_meta["tag"] = tags
+        bundle["meta"] = bundle_meta
+
+        validation_response = _validate_remotely(bundle, "Bundle")
+        if validation_response:
+            return validation_response
+
+        headers = auth_headers()
+        headers["Prefer"] = "return=representation"
+
+        try:
+            resp = httpx.post(FHIR_BASE.rstrip("/"), json=bundle, headers=headers, timeout=60)
+        except httpx.HTTPError:
+            return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
+
+        if resp.status_code >= 400:
+            return Response({"errors": [resp.text]}, status=resp.status_code)
+
+        try:
+            return Response(resp.json(), status=resp.status_code)
+        except Exception:
+            return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)

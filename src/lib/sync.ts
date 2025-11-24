@@ -65,6 +65,7 @@ export type FlushCompatOptions = {
    * Pausa entre elementos, por si el backend prefiere no recibir ráfagas.
    */
   delayMs?: number;
+  validation?: ValidationOptions;
 };
 
 type ValidationErrorDetail = ValidationResult['errors'][number];
@@ -75,8 +76,19 @@ type TransactionBundle = {
   _validationErrors?: ValidationErrorDetail[];
 };
 type BundleWithValidation = Bundle & { _validationErrors?: ValidationErrorDetail[] };
+type ValidationMode = 'off' | 'local' | 'remote';
+type ValidationOptions = {
+  mode?: ValidationMode;
+  accessToken?: string;
+  fhirBaseUrl?: string;
+};
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+const ENV_VALIDATION_MODE =
+  (process.env.EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
+  (process.env.HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
+  'off';
 
 function annotateValidationErrors(bundle: any, errors: ValidationErrorDetail[]) {
   if (!bundle || typeof bundle !== 'object') return;
@@ -98,6 +110,12 @@ function formatFhirErrors(errors: string[]): ValidationResult['errors'] {
   return errors.map((err) => ({ path: '$', message: err }));
 }
 
+function resolveValidationMode(input?: ValidationMode): ValidationMode {
+  if (input === 'off' || input === 'local' || input === 'remote') return input;
+  if (ENV_VALIDATION_MODE === 'local' || ENV_VALIDATION_MODE === 'remote') return ENV_VALIDATION_MODE;
+  return 'off';
+}
+
 function enforceBundleValidation(bundle: any, context: string) {
   const result = validateFHIRBundle(bundle);
   if (!result.isValid) {
@@ -113,6 +131,74 @@ function enforceBundleValidation(bundle: any, context: string) {
     const error = new Error(`FHIR structure validation failed (${context}): ${fhirValidation.errors.join('; ')}`);
     (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = mappedErrors;
     annotateValidationErrors(bundle, mappedErrors);
+    throw error;
+  }
+
+  clearValidationErrors(bundle);
+}
+
+async function remoteValidateResource(
+  resource: Record<string, unknown>,
+  opts: Required<Pick<ValidationOptions, 'accessToken' | 'fhirBaseUrl'>>
+): Promise<ValidationErrorDetail[] | null> {
+  const resourceType = typeof resource?.resourceType === 'string' ? resource.resourceType : undefined;
+  if (!resourceType) return null;
+  const url = `${opts.fhirBaseUrl.replace(/\/+$/, '')}/${resourceType}/$validate`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/fhir+json' };
+  if (opts.accessToken) headers.Authorization = `Bearer ${opts.accessToken}`;
+
+  try {
+    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(resource) });
+    if (!resp.ok && resp.status >= 500) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const outcome = await resp.json();
+    const issues = Array.isArray(outcome?.issue) ? outcome.issue : [];
+    const errors = issues
+      .filter((issue: any) => issue?.severity === 'error' || issue?.severity === 'fatal')
+      .map((issue: any, index: number) => ({
+        path: issue?.expression?.[0] ?? `${resourceType}[${index}]`,
+        message: issue?.diagnostics ?? issue?.details?.text ?? 'Validation error',
+      }));
+
+    return errors.length > 0 ? errors : null;
+  } catch (error) {
+    const err = error as Error;
+    throw new Error(`Error al validar remotamente ${resourceType}: ${err.message}`);
+  }
+}
+
+async function enforceBundleValidationWithMode(
+  bundle: any,
+  context: string,
+  opts?: ValidationOptions
+): Promise<void> {
+  const mode = resolveValidationMode(opts?.mode);
+  if (mode === 'off') return;
+
+  enforceBundleValidation(bundle, context);
+
+  if (mode !== 'remote') return;
+
+  const fhirBaseUrl = opts?.fhirBaseUrl ?? FHIR_BASE_URL;
+  const accessToken = opts?.accessToken ?? '';
+  const entries = Array.isArray(bundle?.entry) ? bundle.entry : [];
+  const resources = entries
+    .map((entry: any) => (entry && typeof entry === 'object' ? entry.resource : null))
+    .filter((res): res is Record<string, unknown> => !!res && typeof res === 'object');
+
+  const errors: ValidationErrorDetail[] = [];
+  for (const resource of resources) {
+    const result = await remoteValidateResource(resource, { accessToken, fhirBaseUrl });
+    if (result && result.length > 0) {
+      errors.push(...result);
+    }
+  }
+
+  if (errors.length > 0) {
+    annotateValidationErrors(bundle, errors);
+    const error = new Error(`Remote validation failed (${context})`);
+    (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = errors;
     throw error;
   }
 
@@ -276,7 +362,7 @@ function ensureConnectivityListener() {
       isOffline = false;
       offlineSince = null;
       if (lastTokenProvider && !pendingDrain) {
-        pendingDrain = drain(lastTokenProvider)
+        pendingDrain = drain(lastTokenProvider, { mode: resolveValidationMode() })
           .catch(() => {})
           .finally(() => {
             pendingDrain = null;
@@ -595,9 +681,9 @@ function shouldRetryStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
-export async function enqueue(bundle: Bundle, opts?: { patientId?: string }): Promise<void> {
+export async function enqueue(bundle: Bundle, opts?: { patientId?: string; validation?: ValidationOptions }): Promise<void> {
   const normalized = ensureBundleShape(bundle);
-  enforceBundleValidation(normalized, 'secure-queue enqueue');
+  await enforceBundleValidationWithMode(normalized, 'secure-queue enqueue', opts?.validation);
   const fullUrls = collectFullUrls(normalized);
   const id = computeId(fullUrls);
   const now = Date.now();
@@ -647,7 +733,10 @@ export async function enqueue(bundle: Bundle, opts?: { patientId?: string }): Pr
 
 let drainingSecureQueue = false;
 
-export async function drain(getToken: () => Promise<string>): Promise<void> {
+export async function drain(
+  getToken: () => Promise<string>,
+  validation?: ValidationOptions
+): Promise<void> {
   lastTokenProvider = getToken;
   ensureConnectivityListener();
   if (drainingSecureQueue || shouldPauseQueue()) return;
@@ -678,7 +767,7 @@ export async function drain(getToken: () => Promise<string>): Promise<void> {
         try {
           const token = await getToken();
           if (!token) throw new Error('OAuth token is required');
-          enforceBundleValidation(current.bundle, 'secure-queue drain');
+          await enforceBundleValidationWithMode(current.bundle, 'secure-queue drain', validation);
           response = await postBundle(current.bundle, { token });
         } catch (error) {
           if (handleNetworkFailure(error)) {
@@ -844,6 +933,7 @@ type EnqueueBundleInput = {
   values?: HandoverValues & { administrativeData?: AdministrativeData };
   authorId?: string;
 };
+type EnqueueBundleOptions = ValidationOptions;
 
 function isRawBundleInput(value: unknown): value is { resourceType?: string; entry?: any[] } {
   return !!value && typeof value === 'object' && (value as any).resourceType === 'Bundle';
@@ -878,7 +968,10 @@ function extractPatientIdFromBundle(bundle: { entry?: any[] }): string | undefin
   return undefined;
 }
 
-export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: string; entry?: any[] }) {
+export async function enqueueBundle(
+  input: EnqueueBundleInput | { resourceType: string; entry?: any[] },
+  opts?: EnqueueBundleOptions
+) {
   const normalized: EnqueueBundleInput = isRawBundleInput(input)
     ? {
         patientId: extractPatientIdFromBundle(input) ?? 'unknown',
@@ -890,7 +983,7 @@ export async function enqueueBundle(input: EnqueueBundleInput | { resourceType: 
   const nowIso = new Date().toISOString();
   const queue = await loadQueue();
   const ensured = ensureTransactionBundle(normalized.bundle);
-  enforceBundleValidation(ensured, 'legacy enqueueBundle');
+  await enforceBundleValidationWithMode(ensured, 'legacy enqueueBundle', opts);
 
   const existingIndex = queue.findIndex((it) => it.patientId === patientId);
   const existingTxId = existingIndex >= 0 ? queue[existingIndex].txId : undefined;
@@ -974,7 +1067,7 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     });
   const sender: SendFn = async (tx) => {
     if (tx?.bundle) {
-      enforceBundleValidation(tx.bundle, 'legacy flushQueue sender');
+      await enforceBundleValidationWithMode(tx.bundle, 'legacy flushQueue sender', opts?.validation);
     }
     return baseSender(tx);
   };
