@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { Audio, type PermissionResponse } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 
-import { STT_ENDPOINT } from '@/src/config/env';
+import { AI_BACKEND_BASE_URL, STT_ENDPOINT } from '@/src/config/env';
 
 export type SttStatus = 'idle' | 'listening' | 'processing' | 'error';
 
@@ -269,10 +269,77 @@ class UnsupportedSttService implements SttService {
 const NETWORK_ERROR = Symbol('NETWORK_ERROR');
 const ENGINE_ERROR = Symbol('ENGINE_ERROR');
 
+const TRANSCRIPTION_ERROR_MESSAGE = 'No se pudo transcribir el audio con IA';
+
+const AUDIO_MIME_BY_EXTENSION: Record<string, string> = {
+  m4a: 'audio/m4a',
+  mp3: 'audio/mp3',
+  wav: 'audio/wav',
+  oga: 'audio/ogg',
+  ogg: 'audio/ogg',
+};
+
 export function createSttService(): SttService {
   const endpoint = STT_ENDPOINT?.trim();
   if (!endpoint || !SUPPORTED_PLATFORMS.has(Platform.OS)) {
     return new UnsupportedSttService();
   }
   return new NativeSttService(endpoint);
+}
+
+const defaultTranscriptionMock = async (): Promise<string> => '';
+
+function resolveMimeType(fileUri: string): string {
+  const [, extension = ''] = /\.([a-z0-9]+)$/i.exec(fileUri) ?? [];
+  const normalized = extension.toLowerCase();
+  return AUDIO_MIME_BY_EXTENSION[normalized] ?? 'audio/m4a';
+}
+
+export async function transcribeAudioViaBackend(
+  fileUri: string,
+  options?: { language?: string },
+): Promise<string> {
+  const info = await FileSystem.getInfoAsync(fileUri);
+  if (!info.exists) {
+    throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
+  }
+
+  const name = fileUri.split('/').pop() ?? 'audio.m4a';
+  const mimeType = resolveMimeType(name);
+  const formData = new FormData();
+  formData.append('file', { uri: fileUri, name, type: mimeType } as unknown as Blob);
+  if (options?.language) {
+    formData.append('language', options.language);
+  }
+
+  const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
+  }
+
+  const data = (await response.json()) as { text?: string };
+  if (typeof data.text !== 'string') {
+    throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
+  }
+
+  return data.text;
+}
+
+export async function transcribeAudio(
+  fileUri: string,
+  options?: { language?: string },
+): Promise<string> {
+  if (!AI_BACKEND_BASE_URL) {
+    return defaultTranscriptionMock();
+  }
+
+  try {
+    return await transcribeAudioViaBackend(fileUri, options);
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(TRANSCRIPTION_ERROR_MESSAGE);
+  }
 }

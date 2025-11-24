@@ -23,6 +23,7 @@ import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
+import { generateSbarViaBackend } from '@/src/lib/ai-sbar';
 import {
   createSttService,
   type SttConfig,
@@ -737,6 +738,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [dictatedPartial, setDictatedPartial] = useState('');
   const activeFieldRef = useRef<DictationField | null>(null);
   const [sbarPreview, setSbarPreview] = useState<string | null>(null);
+  const [isGeneratingSbar, setIsGeneratingSbar] = useState(false);
+  const [sbarAiError, setSbarAiError] = useState<string | null>(null);
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -906,6 +909,71 @@ export default function HandoverForm({ navigation, route }: Props) {
       returnTo: 'HandoverForm',
       administrativeData: form.getValues('administrativeData'),
     });
+  };
+
+  const buildSbarFreeText = (values: HandoverFormValues) => {
+    const parts = [values.evolution, values.closingSummary, values.meds, values.dxNursing, values.dxMedical];
+    return parts
+      .map((part) => (typeof part === 'string' ? part.trim() : ''))
+      .filter(Boolean)
+      .join('\n\n');
+  };
+
+  const buildSbarContext = (values: HandoverFormValues) => {
+    const context: Record<string, unknown> = {};
+    const vitals = values.vitals ?? {};
+    if (Object.values(vitals).some((value) => value !== undefined && value !== null && value !== '')) {
+      context.vitals = vitals;
+    }
+
+    const oxygenTherapy = values.oxygenTherapy ?? {};
+    if (Object.values(oxygenTherapy).some((value) => value !== undefined && value !== null && value !== '')) {
+      context.oxygenTherapy = oxygenTherapy;
+    }
+
+    if (Array.isArray(values.risksStructured) && values.risksStructured.length > 0) {
+      context.risks = values.risksStructured;
+    }
+
+    if (Array.isArray(values.treatments) && values.treatments.length > 0) {
+      context.treatments = values.treatments;
+    }
+
+    if (Array.isArray(values.medications) && values.medications.length > 0) {
+      context.medications = values.medications;
+    }
+
+    return context;
+  };
+
+  const handleGenerateSbarWithAi = async () => {
+    const values = form.getValues();
+    const freeText = buildSbarFreeText(values);
+    if (!freeText.trim()) {
+      Alert.alert('Añade texto clínico', 'Escribe alguna nota para generar el SBAR con IA.');
+      return;
+    }
+
+    setIsGeneratingSbar(true);
+    setSbarAiError(null);
+    try {
+      const sbar = await generateSbarViaBackend(freeText, buildSbarContext(values), 'es');
+      form.setValue('sbarSituation', sbar.situation, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarBackground', sbar.background, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarAssessment', sbar.assessment, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarRecommendation', sbar.recommendation, { shouldDirty: true, shouldValidate: true });
+
+      const previewText =
+        sbar.fullText && sbar.fullText.trim().length > 0
+          ? sbar.fullText
+          : `Situation: ${sbar.situation}\nBackground: ${sbar.background}\nAssessment: ${sbar.assessment}\nRecommendation: ${sbar.recommendation}`;
+      setSbarPreview(previewText);
+    } catch (error) {
+      console.warn('[handover] ai sbar error', error);
+      setSbarAiError('No pudimos generar el SBAR con IA. Inténtalo de nuevo en unos segundos.');
+    } finally {
+      setIsGeneratingSbar(false);
+    }
   };
 
   const handleGenerateSbar = async () => {
@@ -1415,6 +1483,15 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.sbar}
             onToggle={() => toggleSection('sbar')}
           >
+            <View style={styles.inlineActions}>
+              <Button
+                title={isGeneratingSbar ? 'Generando SBAR con IA…' : 'Generar SBAR con IA'}
+                onPress={handleGenerateSbarWithAi}
+                disabled={isGeneratingSbar}
+              />
+              {isGeneratingSbar ? <ActivityIndicator style={{ marginLeft: 12 }} /> : null}
+            </View>
+            {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
             <View style={styles.field}>
               <Text style={styles.label}>SBAR - Situation</Text>
               <Controller

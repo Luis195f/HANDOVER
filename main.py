@@ -3,17 +3,20 @@ import base64
 import datetime
 import logging
 import os
+from typing import Any, Dict, Optional
 
 import django
 import httpx
 from fastapi import File, Form, Header, HTTPException, Request, UploadFile
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
 
+from backend.ai_client import generate_sbar, transcribe_audio
 from backend.signature import (
     SignatureSettings,
     SignatureVerificationError,
@@ -30,6 +33,16 @@ HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off"
 SIGNATURE_SETTINGS: SignatureSettings = load_settings()
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_AUDIO_MIME_TYPES = {
+    "audio/m4a",
+    "audio/mp3",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+    "audio/x-m4a",
+}
+MAX_FREE_TEXT_LENGTH = 15000
 
 app = FastAPI(title="handover-api")
 allowed_origins = [o for o in os.getenv("HANDOVER_ALLOWED_ORIGINS", "").split(",") if o] or [
@@ -55,6 +68,21 @@ class CSPMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(CSPMiddleware)
+
+
+class SbarRequest(BaseModel):
+    language: str = "es"
+    free_text: str
+    context: Optional[Dict[str, Any]] = None
+
+
+class SbarResponse(BaseModel):
+    situation: str
+    background: str
+    assessment: str
+    recommendation: str
+    full_text: str
+
 
 def auth_headers():
     h = {"Content-Type": "application/fhir+json"}
@@ -264,3 +292,57 @@ async def audio_to_fhir(patientId: str = Form(...),
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
         return r.json()
+
+
+def _merge_context(req: SbarRequest) -> str:
+    base_text = req.free_text.strip()
+    context = req.context or {}
+    if not isinstance(context, dict) or not context:
+        return base_text
+    context_lines = []
+    for key, value in context.items():
+        if value is None:
+            continue
+        context_lines.append(f"{key}: {value}")
+    if not context_lines:
+        return base_text
+    return base_text + "\n\nContexto estructurado:\n" + "\n".join(context_lines)
+
+
+@app.post("/ai/transcribe")
+async def ai_transcribe(
+    file: UploadFile = File(...),
+    language: str | None = Form(None),
+) -> dict:
+    content_type = (file.content_type or "").split(";")[0]
+    if content_type not in ALLOWED_AUDIO_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Audio inválido o formato no soportado")
+
+    try:
+        text = await transcribe_audio(file, language)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="Error al procesar el audio con el servicio de IA")
+
+    return {"text": text, "language": language or "es", "durationSeconds": None}
+
+
+@app.post("/ai/summarize-sbar", response_model=SbarResponse)
+async def summarize_sbar(req: SbarRequest) -> SbarResponse:
+    if len(req.free_text or "") > MAX_FREE_TEXT_LENGTH:
+        raise HTTPException(status_code=400, detail="Texto demasiado largo para resumir")
+
+    combined_text = _merge_context(req)
+    try:
+        payload = await generate_sbar(combined_text, language=req.language or "es")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="Error al generar SBAR con el servicio de IA")
+
+    required_keys = ["situation", "background", "assessment", "recommendation", "full_text"]
+    if not all(isinstance(payload.get(key), str) for key in required_keys):
+        raise HTTPException(status_code=502, detail="Formato de respuesta de IA inesperado")
+
+    return SbarResponse(**payload)
