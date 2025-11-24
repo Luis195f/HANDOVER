@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { Platform } from 'react-native';
-import { createSttService } from '@/src/lib/stt';
+import { createSttService, transcribeAudio, transcribeAudioViaBackend } from '@/src/lib/stt';
 
 const recordingInstances: Array<{
   prepareToRecordAsync: ReturnType<typeof vi.fn>;
@@ -40,6 +40,7 @@ const fileSystemMocks = vi.hoisted(() => ({
   readAsStringAsync: vi.fn(async () => 'YmFzZTY0QXVkaW8='),
   deleteAsync: vi.fn(async () => undefined),
   EncodingType: { Base64: 'base64' },
+  getInfoAsync: vi.fn(async () => ({ exists: true })),
 }));
 
 vi.mock('expo-file-system', () => fileSystemMocks);
@@ -63,6 +64,7 @@ beforeEach(() => {
   mockAudioModule.Recording.mockClear();
   fileSystemMocks.readAsStringAsync.mockClear();
   fileSystemMocks.deleteAsync.mockClear();
+  fileSystemMocks.getInfoAsync.mockClear();
   mockFetch.mockClear();
   (globalThis as any).fetch = mockFetch;
   Platform.OS = 'ios' as typeof Platform.OS;
@@ -128,5 +130,32 @@ describe('createSttService', () => {
     await service.start({ locale: 'es-ES' });
     expect(service.getStatus()).toBe('error');
     Platform.OS = 'ios' as typeof Platform.OS;
+  });
+});
+
+describe('transcribeAudioViaBackend', () => {
+  it('envía el formulario al backend de IA y devuelve texto', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ text: 'voz transcrita' }) });
+
+    const result = await transcribeAudioViaBackend('file:///note.m4a', { language: 'es' });
+
+    expect(mockFetch).toHaveBeenCalledWith('https://fhir.test/ai/transcribe', expect.anything());
+    expect(result).toBe('voz transcrita');
+  });
+
+  it('lanza un error cuando la API devuelve estado de error', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+
+    await expect(transcribeAudioViaBackend('file:///note.m4a')).rejects.toThrow(
+      'No se pudo transcribir el audio con IA',
+    );
+  });
+});
+
+describe('transcribeAudio', () => {
+  it('propaga el error del backend de IA', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+
+    await expect(transcribeAudio('file:///note.m4a')).rejects.toThrow('No se pudo transcribir el audio con IA');
   });
 });

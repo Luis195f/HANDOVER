@@ -13,6 +13,7 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
   createSttService,
+  transcribeAudio,
   type SttErrorCode,
   type SttService,
   type SttStatus,
@@ -75,6 +76,8 @@ export default function AudioNote({ navigation }: Props) {
   const sttServiceRef = useRef<SttService>(createSttService());
   const sttService = sttServiceRef.current;
   const [transcription, setTranscription] = useState('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [dictationStatus, setDictationStatus] = useState<SttStatus>(sttService.getStatus());
   const [dictationError, setDictationError] = useState<SttErrorCode | null>(sttService.getLastError());
   const [dictatedPartial, setDictatedPartial] = useState('');
@@ -167,6 +170,28 @@ export default function AudioNote({ navigation }: Props) {
       setDictationError(sttService.getLastError() ?? 'UNKNOWN');
     } finally {
       setDictationStatus(sttService.getStatus());
+    }
+  };
+
+  const handleAiTranscription = async () => {
+    const uri = lastUri ?? recorder.uri;
+    if (!uri) {
+      setTranscriptionError('Graba una nota antes de transcribir.');
+      return;
+    }
+
+    setIsTranscribing(true);
+    setTranscriptionError(null);
+    try {
+      const text = await transcribeAudio(uri, { language: 'es' });
+      if (text.trim()) {
+        setTranscription((current) => appendDictationText(current, text));
+      }
+    } catch (error) {
+      console.warn('[audio-note] ai transcription error', error);
+      setTranscriptionError('No se pudo transcribir con IA. Inténtalo más tarde.');
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
@@ -266,6 +291,21 @@ export default function AudioNote({ navigation }: Props) {
           La transcripción por voz no está disponible en este dispositivo.
         </Text>
       )}
+      <Pressable
+        onPress={handleAiTranscription}
+        disabled={!hasUri || isTranscribing}
+        style={({ pressed }) => ({
+          ...sttStyles.dictationButton,
+          backgroundColor: '#0d3a5a',
+          opacity: pressed && !isTranscribing ? 0.85 : 1,
+        })}
+      >
+        <Text style={{ color: '#eaf2ff', fontWeight: '700' }}>
+          {isTranscribing ? 'Transcribiendo…' : 'Transcribir nota con IA'}
+        </Text>
+      </Pressable>
+      {isTranscribing ? <Text style={sttStyles.dictationHint}>Procesando audio…</Text> : null}
+      {transcriptionError ? <Text style={sttStyles.dictationError}>{transcriptionError}</Text> : null}
       <TextInput
         style={sttStyles.transcriptionInput}
         multiline
