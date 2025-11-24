@@ -1,18 +1,24 @@
 // src/screens/LoginMock.tsx
-import React from "react";
-import { View, Text, Button } from "react-native";
+import React, { useCallback } from "react";
+import { View, Text, Button, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { loginWithMockUser } from '@/src/lib/auth';
+
+import { loginWithMockUser } from '@/src/security/auth';
+
+const MOCK_AUTH_ENABLED = (process.env.EXPO_PUBLIC_USE_MOCK_AUTH ?? process.env.USE_MOCK_AUTH ?? '').toLowerCase() === 'true';
 
 export default function LoginMock() {
   const nav = useNavigation();
 
-  const onLogin = async () => {
+  const onLogin = useCallback(async () => {
+    if (!MOCK_AUTH_ENABLED) {
+      Alert.alert('Demo deshabilitada', 'Activa USE_MOCK_AUTH=true para usar este flujo.');
+      return;
+    }
     await loginWithMockUser();
-    // tras login: a la lista de pacientes
     // @ts-ignore
     nav.replace("Patients");
-  };
+  }, [nav]);
 
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>

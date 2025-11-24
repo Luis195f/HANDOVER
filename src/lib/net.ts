@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/net.ts
 
+import { getSession, logout, refreshTokenIfNeeded } from '@/src/security/auth';
+
 /** Opciones de reintento para fetchWithRetry */
 export type RetryOptions = {
   /** Intentos adicionales (default 3) */
@@ -64,21 +66,59 @@ export async function fetchWithRetry(
     typeof retry === 'number' ? Number.POSITIVE_INFINITY :
     (retry?.maxDelayMs ?? Number.POSITIVE_INFINITY);
 
-  // Timeout opcional
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const controller = new AbortController();
-  const finalSignal = optSignal ?? (timeoutMs ? controller.signal : undefined);
-  if (timeoutMs) {
-    // Sin argumento para compatibilidad con DOM libs antiguas
-    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  }
-
   let attempt = 0;
   let lastErr: any;
 
-  while (attempt <= retries) {
+  const authorize = async () => {
     try {
-      const res = await doFetch(input, { ...initRest, signal: finalSignal });
+      await refreshTokenIfNeeded();
+      const session = await getSession();
+      if (!session?.accessToken) return initRest.headers ?? {};
+      return {
+        ...(initRest.headers ?? {}),
+        Authorization: (initRest.headers as Record<string, string> | undefined)?.Authorization
+          ? (initRest.headers as Record<string, string>).Authorization
+          : `Bearer ${session.accessToken}`,
+      } as Record<string, string>;
+    } catch {
+      return initRest.headers ?? {};
+    }
+  };
+
+  let authHeaders = await authorize();
+
+  while (attempt <= retries) {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const controller = timeoutMs ? new AbortController() : null;
+    const finalSignal = optSignal ?? controller?.signal;
+    if (timeoutMs && controller) {
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    }
+
+    try {
+      const res = await doFetch(input, {
+        ...initRest,
+        headers: authHeaders,
+        signal: finalSignal,
+      });
+      if (res.status === 401) {
+        try {
+          await refreshTokenIfNeeded();
+          authHeaders = await authorize();
+          const retryRes = await doFetch(input, {
+            ...initRest,
+            headers: authHeaders,
+            signal: finalSignal,
+          });
+          if (retryRes.status !== 401) {
+            if (timeoutId) clearTimeout(timeoutId);
+            return retryRes;
+          }
+        } catch (error) {
+          await logout();
+          throw error;
+        }
+      }
       // Si no es reintitable o ya es el último intento, devolvemos la respuesta
       if (!retryOn.includes(res.status) || attempt === retries) {
         if (timeoutId) clearTimeout(timeoutId);
@@ -92,6 +132,8 @@ export async function fetchWithRetry(
       }
     }
 
+    if (timeoutId) clearTimeout(timeoutId);
+
     // Backoff exponencial + jitter (0..99 ms), acotado por maxDelayMs
     const backoff = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
     const delay = Math.min(backoff, maxDelayMs);
@@ -102,6 +144,10 @@ export async function fetchWithRetry(
   if (timeoutId) clearTimeout(timeoutId);
   if (lastErr) throw lastErr; // TS guard
   throw new Error('fetchWithRetry: fallthrough inesperado');
+}
+
+export function safeFetch(input: RequestInfo | URL, init: ExtendedRequestInit = {}): Promise<Response> {
+  return fetchWithRetry(input, init);
 }
 
 export default fetchWithRetry;

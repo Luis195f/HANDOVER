@@ -48,10 +48,10 @@ export default function RequireAuth({ children, redirectTo = 'Login', splash }: 
     mounted.current = true;
     hydrate();
     const unsub = typeof onAuthChange === 'function'
-      ? onAuthChange((s) => {
+      ? onAuthChange((state) => {
           if (!mounted.current) return;
-          setSession(s);
-          if (!s) doRedirect();
+          setSession(state.session);
+          if (!state.session) doRedirect();
         })
       : undefined;
     return () => {

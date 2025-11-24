@@ -35,7 +35,7 @@ export default defineConfig({
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage/unit',
       include: [
-        'src/lib/auth.ts',
+        'src/security/auth.tsx',
         'src/lib/net.ts',
         'src/screens/HandoverForm.tsx',
         'src/validation/schemas.ts',
@@ -65,6 +65,10 @@ export default defineConfig({
       {
         find: '@testing-library/jest-native/extend-expect',
         replacement: fileURLToPath(new URL('./tests/jest-native.ts', import.meta.url)),
+      },
+      {
+        find: 'expo-web-browser',
+        replacement: fileURLToPath(new URL('./tests/__mocks__/expo-web-browser.ts', import.meta.url)),
       },
     ],
   },
