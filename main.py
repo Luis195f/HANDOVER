@@ -9,6 +9,7 @@ import httpx
 from fastapi import File, Form, Header, HTTPException, Request, UploadFile
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
@@ -31,8 +32,29 @@ SIGNATURE_SETTINGS: SignatureSettings = load_settings()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="handover-api")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-                   allow_methods=["*"], allow_headers=["*"])
+allowed_origins = [o for o in os.getenv("HANDOVER_ALLOWED_ORIGINS", "").split(",") if o] or [
+    "http://localhost",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+
+class CSPMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+app.add_middleware(CSPMiddleware)
 
 def auth_headers():
     h = {"Content-Type": "application/fhir+json"}
