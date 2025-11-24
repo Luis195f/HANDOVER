@@ -24,6 +24,17 @@
   transaccionales del backend queda expuesto en `/api/fhir/transaction` y reenvía el bundle al servidor FHIR con
   `Prefer: return=representation` y token Bearer.
 
+## Validación de códigos SNOMED/LOINC
+- Los catálogos locales (`src/lib/codes.ts` y `src/catalogs/diagnosisCodes.ts`) se consolidan en conjuntos en memoria para
+  validar códigos SNOMED CT y LOINC sin llamadas externas. Esto cubre los vitales, escalas y riesgos más usados en la app.
+- La función `validateTerminologyCode` consulta `/ValueSet/$validate-code` del servidor FHIR cuando
+  `HANDOVER_FHIR_VALIDATION_MODE=remote` y el código no está en las listas locales. Se envían los parámetros `system`, `code`
+  y `display` y se interpreta `result=true` como éxito.
+- Los resultados se cachean por sesión para evitar invocar el endpoint repetidamente y se muestra al usuario un mensaje
+  claro si el servidor devuelve `result=false` o si no hay conectividad.
+- Los formularios de diagnósticos bloquean el envío cuando el código SNOMED ingresado no existe (local o remotamente) y
+  sugieren escoger uno del autocompletado.
+
 ## Firma digital y trazabilidad
 - Cuando se configuran `HANDOVER_PRIVATE_KEY_PATH` y `HANDOVER_PUBLIC_KEY_PATH`, el backend añade `bundle.signature` (FHIR Signature con ECDSA + SHA-256) antes de enviar el `Bundle` al servidor FHIR. Si el cliente ya envía `signature`, se valida y se rechaza con `400` si la verificación falla.
 - El hash SHA-256 del `Bundle` (sin el nodo `signature`) se guarda en la tabla `HandoverSignatureAudit` junto con `user_id`, `signed_at` y el valor base64 de la firma, lo que permite auditar quién firmó cada relevo.
