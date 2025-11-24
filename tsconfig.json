@@ -5,10 +5,11 @@
     "skipLibCheck": true,
     "types": ["jest", "node"],
     "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "@/src/*": ["src/*"]
-    },
+      "paths": {
+        "@/*": ["src/*"],
+        "@/src/*": ["src/*"],
+        "react-native-exception-handler": ["src/shims/react-native-exception-handler"]
+      },
     "jsx": "react-jsx",
     "lib": ["es2021", "dom"],
     "typeRoots": ["./types", "./node_modules/@types"],

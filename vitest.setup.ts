@@ -10,6 +10,7 @@ vi.mock('expo-barcode-scanner');
 vi.mock('expo-audio');
 vi.mock('expo-secure-store', () => SecureStoreMock);
 vi.mock('expo-auth-session', () => import('./__mocks__/expo-auth-session'));
+vi.mock('expo-sqlite', () => import('./src/tests/expo-sqlite.stub'));
 
 vi.mock('expo-constants', () => ({
   default: {

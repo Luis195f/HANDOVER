@@ -59,6 +59,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./tests/__mocks__/react-native.ts', import.meta.url)),
       },
       {
+        find: 'react-native-exception-handler',
+        replacement: fileURLToPath(new URL('./src/shims/react-native-exception-handler.ts', import.meta.url)),
+      },
+      {
         find: '@testing-library/jest-native/extend-expect',
         replacement: fileURLToPath(new URL('./tests/jest-native.ts', import.meta.url)),
       },
