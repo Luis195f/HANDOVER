@@ -53,13 +53,13 @@ jobs:
         id: coverage_value
         run: |
           percent=$(python - <<'PY'
-import xml.etree.ElementTree as ET
+          import xml.etree.ElementTree as ET
 
-tree = ET.parse("coverage.xml")
-rate = float(tree.getroot().get("line-rate", 0))
-percent = round(rate * 100, 2)
-print(percent)
-PY
+          tree = ET.parse("coverage.xml")
+          rate = float(tree.getroot().get("line-rate", 0))
+          percent = round(rate * 100, 2)
+          print(percent)
+          PY
           )
           echo "percent=$percent" >> "$GITHUB_OUTPUT"
           echo '{"schemaVersion":1,"label":"coverage","message":"'"${percent}%"'","color":"green"}' > .coverage-badge.json
