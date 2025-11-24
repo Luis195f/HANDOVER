@@ -40,6 +40,8 @@ import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
 import type { RiskItem } from '@/src/types/handover';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
+import type { PrefillOutput } from '@/src/lib/prefill';
+import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 // BEGIN HANDOVER D4 – Form imports
@@ -512,6 +514,9 @@ export default function HandoverForm({ navigation, route }: Props) {
     unitId: unitIdParam,
     specialtyId,
     administrativeData: administrativeDataParam,
+    prefilledValues: prefilledValuesParam,
+    patientSummary: patientSummaryParam,
+    prefillMeta,
   } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession } = useAuth();
@@ -555,9 +560,29 @@ export default function HandoverForm({ navigation, route }: Props) {
     };
   }, []);
 
+  const prefilledVitals = useMemo<HandoverFormValues['vitals'] | undefined>(() => {
+    const vitals = prefilledValuesParam?.vitals;
+    if (!vitals) return undefined;
+    const mapped: HandoverFormValues['vitals'] = {};
+    if (typeof vitals.rr === 'number') mapped.rr = vitals.rr;
+    if (typeof vitals.spo2 === 'number') mapped.spo2 = vitals.spo2;
+    if (typeof vitals.temp === 'number') mapped.tempC = vitals.temp;
+    if (typeof vitals.sbp === 'number') mapped.sbp = vitals.sbp;
+    if (typeof vitals.dbp === 'number') mapped.dbp = vitals.dbp;
+    if (typeof vitals.hr === 'number') mapped.hr = vitals.hr;
+    if (vitals.acvpu) mapped.avpu = vitals.acvpu;
+    return Object.keys(mapped).length ? mapped : undefined;
+  }, [prefilledValuesParam?.vitals]);
+
   const defaultValues = useMemo<HandoverFormValues>(() => {
     const administrativeDefaults: AdministrativeData = {
-      unit: administrativeDataParam?.unit ?? unitIdParam ?? selectedUnitId ?? '',
+      unit:
+        administrativeDataParam?.unit ??
+        unitIdParam ??
+        selectedUnitId ??
+        prefillMeta?.unit ??
+        prefilledValuesParam?.location ??
+        '',
       census: administrativeDataParam?.census ?? 0,
       staffIn: administrativeDataParam?.staffIn ?? [],
       staffOut: administrativeDataParam?.staffOut ?? [],
@@ -568,9 +593,9 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
-      patientId: patientIdParam ?? '',
+      patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
-      dxMedical: '',
+      dxMedical: prefilledValuesParam?.dxText ?? '',
       dxNursing: '',
       dxMedicalStructured: [],
       dxNursingStructured: [],
@@ -583,7 +608,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbarBackground: '',
       sbarAssessment: '',
       sbarRecommendation: '',
-      vitals: {},
+      vitals: prefilledVitals ?? {},
       oxygenTherapy: {},
       fluidBalance: {
         intakeMl: undefined,
@@ -616,7 +641,16 @@ export default function HandoverForm({ navigation, route }: Props) {
       },
     };
     return { ...base, risksStructured: deriveInitialRisksStructured(base) };
-  }, [patientIdParam, unitIdParam, administrativeDataParam, selectedUnitId]);
+  }, [
+    patientIdParam,
+    patientSummaryParam,
+    unitIdParam,
+    administrativeDataParam,
+    selectedUnitId,
+    prefilledValuesParam,
+    prefilledVitals,
+    prefillMeta,
+  ]);
 
   const form = useZodForm(zHandover, defaultValues);
 
@@ -915,6 +949,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   const { loading: loadingPatient, error: patientError, summary: patientSummary } = usePatientSummary(
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined,
   );
+  const bannerSummary: PatientSummary | null = useMemo(
+    () => patientSummary ?? patientSummaryParam ?? null,
+    [patientSummary, patientSummaryParam],
+  );
+  const bannerLoading = loadingPatient && !patientSummaryParam;
   // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
@@ -1184,7 +1223,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           scrollEventThrottle={16}
         >
         {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
-        <PatientBanner summary={patientSummary} loading={loadingPatient} error={patientError} />
+        <PatientBanner summary={bannerSummary} loading={bannerLoading} error={patientError} />
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
         <View
           ref={sectionRefs.turno}
