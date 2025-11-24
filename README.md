@@ -64,6 +64,19 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    ```
    Usa la app Expo Go o un emulador (`pnpm expo run:android`, `pnpm expo run:ios`, `pnpm expo start --web`).
 
+### Firma digital de Bundles FHIR
+
+- Genera un par de claves ECDSA (prime256v1) y guarda las rutas en variables de entorno:
+  ```bash
+  openssl ecparam -name prime256v1 -genkey -noout -out private.pem
+  openssl ec -in private.pem -pubout -out public.pem
+  export HANDOVER_PRIVATE_KEY_PATH=$PWD/private.pem
+  export HANDOVER_PUBLIC_KEY_PATH=$PWD/public.pem
+  ```
+- El backend (`/fhir/transaction`) firma los Bundles antes de reenviarlos al servidor FHIR cuando ambas rutas están definidas y `HANDOVER_SIGNATURE_DISABLED` no es `true`. Si el cliente ya envía `bundle.signature`, se verifica con la clave pública y se rechaza con `400` si la firma es inválida.
+- La firma se serializa en `bundle.signature` como recurso FHIR Signature (ECDSA + SHA-256) y se registra un hash único en la tabla `HandoverSignatureAudit` junto con `user_id`, `signed_at` y el `data` base64.
+- En entornos de desarrollo se puede desactivar la firma criptográfica exportando `HANDOVER_SIGNATURE_DISABLED=true`. Cuando la librería `cryptography` no está disponible, el backend recurre a `openssl dgst` para firmar/verificar usando las claves PEM configuradas.
+
 ## Pruebas
 
 La automatización usa Vitest junto con utilidades específicas para FHIR y seguridad.

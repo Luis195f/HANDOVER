@@ -1,13 +1,34 @@
 # main.py
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Request
-from fastapi.middleware.cors import CORSMiddleware
-import os, base64, httpx, datetime
+import base64
+import datetime
+import logging
+import os
 
+import django
+import httpx
+from fastapi import File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
+django.setup()
+
+from backend.signature import (
+    SignatureSettings,
+    SignatureVerificationError,
+    load_settings,
+    record_signature_audit,
+    sign_bundle,
+    verify_bundle_signature,
+)
 from backend.validation import validate_fhir_bundle
 
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
 FHIR_TOKEN = os.environ.get("FHIR_TOKEN", "")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off")
+SIGNATURE_SETTINGS: SignatureSettings = load_settings()
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="handover-api")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -18,6 +39,16 @@ def auth_headers():
     if FHIR_TOKEN:
         h["Authorization"] = f"Bearer {FHIR_TOKEN}"
     return h
+
+
+def _parse_signature_when(value: str | None) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+        return datetime.datetime.fromisoformat(normalized)
+    except Exception:
+        return None
 
 async def create_audit_event(client: httpx.AsyncClient, *,
                              bundle: dict,
@@ -143,6 +174,35 @@ async def fhir_transaction(bundle: dict,
             base_url=FHIR_BASE,
             validation_mode=HANDOVER_FHIR_VALIDATION_MODE,
         )
+        if SIGNATURE_SETTINGS.enabled:
+            try:
+                verification = verify_bundle_signature(bundle, settings=SIGNATURE_SETTINGS)
+            except SignatureVerificationError:
+                raise HTTPException(status_code=400, detail="Invalid signature")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+            if verification:
+                record_signature_audit(
+                    user_id=x_user_id,
+                    bundle_hash=verification.bundle_hash,
+                    signature_b64=verification.signature_b64,
+                    signed_at=_parse_signature_when(
+                        bundle.get("signature", {}).get("when") if isinstance(bundle.get("signature"), dict) else None
+                    ),
+                )
+            else:
+                signature = sign_bundle(bundle, user_id=x_user_id, settings=SIGNATURE_SETTINGS)
+                if signature:
+                    bundle["signature"] = signature.fhir_signature
+                    record_signature_audit(
+                        user_id=x_user_id,
+                        bundle_hash=signature.bundle_hash,
+                        signature_b64=signature.signature_b64,
+                        signed_at=_parse_signature_when(signature.fhir_signature.get("when")),
+                    )
+        else:
+            logger.info("Firma digital de Bundle deshabilitada; se reenvía sin firma/validación criptográfica.")
         r = await client.post(f"{FHIR_BASE}", json=bundle, headers=auth_headers())
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)

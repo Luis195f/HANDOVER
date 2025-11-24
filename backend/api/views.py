@@ -7,9 +7,12 @@ import httpx
 from django.http import HttpRequest
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from fhir.resources.patient import Patient
-from fhir.resources.medicationstatement import MedicationStatement
-from fhir.resources.fhirabstractmodel import FHIRValidationError
+try:
+    from fhir.resources.fhirabstractmodel import FHIRValidationError
+    from fhir.resources.medicationstatement import MedicationStatement
+    from fhir.resources.patient import Patient
+except ImportError:  # pragma: no cover - entorno sin dependencias FHIR
+    Patient = MedicationStatement = FHIRValidationError = None  # type: ignore[assignment]
 
 
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
@@ -84,6 +87,8 @@ def _post_to_fhir(resource: Dict[str, Any], resource_type: str) -> Response:
 
 class PatientView(APIView):
     def post(self, request: HttpRequest) -> Response:
+        if Patient is None or FHIRValidationError is None:
+            return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
         try:
             patient_obj = Patient.parse_obj(request.data)
         except FHIRValidationError as exc:
@@ -99,6 +104,8 @@ class PatientView(APIView):
 
 class MedicationStatementView(APIView):
     def post(self, request: HttpRequest) -> Response:
+        if MedicationStatement is None or FHIRValidationError is None:
+            return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
         try:
             medication_statement_obj = MedicationStatement.parse_obj(request.data)
         except FHIRValidationError as exc:
