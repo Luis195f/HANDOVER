@@ -55,15 +55,63 @@ export const zAdministrativeData = z
   });
 
 export const zVitals = z.object({
-  hr: z.number().int().min(30).max(220).optional(),
-  rr: z.number().int().min(5).max(60).optional(),
-  tempC: z.number().min(30).max(45).optional(),
-  spo2: z.number().int().min(50).max(100).optional(),
-  sbp: z.number().int().min(50).max(260).optional(),
-  dbp: z.number().int().min(30).max(160).optional(),
-  glucoseMgDl: z.number().min(20).max(600).optional(),
-  glucoseMmolL: z.number().min(1).max(55).optional(),
-  avpu: z.enum(["A", "C", "V", "P", "U"]).optional(),
+  hr: z
+    .number()
+    .int()
+    .min(30)
+    .max(220)
+    .describe('Frecuencia cardiaca (LOINC 8867-4) en latidos por minuto')
+    .optional(),
+  rr: z
+    .number()
+    .int()
+    .min(5)
+    .max(60)
+    .describe('Frecuencia respiratoria (LOINC 9279-1) en respiraciones por minuto')
+    .optional(),
+  tempC: z
+    .number()
+    .min(30)
+    .max(45)
+    .describe('Temperatura corporal en °C mapeada a LOINC 8310-5')
+    .optional(),
+  spo2: z
+    .number()
+    .int()
+    .min(50)
+    .max(100)
+    .describe('Saturación de oxígeno (LOINC 59408-5) en porcentaje')
+    .optional(),
+  sbp: z
+    .number()
+    .int()
+    .min(50)
+    .max(260)
+    .describe('Presión sistólica (LOINC 8480-6) en mmHg')
+    .optional(),
+  dbp: z
+    .number()
+    .int()
+    .min(30)
+    .max(160)
+    .describe('Presión diastólica (LOINC 8462-4) en mmHg')
+    .optional(),
+  glucoseMgDl: z
+    .number()
+    .min(20)
+    .max(600)
+    .describe('Glucemia capilar mg/dL (LOINC 2339-0)')
+    .optional(),
+  glucoseMmolL: z
+    .number()
+    .min(1)
+    .max(55)
+    .describe('Glucemia capilar mmol/L (LOINC 15074-8)')
+    .optional(),
+  avpu: z
+    .enum(["A", "C", "V", "P", "U"])
+    .describe('Escala AVPU codificada con SNOMED/LOINC para el mapeo a FHIR')
+    .optional(),
 });
 
 export const zOxygen = z
@@ -233,14 +281,17 @@ export const zRiskFlags: z.ZodSchema<RiskFlags> = z
 
 // BEGIN HANDOVER D3 – StructuredDiagnosis schema
 export const zHandoverStructuredDiagnosis = z.object({
-  system: z.union([
-    z.literal('NANDA'),
-    z.literal('SNOMED'),
-    z.literal('ICD10'),
-    z.literal('OTHER'),
-  ]),
-  code: z.string().min(1, 'El código no puede estar vacío'),
-  display: z.string().min(1, 'La descripción no puede estar vacía'),
+  system: z
+    .union([z.literal('NANDA'), z.literal('SNOMED'), z.literal('ICD10'), z.literal('OTHER')])
+    .describe('Sistema de codificación: SNOMED CT (dx médicos), NANDA o ICD10'),
+  code: z
+    .string()
+    .min(1, 'El código no puede estar vacío')
+    .describe('Código del diagnóstico según el sistema seleccionado (SNOMED/ICD10/NANDA)'),
+  display: z
+    .string()
+    .min(1, 'La descripción no puede estar vacía')
+    .describe('Descripción legible asociada al código SNOMED/NANDA'),
   freeTextNote: z.string().optional(),
 });
 

@@ -116,6 +116,6 @@ CONTENT_SECURITY_POLICY = {
         "style-src": ("'self'", "https://fonts.googleapis.com"),
         "img-src": ("'self'", "data:"),
         "font-src": ("'self'", "https://fonts.gstatic.com"),
-        "connect-src": ("'self'",) + tuple(CORS_ALLOWED_ORIGINS),
+        "connect-src": ("'self'",),
     }
 }
