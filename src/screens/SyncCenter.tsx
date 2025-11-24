@@ -7,6 +7,8 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import { readQueue } from '@/src/lib/offlineQueue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
+import { useSettings } from '@/src/context/settings-context';
+import { reportError } from '@/src/lib/error-logging';
 
 type QueueItemMeta = { id: string; createdAt: number | string; tries: number; hash?: string };
 
@@ -37,6 +39,7 @@ export default function SyncCenter() {
   const [items, setItems] = React.useState<QueueItemMeta[]>([]);
   const [refreshing, setRefreshing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const { shareErrorLogs, setShareErrorLogs, loading } = useSettings();
 
   // Auto-retry
   const [autoRetry, setAutoRetry] = React.useState(true);
@@ -77,16 +80,17 @@ export default function SyncCenter() {
     }
     setBusy(true);
     try {
-      const res = await flushQueueNow(opts);
-      await refresh();
-      setLastRun(new Date().toLocaleTimeString());
-      return res;
-    } catch (e: any) {
-      Alert.alert('Sync', `Error al reintentar: ${e?.message ?? e}`);
-      return { processed: 0, remaining: -1 };
-    } finally {
-      setBusy(false);
-    }
+    const res = await flushQueueNow(opts);
+    await refresh();
+    setLastRun(new Date().toLocaleTimeString());
+    return res;
+  } catch (e: any) {
+    void reportError(e);
+    Alert.alert('Sync', `Error al reintentar: ${e?.message ?? e}`);
+    return { processed: 0, remaining: -1 };
+  } finally {
+    setBusy(false);
+  }
   }, [refresh]);
 
   // Inicia/detiene interval cuando la pantalla está enfocada
@@ -161,6 +165,20 @@ export default function SyncCenter() {
         {lastRun && (
           <Text style={{ marginTop: 8, color: C.textHint }}>Última ejecución: {lastRun}</Text>
         )}
+      </View>
+
+      <View style={[styles.card, { backgroundColor: C.card, borderColor: C.border }]}> 
+        <View style={styles.rowBetween}>
+          <Text style={[styles.cardTitle, { color: C.textPrimary }]}>Privacidad</Text>
+          <Switch
+            value={!!shareErrorLogs}
+            onValueChange={(value) => void setShareErrorLogs(value)}
+            disabled={loading}
+          />
+        </View>
+        <Text style={{ marginTop: 8, color: C.textSecondary }}>
+          Compartir registros de errores para mejorar la app. Se anonimizan automáticamente.
+        </Text>
       </View>
 
       {/* Lista FIFO */}

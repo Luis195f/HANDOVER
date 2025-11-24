@@ -7,6 +7,7 @@ module.exports = function (api) {
         root: ["./"],
         alias: {
           "@": "./",
+          "react-native-exception-handler": "./src/shims/react-native-exception-handler",
         },
       }],
       "react-native-reanimated/plugin",

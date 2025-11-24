@@ -86,3 +86,56 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+
+LOGGING_HANDLERS = ["error_file"] + (["sentry"] if SENTRY_DSN else [])
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "remove_personal": {
+            "()": "backend.logging.RemovePersonalDataFilter",
+        },
+    },
+    "handlers": {
+        "error_file": {
+            "level": "ERROR",
+            "class": "logging.FileHandler",
+            "filename": str(os.environ.get("ERROR_LOG_FILE", BASE_DIR / "error.log")),
+            "filters": ["remove_personal"],
+        },
+        "sentry": {
+            "level": "ERROR",
+            "class": "sentry_sdk.integrations.logging.EventHandler",
+            "filters": ["remove_personal"],
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": LOGGING_HANDLERS,
+            "level": "ERROR",
+            "propagate": True,
+            "filters": ["remove_personal"],
+        },
+        "handover": {
+            "handlers": LOGGING_HANDLERS,
+            "level": "ERROR",
+            "propagate": False,
+            "filters": ["remove_personal"],
+        },
+    },
+}
+
+if not SENTRY_DSN:
+    LOGGING["handlers"].pop("sentry", None)
+
+REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "backend.exceptions.custom_exception_handler",
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "60/min",
+        "error_log": "30/min",
+    },
+}

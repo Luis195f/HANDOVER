@@ -230,3 +230,11 @@ declare module '@expo/cli';
 declare module 'expo-router';
 
 declare module 'expo-speech';
+declare module 'react-native-exception-handler' {
+  export type JSExceptionHandler = (error: Error, isFatal?: boolean) => void;
+  export function setJSExceptionHandler(handler: JSExceptionHandler, allowInDevMode?: boolean): void;
+  export const ErrorUtils: {
+    setGlobalHandler(handler: JSExceptionHandler): void;
+    getGlobalHandler(): JSExceptionHandler | null;
+  };
+}
