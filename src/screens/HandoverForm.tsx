@@ -656,6 +656,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const { control, formState } = form;
   const errors: HandoverFormErrors = formState.errors ?? {};
+  const hasValidationErrors = Object.keys(errors).length > 0;
   const administrativeErrors = errors.administrativeData ?? {};
   const unitError = administrativeErrors.unit?.message as string | undefined;
   const censusError = administrativeErrors.census?.message as string | undefined;
@@ -1957,7 +1958,11 @@ export default function HandoverForm({ navigation, route }: Props) {
       <View style={styles.buttonRow}>
         <Button title="Guardar borrador" onPress={handleSaveDraft} />
         <View style={styles.secondaryButton}>
-          <Button title="Finalizar entrega" onPress={handleFinalize} />
+          <Button
+            title="Finalizar entrega"
+            onPress={handleFinalize}
+            disabled={formState.isSubmitting || hasValidationErrors}
+          />
         </View>
         <View style={styles.secondaryButton}>
           <ExportPdfButton handover={form.getValues()} onBeforeExport={handleValidateForExport} />

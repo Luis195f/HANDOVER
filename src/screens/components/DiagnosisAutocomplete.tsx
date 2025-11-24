@@ -9,6 +9,7 @@ import {
   type DiagnosisSystem,
 } from '../../catalogs/diagnosisCodes';
 import type { HandoverStructuredDiagnosis } from '../../types/handover';
+import { validateSnomed } from '../../lib/terminology-validation';
 
 const styles = StyleSheet.create({
   container: { gap: 8 },
@@ -69,6 +70,7 @@ const styles = StyleSheet.create({
   },
   removeButtonText: { color: '#B91C1C', fontWeight: '600' },
   helperText: { color: '#4B5563', fontSize: 13 },
+  errorText: { color: '#DC2626' },
 });
 
 interface DiagnosisAutocompleteProps {
@@ -83,16 +85,24 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
   label,
   systemsAllowed,
 }) => {
-  const { control } = useFormContext<{ [key: string]: HandoverStructuredDiagnosis[] }>();
+  const {
+    control,
+    setError,
+    clearErrors,
+    formState: { errors },
+  } = useFormContext<{ [key: string]: HandoverStructuredDiagnosis[] }>();
   const { fields, append, remove } = useFieldArray({ control, name });
   const [query, setQuery] = useState('');
+  const [validatingCode, setValidatingCode] = useState<string | null>(null);
 
   const suggestions = useMemo(
     () => filterDiagnosisCodes(query, systemsAllowed),
     [query, systemsAllowed],
   );
 
-  const handleSelect = (code: DiagnosisCode) => {
+  const fieldError = (errors as any)?.[name]?.message as string | undefined;
+
+  const handleSelect = async (code: DiagnosisCode) => {
     const alreadySelected = fields.some(
       (field) => field.code === code.code && (field as any).system === code.system,
     );
@@ -100,6 +110,18 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
       setQuery('');
       return;
     }
+
+    if (code.system === 'SNOMED') {
+      setValidatingCode(code.code);
+      const result = await validateSnomed(code.code, code.display);
+      setValidatingCode(null);
+      if (!result.valid) {
+        setError(name as any, { type: 'validate', message: result.message });
+        return;
+      }
+    }
+
+    clearErrors(name as any);
     append({
       system: code.system,
       code: code.code,
@@ -125,12 +147,16 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
           </Text>
         </View>
       ) : null}
+      {validatingCode ? (
+        <Text style={styles.helperText}>Validando código SNOMED...</Text>
+      ) : null}
+      {fieldError ? <Text style={[styles.helperText, styles.errorText]}>{fieldError}</Text> : null}
       {suggestions.length > 0 ? (
         <View style={styles.suggestions}>
           {suggestions.map((code) => (
             <Pressable
               key={`${code.system}-${code.code}`}
-              onPress={() => handleSelect(code)}
+              onPress={() => void handleSelect(code)}
               style={({ pressed }) => [styles.suggestionItem, pressed ? { opacity: 0.75 } : null]}
               accessibilityRole="button"
             >
