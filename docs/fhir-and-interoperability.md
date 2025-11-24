@@ -11,6 +11,19 @@
   - `"off"`: el backend reenviará sin validar.
   - `"remote"`: se invoca `$validate` en el servidor FHIR y se bloquea la entrega ante errores `error`/`fatal`.
 
+## Validación y envío offline de bundles
+- `HANDOVER_FHIR_VALIDATION_MODE` admite `off`, `local` y `remote` para controlar la validación previa al envío.
+  - `off`: se encola y se envía sin validaciones adicionales.
+  - `local`: aplica las reglas locales (`validateFHIRBundle` + `validateResource`) antes de encolar o reenviar.
+  - `remote`: tras la validación local se llama a `$validate` en el servidor FHIR por cada recurso del `Bundle` y el envío se
+    bloquea si hay issues `error`/`fatal`.
+- En modo offline la app encripta los bundles pendientes en la cola usando AES (`encryptPayload` / `decryptPayload`) y los
+  procesa en orden FIFO cuando vuelve la conectividad, respetando los reintentos con backoff y deteniendo los reenvíos si la
+  validación remota responde con `422`.
+- Configura la URL de `$validate` y de transacciones con `FHIR_BASE_URL`/`EXPO_PUBLIC_FHIR_BASE_URL`; el endpoint de bundles
+  transaccionales del backend queda expuesto en `/api/fhir/transaction` y reenvía el bundle al servidor FHIR con
+  `Prefer: return=representation` y token Bearer.
+
 ## Firma digital y trazabilidad
 - Cuando se configuran `HANDOVER_PRIVATE_KEY_PATH` y `HANDOVER_PUBLIC_KEY_PATH`, el backend añade `bundle.signature` (FHIR Signature con ECDSA + SHA-256) antes de enviar el `Bundle` al servidor FHIR. Si el cliente ya envía `signature`, se valida y se rechaza con `400` si la verificación falla.
 - El hash SHA-256 del `Bundle` (sin el nodo `signature`) se guarda en la tabla `HandoverSignatureAudit` junto con `user_id`, `signed_at` y el valor base64 de la firma, lo que permite auditar quién firmó cada relevo.
