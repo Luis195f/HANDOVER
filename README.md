@@ -1,5 +1,8 @@
 # Handover Pro
 
+![Backend tests](./ci-badge.svg)
+![Coverage](./coverage-badge.svg)
+
 Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend Django opcional para pruebas locales y una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
 
 ## Requisitos
@@ -58,6 +61,8 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    python manage.py migrate
    python manage.py runserver 0.0.0.0:8000
    ```
+   - Define `HANDOVER_ALLOWED_ORIGINS` (p. ej. `https://app.handover-pro.es,https://app.handover-pro.lat`) para restringir CORS/ALLOWED_HOSTS y mantener CSP/Referrer-Policy alineadas en Django/FastAPI.
+   - En producción mantén `ENABLE_SSL_REDIRECT=true` y despliega detrás de un proxy TLS 1.3 con HSTS (ya habilitado en `backend/settings.py`).
 3. Arranca el cliente Expo:
    ```bash
    pnpm expo start

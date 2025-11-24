@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 from os import environ
+from urllib.parse import urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -11,17 +12,26 @@ HANDOVER_PRIVATE_KEY_PATH = os.getenv("HANDOVER_PRIVATE_KEY_PATH")
 HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
 HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false")
 
-ALLOWED_HOSTS: list[str] = ["*"]
-CORS_ALLOW_ALL_ORIGINS = True
+RAW_ALLOWED_ORIGINS = os.getenv("HANDOVER_ALLOWED_ORIGINS", "")
+ALLOWED_HOSTS: list[str] = [
+    urlparse(origin).hostname or origin
+    for origin in RAW_ALLOWED_ORIGINS.split(",")
+    if origin
+]
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS.split(",") if RAW_ALLOWED_ORIGINS else []
+CORS_ALLOWED_ORIGIN_REGEXES = [r"^https?:\/\/localhost(:\d+)?$"]
 
 LOCAL_IP = environ.get("LOCAL_IP")
 CSRF_TRUSTED_ORIGINS = [
+    *CORS_ALLOWED_ORIGINS,
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ] + ([f"http://{LOCAL_IP}:8000"] if LOCAL_IP else [])
 
 INSTALLED_APPS = [
     "corsheaders",
+    "csp",
     "rest_framework",
     "backend.api",
     "django.contrib.admin",
@@ -34,6 +44,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    "csp.middleware.CSPMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -86,3 +97,21 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+SECURE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "true") == "true"
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+CSP_DEFAULT_SRC = ("'self'",)
+CSP_SCRIPT_SRC = ("'self'", "https://cdn.jsdelivr.net")
+CSP_STYLE_SRC = ("'self'", "https://fonts.googleapis.com")
+CSP_IMG_SRC = ("'self'", "data:")
+CSP_FONT_SRC = ("'self'", "https://fonts.gstatic.com")
+CSP_CONNECT_SRC = ("'self'",) + tuple(CORS_ALLOWED_ORIGINS)
