@@ -109,9 +109,13 @@ CSRF_COOKIE_SECURE = True
 X_FRAME_OPTIONS = "DENY"
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
-CSP_DEFAULT_SRC = ("'self'",)
-CSP_SCRIPT_SRC = ("'self'", "https://cdn.jsdelivr.net")
-CSP_STYLE_SRC = ("'self'", "https://fonts.googleapis.com")
-CSP_IMG_SRC = ("'self'", "data:")
-CSP_FONT_SRC = ("'self'", "https://fonts.gstatic.com")
-CSP_CONNECT_SRC = ("'self'",) + tuple(CORS_ALLOWED_ORIGINS)
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ("'self'",),
+        "script-src": ("'self'", "https://cdn.jsdelivr.net"),
+        "style-src": ("'self'", "https://fonts.googleapis.com"),
+        "img-src": ("'self'", "data:"),
+        "font-src": ("'self'", "https://fonts.gstatic.com"),
+        "connect-src": ("'self'",) + tuple(CORS_ALLOWED_ORIGINS),
+    }
+}
