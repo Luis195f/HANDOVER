@@ -2,20 +2,40 @@ import io
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import UploadFile
+from pydantic import BaseModel
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
 OPENAI_MODEL_SBAR = os.getenv("OPENAI_MODEL_SBAR", "gpt-4.1-mini")
 OPENAI_MODEL_WHISPER = os.getenv("OPENAI_MODEL_WHISPER", "whisper-1")
+OPENAI_MODEL_SUGGESTIONS = os.getenv("OPENAI_MODEL_SUGGESTIONS", OPENAI_MODEL_SBAR)
 
 client = OpenAI()
 
 ASYNC_TRANSCRIPTION_TIMEOUT = 60
 ASYNC_SBAR_TIMEOUT = 120
+ASYNC_SUGGESTIONS_TIMEOUT = 90
+
+
+class ClinicalContext(BaseModel):
+    language: str = "es"
+    section: str
+    patient_age: int | None = None
+    vital_signs: dict | None = None
+    scores: dict | None = None
+    diagnoses: list[str] | None = None
+    devices: list[str] | None = None
+    notes: str | None = None
+
+
+class SuggestionsResponse(BaseModel):
+    interventions: list[str]
+    rationale: str | None = None
+    section: str
 
 
 def _safe_length(value: Optional[str] | bytes) -> int:
@@ -105,4 +125,54 @@ async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
         }
     except Exception as exc:  # pragma: no cover - logged for observability
         logger.exception("[ai] sbar failed length=%s error_type=%s", len(text), type(exc).__name__)
+        raise
+
+
+def _build_suggestions_prompt(ctx: ClinicalContext) -> str:
+    context_json = json.dumps(ctx.model_dump(exclude_none=True), ensure_ascii=False)
+    return (
+        "Eres una enfermera clínica experta en un hospital de España. Te doy contexto "
+        "estructurado de un paciente (signos vitales, diagnósticos, escalas de riesgo).\n"
+        "A partir de estos datos, sugiere entre 3 y 6 intervenciones de enfermería concretas,"
+        " accionables y alineadas con prácticas clínicas estándar.\n"
+        "NO inventes datos que no estén en el contexto.\n"
+        "No des diagnóstico médico ni prescribas medicación nueva.\n"
+        "Responde en formato JSON con: interventions (lista de strings) y rationale "
+        "(explicación breve en un párrafo).\n"
+        f"Idioma de salida: {ctx.language}.\n"
+        f"Contexto: {context_json}"
+    )
+
+
+async def generate_intervention_suggestions(ctx: ClinicalContext) -> SuggestionsResponse:
+    try:
+        logger.info("[ai] suggestions start section=%s", ctx.section)
+        completion = client.chat.completions.create(
+            model=OPENAI_MODEL_SUGGESTIONS,
+            messages=[
+                {"role": "system", "content": "Asistente de apoyo a la decisión clínica"},
+                {"role": "user", "content": _build_suggestions_prompt(ctx)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            timeout=ASYNC_SUGGESTIONS_TIMEOUT,
+        )
+        choice = completion.choices[0].message if completion.choices else None
+        content = choice.content if choice else None
+        if not content:
+            raise RuntimeError("empty-response")
+
+        payload = json.loads(content)
+        interventions = payload.get("interventions")
+        rationale = payload.get("rationale") if isinstance(payload.get("rationale"), str) else None
+        if not isinstance(interventions, list) or not all(isinstance(item, str) for item in interventions):
+            raise ValueError("invalid-interventions")
+        if len(interventions) == 0:
+            raise ValueError("empty-interventions")
+
+        return SuggestionsResponse(interventions=interventions, rationale=rationale, section=ctx.section)
+    except ValueError:
+        raise
+    except Exception as exc:  # pragma: no cover - logged for observability
+        logger.exception("[ai] suggestions failed section=%s error_type=%s", ctx.section, type(exc).__name__)
         raise
