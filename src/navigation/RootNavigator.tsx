@@ -7,6 +7,7 @@ import HandoverForm from '@/src/screens/HandoverForm';
 import HandoverMain from '@/src/screens/HandoverMain';
 import PatientDashboard from '@/src/screens/PatientDashboard';
 import PatientList from '@/src/screens/PatientList';
+import OnboardingScreen from '@/src/screens/OnboardingScreen';
 import QRScan from '@/src/screens/QRScan';
 import ShiftDetailsScreen from '@/src/screens/ShiftDetailsScreen';
 import SyncCenter from '@/src/screens/SyncCenter';
@@ -16,6 +17,7 @@ import LoginScreen from '@/src/screens/LoginScreen';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { hasRole } from '@/src/security/acl';
 import { useAuth } from '@/src/security/auth';
+import { getOnboardingCompleted } from '@/src/lib/onboarding-storage';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -33,8 +35,32 @@ function UnauthorizedScreen() {
 // BEGIN HANDOVER_AUTH
 function AuthGate() {
   const { session, loading } = useAuth();
+  const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
 
-  if (loading) {
+  // BEGIN HANDOVER: ONBOARDING
+  React.useEffect(() => {
+    let alive = true;
+    async function loadOnboarding() {
+      if (!session) {
+        setOnboardingCompletedState(null);
+        return;
+      }
+      setOnboardingCompletedState(null);
+      try {
+        const completed = await getOnboardingCompleted();
+        if (alive) setOnboardingCompletedState(completed);
+      } catch {
+        if (alive) setOnboardingCompletedState(false);
+      }
+    }
+    void loadOnboarding();
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+  // END HANDOVER: ONBOARDING
+
+  if (loading || (session && onboardingCompleted === null)) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
@@ -52,9 +78,27 @@ function AuthGate() {
 
   const canSubmitHandover = hasRole(session, ['nurse', 'supervisor']);
   const canAdminister = hasRole(session, ['supervisor', 'admin']);
+  const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover ? 'PatientList' : 'Unauthorized';
+
+  const onboardingScreen = (
+    <Stack.Screen name="Onboarding" options={{ headerShown: false }}>
+      {(props) => (
+        <OnboardingScreen
+          {...props}
+          onComplete={async () => {
+            setOnboardingCompletedState(true);
+          }}
+          nextRoute={postOnboardingRoute}
+        />
+      )}
+    </Stack.Screen>
+  );
+
+  const initialRouteName = onboardingCompleted === false ? 'Onboarding' : postOnboardingRoute;
 
   return (
-    <Stack.Navigator>
+    <Stack.Navigator initialRouteName={initialRouteName}>
+      {onboardingScreen}
       {canSubmitHandover ? (
         <>
           <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />

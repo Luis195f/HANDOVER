@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Alert,
   FlatList,
@@ -28,6 +28,7 @@ import {
 } from "@/src/state/filterStore";
 import type { Handover } from "@/src/types/handover";
 import { computeAlerts } from "@/src/lib/alerts";
+import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
@@ -157,6 +158,27 @@ export default function PatientList({ navigation }: Props) {
   const onUnitChange = useCallback((value: string) => {
     setSelectedUnitId(value);
   }, []);
+
+  // BEGIN HANDOVER: ONBOARDING
+  const handleShowOnboarding = useCallback(async () => {
+    await setOnboardingCompleted(false);
+    navigation.navigate("Onboarding");
+  }, [navigation]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Ver tutorial de inicio"
+          onPress={handleShowOnboarding}
+        >
+          <Text style={styles.headerLink}>Ver tutorial</Text>
+        </Pressable>
+      ),
+    });
+  }, [handleShowOnboarding, navigation]);
+  // END HANDOVER: ONBOARDING
 
   useEffect(() => {
     mark("patientlist.filter.change", {
@@ -454,6 +476,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f7fb",
+  },
+  headerLink: {
+    color: "#2563EB",
+    fontWeight: "700",
+    paddingHorizontal: 8,
   },
   filters: {
     paddingHorizontal: 16,
