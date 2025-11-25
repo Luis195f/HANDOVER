@@ -49,4 +49,5 @@ export type RootStackParamList = {
   PatientDashboard: { patientId: string };
   Login: undefined;
   Unauthorized: undefined;
+  Onboarding: undefined;
 };
