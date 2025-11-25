@@ -1,10 +1,10 @@
 // BEGIN HANDOVER_AUTH
-import * as AuthSession from 'expo-auth-session';
+import * as ExpoAuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
-import { AuthSession, HandoverSession, UserRole } from './auth-types';
+import type { AuthSession, HandoverSession, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -183,15 +183,15 @@ async function performOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promi
   const issuer = config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer;
   const clientId = config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId;
   const scopes = config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes;
-  const redirectUri = AuthSession.makeRedirectUri({ useProxy: true });
-  const discovery = await AuthSession.fetchDiscoveryAsync(issuer);
+  const redirectUri = ExpoAuthSession.makeRedirectUri({ useProxy: true });
+  const discovery = await ExpoAuthSession.fetchDiscoveryAsync(issuer);
 
-  const request = new AuthSession.AuthRequest({
+  const request = new ExpoAuthSession.AuthRequest({
     clientId,
     redirectUri,
     scopes,
     usePKCE: true,
-    responseType: AuthSession.ResponseType.Code,
+    responseType: ExpoAuthSession.ResponseType.Code,
   });
 
   const result = await request.promptAsync(discovery, { useProxy: true });
