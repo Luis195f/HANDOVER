@@ -11,7 +11,7 @@ const genericResourceSchema = z
     resourceType: z.string().min(1),
     id: z.string().min(1).optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const resourceSchemas: Record<string, z.ZodTypeAny> = {
   Observation: schemas.observation,

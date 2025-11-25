@@ -23,7 +23,7 @@ const referenceSchema = z
     type: z.string().optional(),
     display: z.string().optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const codingSchema = z
   .object({
@@ -31,17 +31,21 @@ const codingSchema = z
     code: z.union([z.string(), z.number()]).optional(),
     display: z.string().optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
-const codeableConceptSchema = z
+const codeableConceptSchemaBase = z
   .object({
     coding: z.array(codingSchema).min(1).optional(),
     text: z.string().optional(),
   })
-  .refine((value) => value.coding !== undefined || value.text !== undefined, {
+  .catchall(z.unknown());
+
+const codeableConceptSchema = codeableConceptSchemaBase.refine(
+  (value) => value.coding !== undefined || value.text !== undefined,
+  {
     message: 'CodeableConcept requires coding or text',
-  })
-  .passthrough();
+  }
+);
 
 const quantitySchema = z
   .object({
@@ -50,16 +54,16 @@ const quantitySchema = z
     system: z.string().optional(),
     code: z.union([z.string(), z.number()]).optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const periodSchema = z
   .object({
     start: isoDateTime,
     end: isoDateTime.optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
-const attachmentSchema = z
+const attachmentSchemaBase = z
   .object({
     contentType: z.string().min(1),
     url: z.string().url().optional(),
@@ -68,12 +72,16 @@ const attachmentSchema = z
     size: z.number().optional(),
     hash: z.string().optional(),
   })
-  .refine((value) => value.url !== undefined || value.data !== undefined, {
-    message: 'Attachment requires either an URL or inline data',
-  })
-  .passthrough();
+  .catchall(z.unknown());
 
-const observationSchema = z
+const attachmentSchema = attachmentSchemaBase.refine(
+  (value) => value.url !== undefined || value.data !== undefined,
+  {
+    message: 'Attachment requires either an URL or inline data',
+  }
+);
+
+const observationSchemaBase = z
   .object({
     resourceType: z.literal('Observation'),
     status: z.string().min(1),
@@ -89,7 +97,7 @@ const observationSchema = z
             coding: z.array(codingSchema).min(1),
             text: z.string().optional(),
           })
-          .passthrough(),
+          .catchall(z.unknown()),
       )
       .optional(),
     code: codeableConceptSchema,
@@ -109,12 +117,14 @@ const observationSchema = z
             valueCodeableConcept: codeableConceptSchema.optional(),
             valueString: z.string().optional(),
           })
-          .passthrough(),
+          .catchall(z.unknown()),
       )
       .optional(),
     hasMember: z.array(referenceSchema).optional(),
   })
-  .superRefine((value, ctx) => {
+  .catchall(z.unknown());
+
+const observationSchema = observationSchemaBase.superRefine((value, ctx) => {
     const hasValue =
       value.valueQuantity !== undefined ||
       value.valueCodeableConcept !== undefined ||
@@ -128,8 +138,7 @@ const observationSchema = z
         path: ['valueQuantity'],
       });
     }
-  })
-  .passthrough();
+  });
 
 const medicationStatementSchema = z
   .object({
@@ -142,9 +151,15 @@ const medicationStatementSchema = z
     effectivePeriod: periodSchema.optional(),
     dateAsserted: isoDateTime.optional(),
     dosage: z.any().optional(),
-    note: z.array(z.object({ text: z.string() }).passthrough()).optional(),
+    note: z
+      .array(
+        z
+          .object({ text: z.string() })
+          .catchall(z.unknown())
+      )
+      .optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const deviceUseStatementSchema = z
   .object({
@@ -157,10 +172,10 @@ const deviceUseStatementSchema = z
         reference: z.string().min(1),
         display: z.string().optional(),
       })
-      .passthrough(),
+      .catchall(z.unknown()),
     timingPeriod: periodSchema,
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const documentReferenceSchema = z
   .object({
@@ -170,10 +185,16 @@ const documentReferenceSchema = z
     encounter: referenceSchema.optional(),
     author: z.array(referenceSchema).min(1),
     date: isoDateTime,
-    content: z.array(z.object({ attachment: attachmentSchema }).passthrough()).min(1),
+    content: z
+      .array(
+        z
+          .object({ attachment: attachmentSchema })
+          .catchall(z.unknown())
+      )
+      .min(1),
     category: z.array(codeableConceptSchema).min(1),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const compositionSectionSchema = z
   .object({
@@ -184,11 +205,11 @@ const compositionSectionSchema = z
         status: z.string().optional(),
         div: z.string().optional(),
       })
-      .passthrough()
+      .catchall(z.unknown())
       .optional(),
     entry: z.array(referenceSchema).optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const compositionSchema = z
   .object({
@@ -202,7 +223,7 @@ const compositionSchema = z
     title: z.string().min(1),
     section: z.array(compositionSectionSchema).optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const bundleEntrySchema = z
   .object({
@@ -213,10 +234,10 @@ const bundleEntrySchema = z
         method: z.string().min(1),
         url: z.string().min(1),
       })
-      .passthrough()
+      .catchall(z.unknown())
       .optional(),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 const bundleSchema = z
   .object({
@@ -224,7 +245,7 @@ const bundleSchema = z
     type: z.literal('transaction'),
     entry: z.array(bundleEntrySchema).min(1),
   })
-  .passthrough();
+  .catchall(z.unknown());
 
 type ValidatedBundle = {
   bundle: Bundle;
