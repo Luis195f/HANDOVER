@@ -24,6 +24,7 @@ import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { generateSbarViaBackend } from '@/src/lib/ai-sbar';
+import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import {
   createSttService,
@@ -66,6 +67,7 @@ import TtsButton from '@/src/components/TtsButton';
 // END HANDOVER D2 – VitalTrends imports
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { SidebarIndex, type SectionInfo } from './components/SidebarIndex';
+import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -702,6 +704,44 @@ export default function HandoverForm({ navigation, route }: Props) {
     () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
     [watchedBraden, watchedOxygen, watchedVitals],
   );
+  const news2Breakdown = useMemo(() => {
+    const vitals = watchedVitals ?? {};
+    const oxygen = watchedOxygen ?? {};
+    const input = {
+      rr: vitals.rr,
+      spo2: vitals.spo2,
+      temp: vitals.tempC,
+      sbp: vitals.sbp,
+      hr: vitals.hr,
+      o2: Boolean(oxygen.device || oxygen.flowLMin != null || oxygen.fio2 != null),
+      avpu: vitals.avpu as any,
+    };
+    return computeNEWS2(input);
+  }, [watchedOxygen, watchedVitals]);
+  const bradenScore = useMemo(() => {
+    if (!watchedBraden) return undefined;
+    const values = [
+      watchedBraden.sensoryPerception,
+      watchedBraden.moisture,
+      watchedBraden.activity,
+      watchedBraden.mobility,
+      watchedBraden.nutrition,
+      watchedBraden.frictionShear,
+    ];
+    if (values.some((value) => typeof value !== 'number')) {
+      return undefined;
+    }
+    return values.reduce((total, value) => total + (value ?? 0), 0);
+  }, [watchedBraden]);
+  const [suggestionsState, setSuggestionsState] = useState<{ vitals: SuggestionsResult | null; diagnosis: SuggestionsResult | null }>(
+    { vitals: null, diagnosis: null },
+  );
+  const [suggestionsLoading, setSuggestionsLoading] = useState<'vitals' | 'diagnosis' | null>(null);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const suggestionsCacheRef = useRef<
+    Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
+  >({});
+  const aiSuggestionsEnabled = isOn('AI_SUGGESTIONS_ENABLED');
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
@@ -1099,6 +1139,89 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
     const message = (formErrors as any)?.message ?? 'No se pudo guardar';
     Alert.alert('Error', typeof message === 'string' ? message : 'No se pudo guardar');
+  };
+
+  const truncateNote = (value?: string | null, maxLength = 400) => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    return trimmed.slice(0, maxLength);
+  };
+
+  const compactObject = (input: Record<string, any>) =>
+    Object.fromEntries(
+      Object.entries(input).filter(([, value]) => value !== undefined && value !== null),
+    );
+
+  const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
+    const vitals = watchedVitals ?? {};
+    const oxygen = watchedOxygen ?? {};
+    const vitalSigns = compactObject({
+      respiratoryRate: vitals.rr,
+      heartRate: vitals.hr,
+      systolicBP: vitals.sbp,
+      spo2: vitals.spo2,
+      temperature: vitals.tempC,
+      consciousness: vitals.avpu,
+      onOxygen: Boolean(oxygen.device || oxygen.flowLMin != null || oxygen.fio2 != null),
+    });
+
+    const scores = compactObject({
+      news2: news2Breakdown?.total,
+      braden: bradenScore,
+    });
+
+    const diagnoses: string[] = [];
+    (watchedValues.dxMedicalStructured ?? []).forEach((dx: any) => {
+      if (dx?.display) diagnoses.push(dx.display);
+    });
+    (watchedValues.dxNursingStructured ?? []).forEach((dx: any) => {
+      if (dx?.display) diagnoses.push(dx.display);
+    });
+    if (watchedValues.dxMedical) {
+      diagnoses.push(watchedValues.dxMedical);
+    }
+    if (watchedValues.dxNursing) {
+      diagnoses.push(watchedValues.dxNursing);
+    }
+
+    const notes = truncateNote(watchedValues.evolution) ?? truncateNote(watchedValues.closingSummary);
+    const devices = oxygen.device ? [oxygen.device] : undefined;
+
+    const context: ClinicalContext = {
+      language: 'es',
+      section,
+      vitalSigns: Object.keys(vitalSigns).length ? vitalSigns : undefined,
+      scores: Object.keys(scores).length ? scores : undefined,
+      diagnoses: diagnoses.length ? diagnoses : undefined,
+      devices,
+      notes,
+    };
+
+    return context;
+  };
+
+  const requestSuggestions = async (section: 'vitals' | 'diagnosis') => {
+    if (!aiSuggestionsEnabled) return;
+    setSuggestionsError(null);
+    const context = buildClinicalContext(section);
+    const contextHash = JSON.stringify(context);
+    const now = Date.now();
+    const cacheEntry = suggestionsCacheRef.current[section];
+    if (cacheEntry && cacheEntry.contextHash === contextHash && now - cacheEntry.timestamp < 15000) {
+      setSuggestionsState((prev) => ({ ...prev, [section]: cacheEntry.result }));
+      return;
+    }
+    setSuggestionsLoading(section);
+    try {
+      const result = await fetchInterventionsSuggestions(context);
+      setSuggestionsState((prev) => ({ ...prev, [section]: result }));
+      suggestionsCacheRef.current[section] = { timestamp: now, contextHash, result };
+    } catch (error: any) {
+      setSuggestionsError(error?.message ?? 'No se pudieron cargar sugerencias de IA');
+    } finally {
+      setSuggestionsLoading(null);
+    }
   };
 
   const onSubmit = form.handleSubmit(
@@ -1641,6 +1764,23 @@ export default function HandoverForm({ navigation, route }: Props) {
                 </Text>
               )}
             </View>
+            {aiSuggestionsEnabled ? (
+              <View style={styles.inlineActions}>
+                <Button
+                  title="Ver sugerencias de intervenciones (IA)"
+                  onPress={() => requestSuggestions('vitals')}
+                  disabled={suggestionsLoading === 'vitals'}
+                />
+              </View>
+            ) : null}
+            {aiSuggestionsEnabled ? (
+              <ClinicalSuggestions
+                suggestions={suggestionsState.vitals}
+                isLoading={suggestionsLoading === 'vitals'}
+                onRefresh={() => requestSuggestions('vitals')}
+                errorMessage={suggestionsError}
+              />
+            ) : null}
           </CollapsibleSection>
         </View>
       )}
@@ -1928,6 +2068,23 @@ export default function HandoverForm({ navigation, route }: Props) {
             {renderDictationStatus('dxNursing')}
             {dxNursingError ? <Text style={styles.error}>{dxNursingError}</Text> : null}
           </View>
+          {aiSuggestionsEnabled ? (
+            <View style={styles.inlineActions}>
+              <Button
+                title="Sugerencias IA de cuidados"
+                onPress={() => requestSuggestions('diagnosis')}
+                disabled={suggestionsLoading === 'diagnosis'}
+              />
+            </View>
+          ) : null}
+          {aiSuggestionsEnabled ? (
+            <ClinicalSuggestions
+              suggestions={suggestionsState.diagnosis}
+              isLoading={suggestionsLoading === 'diagnosis'}
+              onRefresh={() => requestSuggestions('diagnosis')}
+              errorMessage={suggestionsError}
+            />
+          ) : null}
         </CollapsibleSection>
       </View>
 

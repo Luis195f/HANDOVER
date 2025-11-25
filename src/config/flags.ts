@@ -17,6 +17,8 @@ export const flags = {
   SHOW_MEDS: extra.FEATURES?.handover?.showMeds ?? process.env.EXPO_PUBLIC_SHOW_MEDS,
   SHOW_ATTACH: extra.FEATURES?.handover?.showAttachments ?? process.env.EXPO_PUBLIC_SHOW_ATTACH,
   ENABLE_ALERTS: extra.FEATURES?.handover?.enableAlerts ?? process.env.EXPO_PUBLIC_ENABLE_ALERTS,
+  AI_SUGGESTIONS_ENABLED:
+    extra.FEATURES?.handover?.aiSuggestions ?? process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED,
 };
 
 export const isOn = (k: keyof typeof flags) => truthy(flags[k]);

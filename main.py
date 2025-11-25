@@ -16,7 +16,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
 
-from backend.ai_client import generate_sbar, transcribe_audio
+from backend.ai_client import (
+    ClinicalContext,
+    SuggestionsResponse,
+    generate_intervention_suggestions,
+    generate_sbar,
+    transcribe_audio,
+)
 from backend.signature import (
     SignatureSettings,
     SignatureVerificationError,
@@ -30,6 +36,9 @@ from backend.validation import validate_fhir_bundle
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
 FHIR_TOKEN = os.environ.get("FHIR_TOKEN", "")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off")
+AI_SUGGESTIONS_ENABLED = (
+    os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
+)
 SIGNATURE_SETTINGS: SignatureSettings = load_settings()
 
 logger = logging.getLogger(__name__)
@@ -346,3 +355,20 @@ async def summarize_sbar(req: SbarRequest) -> SbarResponse:
         raise HTTPException(status_code=502, detail="Formato de respuesta de IA inesperado")
 
     return SbarResponse(**payload)
+
+
+@app.post("/ai/suggest-interventions", response_model=SuggestionsResponse)
+async def suggest_interventions(ctx: ClinicalContext) -> SuggestionsResponse:
+    if not AI_SUGGESTIONS_ENABLED:
+        raise HTTPException(status_code=404, detail="Sugerencias de IA deshabilitadas")
+
+    try:
+        payload = await generate_intervention_suggestions(ctx)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Formato de respuesta de IA inesperado") from exc
+    except Exception:
+        raise HTTPException(status_code=502, detail="Error al generar sugerencias con IA")
+
+    return payload
