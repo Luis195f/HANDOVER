@@ -1,5 +1,3 @@
-export type SensitiveFieldPath = string;
-
 /**
  * Inventario de rutas/campos que contienen datos sensibles de paciente o
  * credenciales. Sirve para revisar periódicamente qué campos se guardan en
@@ -9,7 +7,7 @@ export type SensitiveFieldPath = string;
  * Si en el futuro se añaden nuevos datos clínicos o tokens al storage local,
  * deben añadirse aquí para mantener el inventario actualizado.
  */
-export const SENSITIVE_FIELDS: SensitiveFieldPath[] = [
+export const SENSITIVE_FIELDS = [
   // Identificación de paciente
   'patientId',
   'patient.id',
@@ -41,4 +39,9 @@ export const SENSITIVE_FIELDS: SensitiveFieldPath[] = [
   'auth.accessToken',
   'auth.refreshToken',
   'auth.userId',
-];
+  // Meta
+  'meta.versionId',
+  'meta.lastUpdated',
+] as const;
+
+export type SensitiveFieldPath = (typeof SENSITIVE_FIELDS)[number];

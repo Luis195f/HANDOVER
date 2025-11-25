@@ -1071,9 +1071,8 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const patientIdValue = form.watch('patientId');
   // BEGIN HANDOVER D6 – HandoverForm PatientBanner
-  const { loading: loadingPatient, error: patientError, summary: patientSummary } = usePatientSummary(
-    typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined,
-  );
+  const { loading: loadingPatient, error: patientSummaryError, summary: patientSummary } =
+    usePatientSummary(typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined);
   const bannerSummary: PatientSummary | null = useMemo(
     () => patientSummary ?? patientSummaryParam ?? null,
     [patientSummary, patientSummaryParam],
@@ -1442,7 +1441,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           scrollEventThrottle={16}
         >
         {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
-        <PatientBanner summary={bannerSummary} loading={bannerLoading} error={patientError} />
+        <PatientBanner summary={bannerSummary} loading={bannerLoading} error={patientSummaryError} />
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
         <View
           ref={sectionRefs.turno}
