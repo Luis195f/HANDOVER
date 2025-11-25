@@ -1,5 +1,6 @@
 // BEGIN HANDOVER_AUTH
 export type UserRole = 'nurse' | 'supervisor' | 'admin';
+export type SessionMode = 'normal' | 'demo';
 
 export interface HandoverSession {
   userId: string;
@@ -9,6 +10,7 @@ export interface HandoverSession {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string; // ISO
+  mode?: SessionMode;
 }
 
 export interface AuthSession extends HandoverSession {

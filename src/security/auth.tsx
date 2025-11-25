@@ -3,6 +3,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import { AuthSession, HandoverSession, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 
@@ -62,6 +63,7 @@ function normalizeSession(session: AuthSession | null): HandoverSession | null {
   const units = Array.isArray(session.units)
     ? session.units.filter((unit): unit is string => typeof unit === 'string')
     : [];
+  const mode = session.mode === 'demo' ? 'demo' : undefined;
   return {
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
@@ -70,6 +72,7 @@ function normalizeSession(session: AuthSession | null): HandoverSession | null {
     displayName: session.displayName ?? session.fullName ?? session.userId,
     roles,
     units,
+    mode,
   };
 }
 
@@ -110,6 +113,7 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
     roles: session.roles ?? [],
     units: session.units ?? [],
     expiresAt: normalizeExpiresAt(session.expiresAt),
+    mode: session.mode === 'demo' ? 'demo' : undefined,
   };
   await secureSetItem(SESSION_KEY, JSON.stringify(normalized));
 }
@@ -223,6 +227,14 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
   return session;
 }
 
+// BEGIN HANDOVER: DEMO_MODE
+export async function loginDemo(): Promise<SessionModel> {
+  const session = ensureDemoSessionTemplate();
+  await setSession(session);
+  return session;
+}
+// END HANDOVER: DEMO_MODE
+
 export async function logout(): Promise<void> {
   await hydrateSession();
   await setSession(null);
@@ -283,6 +295,7 @@ interface AuthContextValue {
   session: SessionModel | null;
   loading: boolean;
   loginWithOAuth: (config?: Partial<typeof DEFAULT_AUTH_CONFIG>) => Promise<SessionModel>;
+  loginDemo: () => Promise<SessionModel>;
   logout: () => Promise<void>;
 }
 
@@ -313,6 +326,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     loading,
     loginWithOAuth,
+    loginDemo,
     logout,
   }), [session, loading]);
 
