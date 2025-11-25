@@ -7,6 +7,7 @@ import HandoverForm from '@/src/screens/HandoverForm';
 import HandoverMain from '@/src/screens/HandoverMain';
 import PatientDashboard from '@/src/screens/PatientDashboard';
 import PatientList from '@/src/screens/PatientList';
+import { DemoModeBanner } from '@/src/components/DemoModeBanner';
 import OnboardingScreen from '@/src/screens/OnboardingScreen';
 import QRScan from '@/src/screens/QRScan';
 import ShiftDetailsScreen from '@/src/screens/ShiftDetailsScreen';
@@ -34,7 +35,7 @@ function UnauthorizedScreen() {
 
 // BEGIN HANDOVER_AUTH
 function AuthGate() {
-  const { session, loading } = useAuth();
+  const { session, loading, logout } = useAuth();
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
 
   // BEGIN HANDOVER: ONBOARDING
@@ -97,7 +98,9 @@ function AuthGate() {
   const initialRouteName = onboardingCompleted === false ? 'Onboarding' : postOnboardingRoute;
 
   return (
-    <Stack.Navigator initialRouteName={initialRouteName}>
+    <View style={{ flex: 1 }}>
+      <DemoModeBanner visible={session?.mode === 'demo'} onExit={logout} />
+      <Stack.Navigator initialRouteName={initialRouteName}>
       {onboardingScreen}
       {canSubmitHandover ? (
         <>
@@ -123,11 +126,12 @@ function AuthGate() {
       {canAdminister ? (
         <Stack.Screen
           name="AdminDashboard"
-          component={AdminDashboardScreen}
-          options={{ title: 'Dashboard admin' }}
-        />
-      ) : null}
-    </Stack.Navigator>
+        component={AdminDashboardScreen}
+        options={{ title: 'Dashboard admin' }}
+      />
+    ) : null}
+      </Stack.Navigator>
+    </View>
   );
 }
 // END HANDOVER_AUTH

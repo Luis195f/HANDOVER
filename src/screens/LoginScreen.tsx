@@ -1,40 +1,73 @@
 // src/screens/LoginScreen.tsx
-import React from 'react';
-import { View, Text, Pressable } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { login, getSession } from '@/src/security/auth';
-import { UNITS_BY_ID } from '@/src/config/units';
+import { useAuth } from '@/src/security/auth';
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
+  const { loginWithOAuth, loginDemo } = useAuth();
 
-  const onPress = async () => {
-    const allowedUnits = ["icu-a", "icu-b"];
-    await login({
-      user: { id: 'nurse-1', name: 'Demo Nurse', allowedUnits },
-      units: allowedUnits, // acceso demo restringido a unidades base
-      token: 'mock-token',
-    });
-
-    const s = await getSession();
-    console.log('[dev] session', s?.units, s?.user?.allowedUnits);
-    (globalThis as any).__NURSEOS_SESSION_CACHE = s;
-
+  const goToHome = useCallback(() => {
     navigation.reset({
       index: 0,
       routes: [{ name: 'PatientList' }],
     });
-  };
+  }, [navigation]);
+
+  const handleDemo = useCallback(async () => {
+    await loginDemo();
+    goToHome();
+  }, [goToHome, loginDemo]);
+
+  const handleOAuth = useCallback(async () => {
+    await loginWithOAuth();
+    goToHome();
+  }, [goToHome, loginWithOAuth]);
 
   return (
-    <View style={{ flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontSize: 20, fontWeight: '600', marginBottom: 12 }}>Handover Pro</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>Handover Pro</Text>
+      <Text style={styles.subtitle}>Inicia sesión con tu cuenta o prueba el modo demo.</Text>
+
       <Pressable
-        onPress={onPress}
-        style={{ backgroundColor: '#1677ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
+        onPress={handleOAuth}
+        style={[styles.button, styles.primaryButton]}
+        accessibilityRole="button"
+        accessibilityLabel="Iniciar sesión con credenciales"
       >
-        <Text style={{ color: 'white', fontWeight: '600' }}>Entrar (demo)</Text>
+        <Text style={[styles.buttonText, styles.primaryText]}>Iniciar sesión</Text>
       </Pressable>
+
+      <Pressable
+        onPress={handleDemo}
+        style={[styles.button, styles.demoButton]}
+        accessibilityRole="button"
+        accessibilityLabel="Iniciar demo con datos ficticios"
+      >
+        <Text style={[styles.buttonText, styles.demoText]}>Iniciar demo</Text>
+      </Pressable>
+
+      <Text style={styles.helper}>Modo demo – datos ficticios, no usar con pacientes reales.</Text>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  title: { fontSize: 22, fontWeight: '700' },
+  subtitle: { textAlign: 'center', color: '#52606d' },
+  button: {
+    width: '100%',
+    maxWidth: 320,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  primaryButton: { backgroundColor: '#1677ff' },
+  primaryText: { color: '#fff' },
+  demoButton: { backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#b6e0fe' },
+  demoText: { color: '#0b69a3' },
+  buttonText: { fontWeight: '700' },
+  helper: { marginTop: 8, textAlign: 'center', color: '#52606d' },
+});

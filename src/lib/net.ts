@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/net.ts
+import { maybeUseDemoResponse } from '@/src/demo/net-interceptor';
 
 /** Opciones de reintento para fetchWithRetry */
 export type RetryOptions = {
@@ -50,6 +51,13 @@ export async function fetchWithRetry(
   // Separa extensiones de init y decide qué fetch usar
   const { fetchImpl, retry, timeoutMs, ...initRest } = init;
   const doFetch = fetchImpl ?? fetch;
+
+  // BEGIN HANDOVER: DEMO_MODE
+  const demoResponse = await maybeUseDemoResponse(input, initRest);
+  if (demoResponse) {
+    return demoResponse;
+  }
+  // END HANDOVER: DEMO_MODE
 
   // Overrides provenientes de init.retry
   const retries =
