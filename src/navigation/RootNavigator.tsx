@@ -64,7 +64,7 @@ function AuthGate() {
   if (loading || (session && onboardingCompleted === null)) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
+        <ActivityIndicator size="large" />
       </View>
     );
   }
@@ -101,35 +101,39 @@ function AuthGate() {
     <View style={{ flex: 1 }}>
       <DemoModeBanner visible={session?.mode === 'demo'} onExit={logout} />
       <Stack.Navigator initialRouteName={initialRouteName}>
-      {onboardingScreen}
-      {canSubmitHandover ? (
-        <>
-          <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
-          <Stack.Screen name="AudioNote" component={AudioNote} options={{ title: 'Nota de voz' }} />
-          <Stack.Screen name="HandoverMain" component={HandoverMain} options={{ title: 'Handover' }} />
-          <Stack.Screen name="HandoverForm" component={HandoverForm} options={{ title: 'Handover' }} />
-          <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} options={{ title: 'Turno' }} />
-          <Stack.Screen name="QRScan" component={QRScan} options={{ title: 'Escanear QR' }} />
-          <Stack.Screen name="SyncCenter" component={SyncCenter} options={{ title: 'Centro de sincronización' }} />
-          <Stack.Screen name="PatientDashboard" component={PatientDashboard} options={{ title: 'Dashboard del paciente' }} />
-        </>
-      ) : (
-        <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
-      )}
-      {canAdminister ? (
-        <Stack.Screen
-          name="SupervisorDashboard"
-          component={SupervisorDashboardScreen}
-          options={{ title: 'Dashboard de turno' }}
-        />
-      ) : null}
-      {canAdminister ? (
-        <Stack.Screen
-          name="AdminDashboard"
-        component={AdminDashboardScreen}
-        options={{ title: 'Dashboard admin' }}
-      />
-    ) : null}
+        {onboardingScreen}
+        {canSubmitHandover ? (
+          <>
+            <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
+            <Stack.Screen name="AudioNote" component={AudioNote} options={{ title: 'Nota de voz' }} />
+            <Stack.Screen name="HandoverMain" component={HandoverMain} options={{ title: 'Handover' }} />
+            <Stack.Screen name="HandoverForm" component={HandoverForm} options={{ title: 'Handover' }} />
+            <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} options={{ title: 'Turno' }} />
+            <Stack.Screen name="QRScan" component={QRScan} options={{ title: 'Escanear QR' }} />
+            <Stack.Screen name="SyncCenter" component={SyncCenter} options={{ title: 'Centro de sincronización' }} />
+            <Stack.Screen
+              name="PatientDashboard"
+              component={PatientDashboard}
+              options={{ title: 'Dashboard del paciente' }}
+            />
+          </>
+        ) : (
+          <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
+        )}
+        {canAdminister ? (
+          <Stack.Screen
+            name="SupervisorDashboard"
+            component={SupervisorDashboardScreen}
+            options={{ title: 'Dashboard de turno' }}
+          />
+        ) : null}
+        {canAdminister ? (
+          <Stack.Screen
+            name="AdminDashboard"
+            component={AdminDashboardScreen}
+            options={{ title: 'Dashboard admin' }}
+          />
+        ) : null}
       </Stack.Navigator>
     </View>
   );
