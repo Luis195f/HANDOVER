@@ -5,10 +5,13 @@ export type SessionMode = 'normal' | 'demo';
 export interface HandoverSession {
   userId: string;
   displayName?: string;
+  email?: string;
+  picture?: string;
   roles: string[];
   units: string[]; // unidades a las que tiene acceso
   accessToken: string;
   refreshToken?: string;
+  idToken?: string;
   expiresAt?: string; // ISO
   mode?: SessionMode;
 }

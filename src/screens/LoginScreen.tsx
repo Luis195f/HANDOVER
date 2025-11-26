@@ -21,8 +21,12 @@ export default function LoginScreen() {
   }, [goToHome, loginDemo]);
 
   const handleOAuth = useCallback(async () => {
-    await loginWithOAuth();
-    goToHome();
+    try {
+      await loginWithOAuth();
+      goToHome();
+    } catch (error) {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[login] Failed to authenticate', error);
+    }
   }, [goToHome, loginWithOAuth]);
 
   return (

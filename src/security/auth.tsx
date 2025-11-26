@@ -1,22 +1,38 @@
 // BEGIN HANDOVER_AUTH
-import * as ExpoAuthSession from 'expo-auth-session';
+import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import Constants from 'expo-constants';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Buffer } from 'buffer';
 
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
-import type { AuthSession, HandoverSession, UserRole } from './auth-types';
+import type { AuthSession as StoredAuthSession, HandoverSession, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
+
+const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
 
 try {
   WebBrowser.maybeCompleteAuthSession();
 } catch (error) {
-  if (__DEV__) console.warn('[auth] Failed to complete auth session', error);
+  if (isDev) console.warn('[auth] Failed to complete auth session', error);
 }
 
+const auth0Domain =
+  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? Constants.expoConfig?.extra?.auth0Domain ?? 'dev-6jmxxysflz2kx61w.us.auth0.com';
+
 const DEFAULT_AUTH_CONFIG = {
-  issuer: process.env.EXPO_PUBLIC_OIDC_ISSUER ?? 'https://example.auth0.com',
-  clientId: process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? 'handover-mobile',
-  scopes: (process.env.EXPO_PUBLIC_OIDC_SCOPES ?? 'openid profile email offline_access').split(' '),
+  issuer: process.env.EXPO_PUBLIC_OIDC_ISSUER ?? `https://${auth0Domain}`,
+  clientId:
+    process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? Constants.expoConfig?.extra?.auth0ClientId ?? 'handover-mobile',
+  redirectUri:
+    process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
+    Constants.expoConfig?.extra?.auth0RedirectUri ??
+    AuthSession.makeRedirectUri({ scheme: 'handover-pro', path: 'redirect' }),
+  logoutUri:
+    process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
+    Constants.expoConfig?.extra?.auth0LogoutUri ??
+    AuthSession.makeRedirectUri({ scheme: 'handover-pro' }),
+  scopes: (process.env.EXPO_PUBLIC_OIDC_SCOPES ?? 'openid profile email').split(' '),
 };
 
 type SessionModel = HandoverSession;
@@ -40,16 +56,16 @@ async function getLegacyAsyncStorage(): Promise<AsyncStorageLike | null> {
   }
 }
 
-function parseSession(raw: string | null): AuthSession | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as AuthSession;
-  } catch {
-    return null;
+  function parseSession(raw: string | null): StoredAuthSession | null {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as StoredAuthSession;
+    } catch {
+      return null;
+    }
   }
-}
 
-function normalizeExpiresAt(expiresAt: AuthSession['expiresAt']): string | undefined {
+function normalizeExpiresAt(expiresAt: StoredAuthSession['expiresAt']): string | undefined {
   if (typeof expiresAt === 'number') {
     return new Date(expiresAt * 1000).toISOString();
   }
@@ -59,7 +75,7 @@ function normalizeExpiresAt(expiresAt: AuthSession['expiresAt']): string | undef
   return parsed.toISOString();
 }
 
-function normalizeSession(session: AuthSession | null): HandoverSession | null {
+function normalizeSession(session: StoredAuthSession | null): HandoverSession | null {
   if (!session) return null;
   const roles = Array.isArray(session.roles)
     ? session.roles.filter((role): role is string => typeof role === 'string')
@@ -74,6 +90,9 @@ function normalizeSession(session: AuthSession | null): HandoverSession | null {
     expiresAt: normalizeExpiresAt(session.expiresAt),
     userId: session.userId,
     displayName: session.displayName ?? session.fullName ?? session.userId,
+    email: session.email,
+    picture: session.picture,
+    idToken: session.idToken,
     roles,
     units,
     mode,
@@ -111,7 +130,7 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
     await secureDeleteItem(SESSION_KEY);
     return;
   }
-  const normalized: AuthSession = {
+  const normalized: StoredAuthSession = {
     ...session,
     displayName: session.displayName ?? session.userId,
     roles: session.roles ?? [],
@@ -132,7 +151,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
       return currentSession;
     }
   } catch (error) {
-    if (__DEV__) console.warn('[auth] Failed to read persisted session', error);
+    if (isDev) console.warn('[auth] Failed to read persisted session', error);
   }
 
   try {
@@ -141,7 +160,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
       await persistSession(currentSession);
     }
   } catch (error) {
-    if (__DEV__) console.warn('[auth] Failed to migrate session', error);
+    if (isDev) console.warn('[auth] Failed to migrate session', error);
     currentSession = null;
   }
 
@@ -162,6 +181,19 @@ async function fetchUserInfo(userInfoEndpoint: string | undefined, accessToken: 
     });
     if (!res.ok) return null;
     return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function decodeIdToken(idToken?: string) {
+  if (!idToken) return null;
+  try {
+    const [, payload] = idToken.split('.');
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
+    return JSON.parse(decoded) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -193,51 +225,147 @@ function extractUnits(profile: Record<string, unknown>): string[] {
   return [];
 }
 
-async function performOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promise<HandoverSession> {
-  const issuer = config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer;
-  const clientId = config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId;
-  const scopes = config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes;
-  const redirectUri = ExpoAuthSession.makeRedirectUri({ useProxy: true });
-  const discovery = await ExpoAuthSession.fetchDiscoveryAsync(issuer);
+function buildAuthConfig(config?: Partial<typeof DEFAULT_AUTH_CONFIG>) {
+  return {
+    issuer: config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer,
+    clientId: config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId,
+    redirectUri: config?.redirectUri ?? DEFAULT_AUTH_CONFIG.redirectUri,
+    logoutUri: config?.logoutUri ?? DEFAULT_AUTH_CONFIG.logoutUri,
+    scopes: config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes,
+  };
+}
 
-  const request = new ExpoAuthSession.AuthRequest({
-    clientId,
-    redirectUri,
-    scopes,
-    usePKCE: true,
-    responseType: ExpoAuthSession.ResponseType.Code,
-  });
+type AuthTokens = {
+  accessToken?: string;
+  refreshToken?: string;
+  idToken?: string;
+  issuedAt?: number;
+  expiresIn?: number;
+  expiresAt?: string;
+  tokenType?: string;
+};
 
-  const result = await request.promptAsync(discovery, { useProxy: true });
-  if (result.type !== 'success' || !result.authentication?.accessToken) {
+async function resolveTokensFromResult(
+  result: AuthSession.AuthSessionResult,
+  discovery: AuthSession.DiscoveryDocument | null,
+  clientId: string,
+  redirectUri: string,
+): Promise<AuthTokens> {
+  if (result.type !== 'success') {
     throw new Error(result.params?.error_description ?? 'OAUTH_CANCELLED');
   }
 
-  const { accessToken, refreshToken, issuedAt, expiresIn } = result.authentication;
-  const expiresAtSeconds = issuedAt && expiresIn ? issuedAt + expiresIn : Math.floor(Date.now() / 1000) + 3600;
-  const expiresAt = normalizeExpiresAt(expiresAtSeconds);
+  if (result.authentication?.accessToken) {
+    return {
+      accessToken: result.authentication.accessToken,
+      refreshToken: result.authentication.refreshToken ?? undefined,
+      issuedAt: result.authentication.issuedAt ?? undefined,
+      expiresIn: result.authentication.expiresIn ?? undefined,
+      tokenType: result.authentication.tokenType ?? undefined,
+    };
+  }
 
-  const profile = (await fetchUserInfo(discovery.userInfoEndpoint, accessToken)) ?? {};
+  const params = result.params as Record<string, string | undefined>;
+  if (params?.access_token || params?.id_token) {
+    return {
+      accessToken: params.access_token,
+      idToken: params.id_token,
+      expiresIn: params.expires_in ? Number(params.expires_in) : undefined,
+      tokenType: params.token_type,
+    };
+  }
+
+  if (!discovery) {
+    throw new Error('DISCOVERY_UNAVAILABLE');
+  }
+
+  const code = params?.code;
+  if (!code) {
+    throw new Error('OAUTH_CANCELLED');
+  }
+
+  const tokenResult = await AuthSession.exchangeCodeAsync(
+    { clientId, code, redirectUri },
+    discovery,
+  );
+
+  return {
+    accessToken: tokenResult.accessToken ?? (tokenResult as unknown as { access_token?: string }).access_token,
+    refreshToken: tokenResult.refreshToken ?? undefined,
+    idToken: (tokenResult as unknown as { id_token?: string; idToken?: string }).id_token ?? tokenResult.idToken,
+    issuedAt: tokenResult.issuedAt ?? undefined,
+    expiresIn: tokenResult.expiresIn ?? undefined,
+    tokenType: tokenResult.tokenType ?? undefined,
+  };
+}
+
+async function buildSessionFromTokens(tokens: AuthTokens, discovery: AuthSession.DiscoveryDocument | null) {
+  if (!tokens.accessToken) {
+    throw new Error('MISSING_ACCESS_TOKEN');
+  }
+
+  const userInfo = await fetchUserInfo(discovery?.userinfoEndpoint ?? discovery?.userInfoEndpoint, tokens.accessToken);
+  const decodedIdToken = decodeIdToken(tokens.idToken);
+  const profile = { ...(decodedIdToken ?? {}), ...(userInfo ?? {}) } as Record<string, unknown>;
+
   const roles = extractRoles(profile);
   const units = extractUnits(profile);
   const userId = (profile['sub'] as string | undefined) ?? 'unknown-user';
   const displayName =
-    (profile['name'] as string | undefined) ?? (profile['preferred_username'] as string | undefined) ?? 'Unknown';
+    (profile['name'] as string | undefined) ??
+    (profile['preferred_username'] as string | undefined) ??
+    (profile['nickname'] as string | undefined) ??
+    userId;
+
+  const issuedAt = tokens.issuedAt ?? Math.floor(Date.now() / 1000);
+  const expiresIn = tokens.expiresIn ?? 3600;
+  const expiresAt = tokens.expiresAt ? normalizeExpiresAt(tokens.expiresAt) : normalizeExpiresAt(issuedAt + expiresIn);
 
   return {
-    accessToken,
-    refreshToken: refreshToken ?? undefined,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    idToken: tokens.idToken,
     expiresAt,
     userId,
     displayName,
+    email: profile['email'] as string | undefined,
+    picture: profile['picture'] as string | undefined,
     roles,
     units,
-  };
+  } satisfies HandoverSession;
+}
+
+async function performAuth0Login(options: {
+  config?: Partial<typeof DEFAULT_AUTH_CONFIG>;
+  promptAsync: (options?: AuthSession.AuthRequestPromptOptions) => Promise<AuthSession.AuthSessionResult>;
+  discovery?: AuthSession.DiscoveryDocument | null;
+}): Promise<HandoverSession> {
+  const config = buildAuthConfig(options.config);
+  const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
+
+  const authResult = await options.promptAsync({ useProxy: false });
+  const tokens = await resolveTokensFromResult(authResult, discovery, config.clientId, config.redirectUri);
+  const session = await buildSessionFromTokens(tokens, discovery);
+  await setSession(session);
+  return session;
 }
 
 export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promise<SessionModel> {
-  const session = await performOAuth(config);
-  await setSession(session);
+  const merged = buildAuthConfig(config);
+  const discovery = await AuthSession.fetchDiscoveryAsync(merged.issuer);
+  const request = new AuthSession.AuthRequest({
+    clientId: merged.clientId,
+    redirectUri: merged.redirectUri,
+    scopes: merged.scopes,
+    usePKCE: true,
+    responseType: AuthSession.ResponseType.Code,
+  });
+
+  const session = await performAuth0Login({
+    config: merged,
+    discovery,
+    promptAsync: (options) => request.promptAsync(discovery, { ...options, useProxy: false }),
+  });
   return session;
 }
 
@@ -251,6 +379,20 @@ export async function loginDemo(): Promise<SessionModel> {
 
 export async function logout(): Promise<void> {
   await hydrateSession();
+  const config = buildAuthConfig();
+  const domain = auth0Domain ?? config.issuer?.replace(/^https?:\/\//, '');
+
+  if (domain && config.logoutUri && config.clientId) {
+    try {
+      const authUrl =
+        `https://${domain}/v2/logout?client_id=${config.clientId}` +
+        `&returnTo=${encodeURIComponent(config.logoutUri)}`;
+      await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
+    } catch (error) {
+      if (isDev) console.warn('[auth] Failed to complete logout', error);
+    }
+  }
+
   await setSession(null);
 }
 
@@ -259,7 +401,7 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
     try {
       await hydrateSession();
     } catch (error) {
-      if (__DEV__) console.warn('[auth] Failed to hydrate current session', error);
+      if (isDev) console.warn('[auth] Failed to hydrate current session', error);
     }
   }
   return currentSession;
@@ -322,6 +464,18 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSessionState] = useState<SessionModel | null>(null);
   const [loading, setLoading] = useState(true);
+  const authConfig = useMemo(() => buildAuthConfig(), []);
+  const discovery = AuthSession.useAutoDiscovery(authConfig.issuer);
+  const [, , promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: authConfig.clientId,
+      redirectUri: authConfig.redirectUri,
+      scopes: authConfig.scopes,
+      usePKCE: true,
+      responseType: AuthSession.ResponseType.Code,
+    },
+    discovery,
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -331,7 +485,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
         setSessionState(hydratedSession);
       } catch (error) {
-        if (__DEV__) console.warn('[auth] Failed to hydrate session', error);
+        if (isDev) console.warn('[auth] Failed to hydrate session', error);
         if (!mounted) return;
         setSessionState(null);
       } finally {
@@ -347,13 +501,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const loginWithAuth0 = useCallback(async () => {
+    return performAuth0Login({
+      config: authConfig,
+      discovery,
+      promptAsync: (options) => promptAsync({ ...options, useProxy: false }),
+    });
+  }, [authConfig, discovery, promptAsync]);
+
   const value = useMemo<AuthContextValue>(() => ({
     session,
     loading,
-    loginWithOAuth,
+    loginWithOAuth: loginWithAuth0,
     loginDemo,
     logout,
-  }), [session, loading]);
+  }), [session, loading, loginWithAuth0]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

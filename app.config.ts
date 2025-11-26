@@ -5,7 +5,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "handover-pro",
   owner: "enfermero1",
 
-  scheme: "handoverpro",
+  scheme: "handover-pro",
   version: "1.0.0",
   orientation: "portrait",
   userInterfaceStyle: "light",
@@ -100,6 +100,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         enableAlerts: "1",
       },
     },
+    auth0Domain: process.env.EXPO_PUBLIC_AUTH0_DOMAIN,
+    auth0ClientId: process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID,
+    auth0RedirectUri: process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI,
+    auth0LogoutUri: process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI,
   },
 
   // ────────────────────────────────────────────────
