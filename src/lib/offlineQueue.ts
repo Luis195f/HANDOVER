@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '@/security/sensitiveFields';
+import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '../security/sensitiveFields';
 import type { ValidationResult } from './fhir-validation';
 
 export const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
