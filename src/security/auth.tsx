@@ -42,7 +42,12 @@ const DEFAULT_AUTH_CONFIG = {
 
 type SessionModel = HandoverSession;
 
-const SESSION_KEY = `${process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover'}:auth-session`;
+const STORAGE_NAMESPACE = (process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover').replace(
+  /[^a-zA-Z0-9._-]/g,
+  '_',
+);
+
+const SESSION_KEY = `${STORAGE_NAMESPACE}_auth_session`;
 type AsyncStorageLike = {
   getItem: (key: string) => Promise<string | null>;
   removeItem: (key: string) => Promise<void>;
@@ -349,6 +354,13 @@ async function performAuth0Login(options: {
   const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
 
   const authResult = await options.promptAsync({ useProxy: false });
+
+  if (isDev) {
+    console.log('[auth] Auth result type:', authResult.type);
+    console.log('[auth] Auth result params:', authResult.params);
+    console.log('[auth] Using redirectUri:', config.redirectUri);
+  }
+  
   const tokens = await resolveTokensFromResult(authResult, discovery, config.clientId, config.redirectUri);
   const session = await buildSessionFromTokens(tokens, discovery);
   await setSession(session);
