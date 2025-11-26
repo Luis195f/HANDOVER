@@ -1,7 +1,6 @@
 // BEGIN HANDOVER_AUTH
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import Constants from 'expo-constants';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Buffer } from 'buffer';
 
@@ -17,23 +16,29 @@ try {
   if (isDev) console.warn('[auth] Failed to complete auth session', error);
 }
 
-const auth0Domain =
-  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? Constants.expoConfig?.extra?.auth0Domain ?? 'dev-6jmxxysflz2kx61w.us.auth0.com';
+// BEGIN HANDOVER: AUTH_CONFIG
+const AUTH0_DOMAIN =
+  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? 'dev-6jmxxysflz2kx61w.us.auth0.com';
+
+const AUTH0_CLIENT_ID =
+  process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? 'zJxhI0SK1J4hmzr1KNzEbWddgZWJDUlL';
+
+const REDIRECT_URI =
+  process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
+  AuthSession.makeRedirectUri({ scheme: 'handover-pro', path: 'redirect' });
+
+const LOGOUT_REDIRECT_URI =
+  process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
+  'https://auth.expo.io/@enfermero1/handover-pro';
 
 const DEFAULT_AUTH_CONFIG = {
-  issuer: process.env.EXPO_PUBLIC_OIDC_ISSUER ?? `https://${auth0Domain}`,
-  clientId:
-    process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? Constants.expoConfig?.extra?.auth0ClientId ?? 'handover-mobile',
-  redirectUri:
-    process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
-    Constants.expoConfig?.extra?.auth0RedirectUri ??
-    AuthSession.makeRedirectUri({ scheme: 'handover-pro', path: 'redirect' }),
-  logoutUri:
-    process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
-    Constants.expoConfig?.extra?.auth0LogoutUri ??
-    AuthSession.makeRedirectUri({ scheme: 'handover-pro' }),
-  scopes: (process.env.EXPO_PUBLIC_OIDC_SCOPES ?? 'openid profile email').split(' '),
+  issuer: `https://${AUTH0_DOMAIN}`,
+  clientId: AUTH0_CLIENT_ID,
+  redirectUri: REDIRECT_URI,
+  logoutUri: LOGOUT_REDIRECT_URI,
+  scopes: ['openid', 'profile', 'email'],
 };
+// END HANDOVER: AUTH_CONFIG
 
 type SessionModel = HandoverSession;
 
@@ -369,32 +374,60 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
   return session;
 }
 
-// BEGIN HANDOVER: DEMO_MODE
+// BEGIN HANDOVER: AUTH_DEMO_LOGIN
 export async function loginDemo(): Promise<SessionModel> {
-  const session = ensureDemoSessionTemplate();
-  await setSession(session);
-  return session;
-}
-// END HANDOVER: DEMO_MODE
+  try {
+    const session = ensureDemoSessionTemplate() ?? {
+      accessToken: 'demo-token',
+      refreshToken: undefined,
+      expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
+      userId: 'demo-user',
+      displayName: 'Demo User',
+      roles: ['nurse'],
+      units: ['UCI', 'Pediatría'],
+      mode: 'demo',
+    };
 
+    await setSession(session);
+    return session;
+  } catch (error) {
+    if (isDev) console.warn('[demo] Failed to start demo session', error);
+
+    const fallbackSession: SessionModel = {
+      accessToken: 'demo-fallback-token',
+      refreshToken: undefined,
+      expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
+      userId: 'demo-user',
+      displayName: 'Demo User',
+      roles: ['nurse'],
+      units: [],
+      mode: 'demo',
+    };
+
+    await setSession(fallbackSession);
+    return fallbackSession;
+  }
+}
+// END HANDOVER: AUTH_DEMO_LOGIN
+
+// BEGIN HANDOVER: AUTH_LOGOUT
 export async function logout(): Promise<void> {
   await hydrateSession();
   const config = buildAuthConfig();
-  const domain = auth0Domain ?? config.issuer?.replace(/^https?:\/\//, '');
+  const domain = AUTH0_DOMAIN;
 
-  if (domain && config.logoutUri && config.clientId) {
-    try {
-      const authUrl =
-        `https://${domain}/v2/logout?client_id=${config.clientId}` +
-        `&returnTo=${encodeURIComponent(config.logoutUri)}`;
-      await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
-    } catch (error) {
-      if (isDev) console.warn('[auth] Failed to complete logout', error);
-    }
+  try {
+    const authUrl = `https://${domain}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
+      config.logoutUri,
+    )}`;
+    await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
+  } catch (error) {
+    if (isDev) console.warn('[auth] Failed to complete logout', error);
   }
 
   await setSession(null);
 }
+// END HANDOVER: AUTH_LOGOUT
 
 export async function getCurrentSession(): Promise<SessionModel | null> {
   if (!hydrated) {
