@@ -25,7 +25,11 @@ const AUTH0_CLIENT_ID =
 
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
-  AuthSession.makeRedirectUri({ scheme: 'handover-pro', path: 'redirect' });
+  AuthSession.makeRedirectUri({
+    native: 'handover-pro://redirect',
+    scheme: 'handover-pro',
+    path: 'redirect',
+  });
 
 const LOGOUT_REDIRECT_URI =
   process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
@@ -360,7 +364,7 @@ async function performAuth0Login(options: {
     console.log('[auth] Auth result params:', authResult.params);
     console.log('[auth] Using redirectUri:', config.redirectUri);
   }
-  
+
   const tokens = await resolveTokensFromResult(authResult, discovery, config.clientId, config.redirectUri);
   const session = await buildSessionFromTokens(tokens, discovery);
   await setSession(session);
