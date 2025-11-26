@@ -7,7 +7,11 @@ import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession, HandoverSession, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 
-WebBrowser.maybeCompleteAuthSession();
+try {
+  WebBrowser.maybeCompleteAuthSession();
+} catch (error) {
+  if (__DEV__) console.warn('[auth] Failed to complete auth session', error);
+}
 
 const DEFAULT_AUTH_CONFIG = {
   issuer: process.env.EXPO_PUBLIC_OIDC_ISSUER ?? 'https://example.auth0.com',
@@ -121,16 +125,26 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
 async function hydrateSession(): Promise<HandoverSession | null> {
   if (hydrated) return currentSession;
   hydrated = true;
-  const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
-  if (persisted) {
-    currentSession = normalizeSession(parseSession(persisted));
-    return currentSession;
+  try {
+    const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
+    if (persisted) {
+      currentSession = normalizeSession(parseSession(persisted));
+      return currentSession;
+    }
+  } catch (error) {
+    if (__DEV__) console.warn('[auth] Failed to read persisted session', error);
   }
 
-  currentSession = await migrateFromAsyncStorage();
-  if (currentSession) {
-    await persistSession(currentSession);
+  try {
+    currentSession = await migrateFromAsyncStorage();
+    if (currentSession) {
+      await persistSession(currentSession);
+    }
+  } catch (error) {
+    if (__DEV__) console.warn('[auth] Failed to migrate session', error);
+    currentSession = null;
   }
+
   return currentSession;
 }
 
@@ -242,7 +256,11 @@ export async function logout(): Promise<void> {
 
 export async function getCurrentSession(): Promise<SessionModel | null> {
   if (!hydrated) {
-    await hydrateSession();
+    try {
+      await hydrateSession();
+    } catch (error) {
+      if (__DEV__) console.warn('[auth] Failed to hydrate current session', error);
+    }
   }
   return currentSession;
 }
@@ -308,10 +326,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const hydratedSession = await getCurrentSession();
-      if (!mounted) return;
-      setSessionState(hydratedSession);
-      setLoading(false);
+      try {
+        const hydratedSession = await getCurrentSession();
+        if (!mounted) return;
+        setSessionState(hydratedSession);
+      } catch (error) {
+        if (__DEV__) console.warn('[auth] Failed to hydrate session', error);
+        if (!mounted) return;
+        setSessionState(null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
     const unsubscribe = onAuthChange((next) => {
       setSessionState(next);
