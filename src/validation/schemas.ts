@@ -58,60 +58,75 @@ export const zVitals = z.object({
   hr: z
     .number()
     .int()
-    .min(30)
-    .max(220)
+    .min(30, "Frecuencia cardiaca fuera de rango")
+    .max(220, "Frecuencia cardiaca fuera de rango")
     .describe('Frecuencia cardiaca (LOINC 8867-4) en latidos por minuto')
     .optional(),
   rr: z
     .number()
     .int()
-    .min(5)
-    .max(60)
+    .min(5, "Frecuencia respiratoria fuera de rango")
+    .max(60, "Frecuencia respiratoria fuera de rango")
     .describe('Frecuencia respiratoria (LOINC 9279-1) en respiraciones por minuto')
     .optional(),
   tempC: z
     .number()
-    .min(30)
-    .max(45)
+    .min(30, "Temperatura fuera de rango")
+    .max(45, "Temperatura fuera de rango")
     .describe('Temperatura corporal en °C mapeada a LOINC 8310-5')
     .optional(),
   spo2: z
     .number()
     .int()
-    .min(50)
-    .max(100)
+    .min(50, "SpO₂ fuera de rango")
+    .max(100, "SpO₂ fuera de rango")
     .describe('Saturación de oxígeno (LOINC 59408-5) en porcentaje')
     .optional(),
   sbp: z
     .number()
     .int()
-    .min(50)
-    .max(260)
+    .min(50, "Presión arterial fuera de rango")
+    .max(260, "Presión arterial fuera de rango")
     .describe('Presión sistólica (LOINC 8480-6) en mmHg')
     .optional(),
   dbp: z
     .number()
     .int()
-    .min(30)
-    .max(160)
+    .min(30, "Presión arterial fuera de rango")
+    .max(160, "Presión arterial fuera de rango")
     .describe('Presión diastólica (LOINC 8462-4) en mmHg')
     .optional(),
   glucoseMgDl: z
     .number()
-    .min(20)
-    .max(600)
+    .min(20, "Glucemia fuera de rango")
+    .max(600, "Glucemia fuera de rango")
     .describe('Glucemia capilar mg/dL (LOINC 2339-0)')
     .optional(),
   glucoseMmolL: z
     .number()
-    .min(1)
-    .max(55)
+    .min(1, "Glucemia fuera de rango")
+    .max(55, "Glucemia fuera de rango")
     .describe('Glucemia capilar mmol/L (LOINC 15074-8)')
     .optional(),
   avpu: z
     .enum(["A", "C", "V", "P", "U"])
     .describe('Escala AVPU codificada con SNOMED/LOINC para el mapeo a FHIR')
     .optional(),
+}).superRefine((value, ctx) => {
+  if (
+    typeof value.glucoseMgDl === "number" &&
+    typeof value.glucoseMmolL === "number"
+  ) {
+    const convertedMmol = value.glucoseMmolL * 18;
+    const tolerance = 15; // mg/dL de tolerancia
+    if (Math.abs(convertedMmol - value.glucoseMgDl) > tolerance) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Las glucemias en mg/dL y mmol/L deben ser coherentes",
+        path: ["glucoseMmolL"],
+      });
+    }
+  }
 });
 
 export const zOxygen = z
@@ -464,4 +479,5 @@ export const zHandover = z.object({
   }
 });
 
-export type HandoverValues = z.infer<typeof zHandover>;
+export type HandoverFormData = z.infer<typeof zHandover>;
+export type HandoverValues = HandoverFormData;
