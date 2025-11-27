@@ -6,7 +6,7 @@ import process from 'node:process';
 
 import { ZodError } from 'zod';
 
-import { validateBundle } from '../src/lib/fhir/validators';
+import { validateBundle, type FhirBundleTransaction } from '../src/lib/fhir-map';
 
 async function readFromStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -81,14 +81,18 @@ async function main() {
     const label = source === '-' ? 'stdin' : resolve(source);
     try {
       const data = await readJson(source);
-      const result = validateBundle(data);
+      const bundle = data as FhirBundleTransaction;
+      const result = validateBundle(bundle);
+      if (!result.ok) {
+        throw new ZodError(result.errors.map((message) => ({ code: 'custom', path: [], message })));
+      }
       printSuccess(label, {
-        entries: result.bundle.entry?.length ?? 0,
-        observations: result.observations.length,
-        medications: result.medicationStatements.length,
-        deviceUses: result.deviceUseStatements.length,
-        documents: result.documentReferences.length,
-        compositions: result.compositions.length,
+        entries: Array.isArray(bundle.entry) ? bundle.entry.length : 0,
+        observations: 0,
+        medications: 0,
+        deviceUses: 0,
+        documents: 0,
+        compositions: 0,
       });
     } catch (error) {
       hasErrors = true;

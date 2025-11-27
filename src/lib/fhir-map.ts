@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 
 import type { AdministrativeData } from '../types/administrative';
@@ -17,9 +18,12 @@ import type {
   RiskFlags,
   RiskItem,
 } from '../types/handover';
+import { zHandover } from '../validation/schemas';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
 import { validateResource as validateFhirResource } from './fhir-validation';
+
+export type HandoverData = z.infer<typeof zHandover>;
 
 const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
 const resolveOptions = (options?: Partial<typeof DEFAULT_OPTS>) =>
@@ -176,6 +180,26 @@ type Condition = {
   recordedDate?: string;
 };
 
+type Patient = {
+  resourceType: 'Patient';
+  id?: string;
+  identifier?: Array<{ system: string; value: string }>;
+  name?: Array<{ use?: string; text?: string }>;
+  gender?: string;
+  birthDate?: string;
+};
+
+type DetectedIssue = {
+  resourceType: 'DetectedIssue';
+  id?: string;
+  status: 'final' | 'registered' | 'preliminary';
+  code?: CodeableConcept;
+  severity?: 'high' | 'moderate' | 'low';
+  detail?: string;
+  subject: Reference;
+  identifiedDateTime?: string;
+};
+
 type CompositionAttester = {
   mode: 'professional' | 'legal' | 'official' | 'personal';
   time?: string;
@@ -215,7 +239,9 @@ type FhirResource =
   | DeviceUseStatement
   | DocumentReference
   | Composition
-  | Condition;
+  | Condition
+  | Patient
+  | DetectedIssue;
 
 type BundleEntry = {
   fullUrl: string;
@@ -231,6 +257,16 @@ type Bundle = {
   type: 'transaction';
   entry: BundleEntry[];
 };
+
+export interface FhirBundleTransaction {
+  resourceType: 'Bundle';
+  type: 'transaction';
+  entry: Array<{
+    fullUrl: string;
+    resource: FhirResource;
+    request: { method: 'POST'; url: string };
+  }>;
+}
 
 const TEST_LOINC = {
   ...LOINC,
@@ -721,6 +757,8 @@ const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
   DocumentReference: 'doc-',
   Composition: 'comp-',
   Condition: 'cond-',
+  Patient: 'pat-',
+  DetectedIssue: 'di-',
 };
 
 function assignStableIds(
@@ -2222,16 +2260,306 @@ export function buildHandoverBundle(
   };
 
   // BEGIN HANDOVER_FHIR_VALIDATION
-  const validation = validateFhirResource(bundle, 'Bundle');
-  if (!validation.ok) {
-    const message = validation.errors.join('; ');
-    const error = new Error(message);
-    (error as Error & { details: string[] }).details = validation.errors;
+  const validation = validateFhirResource(bundle);
+  if (!validation.isValid) {
+    const messages = validation.errors.map((err) => `${err.path}: ${err.message}`);
+    const error = new Error(messages.join('; '));
+    (error as Error & { details: string[] }).details = messages;
     throw error;
   }
   // END HANDOVER_FHIR_VALIDATION
 
   return bundle;
+}
+
+type BundleEntryTransaction = FhirBundleTransaction['entry'][number];
+
+function createTransactionEntry(resource: FhirResource, idOverride?: string): BundleEntryTransaction {
+  const generatedId = idOverride ?? uuidv4();
+  const resourceWithId = { ...resource, id: resource.id ?? idOverride ?? generatedId } as FhirResource;
+  return {
+    fullUrl: `urn:uuid:${generatedId}`,
+    resource: resourceWithId,
+    request: { method: 'POST', url: resource.resourceType },
+  };
+}
+
+function mapDiagnoses(
+  data: HandoverData,
+  context: MappingContext,
+): Condition[] {
+  const conditions: Condition[] = [];
+  const addCondition = (text: string | undefined, categoryCode?: TerminologyCode<string>) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    conditions.push({
+      resourceType: 'Condition',
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      category: categoryCode ? [codeableConceptFromCode(categoryCode)] : undefined,
+      code: { coding: categoryCode ? [categoryCode] : undefined, text: trimmed },
+      subject: context.subject,
+      encounter: context.encounter,
+      onsetDateTime: context.effectiveDateTime,
+      recordedDate: context.effectiveDateTime,
+    });
+  };
+
+  addCondition(data.dxMedical, FHIR_CODES.RISK.FALL);
+  addCondition(data.dxNursing, FHIR_CODES.RISK.PRESSURE_ULCER);
+
+  const structured = [...(data.dxMedicalStructured ?? []), ...(data.dxNursingStructured ?? [])];
+  structured.forEach((item) => {
+    conditions.push({
+      resourceType: 'Condition',
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      code: {
+        coding: [
+          {
+            system: item.system === 'OTHER' ? 'urn:handover-pro:diagnosis' : item.system,
+            code: item.code,
+            display: item.display,
+          },
+        ],
+        text: item.display,
+      },
+      subject: context.subject,
+      encounter: context.encounter,
+      recordedDate: context.effectiveDateTime,
+    });
+  });
+
+  return conditions;
+}
+
+function mapDetectedIssuesFromRisks(
+  items: RiskItem[] | undefined,
+  context: MappingContext,
+): DetectedIssue[] {
+  if (!items || items.length === 0) return [];
+
+  const codeMap: Partial<Record<RiskItem['type'], TerminologyCode<string>>> = {
+    fall: FHIR_CODES.RISK.FALL,
+    pressureUlcer: FHIR_CODES.RISK.PRESSURE_ULCER,
+    isolation: FHIR_CODES.RISK.SOCIAL_ISOLATION,
+  };
+
+  return items
+    .filter((item) => item.present)
+    .map((item) => {
+      const code = codeMap[item.type];
+      return {
+        resourceType: 'DetectedIssue',
+        status: 'final',
+        code: code ? codeableConceptFromCode(code) : undefined,
+        severity: 'moderate',
+        detail: item.notes,
+        subject: context.subject,
+        identifiedDateTime: context.effectiveDateTime,
+      } satisfies DetectedIssue;
+    });
+}
+
+export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildOptions): FhirBundleTransaction {
+  const optionsMerged = resolveOptions(options);
+  const timestamp = data.administrativeData.shiftEnd ?? optionsMerged.now();
+  const sharedOptions: BuildOptions = { now: () => timestamp };
+  const mappingContext: MappingContext = {
+    subject: patientReference(data.patientId),
+    encounter: encounterReference(undefined),
+    effectiveDateTime: timestamp,
+  };
+
+  const vitals = data.vitals
+    ? mapObservationVitals({ patientId: data.patientId, ...data.vitals }, sharedOptions)
+    : [];
+  const oxygenObservations = mapOxygenObservations(
+    { patientId: data.patientId, oxygenTherapy: data.oxygenTherapy },
+    sharedOptions,
+  );
+  const nutrition = mapNutritionCare(
+    { patientId: data.patientId, nutrition: data.nutrition },
+    sharedOptions,
+  );
+  const elimination = mapEliminationCare(
+    { patientId: data.patientId, elimination: data.elimination },
+    sharedOptions,
+  );
+  const mobilitySkin = mapMobilitySkinCare(
+    { patientId: data.patientId, mobility: data.mobility, skin: data.skin },
+    sharedOptions,
+  );
+  const fluidBalance = mapFluidBalanceCare(
+    { patientId: data.patientId, fluidBalance: data.fluidBalance },
+    sharedOptions,
+  );
+  const evaObservation = mapEvaObservation(data.painAssessment, mappingContext);
+  const bradenObservation = mapBradenObservation(data.braden, mappingContext);
+  const glasgowObservation = mapGlasgowObservation(data.glasgow, mappingContext);
+  const riskConditions = mapRiskConditions(data.risks, mappingContext);
+  const detectedIssues = mapDetectedIssuesFromRisks(data.risksStructured, mappingContext);
+  const medications = mapMedicationStatements(
+    {
+      patientId: data.patientId,
+      medications: data.medications,
+      meds: data.meds,
+    },
+    sharedOptions,
+  );
+  const treatmentProcedures = mapTreatments(
+    { patientId: data.patientId, treatments: data.treatments },
+    sharedOptions,
+  );
+  const oxygenDevices = mapDeviceUse(
+    { patientId: data.patientId, oxygenTherapy: data.oxygenTherapy },
+    sharedOptions,
+  );
+  const document = data.audioUri
+    ? mapDocumentReferenceAudio(
+        { patientId: data.patientId, audioAttachment: { url: data.audioUri } },
+        sharedOptions,
+      )
+    : undefined;
+
+  const diagnoses = mapDiagnoses(data, mappingContext);
+
+  const patient: Patient = {
+    resourceType: 'Patient',
+    id: data.patientId,
+    identifier: [{ system: 'urn:handover-pro:patient-id', value: data.patientId }],
+  };
+
+  const entries: BundleEntryTransaction[] = [createTransactionEntry(patient, uuidv4())];
+  const refs: BundleReferenceIndex & { detectedIssues?: string[]; diagnoses?: string[] } = {
+    vitals: [],
+    medications: [],
+    treatments: [],
+    oxygen: [],
+    attachments: [],
+    nutrition: [],
+    elimination: [],
+    mobilitySkin: [],
+    fluidBalance: [],
+    pain: [],
+    braden: [],
+    glasgow: [],
+    risks: [],
+    detectedIssues: [],
+    diagnoses: [],
+  };
+
+  const pushEntry = (resource: FhirResource | undefined | null) => {
+    if (!resource) return;
+    const entry = createTransactionEntry(resource);
+    entries.push(entry);
+    switch (resource.resourceType) {
+      case 'Observation':
+        if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.EVA.code) refs.pain.push(entry.fullUrl);
+        else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.BRADEN.code) refs.braden.push(entry.fullUrl);
+        else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.GLASGOW.code) refs.glasgow.push(entry.fullUrl);
+        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'vital-signs'))) refs.vitals.push(entry.fullUrl);
+        else refs.mobilitySkin.push(entry.fullUrl);
+        break;
+      case 'MedicationStatement':
+        refs.medications.push(entry.fullUrl);
+        break;
+      case 'Procedure':
+      case 'DeviceUseStatement':
+        refs.oxygen.push(entry.fullUrl);
+        break;
+      case 'DocumentReference':
+        refs.attachments.push(entry.fullUrl);
+        break;
+      case 'Condition':
+        refs.risks.push(entry.fullUrl);
+        break;
+      case 'DetectedIssue':
+        refs.detectedIssues?.push(entry.fullUrl);
+        break;
+      default:
+        break;
+    }
+  };
+
+  vitals.forEach(pushEntry);
+  oxygenObservations.forEach(pushEntry);
+  nutrition.forEach((obs) => {
+    pushEntry(obs);
+    refs.nutrition.push(entries[entries.length - 1].fullUrl);
+  });
+  elimination.forEach((obs) => {
+    pushEntry(obs);
+    refs.elimination.push(entries[entries.length - 1].fullUrl);
+  });
+  mobilitySkin.forEach((obs) => {
+    pushEntry(obs);
+    refs.mobilitySkin.push(entries[entries.length - 1].fullUrl);
+  });
+  fluidBalance.forEach((obs) => {
+    pushEntry(obs);
+    refs.fluidBalance.push(entries[entries.length - 1].fullUrl);
+  });
+  pushEntry(evaObservation);
+  pushEntry(bradenObservation);
+  pushEntry(glasgowObservation);
+  riskConditions.forEach(pushEntry);
+  detectedIssues.forEach(pushEntry);
+  diagnoses.forEach((condition) => {
+    const entry = createTransactionEntry(condition);
+    entries.push(entry);
+    refs.diagnoses?.push(entry.fullUrl);
+  });
+  medications.forEach(pushEntry);
+  treatmentProcedures.forEach(pushEntry);
+  oxygenDevices.forEach(pushEntry);
+  if (document) pushEntry(document);
+
+  const composition = buildComposition(
+    {
+      patientId: data.patientId,
+      closingSummary: data.closingSummary ?? data.evolution,
+      administrativeData: data.administrativeData,
+      sbar: {
+        situation: data.sbarSituation,
+        background: data.sbarBackground,
+        assessment: data.sbarAssessment,
+        recommendation: data.sbarRecommendation,
+      },
+      signatures: data.signatures,
+    },
+    refs,
+    sharedOptions,
+  );
+
+  entries.push(createTransactionEntry(composition));
+
+  return { resourceType: 'Bundle', type: 'transaction', entry: entries } satisfies FhirBundleTransaction;
+}
+
+const transactionBundleSchema: z.ZodType<FhirBundleTransaction> = z.object({
+  resourceType: z.literal('Bundle'),
+  type: z.literal('transaction'),
+  entry: z
+    .array(
+      z.object({
+        fullUrl: z.string().url().or(z.string().startsWith('urn:uuid:')),
+        resource: z.record(z.any()),
+        request: z.object({ method: z.literal('POST'), url: z.string().min(1) }),
+      }),
+    )
+    .min(1),
+});
+
+export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; errors: string[] } {
+  const result = transactionBundleSchema.safeParse(bundle);
+  if (!result.success) {
+    return {
+      ok: false,
+      errors: result.error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`),
+    };
+  }
+  return { ok: true, errors: [] };
 }
 
 export type {

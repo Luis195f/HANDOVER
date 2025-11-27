@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
+  buildFhirBundleFromFormData,
   buildHandoverBundle,
   mapObservationVitals,
+  type HandoverData,
   type HandoverValues,
+  validateBundle,
 } from '@/src/lib/fhir-map';
+import { zHandover } from '@/src/validation/schemas';
 
 const NOW = '2025-01-05T10:30:00.000Z';
 
@@ -349,5 +353,95 @@ describe('buildHandoverBundle', () => {
 
     const combinedUrls = [...first.entry, ...second.entry].map((entry) => entry.fullUrl);
     expect(new Set(combinedUrls).size).toBe(first.entry.length);
+  });
+});
+
+describe('buildFhirBundleFromFormData', () => {
+  it('creates a transaction bundle valid for handover data', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 10,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        incidents: ['Sin incidentes'],
+      },
+      status: 'final',
+      patientId: 'patient-zod-1',
+      vitals: { hr: 80, rr: 18, tempC: 37.1, spo2: 97, sbp: 120, dbp: 78 },
+      dxMedical: 'Neumonía adquirida en la comunidad',
+      dxNursing: 'Riesgo de caídas',
+      evolution: 'Paciente estable, responde bien a la oxigenoterapia',
+      closingSummary: 'Turno sin novedades relevantes',
+      sbarSituation: 'Paciente ingresó por neumonía',
+      sbarBackground: 'Sin comorbilidades previas relevantes',
+      sbarAssessment: 'Sat 97% con oxígeno a 2 L/min',
+      sbarRecommendation: 'Continuar antibiótico IV y vigilancia de signos',
+      medications: [
+        { id: 'med-1', name: 'Paracetamol', dose: '1 g', route: 'iv', frequency: 'c/8h' },
+      ],
+      treatments: [
+        { id: 'tx-1', type: 'woundCare', description: 'Cambio de apósito', scheduledAt: '2025-01-05T12:00:00Z' },
+      ],
+      oxygenTherapy: { flowLMin: 2, deviceDisplay: 'Cánula nasal' },
+      nutrition: { dietType: 'oral', tolerance: 'Buena', intakeMl: 1200 },
+      elimination: { urineMl: 900, stoolPattern: 'normal', hasRectalTube: false },
+      mobility: { mobilityLevel: 'independent' },
+      skin: { skinStatus: 'Piel íntegra', hasPressureInjury: false },
+      fluidBalance: { intakeMl: 1200, outputMl: 900, netBalanceMl: 300 },
+      painAssessment: { hasPain: true, evaScore: 3, location: 'Torácico', actionsTaken: 'Analgesia' },
+      braden: {
+        sensoryPerception: 3,
+        moisture: 3,
+        activity: 3,
+        mobility: 3,
+        nutrition: 3,
+        frictionShear: 3,
+        totalScore: 18,
+        riskLevel: 'bajo',
+      },
+      glasgow: { eye: 4, verbal: 5, motor: 6, total: 15, severity: 'leve' },
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      risksStructured: [{ type: 'fall', present: true, notes: 'Precaución al movilizar' }],
+      signatures: {
+        outgoing: {
+          userId: 'nurse-1',
+          fullName: 'Nurse Example',
+          unitId: 'UCI-1',
+          signedAt: '2025-01-05T16:00:00Z',
+          method: 'session',
+        },
+      },
+      audioUri: 'https://example.org/audio/shift.m4a',
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const validation = validateBundle(bundle);
+
+    expect(bundle.resourceType).toBe('Bundle');
+    expect(bundle.type).toBe('transaction');
+    expect(validation.ok).toBe(true);
+    expect(validation.errors).toHaveLength(0);
+
+    const resourcesByType = bundle.entry.reduce<Record<string, number>>((acc, entry) => {
+      const type = entry.resource.resourceType;
+      acc[type] = (acc[type] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    expect(resourcesByType.Patient).toBe(1);
+    expect(resourcesByType.Composition).toBe(1);
+    expect((resourcesByType.Observation ?? 0) > 0).toBe(true);
+    expect((resourcesByType.MedicationStatement ?? 0) > 0).toBe(true);
+    expect(bundle.entry.every((entry) => entry.request.method === 'POST')).toBe(true);
   });
 });
