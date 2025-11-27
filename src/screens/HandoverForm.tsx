@@ -62,12 +62,14 @@ import { SignaturesSection, type SignatureUser } from './components/SignaturesSe
 import MedicationSection from './components/MedicationSection';
 import TreatmentsSection from './components/TreatmentsSection';
 import SafetySection from './components/SafetySection';
-import { VitalTrendsChart } from './components/VitalTrendsChart';
-import TtsButton from '@/src/components/TtsButton';
 // END HANDOVER D2 – VitalTrends imports
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { SidebarIndex, type SectionInfo } from './components/SidebarIndex';
 import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
+import { AdministrativeSection } from '@/src/components/handover/AdministrativeSection';
+import { PatientSection } from '@/src/components/handover/PatientSection';
+import { VitalsSection } from '@/src/components/handover/VitalsSection';
+import { SummarySection } from '@/src/components/handover/SummarySection';
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -147,7 +149,13 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
 type HandoverFormControl = Control<HandoverFormValues>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
-type DictationField = 'dxMedical' | 'dxNursing' | 'meds' | 'evolution' | 'closingSummary' | 'incidents';
+export type DictationField =
+  | 'dxMedical'
+  | 'dxNursing'
+  | 'meds'
+  | 'evolution'
+  | 'closingSummary'
+  | 'incidents';
 
 const sectionsInfo = [
   { key: 'turno', title: 'Datos del turno' },
@@ -312,94 +320,6 @@ async function buildAudioAttachment(uri: string | undefined) {
   }
 }
 
-function VitalsGroup({
-  control,
-  parseNumber,
-  errors,
-}: {
-  control: HandoverFormControl;
-  parseNumber: (value: string) => number | undefined;
-  errors: HandoverFormErrors;
-}) {
-  const fields: Array<{
-    name: `vitals.${string}`;
-    label: string;
-    placeholder: string;
-    keyboard?: 'default' | 'numeric';
-    errorPath: string[];
-  }> = [
-    { name: 'vitals.hr', label: 'Frecuencia cardíaca (/min)', placeholder: '80', keyboard: 'numeric', errorPath: ['vitals', 'hr'] },
-    { name: 'vitals.rr', label: 'Frecuencia respiratoria (/min)', placeholder: '16', keyboard: 'numeric', errorPath: ['vitals', 'rr'] },
-    { name: 'vitals.tempC', label: 'Temperatura (°C)', placeholder: '37.2', keyboard: 'numeric', errorPath: ['vitals', 'tempC'] },
-    { name: 'vitals.spo2', label: 'SpO₂ (%)', placeholder: '96', keyboard: 'numeric', errorPath: ['vitals', 'spo2'] },
-    { name: 'vitals.sbp', label: 'TA sistólica (mmHg)', placeholder: '118', keyboard: 'numeric', errorPath: ['vitals', 'sbp'] },
-    { name: 'vitals.dbp', label: 'TA diastólica (mmHg)', placeholder: '75', keyboard: 'numeric', errorPath: ['vitals', 'dbp'] },
-    { name: 'vitals.glucoseMgDl', label: 'Glucemia (mg/dL)', placeholder: '110', keyboard: 'numeric', errorPath: ['vitals', 'glucoseMgDl'] },
-    { name: 'vitals.glucoseMmolL', label: 'Glucemia (mmol/L)', placeholder: '6.1', keyboard: 'numeric', errorPath: ['vitals', 'glucoseMmolL'] },
-  ];
-
-  return (
-    <View>
-      <View style={styles.vitalsGrid}>
-        {fields.map((item) => {
-          const errorValue = item.errorPath.reduce<unknown>((acc, key) => {
-            if (acc && typeof acc === 'object' && key in (acc as Record<string, unknown>)) {
-              return (acc as Record<string, unknown>)[key];
-            }
-            return undefined;
-          }, errors);
-          const errorMessage =
-            typeof (errorValue as { message?: unknown } | undefined)?.message === 'string'
-              ? (errorValue as { message?: string }).message
-              : undefined;
-          return (
-            <View key={item.name as string} style={styles.vitalsCell}>
-              <View style={styles.field}>
-                <Text style={styles.label}>{item.label}</Text>
-                <Controller
-                  control={control}
-                  name={item.name}
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      style={styles.input}
-                      keyboardType={item.keyboard === 'numeric' ? 'numeric' : 'default'}
-                      placeholder={item.placeholder}
-                      onBlur={onBlur}
-                      value={value == null ? '' : String(value)}
-                      onChangeText={(text) => onChange(parseNumber(text))}
-                    />
-                  )}
-                />
-                {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-              </View>
-            </View>
-          );
-        })}
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>AVPU</Text>
-        <Controller
-          control={control}
-          name="vitals.avpu"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={styles.input}
-              placeholder="A / C / V / P / U"
-              autoCapitalize="characters"
-              onBlur={onBlur}
-              value={value ?? ''}
-              onChangeText={(text) => onChange(text.trim().toUpperCase().slice(0, 1) || undefined)}
-            />
-          )}
-        />
-        {errors?.vitals?.avpu?.message ? (
-          <Text style={styles.error}>{errors.vitals.avpu.message}</Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
 function OxygenGroup({
   control,
   parseNumber,
@@ -467,53 +387,6 @@ function OxygenGroup({
         />
         {fio2Error ? <Text style={styles.error}>{fio2Error}</Text> : null}
       </View>
-    </View>
-  );
-}
-
-function StaffListInput({
-  control,
-  name,
-  label,
-  placeholder,
-  error,
-}: {
-  control: HandoverFormControl;
-  name: 'administrativeData.staffIn' | 'administrativeData.staffOut';
-  label: string;
-  placeholder: string;
-  error?: string;
-}) {
-  const { fields, append, remove } = useFieldArray({ control, name });
-
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      {fields.map((field, index) => (
-        <View key={field.id} style={[styles.row, { marginBottom: 8 }]}>
-          <View style={styles.flex}>
-            <Controller
-              control={control}
-              name={`${name}.${index}` as const}
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={styles.input}
-                  placeholder={`${placeholder} ${index + 1}`}
-                  onBlur={onBlur}
-                  value={value ?? ''}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-          </View>
-          <View style={styles.spacer} />
-          <Button title="Eliminar" onPress={() => remove(index)} />
-        </View>
-      ))}
-      <View style={styles.inlineActions}>
-        <Button title="Añadir" onPress={() => append('')} />
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
@@ -667,20 +540,10 @@ export default function HandoverForm({ navigation, route }: Props) {
   const { control, formState } = form;
   const errors: HandoverFormErrors = formState.errors ?? {};
   const hasValidationErrors = Object.keys(errors).length > 0;
-  const administrativeErrors = errors.administrativeData ?? {};
-  const unitError = administrativeErrors.unit?.message as string | undefined;
-  const censusError = administrativeErrors.census?.message as string | undefined;
-  const startError = administrativeErrors.shiftStart?.message as string | undefined;
-  const endError = administrativeErrors.shiftEnd?.message as string | undefined;
-  const staffInError = administrativeErrors.staffIn?.message as string | undefined;
-  const staffOutError = administrativeErrors.staffOut?.message as string | undefined;
-  const incidentsError = administrativeErrors.incidents?.message as string | undefined;
-  const patientError = errors.patientId?.message as string | undefined;
   const medsError = errors.meds?.message as string | undefined;
   const dxMedicalError = errors.dxMedical?.message as string | undefined;
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
-  const closingSummaryError = errors.closingSummary?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const administrativeUnitValue = form.watch('administrativeData.unit');
   // BEGIN HANDOVER D4 – Get active unit
@@ -1453,135 +1316,19 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.turno}
             onToggle={() => toggleSection('turno')}
           >
-            <View style={styles.buttonRow}>
-              <Button title="Editar detalles del turno" color="#2563EB" onPress={handleShiftDetailsPress} />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Unidad</Text>
-              <Controller
-                control={control}
-                name="administrativeData.unit"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="UCI Adulto"
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {unitError ? <Text style={styles.error}>{unitError}</Text> : null}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Censo de pacientes</Text>
-              <Controller
-                control={control}
-                name="administrativeData.census"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="0"
-                    keyboardType="numeric"
-                    onBlur={onBlur}
-                    value={value == null ? '' : String(value)}
-                    onChangeText={(text) => onChange(parseNumericInput(text))}
-                  />
-                )}
-              />
-              {censusError ? <Text style={styles.error}>{censusError}</Text> : null}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Inicio de turno</Text>
-              <Controller
-                control={control}
-                name="administrativeData.shiftStart"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="2024-01-01T08:00"
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {startError ? <Text style={styles.error}>{startError}</Text> : null}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Fin de turno</Text>
-              <Controller
-                control={control}
-                name="administrativeData.shiftEnd"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    placeholder="2024-01-01T20:00"
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {endError ? <Text style={styles.error}>{endError}</Text> : null}
-            </View>
-            <StaffListInput
-              control={control}
-              name="administrativeData.staffIn"
-              label="Personal entrante"
-              placeholder="Nombre"
-              error={staffInError}
+            <AdministrativeSection
+              styles={styles}
+              onEditShift={handleShiftDetailsPress}
+              parseNumericInput={parseNumericInput}
+              dictationState={{
+                activeDictationField,
+                sttStatus,
+                dictationUnavailable,
+                renderDictationStatus,
+                handleDictationPress,
+              }}
+              DictationMicButton={DictationMicButton}
             />
-            <StaffListInput
-              control={control}
-              name="administrativeData.staffOut"
-              label="Personal saliente"
-              placeholder="Nombre"
-              error={staffOutError}
-            />
-            <View style={styles.field}>
-              <Text style={styles.label}>Observaciones del turno</Text>
-              <View style={styles.dictationRow}>
-                <View style={styles.flex}>
-                  <Controller
-                    control={control}
-                    name="administrativeData.incidents"
-                    render={({ field: { onChange, onBlur, value } }) => (
-                      <TextInput
-                        style={[styles.input, styles.textArea]}
-                        multiline
-                        placeholder="Incidentes o novedades del turno (una por línea)"
-                        onBlur={onBlur}
-                        value={Array.isArray(value) ? value.join('\n') : ''}
-                        onChangeText={(text) =>
-                          onChange(
-                            text
-                              .split('\n')
-                              .map((item) => item.trim())
-                              .filter(Boolean),
-                          )
-                        }
-                      />
-                    )}
-                  />
-                </View>
-                <DictationMicButton
-                  active={activeDictationField === 'incidents' && sttStatus === 'listening'}
-                  disabled={dictationUnavailable}
-                  label="Dictar observaciones"
-                  onPress={() =>
-                    handleDictationPress('incidents', {
-                      locale: 'es-ES',
-                      interimResults: true,
-                      maxSeconds: 60,
-                    })
-                  }
-                />
-              </View>
-              {renderDictationStatus('incidents')}
-              {incidentsError ? <Text style={styles.error}>{incidentsError}</Text> : null}
-              <Text style={styles.helperText}>Separa cada observación en una línea.</Text>
-            </View>
           </CollapsibleSection>
         </View>
 
@@ -1595,29 +1342,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.paciente}
             onToggle={() => toggleSection('paciente')}
           >
-            <View style={styles.field}>
-              <Text style={styles.label}>Paciente</Text>
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <Controller
-                    control={control}
-                    name="patientId"
-                    render={({ field: { onChange, onBlur, value } }) => (
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Paciente"
-                        onBlur={onBlur}
-                        value={value ?? ''}
-                        onChangeText={onChange}
-                      />
-                    )}
-                  />
-                </View>
-                <View style={styles.spacer} />
-                <Button title="Escanear" onPress={onScanPress} />
-              </View>
-              {patientError ? <Text style={styles.error}>{patientError}</Text> : null}
-            </View>
+            <PatientSection styles={styles} onScanPress={onScanPress} />
           </CollapsibleSection>
         </View>
 
@@ -1724,62 +1449,19 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.signos}
             onToggle={() => toggleSection('signos')}
           >
-            <VitalsGroup control={control} parseNumber={parseNumericInput} errors={errors} />
-            {/* BEGIN HANDOVER D2 – VitalTrends section */}
-            <View style={styles.vitalTrendsBlock}>
-              {loadingVitalTrends ? <ActivityIndicator size="small" /> : null}
-              {vitalTrendsError ? (
-                <Text style={styles.vitalTrendsError}>No se pudieron cargar las tendencias de signos vitales.</Text>
-              ) : null}
-              <VitalTrendsChart trends={vitalTrends} />
-            </View>
-            {/* END HANDOVER D2 – VitalTrends section */}
-            <View
-              style={[
-                styles.riskBanner,
-                riskEvaluation.level === 'high'
-                  ? styles.riskHigh
-                  : riskEvaluation.level === 'moderate'
-                    ? styles.riskModerate
-                    : styles.riskLow,
-              ]}
-            >
-              <Text style={styles.riskTitle}>
-                {riskEvaluation.level === 'high'
-                  ? 'Riesgo alto detectado'
-                  : riskEvaluation.level === 'moderate'
-                    ? 'Riesgo moderado'
-                    : 'Riesgo bajo'}
-              </Text>
-              {riskEvaluation.reasons.length > 0 ? (
-                riskEvaluation.reasons.map((reason) => (
-                  <Text key={reason} style={styles.riskReason}>
-                    • {reason}
-                  </Text>
-                ))
-              ) : (
-                <Text style={styles.riskReason}>
-                  Completa signos vitales y la escala de Braden para calcular el riesgo.
-                </Text>
-              )}
-            </View>
-            {aiSuggestionsEnabled ? (
-              <View style={styles.inlineActions}>
-                <Button
-                  title="Ver sugerencias de intervenciones (IA)"
-                  onPress={() => requestSuggestions('vitals')}
-                  disabled={suggestionsLoading === 'vitals'}
-                />
-              </View>
-            ) : null}
-            {aiSuggestionsEnabled ? (
-              <ClinicalSuggestions
-                suggestions={suggestionsState.vitals}
-                isLoading={suggestionsLoading === 'vitals'}
-                onRefresh={() => requestSuggestions('vitals')}
-                errorMessage={suggestionsError}
-              />
-            ) : null}
+            <VitalsSection
+              styles={styles}
+              parseNumericInput={parseNumericInput}
+              riskEvaluation={riskEvaluation}
+              loadingVitalTrends={loadingVitalTrends}
+              vitalTrendsError={vitalTrendsError}
+              vitalTrends={vitalTrends}
+              aiSuggestionsEnabled={aiSuggestionsEnabled}
+              suggestionsState={suggestionsState}
+              suggestionsLoading={suggestionsLoading}
+              suggestionsError={suggestionsError}
+              requestSuggestions={requestSuggestions}
+            />
           </CollapsibleSection>
         </View>
       )}
@@ -2145,63 +1827,21 @@ export default function HandoverForm({ navigation, route }: Props) {
           isCollapsed={collapsedSections.resumen}
           onToggle={() => toggleSection('resumen')}
         >
-          <View style={styles.field}>
-            <Text style={styles.label}>Resumen / cierre de turno</Text>
-            <View style={styles.dictationRow}>
-              <View style={styles.flex}>
-                <Controller
-                  control={control}
-                  name="closingSummary"
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      style={[styles.input, styles.textArea]}
-                      multiline
-                      placeholder="Resumen breve para el equipo entrante"
-                      onBlur={onBlur}
-                      value={value ?? ''}
-                      onChangeText={onChange}
-                    />
-                  )}
-                />
-              </View>
-              <DictationMicButton
-                active={activeDictationField === 'closingSummary' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
-                label="Dictar cierre"
-                onPress={() =>
-                  handleDictationPress('closingSummary', {
-                    locale: 'es-ES',
-                    interimResults: true,
-                    maxSeconds: 60,
-                  })
-                }
-              />
-            </View>
-            {renderDictationStatus('closingSummary')}
-            {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
-            <View style={styles.inlineActions}>
-              <TtsButton text={form.watch('closingSummary') ?? ''} label="Escuchar resumen" />
-              <View style={styles.secondaryButton}>
-                <Button title="Generar SBAR" onPress={handleGenerateSbar} />
-              </View>
-            </View>
-            {sbarPreview ? (
-              <View style={styles.sbarPreview}>
-                <Text style={styles.sbarTitle}>Resumen SBAR sugerido</Text>
-                <Text style={styles.sbarText}>{sbarPreview}</Text>
-                <Text style={styles.helperText}>Revisa y ajusta el contenido según tu criterio clínico.</Text>
-                <View style={styles.inlineActions}>
-                  <TtsButton text={sbarPreview ?? ''} label="Escuchar SBAR" />
-                  <View style={styles.secondaryButton}>
-                    <Button title="Insertar en resumen" onPress={handleInsertSbar} />
-                  </View>
-                  <View style={styles.secondaryButton}>
-                    <Button title="Cerrar" onPress={handleCloseSbarPreview} />
-                  </View>
-                </View>
-              </View>
-            ) : null}
-          </View>
+          <SummarySection
+            styles={styles}
+            dictationState={{
+              activeDictationField,
+              sttStatus,
+              dictationUnavailable,
+              renderDictationStatus,
+              handleDictationPress,
+            }}
+            DictationMicButton={DictationMicButton}
+            sbarPreview={sbarPreview}
+            onGenerateSbar={handleGenerateSbar}
+            onInsertSbar={handleInsertSbar}
+            onCloseSbarPreview={handleCloseSbarPreview}
+          />
         </CollapsibleSection>
       </View>
 
