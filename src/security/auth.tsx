@@ -26,14 +26,12 @@ const AUTH0_CLIENT_ID =
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
   AuthSession.makeRedirectUri({
-    native: 'handover-pro://redirect',
+    native: 'handover-pro://callback',
     scheme: 'handover-pro',
-    path: 'redirect',
+    path: 'callback',
   });
 
-const LOGOUT_REDIRECT_URI =
-  process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
-  'https://auth.expo.io/@enfermero1/handover-pro';
+const LOGOUT_REDIRECT_URI = process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ?? 'handover-pro://logout';
 
 const DEFAULT_AUTH_CONFIG = {
   issuer: `https://${AUTH0_DOMAIN}`,
@@ -354,6 +352,18 @@ async function performAuth0Login(options: {
   promptAsync: (options?: AuthSession.AuthRequestPromptOptions) => Promise<AuthSession.AuthSessionResult>;
   discovery?: AuthSession.DiscoveryDocument | null;
 }): Promise<HandoverSession> {
+  if (process.env.EXPO_PUBLIC_AUTH_DISABLED === 'true') {
+    // Creamos una sesión real local, sin modo demo
+    return login({
+      user: {
+        id: 'nurse001',
+        name: 'Luis Enfermero',
+        roles: ['nurse'],
+        units: ['UCI'],
+      },
+      accessToken: 'local-dev-token',
+    });
+  }
   const config = buildAuthConfig(options.config);
   const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
 

@@ -29,6 +29,7 @@ ios/
 # Environment variables
 .env
 .env.*
+.env.txt
 .env.local
 .env.production
 .env.development
