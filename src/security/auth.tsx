@@ -31,7 +31,10 @@ const REDIRECT_URI =
     path: 'callback',
   });
 
-const LOGOUT_REDIRECT_URI = process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ?? 'handover-pro://logout';
+// EXPO_PUBLIC_AUTH0_LOGOUT_URI debe ser un deep link válido (ej: handover-pro://auth/logout) cuando se defina.
+const LOGOUT_REDIRECT_URI =
+  process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
+  AuthSession.makeRedirectUri({ useProxy: false, path: 'auth/logout' });
 
 const DEFAULT_AUTH_CONFIG = {
   issuer: `https://${AUTH0_DOMAIN}`,
@@ -262,6 +265,7 @@ async function resolveTokensFromResult(
   discovery: AuthSession.DiscoveryDocument | null,
   clientId: string,
   redirectUri: string,
+  codeVerifier?: string | null,
 ): Promise<AuthTokens> {
   if (result.type !== 'success') {
     throw new Error(result.params?.error_description ?? 'OAUTH_CANCELLED');
@@ -297,7 +301,7 @@ async function resolveTokensFromResult(
   }
 
   const tokenResult = await AuthSession.exchangeCodeAsync(
-    { clientId, code, redirectUri },
+    { clientId, code, redirectUri, extraParams: codeVerifier ? { code_verifier: codeVerifier } : undefined },
     discovery,
   );
 
@@ -351,6 +355,7 @@ async function performAuth0Login(options: {
   config?: Partial<typeof DEFAULT_AUTH_CONFIG>;
   promptAsync: (options?: AuthSession.AuthRequestPromptOptions) => Promise<AuthSession.AuthSessionResult>;
   discovery?: AuthSession.DiscoveryDocument | null;
+  codeVerifier?: string | null;
 }): Promise<HandoverSession> {
   if (process.env.EXPO_PUBLIC_AUTH_DISABLED === 'true') {
     // Creamos una sesión real local, sin modo demo
@@ -375,7 +380,13 @@ async function performAuth0Login(options: {
     console.log('[auth] Using redirectUri:', config.redirectUri);
   }
 
-  const tokens = await resolveTokensFromResult(authResult, discovery, config.clientId, config.redirectUri);
+  const tokens = await resolveTokensFromResult(
+    authResult,
+    discovery,
+    config.clientId,
+    config.redirectUri,
+    options.codeVerifier,
+  );
   const session = await buildSessionFromTokens(tokens, discovery);
   await setSession(session);
   return session;
@@ -396,6 +407,7 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
     config: merged,
     discovery,
     promptAsync: (options) => request.promptAsync(discovery, { ...options, useProxy: false }),
+    codeVerifier: request.codeVerifier,
   });
   return session;
 }
@@ -525,7 +537,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const authConfig = useMemo(() => buildAuthConfig(), []);
   const discovery = AuthSession.useAutoDiscovery(authConfig.issuer);
-  const [, , promptAsync] = AuthSession.useAuthRequest(
+  const [authRequest, , promptAsync] = AuthSession.useAuthRequest(
     {
       clientId: authConfig.clientId,
       redirectUri: authConfig.redirectUri,
@@ -565,8 +577,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       config: authConfig,
       discovery,
       promptAsync: (options) => promptAsync({ ...options, useProxy: false }),
+      codeVerifier: authRequest?.codeVerifier,
     });
-  }, [authConfig, discovery, promptAsync]);
+  }, [authConfig, authRequest?.codeVerifier, discovery, promptAsync]);
 
   const value = useMemo<AuthContextValue>(() => ({
     session,

@@ -26,6 +26,10 @@ export async function generateSbarViaBackend(
     throw new Error('No se pudo generar el SBAR con IA');
   }
 
+  if (!AI_BACKEND_BASE_URL) {
+    throw new Error('Módulo de IA no configurado');
+  }
+
   const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/summarize-sbar`, {
     method: 'POST',
     headers: {

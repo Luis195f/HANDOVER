@@ -38,6 +38,10 @@ interface SuggestionsBackendResponse {
 export async function fetchInterventionsSuggestions(
   ctx: ClinicalContext,
 ): Promise<SuggestionsResult> {
+  if (!AI_BACKEND_BASE_URL) {
+    throw new Error('Módulo de IA no configurado');
+  }
+
   const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/suggest-interventions`, {
     method: 'POST',
     headers: {

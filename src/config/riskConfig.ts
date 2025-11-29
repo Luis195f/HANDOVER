@@ -1,6 +1,6 @@
 import { isOn } from './flags';
 
-import type { RiskConfig } from '@/src/lib/scores/riskRules';
+import type { RiskConfig } from '@/src/types/risk';
 
 const DEFAULT_RISK_CONFIG: RiskConfig = {
   news2HighThreshold: 7,
