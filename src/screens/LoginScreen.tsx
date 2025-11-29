@@ -1,8 +1,14 @@
 // src/screens/LoginScreen.tsx
 import React, { useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Alert, View, Text, Pressable, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@/src/security/auth';
+
+const isAuthCancelledError = (error: unknown): boolean => {
+  if (!error) return false;
+  const message = (error as { message?: string }).message ?? String(error);
+  return message.includes('OAUTH_CANCELLED') || (error as { type?: string }).type === 'dismiss';
+};
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
@@ -25,7 +31,11 @@ export default function LoginScreen() {
       await loginWithOAuth();
       goToHome();
     } catch (error) {
+      if (isAuthCancelledError(error)) {
+        return;
+      }
       if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[login] Failed to authenticate', error);
+      Alert.alert('No se pudo iniciar sesión', 'Vuelve a intentarlo en unos segundos.');
     }
   }, [goToHome, loginWithOAuth]);
 

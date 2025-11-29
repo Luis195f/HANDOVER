@@ -80,6 +80,33 @@ describe('terminology-validation', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('does not cache offline failures so it can retry once network is back', async () => {
+    process.env.HANDOVER_FHIR_VALIDATION_MODE = 'remote';
+    const fetchSpy = vi
+      .spyOn(fhirClient, 'fetchFHIR')
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({
+        ok: true,
+        response: {} as Response,
+        data: { result: true },
+      });
+
+    const first = await validateTerminologyCode({
+      system: TERMINOLOGY_SYSTEMS.SNOMED,
+      code: '12345',
+    });
+
+    const second = await validateTerminologyCode({
+      system: TERMINOLOGY_SYSTEMS.SNOMED,
+      code: '12345',
+    });
+
+    expect(first.source).toBe('offline');
+    expect(second.source).toBe('remote');
+    expect(second.valid).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('fails fast when mode is off and code is unknown locally', async () => {
     const fetchSpy = vi.spyOn(fhirClient, 'fetchFHIR');
     const result = await validateTerminologyCode({

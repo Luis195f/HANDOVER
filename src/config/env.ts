@@ -22,8 +22,42 @@ function resolveSttEndpoint(): string | null {
 export const FHIR_BASE_URL: string = resolveBaseUrl();
 export const STT_ENDPOINT: string | null = resolveSttEndpoint();
 
-export const AI_BACKEND_BASE_URL =
-  process.env.EXPO_PUBLIC_AI_BACKEND_BASE_URL ?? FHIR_BASE_URL;
+function sanitizeBaseUrl(raw: string): string {
+  return raw.replace(/\/+$/, '');
+}
+
+function resolveAiBackendBaseUrl(): string | null {
+  const aiEnv =
+    process.env.EXPO_PUBLIC_AI_BACKEND_BASE_URL ??
+    process.env.AI_BACKEND_BASE_URL ??
+    Constants.expoConfig?.extra?.AI_BACKEND_BASE_URL;
+
+  if (typeof aiEnv === 'string' && aiEnv.trim()) {
+    return sanitizeBaseUrl(aiEnv.trim());
+  }
+
+  const apiBaseCandidate =
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    process.env.API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE ??
+    process.env.API_BASE ??
+    (typeof Constants.expoConfig?.extra?.API_BASE_URL === 'string'
+      ? Constants.expoConfig?.extra?.API_BASE_URL
+      : undefined);
+
+  if (apiBaseCandidate && apiBaseCandidate.trim()) {
+    return sanitizeBaseUrl(apiBaseCandidate.trim());
+  }
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn('[env] AI backend is not configured; disabling AI features');
+  }
+
+  return null;
+}
+
+export const AI_BACKEND_BASE_URL: string | null = resolveAiBackendBaseUrl();
+export const AI_BACKEND_ENABLED = Boolean(AI_BACKEND_BASE_URL);
 
 export const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? process.env.API_BASE ?? '';
 export const API_TOKEN = process.env.EXPO_PUBLIC_API_TOKEN ?? process.env.API_TOKEN ?? '';
@@ -34,6 +68,7 @@ export const ENV = {
   API_TOKEN,
   STT_ENDPOINT,
   AI_BACKEND_BASE_URL,
+  AI_BACKEND_ENABLED,
 } as const;
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';

@@ -1,4 +1,5 @@
-import { getEffectiveRiskConfig, type RiskConfig } from '@/src/config/riskConfig';
+import { getEffectiveRiskConfig } from '@/src/config/riskConfig';
+import type { RiskConfig } from '@/src/types/risk';
 
 import type { BradenResult } from './braden';
 import type { News2Result } from './news2';

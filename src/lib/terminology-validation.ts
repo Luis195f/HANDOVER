@@ -149,7 +149,11 @@ export async function validateTerminologyCode({
   }
 
   const remoteResult = await validateRemotely({ system, code, display });
-  cache.set(key, remoteResult);
+
+  if (remoteResult.source !== 'offline') {
+    cache.set(key, remoteResult);
+  }
+
   return remoteResult;
 }
 

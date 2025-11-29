@@ -6,6 +6,7 @@ import { VitalTrendsChart } from '@/src/screens/components/VitalTrendsChart';
 import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
 import type { SuggestionsResult } from '@/src/lib/ai-suggestions';
 import type { deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
+import type { VitalTrendsData } from '../../../types/vitals';
 
 export type VitalsSectionProps = {
   styles: Record<string, any>;
@@ -13,7 +14,7 @@ export type VitalsSectionProps = {
   riskEvaluation: ReturnType<typeof deriveRiskEvaluationFromValues>;
   loadingVitalTrends: boolean;
   vitalTrendsError: string | null;
-  vitalTrends: Array<{ time: string; label: string; value: number } | null>;
+  vitalTrends: VitalTrendsData | null;
   aiSuggestionsEnabled: boolean;
   suggestionsState: { vitals: SuggestionsResult | null; diagnosis: SuggestionsResult | null };
   suggestionsLoading: 'vitals' | 'diagnosis' | null;
