@@ -176,7 +176,7 @@ const extractMrn = (patient: any): string | undefined => {
 
 type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;
-  logout?: () => void;
+  logout?: () => Promise<void> | void;
   getBaseUrl?: () => string | undefined;
   /** Compat: algunos callers pasan baseUrl directo */
   baseUrl?: string;
@@ -253,7 +253,7 @@ export async function fetchFHIR(
 
   // Comportamiento esperado por los tests
   if (res.status === 401 || res.status === 403) {
-    hooks.logout?.();
+    if (hooks.logout) await hooks.logout();
     throw new Error('unauthorized');
   }
 

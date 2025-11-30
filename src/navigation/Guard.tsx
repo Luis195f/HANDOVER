@@ -1,12 +1,13 @@
 // @ts-nocheck
 import React, { useEffect, useState } from "react";
 import { View, ActivityIndicator, Text } from "react-native";
-import { getSession, ensureRole, ensureUnit, type Role } from "@/src/security/auth";
+import { getSession } from "@/src/security/auth";
+import { ensureRole, ensureUnitAccess, type UserRole } from "@/src/security/acl";
 
 type Props = {
   children: React.ReactNode;
   /** Rol o lista de roles requeridos (cualquiera de ellos). */
-  role?: Role | Role[];
+  role?: UserRole | UserRole[];
   /** Unidad requerida (el usuario debe tener acceso). */
   unitId?: string;
   /** (Opcional) UI alternativa cuando se deniega el acceso. */
@@ -24,7 +25,7 @@ export function RequireAuth({ children, role, unitId, fallback }: Props) {
         if (!session) throw new Error("NO_SESSION");
 
         if (role) ensureRole(session, role);      // puede lanzar
-        if (unitId) ensureUnit(session, unitId);  // puede lanzar
+        if (unitId) ensureUnitAccess(session, unitId);  // puede lanzar
 
         if (alive) setOk(true);
       } catch {

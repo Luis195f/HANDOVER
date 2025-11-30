@@ -2,13 +2,7 @@
 import React, { useCallback } from 'react';
 import { Alert, View, Text, Pressable, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useAuth } from '@/src/security/auth';
-
-const isAuthCancelledError = (error: unknown): boolean => {
-  if (!error) return false;
-  const message = (error as { message?: string }).message ?? String(error);
-  return message.includes('OAUTH_CANCELLED') || (error as { type?: string }).type === 'dismiss';
-};
+import { isAuthCancelledError, useAuth } from '@/src/security/auth';
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
