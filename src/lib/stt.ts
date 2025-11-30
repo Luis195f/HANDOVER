@@ -299,6 +299,10 @@ export async function transcribeAudioViaBackend(
   fileUri: string,
   options?: { language?: string },
 ): Promise<string> {
+  if (!AI_BACKEND_BASE_URL) {
+    throw new Error('AI backend not configured');
+  }
+
   const info = await FileSystem.getInfoAsync(fileUri);
   if (!info.exists) {
     throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
@@ -334,7 +338,7 @@ export async function transcribeAudio(
   options?: { language?: string },
 ): Promise<string> {
   if (!AI_BACKEND_BASE_URL) {
-    return defaultTranscriptionMock();
+    throw new Error('AI backend not configured');
   }
 
   try {

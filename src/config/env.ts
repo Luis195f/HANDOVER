@@ -36,19 +36,6 @@ function resolveAiBackendBaseUrl(): string | null {
     return sanitizeBaseUrl(aiEnv.trim());
   }
 
-  const apiBaseCandidate =
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    process.env.API_BASE_URL ??
-    process.env.EXPO_PUBLIC_API_BASE ??
-    process.env.API_BASE ??
-    (typeof Constants.expoConfig?.extra?.API_BASE_URL === 'string'
-      ? Constants.expoConfig?.extra?.API_BASE_URL
-      : undefined);
-
-  if (apiBaseCandidate && apiBaseCandidate.trim()) {
-    return sanitizeBaseUrl(apiBaseCandidate.trim());
-  }
-
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.warn('[env] AI backend is not configured; disabling AI features');
   }
