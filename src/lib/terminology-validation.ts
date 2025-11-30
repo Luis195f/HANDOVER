@@ -15,6 +15,7 @@ export type CodeValidationResult = {
   valid: boolean;
   message?: string;
   source: 'local' | 'remote' | 'cache' | 'offline';
+  offline?: boolean;
 };
 
 const snomedLocalCodes = new Set<string>([
@@ -106,7 +107,7 @@ async function validateRemotely({
       error?.message?.includes('unauthorized')
         ? 'Sesión expirada, vuelve a iniciar sesión para validar códigos.'
         : 'No se pudo verificar el código en este momento; comprueba tu conexión o selecciona un código conocido';
-    return { valid: false, message, source: 'offline' };
+    return { valid: false, message, source: 'offline', offline: true };
   }
 }
 
@@ -150,7 +151,7 @@ export async function validateTerminologyCode({
 
   const remoteResult = await validateRemotely({ system, code, display });
 
-  if (remoteResult.source !== 'offline') {
+  if (!remoteResult.offline) {
     cache.set(key, remoteResult);
   }
 

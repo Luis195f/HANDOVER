@@ -533,6 +533,8 @@ type BundleReferenceIndex = {
   braden: string[];
   glasgow: string[];
   risks: string[];
+  detectedIssues?: string[];
+  diagnoses?: string[];
 };
 
 export type AuthorInput = {
@@ -1920,6 +1922,20 @@ export function buildComposition(
     });
   }
 
+  if (refs.detectedIssues && refs.detectedIssues.length > 0) {
+    sections.push({
+      title: 'Detected issues',
+      entry: refs.detectedIssues.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.diagnoses && refs.diagnoses.length > 0) {
+    sections.push({
+      title: 'Diagnoses',
+      entry: refs.diagnoses.map((reference) => ({ reference })),
+    });
+  }
+
   if (refs.fluidBalance.length > 0) {
     sections.push({
       title: 'Fluid balance',
@@ -1977,14 +1993,14 @@ export function buildHandoverBundle(
     encounter: encounterReference(values.encounterId),
     effectiveDateTime: sharedOptions.now(),
   };
-  // BEGIN HANDOVER D3 – TODO FHIR mapping for structured diagnoses
-  // TODO: mapear `dxMedicalStructured` y `dxNursingStructured` a Condition resources con códigos
-  //       SNOMED/NANDA.
-  //       Cada diagnóstico debería convertirse en un recurso FHIR `Condition` con
-  //       `code.coding = [{ system, code, display }]`.
-  //       Referenciar estas Conditions desde la Composition principal.
-  // END HANDOVER D3 – TODO FHIR mapping for structured diagnoses
-  // TODO HANDOVER D1: mapear bedsideChecklist a extensiones/observaciones FHIR en un bloque posterior.
+  const patient: Patient = {
+    resourceType: 'Patient',
+    id: values.patientId,
+    identifier: [{ system: 'urn:handover-pro:patient-id', value: values.patientId }],
+  };
+
+  const diagnoses = mapDiagnoses(values as HandoverData, mappingContext);
+  const detectedIssues = mapDetectedIssuesFromRisks(values.risksStructured, mappingContext);
 
   const vitalObservations = values.vitals
     ? mapObservationVitals(
@@ -2070,7 +2086,9 @@ export function buildHandoverBundle(
     sharedOptions,
   );
 
-  const entries: BundleEntry[] = [];
+  const entries: BundleEntry[] = [
+    { fullUrl: `Patient/${values.patientId}`, resource: patient, request: { method: 'POST', url: 'Patient' } },
+  ];
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];
   const treatmentRefs: string[] = [];
@@ -2084,6 +2102,8 @@ export function buildHandoverBundle(
   const bradenRefs: string[] = [];
   const glasgowRefs: string[] = [];
   const riskRefs: string[] = [];
+  const issueRefs: string[] = [];
+  const diagnosisRefs: string[] = [];
 
   vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(observation, values.patientId);
@@ -2173,6 +2193,18 @@ export function buildHandoverBundle(
     riskRefs.push(fullUrl);
   });
 
+  detectedIssues.forEach((issue) => {
+    const { resource, fullUrl } = assignStableIds(issue, values.patientId);
+    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'DetectedIssue' } });
+    issueRefs.push(fullUrl);
+  });
+
+  diagnoses.forEach((condition) => {
+    const { resource, fullUrl } = assignStableIds(condition, values.patientId);
+    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Condition' } });
+    diagnosisRefs.push(fullUrl);
+  });
+
   medications.forEach((medication) => {
     const { resource, fullUrl } = assignStableIds(medication, values.patientId);
     entries.push({
@@ -2238,6 +2270,8 @@ export function buildHandoverBundle(
       braden: bradenRefs,
       glasgow: glasgowRefs,
       risks: riskRefs,
+      detectedIssues: issueRefs,
+      diagnoses: diagnosisRefs,
     },
     sharedOptions,
   );

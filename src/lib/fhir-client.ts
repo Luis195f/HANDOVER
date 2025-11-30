@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/fhir-client.ts
 import { fetchWithRetry } from './net';
+import { getValidationErrorsFromBundle, validateBundle as validateFhirBundle } from './fhir-validation';
 import type { GeneratedPdf } from './export/export-pdf';
 // BEGIN HANDOVER D2 – VitalTrends fhir-client
 import { LOINC, TERMINOLOGY_SYSTEMS } from './codes';
@@ -279,6 +280,22 @@ export async function postBundle(
   bundle: any,
   opts?: { token?: string; headers?: Record<string, string> } | string
 ) {
+  const validation = validateFhirBundle(bundle);
+  const embeddedErrors = getValidationErrorsFromBundle(bundle);
+  if (!validation.isValid || embeddedErrors) {
+    const errors = embeddedErrors || validation.errors;
+    return {
+      ok: false,
+      status: 400,
+      issues: errors.map((err) => ({ severity: 'error', code: 'invalid', diagnostics: `${err.path}: ${err.message}` })),
+      issue: errors.map((err) => ({ severity: 'error', code: 'invalid', diagnostics: `${err.path}: ${err.message}` })),
+      body: {
+        error: 'FHIR bundle failed validation',
+        details: errors,
+      },
+    } as const;
+  }
+
   try {
     // ensureFreshToken si no hay token explícito
     let token: string | undefined;

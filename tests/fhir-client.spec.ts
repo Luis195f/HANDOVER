@@ -3,7 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const bundle = {
   resourceType: 'Bundle' as const,
   type: 'transaction' as const,
-  entry: [],
+  entry: [
+    {
+      fullUrl: 'urn:uuid:obs-1',
+      resource: {
+        resourceType: 'Observation',
+        status: 'final',
+        category: [
+          {
+            coding: [
+              { system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' },
+            ],
+          },
+        ],
+        code: { coding: [{ system: 'http://loinc.org', code: '8867-4' }] },
+        subject: { reference: 'Patient/p-1' },
+        effectiveDateTime: '2024-01-01T00:00:00.000Z',
+      },
+      request: { method: 'POST', url: 'Observation' },
+    },
+  ],
 };
 
 async function loadClient() {
@@ -111,5 +130,20 @@ describe('postBundle', () => {
     const result = await postBundle(bundle, { token: 'tk' });
 
     expect(result).toEqual({ ok: false, status: 500, json: undefined, issue: undefined, location: undefined });
+  });
+
+  it('returns validation error without performing fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { postBundle } = await loadClient();
+
+    const invalidBundle = { resourceType: 'Bundle', type: 'transaction' };
+
+    const result = await postBundle(invalidBundle, { token: 'tk' });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(400);
+    expect(result.issues?.[0]?.diagnostics).toContain('entry');
   });
 });
