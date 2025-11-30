@@ -2,11 +2,14 @@
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Alert } from 'react-native';
 import { Buffer } from 'buffer';
 
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
+import navigation from '@/src/navigation/navigation';
+import { configureFHIRClient } from '@/src/lib/fhir-client';
 
 const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
 
@@ -46,6 +49,11 @@ const DEFAULT_AUTH_CONFIG = {
 // END HANDOVER: AUTH_CONFIG
 
 type SessionModel = HandoverSession;
+
+type LogoutOptions = {
+  skipRemote?: boolean;
+  message?: string;
+};
 
 const STORAGE_NAMESPACE = (process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover').replace(
   /[^a-zA-Z0-9._-]/g,
@@ -129,6 +137,8 @@ async function migrateFromAsyncStorage(): Promise<HandoverSession | null> {
 let hydrated = false;
 let currentSession: HandoverSession | null = null;
 const listeners: Array<(session: HandoverSession | null) => void> = [];
+let logoutInFlight: Promise<void> | null = null;
+let pendingLogoutMessage: string | undefined;
 
 function notify(session: SessionModel | null) {
   listeners.forEach((listener) => {
@@ -300,8 +310,12 @@ async function resolveTokensFromResult(
     throw new Error('OAUTH_CANCELLED');
   }
 
+  if (!codeVerifier) {
+    throw new Error('PKCE_CODE_VERIFIER_MISSING');
+  }
+
   const tokenResult = await AuthSession.exchangeCodeAsync(
-    { clientId, code, redirectUri, extraParams: codeVerifier ? { code_verifier: codeVerifier } : undefined },
+    { clientId, code, redirectUri, extraParams: { code_verifier: codeVerifier } },
     discovery,
   );
 
@@ -349,6 +363,12 @@ async function buildSessionFromTokens(tokens: AuthTokens, discovery: AuthSession
     roles,
     units,
   } satisfies HandoverSession;
+}
+
+export function isAuthCancelledError(error: unknown): boolean {
+  if (!error) return false;
+  const message = (error as { message?: string }).message ?? String(error);
+  return message.includes('OAUTH_CANCELLED') || (error as { type?: string }).type === 'dismiss';
 }
 
 async function performAuth0Login(options: {
@@ -450,20 +470,52 @@ export async function loginDemo(): Promise<SessionModel> {
 
 // BEGIN HANDOVER: AUTH_LOGOUT
 export async function logout(): Promise<void> {
-  await hydrateSession();
-  const config = buildAuthConfig();
-  const domain = AUTH0_DOMAIN;
+  const message = pendingLogoutMessage;
+  if (logoutInFlight) return logoutInFlight;
 
-  try {
-    const authUrl = `https://${domain}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
-      config.logoutUri,
-    )}`;
-    await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
-  } catch (error) {
-    if (isDev) console.warn('[auth] Failed to complete logout', error);
+  const runner = async () => {
+    await hydrateSession();
+    const config = buildAuthConfig();
+    const domain = AUTH0_DOMAIN;
+
+    try {
+      const authUrl = `https://${domain}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
+        config.logoutUri,
+      )}`;
+      await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
+    } catch (error) {
+      if (isDev) console.warn('[auth] Failed to complete logout', error);
+    }
+
+    await setSession(null);
+    if (message) {
+      Alert.alert('Sesión expirada', message);
+    }
+    navigation.resetTo('Login');
+  };
+
+  logoutInFlight = runner().finally(() => {
+    logoutInFlight = null;
+    pendingLogoutMessage = undefined;
+  });
+
+  return logoutInFlight;
+}
+export async function logoutAndClear(options: LogoutOptions = {}): Promise<void> {
+  if (options.message) pendingLogoutMessage = options.message;
+  if (options.skipRemote) {
+    if (logoutInFlight) return logoutInFlight;
+    logoutInFlight = (async () => {
+      await setSession(null);
+      if (options.message) Alert.alert('Sesión expirada', options.message);
+      navigation.resetTo('Login');
+    })().finally(() => {
+      logoutInFlight = null;
+      pendingLogoutMessage = undefined;
+    });
+    return logoutInFlight;
   }
-
-  await setSession(null);
+  return logout();
 }
 // END HANDOVER: AUTH_LOGOUT
 
@@ -572,12 +624,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    configureFHIRClient({
+      ensureFreshToken: async () => (await getCurrentSession())?.accessToken ?? null,
+      logout: async () =>
+        logoutAndClear({
+          skipRemote: true,
+          message: 'Sesión expirada, inicia sesión de nuevo',
+        }),
+    });
+  }, []);
+
   const loginWithAuth0 = useCallback(async () => {
+    if (!authRequest?.codeVerifier) {
+      throw new Error('AUTH_REQUEST_NOT_READY');
+    }
     return performAuth0Login({
       config: authConfig,
       discovery,
       promptAsync: (options) => promptAsync({ ...options, useProxy: false }),
-      codeVerifier: authRequest?.codeVerifier,
+      codeVerifier: authRequest.codeVerifier,
     });
   }, [authConfig, authRequest?.codeVerifier, discovery, promptAsync]);
 
