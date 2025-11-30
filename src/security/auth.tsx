@@ -270,13 +270,15 @@ type AuthTokens = {
   tokenType?: string;
 };
 
-async function resolveTokensFromResult(
-  result: AuthSession.AuthSessionResult,
-  discovery: AuthSession.DiscoveryDocument | null,
-  clientId: string,
-  redirectUri: string,
-  codeVerifier?: string | null,
-): Promise<AuthTokens> {
+async function resolveTokensFromResult(options: {
+  request: AuthSession.AuthRequest;
+  result: AuthSession.AuthSessionResult;
+  discovery: AuthSession.DiscoveryDocument | null;
+  clientId: string;
+  redirectUri: string;
+}): Promise<AuthTokens> {
+  const { request, result, discovery, clientId, redirectUri } = options;
+
   if (result.type !== 'success') {
     throw new Error(result.params?.error_description ?? 'OAUTH_CANCELLED');
   }
@@ -310,12 +312,17 @@ async function resolveTokensFromResult(
     throw new Error('OAUTH_CANCELLED');
   }
 
-  if (!codeVerifier) {
+  if (!request.codeVerifier && request.codeChallengeMethod) {
     throw new Error('PKCE_CODE_VERIFIER_MISSING');
   }
 
   const tokenResult = await AuthSession.exchangeCodeAsync(
-    { clientId, code, redirectUri, extraParams: { code_verifier: codeVerifier } },
+    {
+      clientId,
+      code,
+      redirectUri,
+      extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : undefined,
+    },
     discovery,
   );
 
@@ -375,7 +382,7 @@ async function performAuth0Login(options: {
   config?: Partial<typeof DEFAULT_AUTH_CONFIG>;
   promptAsync: (options?: AuthSession.AuthRequestPromptOptions) => Promise<AuthSession.AuthSessionResult>;
   discovery?: AuthSession.DiscoveryDocument | null;
-  codeVerifier?: string | null;
+  request: AuthSession.AuthRequest;
 }): Promise<HandoverSession> {
   if (process.env.EXPO_PUBLIC_AUTH_DISABLED === 'true') {
     // Creamos una sesión real local, sin modo demo
@@ -400,13 +407,13 @@ async function performAuth0Login(options: {
     console.log('[auth] Using redirectUri:', config.redirectUri);
   }
 
-  const tokens = await resolveTokensFromResult(
-    authResult,
+  const tokens = await resolveTokensFromResult({
+    request: options.request,
+    result: authResult,
     discovery,
-    config.clientId,
-    config.redirectUri,
-    options.codeVerifier,
-  );
+    clientId: config.clientId,
+    redirectUri: config.redirectUri,
+  });
   const session = await buildSessionFromTokens(tokens, discovery);
   await setSession(session);
   return session;
@@ -427,7 +434,7 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
     config: merged,
     discovery,
     promptAsync: (options) => request.promptAsync(discovery, { ...options, useProxy: false }),
-    codeVerifier: request.codeVerifier,
+    request,
   });
   return session;
 }
@@ -636,16 +643,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loginWithAuth0 = useCallback(async () => {
-    if (!authRequest?.codeVerifier) {
+    if (!authRequest) {
       throw new Error('AUTH_REQUEST_NOT_READY');
     }
     return performAuth0Login({
       config: authConfig,
       discovery,
       promptAsync: (options) => promptAsync({ ...options, useProxy: false }),
-      codeVerifier: authRequest.codeVerifier,
+      request: authRequest,
     });
-  }, [authConfig, authRequest?.codeVerifier, discovery, promptAsync]);
+  }, [authConfig, authRequest, discovery, promptAsync]);
 
   const value = useMemo<AuthContextValue>(() => ({
     session,
