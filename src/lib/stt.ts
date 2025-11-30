@@ -347,3 +347,26 @@ export async function transcribeAudio(
     throw error instanceof Error ? error : new Error(TRANSCRIPTION_ERROR_MESSAGE);
   }
 }
+
+export type TranscriptionResult =
+  | { ok: true; text: string }
+  | { ok: false; error: string; code?: SttErrorCode };
+
+export async function transcribeAudioWithResult(
+  fileUri: string,
+  options?: { language?: string },
+): Promise<TranscriptionResult> {
+  try {
+    const text = await transcribeAudio(fileUri, options);
+    return { ok: true, text };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : TRANSCRIPTION_ERROR_MESSAGE;
+    const normalized = message.toLowerCase();
+    const code: SttErrorCode | undefined = normalized.includes('permission')
+      ? 'PERMISSION_DENIED'
+      : normalized.includes('network')
+        ? 'NETWORK'
+        : undefined;
+    return { ok: false, error: message || TRANSCRIPTION_ERROR_MESSAGE, code };
+  }
+}
