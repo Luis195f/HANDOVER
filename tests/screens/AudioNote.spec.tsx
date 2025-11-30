@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { describe, expect, it, vi } from 'vitest';
 
 import AudioNote from '@/src/screens/AudioNote';
@@ -30,6 +30,9 @@ vi.mock('@/src/lib/stt', () => {
   return {
     createSttService: () => service,
     transcribeAudioWithResult: vi.fn(async () => ({ ok: true, text: 'mock transcription' })),
+    __emitSttResult: (payload: { text: string; isFinal: boolean }) => {
+      listeners.forEach((listener) => listener(payload));
+    },
   };
 });
 
@@ -66,7 +69,7 @@ describe('AudioNote', () => {
     vi.clearAllMocks();
   });
 
-  it('rellena la transcripción cuando el STT devuelve texto', async () => {
+  it('rellena la transcripción al transcribir el audio grabado con IA', async () => {
     const screen = renderScreen();
 
     await waitFor(() => {
@@ -79,6 +82,8 @@ describe('AudioNote', () => {
       const input = screen.getByPlaceholderText('Transcripción editable de la nota');
       expect(input.props.value).toContain('mock transcription');
     });
+
+    expect(transcribeAudioWithResult).toHaveBeenCalledWith('file://mock-note.m4a', { language: 'es' });
   });
 
   it('permite editar manualmente cuando la transcripción falla', async () => {
@@ -97,6 +102,24 @@ describe('AudioNote', () => {
     await waitFor(() => {
       expect(screen.getByText('No se pudo transcribir con IA. Puedes seguir escribiendo manualmente.')).toBeTruthy();
       expect(screen.getByPlaceholderText('Transcripción editable de la nota').props.value).toBe('manual note');
+    });
+  });
+
+  it('añade texto dictado cuando el STT notifica un resultado final', async () => {
+    const screen = renderScreen();
+
+    const dictationButton = await screen.findByText('Dictar nota (transcripción)');
+    fireEvent.press(dictationButton);
+
+    const { __emitSttResult } = await import('@/src/lib/stt');
+    await act(async () => {
+      (__emitSttResult as any)({ text: 'dictado final', isFinal: true });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Transcripción editable de la nota').props.value).toContain(
+        'dictado final',
+      );
     });
   });
 });
