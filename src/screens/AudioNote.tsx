@@ -13,7 +13,7 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
   createSttService,
-  transcribeAudio,
+  transcribeAudioWithResult,
   type SttErrorCode,
   type SttService,
   type SttStatus,
@@ -78,6 +78,7 @@ export default function AudioNote({ navigation }: Props) {
   const [transcription, setTranscription] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
   const [dictationStatus, setDictationStatus] = useState<SttStatus>(sttService.getStatus());
   const [dictationError, setDictationError] = useState<SttErrorCode | null>(sttService.getLastError());
   const [dictatedPartial, setDictatedPartial] = useState('');
@@ -183,10 +184,18 @@ export default function AudioNote({ navigation }: Props) {
     setIsTranscribing(true);
     setTranscriptionError(null);
     try {
-      const text = await transcribeAudio(uri, { language: 'es' });
-      if (text.trim()) {
-        setTranscription((current) => appendDictationText(current, text));
+      const result = await transcribeAudioWithResult(uri, { language: 'es' });
+      if (result.ok) {
+        if (result.text.trim()) {
+          setTranscription((current) => appendDictationText(current, result.text));
+        }
+        return;
       }
+      const message =
+        result.error && result.error !== 'network'
+          ? result.error
+          : 'No se pudo transcribir con IA. Puedes seguir escribiendo manualmente.';
+      setTranscriptionError(message);
     } catch (error) {
       console.warn('[audio-note] ai transcription error', error);
       setTranscriptionError('No se pudo transcribir con IA. Inténtalo más tarde.');
@@ -196,22 +205,34 @@ export default function AudioNote({ navigation }: Props) {
   };
 
   const startRecording = async () => {
-    if (typeof recorder.prepareToRecordAsync === "function") {
-      await recorder.prepareToRecordAsync();
+    setRecordingError(null);
+    try {
+      if (typeof recorder.prepareToRecordAsync === "function") {
+        await recorder.prepareToRecordAsync();
+      }
+      recorder.record?.();
+    } catch (error) {
+      console.warn('[audio-note] start recording error', error);
+      setRecordingError('No se pudo iniciar la grabación. Revisa los permisos de micrófono.');
     }
-    recorder.record?.();
   };
 
   const stopRecording = async () => {
-    const maybeUri = (await recorder.stop?.()) as unknown;
-    const uri =
-      (typeof maybeUri === "string" && maybeUri.length > 0 && maybeUri) ||
-      recorder.uri ||
-      null;
-    if (uri) {
-      setLastUri(uri);
+    try {
+      const maybeUri = (await recorder.stop?.()) as unknown;
+      const uri =
+        (typeof maybeUri === "string" && maybeUri.length > 0 && maybeUri) ||
+        recorder.uri ||
+        null;
+      if (uri) {
+        setLastUri(uri);
+      }
+      return uri;
+    } catch (error) {
+      console.warn('[audio-note] stop recording error', error);
+      setRecordingError('No se pudo detener la grabación. Intenta nuevamente.');
+      return null;
     }
-    return uri;
   };
 
   const onToggle = async () => {
@@ -221,6 +242,7 @@ export default function AudioNote({ navigation }: Props) {
     }
     const granted = await ensurePermissionGranted();
     if (!granted) {
+      setRecordingError('Activa los permisos de micrófono para grabar la nota.');
       return;
     }
     await startRecording();
@@ -257,6 +279,7 @@ export default function AudioNote({ navigation }: Props) {
           {recorder.isRecording ? "Detener" : "Grabar"}
         </Text>
       </Pressable>
+      {recordingError ? <Text style={sttStyles.dictationError}>{recordingError}</Text> : null}
 
       <Pressable
         onPress={toggleDictation}

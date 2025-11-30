@@ -1,0 +1,102 @@
+import React from 'react';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { describe, expect, it, vi } from 'vitest';
+
+import AudioNote from '@/src/screens/AudioNote';
+import { transcribeAudioWithResult } from '@/src/lib/stt';
+
+vi.mock('@/src/lib/stt', () => {
+  let status: 'idle' | 'listening' | 'processing' | 'error' = 'idle';
+  const listeners = new Set<(result: { text: string; isFinal: boolean }) => void>();
+  const service = {
+    start: vi.fn(async () => {
+      status = 'listening';
+    }),
+    stop: vi.fn(async () => {
+      status = 'idle';
+      listeners.forEach((listener) => listener({ text: '', isFinal: true }));
+    }),
+    cancel: vi.fn(async () => {
+      status = 'idle';
+    }),
+    addListener: (handler: (result: { text: string; isFinal: boolean }) => void) => {
+      listeners.add(handler);
+      return () => listeners.delete(handler);
+    },
+    getStatus: () => status,
+    getLastError: () => null,
+  };
+
+  return {
+    createSttService: () => service,
+    transcribeAudioWithResult: vi.fn(async () => ({ ok: true, text: 'mock transcription' })),
+  };
+});
+
+vi.mock('expo-audio', () => {
+  const recorder = {
+    isRecording: false,
+    uri: 'file://mock-note.m4a',
+    record: vi.fn(),
+    stop: vi.fn(async () => 'file://mock-note.m4a'),
+    prepareToRecordAsync: vi.fn(async () => undefined),
+  };
+
+  return {
+    useAudioRecorder: () => recorder,
+    setAudioModeAsync: vi.fn(async () => undefined),
+    RecordingPresets: { HIGH_QUALITY: {} },
+    getRecordingPermissionsAsync: vi.fn(async () => ({ granted: true })),
+    requestRecordingPermissionsAsync: vi.fn(async () => ({ granted: true })),
+  };
+});
+
+const navigationMock = { goBack: vi.fn() } as any;
+
+const renderScreen = () =>
+  render(
+    <AudioNote
+      navigation={navigationMock}
+      route={{ key: 'AudioNote', name: 'AudioNote', params: undefined }}
+    />,
+  );
+
+describe('AudioNote', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rellena la transcripción cuando el STT devuelve texto', async () => {
+    const screen = renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText('Transcribir nota con IA')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText('Transcribir nota con IA'));
+
+    await waitFor(() => {
+      const input = screen.getByPlaceholderText('Transcripción editable de la nota');
+      expect(input.props.value).toContain('mock transcription');
+    });
+  });
+
+  it('permite editar manualmente cuando la transcripción falla', async () => {
+    vi.mocked(transcribeAudioWithResult).mockResolvedValueOnce({ ok: false, error: 'network' });
+    const screen = renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText('Transcribir nota con IA')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText('Transcribir nota con IA'));
+
+    const input = screen.getByPlaceholderText('Transcripción editable de la nota');
+    fireEvent.changeText(input, 'manual note');
+
+    await waitFor(() => {
+      expect(screen.getByText('No se pudo transcribir con IA. Puedes seguir escribiendo manualmente.')).toBeTruthy();
+      expect(screen.getByPlaceholderText('Transcripción editable de la nota').props.value).toBe('manual note');
+    });
+  });
+});
