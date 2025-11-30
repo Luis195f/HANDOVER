@@ -23,7 +23,7 @@ import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
-import { generateSbarViaBackend } from '@/src/lib/ai-sbar';
+import { refineSBARWithAI } from '@/src/lib/ai-sbar';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import {
@@ -36,12 +36,14 @@ import {
 import { appendAuditEvent, createAsyncStorageAuditStorage, makeAuditEvent, type AuditStorage } from '@/src/lib/audit';
 import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
+import { AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
 import { getSession, useAuth, type Session } from '@/src/security/auth';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
 import type { RiskItem } from '@/src/types/handover';
+import type { SBARSummary } from '@/src/types/sbar';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
@@ -657,9 +659,10 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [dictatedPartial, setDictatedPartial] = useState('');
   const activeFieldRef = useRef<DictationField | null>(null);
   const [sbarPreview, setSbarPreview] = useState<string | null>(null);
-  const [isGeneratingSbar, setIsGeneratingSbar] = useState(false);
+  const [isRefiningSbarWithAI, setIsRefiningSbarWithAI] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
+  const aiSbarAvailable = AI_SBAR_ENABLED;
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -831,69 +834,52 @@ export default function HandoverForm({ navigation, route }: Props) {
     });
   };
 
-  const buildSbarFreeText = (values: HandoverFormValues) => {
-    const parts = [values.evolution, values.closingSummary, values.meds, values.dxNursing, values.dxMedical];
-    return parts
-      .map((part) => (typeof part === 'string' ? part.trim() : ''))
-      .filter(Boolean)
-      .join('\n\n');
+  const buildDraftSbar = (values: HandoverFormValues): SBARSummary => {
+    const manualDraft: SBARSummary = {
+      situation: values.sbarSituation?.trim() ?? '',
+      background: values.sbarBackground?.trim() ?? '',
+      assessment: values.sbarAssessment?.trim() ?? '',
+      recommendation: values.sbarRecommendation?.trim() ?? '',
+    };
+
+    const hasManualContent = Object.values(manualDraft).some((value) => value.length > 0);
+    if (hasManualContent) {
+      return manualDraft;
+    }
+
+    try {
+      return generateSBARSummary(values, { maxCharsPerSection: 320 });
+    } catch (error) {
+      console.warn('[handover] draft sbar generation failed', error);
+      return manualDraft;
+    }
   };
 
-  const buildSbarContext = (values: HandoverFormValues) => {
-    const context: Record<string, unknown> = {};
-    const vitals = values.vitals ?? {};
-    if (Object.values(vitals).some((value) => value !== undefined && value !== null && value !== '')) {
-      context.vitals = vitals;
-    }
-
-    const oxygenTherapy = values.oxygenTherapy ?? {};
-    if (Object.values(oxygenTherapy).some((value) => value !== undefined && value !== null && value !== '')) {
-      context.oxygenTherapy = oxygenTherapy;
-    }
-
-    if (Array.isArray(values.risksStructured) && values.risksStructured.length > 0) {
-      context.risks = values.risksStructured;
-    }
-
-    if (Array.isArray(values.treatments) && values.treatments.length > 0) {
-      context.treatments = values.treatments;
-    }
-
-    if (Array.isArray(values.medications) && values.medications.length > 0) {
-      context.medications = values.medications;
-    }
-
-    return context;
-  };
-
-  const handleGenerateSbarWithAi = async () => {
+  const handleRefineSbarWithAi = async () => {
     const values = form.getValues();
-    const freeText = buildSbarFreeText(values);
-    if (!freeText.trim()) {
-      Alert.alert('Añade texto clínico', 'Escribe alguna nota para generar el SBAR con IA.');
-      return;
-    }
 
-    setIsGeneratingSbar(true);
+    setIsRefiningSbarWithAI(true);
     setSbarAiError(null);
     setSbarHelperMessage(null);
-    try {
-      const sbar = await generateSbarViaBackend(freeText, buildSbarContext(values), 'es');
-      form.setValue('sbarSituation', sbar.situation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarBackground', sbar.background, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarAssessment', sbar.assessment, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarRecommendation', sbar.recommendation, { shouldDirty: true, shouldValidate: true });
 
-      const previewText =
-        sbar.fullText && sbar.fullText.trim().length > 0
-          ? sbar.fullText
-          : `Situation: ${sbar.situation}\nBackground: ${sbar.background}\nAssessment: ${sbar.assessment}\nRecommendation: ${sbar.recommendation}`;
-      setSbarPreview(previewText);
+    try {
+      const draft = buildDraftSbar(values);
+      const refined = await refineSBARWithAI(values, draft);
+
+      if (refined) {
+        form.setValue('sbarSituation', refined.situation, { shouldDirty: true, shouldValidate: true });
+        form.setValue('sbarBackground', refined.background, { shouldDirty: true, shouldValidate: true });
+        form.setValue('sbarAssessment', refined.assessment, { shouldDirty: true, shouldValidate: true });
+        form.setValue('sbarRecommendation', refined.recommendation, { shouldDirty: true, shouldValidate: true });
+        setSbarHelperMessage('SBAR refinada por IA. Revise y ajuste según criterio clínico.');
+      } else {
+        setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
+      }
     } catch (error) {
-      console.warn('[handover] ai sbar error', error);
-      setSbarAiError('No pudimos generar el SBAR con IA. Inténtalo de nuevo en unos segundos.');
+      console.warn('[handover] ai sbar refine error', error);
+      setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
     } finally {
-      setIsGeneratingSbar(false);
+      setIsRefiningSbarWithAI(false);
     }
   };
 
@@ -1384,12 +1370,18 @@ export default function HandoverForm({ navigation, route }: Props) {
               <Button title="Generar SBAR sugerida" onPress={handleGenerateSbarSuggestion} />
               <View style={styles.secondaryButton}>
                 <Button
-                  title={isGeneratingSbar ? 'Generando SBAR con IA…' : 'Generar SBAR con IA'}
-                  onPress={handleGenerateSbarWithAi}
-                  disabled={isGeneratingSbar}
+                  title={
+                    aiSbarAvailable
+                      ? isRefiningSbarWithAI
+                        ? 'Refinando SBAR con IA…'
+                        : 'Refinar SBAR con IA'
+                      : 'IA no disponible'
+                  }
+                  onPress={handleRefineSbarWithAi}
+                  disabled={!aiSbarAvailable || isRefiningSbarWithAI}
                 />
               </View>
-              {isGeneratingSbar ? <ActivityIndicator style={{ marginLeft: 12 }} /> : null}
+              {isRefiningSbarWithAI ? <ActivityIndicator style={{ marginLeft: 12 }} /> : null}
             </View>
             {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
             {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
