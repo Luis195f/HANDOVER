@@ -1,194 +1,99 @@
 // BEGIN HANDOVER_SECURE_STORAGE
-import { sha256 } from 'js-sha256';
+import CryptoJS from 'crypto-js';
 
 import { secureGetItem, secureSetItem } from './secure-storage';
 
-const KEY_ID = 'handover_local_crypto_key';
-const VERSION_AES_GCM = 'v1';
-const VERSION_FALLBACK = 'v0';
-const UTF8_ENCODER = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
-const UTF8_DECODER = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null;
+const STORAGE_KEY = 'handover_encryption_key_v1';
+const VERSION_TAG = 'v1';
+const PREFIX = `${VERSION_TAG}:`;
+const LEGACY_PREFIX = 'enc:v1:'; // compatibilidad con versiones previas
 
 let cachedKey: string | null = null;
 
-function getCrypto(): Crypto | null {
-  if (typeof globalThis !== 'undefined' && globalThis.crypto) {
-    return globalThis.crypto as Crypto;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { webcrypto } = require('node:crypto');
-    return (webcrypto ?? null) as Crypto | null;
-  } catch {
-    return null;
-  }
+function getRandomKeyBase64(): string {
+  const randomBytes = CryptoJS.lib.WordArray.random(32);
+  return CryptoJS.enc.Base64.stringify(randomBytes);
 }
 
-function encodeBase64(bytes: Uint8Array): string {
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(bytes).toString('base64');
-  }
-  const binary = Array.from(bytes)
-    .map((b) => String.fromCharCode(b))
-    .join('');
-  if (typeof btoa === 'function') {
-    return btoa(binary);
-  }
-  throw new Error('Base64 encoding is not supported in this environment');
+function getIvWordArray(): CryptoJS.lib.WordArray {
+  return CryptoJS.lib.WordArray.random(16);
 }
 
-function decodeBase64(base64: string): Uint8Array {
-  if (typeof Buffer !== 'undefined') {
-    return Uint8Array.from(Buffer.from(base64, 'base64'));
-  }
-  if (typeof atob === 'function') {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  }
-  throw new Error('Base64 decoding is not supported in this environment');
+function isPayloadEncrypted(payload: string): boolean {
+  return typeof payload === 'string' && (payload.startsWith(PREFIX) || payload.startsWith(LEGACY_PREFIX));
 }
 
-function getRandomBytes(length: number): Uint8Array {
-  const crypto = getCrypto();
-  const buffer = new Uint8Array(length);
-  if (crypto?.getRandomValues) {
-    crypto.getRandomValues(buffer);
-    return buffer;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { randomBytes } = require('node:crypto');
-    return randomBytes(length) as Uint8Array;
-  } catch {
-    for (let i = 0; i < length; i += 1) {
-      buffer[i] = Math.floor(Math.random() * 256);
-    }
-    return buffer;
-  }
-}
-
-function toUtf8Bytes(text: string): Uint8Array {
-  if (UTF8_ENCODER) return UTF8_ENCODER.encode(text);
-  if (typeof Buffer !== 'undefined') return Buffer.from(text, 'utf8');
-  const bytes = new Uint8Array(text.length);
-  for (let i = 0; i < text.length; i += 1) {
-    bytes[i] = text.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function fromUtf8Bytes(bytes: Uint8Array): string {
-  if (UTF8_DECODER) return UTF8_DECODER.decode(bytes);
-  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('utf8');
-  let text = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    text += String.fromCharCode(bytes[i]);
-  }
-  return text;
-}
-
-async function getOrCreateKey(): Promise<string> {
+export async function getOrCreateEncryptionKey(): Promise<string> {
   if (cachedKey) return cachedKey;
-  const existing = await secureGetItem(KEY_ID);
-  if (existing) {
-    cachedKey = existing;
-    return existing;
-  }
-  const keyBytes = getRandomBytes(32);
-  const keyBase64 = encodeBase64(keyBytes);
-  await secureSetItem(KEY_ID, keyBase64);
-  cachedKey = keyBase64;
-  return keyBase64;
-}
-
-async function importAesKey(rawKey: Uint8Array): Promise<CryptoKey | null> {
-  const crypto = getCrypto();
-  if (!crypto?.subtle) return null;
   try {
-    return await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM', length: 256 }, false, [
-      'encrypt',
-      'decrypt',
-    ]);
-  } catch {
-    return null;
+    const stored = await secureGetItem(STORAGE_KEY);
+    if (stored) {
+      cachedKey = stored;
+      return stored;
+    }
+    const nextKey = getRandomKeyBase64();
+    await secureSetItem(STORAGE_KEY, nextKey);
+    cachedKey = nextKey;
+    return nextKey;
+  } catch (error) {
+    console.error('No se pudo acceder a SecureStore para la clave de cifrado.', error);
+    throw new Error('No se pudo obtener la clave de cifrado.');
   }
 }
 
-function deriveFallbackStream(key: Uint8Array, iv: Uint8Array, length: number): Uint8Array {
-  const digestInput = new Uint8Array(key.length + iv.length);
-  digestInput.set(key);
-  digestInput.set(iv, key.length);
-  const hash = sha256.arrayBuffer(digestInput) as ArrayBuffer;
-  const seed = new Uint8Array(hash);
-  const stream = new Uint8Array(length);
-  for (let i = 0; i < length; i += 1) {
-    stream[i] = seed[i % seed.length] ^ key[i % key.length] ^ iv[i % iv.length];
+function parseNewFormat(cipherText: string): { iv: CryptoJS.lib.WordArray; cipher: CryptoJS.lib.CipherParams } | null {
+  if (!cipherText.startsWith(PREFIX)) return null;
+  const [, ivPart, cipherPart] = cipherText.split(':');
+  if (!ivPart || !cipherPart) return null;
+  return {
+    iv: CryptoJS.enc.Base64.parse(ivPart),
+    cipher: CryptoJS.lib.CipherParams.create({ ciphertext: CryptoJS.enc.Base64.parse(cipherPart) }),
+  };
+}
+
+export async function encryptPayload(plainText: string): Promise<string> {
+  if (isPayloadEncrypted(plainText)) return plainText;
+  const keyBase64 = await getOrCreateEncryptionKey();
+  const key = CryptoJS.enc.Base64.parse(keyBase64);
+  const iv = getIvWordArray();
+  const encrypted = CryptoJS.AES.encrypt(plainText, key, {
+    iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7,
+  });
+  const ivBase64 = CryptoJS.enc.Base64.stringify(iv);
+  const cipherBase64 = encrypted.ciphertext.toString(CryptoJS.enc.Base64);
+  return `${PREFIX}${ivBase64}:${cipherBase64}`;
+}
+
+export async function decryptPayload(cipherText: string): Promise<string> {
+  if (!isPayloadEncrypted(cipherText)) return cipherText;
+
+  if (cipherText.startsWith(LEGACY_PREFIX)) {
+    // Compatibilidad: devolvemos tal cual; el descifrado legacy ocurre en lib/crypto.
+    return cipherText;
   }
-  return stream;
-}
 
-function xorBytes(data: Uint8Array, keyStream: Uint8Array): Uint8Array {
-  const result = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i += 1) {
-    result[i] = data[i] ^ keyStream[i % keyStream.length];
-  }
-  return result;
-}
-
-export async function encryptPayload(json: unknown): Promise<string> {
-  const serialized = JSON.stringify(json ?? null);
-  const keyBase64 = await getOrCreateKey();
-  const keyBytes = decodeBase64(keyBase64);
-  const crypto = getCrypto();
-  const iv = getRandomBytes(12);
-
-  const aesKey = await importAesKey(keyBytes);
-  if (aesKey && crypto?.subtle) {
-    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, toUtf8Bytes(serialized));
-    return `${VERSION_AES_GCM}:${encodeBase64(iv)}:${encodeBase64(new Uint8Array(encrypted))}`;
-  }
-
-  const stream = deriveFallbackStream(keyBytes, iv, serialized.length);
-  const cipher = xorBytes(toUtf8Bytes(serialized), stream);
-  return `${VERSION_FALLBACK}:${encodeBase64(iv)}:${encodeBase64(cipher)}`;
-}
-
-function parseCipher(cipher: string): { version: string; iv: Uint8Array; data: Uint8Array } | null {
-  const parts = cipher.split(':');
-  if (parts.length !== 3) return null;
-  const [version, ivPart, dataPart] = parts;
-  if (!version || !ivPart || !dataPart) return null;
-  return { version, iv: decodeBase64(ivPart), data: decodeBase64(dataPart) };
-}
-
-export async function decryptPayload(cipher: string): Promise<unknown> {
-  if (!cipher) throw new Error('EMPTY_CIPHER');
-  const parsed = parseCipher(cipher);
+  const parsed = parseNewFormat(cipherText);
   if (!parsed) {
-    return JSON.parse(cipher);
+    return cipherText;
   }
 
-  const keyBase64 = await getOrCreateKey();
-  const keyBytes = decodeBase64(keyBase64);
+  const keyBase64 = await getOrCreateEncryptionKey();
+  const key = CryptoJS.enc.Base64.parse(keyBase64);
+  const decrypted = CryptoJS.AES.decrypt(parsed.cipher, key, {
+    iv: parsed.iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7,
+  });
+  const plain = decrypted.toString(CryptoJS.enc.Utf8);
 
-  if (parsed.version === VERSION_AES_GCM) {
-    const crypto = getCrypto();
-    const aesKey = await importAesKey(keyBytes);
-    if (!aesKey || !crypto?.subtle) throw new Error('DECRYPT_UNAVAILABLE');
-    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: parsed.iv }, aesKey, parsed.data);
-    return JSON.parse(fromUtf8Bytes(new Uint8Array(decrypted)));
+  if (!plain && cipherText.startsWith(PREFIX)) {
+    throw new Error('No se pudo descifrar el payload cifrado local.');
   }
 
-  if (parsed.version === VERSION_FALLBACK) {
-    const stream = deriveFallbackStream(keyBytes, parsed.iv, parsed.data.length);
-    const plainBytes = xorBytes(parsed.data, stream);
-    return JSON.parse(fromUtf8Bytes(plainBytes));
-  }
-
-  throw new Error('UNSUPPORTED_CIPHER_VERSION');
+  return plain;
 }
+
+export { isPayloadEncrypted };
 // END HANDOVER_SECURE_STORAGE

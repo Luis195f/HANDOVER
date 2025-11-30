@@ -2,6 +2,7 @@
 import '@testing-library/jest-native/extend-expect';
 import { vi } from 'vitest';
 
+(globalThis as any).__DEV__ = false;
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 import * as SecureStoreMock from './__mocks__/expo-secure-store';

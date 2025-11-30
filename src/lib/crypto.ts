@@ -1,6 +1,7 @@
 import CryptoJS from 'crypto-js';
 import { sha256 } from 'js-sha256';
 
+import { decryptPayload as decryptNewPayload, encryptPayload as encryptNewPayload, getOrCreateEncryptionKey, isPayloadEncrypted } from '../security/crypto';
 import { secureGetItem, secureSetItem } from '../security/secure-storage';
 
 export function hashHex(input: string, len = 64): string {
@@ -14,82 +15,97 @@ export function fhirId(prefix: string, input: string, maxLen = 64): string {
   return base.slice(0, maxLen).replace(/[^A-Za-z0-9\-.]/g, '-');
 }
 
-const QUEUE_KEY_SECURESTORE_KEY = 'handover_offline_queue_key';
-export const ENCRYPTION_PREFIX = 'enc:v1:';
+const LEGACY_QUEUE_KEY = 'handover_offline_queue_key';
+export const ENCRYPTION_PREFIX = 'v1:';
+export const LEGACY_ENCRYPTION_PREFIX = 'enc:v1:';
 export const OFFLINE_ENCRYPTION_DISABLED = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED === 'true';
 
-let cachedQueueKey: string | null = null;
+let cachedLegacyKey: string | null = null;
 
-function generateQueueKey(): string {
+function generateLegacyKey(): string {
   const randomBytes = CryptoJS.lib.WordArray.random(32);
   return CryptoJS.enc.Base64.stringify(randomBytes);
 }
 
-async function readStoredQueueKey(): Promise<string | null> {
+async function readLegacyKey(): Promise<string | null> {
+  if (cachedLegacyKey) return cachedLegacyKey;
   try {
-    return await secureGetItem(QUEUE_KEY_SECURESTORE_KEY);
+    const stored = await secureGetItem(LEGACY_QUEUE_KEY);
+    if (stored) {
+      cachedLegacyKey = stored;
+      return stored;
+    }
   } catch (error) {
-    console.warn('No se pudo leer la clave de cifrado offline desde SecureStore', error);
-    return null;
+    console.warn('No se pudo leer la clave de cifrado offline legacy', error);
+  }
+  return null;
+}
+
+async function persistLegacyKey(key: string): Promise<void> {
+  try {
+    await secureSetItem(LEGACY_QUEUE_KEY, key);
+  } catch (error) {
+    console.warn('No se pudo persistir la clave de cifrado offline legacy', error);
   }
 }
 
-async function persistQueueKey(key: string): Promise<void> {
-  try {
-    await secureSetItem(QUEUE_KEY_SECURESTORE_KEY, key);
-  } catch (error) {
-    console.warn('No se pudo persistir la clave de cifrado offline en SecureStore', error);
-  }
-}
-
-async function getOrCreateQueueKey(): Promise<string> {
-  if (cachedQueueKey) return cachedQueueKey;
-
-  const stored = await readStoredQueueKey();
-  if (stored) {
-    cachedQueueKey = stored;
-    return stored;
-  }
-
-  const key = generateQueueKey();
-  await persistQueueKey(key);
-  cachedQueueKey = key;
+async function getOrCreateLegacyKey(): Promise<string> {
+  const existing = await readLegacyKey();
+  if (existing) return existing;
+  const key = generateLegacyKey();
+  await persistLegacyKey(key);
+  cachedLegacyKey = key;
   return key;
+}
+
+function decryptLegacyPayload(ciphertext: string): string {
+  const raw = ciphertext.slice(LEGACY_ENCRYPTION_PREFIX.length);
+  const key = cachedLegacyKey;
+  if (!key) {
+    throw new Error('No se encontró la clave legacy para descifrar.');
+  }
+  const bytes = CryptoJS.AES.decrypt(raw, key);
+  const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+  if (!decrypted) {
+    throw new Error('No se pudo descifrar el payload offline legacy.');
+  }
+  return decrypted;
+}
+
+export function payloadIsEncrypted(payload: unknown): payload is string {
+  return typeof payload === 'string' && (payload.startsWith(ENCRYPTION_PREFIX) || payload.startsWith(LEGACY_ENCRYPTION_PREFIX));
 }
 
 export async function encryptPayload(plaintext: string): Promise<string> {
   if (OFFLINE_ENCRYPTION_DISABLED) {
     return plaintext;
   }
-
-  const key = await getOrCreateQueueKey();
-  const encrypted = CryptoJS.AES.encrypt(plaintext, key).toString();
-  return `${ENCRYPTION_PREFIX}${encrypted}`;
+  if (payloadIsEncrypted(plaintext)) return plaintext;
+  return encryptNewPayload(plaintext);
 }
 
 export async function decryptPayload(ciphertext: string): Promise<string> {
-  if (OFFLINE_ENCRYPTION_DISABLED) {
+  if (OFFLINE_ENCRYPTION_DISABLED && !payloadIsEncrypted(ciphertext)) {
     return ciphertext;
+  }
+
+  if (ciphertext.startsWith(LEGACY_ENCRYPTION_PREFIX)) {
+    if (!cachedLegacyKey) {
+      await getOrCreateLegacyKey();
+    }
+    return decryptLegacyPayload(ciphertext);
   }
 
   if (!ciphertext.startsWith(ENCRYPTION_PREFIX)) {
     return ciphertext;
   }
 
-  const key = await getOrCreateQueueKey();
-  const raw = ciphertext.slice(ENCRYPTION_PREFIX.length);
-  const bytes = CryptoJS.AES.decrypt(raw, key);
-  const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-
-  if (!decrypted) {
-    throw new Error('No se pudo descifrar el payload offline.');
-  }
-
-  return decrypted;
+  return decryptNewPayload(ciphertext);
 }
 
 /**
  * Cifra borradores reutilizando la misma clave que la cola offline.
+ * Si fallase el cifrado, el caller NO debería persistir datos sensibles en claro.
  */
 export async function encryptDraft(plaintext: string): Promise<string> {
   return encryptPayload(plaintext);
@@ -101,23 +117,11 @@ export async function encryptDraft(plaintext: string): Promise<string> {
  * descifrar para mantener compatibilidad.
  */
 export async function decryptDraft(ciphertext: string): Promise<string> {
-  const encryptionDisabledAndPlain = OFFLINE_ENCRYPTION_DISABLED && !ciphertext.startsWith(ENCRYPTION_PREFIX);
+  const encryptionDisabledAndPlain = OFFLINE_ENCRYPTION_DISABLED && !payloadIsEncrypted(ciphertext);
   if (encryptionDisabledAndPlain) {
     return ciphertext;
   }
-
-  if (!ciphertext.startsWith(ENCRYPTION_PREFIX)) {
-    return ciphertext;
-  }
-
-  const key = await getOrCreateQueueKey();
-  const raw = ciphertext.slice(ENCRYPTION_PREFIX.length);
-  const bytes = CryptoJS.AES.decrypt(raw, key);
-  const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-
-  if (!decrypted) {
-    throw new Error('No se pudo descifrar el payload offline.');
-  }
-
-  return decrypted;
+  return decryptPayload(ciphertext);
 }
+
+export { getOrCreateEncryptionKey };

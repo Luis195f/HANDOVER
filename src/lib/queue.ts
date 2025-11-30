@@ -14,7 +14,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as SQLite from "expo-sqlite";
-import { decryptPayload, encryptPayload, hashHex } from "./crypto";
+import { decryptPayload, encryptPayload, hashHex, payloadIsEncrypted } from "./crypto";
 import { mark } from "./otel";
 
 // -------------------------------
@@ -45,6 +45,7 @@ if (db?.execSync) {
 
 async function encryptQueuePayload(payload: unknown): Promise<string> {
   const serialized = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
+  if (payloadIsEncrypted(serialized)) return serialized;
   try {
     return await encryptPayload(serialized);
   } catch (error) {
