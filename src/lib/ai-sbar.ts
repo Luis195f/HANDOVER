@@ -1,4 +1,11 @@
-import { AI_BACKEND_BASE_URL } from '@/src/config/env';
+import { AI_BACKEND_BASE_URL, AI_SBAR_API_KEY, AI_SBAR_BASE_URL } from '@/src/config/env';
+import type { SBARSummary } from '@/src/types/sbar';
+import type { HandoverFormData } from '@/src/validation/schemas';
+
+export interface AISBARConfig {
+  baseUrl: string;
+  apiKey?: string;
+}
 
 export interface SbarResult {
   situation: string;
@@ -14,6 +21,93 @@ interface SbarBackendResponse {
   assessment?: string;
   recommendation?: string;
   full_text?: string;
+}
+
+interface RefineSbarResponse {
+  sbar?: Partial<SBARSummary> | null;
+}
+
+function getAiSbarConfig(): AISBARConfig | null {
+  const baseUrl = AI_SBAR_BASE_URL ?? AI_BACKEND_BASE_URL;
+  if (!baseUrl) {
+    return null;
+  }
+  return { baseUrl, apiKey: AI_SBAR_API_KEY };
+}
+
+function toSafeString(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value;
+  }
+  return fallback;
+}
+
+function buildRefinedSbar(candidate: Partial<SBARSummary> | null | undefined, draft: SBARSummary): SBARSummary {
+  const baseDraft: SBARSummary = { ...draft };
+  if (!candidate || typeof candidate !== 'object') {
+    return baseDraft;
+  }
+  return {
+    situation: toSafeString(candidate.situation, baseDraft.situation),
+    background: toSafeString(candidate.background, baseDraft.background),
+    assessment: toSafeString(candidate.assessment, baseDraft.assessment),
+    recommendation: toSafeString(candidate.recommendation, baseDraft.recommendation),
+  };
+}
+
+export async function refineSBARWithAI(
+  handover: HandoverFormData,
+  draft: SBARSummary,
+): Promise<SBARSummary | null> {
+  const config = getAiSbarConfig();
+  if (!config?.baseUrl) {
+    console.info('[ai-sbar] AI SBAR backend not configured');
+    return null;
+  }
+
+  const payload = {
+    handover: {
+      dxMedical: handover.dxMedical,
+      dxNursing: handover.dxNursing,
+      vitals: handover.vitals,
+      oxygenTherapy: handover.oxygenTherapy,
+      risks: handover.risks,
+      evolution: handover.evolution,
+      mobility: handover.mobility,
+      nutrition: handover.nutrition,
+    },
+    draft: { ...draft },
+  };
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
+
+  try {
+    const response = await fetch(`${config.baseUrl}/api/sbar/refine`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: controller?.signal,
+    });
+
+    if (!response.ok) {
+      console.warn('[ai-sbar] refineSBARWithAI failed', `status ${response.status}`);
+      return null;
+    }
+
+    const data = (await response.json()) as RefineSbarResponse;
+    const refined = buildRefinedSbar(data?.sbar, draft);
+    return refined;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[ai-sbar] refineSBARWithAI failed', message);
+    return null;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 export async function generateSbarViaBackend(
