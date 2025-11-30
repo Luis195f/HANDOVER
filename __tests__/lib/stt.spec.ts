@@ -29,7 +29,15 @@ const mockAudioModule = vi.hoisted(() => ({
 }));
 
 vi.mock('expo-constants', () => ({
-  default: { expoConfig: { extra: { FHIR_BASE_URL: 'https://fhir.test', STT_ENDPOINT: 'https://stt.test' } } },
+  default: {
+    expoConfig: {
+      extra: {
+        FHIR_BASE_URL: 'https://fhir.test',
+        STT_ENDPOINT: 'https://stt.test',
+        AI_BACKEND_BASE_URL: 'https://ai.test',
+      },
+    },
+  },
 }));
 
 vi.mock('expo-av', () => ({
@@ -139,7 +147,7 @@ describe('transcribeAudioViaBackend', () => {
 
     const result = await transcribeAudioViaBackend('file:///note.m4a', { language: 'es' });
 
-    expect(mockFetch).toHaveBeenCalledWith('https://fhir.test/ai/transcribe', expect.anything());
+    expect(mockFetch).toHaveBeenCalledWith('https://ai.test/ai/transcribe', expect.anything());
     expect(result).toBe('voz transcrita');
   });
 
@@ -157,5 +165,17 @@ describe('transcribeAudio', () => {
     mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
 
     await expect(transcribeAudio('file:///note.m4a')).rejects.toThrow('No se pudo transcribir el audio con IA');
+  });
+
+  it('lanza un error claro cuando el backend de IA no está configurado', async () => {
+    vi.resetModules();
+    vi.doMock('expo-constants', () => ({
+      default: { expoConfig: { extra: { FHIR_BASE_URL: 'https://fhir.test', STT_ENDPOINT: 'https://stt.test' } } },
+    }));
+
+    const { transcribeAudio: transcribeWithoutAi } = await import('@/src/lib/stt');
+    (globalThis as any).fetch = mockFetch;
+
+    await expect(transcribeWithoutAi('file:///note.m4a')).rejects.toThrow('AI backend not configured');
   });
 });
