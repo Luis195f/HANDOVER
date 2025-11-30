@@ -27,6 +27,7 @@ import {
   decryptPayload,
   encryptPayload,
   hashHex,
+  payloadIsEncrypted,
 } from './crypto';
 import { z } from 'zod';
 import {
@@ -35,7 +36,13 @@ import {
   type FhirValidationResult,
   type ValidationResult,
 } from './fhir-validation';
-import { listOfflineQueue, updateOfflineQueueItem, type QueueItem as OfflineQueueItem, type SyncStatus } from './queue';
+import {
+  deleteOfflineQueueItem,
+  listOfflineQueue,
+  updateOfflineQueueItem,
+  type QueueItem as OfflineQueueItem,
+  type SyncStatus,
+} from './queue';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -211,9 +218,9 @@ const OFFLINE_ERROR_MESSAGE = 'Sin conexión a la red. Reintentaremos automátic
 
 // BEGIN HANDOVER_OFFLINE
 export function getNextDelayMs(attempts: number): number {
-  const base = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
-  const index = Math.min(Math.max(0, attempts), base.length - 1);
-  return base[index];
+  if (attempts <= 0) return 0;
+  const delay = 1_000 * 2 ** Math.max(0, attempts - 1);
+  return Math.min(delay, 60_000);
 }
 
 type QueueSendResult = { ok: true } | { ok: false; status?: number; message?: string; recoverable?: boolean };
@@ -296,7 +303,7 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
-    if (!item.payload.startsWith(ENCRYPTION_PREFIX) && !OFFLINE_ENCRYPTION_DISABLED) {
+    if (!payloadIsEncrypted(item.payload) && !OFFLINE_ENCRYPTION_DISABLED) {
       try {
         const reEncrypted = await encryptPayload(JSON.stringify(parsedPayload));
         await updateOfflineQueueItem(item.id, { payload: reEncrypted });
@@ -321,6 +328,7 @@ export async function processQueueOnce(): Promise<void> {
         lastAttemptAt: startedAt,
         errorMessage: undefined,
       });
+      await deleteOfflineQueueItem(item.id);
       continue;
     }
 

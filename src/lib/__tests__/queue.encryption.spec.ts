@@ -53,10 +53,7 @@ describe('offline queue encryption', () => {
 
     expect(sentPayload).toEqual(legacyPayload);
 
-    const [updated] = await listOfflineQueue();
-    expect(updated?.syncStatus).toBe('synced');
-    if (updated && process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED !== 'true') {
-      expect(updated.payload.startsWith(ENCRYPTION_PREFIX)).toBe(true);
-    }
+    const remaining = await listOfflineQueue();
+    expect(remaining.length).toBe(0);
   });
 });
