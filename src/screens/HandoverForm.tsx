@@ -34,7 +34,7 @@ import {
   type SttStatus,
 } from '@/src/lib/stt';
 import { appendAuditEvent, createAsyncStorageAuditStorage, makeAuditEvent, type AuditStorage } from '@/src/lib/audit';
-import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
+import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
@@ -659,6 +659,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [sbarPreview, setSbarPreview] = useState<string | null>(null);
   const [isGeneratingSbar, setIsGeneratingSbar] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
+  const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -875,6 +876,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     setIsGeneratingSbar(true);
     setSbarAiError(null);
+    setSbarHelperMessage(null);
     try {
       const sbar = await generateSbarViaBackend(freeText, buildSbarContext(values), 'es');
       form.setValue('sbarSituation', sbar.situation, { shouldDirty: true, shouldValidate: true });
@@ -892,6 +894,27 @@ export default function HandoverForm({ navigation, route }: Props) {
       setSbarAiError('No pudimos generar el SBAR con IA. Inténtalo de nuevo en unos segundos.');
     } finally {
       setIsGeneratingSbar(false);
+    }
+  };
+
+  const handleGenerateSbarSuggestion = () => {
+    try {
+      const values = form.getValues();
+      const summary = generateSBARSummary(values, { maxCharsPerSection: 320 });
+      form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
+      setSbarHelperMessage(
+        'SBAR generada automáticamente a partir del formulario. Revise y ajuste según criterio clínico.',
+      );
+      setSbarAiError(null);
+    } catch (error) {
+      console.warn('[handover] local sbar error', error);
+      Alert.alert(
+        'No se pudo generar la SBAR automática',
+        'Revise los datos o complete la SBAR de forma manual.',
+      );
     }
   };
 
@@ -1358,13 +1381,17 @@ export default function HandoverForm({ navigation, route }: Props) {
             onToggle={() => toggleSection('sbar')}
           >
             <View style={styles.inlineActions}>
-              <Button
-                title={isGeneratingSbar ? 'Generando SBAR con IA…' : 'Generar SBAR con IA'}
-                onPress={handleGenerateSbarWithAi}
-                disabled={isGeneratingSbar}
-              />
+              <Button title="Generar SBAR sugerida" onPress={handleGenerateSbarSuggestion} />
+              <View style={styles.secondaryButton}>
+                <Button
+                  title={isGeneratingSbar ? 'Generando SBAR con IA…' : 'Generar SBAR con IA'}
+                  onPress={handleGenerateSbarWithAi}
+                  disabled={isGeneratingSbar}
+                />
+              </View>
               {isGeneratingSbar ? <ActivityIndicator style={{ marginLeft: 12 }} /> : null}
             </View>
+            {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
             {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
             <View style={styles.field}>
               <Text style={styles.label}>SBAR - Situation</Text>

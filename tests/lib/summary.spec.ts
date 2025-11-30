@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
+import { formatSbar, generateSBARSummary } from '@/src/lib/summary';
 import type { HandoverValues } from '@/src/types/handover';
 
 const baseAdministrativeData = {
@@ -27,7 +27,7 @@ const buildData = (overrides: Partial<HandoverValues>): HandoverValues => ({
   ...overrides,
 });
 
-describe('generateSbarSummary', () => {
+describe('generateSBARSummary', () => {
   it('resume paciente estable con NEWS2 bajo y diagnóstico respiratorio', () => {
     const data = buildData({
       dxMedical: 'Bronquitis leve',
@@ -36,7 +36,7 @@ describe('generateSbarSummary', () => {
       evolution: 'Paciente estable, sin incidencias.',
     });
 
-    const summary = generateSbarSummary(data);
+    const summary = generateSBARSummary(data);
     expect(summary.situation).toContain('Bronquitis leve');
     expect(summary.assessment).toContain('NEWS2');
     expect(summary.assessment.toLowerCase()).toContain('bajo');
@@ -58,7 +58,7 @@ describe('generateSbarSummary', () => {
       painAssessment: { hasPain: true, evaScore: 6, location: 'torácico', actionsTaken: null },
     });
 
-    const summary = generateSbarSummary(data);
+    const summary = generateSBARSummary(data);
 
     expect(summary.assessment).toContain('NEWS2');
     expect(summary.assessment).toContain('Oxígeno');
@@ -73,10 +73,28 @@ describe('generateSbarSummary', () => {
       evolution: 'Texto extenso '.repeat(5),
     });
 
-    const summary = generateSbarSummary(data, { maxCharsPerSection: 80 });
+    const summary = generateSBARSummary(data, { maxCharsPerSection: 80 });
     expect(summary.situation.length).toBeLessThanOrEqual(81);
     expect(summary.background.length).toBeLessThanOrEqual(81);
     expect(summary.assessment.length).toBeLessThanOrEqual(81);
     expect(summary.recommendation.length).toBeLessThanOrEqual(81);
+  });
+
+  it('genera frases seguras aunque falten datos', () => {
+    const summary = generateSBARSummary(
+      buildData({
+        dxMedical: undefined,
+        dxNursing: undefined,
+        vitals: undefined,
+        oxygenTherapy: undefined,
+        evolution: undefined,
+        risks: {},
+      }),
+    );
+
+    expect(summary.situation).toContain('información parcial');
+    expect(summary.background.length).toBeGreaterThan(0);
+    expect(summary.assessment).toContain('Paciente sin hallazgos críticos');
+    expect(summary.recommendation.length).toBeGreaterThan(0);
   });
 });

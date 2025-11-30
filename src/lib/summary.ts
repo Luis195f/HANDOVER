@@ -1,15 +1,17 @@
 // Fase 3 – Bloque B (SBAR): generación de resúmenes SBAR a partir de HandoverFormValues.
 import { computeNEWS2 } from "./news2";
-import type { HandoverValues, OxygenTherapy, RiskFlags, PainAssessment, FluidBalanceInfo } from "../types/handover";
+import type {
+  FluidBalanceInfo,
+  HandoverValues,
+  OxygenTherapy,
+  PainAssessment,
+  RiskFlags,
+} from "../types/handover";
+import type { HandoverFormData } from "../validation/schemas";
+import type { SBARSummary } from "@/src/types/sbar";
 
 export type SbarSection = "situation" | "background" | "assessment" | "recommendation";
-
-export interface SbarSummary {
-  situation: string;
-  background: string;
-  assessment: string;
-  recommendation: string;
-}
+export type SbarSummary = SBARSummary;
 
 export interface SbarOptions {
   locale?: "es" | "en";
@@ -29,12 +31,23 @@ const RISK_LABELS: Record<keyof RiskFlags, string> = {
   isolation: "aislamiento",
 };
 
+const BRADEN_LABELS: Record<NonNullable<HandoverValues["braden"]>["riskLevel"], string> = {
+  alto: "alto",
+  moderado: "moderado",
+  bajo: "bajo",
+  sin_riesgo: "sin riesgo",
+};
+
 function truncateText(value: string, limit?: number): string {
   if (!limit || value.length <= limit) return value;
   const slice = value.slice(0, limit);
   const lastSpace = slice.lastIndexOf(" ");
   const safeCut = lastSpace > limit * 0.6 ? slice.slice(0, lastSpace) : slice;
   return `${safeCut.trimEnd()}…`;
+}
+
+function joinSentences(parts: Array<string | undefined>): string {
+  return parts.filter(Boolean).join(". ");
 }
 
 function formatOxygenTherapy(oxygen?: OxygenTherapy): string | undefined {
@@ -92,27 +105,38 @@ function describeMobility(mobilityLevel?: string, repositioningPlan?: string): s
 }
 
 function buildSituation(data: HandoverValues): string {
-  const patientId = data.patientId ? `Paciente ${data.patientId}` : "Paciente sin identificar";
   const diagnosis = data.dxMedical || data.dxNursing;
+  const admission = diagnosis ? `Paciente con ${diagnosis}` : "Paciente con información parcial disponible";
+  const vitals = data.vitals;
+  const news2 = vitals
+    ? computeNEWS2({
+        rr: vitals.rr,
+        spo2: vitals.spo2,
+        temp: vitals.tempC,
+        sbp: vitals.sbp,
+        hr: vitals.hr,
+        o2: isSupplementalOxygen(data.oxygenTherapy),
+        avpu: vitals.avpu,
+        scale2: false,
+      })
+    : undefined;
+  const newsText = news2 ? `NEWS2 ${news2.total} (${NEWS2_BAND_LABEL[news2.band]} riesgo)` : undefined;
   const oxygen = formatOxygenTherapy(data.oxygenTherapy);
-  const pain = describePain(data.painAssessment);
-  const statusParts = [oxygen, pain, data.evolution]?.filter(Boolean);
-  const status = statusParts.length ? `Estado actual: ${statusParts.join(" | ")}` : undefined;
-  return [patientId, diagnosis ? `Dx: ${diagnosis}` : undefined, status].filter(Boolean).join(". ");
+  const evolution = data.evolution ? `Evolución: ${data.evolution}` : undefined;
+  const situation = joinSentences([admission, newsText, oxygen, evolution]);
+  return situation || "Paciente con información parcial disponible. Revisar historia clínica y registro de enfermería.";
 }
 
 function buildBackground(data: HandoverValues): string {
   const antecedentes: string[] = [];
-  if (data.dxNursing && data.dxMedical) {
-    antecedentes.push(`Enf.: ${data.dxNursing}`);
-  }
-  if (data.nutrition?.dietType) {
-    antecedentes.push(`Dieta: ${data.nutrition.dietType}`);
-  }
+  if (data.dxNursing && data.dxMedical) antecedentes.push(`Cuadro mixto: ${data.dxMedical}; ${data.dxNursing}`);
+  const diet = data.nutrition?.dietType ? `Dieta ${data.nutrition.dietType}` : undefined;
   const mobility = describeMobility(data.mobility?.mobilityLevel, data.mobility?.repositioningPlan);
-  if (mobility) antecedentes.push(mobility);
-  if (data.skin?.skinStatus) antecedentes.push(`Piel: ${data.skin.skinStatus}`);
-  return antecedentes.join(". ") || "Sin antecedentes relevantes documentados.";
+  const skin = data.skin?.skinStatus ? `Piel: ${data.skin.skinStatus}` : undefined;
+  const allergies = data.bedsideChecklist?.allergiesReviewed ? "Alergias revisadas" : undefined;
+  antecedentes.push(...[diet, mobility, skin, allergies].filter(Boolean));
+  const background = antecedentes.join(". ");
+  return background || "Antecedentes relevantes recogidos en la historia clínica, revisar para más detalles.";
 }
 
 function buildAssessment(data: HandoverValues): string {
@@ -131,10 +155,7 @@ function buildAssessment(data: HandoverValues): string {
     : undefined;
 
   const parts: string[] = [];
-  if (news2) {
-    const bandLabel = NEWS2_BAND_LABEL[news2.band];
-    parts.push(`NEWS2 ${news2.total} (${bandLabel})`);
-  }
+  if (news2) parts.push(`NEWS2 ${news2.total} (${NEWS2_BAND_LABEL[news2.band]} riesgo)`);
 
   const oxygen = formatOxygenTherapy(data.oxygenTherapy);
   if (oxygen) parts.push(oxygen);
@@ -148,30 +169,40 @@ function buildAssessment(data: HandoverValues): string {
   const balance = describeFluidBalance(data.fluidBalance);
   if (balance) parts.push(balance);
 
-  return parts.join(". ") || "Sin hallazgos críticos actuales.";
+  const braden = data.braden ? `Braden ${data.braden.totalScore} (${BRADEN_LABELS[data.braden.riskLevel]} riesgo)` : undefined;
+  if (braden) parts.push(braden);
+
+  const glasgow = data.glasgow ? `Glasgow ${data.glasgow.total} (${data.glasgow.severity})` : undefined;
+  if (glasgow) parts.push(glasgow);
+
+  const assessment = parts.join(". ");
+  return assessment || "Paciente sin hallazgos críticos reportados. Mantener vigilancia estándar.";
 }
 
 function buildRecommendation(data: HandoverValues): string {
   const tasks: string[] = [];
   if (data.meds) tasks.push(`Medicaciones pendientes: ${data.meds}`);
+  if (data.treatments?.length) tasks.push("Procedimientos/curas programadas revisar hoja de tratamientos");
   if (data.painAssessment?.hasPain) tasks.push("Control del dolor según plan");
   if (data.risks?.fall || data.risks?.pressureUlcer || data.risks?.isolation) {
     const risks = describeRisks(data.risks);
     if (risks) tasks.push(`Vigilar ${risks.replace("Riesgos: ", "")}`);
   }
-  if (data.fluidBalance?.notes) tasks.push(`Balance/curas: ${data.fluidBalance.notes}`);
+  if (data.fluidBalance?.notes) tasks.push(`Balance/diuresis: ${data.fluidBalance.notes}`);
   if (data.evolution) tasks.push(`Seguir plan: ${data.evolution}`);
-  return tasks.join(". ") || "Vigilar y continuar plan vigente.";
+  if (!tasks.length) {
+    tasks.push("Control de signos vitales cada 4-6 h y revisar diuresis si aplica");
+  }
+  return tasks.join(". ");
 }
 
-export function generateSbarSummary(data: HandoverValues, options: SbarOptions = {}): SbarSummary {
+export function generateSBARSummary(handover: HandoverFormData, options: SbarOptions = {}): SBARSummary {
   const maxChars = options.maxCharsPerSection;
-
-  const raw: SbarSummary = {
-    situation: buildSituation(data),
-    background: buildBackground(data),
-    assessment: buildAssessment(data),
-    recommendation: buildRecommendation(data),
+  const raw: SBARSummary = {
+    situation: buildSituation(handover),
+    background: buildBackground(handover),
+    assessment: buildAssessment(handover),
+    recommendation: buildRecommendation(handover),
   };
 
   if (!maxChars) return raw;
@@ -184,7 +215,9 @@ export function generateSbarSummary(data: HandoverValues, options: SbarOptions =
   };
 }
 
-export function formatSbar(summary: SbarSummary, locale: "es" | "en" = "es"): string {
+export const generateSbarSummary = generateSBARSummary;
+
+export function formatSbar(summary: SBARSummary, locale: "es" | "en" = "es"): string {
   const labels =
     locale === "en"
       ? {
