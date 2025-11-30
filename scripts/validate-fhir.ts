@@ -6,7 +6,9 @@ import process from 'node:process';
 
 import { ZodError } from 'zod';
 
-import { validateBundle, type FhirBundleTransaction } from '../src/lib/fhir-map';
+import { getValidationErrorsFromBundle, validateBundle } from '../src/lib/fhir-validation';
+
+// Nota: este script se ejecuta en CI vía "pnpm validate:fhir" para validar bundles locales.
 
 async function readFromStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -81,18 +83,27 @@ async function main() {
     const label = source === '-' ? 'stdin' : resolve(source);
     try {
       const data = await readJson(source);
-      const bundle = data as FhirBundleTransaction;
-      const result = validateBundle(bundle);
-      if (!result.ok) {
-        throw new ZodError(result.errors.map((message) => ({ code: 'custom', path: [], message })));
+      const result = validateBundle(data);
+      if (!result.isValid) {
+        const issues = [...result.errors, ...(getValidationErrorsFromBundle(data) ?? [])];
+        throw new ZodError(issues.map((issue) => ({ code: 'custom', path: [issue.path], message: issue.message })));
       }
+      const bundle = data as { entry?: Array<{ resource?: { resourceType?: string } }> };
+      const counts = (bundle.entry ?? []).reduce(
+        (acc, entry) => {
+          const rt = entry?.resource?.resourceType;
+          if (rt === 'Observation') acc.observations += 1;
+          if (rt === 'MedicationStatement') acc.medications += 1;
+          if (rt === 'DeviceUseStatement' || rt === 'Procedure') acc.deviceUses += 1;
+          if (rt === 'DocumentReference') acc.documents += 1;
+          if (rt === 'Composition') acc.compositions += 1;
+          acc.entries += 1;
+          return acc;
+        },
+        { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
+      );
       printSuccess(label, {
-        entries: Array.isArray(bundle.entry) ? bundle.entry.length : 0,
-        observations: 0,
-        medications: 0,
-        deviceUses: 0,
-        documents: 0,
-        compositions: 0,
+        ...counts,
       });
     } catch (error) {
       hasErrors = true;
