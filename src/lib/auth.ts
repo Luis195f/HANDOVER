@@ -1,4 +1,5 @@
 import * as AuthSession from 'expo-auth-session';
+import type { AuthSessionResult } from 'expo-auth-session';
 import Constants from 'expo-constants';
 import { clearAuthState, getAuthState, setAuthState, subscribe, type AuthTokens } from '@/src/state/auth-store';
 
@@ -11,6 +12,28 @@ export type Tokens = {
   id_token?: string;
   scope?: string;
 };
+
+export type AuthErrorKind =
+  | 'CONFIG'
+  | 'TOKEN_INVALID'
+  | 'TOKEN_EXPIRED'
+  | 'CANCELLED'
+  | 'NETWORK'
+  | 'UNAUTHENTICATED';
+
+export class AuthError extends Error {
+  kind: AuthErrorKind;
+
+  constructor(kind: AuthErrorKind, message: string) {
+    super(message);
+    this.name = 'AuthError';
+    this.kind = kind;
+  }
+}
+
+type AuthSuccessResult = { status: 'success' };
+type AuthCancelledResult = { status: 'cancelled' };
+export type AuthFlowResult = AuthSuccessResult | AuthCancelledResult;
 
 type DiscoveryDocument = {
   authorizationEndpoint?: string;
@@ -43,14 +66,17 @@ type AuthRequestLike = {
   promptAsync: (
     discovery: DiscoveryDocument,
     options?: Record<string, unknown>
-  ) => Promise<{ type: 'success' | 'dismiss' | 'cancel'; params?: Record<string, any> }>;
+  ) => Promise<
+    | ({ type: 'success'; params?: Record<string, string | undefined> } & AuthSessionResult)
+    | { type: 'dismiss' | 'cancel'; params?: Record<string, string | undefined> }
+  >;
 };
 
 export type User = {
   sub: string;
   name?: string;
   email?: string;
-  role: 'nurse' | 'admin' | 'viewer';
+  role: 'nurse' | 'admin' | 'viewer' | 'supervisor';
   unitIds: string[];
 };
 
@@ -123,7 +149,7 @@ function resolveNamespace(): string {
 type OIDCConfig = {
   issuer: string;
   clientId: string;
-  audience?: string;
+  audience: string;
   scope: string;
   redirectScheme: string;
 };
@@ -136,15 +162,38 @@ function readEnv(name: string): string | undefined {
   return process.env[`EXPO_PUBLIC_${name}`] ?? process.env[name];
 }
 
-function loadOIDCConfig(): OIDCConfig {
-  const issuer = readEnv('OIDC_ISSUER');
-  const clientId = readEnv('OIDC_CLIENT_ID');
-  const scope = readEnv('OIDC_SCOPE') ?? 'openid profile email offline_access';
-  const redirectScheme = readEnv('OIDC_REDIRECT_SCHEME') ?? 'handoverpro';
-  if (!issuer || !clientId) {
-    throw new Error('Missing OIDC configuration');
+function requireEnv(name: string): string {
+  const value = readEnv(name)?.trim();
+  if (!value) {
+    throw new AuthError('CONFIG', `Missing ${name}`);
   }
-  const audience = readEnv('OIDC_AUDIENCE');
+  return value;
+}
+
+function validateIssuer(issuer: string): void {
+  try {
+    // eslint-disable-next-line no-new
+    new URL(issuer);
+  } catch {
+    throw new AuthError('CONFIG', 'OIDC_ISSUER must be a valid URL');
+  }
+}
+
+function validateRedirectScheme(scheme: string): void {
+  const schemePattern = /^[a-z][a-z0-9+.-]*$/i;
+  if (!schemePattern.test(scheme)) {
+    throw new AuthError('CONFIG', 'OIDC_REDIRECT_SCHEME must be a valid URI scheme');
+  }
+}
+
+function loadOIDCConfig(): OIDCConfig {
+  const issuer = requireEnv('OIDC_ISSUER');
+  const clientId = requireEnv('OIDC_CLIENT_ID');
+  const audience = requireEnv('OIDC_AUDIENCE');
+  const scope = requireEnv('OIDC_SCOPE');
+  const redirectScheme = requireEnv('OIDC_REDIRECT_SCHEME');
+  validateIssuer(issuer);
+  validateRedirectScheme(redirectScheme);
   return { issuer: issuer.replace(/\/$/, ''), clientId, audience, scope, redirectScheme };
 }
 
@@ -193,22 +242,43 @@ async function hydrateFromStorage(): Promise<void> {
         clearAuthState();
         return;
       }
+      if (expiresAt * 1000 <= Date.now()) {
+        clearAuthState();
+        return;
+      }
+      if (!idToken) {
+        clearAuthState();
+        return;
+      }
       const tokens: AuthTokens = {
         accessToken,
         refreshToken: refreshToken ?? null,
         expiresAt,
         idToken: idToken ?? undefined,
       };
-      let user: User | null = null;
-      if (userJson) {
-        try {
-          const parsed = JSON.parse(userJson) as User;
-          user = parsed;
-        } catch (error) {
-          console.warn('Failed to parse stored user', error);
+      try {
+        const { user } = validateIdToken(idToken);
+        let persistedUser = user;
+        if (userJson) {
+          try {
+            const parsed = JSON.parse(userJson) as User;
+            persistedUser = {
+              ...user,
+              name: parsed.name ?? user.name,
+              email: parsed.email ?? user.email,
+              unitIds: parsed.unitIds?.length ? parsed.unitIds : user.unitIds,
+            };
+          } catch (error) {
+            console.warn('Failed to parse stored user', error);
+          }
         }
+        setAuthState({ user: persistedUser, tokens });
+      } catch (error) {
+        if (error instanceof AuthError) {
+          console.warn('Clearing stored auth due to token validation', error.message);
+        }
+        clearAuthState();
       }
-      setAuthState({ user, tokens });
     })().finally(() => {
       hydrationPromise = null;
     });
@@ -228,29 +298,48 @@ function decodeBase64Url(value: string): string {
   if (nodeBuffer) {
     return nodeBuffer.from(padded, 'base64').toString('utf-8');
   }
-  throw new Error('No base64 decoder available');
+  throw new AuthError('TOKEN_INVALID', 'No base64 decoder available');
 }
 
-function decodeJwtClaims(idToken: string): Record<string, unknown> | null {
+function encodeBase64Url(value: string): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(value, 'utf8').toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  if (typeof globalThis.btoa === 'function') {
+    return globalThis.btoa(value).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  throw new AuthError('TOKEN_INVALID', 'No base64 encoder available');
+}
+
+type JwtClaims = {
+  iss?: unknown;
+  aud?: unknown;
+  exp?: unknown;
+  sub?: unknown;
+  name?: unknown;
+  email?: unknown;
+  [key: string]: unknown;
+};
+
+type ValidatedClaims = JwtClaims & { iss: string; aud: string | string[]; exp: number; sub: string };
+
+function decodeJwtClaims(idToken: string): JwtClaims {
+  const parts = idToken.split('.');
+  if (parts.length < 2) {
+    throw new AuthError('TOKEN_INVALID', 'ID token is malformed');
+  }
   try {
-    const parts = idToken.split('.');
-    if (parts.length < 2) {
-      return null;
-    }
     const payload = decodeBase64Url(parts[1]);
-    return JSON.parse(payload) as Record<string, unknown>;
+    return JSON.parse(payload) as JwtClaims;
   } catch (error) {
     console.warn('Failed to decode id token', error);
-    return null;
+    throw new AuthError('TOKEN_INVALID', 'Unable to decode id token');
   }
 }
 
-const roleValues = new Set<User['role']>(['nurse', 'admin', 'viewer']);
+const roleValues = new Set<User['role']>(['nurse', 'admin', 'viewer', 'supervisor']);
 
-function resolveRole(claims: Record<string, unknown> | null): User['role'] {
-  if (!claims) {
-    return 'viewer';
-  }
+function resolveRole(claims: JwtClaims): User['role'] | null {
   const candidates = [
     claims['role'],
     claims['https://handover/role'],
@@ -271,7 +360,7 @@ function resolveRole(claims: Record<string, unknown> | null): User['role'] {
       return candidate as User['role'];
     }
   }
-  return 'viewer';
+  return null;
 }
 
 function toStringArray(value: unknown): string[] {
@@ -290,10 +379,7 @@ function toStringArray(value: unknown): string[] {
   return [];
 }
 
-function resolveUnitIds(claims: Record<string, unknown> | null): string[] {
-  if (!claims) {
-    return [];
-  }
+function resolveUnitIds(claims: JwtClaims): string[] {
   const candidates = [
     claims['unitIds'],
     claims['units'],
@@ -309,21 +395,56 @@ function resolveUnitIds(claims: Record<string, unknown> | null): string[] {
   return Array.from(collected);
 }
 
-function buildUserFromClaims(claims: Record<string, unknown> | null): User | null {
-  if (!claims) {
-    return null;
-  }
-  const sub = typeof claims.sub === 'string' ? claims.sub : undefined;
-  if (!sub) {
-    return null;
+function buildUserFromClaims(claims: ValidatedClaims): User {
+  const role = resolveRole(claims);
+  if (!role) {
+    throw new AuthError('TOKEN_INVALID', 'Missing or invalid role claim');
   }
   return {
-    sub,
+    sub: claims.sub,
     name: typeof claims.name === 'string' ? claims.name : undefined,
     email: typeof claims.email === 'string' ? claims.email : undefined,
-    role: resolveRole(claims),
+    role,
     unitIds: resolveUnitIds(claims),
   };
+}
+
+function normalizeAudience(aud: unknown): string[] {
+  if (typeof aud === 'string') {
+    return [aud];
+  }
+  if (Array.isArray(aud)) {
+    return aud.map((value) => String(value));
+  }
+  return [];
+}
+
+function assertValidClaims(claims: JwtClaims): ValidatedClaims {
+  const iss = typeof claims.iss === 'string' ? claims.iss.replace(/\/$/, '') : null;
+  const aud = normalizeAudience(claims.aud);
+  const expRaw = typeof claims.exp === 'number' ? claims.exp : Number.parseInt(String(claims.exp ?? 'NaN'), 10);
+  const sub = typeof claims.sub === 'string' ? claims.sub : null;
+  if (!iss || !sub || !Number.isFinite(expRaw) || !aud.length) {
+    throw new AuthError('TOKEN_INVALID', 'ID token is missing required claims');
+  }
+  if (iss !== oidcConfig.issuer) {
+    throw new AuthError('TOKEN_INVALID', 'ID token issuer mismatch');
+  }
+  if (!aud.includes(oidcConfig.audience)) {
+    throw new AuthError('TOKEN_INVALID', 'ID token audience mismatch');
+  }
+  const exp = expRaw;
+  if (exp * 1000 <= Date.now()) {
+    throw new AuthError('TOKEN_EXPIRED', 'ID token has expired');
+  }
+  return { ...claims, iss, aud, exp, sub };
+}
+
+function validateIdToken(idToken: string): { claims: ValidatedClaims; user: User } {
+  const claims = decodeJwtClaims(idToken);
+  const validated = assertValidClaims(claims);
+  const user = buildUserFromClaims(validated);
+  return { claims: validated, user };
 }
 
 export async function persistAuth(tokens: AuthTokens, user: User | null): Promise<void> {
@@ -344,32 +465,47 @@ export async function refresh(
   await hydrateFromStorage();
   const state = getAuthState();
   if (!state.tokens) {
-    throw new Error('Cannot refresh tokens without an existing session');
+    throw new AuthError('UNAUTHENTICATED', 'Cannot refresh tokens without an existing session');
   }
 
   const normalized = normalizeTokenResponse(response);
   const accessToken = normalized.accessToken ?? state.tokens.accessToken;
   if (!accessToken) {
-    throw new Error('Missing access token in refresh response');
+    throw new AuthError('TOKEN_INVALID', 'Missing access token in refresh response');
   }
 
   const baseTokens = buildTokens({
     accessToken,
     refreshToken: normalized.refreshToken ?? undefined,
     expiresIn: normalized.expiresIn ?? undefined,
-    idToken: normalized.idToken ?? undefined,
+    idToken: normalized.idToken ?? state.tokens.idToken ?? undefined,
     scope: normalized.scope ?? undefined,
   });
 
+  const idToken = normalized.idToken ?? state.tokens.idToken;
+  if (!idToken) {
+    throw new AuthError('TOKEN_INVALID', 'Missing id token in refresh response');
+  }
+  const { user: validatedUser } = validateIdToken(idToken);
   const tokens: AuthTokens = {
     ...baseTokens,
     refreshToken: normalized.refreshToken ?? state.tokens.refreshToken,
-    idToken: normalized.idToken ?? state.tokens.idToken,
+    idToken,
     scope: normalized.scope ?? state.tokens.scope,
   };
 
-  const nextUser = user ?? state.user;
-  await persistAuth(tokens, nextUser);
+  const baseUser = user ?? state.user ?? validatedUser;
+  if (baseUser?.sub && baseUser.sub !== validatedUser.sub) {
+    throw new AuthError('TOKEN_INVALID', 'User in refresh response does not match existing session');
+  }
+  const mergedUser: User = {
+    ...validatedUser,
+    name: baseUser?.name ?? validatedUser.name,
+    email: baseUser?.email ?? validatedUser.email,
+    unitIds: baseUser?.unitIds?.length ? baseUser.unitIds : validatedUser.unitIds,
+    role: baseUser?.role ?? validatedUser.role,
+  };
+  await persistAuth(tokens, mergedUser);
   return tokens;
 }
 
@@ -404,6 +540,9 @@ async function fetchUserInfo(accessToken: string, discovery: DiscoveryDocument):
     }
     const payload = (await response.json()) as Record<string, unknown>;
     const role = resolveRole(payload);
+    if (!role) {
+      return null;
+    }
     const unitIds = resolveUnitIds(payload);
     const sub = typeof payload.sub === 'string' ? payload.sub : undefined;
     if (!sub) {
@@ -447,17 +586,23 @@ function normalizeTokenResponse(response: AnyTokenResponse): TokenResponse {
 async function handleTokenResponse(response: TokenResponse, discovery: DiscoveryDocument): Promise<void> {
   const tokens = buildTokens(response);
   if (!tokens.accessToken) {
-    throw new Error('Missing access token in response');
+    throw new AuthError('TOKEN_INVALID', 'Missing access token in response');
   }
-  const claims = tokens.idToken ? decodeJwtClaims(tokens.idToken) : null;
-  let user = buildUserFromClaims(claims);
-  if (!user) {
-    user = await fetchUserInfo(tokens.accessToken, discovery);
+  if (!tokens.idToken) {
+    throw new AuthError('TOKEN_INVALID', 'Missing id token in response');
   }
-  if (!user) {
-    throw new Error('Unable to resolve user profile from token response');
-  }
-  await persistAuth(tokens, user);
+  const { user } = validateIdToken(tokens.idToken);
+  const profile = await fetchUserInfo(tokens.accessToken, discovery);
+  const mergedUser: User =
+    profile && profile.sub === user.sub
+      ? {
+          ...user,
+          name: profile.name ?? user.name,
+          email: profile.email ?? user.email,
+          unitIds: profile.unitIds.length ? profile.unitIds : user.unitIds,
+        }
+      : user;
+  await persistAuth(tokens, mergedUser);
 }
 
 let pendingAuthRequest: AuthRequestLike | null = null;
@@ -475,16 +620,25 @@ function createAuthRequest(): AuthRequestLike {
   return request;
 }
 
-export async function loginWithOIDC(): Promise<void> {
+export async function loginWithOIDC(): Promise<AuthFlowResult> {
   const discovery = await getDiscovery();
   const request = createAuthRequest();
   pendingAuthRequest = request;
   try {
     const result = await request.promptAsync(discovery, { useProxy: false });
+    if (result.type === 'cancel' || result.type === 'dismiss') {
+      return { status: 'cancelled' };
+    }
     if (result.type !== 'success' || !result.params?.code) {
-      throw new Error(result.params?.error_description ?? 'OIDC login cancelled');
+      throw new AuthError('CANCELLED', result.params?.error_description ?? 'OIDC login cancelled');
     }
     await exchangeCodeForTokens(result.params.code, request, discovery);
+    return { status: 'success' };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    throw new AuthError('NETWORK', (error as Error)?.message ?? 'OIDC login failed');
   } finally {
     pendingAuthRequest = null;
   }
@@ -500,17 +654,25 @@ async function exchangeCodeForTokens(
     ...(oidcConfig.audience ? { audience: oidcConfig.audience } : {}),
     ...(request.codeVerifier ? { code_verifier: request.codeVerifier } : {}),
   };
-  const tokenResponse = (await AuthSession.exchangeCodeAsync(
-    {
-      clientId: oidcConfig.clientId,
-      code,
-      redirectUri,
-      extraParams: Object.keys(extraParams).length ? extraParams : undefined,
-    },
-    discovery
-  )) as TokenResponse;
-  await handleTokenResponse(tokenResponse, discovery);
-  pendingAuthRequest = null;
+  try {
+    const tokenResponse = (await AuthSession.exchangeCodeAsync(
+      {
+        clientId: oidcConfig.clientId,
+        code,
+        redirectUri,
+        extraParams: Object.keys(extraParams).length ? extraParams : undefined,
+      },
+      discovery
+    )) as TokenResponse;
+    await handleTokenResponse(tokenResponse, discovery);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    throw new AuthError('NETWORK', (error as Error)?.message ?? 'Failed to exchange authorization code');
+  } finally {
+    pendingAuthRequest = null;
+  }
 }
 
 export async function handleRedirect(url: string): Promise<void> {
@@ -521,11 +683,12 @@ export async function handleRedirect(url: string): Promise<void> {
   }
   try {
     const discovery = await getDiscovery();
-    const parsed = (AuthSession as any).parse?.(url) ?? { queryParams: {}, params: {} };
+    const parsed = (AuthSession as unknown as { parse?: (input: string) => { queryParams?: Record<string, string>; params?: Record<string, string> } }).parse?.(url) ??
+      { queryParams: {}, params: {} };
     const code = parsed.queryParams?.code ?? parsed.params?.code;
     if (!code) {
       const error = parsed.queryParams?.error_description ?? parsed.params?.error_description;
-      throw new Error(error ?? 'OIDC redirect missing authorization code');
+      throw new AuthError('TOKEN_INVALID', error ?? 'OIDC redirect missing authorization code');
     }
     await exchangeCodeForTokens(code, request, discovery);
   } finally {
@@ -538,14 +701,14 @@ export async function ensureFreshToken(): Promise<string> {
   const state = getAuthState();
   const tokens = state.tokens;
   if (!tokens) {
-    throw new Error('User is not authenticated');
+    throw new AuthError('UNAUTHENTICATED', 'User is not authenticated');
   }
   const now = Math.floor(Date.now() / 1000);
   if (tokens.expiresAt - now > 60) {
     return tokens.accessToken;
   }
   if (!tokens.refreshToken) {
-    throw new Error('Refresh token missing');
+    throw new AuthError('TOKEN_INVALID', 'Refresh token missing');
   }
   const discovery = await getDiscovery();
   const response = (await AuthSession.refreshAsync(
@@ -601,6 +764,20 @@ export function getCurrentUser(): User | null {
   return getAuthState().user;
 }
 
+export type PublicAuthProfile = { user: User | null };
+
+export function getPublicProfile(): PublicAuthProfile {
+  const user = getAuthState().user;
+  return {
+    user: user
+      ? {
+          ...user,
+          unitIds: [...user.unitIds],
+        }
+      : null,
+  };
+}
+
 export function onAuthStateChange(callback: (user: User | null) => void): () => void {
   callback(getAuthState().user);
   return subscribe((state) => callback(state.user));
@@ -619,10 +796,27 @@ export async function loginWithMockUser(overrides: Partial<User> = {}): Promise<
     accessToken: overrides.email ? `mock-${overrides.email}` : 'mock-token',
     refreshToken: null,
     expiresAt: now + 3600,
-    idToken: undefined,
+    idToken: buildMockIdToken(user, now + 3600),
     scope: 'openid profile email',
   };
   await persistAuth(tokens, user);
 }
 
 export { getAuthState };
+
+function buildMockIdToken(user: User, exp: number): string {
+  const header = encodeBase64Url(JSON.stringify({ alg: 'none', typ: 'JWT' }));
+  const payload = encodeBase64Url(
+    JSON.stringify({
+      iss: oidcConfig.issuer,
+      aud: oidcConfig.audience,
+      exp,
+      sub: user.sub,
+      role: user.role,
+      unitIds: user.unitIds,
+      name: user.name,
+      email: user.email,
+    })
+  );
+  return `${header}.${payload}.mock`;
+}
