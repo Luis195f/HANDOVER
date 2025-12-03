@@ -32,3 +32,44 @@ describe('ACL helpers', () => {
     expect(() => ensureUnitAccess(baseSession, '')).toThrowError('INVALID_UNIT');
   });
 });
+
+describe('ACL env flags and edge cases', () => {
+  beforeEach(() => {
+    delete process.env.EXPO_PUBLIC_BYPASS_SCOPE;
+    delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
+    delete process.env.EXPO_PUBLIC_ALLOWED_UNITS;
+  });
+
+  it('fails closed for unknown roles', () => {
+    const session: AuthSession = { ...baseSession, roles: ['unknown' as never] };
+    expect(hasRole(session, 'viewer')).toBe(false);
+    expect(() => ensureRole(session, 'viewer')).toThrowError('FORBIDDEN_ROLE');
+  });
+
+  it('returns NO_SESSION when bypass flag is set but session is missing', () => {
+    process.env.EXPO_PUBLIC_BYPASS_SCOPE = 'true';
+    expect(hasRole(null, 'nurse')).toBe(false);
+    expect(() => ensureRole(null, 'nurse')).toThrowError('NO_SESSION');
+  });
+
+  it('bypasses unit and role checks when bypass flag is enabled with session', () => {
+    process.env.EXPO_PUBLIC_BYPASS_SCOPE = 'true';
+    expect(() => ensureRole(baseSession, 'admin')).not.toThrow();
+    expect(() => ensureUnitAccess(baseSession, 'any-unit')).not.toThrow();
+  });
+
+  it('allows all units when allow-all flag is set', () => {
+    process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = 'true';
+    expect(() => ensureUnitAccess({ ...baseSession, roles: ['nurse'] }, 'new-unit')).not.toThrow();
+  });
+
+  it('respects allowed units allow-list', () => {
+    process.env.EXPO_PUBLIC_ALLOWED_UNITS = 'icu-a, med-2';
+    expect(() => ensureUnitAccess(baseSession, 'icu-a')).not.toThrow();
+    expect(() => ensureUnitAccess(baseSession, 'med-2')).toThrowError('FORBIDDEN_UNIT');
+  });
+
+  it('requires session for unit access checks', () => {
+    expect(() => ensureUnitAccess(null, 'icu-a')).toThrowError('NO_SESSION');
+  });
+});
