@@ -16,6 +16,20 @@ export interface PatientSummary {
   mrn?: string;
   allergies?: string[];
 }
+export type OperationIssue = {
+  severity?: 'information' | 'warning' | 'error' | 'fatal' | string;
+  code?: string;
+  diagnostics?: string;
+  details?: { text?: string };
+};
+
+export type ResponseLike = {
+  ok: boolean;
+  status: number;
+  issue?: OperationIssue[];
+  issues?: OperationIssue[];
+  body?: unknown;
+};
 
 /**
  * Obtiene un resumen de paciente a partir de su ID.

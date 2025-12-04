@@ -1,4 +1,3 @@
-// @ts-nocheck
 // src/lib/sync.ts
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -216,6 +215,26 @@ const TX_IDENTIFIER_SYSTEM = 'urn:handover-pro:tx';
 const OFFLINE_RETRY_DELAY_MS = 30_000;
 const OFFLINE_ERROR_MESSAGE = 'Sin conexión a la red. Reintentaremos automáticamente al recuperar conectividad.';
 
+type SyncLifecycleStatus = 'idle' | 'running' | 'backoff' | 'paused';
+
+export type SyncSnapshot = {
+  status: SyncLifecycleStatus;
+  lastRunAt: string | null;
+  pendingCount: number;
+  lastError?: string | null;
+  nextRetryAt?: number | null;
+};
+
+type SyncListener = (snapshot: SyncSnapshot) => void;
+
+type SyncEngineOptions = {
+  getToken: () => Promise<string>;
+  validation?: ValidationOptions;
+  onAuthError?: (error: Error) => void;
+  isOnline?: () => Promise<boolean>;
+  sender?: QueueSendHandler;
+};
+
 // BEGIN HANDOVER_OFFLINE
 export function getNextDelayMs(attempts: number): number {
   if (attempts <= 0) return 0;
@@ -225,11 +244,97 @@ export function getNextDelayMs(attempts: number): number {
 
 type QueueSendResult = { ok: true } | { ok: false; status?: number; message?: string; recoverable?: boolean };
 type QueueSendHandler = (item: OfflineQueueItem) => Promise<QueueSendResult>;
+type OfflineQueuePayload = { bundle?: Bundle; txId?: string; patientId?: string };
 
 let queueSendHandler: QueueSendHandler = async () => ({ ok: true });
 
 export function setQueueSendHandler(handler: QueueSendHandler): void {
   queueSendHandler = handler;
+}
+
+let syncOptions: SyncEngineOptions | null = null;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let pausedForAuth = false;
+let syncSnapshot: SyncSnapshot = {
+  status: 'idle',
+  lastRunAt: null,
+  pendingCount: 0,
+  lastError: null,
+  nextRetryAt: null,
+};
+const syncListeners = new Set<SyncListener>();
+
+function notifySyncListeners() {
+  for (const listener of syncListeners) {
+    try {
+      listener(syncSnapshot);
+    } catch (error) {
+      console.warn('Sync listener failed', error);
+    }
+  }
+}
+
+function updateSyncSnapshot(patch: Partial<SyncSnapshot>): SyncSnapshot {
+  syncSnapshot = { ...syncSnapshot, ...patch };
+  notifySyncListeners();
+  return syncSnapshot;
+}
+
+export function getSyncSnapshot(): SyncSnapshot {
+  return { ...syncSnapshot };
+}
+
+export function subscribeSyncStatus(listener: SyncListener): () => void {
+  syncListeners.add(listener);
+  listener(syncSnapshot);
+  return () => {
+    syncListeners.delete(listener);
+  };
+}
+
+function cancelSyncTimer() {
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+}
+
+function scheduleSync(delayMs: number) {
+  cancelSyncTimer();
+  const nextRetryAt = Date.now() + delayMs;
+  updateSyncSnapshot({ status: 'backoff', nextRetryAt });
+  syncTimer = setTimeout(() => {
+    void runSyncCycle();
+  }, delayMs);
+}
+
+function pauseSync(message: string) {
+  pausedForAuth = true;
+  cancelSyncTimer();
+  updateSyncSnapshot({ status: 'paused', lastError: message, nextRetryAt: null });
+}
+
+export function resumeSync() {
+  pausedForAuth = false;
+  cancelSyncTimer();
+  updateSyncSnapshot({ status: 'idle', lastError: null, nextRetryAt: null });
+  void runSyncCycle();
+}
+
+async function checkOnline(): Promise<boolean> {
+  if (syncOptions?.isOnline) {
+    try {
+      return await syncOptions.isOnline();
+    } catch {
+      return true;
+    }
+  }
+  try {
+    const state = await NetInfo.fetch();
+    return isOnlineState(state as any);
+  } catch {
+    return true;
+  }
 }
 
 function isRecoverableStatus(status?: number): boolean {
@@ -255,6 +360,84 @@ function buildFailureOutcome(error: unknown): QueueSendResult {
   return { ok: false, message: typeof error === 'string' ? error : 'Unknown error' };
 }
 
+function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const bundle = (payload as { bundle?: unknown }).bundle;
+  return {
+    bundle: bundle as Bundle | undefined,
+    txId: typeof (payload as { txId?: unknown }).txId === 'string' ? (payload as { txId: string }).txId : undefined,
+    patientId:
+      typeof (payload as { patientId?: unknown }).patientId === 'string'
+        ? (payload as { patientId: string }).patientId
+        : undefined,
+  };
+}
+
+function hasFatalOutcome(issues?: OperationIssue[]): OperationIssue | undefined {
+  if (!Array.isArray(issues)) return undefined;
+  return issues.find((issue) => issue?.severity === 'fatal' || issue?.severity === 'error');
+}
+
+function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
+  return async (item) => {
+    const parsed = extractOfflinePayload(item.payload);
+    if (!parsed?.bundle) {
+      return { ok: true };
+    }
+
+    let token: string;
+    try {
+      token = await options.getToken();
+    } catch (error) {
+      return { ok: false, recoverable: true, message: (error as Error)?.message };
+    }
+
+    if (!token) {
+      pauseSync('Autenticación requerida');
+      options.onAuthError?.(new Error('unauthorized'));
+      return { ok: false, status: 401, recoverable: false, message: 'Token requerido' };
+    }
+
+    try {
+      await enforceBundleValidationWithMode(parsed.bundle, 'offline drain', options.validation);
+      const response = await postBundle(parsed.bundle, { token, idempotencyKey: parsed.txId ?? item.id });
+
+      const issues = response.issue ?? response.issues;
+      const fatal = hasFatalOutcome(issues);
+      const message = fatal?.diagnostics ?? (response.body as { error?: string } | undefined)?.error;
+
+      if (response.status === 401 || response.status === 403) {
+        pauseSync('Autenticación requerida');
+        options.onAuthError?.(new Error('unauthorized'));
+        return { ok: false, status: response.status, recoverable: false, message: message ?? 'Unauthorized' };
+      }
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          recoverable: fatal ? false : undefined,
+          message: message ?? `HTTP ${response.status}`,
+        };
+      }
+
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'unauthorized') {
+        pauseSync('Autenticación requerida');
+        options.onAuthError?.(error);
+        return { ok: false, status: 401, recoverable: false, message: error.message };
+      }
+      return {
+        ok: false,
+        status: error instanceof HTTPError ? error.status : undefined,
+        recoverable: true,
+        message: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  };
+}
+
 function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
   if (item.syncStatus !== 'pending') return false;
   const reference = item.lastAttemptAt ?? item.createdAt;
@@ -262,6 +445,13 @@ function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
   const baseline = Number.isFinite(base) ? base : 0;
   const nextAllowed = baseline + getNextDelayMs(item.attempts);
   return nextAllowed <= now;
+}
+
+function nextEligibleAt(item: OfflineQueueItem): number {
+  const reference = item.lastAttemptAt ?? item.createdAt;
+  const base = Date.parse(reference);
+  const baseline = Number.isFinite(base) ? base : Date.now();
+  return baseline + getNextDelayMs(item.attempts);
 }
 
 export async function processQueueOnce(): Promise<void> {
@@ -332,8 +522,13 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
+    const isAuthError = result.status === 401 || result.status === 403;
     const recoverable = result.recoverable ?? isRecoverableStatus(result.status);
-    if (recoverable) {
+    if (recoverable || isAuthError) {
+      if (isAuthError) {
+        pauseSync('Autenticación requerida');
+        syncOptions?.onAuthError?.(new Error('unauthorized'));
+      }
       await updateOfflineQueueItem(item.id, {
         syncStatus: 'pending',
         attempts: item.attempts + 1,
@@ -350,6 +545,105 @@ export async function processQueueOnce(): Promise<void> {
       errorMessage: result.message ?? (result.status ? `HTTP ${result.status}` : undefined),
     });
   }
+}
+
+async function runSyncCycle(): Promise<SyncSnapshot> {
+  if (pausedForAuth) {
+    return updateSyncSnapshot({ status: 'paused' });
+  }
+
+  const online = await checkOnline();
+  const queue = await listOfflineQueue();
+  updateSyncSnapshot({ pendingCount: queue.length });
+
+  if (!online) {
+    scheduleSync(OFFLINE_RETRY_DELAY_MS);
+    return updateSyncSnapshot({
+      status: 'backoff',
+      lastError: OFFLINE_ERROR_MESSAGE,
+    });
+  }
+
+  if (queue.length === 0) {
+    cancelSyncTimer();
+    return updateSyncSnapshot({
+      status: 'idle',
+      lastRunAt: new Date().toISOString(),
+      lastError: null,
+      nextRetryAt: null,
+    });
+  }
+
+  updateSyncSnapshot({
+    status: 'running',
+    lastRunAt: new Date().toISOString(),
+    lastError: null,
+  });
+
+  try {
+    await processQueueOnce();
+  } catch (error) {
+    updateSyncSnapshot({ lastError: error instanceof Error ? error.message : String(error) });
+  }
+
+  const refreshed = await listOfflineQueue();
+  const pending = refreshed.filter((item) => item.syncStatus === 'pending' || item.syncStatus === 'inFlight');
+  const errored = refreshed.find((item) => item.syncStatus === 'error' && item.errorMessage);
+  updateSyncSnapshot({
+    pendingCount: pending.length,
+    lastRunAt: new Date().toISOString(),
+    lastError: errored?.errorMessage ?? syncSnapshot.lastError ?? null,
+  });
+
+  if (pausedForAuth) {
+    return updateSyncSnapshot({ status: 'paused' });
+  }
+
+  if (pending.length === 0) {
+    cancelSyncTimer();
+    return updateSyncSnapshot({ status: 'idle', nextRetryAt: null });
+  }
+
+  const now = Date.now();
+  const next = Math.max(0, Math.min(...pending.map((item) => nextEligibleAt(item))) - now);
+  scheduleSync(next || 0);
+  return syncSnapshot;
+}
+
+let syncConnectivityUnsubscribe: (() => void) | null = null;
+
+function ensureSyncConnectivityListener() {
+  if (syncConnectivityUnsubscribe || !NetInfo?.addEventListener) return;
+  syncConnectivityUnsubscribe = NetInfo.addEventListener((state: { isConnected?: boolean | null; isInternetReachable?: boolean | null }) => {
+    if (isOnlineState(state)) {
+      void runSyncCycle();
+    }
+  });
+}
+
+export function configureSyncEngine(options: SyncEngineOptions): void {
+  syncOptions = options;
+  pausedForAuth = false;
+  cancelSyncTimer();
+  setQueueSendHandler(options.sender ?? buildDefaultQueueSender(options));
+  ensureSyncConnectivityListener();
+  void runSyncCycle();
+}
+
+export async function forceSync(): Promise<SyncSnapshot> {
+  return runSyncCycle();
+}
+
+export function stopSyncEngine(): void {
+  cancelSyncTimer();
+  syncOptions = null;
+  if (syncConnectivityUnsubscribe) {
+    try {
+      syncConnectivityUnsubscribe();
+    } catch {}
+    syncConnectivityUnsubscribe = null;
+  }
+  updateSyncSnapshot({ status: 'idle', nextRetryAt: null });
 }
 // END HANDOVER_OFFLINE
 
