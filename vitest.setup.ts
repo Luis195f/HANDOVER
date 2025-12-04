@@ -1,5 +1,5 @@
 // vitest.setup.ts
-import '@testing-library/jest-native/extend-expect';
+import './tests/jest-native';
 import { vi } from 'vitest';
 
 (globalThis as any).__DEV__ = false;
@@ -89,3 +89,4 @@ vi.mock('expo-crypto', () => ({
     return hash.toString(16);
   }),
 }));
+

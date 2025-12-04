@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
   test: {
     environment: 'node',
@@ -48,6 +50,13 @@ export default defineConfig({
         branches: 70,
       },
     },
+    // 👇 IMPORTANTE: decirle a Vitest que inlinee estos deps para que no
+    // intente ejecutarlos como CJS directamente en Node.
+    server: {
+      deps: {
+        inline: ['react-native', '@testing-library/react-native'],
+      },
+    },
   },
   resolve: {
     alias: [
@@ -56,14 +65,32 @@ export default defineConfig({
       { find: '@', replacement: path.resolve(__dirname, 'src') },
       {
         find: 'react-native',
-        replacement: fileURLToPath(new URL('./tests/__mocks__/react-native.ts', import.meta.url)),
+        replacement: fileURLToPath(
+          new URL('./tests/__mocks__/react-native.ts', import.meta.url),
+        ),
+      },
+      {
+        // Stub explícito de @testing-library/react-native
+        find: '@testing-library/react-native',
+        replacement: fileURLToPath(
+          new URL(
+            './tests/__mocks__/@testing-library-react-native.ts',
+            import.meta.url,
+          ),
+        ),
       },
       {
         find: '@testing-library/jest-native/extend-expect',
-        replacement: fileURLToPath(new URL('./tests/jest-native.ts', import.meta.url)),
+        replacement: fileURLToPath(
+          new URL('./tests/jest-native.ts', import.meta.url),
+        ),
       },
     ],
   },
-  optimizeDeps: { exclude: ['react-native'] },
-  ssr: { external: ['react-native'] },
+  optimizeDeps: {
+    exclude: ['react-native', '@testing-library/react-native'],
+  },
+  ssr: {
+    external: ['react-native', '@testing-library/react-native'],
+  },
 });
