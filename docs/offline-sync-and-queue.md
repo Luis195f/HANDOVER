@@ -15,3 +15,11 @@
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: número máximo de reintentos.
 - `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`: base del backoff exponencial.
 - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`: desactiva cifrado en desarrollo.
+
+## Estado de sincronización
+- La sync expone `SyncSnapshot` (`status`, `pendingCount`, `lastRunAt`, `lastError`, `nextRetryAt`).
+- Estados posibles:
+  - `idle`: sin trabajos pendientes o esperando nuevas órdenes.
+  - `running`: procesando la cola.
+  - `backoff`: esperando el próximo reintento (por ejemplo tras 5xx o sin red).
+  - `paused`: bloqueado por autenticación (401/403) hasta re-login o `resumeSync()`.
