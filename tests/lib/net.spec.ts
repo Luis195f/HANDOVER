@@ -28,20 +28,40 @@ describe('safeFetch (network layer)', () => {
     expect(localhostFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('retries transient failures with backoff', async () => {
+  it(
+  'retries transient failures with backoff',
+  async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response('fail', { status: 503 }))
       .mockResolvedValueOnce(new Response('ok'));
 
-    const promise = safeFetch(HTTPS_URL, { fetchImpl: fetchMock, maxRetries: 1, backoffMs: 50, random: () => 0 });
+    // Hacemos que TODOS los setTimeout de este test se ejecuten inmediatamente
+    const originalSetTimeout = globalThis.setTimeout;
 
-    await vi.advanceTimersByTimeAsync(50);
+    (globalThis as any).setTimeout = (fn: (...args: any[]) => void, ms?: number) => {
+      fn();
+      // devolvemos un handler dummy; no lo usamos
+      return 0 as any;
+    };
 
-    const res = await promise;
-    expect(res.ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
+    try {
+      const res = await safeFetch(HTTPS_URL, {
+        fetchImpl: fetchMock,
+        maxRetries: 1,
+        backoffMs: 50,
+        random: () => 0,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      // Muy importante: restaurar setTimeout original
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  },
+  10_000, // timeout del test (por seguridad, ya no deberíamos llegar a él)
+);
 
   it('does not retry non-transient 4xx responses', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('bad', { status: 400, statusText: 'Bad Request' }));
