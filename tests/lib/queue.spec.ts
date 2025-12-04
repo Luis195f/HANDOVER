@@ -1,5 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// 1) Mock de expo-sqlite: así `queue.ts` usa el fallback in-memory
+vi.mock('expo-sqlite', () => {
+  return {
+    
+    openDatabaseSync: undefined,
+    openDatabase: undefined,
+  };
+});
+
+// 2) Mock de expo-modules-core: por si algo lo llega a importar
+vi.mock('expo-modules-core', () => {
+  class MockEventEmitter {
+    addListener() {}
+    removeAllListeners() {}
+    removeSubscription() {}
+  }
+
+  return {
+    NativeModulesProxy: {},
+    requireNativeModule: () => ({}),
+    EventEmitter: MockEventEmitter,
+  };
+});
+
 const resetEnv = () => {
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
