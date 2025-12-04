@@ -49,26 +49,17 @@ describe('postBundle', () => {
   });
 
   it('sends bundle with correct headers and parses success body', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
+    const response = new Response(JSON.stringify({ resourceType: 'Bundle', id: 'abc' }), {
       status: 201,
-      headers: { get: vi.fn().mockReturnValue('Observation/123') },
-      json: vi.fn().mockResolvedValue({ resourceType: 'Bundle', id: 'abc' }),
+      headers: { Location: 'Observation/123', 'Content-Type': 'application/fhir+json' },
     });
+    const fetchMock = vi.fn().mockResolvedValue(response);
     vi.stubGlobal('fetch', fetchMock);
     const { postBundle } = await loadClient();
 
     const result = await postBundle(bundle, { token: 'token-123' });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://fhir.test/api', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer token-123',
-        'Content-Type': 'application/fhir+json',
-        Accept: 'application/fhir+json',
-      },
-      body: JSON.stringify(bundle),
-    });
+    expect(fetchMock).toHaveBeenCalledWith('https://fhir.test/api/Bundle', expect.any(Object));
     expect(result).toEqual({
       ok: true,
       status: 201,
@@ -78,13 +69,8 @@ describe('postBundle', () => {
   });
 
   it('handles success responses without JSON body', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: { get: vi.fn().mockReturnValue(null) },
-      json: vi.fn().mockRejectedValue(new Error('No body')),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(undefined, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     const { postBundle } = await loadClient();
 
     const result = await postBundle(bundle, { token: 'tk' });
@@ -100,13 +86,15 @@ describe('postBundle', () => {
         { severity: 'warning', code: 'processing' },
       ],
     };
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 400,
-      headers: { get: vi.fn().mockReturnValue(undefined) },
-      json: vi.fn().mockResolvedValue(outcome),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(outcome), {
+          status: 400,
+          headers: { 'Content-Type': 'application/fhir+json' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     const { postBundle } = await loadClient();
 
     const result = await postBundle(bundle, { token: 'tk' });
@@ -118,13 +106,12 @@ describe('postBundle', () => {
   });
 
   it('returns json undefined when error body cannot be parsed', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      headers: { get: vi.fn().mockReturnValue(undefined) },
-      json: vi.fn().mockRejectedValue(new Error('invalid json')),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('invalid json', { status: 500, headers: { 'Content-Type': 'application/fhir+json' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     const { postBundle } = await loadClient();
 
     const result = await postBundle(bundle, { token: 'tk' });

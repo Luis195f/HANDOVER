@@ -1,115 +1,287 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/net.ts
 import { maybeUseDemoResponse } from '@/src/demo/net-interceptor';
 
-/** Opciones de reintento para fetchWithRetry */
 export type RetryOptions = {
-  /** Intentos adicionales (default 3) */
   retries?: number;
-  /** Base del backoff exponencial en ms (default 500) */
   backoffMs?: number;
-  /** Códigos HTTP que disparan reintento (default 408,429,5xx) */
   retryOn?: number[];
-  /** AbortSignal externo */
   signal?: AbortSignal;
 };
 
-/** Extiende RequestInit para permitir un fetch alternativo y flags usados en tests */
 export interface ExtendedRequestInit extends RequestInit {
-  /** Implementación custom de fetch (usado por jest/vitest) */
   fetchImpl?: typeof fetch;
-  /** Puede ser número (p.ej., 0) o objeto con overrides (usado por tests) */
   retry?: number | {
     retries?: number;
     baseDelayMs?: number;
     maxDelayMs?: number;
   };
-  /** Timeout duro en ms (se cancela la petición) */
   timeoutMs?: number;
 }
 
-const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+export type SafeFetchOptions = RequestInit & {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  retries?: number;
+  retry?: number;
+  maxRetries?: number;
+  backoffMs?: number;
+  backoffFactor?: number;
+  maxBackoffMs?: number;
+  retryOn?: number[];
+  idempotencyKey?: string;
+  parseJson?: boolean;
+  random?: () => number;
+};
 
-/**
- * fetchWithRetry: wrapper de fetch con backoff exponencial + jitter.
- * - Acepta `init.fetchImpl` para inyectar un fetch simulado en tests.
- * - Acepta `init.retry` (number | object) y `init.timeoutMs`.
- * - Reintenta en 408, 429 y 5xx por defecto.
- */
-export async function fetchWithRetry(
-  input: RequestInfo | URL,
-  init: ExtendedRequestInit = {},
-  opts: RetryOptions = {},
-): Promise<Response> {
-  const {
-    retries: optRetries = 3,
-    backoffMs: optBackoff = 500,
-    retryOn = [408, 429, 500, 502, 503, 504],
-    signal: optSignal,
-  } = opts;
+export type SafeResponse<T> = {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  headers: Headers;
+  data?: T;
+  raw: Response;
+};
 
-  // Separa extensiones de init y decide qué fetch usar
-  const { fetchImpl, retry, timeoutMs, ...initRest } = init;
-  const doFetch = fetchImpl ?? fetch;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // BEGIN HANDOVER: DEMO_MODE
-  const demoResponse = await maybeUseDemoResponse(input, initRest);
-  if (demoResponse) {
-    return demoResponse;
+const DEFAULT_RETRYABLE = [408, 429, 500, 502, 503, 504];
+const envRetryMax = Number.parseInt(process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS || '', 10);
+const DEFAULT_RETRIES = Number.isFinite(envRetryMax) ? envRetryMax : 3;
+const envBackoff = Number.parseInt(process.env.EXPO_PUBLIC_QUEUE_BACKOFF_BASE || '', 10);
+const DEFAULT_BACKOFF_MS = Number.isFinite(envBackoff) ? envBackoff : 500;
+const DEFAULT_BACKOFF_FACTOR = 2;
+
+function isHttpUrlAllowedInProd(url: URL) {
+  return (
+    url.hostname === 'localhost' ||
+    url.hostname.startsWith('127.') ||
+    url.hostname.startsWith('10.') ||
+    url.hostname.startsWith('192.168.')
+  );
+}
+
+export class NetworkError extends Error {
+  status?: number;
+  code?: string;
+  isTransient: boolean;
+  details?: unknown;
+
+  constructor(message: string, params: { status?: number; code?: string; isTransient?: boolean; details?: unknown } = {}) {
+    super(message);
+    this.name = 'NetworkError';
+    this.status = params.status;
+    this.code = params.code;
+    this.isTransient = params.isTransient ?? false;
+    this.details = params.details;
   }
-  // END HANDOVER: DEMO_MODE
+}
 
-  // Overrides provenientes de init.retry
-  const retries =
-    typeof retry === 'number' ? retry :
-    (retry?.retries ?? optRetries);
+export class TimeoutError extends NetworkError {
+  constructor(message = 'Request timed out') {
+    super(message, { code: 'TIMEOUT', isTransient: true });
+    this.name = 'TimeoutError';
+  }
+}
 
-  const baseDelayMs =
-    typeof retry === 'number' ? optBackoff :
-    (retry?.baseDelayMs ?? optBackoff);
+export class HTTPError extends NetworkError {
+  response?: Response;
 
-  const maxDelayMs =
-    typeof retry === 'number' ? Number.POSITIVE_INFINITY :
-    (retry?.maxDelayMs ?? Number.POSITIVE_INFINITY);
+  constructor(status: number, statusText: string, isTransient: boolean, response?: Response) {
+    super(statusText || `HTTP ${status}`, { status, isTransient });
+    this.name = 'HTTPError';
+    this.response = response;
+  }
+}
 
-  // Timeout opcional
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const controller = new AbortController();
-  const finalSignal = optSignal ?? (timeoutMs ? controller.signal : undefined);
-  if (timeoutMs) {
-    // Sin argumento para compatibilidad con DOM libs antiguas
-    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+const buildHeaders = (headers?: HeadersInit, idempotencyKey?: string) => {
+  const merged = new Headers(headers || undefined);
+  if (idempotencyKey && !merged.has('Idempotency-Key')) {
+    merged.set('Idempotency-Key', idempotencyKey);
+  }
+  return merged;
+};
+
+const shouldRetryStatus = (status: number, retryOn: number[]) => retryOn.includes(status);
+
+const parseRetryAfter = (headers: Headers) => {
+  const retryAfterHeader = headers.get('Retry-After');
+  if (!retryAfterHeader) return null;
+  const retryAfterSeconds = Number.parseFloat(retryAfterHeader);
+  if (Number.isFinite(retryAfterSeconds)) {
+    return retryAfterSeconds * 1000;
+  }
+  return null;
+};
+
+const parseJsonIfPossible = async <T>(response: Response, parseJson: boolean): Promise<T | undefined> => {
+  if (!parseJson) return undefined;
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('json')) return undefined;
+  try {
+    return (await response.clone().json()) as T;
+  } catch {
+    return undefined;
+  }
+};
+
+export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: SafeFetchOptions = {}): Promise<SafeResponse<T>> {
+  const {
+    fetchImpl = fetch,
+    timeoutMs,
+    retries,
+    retry,
+    maxRetries,
+    backoffMs = DEFAULT_BACKOFF_MS,
+    backoffFactor = DEFAULT_BACKOFF_FACTOR,
+    maxBackoffMs = Number.POSITIVE_INFINITY,
+    retryOn = DEFAULT_RETRYABLE,
+    idempotencyKey,
+    parseJson = true,
+    random = Math.random,
+    signal,
+    ...init
+  } = options;
+
+  const resolvedRetries = retries ?? maxRetries ?? retry ?? DEFAULT_RETRIES;
+  const demoResponse = await maybeUseDemoResponse(input, init as RequestInit);
+  if (demoResponse) {
+    const demoData = await parseJsonIfPossible<T>(demoResponse, parseJson);
+    return {
+      ok: demoResponse.ok,
+      status: demoResponse.status,
+      statusText: demoResponse.statusText,
+      headers: demoResponse.headers,
+      data: demoData,
+      raw: demoResponse,
+    };
+  }
+  const urlToUse = input instanceof Request ? input.url : input instanceof URL ? input.toString() : String(input);
+  const parsedUrl = (() => {
+    try {
+      return new URL(urlToUse);
+    } catch {
+      return null;
+    }
+  })();
+
+  if (process.env.NODE_ENV === 'production' && parsedUrl?.protocol === 'http:' && !isHttpUrlAllowedInProd(parsedUrl)) {
+    throw new NetworkError('Insecure HTTP is not allowed in production', { code: 'INSECURE_PROTOCOL', isTransient: false });
   }
 
   let attempt = 0;
-  let lastErr: any;
+  let lastError: unknown;
 
-  while (attempt <= retries) {
-    try {
-      const res = await doFetch(input, { ...initRest, signal: finalSignal });
-      // Si no es reintitable o ya es el último intento, devolvemos la respuesta
-      if (!retryOn.includes(res.status) || attempt === retries) {
-        if (timeoutId) clearTimeout(timeoutId);
-        return res;
+  while (attempt <= resolvedRetries) {
+    const attemptController = new AbortController();
+    const onAbort = () => attemptController.abort();
+    if (signal) {
+      if (signal.aborted) {
+        throw new NetworkError('Request aborted', { code: 'ABORTED', isTransient: false });
       }
-    } catch (err) {
-      lastErr = err;
-      if (attempt === retries) {
-        if (timeoutId) clearTimeout(timeoutId);
-        throw err; // último intento: propaga error
-      }
+      signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    // Backoff exponencial + jitter (0..99 ms), acotado por maxDelayMs
-    const backoff = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
-    const delay = Math.min(backoff, maxDelayMs);
-    await sleep(delay);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (timeoutMs) {
+      timeoutId = setTimeout(() => attemptController.abort(), timeoutMs);
+    }
+
+    try {
+      const headers = buildHeaders(init.headers, idempotencyKey);
+      const fetchPromise = fetchImpl(input, { ...init, headers, signal: attemptController.signal });
+      let abortHandler: (() => void) | undefined;
+      const response = await Promise.race([
+        fetchPromise,
+        new Promise<Response>((_, reject) => {
+          abortHandler = () => reject(new DOMException('Aborted', 'AbortError'));
+          attemptController.signal.addEventListener('abort', abortHandler!, { once: true });
+        }),
+      ]);
+      if (abortHandler) {
+        attemptController.signal.removeEventListener('abort', abortHandler);
+      }
+
+      if (response.ok) {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        const data = await parseJsonIfPossible<T>(response, parseJson);
+        return {
+          ok: true,
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+          data,
+          raw: response,
+        };
+      }
+
+      const shouldRetry = shouldRetryStatus(response.status, retryOn);
+      if (!shouldRetry || attempt === resolvedRetries) {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        throw new HTTPError(response.status, response.statusText, shouldRetry, response);
+      }
+
+      const retryAfterMs = parseRetryAfter(response.headers);
+      const exponentialDelay = backoffMs * Math.pow(backoffFactor, attempt);
+      const jitter = Math.floor(random() * 100);
+      const delay = Math.min(retryAfterMs ?? exponentialDelay + jitter, maxBackoffMs);
+      if (timeoutId) clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      await sleep(delay);
+    } catch (error) {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onAbort);
+
+      if (error instanceof HTTPError) {
+        throw error;
+      }
+
+      const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+      const isTimeout = isAbortError && timeoutMs !== undefined;
+      lastError = error;
+
+      if (isTimeout) {
+        if (attempt === resolvedRetries) {
+          throw new TimeoutError();
+        }
+        await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
+        attempt += 1;
+        continue;
+      }
+
+      if (attempt === resolvedRetries) {
+        throw new NetworkError((error as Error)?.message || 'Network error', { isTransient: true, details: error });
+      }
+
+      await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
+    }
+
     attempt += 1;
   }
 
-  if (timeoutId) clearTimeout(timeoutId);
-  if (lastErr) throw lastErr; // TS guard
-  throw new Error('fetchWithRetry: fallthrough inesperado');
+  throw lastError instanceof Error ? lastError : new Error('safeFetch: exhausted retries');
+}
+
+export async function fetchWithRetry(input: RequestInfo | URL, init: ExtendedRequestInit = {}, opts: RetryOptions = {}): Promise<Response> {
+  const { fetchImpl, retry, timeoutMs, ...rest } = init;
+  const resolvedRetries = typeof retry === 'number' ? retry : retry?.retries;
+  const backoffMs = typeof retry === 'number' ? undefined : retry?.baseDelayMs;
+  const maxBackoffMs = typeof retry === 'number' ? undefined : retry?.maxDelayMs;
+
+  const response = await safeFetch(input, {
+    ...rest,
+    fetchImpl,
+    timeoutMs,
+    retries: resolvedRetries ?? opts.retries,
+    backoffMs: backoffMs ?? opts.backoffMs,
+    maxBackoffMs,
+    retryOn: opts.retryOn,
+    signal: opts.signal,
+    parseJson: false,
+  });
+
+  return response.raw;
 }
 
 export default fetchWithRetry;
