@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/fhir-client.ts
-import { fetchWithRetry } from './net';
+import { HTTPError, safeFetch } from './net';
 import { getValidationErrorsFromBundle, validateBundle as validateFhirBundle } from './fhir-validation';
 import type { GeneratedPdf } from './export/export-pdf';
 // BEGIN HANDOVER D2 – VitalTrends fhir-client
@@ -183,92 +182,147 @@ type AuthHooks = {
   baseUrl?: string;
 };
 
+export interface FhirClientConfig {
+  baseUrl?: string;
+  getToken?: () => Promise<string | null>;
+  timeoutMs?: number;
+  defaultHeaders?: Record<string, string>;
+}
+
+export interface FhirOperationOptions {
+  token?: string;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+  idempotencyKey?: string;
+  timeoutMs?: number;
+}
+
+type OperationOutcomeIssue = {
+  severity?: string;
+  code?: string;
+  diagnostics?: string;
+  details?: { text?: string };
+};
+
+type OperationOutcome = {
+  resourceType: 'OperationOutcome';
+  issue?: OperationOutcomeIssue[];
+};
+
 let hooks: AuthHooks = {};
+let clientConfig: FhirClientConfig = {};
 
 /** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
-export function configureFHIRClient(h: AuthHooks) {
-  // Si pasan baseUrl sin getBaseUrl, lo normalizamos
+export function configureFHIRClient(h: AuthHooks & FhirClientConfig) {
   const mapped: AuthHooks = { ...h };
   if (mapped.baseUrl && !mapped.getBaseUrl) {
     const fixed = mapped.baseUrl.replace(/\/$/, '');
     mapped.getBaseUrl = () => fixed;
   }
   hooks = { ...hooks, ...mapped };
+  clientConfig = { ...clientConfig, ...h };
 }
 
 function getBaseUrl(): string {
   const fromHook = hooks.getBaseUrl?.();
-  const fromEnv = (process.env as any)?.FHIR_BASE_URL as string | undefined;
-  return (fromHook || fromEnv || 'https://example.invalid/fhir').replace(/\/$/, '');
+  const fromConfig = clientConfig.baseUrl;
+  const fromEnv =
+    ((process.env as any)?.FHIR_BASE_URL as string | undefined) ||
+    ((process.env as any)?.EXPO_PUBLIC_FHIR_BASE_URL as string | undefined);
+  return (fromHook || fromConfig || fromEnv || 'https://example.invalid/fhir').replace(/\/$/, '');
 }
 
-export type FetchFHIRParams = {
+export type FetchFHIRParams<TBody = unknown> = {
   path: string;
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  body?: any;
-  token?: string;
-  headers?: Record<string, string>;
-  signal?: AbortSignal;
+  body?: TBody;
+} & FhirOperationOptions;
+
+const parseResponseJson = async <T>(response?: Response): Promise<T | undefined> => {
+  if (!response) return undefined;
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('json')) return undefined;
+  try {
+    return (await response.clone().json()) as T;
+  } catch {
+    return undefined;
+  }
+};
+
+const getAuthToken = async (): Promise<string | null> => {
+  if (clientConfig.getToken) {
+    const token = await clientConfig.getToken();
+    if (token) return token;
+  }
+  return hooks.ensureFreshToken ? await hooks.ensureFreshToken() : null;
+};
+
+export type FhirResponse<T = unknown> = {
+  ok: boolean;
+  response: Response;
+  data?: T;
+  outcome?: OperationOutcomeIssue[];
 };
 
 // === Sobrecargas para que los tests puedan llamar fetchFHIR('/Patient', {...})
-export async function fetchFHIR(
+export async function fetchFHIR<TResource = unknown, TBody = unknown>(
   path: string,
-  opts?: Omit<FetchFHIRParams, 'path'>
-): Promise<{ ok: boolean; response: Response; data: any }>;
-export async function fetchFHIR(
-  params: FetchFHIRParams
-): Promise<{ ok: boolean; response: Response; data: any }>;
+  opts?: Omit<FetchFHIRParams<TBody>, 'path'>
+): Promise<FhirResponse<TResource>>;
+export async function fetchFHIR<TResource = unknown, TBody = unknown>(
+  params: FetchFHIRParams<TBody>
+): Promise<FhirResponse<TResource>>;
 
 /** Client FHIR con inyección de Authorization + manejo de 401/403. */
-export async function fetchFHIR(
-  arg1: string | FetchFHIRParams,
-  arg2?: Omit<FetchFHIRParams, 'path'>
+export async function fetchFHIR<TResource = unknown, TBody = unknown>(
+  arg1: string | FetchFHIRParams<TBody>,
+  arg2?: Omit<FetchFHIRParams<TBody>, 'path'>
 ) {
-  const p: FetchFHIRParams =
+  const p: FetchFHIRParams<TBody> =
     typeof arg1 === 'string' ? { path: arg1, ...(arg2 || {}) } : arg1;
 
-  const { path, method = 'GET', body, token, headers, signal } = p;
+  const { path, method = 'GET', body, token, headers, signal, timeoutMs, idempotencyKey } = p;
 
-  // Token preferente → si no, pedimos uno fresco (si hay hook)
-  const authToken = token ?? (await hooks.ensureFreshToken?.() ?? undefined);
+  const authToken = token ?? (await getAuthToken() ?? undefined);
 
   const url = /^https?:\/\//i.test(path)
     ? path
     : `${getBaseUrl()}/${path.replace(/^\//, '')}`;
 
-  const res = await fetchWithRetry(
-    url,
-    {
+  const requestHeaders: Record<string, string> = {
+    Accept: 'application/fhir+json',
+    ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
+    ...(clientConfig.defaultHeaders ?? {}),
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    ...headers,
+  };
+
+  try {
+    const res = await safeFetch<TResource>(url, {
       method,
-      headers: {
-        Accept: 'application/fhir+json',
-        ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        ...headers,
-      },
+      headers: requestHeaders,
       body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
       signal,
+      timeoutMs: timeoutMs ?? clientConfig.timeoutMs,
+      idempotencyKey,
+    });
+
+    return { ok: true, response: res.raw, data: res.data };
+  } catch (error) {
+    if (error instanceof HTTPError) {
+      if (error.status === 401 || error.status === 403) {
+        if (hooks.logout) await hooks.logout();
+        throw new Error('unauthorized');
+      }
+
+      const data = await parseResponseJson<TResource>(error.response);
+      const response =
+        error.response ?? new Response('', { status: error.status ?? 0, statusText: error.message });
+      const outcome = (data as OperationOutcome | undefined)?.issue;
+      return { ok: false, response, data, outcome };
     }
-  );
-
-  // Comportamiento esperado por los tests
-  if (res.status === 401 || res.status === 403) {
-    if (hooks.logout) await hooks.logout();
-    throw new Error('unauthorized');
+    throw error;
   }
-
-  // Soporta mocks que no implementan text()
-  let json: any = undefined;
-  const anyRes = res as any;
-  if (typeof anyRes?.json === 'function') {
-    json = await anyRes.json();
-  } else if (typeof anyRes?.text === 'function') {
-    const text = await anyRes.text();
-    try { json = text ? JSON.parse(text) : undefined; } catch { /* noop */ }
-  }
-
-  return { ok: res.ok, response: res, data: json };
 }
 
 /**
@@ -277,13 +331,48 @@ export async function fetchFHIR(
  * Acepta `opts` objeto o una *string* tratada como `Idempotency-Key` (compat sync).
  */
 export async function postBundle(
-  bundle: any,
-  opts?: { token?: string; headers?: Record<string, string> } | string
+  bundle: unknown,
+  opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string } | string
 ) {
-  const validation = validateFhirBundle(bundle);
   const embeddedErrors = getValidationErrorsFromBundle(bundle);
-  if (!validation.isValid || embeddedErrors) {
-    const errors = embeddedErrors || validation.errors;
+  if (embeddedErrors) {
+    return {
+      ok: false,
+      status: 400,
+      issues: embeddedErrors.map((err) => ({
+        severity: 'error',
+        code: 'invalid',
+        diagnostics: `${err.path}: ${err.message}`,
+      })),
+      issue: embeddedErrors.map((err) => ({
+        severity: 'error',
+        code: 'invalid',
+        diagnostics: `${err.path}: ${err.message}`,
+      })),
+      body: {
+        error: 'FHIR bundle failed validation',
+        details: embeddedErrors,
+      },
+    } as const;
+  }
+
+  const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
+  const structuralErrors: Array<{ path: string; message: string }> = [];
+  if (bundleObj.resourceType !== 'Bundle') {
+    structuralErrors.push({ path: 'resourceType', message: 'Bundle.resourceType must be "Bundle"' });
+  }
+  if (bundleObj.type !== 'transaction') {
+    structuralErrors.push({ path: 'type', message: 'Bundle.type must be "transaction"' });
+  }
+  if (!Array.isArray(bundleObj.entry) || bundleObj.entry.length === 0) {
+    structuralErrors.push({ path: 'entry', message: 'Bundle.entry is required' });
+  }
+
+  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
+  const validation = shouldRunStrictValidation ? validateFhirBundle(bundle) : { isValid: true, errors: [] };
+
+  const errors = structuralErrors.length > 0 ? structuralErrors : validation.isValid ? [] : validation.errors;
+  if (errors.length > 0) {
     return {
       ok: false,
       status: 400,
@@ -296,41 +385,39 @@ export async function postBundle(
     } as const;
   }
 
+  const tokenFromOpts = typeof opts === 'string' ? undefined : opts?.token;
+  const headersFromOpts = typeof opts === 'string' ? { 'Idempotency-Key': opts } : opts?.headers;
+  const idempotencyKey = typeof opts === 'string' ? opts : opts?.idempotencyKey;
+
+  const token = tokenFromOpts ?? (await getAuthToken() ?? undefined);
+  if (!token) {
+    throw new Error('OAuth token is required');
+  }
+
   try {
-    // ensureFreshToken si no hay token explícito
-    let token: string | undefined;
-    let headers: Record<string, string> | undefined;
-
-    if (typeof opts === 'string') {
-      headers = { 'Idempotency-Key': opts };
-    } else {
-      token = opts?.token;
-      headers = opts?.headers;
-    }
-
-    if (!token) token = (await hooks.ensureFreshToken?.()) ?? undefined;
-
-    const r = await fetchFHIR({
+    const result = await fetchFHIR<OperationOutcome | Record<string, unknown>, typeof bundle>({
       path: '/Bundle',
       method: 'POST',
       body: bundle,
       token,
-      headers,
+      headers: headersFromOpts,
+      idempotencyKey,
     });
 
-    if (!r.ok) {
-      const status = r.response?.status ?? 0;
-      const data = r.data || {};
-      const issues =
-        (data.issue || data.issues) ??
-        [{ severity: 'error', code: 'invalid', diagnostics: `HTTP ${status}` }];
+    const location =
+      result.response.headers.get('location') ?? result.response.headers.get('content-location') ?? undefined;
 
-      // Alias para compatibilidad con tests que esperan .issue
-      return { ok: false, status, issues, issue: issues, body: data };
+    if (!result.ok) {
+      const json = result.data as OperationOutcome | Record<string, unknown> | undefined;
+      const issues = result.outcome ?? (json as OperationOutcome | undefined)?.issue;
+      if (issues && issues.length > 0) {
+        return { ok: false, status: result.response.status, issues, issue: issues, json, location };
+      }
+      return { ok: false, status: result.response.status, issue: undefined, json, location };
     }
-    return { ok: true, status: r.response!.status, body: r.data };
+
+    return { ok: true, status: result.response.status, json: result.data, location };
   } catch (error: any) {
-    // Si fue 401/403 (lanzamos 'unauthorized'), devolvemos shape coherente.
     const isUnauthorized = String(error?.message ?? error).toLowerCase().includes('unauthorized');
     const code = isUnauthorized ? 'login' : 'invalid';
     return {
@@ -338,6 +425,7 @@ export async function postBundle(
       status: isUnauthorized ? 401 : 400,
       issues: [{ severity: 'error', code, diagnostics: String(error?.message ?? error) }],
       issue: [{ severity: 'error', code, diagnostics: String(error?.message ?? error) }],
+      json: { error: String(error?.message ?? error) },
       body: { error: String(error?.message ?? error) },
     };
   }

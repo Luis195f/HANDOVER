@@ -18,7 +18,7 @@ describe('safeFetch', () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(() => new Promise(() => {}));
 
-    const promise = safeFetch(HTTPS_URL, { fetchImpl: fetchMock, timeoutMs: 500 });
+    const promise = safeFetch(HTTPS_URL, { fetchImpl: fetchMock, timeoutMs: 500, retries: 0 });
 
     await vi.advanceTimersByTimeAsync(500);
 
@@ -34,11 +34,7 @@ describe('safeFetch', () => {
     ];
     const fetchMock = vi.fn(async () => responses.shift()!);
 
-    const resultPromise = safeFetch(HTTPS_URL, {
-      fetchImpl: fetchMock,
-      maxRetries: 1,
-      random: () => 0.1,
-    });
+    const resultPromise = safeFetch(HTTPS_URL, { fetchImpl: fetchMock, maxRetries: 1, random: () => 0.1 });
 
     await vi.advanceTimersByTimeAsync(1000);
 
