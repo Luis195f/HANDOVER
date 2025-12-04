@@ -12,7 +12,6 @@
  * - flushQueue(send) admite sender que devuelva Response o { ok, status }
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import * as SQLite from "expo-sqlite";
 import { decryptPayload, encryptPayload, hashHex, payloadIsEncrypted } from "./crypto";
 import { mark } from "./otel";
@@ -20,15 +19,41 @@ import { mark } from "./otel";
 // -------------------------------
 // DB bootstrap (Expo SQLite) + fallback
 // -------------------------------
-type DB = any;
-const db: DB =
-  (SQLite as any).openDatabaseSync?.("handover.db") ??
-  (SQLite as any).openDatabase?.("handover.db") ??
-  null;
+type SQLiteSyncDatabase = {
+  execSync?: (sql: string) => void;
+  runSync?: (sql: string, params?: unknown[]) => void;
+  getAllSync?: (sql: string, params?: unknown[]) => unknown[];
+  getFirstSync?: (sql: string, params?: unknown[]) => unknown;
+};
+
+const sqliteModule = SQLite as unknown as {
+  openDatabaseSync?: (name: string) => SQLiteSyncDatabase;
+  openDatabase?: (name: string) => SQLiteSyncDatabase;
+};
+
+const db: SQLiteSyncDatabase | null =
+  sqliteModule.openDatabaseSync?.("handover.db") ?? sqliteModule.openDatabase?.("handover.db") ?? null;
 
 // In-memory fallback (web/test sin SQLite)
-let memQueue: Array<{ id: number; key: string; payload: string; tries: number; created_at: number; next_at: number }> = [];
+type MemoryQueueRow = {
+  id: number;
+  key: string;
+  payload: string;
+  tries: number;
+  created_at: number;
+  next_at: number;
+};
+
+let memQueue: MemoryQueueRow[] = [];
 let memId = 1;
+
+type QueueRow = {
+  key: string;
+  payload: string;
+  tries: number;
+  created_at: number;
+  next_at: number;
+};
 
 if (db?.execSync) {
   db.execSync(`CREATE TABLE IF NOT EXISTS tx_queue (
@@ -143,6 +168,10 @@ function rowToQueueItem(row: QueueItemRow): QueueItem {
   };
 }
 
+function computeLegacyStatus(attempts: number): OfflineQueueStatus {
+  return attempts >= DEFAULT_QUEUE_MAX_RETRIES ? "failed" : "pending";
+}
+
 function persistQueueItem(item: QueueItem): void {
   if (db?.runSync) {
     db.runSync(
@@ -245,12 +274,26 @@ export function summarizePatientQueueState(items: QueueItem[]): SyncStatus {
 // -------------------------------
 // Tipos + estado
 // -------------------------------
-export interface LegacyTxQueueItem {
+export type OfflineQueueJobType = "fhir-bundle" | "handover-bundle" | "sync-audio" | "unknown";
+
+export type OfflineQueueStatus = "pending" | "processing" | "failed" | "done";
+
+export interface OfflineQueueItem<TPayload = unknown> {
+  id: string;
   key: string;
-  payload: any;     // { fhirBase, bundle, token? } o lo que el caller necesite
-  attempts: number; // mapea a tries
+  type: OfflineQueueJobType;
+  payload: TPayload; // { fhirBase, bundle, token? } o lo que el caller necesite
+  retryCount: number; // mapea a tries
+  createdAt: number;
+  nextRetryAt: number; // timestamp ms para backoff
+  status: OfflineQueueStatus;
+  lastError?: string;
+}
+
+export interface LegacyTxQueueItem<TPayload = unknown> extends OfflineQueueItem<TPayload> {
+  attempts: number;
   enqueuedAt: number;
-  nextAt?: number;  // timestamp ms para backoff
+  nextAt: number;
 }
 
 type SendFn = (item: LegacyTxQueueItem) => Promise<Response | { ok: boolean; status: number }>;
@@ -259,6 +302,11 @@ type FlushOpts = {
   maxRetries?: number;   // default 3
   baseDelayMs?: number;  // default 0 (tests rápidos). En prod: 1000–2000
 };
+
+const envQueueMaxAttempts = Number.parseInt(process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS || "", 10);
+const DEFAULT_QUEUE_MAX_RETRIES = Number.isFinite(envQueueMaxAttempts) ? envQueueMaxAttempts : 3;
+const envQueueBackoff = Number.parseInt(process.env.EXPO_PUBLIC_QUEUE_BACKOFF_BASE || "", 10);
+const DEFAULT_QUEUE_BACKOFF_MS = Number.isFinite(envQueueBackoff) ? envQueueBackoff : 0;
 
 let _flushing = false;
 let _online = true;
@@ -283,20 +331,45 @@ export function setOnline(online: boolean) {
 
 // -------------------------------
 /** Normaliza los inputs (compat con legacy) */
-function _normalizeInput(input: any): LegacyTxQueueItem {
-  const key = input?.key || input?.id || `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+type EnqueuePayload<TPayload = unknown> = {
+  key?: string;
+  id?: string;
+  payload?: TPayload;
+  bundle?: unknown;
+  fhirBase?: string;
+  type?: OfflineQueueJobType;
+  createdAt?: number;
+  nextAt?: number;
+};
+
+function _normalizeInput<TPayload>(input: EnqueuePayload<TPayload>): LegacyTxQueueItem<TPayload> {
+  const now = input?.createdAt ?? Date.now();
+  const key = input?.key || input?.id || `tx-${now}-${Math.random().toString(36).slice(2)}`;
   const payload =
     input?.payload ??
     (input?.bundle
       ? { bundle: input.bundle, fhirBase: input.fhirBase }
-      : input);
-  return { key, payload, attempts: 0, enqueuedAt: Date.now(), nextAt: 0 };
+      : (input as unknown as TPayload));
+
+  return {
+    id: key,
+    key,
+    payload,
+    type: input.type ?? "fhir-bundle",
+    attempts: 0,
+    retryCount: 0,
+    enqueuedAt: now,
+    createdAt: now,
+    nextAt: input.nextAt ?? 0,
+    nextRetryAt: input.nextAt ?? 0,
+    status: "pending",
+  };
 }
 
 // -------------------------------
 // Enqueue
 // -------------------------------
-export async function enqueueTx(input: any): Promise<LegacyTxQueueItem> {
+export async function enqueueTx<TPayload = unknown>(input: EnqueuePayload<TPayload>): Promise<LegacyTxQueueItem<TPayload>> {
   const item = _normalizeInput(input);
   const serializedPayload = await encryptQueuePayload(item.payload);
 
@@ -313,7 +386,7 @@ export async function enqueueTx(input: any): Promise<LegacyTxQueueItem> {
         key: item.key,
         payload: serializedPayload,
         tries: 0,
-        next_at: 0,
+        next_at: item.nextAt ?? 0,
         created_at: item.enqueuedAt,
       });
     }
@@ -331,30 +404,62 @@ export function getQueueLength(): number {
   return memQueue.length;
 }
 
+export async function clearTxQueue(): Promise<void> {
+  if (db?.runSync) {
+    db.runSync("DELETE FROM tx_queue");
+  }
+  memQueue = [];
+  memId = 1;
+}
+
 export async function getQueueSnapshot(): Promise<LegacyTxQueueItem[]> {
   if (db?.getAllSync) {
     const rows = db.getAllSync(
       "SELECT key,payload,tries,created_at,next_at FROM tx_queue ORDER BY COALESCE(next_at,0) ASC, id ASC"
-    ) as any[];
+    ) as QueueRow[];
     return Promise.all(
-      (rows ?? []).map(async (r) => ({
-        key: r.key,
-        payload: await decryptQueuePayload(String(r.payload ?? "")),
-        attempts: Number(r.tries ?? 0),
-        enqueuedAt: Number(r.created_at ?? Date.now()),
-        nextAt: Number(r.next_at ?? 0),
-      }))
+      (rows ?? []).map(async (r) => {
+        const attempts = Number(r.tries ?? 0);
+        const status = computeLegacyStatus(attempts);
+        const payload = (await decryptQueuePayload(String(r.payload ?? ""))) as unknown;
+        const createdAt = Number(r.created_at ?? Date.now());
+        const nextAt = Number(r.next_at ?? 0);
+        return {
+          id: r.key,
+          key: r.key,
+          payload,
+          attempts,
+          retryCount: attempts,
+          enqueuedAt: createdAt,
+          createdAt,
+          nextAt,
+          nextRetryAt: nextAt,
+          status,
+          type: "fhir-bundle",
+        } satisfies LegacyTxQueueItem;
+      })
     );
   }
   const snapshot = memQueue.slice().sort((a, b) => (a.next_at - b.next_at) || (a.id - b.id));
   return Promise.all(
-    snapshot.map(async (r) => ({
-      key: r.key,
-      payload: await decryptQueuePayload(r.payload),
-      attempts: r.tries,
-      enqueuedAt: r.created_at,
-      nextAt: r.next_at,
-    }))
+    snapshot.map(async (r) => {
+      const attempts = r.tries;
+      const status = computeLegacyStatus(attempts);
+      const payload = (await decryptQueuePayload(r.payload)) as unknown;
+      return {
+        id: r.key,
+        key: r.key,
+        payload,
+        attempts,
+        retryCount: attempts,
+        enqueuedAt: r.created_at,
+        createdAt: r.created_at,
+        nextAt: r.next_at,
+        nextRetryAt: r.next_at,
+        status,
+        type: "fhir-bundle",
+      } satisfies LegacyTxQueueItem;
+    })
   );
 }
 
@@ -372,7 +477,7 @@ function safeParse(s: string): unknown {
 const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 export async function flushQueue(send: SendFn, opts: FlushOpts = {}) {
-  const { onSuccess, maxRetries = 3, baseDelayMs = 0 } = opts;
+  const { onSuccess, maxRetries = DEFAULT_QUEUE_MAX_RETRIES, baseDelayMs = DEFAULT_QUEUE_BACKOFF_MS } = opts;
 
   if (_flushing) return;
   _flushing = true;
@@ -384,13 +489,15 @@ export async function flushQueue(send: SendFn, opts: FlushOpts = {}) {
       const item = items[index];
       if (!_online) break;
       // Respetar backoff
-      if (item.nextAt && item.nextAt > Date.now()) continue;
+      const nextAt = item.nextRetryAt ?? item.nextAt;
+      if (nextAt && nextAt > Date.now()) continue;
 
       // Ejecutar envío
       const resp = await send(item).catch(() => ({ ok: false, status: 0 }));
-      const ok = (resp as any).ok === true ||
-                 ((resp as any).ok === undefined && (resp as any).status >= 200 && (resp as any).status < 300);
-      const status = (resp as any).status ?? (ok ? 200 : 0);
+      const responseLike = resp as Response & { ok?: boolean; status?: number };
+      const status = typeof responseLike.status === "number" ? responseLike.status : 0;
+      const ok = typeof responseLike.ok === "boolean" ? responseLike.ok : status >= 200 && status < 300;
+      const normalizedStatus = status || (ok ? 200 : 0);
 
       if (ok) {
         _deleteByKey(item.key);
@@ -400,11 +507,11 @@ export async function flushQueue(send: SendFn, opts: FlushOpts = {}) {
       }
 
       // Error: ¿retryable?
-      const retryable = status >= 500 || status === 0;
+      const retryable = normalizedStatus >= 500 || normalizedStatus === 0;
       if (!retryable) {
         // 4xx: soltar para no bloquear
         _deleteByKey(item.key);
-        mark?.("queue.flush.drop4xx", { key: item.key, status });
+        mark?.("queue.flush.drop4xx", { key: item.key, status: normalizedStatus });
         continue;
       }
 
@@ -412,7 +519,7 @@ export async function flushQueue(send: SendFn, opts: FlushOpts = {}) {
       const newAttempts = (item.attempts ?? 0) + 1;
       const delay = baseDelayMs * Math.pow(2, Math.max(0, newAttempts - 1));
       _updateRetry(item.key, newAttempts, Date.now() + delay);
-      mark?.("queue.flush.retry", { key: item.key, status, attempts: newAttempts });
+      mark?.("queue.flush.retry", { key: item.key, status: normalizedStatus, attempts: newAttempts });
 
       if (newAttempts > maxRetries) {
         // dejamos el item en cola para futuros flush
@@ -452,7 +559,7 @@ function _updateRetry(key: string, tries: number, nextAt: number) {
 export function attachNetInfo(send: SendFn, opts: FlushOpts = {}) {
   try {
     const NetInfo = require("@react-native-community/netinfo").default;
-    const unsub = NetInfo.addEventListener((state: any) => {
+    const unsub = NetInfo.addEventListener((state: { isConnected?: boolean; isInternetReachable?: boolean }) => {
       const online = !!state?.isConnected && !!state?.isInternetReachable;
       setOnline(online);
       if (online) flushQueue(send, opts);
@@ -466,11 +573,11 @@ export function attachNetInfo(send: SendFn, opts: FlushOpts = {}) {
 // -------------------------------
 // Aliases de compatibilidad (legacy)
 // -------------------------------
-export type Tx = { key: string; payload: any }; // legacy shape
+export type Tx = { key: string; payload: unknown }; // legacy shape
 
 /** Alias legacy — NO-OP sobre el normalizador actual */
-export async function enqueue(input: Tx) {
-  return enqueueTx(input);
+export async function enqueue<TPayload = unknown>(input: Tx & { payload: TPayload }) {
+  return enqueueTx<TPayload>(input);
 }
 
 type BundleMeta = {
@@ -491,5 +598,5 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
     },
     enqueuedAt: new Date().toISOString(),
   };
-  return enqueueTx({ key, payload });
+  return enqueueTx({ key, payload, type: "handover-bundle" });
 }
