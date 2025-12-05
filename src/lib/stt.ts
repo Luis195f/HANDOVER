@@ -12,11 +12,29 @@ export type SttErrorCode =
   | 'NETWORK'
   | 'ENGINE'
   | 'UNSUPPORTED'
+  | 'UNAVAILABLE'
+  | 'TIMEOUT'
   | 'UNKNOWN';
 
 export interface SttResult {
   text: string;
   isFinal: boolean;
+}
+
+export interface SttTranscriptionResult {
+  text: string;
+  fromFallback: boolean;
+  code?: SttErrorCode;
+}
+
+export class STTError extends Error {
+  code: SttErrorCode;
+
+  constructor(code: SttErrorCode, message: string) {
+    super(message);
+    this.name = 'STTError';
+    this.code = code;
+  }
 }
 
 export interface SttConfig {
@@ -270,6 +288,7 @@ const NETWORK_ERROR = Symbol('NETWORK_ERROR');
 const ENGINE_ERROR = Symbol('ENGINE_ERROR');
 
 const TRANSCRIPTION_ERROR_MESSAGE = 'No se pudo transcribir el audio con IA';
+export const STT_FALLBACK_TEXT = '[Transcripción no disponible]';
 
 const AUDIO_MIME_BY_EXTENSION: Record<string, string> = {
   m4a: 'audio/m4a',
@@ -300,12 +319,12 @@ export async function transcribeAudioViaBackend(
   options?: { language?: string },
 ): Promise<string> {
   if (!AI_BACKEND_BASE_URL) {
-    throw new Error('AI backend not configured');
+    throw new STTError('UNAVAILABLE', 'AI backend not configured');
   }
 
   const info = await FileSystem.getInfoAsync(fileUri);
   if (!info.exists) {
-    throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
+    throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
   }
 
   const name = fileUri.split('/').pop() ?? 'audio.m4a';
@@ -316,21 +335,31 @@ export async function transcribeAudioViaBackend(
     formData.append('language', options.language);
   }
 
-  const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
-    method: 'POST',
-    body: formData,
-  });
+  try {
+    const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
+      method: 'POST',
+      body: formData,
+    });
 
-  if (!response.ok) {
-    throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
+    if (!response.ok) {
+      throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
+    }
+
+    const data = (await response.json()) as { text?: string };
+    if (typeof data.text !== 'string') {
+      throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
+    }
+
+    return data.text;
+  } catch (error) {
+    if (error instanceof STTError) {
+      throw error;
+    }
+    if (error instanceof TypeError) {
+      throw new STTError('NETWORK', TRANSCRIPTION_ERROR_MESSAGE);
+    }
+    throw new STTError('UNKNOWN', TRANSCRIPTION_ERROR_MESSAGE);
   }
-
-  const data = (await response.json()) as { text?: string };
-  if (typeof data.text !== 'string') {
-    throw new Error(TRANSCRIPTION_ERROR_MESSAGE);
-  }
-
-  return data.text;
 }
 
 export async function transcribeAudio(
@@ -338,13 +367,16 @@ export async function transcribeAudio(
   options?: { language?: string },
 ): Promise<string> {
   if (!AI_BACKEND_BASE_URL) {
-    throw new Error('AI backend not configured');
+    throw new STTError('UNAVAILABLE', 'AI backend not configured');
   }
 
   try {
     return await transcribeAudioViaBackend(fileUri, options);
   } catch (error) {
-    throw error instanceof Error ? error : new Error(TRANSCRIPTION_ERROR_MESSAGE);
+    if (error instanceof STTError) {
+      throw error;
+    }
+    throw new STTError('UNKNOWN', TRANSCRIPTION_ERROR_MESSAGE);
   }
 }
 
@@ -361,12 +393,19 @@ export async function transcribeAudioWithResult(
     return { ok: true, text };
   } catch (error) {
     const message = error instanceof Error ? error.message : TRANSCRIPTION_ERROR_MESSAGE;
-    const normalized = message.toLowerCase();
-    const code: SttErrorCode | undefined = normalized.includes('permission')
-      ? 'PERMISSION_DENIED'
-      : normalized.includes('network')
-        ? 'NETWORK'
-        : undefined;
+    const code: SttErrorCode | undefined = error instanceof STTError ? error.code : undefined;
     return { ok: false, error: message || TRANSCRIPTION_ERROR_MESSAGE, code };
   }
+}
+
+export async function transcribeAudioWithFallback(
+  fileUri: string,
+  options?: { language?: string; fallbackText?: string },
+): Promise<SttTranscriptionResult> {
+  const fallbackText = options?.fallbackText ?? STT_FALLBACK_TEXT;
+  const result = await transcribeAudioWithResult(fileUri, options);
+  if (result.ok) {
+    return { text: result.text, fromFallback: false };
+  }
+  return { text: fallbackText, fromFallback: true, code: result.code ?? 'UNKNOWN' };
 }

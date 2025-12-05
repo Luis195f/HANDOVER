@@ -1,0 +1,108 @@
+import { computeNEWS2 } from './news2';
+import { generateSBARSummary, type SbarOptions } from './summary';
+import type { SBARSummary } from '@/src/types/sbar';
+import type { HandoverFormData } from '@/src/validation/schemas';
+
+export interface AISummaryProvider {
+  (handover: HandoverFormData, draft: SBARSummary): Promise<SBARSummary | null | undefined>;
+}
+
+export interface DegradedSummaryOptions {
+  aiProvider?: AISummaryProvider;
+  useLocalRules?: boolean;
+  sbarOptions?: SbarOptions;
+}
+
+const RISK_LABELS: Record<string, string> = {
+  fall: 'caídas',
+  pressureUlcer: 'úlceras por presión',
+  isolation: 'aislamiento',
+};
+
+function safeString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+function buildRiskSummary(handover: HandoverFormData): string | undefined {
+  const risks = handover.risks ?? {};
+  const active = Object.keys(risks)
+    .filter((key) => (risks as Record<string, unknown>)[key])
+    .map((key) => RISK_LABELS[key] ?? key);
+  if (!active.length) return undefined;
+  return `Riesgos: ${active.join(', ')}`;
+}
+
+function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
+  const diagnosis = handover.dxMedical || handover.dxNursing || 'Diagnóstico no disponible';
+  const news2 = handover.vitals
+    ? computeNEWS2({
+        rr: handover.vitals.rr,
+        spo2: handover.vitals.spo2,
+        temp: handover.vitals.tempC,
+        sbp: handover.vitals.sbp,
+        hr: handover.vitals.hr,
+        o2: Boolean(handover.oxygenTherapy),
+        avpu: handover.vitals.avpu,
+        scale2: false,
+      })
+    : null;
+  const newsText = news2 ? `NEWS2 ${news2.total} (${news2.band.toLowerCase()} riesgo)` : 'NEWS2 no disponible';
+  const risks = buildRiskSummary(handover) ?? 'Riesgos: no reportados';
+  const oxygen = handover.oxygenTherapy?.device ? `Oxígeno: ${handover.oxygenTherapy.device}` : null;
+  const recommendation = news2 && news2.total >= 5
+    ? 'Monitorizar de cerca y avisar a equipo médico'
+    : 'Vigilancia estándar y pasar visita según plan';
+
+  return {
+    situation: `Paciente con ${diagnosis}. ${newsText}`.trim(),
+    background: safeString(handover.evolution, 'Antecedentes breves no disponibles'),
+    assessment: [newsText, risks, oxygen].filter(Boolean).join('. '),
+    recommendation,
+  };
+}
+
+function ensureSbar(summary: SBARSummary | null | undefined, fallback: SBARSummary): SBARSummary {
+  if (!summary) return fallback;
+  const safe: SBARSummary = { ...fallback };
+  return {
+    situation: safeString(summary.situation, fallback.situation),
+    background: safeString(summary.background, fallback.background),
+    assessment: safeString(summary.assessment, fallback.assessment),
+    recommendation: safeString(summary.recommendation, fallback.recommendation),
+  };
+}
+
+export async function getBestAvailableSummary(
+  handover: HandoverFormData,
+  options: DegradedSummaryOptions = {},
+): Promise<SBARSummary> {
+  const { aiProvider, useLocalRules = true, sbarOptions } = options;
+  const draft = (() => {
+    try {
+      return generateSBARSummary(handover, sbarOptions);
+    } catch (error) {
+      console.warn('[ai-degrade] local SBAR generation failed, using minimal fallback', error);
+      return buildMinimalSummary(handover);
+    }
+  })();
+
+  if (aiProvider) {
+    try {
+      const aiSummary = await aiProvider(handover, draft);
+      const refined = ensureSbar(aiSummary, draft);
+      if (refined) return refined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[ai-degrade] AI provider failed, falling back to local summary', message);
+    }
+  }
+
+  if (useLocalRules) {
+    return draft;
+  }
+
+  return buildMinimalSummary(handover);
+}
+
+export const getDegradedSbarSummary = getBestAvailableSummary;
+export const buildMinimalSbarSummary = buildMinimalSummary;
