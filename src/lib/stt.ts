@@ -314,9 +314,11 @@ function resolveMimeType(fileUri: string): string {
   return AUDIO_MIME_BY_EXTENSION[normalized] ?? 'audio/m4a';
 }
 
+export type TranscriptionOptions = { language?: string; timeoutMs?: number };
+
 export async function transcribeAudioViaBackend(
   fileUri: string,
-  options?: { language?: string },
+  options?: TranscriptionOptions,
 ): Promise<string> {
   if (!AI_BACKEND_BASE_URL) {
     throw new STTError('UNAVAILABLE', 'AI backend not configured');
@@ -335,10 +337,15 @@ export async function transcribeAudioViaBackend(
     formData.append('language', options.language);
   }
 
+  const timeoutMs = options?.timeoutMs ?? 20_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
       method: 'POST',
       body: formData,
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -352,6 +359,9 @@ export async function transcribeAudioViaBackend(
 
     return data.text;
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new STTError('TIMEOUT', TRANSCRIPTION_ERROR_MESSAGE);
+    }
     if (error instanceof STTError) {
       throw error;
     }
@@ -359,12 +369,14 @@ export async function transcribeAudioViaBackend(
       throw new STTError('NETWORK', TRANSCRIPTION_ERROR_MESSAGE);
     }
     throw new STTError('UNKNOWN', TRANSCRIPTION_ERROR_MESSAGE);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export async function transcribeAudio(
   fileUri: string,
-  options?: { language?: string },
+  options?: TranscriptionOptions,
 ): Promise<string> {
   if (!AI_BACKEND_BASE_URL) {
     throw new STTError('UNAVAILABLE', 'AI backend not configured');
@@ -386,7 +398,7 @@ export type TranscriptionResult =
 
 export async function transcribeAudioWithResult(
   fileUri: string,
-  options?: { language?: string },
+  options?: TranscriptionOptions,
 ): Promise<TranscriptionResult> {
   try {
     const text = await transcribeAudio(fileUri, options);
@@ -400,7 +412,7 @@ export async function transcribeAudioWithResult(
 
 export async function transcribeAudioWithFallback(
   fileUri: string,
-  options?: { language?: string; fallbackText?: string },
+  options?: TranscriptionOptions & { fallbackText?: string },
 ): Promise<SttTranscriptionResult> {
   const fallbackText = options?.fallbackText ?? STT_FALLBACK_TEXT;
   const result = await transcribeAudioWithResult(fileUri, options);

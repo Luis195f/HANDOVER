@@ -113,6 +113,44 @@ describe('transcribeAudioWithResult', () => {
     expect(result.ok).toBe(false);
     expect(result.code).toBe('NETWORK');
   });
+
+  it('marca TIMEOUT cuando la petición excede el tiempo máximo', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_, init: any) => {
+      const signal: AbortSignal | undefined = init?.signal;
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { transcribeAudioWithResult } = await import('@/src/lib/stt');
+
+    const promise = transcribeAudioWithResult('file://nota.m4a', { timeoutMs: 1000 });
+    vi.runAllTimers();
+    const result = await promise;
+    vi.useRealTimers();
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('TIMEOUT');
+  });
+
+  it('considera respuesta malformada como error de motor', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { transcribeAudioWithResult } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithResult('file://nota.m4a');
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('ENGINE');
+  });
 });
 
 describe('transcribeAudioWithFallback', () => {

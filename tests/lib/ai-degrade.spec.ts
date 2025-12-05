@@ -84,6 +84,17 @@ describe('ai-degrade summary selection', () => {
     expect(result.recommendation).toBe(draft.recommendation);
   });
 
+  it('usa resumen local cuando el proveedor IA devuelve null', async () => {
+    const handover = buildData({ dxMedical: 'Fiebre de origen desconocido' });
+    const aiProvider = vi.fn(async () => null);
+
+    const result = await getBestAvailableSummary(handover, { aiProvider });
+    const draft = generateSBARSummary(handover);
+
+    expect(aiProvider).toHaveBeenCalled();
+    expect(result).toEqual(draft);
+  });
+
   it('cuando no se permiten reglas locales usa el resumen mínimo', async () => {
     const handover = buildData({ dxMedical: undefined, vitals: undefined, risks: {} });
 
