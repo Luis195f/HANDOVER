@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildMinimalSbarSummary, getBestAvailableSummary } from '@/src/lib/ai-degrade';
-import { generateSBARSummary } from '@/src/lib/summary';
+import * as SummaryModule from '@/src/lib/summary';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
@@ -61,7 +61,7 @@ describe('ai-degrade summary selection', () => {
 
     const result = await getBestAvailableSummary(handover, { aiProvider });
 
-    const local = generateSBARSummary(handover);
+    const local = SummaryModule.generateSBARSummary(handover);
     expect(result.situation).toBe(local.situation);
     expect(result.assessment).toContain('NEWS2');
   });
@@ -76,7 +76,7 @@ describe('ai-degrade summary selection', () => {
     } satisfies SBARSummary));
 
     const result = await getBestAvailableSummary(handover, { aiProvider });
-    const draft = generateSBARSummary(handover);
+    const draft = SummaryModule.generateSBARSummary(handover);
 
     expect(result.situation).toBe('IA custom');
     expect(result.background).toBe(draft.background);
@@ -89,7 +89,7 @@ describe('ai-degrade summary selection', () => {
     const aiProvider = vi.fn(async () => null);
 
     const result = await getBestAvailableSummary(handover, { aiProvider });
-    const draft = generateSBARSummary(handover);
+    const draft = SummaryModule.generateSBARSummary(handover);
 
     expect(aiProvider).toHaveBeenCalled();
     expect(result).toEqual(draft);
@@ -102,6 +102,25 @@ describe('ai-degrade summary selection', () => {
 
     expect(result.situation).toContain('Diagnóstico no disponible');
     expect(result.assessment).toContain('Riesgos');
+  });
+
+  it('usa el resumen mínimo cuando fallan las reglas locales', async () => {
+    const handover = buildData({
+      dxMedical: 'Paciente crítico',
+      vitals: { rr: 30, spo2: 85, tempC: 39.2, sbp: 88, hr: 126, avpu: 'P' },
+    });
+    const draftMinimal = buildMinimalSbarSummary(handover);
+    const spy = vi
+      .spyOn(SummaryModule, 'generateSBARSummary')
+      .mockImplementation(() => {
+        throw new Error('Local rules broken');
+      });
+
+    const result = await getBestAvailableSummary(handover);
+
+    expect(result).toEqual(draftMinimal);
+
+    spy.mockRestore();
   });
 });
 
