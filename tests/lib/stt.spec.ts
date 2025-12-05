@@ -219,3 +219,19 @@ describe('transcribeAudioWithFallback', () => {
     expect(result.text).toBe(STT_FALLBACK_TEXT);
   });
 });
+
+describe('createSttService', () => {
+  afterEach(() => {
+    envState.STT_ENDPOINT = 'https://stt.example';
+  });
+
+  it('devuelve servicio no soportado cuando no hay endpoint configurado', async () => {
+    envState.STT_ENDPOINT = '' as unknown as string;
+    const { createSttService } = await import('@/src/lib/stt');
+
+    const service = createSttService();
+
+    expect(service.getStatus()).toBe('error');
+    expect(service.getLastError()).toBe('UNSUPPORTED');
+  });
+});
