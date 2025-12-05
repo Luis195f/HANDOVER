@@ -119,4 +119,37 @@ describe('generateSBARSummary', () => {
 
     expectSafeStrings(summary);
   });
+
+  it('incorpora riesgos estructurados y notas de cabecera', () => {
+    const summary = generateSBARSummary(
+      buildData({
+        dxMedical: 'IAM anterior',
+        risksStructured: [
+          { type: 'seizure', present: true, actions: [], notes: 'Monitorizar' },
+          { type: 'other', present: true, actions: [], notes: 'Riesgo personalizado' },
+        ] as any,
+        bedsideChecklist: { ...bedsideChecklist, bedsideNotes: 'Cama cerca del control' },
+      }),
+    );
+
+    expect(summary.assessment).toContain('convulsiones');
+    expect(summary.recommendation).toContain('Vigilar convulsiones, otro');
+    expect(summary.background).toContain('Cama cerca del control');
+  });
+
+  it('trunca secciones largas respetando límites seguros', () => {
+    const summary = generateSBARSummary(
+      buildData({
+        dxMedical: 'Historia clínica extensa',
+        evolution: 'Texto muy largo y detallado que debe ser truncado para evitar desbordes en UI',
+      }),
+      { maxCharsPerSection: 60 },
+    );
+
+    expect(summary.situation.length).toBeLessThanOrEqual(60);
+    expect(summary.background.length).toBeLessThanOrEqual(60);
+    expect(summary.assessment.length).toBeLessThanOrEqual(60);
+    expect(summary.recommendation.length).toBeLessThanOrEqual(60);
+    expect(summary.situation.endsWith('…')).toBe(true);
+  });
 });

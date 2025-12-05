@@ -6,6 +6,8 @@ import type {
   OxygenTherapy,
   PainAssessment,
   RiskFlags,
+  RiskItem,
+  RiskType,
 } from "../types/handover";
 import type { HandoverFormData } from "../validation/schemas";
 import type { SBARSummary } from "@/src/types/sbar";
@@ -29,6 +31,17 @@ const RISK_LABELS: Record<keyof RiskFlags, string> = {
   fall: "caídas",
   pressureUlcer: "úlceras por presión",
   isolation: "aislamiento",
+};
+
+const RISK_TYPE_LABELS: Record<RiskType, string> = {
+  fall: "caídas",
+  pressureUlcer: "úlceras por presión",
+  isolation: "aislamiento",
+  seizure: "convulsiones",
+  suicide: "riesgo suicida",
+  deviceDisconnection: "desconexión de dispositivos",
+  infection: "infección",
+  other: "otro",
 };
 
 const BRADEN_LABELS: Record<NonNullable<HandoverValues["braden"]>["riskLevel"], string> = {
@@ -66,11 +79,26 @@ function isSupplementalOxygen(oxygen?: OxygenTherapy): boolean {
   return Boolean(hasDevice || oxygen.flowLMin != null || oxygen.fio2 != null);
 }
 
-function describeRisks(risks?: RiskFlags): string | undefined {
-  if (!risks) return undefined;
-  const active = (Object.keys(risks) as Array<keyof RiskFlags>)
-    .filter((key) => risks[key])
-    .map((key) => RISK_LABELS[key]);
+function collectRiskLabels(risks?: RiskFlags, structured: RiskItem[] = []): string[] {
+  const labels = new Set<string>();
+  if (risks) {
+    (Object.keys(risks) as Array<keyof RiskFlags>).forEach((key) => {
+      if (risks[key]) labels.add(RISK_LABELS[key]);
+    });
+  }
+
+  structured
+    .filter((item) => item.present)
+    .forEach((item) => {
+      const label = RISK_TYPE_LABELS[item.type] ?? item.type;
+      labels.add(label);
+    });
+
+  return Array.from(labels);
+}
+
+function describeRisks(risks?: RiskFlags, structured?: RiskItem[]): string | undefined {
+  const active = collectRiskLabels(risks, structured ?? []);
   return active.length ? `Riesgos: ${active.join(", ")}` : undefined;
 }
 
@@ -107,6 +135,7 @@ function describeMobility(mobilityLevel?: string, repositioningPlan?: string): s
 function buildSituation(data: HandoverValues): string {
   const diagnosis = data.dxMedical || data.dxNursing;
   const admission = diagnosis ? `Paciente con ${diagnosis}` : "Paciente con información parcial disponible";
+  const location = data.administrativeData?.unit ? `Ubicación: ${data.administrativeData.unit}` : undefined;
   const vitals = data.vitals;
   const news2 = vitals
     ? computeNEWS2({
@@ -123,7 +152,7 @@ function buildSituation(data: HandoverValues): string {
   const newsText = news2 ? `NEWS2 ${news2.total} (${NEWS2_BAND_LABEL[news2.band]} riesgo)` : undefined;
   const oxygen = formatOxygenTherapy(data.oxygenTherapy);
   const evolution = data.evolution ? `Evolución: ${data.evolution}` : undefined;
-  const situation = joinSentences([admission, newsText, oxygen, evolution]);
+  const situation = joinSentences([admission, location, newsText, oxygen, evolution]);
   return situation || "Paciente con información parcial disponible. Revisar historia clínica y registro de enfermería.";
 }
 
@@ -134,7 +163,8 @@ function buildBackground(data: HandoverValues): string {
   const mobility = describeMobility(data.mobility?.mobilityLevel, data.mobility?.repositioningPlan);
   const skin = data.skin?.skinStatus ? `Piel: ${data.skin.skinStatus}` : undefined;
   const allergies = data.bedsideChecklist?.allergiesReviewed ? "Alergias revisadas" : undefined;
-  antecedentes.push(...[diet, mobility, skin, allergies].filter(Boolean));
+  const bedsideNotes = data.bedsideChecklist?.bedsideNotes;
+  antecedentes.push(...[diet, mobility, skin, allergies, bedsideNotes].filter(Boolean));
   const background = antecedentes.join(". ");
   return background || "Antecedentes relevantes recogidos en la historia clínica, revisar para más detalles.";
 }
@@ -160,7 +190,7 @@ function buildAssessment(data: HandoverValues): string {
   const oxygen = formatOxygenTherapy(data.oxygenTherapy);
   if (oxygen) parts.push(oxygen);
 
-  const risks = describeRisks(data.risks);
+  const risks = describeRisks(data.risks, data.risksStructured);
   if (risks) parts.push(risks);
 
   const pain = describePain(data.painAssessment);
@@ -184,8 +214,8 @@ function buildRecommendation(data: HandoverValues): string {
   if (data.meds) tasks.push(`Medicaciones pendientes: ${data.meds}`);
   if (data.treatments?.length) tasks.push("Procedimientos/curas programadas revisar hoja de tratamientos");
   if (data.painAssessment?.hasPain) tasks.push("Control del dolor según plan");
-  if (data.risks?.fall || data.risks?.pressureUlcer || data.risks?.isolation) {
-    const risks = describeRisks(data.risks);
+  if ((data.risks && Object.values(data.risks).some(Boolean)) || data.risksStructured?.length) {
+    const risks = describeRisks(data.risks, data.risksStructured);
     if (risks) tasks.push(`Vigilar ${risks.replace("Riesgos: ", "")}`);
   }
   if (data.fluidBalance?.notes) tasks.push(`Balance/diuresis: ${data.fluidBalance.notes}`);

@@ -17,6 +17,11 @@ const RISK_LABELS: Record<string, string> = {
   fall: 'caídas',
   pressureUlcer: 'úlceras por presión',
   isolation: 'aislamiento',
+  seizure: 'convulsiones',
+  suicide: 'riesgo suicida',
+  deviceDisconnection: 'desconexión de dispositivos',
+  infection: 'infección',
+  other: 'otro',
 };
 
 function safeString(value: unknown, fallback: string): string {
@@ -25,11 +30,19 @@ function safeString(value: unknown, fallback: string): string {
 
 function buildRiskSummary(handover: HandoverFormData): string | undefined {
   const risks = handover.risks ?? {};
-  const active = Object.keys(risks)
+  const structured = handover.risksStructured ?? [];
+  const labels = new Set<string>();
+
+  Object.keys(risks)
     .filter((key) => (risks as Record<string, unknown>)[key])
-    .map((key) => RISK_LABELS[key] ?? key);
-  if (!active.length) return undefined;
-  return `Riesgos: ${active.join(', ')}`;
+    .forEach((key) => labels.add(RISK_LABELS[key] ?? key));
+
+  structured
+    .filter((item) => item.present)
+    .forEach((item) => labels.add(RISK_LABELS[item.type] ?? item.type));
+
+  if (!labels.size) return undefined;
+  return `Riesgos: ${Array.from(labels).join(', ')}`;
 }
 
 function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
