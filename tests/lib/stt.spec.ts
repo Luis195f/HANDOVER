@@ -221,6 +221,10 @@ describe('transcribeAudioWithFallback', () => {
 });
 
 describe('createSttService', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
   afterEach(() => {
     envState.STT_ENDPOINT = 'https://stt.example';
   });
@@ -233,5 +237,19 @@ describe('createSttService', () => {
 
     expect(service.getStatus()).toBe('error');
     expect(service.getLastError()).toBe('UNSUPPORTED');
+  });
+
+  it('degrada a servicio no soportado en plataformas web', async () => {
+    const { Platform } = await import('react-native');
+    const originalOs = Platform.OS;
+    (Platform as any).OS = 'web';
+
+    const { createSttService } = await import('@/src/lib/stt');
+    const service = createSttService();
+
+    expect(service.getStatus()).toBe('error');
+    expect(service.getLastError()).toBe('UNSUPPORTED');
+
+    (Platform as any).OS = originalOs;
   });
 });

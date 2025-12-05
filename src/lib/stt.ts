@@ -315,6 +315,7 @@ function resolveMimeType(fileUri: string): string {
 }
 
 export type TranscriptionOptions = { language?: string; timeoutMs?: number };
+export type STTProvider = (fileUri: string, options?: TranscriptionOptions) => Promise<SttTranscriptionResult>;
 
 export async function transcribeAudioViaBackend(
   fileUri: string,
