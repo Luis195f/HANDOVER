@@ -39,6 +39,21 @@ vi.mock('expo-file-system', () => ({
   EncodingType: { Base64: 'base64' },
 }));
 
+vi.mock('expo-av', () => ({
+  Audio: {
+    Recording: vi.fn().mockImplementation(() => ({
+      prepareToRecordAsync: vi.fn(),
+      startAsync: vi.fn(),
+      stopAndUnloadAsync: vi.fn(),
+      getURI: vi.fn(() => 'file://dummy.m4a'),
+    })),
+    RecordingOptionsPresets: { HIGH_QUALITY: {} },
+    getPermissionsAsync: vi.fn(async () => ({ granted: true })),
+    requestPermissionsAsync: vi.fn(async () => ({ granted: true })),
+    setAudioModeAsync: vi.fn(),
+  },
+}));
+
 describe('transcribeAudioWithResult', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -73,5 +88,62 @@ describe('transcribeAudioWithResult', () => {
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('No se pudo transcribir') });
+  });
+
+  it('usa código de error UNAVAILABLE cuando no hay backend configurado', async () => {
+    envState.AI_BACKEND_BASE_URL = null as unknown as string;
+    const { transcribeAudioWithResult } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithResult('file://nota.m4a');
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('UNAVAILABLE');
+  });
+
+  it('mapea errores de red a código NETWORK', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('Network down');
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { transcribeAudioWithResult } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithResult('file://nota.m4a');
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('NETWORK');
+  });
+});
+
+describe('transcribeAudioWithFallback', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    envState.AI_BACKEND_BASE_URL = null as unknown as string;
+    getInfoAsync.mockResolvedValue({ exists: true });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('devuelve texto de respaldo cuando el backend no está disponible', async () => {
+    const { transcribeAudioWithFallback, STT_FALLBACK_TEXT } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithFallback('file://nota.m4a');
+
+    expect(result.fromFallback).toBe(true);
+    expect(result.text).toBe(STT_FALLBACK_TEXT);
+    expect(result.code).toBe('UNAVAILABLE');
+  });
+
+  it('permite sobrescribir el texto de respaldo', async () => {
+    const { transcribeAudioWithFallback } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithFallback('file://nota.m4a', {
+      fallbackText: '[sin transcripción]',
+    });
+
+    expect(result.text).toBe('[sin transcripción]');
   });
 });
