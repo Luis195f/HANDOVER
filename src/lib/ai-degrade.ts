@@ -25,7 +25,16 @@ const RISK_LABELS: Record<string, string> = {
 };
 
 function safeString(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.trim() ? value : fallback;
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : fallback;
+}
+
+function resolveDiagnosis(handover: HandoverFormData): string {
+  if (handover.dxMedical) return handover.dxMedical;
+  if (handover.dxNursing) return handover.dxNursing;
+  const fromStructured = handover.dxMedicalStructured?.[0]?.display || handover.dxNursingStructured?.[0]?.display;
+  return safeString(fromStructured, 'Diagnóstico no disponible');
 }
 
 function buildRiskSummary(handover: HandoverFormData): string | undefined {
@@ -46,7 +55,7 @@ function buildRiskSummary(handover: HandoverFormData): string | undefined {
 }
 
 function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
-  const diagnosis = handover.dxMedical || handover.dxNursing || 'Diagnóstico no disponible';
+  const diagnosis = resolveDiagnosis(handover);
   const news2 = handover.vitals
     ? computeNEWS2({
         rr: handover.vitals.rr,

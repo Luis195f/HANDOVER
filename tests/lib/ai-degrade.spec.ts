@@ -122,6 +122,36 @@ describe('ai-degrade summary selection', () => {
 
     spy.mockRestore();
   });
+
+  it('utiliza diagnósticos estructurados cuando faltan los textos libres', async () => {
+    const handover = buildData({
+      dxMedical: '',
+      dxNursing: undefined,
+      dxMedicalStructured: [{ system: 'icd-10', code: 'A00', display: 'Cólera' } as any],
+      vitals: undefined,
+      risksStructured: [],
+    });
+
+    const result = await getBestAvailableSummary(handover, { useLocalRules: false });
+
+    expect(result.situation).toContain('Cólera');
+    expect(result.background.toLowerCase()).toContain('antecedentes');
+  });
+
+  it('rellena con fallback cuando el proveedor IA devuelve cadenas en blanco', async () => {
+    const handover = buildData({ dxMedical: 'Neumonía', vitals: { rr: 16, spo2: 98, tempC: 36.8, sbp: 120, hr: 80, avpu: 'A' } });
+    const aiProvider = vi.fn(async () => ({
+      situation: '   ',
+      background: '\n',
+      assessment: ' ',
+      recommendation: '\t',
+    } as SBARSummary));
+
+    const result = await getBestAvailableSummary(handover, { aiProvider });
+    const draft = SummaryModule.generateSBARSummary(handover);
+
+    expect(result).toEqual(draft);
+  });
 });
 
 describe('buildMinimalSbarSummary', () => {
