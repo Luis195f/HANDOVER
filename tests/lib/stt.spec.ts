@@ -146,4 +146,38 @@ describe('transcribeAudioWithFallback', () => {
 
     expect(result.text).toBe('[sin transcripción]');
   });
+
+  it('usa fallback ante errores de red devolviendo el código específico', async () => {
+    envState.AI_BACKEND_BASE_URL = 'https://ai.example';
+    getInfoAsync.mockResolvedValue({ exists: true });
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('Network down');
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { transcribeAudioWithFallback, STT_FALLBACK_TEXT } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithFallback('file://nota.m4a');
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result.fromFallback).toBe(true);
+    expect(result.code).toBe('NETWORK');
+    expect(result.text).toBe(STT_FALLBACK_TEXT);
+  });
+
+  it('retorna fallback cuando el archivo no existe', async () => {
+    envState.AI_BACKEND_BASE_URL = 'https://ai.example';
+    getInfoAsync.mockResolvedValue({ exists: false });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { transcribeAudioWithFallback, STT_FALLBACK_TEXT } = await import('@/src/lib/stt');
+
+    const result = await transcribeAudioWithFallback('file://nota.m4a');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.fromFallback).toBe(true);
+    expect(result.code).toBe('ENGINE');
+    expect(result.text).toBe(STT_FALLBACK_TEXT);
+  });
 });
