@@ -2,6 +2,18 @@
 export type UserRole = 'nurse' | 'supervisor' | 'admin';
 export type SessionMode = 'normal' | 'demo';
 
+export interface HandoverUser {
+  id?: string;
+  userId?: string;
+  name?: string;
+  fullName?: string;
+  displayName?: string;
+  roles?: string[];
+  role?: string;
+  units?: string[];
+  activeUnitId?: string;
+}
+
 export interface HandoverSession {
   userId: string;
   displayName?: string;
@@ -9,6 +21,7 @@ export interface HandoverSession {
   picture?: string;
   roles: string[];
   units: string[]; // unidades a las que tiene acceso
+  user?: HandoverUser | null;
   accessToken: string;
   refreshToken?: string;
   idToken?: string;

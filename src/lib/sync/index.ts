@@ -23,25 +23,23 @@ import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
 
 // --- mark() tolerante: no-op si el módulo de otel no está disponible ---
-type MarkFn = (name: string, attrs?: Record<string, any>) => void;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MarkFn = (name: string, attrs?: Record<string, unknown>) => void;
 let mark: MarkFn = () => {};
 try {
-  // @ts-ignore – alias de paths
-  const mod = require('@/src/lib/otel');
-  if (mod?.mark) mark = mod.mark as MarkFn;
+  const mod = require('@/src/lib/otel') as { mark?: MarkFn };
+  if (mod?.mark) mark = mod.mark;
 } catch {}
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 type ValidationErrorDetail = ValidationResult['errors'][number];
 
-function enforceBundleValidation(bundle: any, context: string): ValidationErrorDetail[] {
+function enforceBundleValidation(bundle: unknown, context: string): ValidationErrorDetail[] {
   const result = validateFHIRBundle(bundle);
   if (!result.isValid) {
     const error = new Error(`FHIR bundle validation failed (${context}): ${JSON.stringify(result.errors)}`);
     (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = result.errors;
     if (bundle && typeof bundle === 'object') {
-      (bundle as any)._validationErrors = result.errors;
+      (bundle as Record<string, unknown>)._validationErrors = result.errors;
     }
     throw error;
   }
@@ -52,13 +50,13 @@ function enforceBundleValidation(bundle: any, context: string): ValidationErrorD
     const error = new Error(`FHIR structure validation failed (${context}): ${fhirValidation.errors.join('; ')}`);
     (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = mappedErrors;
     if (bundle && typeof bundle === 'object') {
-      (bundle as any)._validationErrors = mappedErrors;
+      (bundle as Record<string, unknown>)._validationErrors = mappedErrors;
     }
     throw error;
   }
 
   if (bundle && typeof bundle === 'object' && '_validationErrors' in bundle) {
-    delete (bundle as any)._validationErrors;
+    delete (bundle as Record<string, unknown>)._validationErrors;
   }
   return [];
 }
@@ -92,7 +90,7 @@ let _currentFlush: Promise<FlushResult> | null = null;
 
 // --- API principal: intenta enviar o encola si no hay red / error ---
 export async function syncBundleOrEnqueue(
-  bundle: any,
+  bundle: unknown,
   opts: SyncOpts
 ): Promise<'sent' | 'queued'> {
   enforceBundleValidation(bundle, 'syncBundleOrEnqueue');
@@ -117,7 +115,7 @@ export async function syncBundleOrEnqueue(
 }
 
 // --- Envío con backoff + marcas por intento ---
-async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts) {
+async function sendWithRetry(bundle: unknown, idemKey: string, opts: SyncOpts) {
   enforceBundleValidation(bundle, 'sync sendWithRetry');
   return await retryWithBackoff(
     async (attempt) => {
@@ -140,7 +138,7 @@ async function sendWithRetry(bundle: any, idemKey: string, opts: SyncOpts) {
 }
 
 // --- Encolar cifrado + marca ---
-async function enqueue(bundle: any, idemKey: string) {
+async function enqueue(bundle: unknown, idemKey: string) {
   mark('sync.enqueue', { kind: 'FHIR_BUNDLE', idemKey });
   enforceBundleValidation(bundle, 'sync enqueue');
   await enqueueTx({ payload: { bundle, meta: { hash: idemKey } } });
@@ -179,9 +177,9 @@ function createFlusher(opts: SyncOpts) {
           processed++;
         }
         return { ok: resp.ok, status: resp.status };
-      } catch (err: any) {
+      } catch (err: unknown) {
         mark('sync.flush.error', {
-          reason: err?.message ?? String(err),
+          reason: err instanceof Error ? err.message : String(err),
           tries: tx.tries,
           id: tx.key,
         });

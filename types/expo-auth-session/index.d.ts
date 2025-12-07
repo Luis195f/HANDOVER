@@ -8,7 +8,7 @@ declare module 'expo-auth-session' {
 
   export type PromptAsyncResult = {
     type: 'success' | 'dismiss' | 'cancel';
-    params?: Record<string, any>;
+    params?: Record<string, string | string[] | undefined>;
   };
 
   export type TokenResponse = {
@@ -20,11 +20,14 @@ declare module 'expo-auth-session' {
   };
 
   export class AuthRequest {
-    constructor(config: any);
+    constructor(config: Record<string, unknown>);
     codeVerifier?: string;
     redirectUri?: string;
     scopes?: string[];
-    promptAsync(discovery: DiscoveryDocument, options?: Record<string, any>): Promise<PromptAsyncResult>;
+    promptAsync(
+      discovery: DiscoveryDocument,
+      options?: Record<string, string | string[] | number | boolean | undefined>,
+    ): Promise<PromptAsyncResult>;
   }
 
   export const ResponseType: { Code: string };
@@ -41,5 +44,5 @@ declare module 'expo-auth-session' {
   ): Promise<TokenResponse>;
   export function revokeAsync(request: { token: string; clientId: string }, discovery: DiscoveryDocument): Promise<void>;
   export function makeRedirectUri(options?: { scheme?: string }): string;
-  export function parse(url: string): { params?: Record<string, any>; queryParams?: Record<string, any> };
+  export function parse(url: string): { params?: Record<string, unknown>; queryParams?: Record<string, unknown> };
 }

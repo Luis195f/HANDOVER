@@ -13,16 +13,17 @@ type QueueItemMeta = { id: string; createdAt: number | string; tries: number; ha
 function resolveSyncOpts(): SyncOpts | null {
   try {
     // ENV tolerante
-    // @ts-ignore
-    const env = require('@/src/config/env');
+    const env = require('@/src/config/env') as { ENV?: { FHIR_BASE?: string }; FHIR_BASE?: string };
     const base: string =
       env?.ENV?.FHIR_BASE ?? env?.FHIR_BASE ?? (process?.env?.EXPO_PUBLIC_FHIR_BASE as string) ?? '';
     if (!base) return null;
     // Auth tolerante
-    // @ts-ignore
-    const auth = require('@/src/services/AuthService');
-    const getToken: SyncOpts["getToken"] =
-      (auth?.getToken as SyncOpts["getToken"]) ?? (auth?.default?.getToken as SyncOpts["getToken"]) ?? (async () => null);
+    const auth = require('@/src/services/AuthService') as {
+      getToken?: SyncOpts['getToken'];
+      default?: { getToken?: SyncOpts['getToken'] };
+    };
+    const getToken: SyncOpts['getToken'] =
+      auth?.getToken ?? auth?.default?.getToken ?? (async () => null);
     return { fhirBaseUrl: base, getToken, backoff: { retries: 5, minMs: 500, maxMs: 15000 } };
   } catch {
     return null;
@@ -81,8 +82,9 @@ export default function SyncCenter() {
       await refresh();
       setLastRun(new Date().toLocaleTimeString());
       return res;
-    } catch (e: any) {
-      Alert.alert('Sync', `Error al reintentar: ${e?.message ?? e}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      Alert.alert('Sync', `Error al reintentar: ${message}`);
       return { processed: 0, remaining: -1 };
     } finally {
       setBusy(false);
