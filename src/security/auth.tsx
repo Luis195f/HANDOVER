@@ -6,7 +6,7 @@ import { Alert } from 'react-native';
 import { Buffer } from 'buffer';
 
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
-import type { AuthSession as StoredAuthSession, HandoverSession, UserRole } from './auth-types';
+import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 import navigation from '@/src/navigation/navigation';
 import { configureFHIRClient } from '@/src/lib/fhir-client';
@@ -107,6 +107,15 @@ function normalizeSession(session: StoredAuthSession | null): HandoverSession | 
     ? session.units.filter((unit): unit is string => typeof unit === 'string')
     : [];
   const mode = session.mode === 'demo' ? 'demo' : undefined;
+  const user: HandoverUser = {
+    id: session.userId,
+    userId: session.userId,
+    displayName: session.displayName ?? session.fullName ?? session.userId,
+    fullName: session.fullName,
+    name: session.displayName ?? session.fullName,
+    roles,
+    units,
+  };
   return {
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
@@ -118,6 +127,7 @@ function normalizeSession(session: StoredAuthSession | null): HandoverSession | 
     idToken: session.idToken,
     roles,
     units,
+    user,
     mode,
   };
 }

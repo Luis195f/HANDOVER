@@ -1,28 +1,44 @@
 // FILE: src/lib/netinfo.ts
 import * as React from 'react';
 
-let NetInfo: any = null;
-let useNetInfo: any = null;
+export type NetInfoState = { isConnected: boolean | null; isInternetReachable: boolean | null };
+type NetInfoListener = (state: NetInfoState) => void;
+
+type NetInfoModule = {
+  addEventListener: (cb: NetInfoListener) => { remove(): void } | (() => void);
+  fetch: () => Promise<NetInfoState>;
+};
+
+type NetworkModule = {
+  addNetworkStateListener: (cb: NetInfoListener) => { remove(): void };
+  getNetworkStateAsync: () => Promise<NetInfoState>;
+};
+
+let NetInfo: NetInfoModule | null = null;
+let useNetInfo: (() => NetInfoState) | null = null;
 
 try {
   // Intenta usar @react-native-community/netinfo si existe
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const mod = require('@react-native-community/netinfo');
-  NetInfo = mod?.default ?? mod;
-  useNetInfo = mod?.useNetInfo;
+  const mod = require('@react-native-community/netinfo') as {
+    default?: NetInfoModule;
+    useNetInfo?: () => NetInfoState;
+  };
+  NetInfo = mod?.default ?? null;
+  useNetInfo = mod?.useNetInfo ?? null;
 } catch {
   // Fallback: expo-network si está disponible. Si tampoco lo está, usar stub síncrono.
-  let Network: any;
+  let Network: NetworkModule | null = null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    Network = require('expo-network');
+    Network = require('expo-network') as NetworkModule;
   } catch {
     Network = null;
   }
 
   if (!Network) {
     NetInfo = {
-      addEventListener(cb: (s: { isConnected: boolean | null; isInternetReachable: boolean | null }) => void) {
+      addEventListener(cb: NetInfoListener) {
         const emit = () => cb({ isConnected: true, isInternetReachable: true });
         if (typeof queueMicrotask === 'function') {
           queueMicrotask(emit);
@@ -40,8 +56,8 @@ try {
     };
   } else {
     NetInfo = {
-      addEventListener(cb: (s: { isConnected: boolean | null; isInternetReachable: boolean | null }) => void) {
-        const sub = Network.addNetworkStateListener((state: any) =>
+      addEventListener(cb: NetInfoListener) {
+        const sub = Network!.addNetworkStateListener((state) =>
           cb({
             isConnected: !!state?.isConnected,
             isInternetReachable: state?.isInternetReachable ?? null,
@@ -50,7 +66,7 @@ try {
         return () => sub.remove();
       },
       async fetch() {
-        const s = await Network.getNetworkStateAsync();
+        const s = await Network!.getNetworkStateAsync();
         return {
           isConnected: !!s?.isConnected,
           isInternetReachable: s?.isInternetReachable ?? null,
@@ -60,7 +76,7 @@ try {
 
     // Hook compatible con useNetInfo()
     useNetInfo = function useNetInfoPolyfill() {
-      const [state, setState] = React.useState<{ isConnected: boolean | null; isInternetReachable: boolean | null }>({
+      const [state, setState] = React.useState<NetInfoState>({
         isConnected: null,
         isInternetReachable: null,
       });
@@ -68,11 +84,11 @@ try {
       React.useEffect(() => {
         let mounted = true;
         // snapshot inicial
-        Network.getNetworkStateAsync().then((s: any) => {
+        Network!.getNetworkStateAsync().then((s) => {
           if (!mounted) return;
           setState({ isConnected: !!s?.isConnected, isInternetReachable: s?.isInternetReachable ?? null });
         });
-        const sub = Network.addNetworkStateListener((s: any) => {
+        const sub = Network!.addNetworkStateListener((s) => {
           if (!mounted) return;
           setState({ isConnected: !!s?.isConnected, isInternetReachable: s?.isInternetReachable ?? null });
         });
@@ -87,5 +103,5 @@ try {
   }
 }
 
-export default NetInfo;
+export default NetInfo as NetInfoModule;
 export { useNetInfo };

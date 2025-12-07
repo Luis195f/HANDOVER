@@ -160,9 +160,9 @@ declare module 'expo-secure-store' {
 }
 
 declare module 'expo-file-system' {
-  export type FileInfo = { exists: boolean };
+  export type FileInfo = { exists: boolean; size?: number };
   export function getInfoAsync(uri: string): Promise<FileInfo>;
-  export function readAsStringAsync(uri: string, options?: { encoding?: string }): Promise<string>;
+  export function readAsStringAsync(uri: string, options?: { encoding?: 'utf8' | 'base64' }): Promise<string>;
 }
 
 declare module 'expo-camera' {

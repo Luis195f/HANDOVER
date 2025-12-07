@@ -12,6 +12,7 @@ import {
   NativeSyntheticEvent,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Controller, FormProvider, type Control, type FieldErrors } from 'react-hook-form';
@@ -40,9 +41,10 @@ import { AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
 import { getSession, useAuth, type Session } from '@/src/security/auth';
+import type { HandoverUser } from '@/src/security/auth-types';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import type { AdministrativeData } from '@/src/types/administrative';
-import type { RiskItem } from '@/src/types/handover';
+import type { HandoverStructuredDiagnosis, RiskItem } from '@/src/types/handover';
 import type { SBARSummary } from '@/src/types/sbar';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PrefillOutput } from '@/src/lib/prefill';
@@ -237,31 +239,43 @@ function deriveInitialRisksStructured(values: HandoverFormValues): RiskItem[] {
   return items;
 }
 
-function normalizeSignatureUser(
-  session?: (Session & { user?: Record<string, unknown> }) | null,
-): SignatureUser | null {
+function asStringArray(value: unknown[] | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const normalized = value.filter((item): item is string => typeof item === 'string');
+  return normalized.length ? normalized : undefined;
+}
+
+function getSessionUser(session?: (Session & { user?: HandoverUser | null }) | null): HandoverUser | null {
   if (!session) return null;
-  const base = (session as any)?.user ?? session;
+  if (session.user) return session.user;
+  return {
+    id: session.userId,
+    userId: session.userId,
+    displayName: session.displayName,
+    fullName: session.displayName,
+    name: session.displayName,
+    roles: session.roles,
+    units: session.units,
+  };
+}
+
+function normalizeSignatureUser(session?: (Session & { user?: HandoverUser | null }) | null): SignatureUser | null {
+  const base = getSessionUser(session);
   if (!base) return null;
-  const roles: string[] | undefined = Array.isArray((base as any).roles)
-    ? ((base as any).roles as string[])
-    : (base as any).role
-      ? [String((base as any).role)]
-      : undefined;
-  const units: string[] | undefined = Array.isArray((base as any).units)
-    ? ((base as any).units as string[])
-    : undefined;
+
+  const roles = asStringArray(base.roles) ?? (base.role ? [base.role] : undefined);
+  const units = asStringArray(base.units);
 
   return {
-    id: (base as any).id ?? (base as any).userId,
-    userId: (base as any).userId ?? (base as any).id,
-    name: (base as any).name ?? (base as any).displayName,
-    fullName: (base as any).fullName ?? (base as any).name ?? (base as any).displayName,
-    displayName: (base as any).displayName ?? (base as any).name ?? (base as any).fullName,
-    role: (base as any).role,
+    id: base.id ?? base.userId ?? session?.userId,
+    userId: base.userId ?? base.id ?? session?.userId,
+    name: base.name ?? base.displayName ?? base.fullName ?? session?.displayName,
+    fullName: base.fullName ?? base.name ?? base.displayName ?? session?.displayName,
+    displayName: base.displayName ?? base.name ?? base.fullName ?? session?.displayName,
+    role: base.role ?? roles?.[0],
     roles,
     units,
-    activeUnitId: (base as any).activeUnitId ?? units?.[0],
+    activeUnitId: base.activeUnitId ?? units?.[0],
   };
 }
 
@@ -304,10 +318,10 @@ async function buildAudioAttachment(uri: string | undefined) {
   try {
     const FileSystem = await import('expo-file-system');
     const dataBase64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: 'base64' as any,
+      encoding: 'base64',
     });
     const info = await FileSystem.getInfoAsync(uri);
-    const reportedSize = typeof (info as any).size === 'number' ? (info as any).size : undefined;
+    const reportedSize = typeof info.size === 'number' ? info.size : undefined;
     const size = reportedSize ?? Math.floor((dataBase64.length * 3) / 4);
     return {
       dataBase64,
@@ -556,15 +570,15 @@ export default function HandoverForm({ navigation, route }: Props) {
   const signaturesValue = form.watch('signatures');
   const outgoingSignature = signaturesValue?.outgoing;
   const signatureErrors = errors.signatures ?? {};
-  const outgoingSignatureError = (signatureErrors as any)?.outgoing?.message as string | undefined;
-  const incomingSignatureError = (signatureErrors as any)?.incoming?.message as string | undefined;
+  const outgoingSignatureError = signatureErrors.outgoing?.message as string | undefined;
+  const incomingSignatureError = signatureErrors.incoming?.message as string | undefined;
   const [watchedVitals, watchedBraden, watchedOxygen] = form.watch([
     'vitals',
     'braden',
     'oxygenTherapy',
   ]);
   const watchedValues = form.watch();
-  const computedAlerts = useMemo(() => computeAlerts(watchedValues as any), [watchedValues]);
+  const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
     () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
     [watchedBraden, watchedOxygen, watchedVitals],
@@ -579,7 +593,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbp: vitals.sbp,
       hr: vitals.hr,
       o2: Boolean(oxygen.device || oxygen.flowLMin != null || oxygen.fio2 != null),
-      avpu: vitals.avpu as any,
+      avpu: vitals.avpu,
     };
     return computeNEWS2(input);
   }, [watchedOxygen, watchedVitals]);
@@ -976,9 +990,13 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     (async () => {
       const activeSession = session ?? (await getSession());
-      const userId = activeSession?.userId ?? (activeSession as any)?.user?.id;
+      const sessionUser = getSessionUser(activeSession);
+      const userId = sessionUser?.userId ?? sessionUser?.id ?? activeSession?.userId;
       if (!userId) return;
-      const unitId = activeSession?.units?.[0] ?? (activeSession as any)?.user?.unitId;
+      const unitId =
+        sessionUser?.activeUnitId ??
+        sessionUser?.units?.[0] ??
+        activeSession?.units?.[0];
       const shiftCode = deriveShiftCode(form.getValues('administrativeData.shiftStart'));
       const event = makeAuditEvent({
         type: 'patient_open',
@@ -993,7 +1011,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [form, patientIdValue, session]);
 
   const onScanPress = () => {
-    const routeNames = (navigation as any)?.getState?.()?.routeNames ?? ([] as string[]);
+    const routeNames = (navigation as { getState?: () => { routeNames?: string[] } }).getState?.()
+      ?.routeNames ?? [];
     if (routeNames.includes('QRScan')) {
       navigation.navigate('QRScan' as never, { returnTo: 'HandoverForm' } as never);
     } else {
@@ -1008,7 +1027,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       Alert.alert('Falta firma', 'Para finalizar la entrega falta la firma de enfermera saliente.');
       return;
     }
-    const message = (formErrors as any)?.message ?? 'No se pudo guardar';
+    const message = typeof formErrors?.message === 'string' ? formErrors.message : 'No se pudo guardar';
     Alert.alert('Error', typeof message === 'string' ? message : 'No se pudo guardar');
   };
 
@@ -1043,10 +1062,10 @@ export default function HandoverForm({ navigation, route }: Props) {
     });
 
     const diagnoses: string[] = [];
-    (watchedValues.dxMedicalStructured ?? []).forEach((dx: any) => {
+    (watchedValues.dxMedicalStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
-    (watchedValues.dxNursingStructured ?? []).forEach((dx: any) => {
+    (watchedValues.dxNursingStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
     if (watchedValues.dxMedical) {
@@ -1088,8 +1107,9 @@ export default function HandoverForm({ navigation, route }: Props) {
       const result = await fetchInterventionsSuggestions(context);
       setSuggestionsState((prev) => ({ ...prev, [section]: result }));
       suggestionsCacheRef.current[section] = { timestamp: now, contextHash, result };
-    } catch (error: any) {
-      setSuggestionsError(error?.message ?? 'No se pudieron cargar sugerencias de IA');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : null;
+      setSuggestionsError(message ?? 'No se pudieron cargar sugerencias de IA');
     } finally {
       setSuggestionsLoading(null);
     }
@@ -1198,8 +1218,13 @@ export default function HandoverForm({ navigation, route }: Props) {
           specialtyId,
         });
 
-        const auditUserId = activeSession?.userId ?? (activeSession as any)?.user?.id;
-        const auditUnitId = activeSession?.units?.[0] ?? (activeSession as any)?.user?.unitId ?? administrativeData.unit;
+        const activeSessionUser = getSessionUser(activeSession);
+        const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
+        const auditUnitId =
+          activeSessionUser?.activeUnitId ??
+          activeSessionUser?.units?.[0] ??
+          activeSession?.units?.[0] ??
+          administrativeData.unit;
         if (auditUserId && values.patientId) {
           const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
           const auditEvent = makeAuditEvent({
@@ -1223,7 +1248,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             sbp: vitals.sbp,
             hr: vitals.hr,
             o2: hasOxygenValues,
-            avpu: vitals.avpu as any,
+            avpu: vitals.avpu,
           };
           const breakdown = computeNEWS2(newsInput);
           if (breakdown.total >= 5 || breakdown.anyThree) {
@@ -1239,9 +1264,9 @@ export default function HandoverForm({ navigation, route }: Props) {
 
         Alert.alert('OK', successMessage);
         navigation.goBack();
-      } catch (error: any) {
-        const message = error?.message ?? 'No se pudo guardar';
-        Alert.alert('Error', message);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : null;
+        Alert.alert('Error', message ?? 'No se pudo guardar');
       }
     },
     handleInvalidSubmit,
@@ -1265,7 +1290,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     onSubmit();
   };
 
-  const handleSectionLayout = (key: SectionKey) => (event: any) => {
+  const handleSectionLayout = (key: SectionKey) => (event: LayoutChangeEvent) => {
     const y = event.nativeEvent.layout.y;
     setSectionPositions((prev) => ({ ...prev, [key]: y }));
   };

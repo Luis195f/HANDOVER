@@ -1,17 +1,17 @@
 // src/screens/LoginMock.tsx
 import React from "react";
 import { View, Text, Button } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import { loginWithMockUser } from '@/src/lib/auth';
+import type { RootStackParamList } from '@/src/navigation/types';
 
 export default function LoginMock() {
-  const nav = useNavigation();
+  const nav = useNavigation<NavigationProp<RootStackParamList>>();
 
   const onLogin = async () => {
     await loginWithMockUser();
     // tras login: a la lista de pacientes
-    // @ts-ignore
-    nav.replace("Patients");
+    nav.replace("PatientList");
   };
 
   return (
