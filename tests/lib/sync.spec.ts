@@ -162,6 +162,43 @@ describe('sync engine state machine', () => {
     expect(remaining.length).toBe(0);
   });
 
+  it('mantiene pendiente tras errores 502/504 y conserva el payload', async () => {
+    const sender = vi.fn(async () => ({ ok: false as const, status: 502 }));
+
+    await createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } },
+      patientId: 'pat-gateway',
+    });
+
+    configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
+    await forceSync();
+
+    const [item] = await listOfflineQueue();
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(item?.syncStatus).toBe('pending');
+    expect(item?.attempts).toBe(1);
+    expect(item?.payload).toContain('bundle');
+  });
+
+  it('marca como error tras repetidos fallos no recuperables', async () => {
+    const sender = vi.fn(async () => ({ ok: false as const, status: 400, message: 'invalid' }));
+    isOnline.mockResolvedValue(true);
+
+    await createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } },
+      patientId: 'pat-invalid',
+      attempts: 2,
+    });
+
+    configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
+    await forceSync();
+
+    const [item] = await listOfflineQueue();
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(item?.syncStatus).toBe('error');
+    expect(item?.errorMessage).toBe('invalid');
+  });
+
   // ======================================================
   // 🔹 TEST 4 — Pausa tras fallo de autenticación
   // ======================================================
