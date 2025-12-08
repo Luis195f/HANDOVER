@@ -1,92 +1,238 @@
 // vitest.setup.ts
-import './tests/jest-native';
-import { vi } from 'vitest';
+// -----------------------------------------------------------------------------
+// Setup global para Vitest en HANDOVER-LIMPIO
+// -----------------------------------------------------------------------------
 
-(globalThis as any).__DEV__ = false;
-(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+import { vi, beforeEach, afterEach } from 'vitest';
 
-import * as SecureStoreMock from './__mocks__/expo-secure-store';
+// -----------------------------------------------------------------------------
+// 🌍 Fallbacks básicos de entorno
+// -----------------------------------------------------------------------------
 
-vi.mock('expo-barcode-scanner');
-vi.mock('expo-audio');
-vi.mock('expo-secure-store', () => SecureStoreMock);
-vi.mock('expo-auth-session', () => import('./__mocks__/expo-auth-session'));
+const g = globalThis as any;
 
-vi.mock('expo-constants', () => ({
-  default: {
-    expoConfig: { extra: {} },
-  },
-}));
+g.window = g.window ?? {};
+g.navigator = g.navigator ?? { userAgent: 'node' };
 
-vi.mock('js-sha256', async () => {
-  const { createHash } = await import('node:crypto');
+if (typeof g.fetch !== 'function') {
+  g.fetch = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({}),
+    text: async () => '',
+  }));
+}
+
+// -----------------------------------------------------------------------------
+// 🔒 Mock de expo-secure-store
+// -----------------------------------------------------------------------------
+
+type SecureStoreData = Record<string, string | null>;
+const secureStoreState: SecureStoreData = {};
+
+vi.mock('expo-secure-store', () => {
+  const api = {
+    async getItemAsync(key: string): Promise<string | null> {
+      return key in secureStoreState ? secureStoreState[key] ?? null : null;
+    },
+    async setItemAsync(key: string, value: string): Promise<void> {
+      secureStoreState[key] = value;
+    },
+    async deleteItemAsync(key: string): Promise<void> {
+      delete secureStoreState[key];
+    },
+    __reset() {
+      for (const k of Object.keys(secureStoreState)) {
+        delete secureStoreState[k];
+      }
+    },
+  };
+
+  return api;
+});
+
+// -----------------------------------------------------------------------------
+// 🌐 Mock de expo-linking
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-linking', () => {
   return {
-    sha256: (input: string) => createHash('sha256').update(input).digest('hex'),
+    createURL: (path: string) => `https://example.com/${path}`,
+    parse: (url: string) => ({ path: url }),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    openURL: vi.fn(),
   };
 });
 
-/** Mock global de auth para evitar dependencias RN/Expo en tests */
-vi.mock('@/src/security/auth', async () => {
-  const actual = await vi.importActual<typeof import('@/src/security/auth')>(
-    '@/src/security/auth'
-  );
+// -----------------------------------------------------------------------------
+// 🌐 Mock de expo-web-browser
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-web-browser', () => {
+  const openAuthSessionAsync = vi.fn(async () => ({
+    type: 'success',
+    url: 'https://example.com/callback?code=mock-auth-code',
+  }));
+
   return {
-    ...actual,
-    getSession: async () => ({ token: '' }),
+    openAuthSessionAsync,
+    dismissBrowser: vi.fn(),
+    WebBrowserResultType: {
+      SUCCESS: 'success',
+      CANCEL: 'cancel',
+      DISMISS: 'dismiss',
+    },
+    default: {
+      openAuthSessionAsync,
+    },
   };
 });
 
-/** (Opcional) Polyfill de fetch si el entorno no lo trae */
-if (!(globalThis as any).fetch) {
-  (globalThis as any).fetch = async () =>
-    ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        resourceType: 'Bundle',
-        type: 'transaction-response',
-        entry: [],
-      }),
-    } as any);
-}
+// -----------------------------------------------------------------------------
+// 🧩 Mock de expo-modules-core
+// -----------------------------------------------------------------------------
 
-/** (Compat) vi.skip "no-op" si algún test antiguo lo llama */
-(Object.assign(vi as any, { skip: () => {} }));
+vi.mock('expo-modules-core', () => {
+  class EventEmitter {
+    constructor(_target?: any) {}
+    addListener = vi.fn();
+    removeAllListeners = vi.fn();
+  }
 
-/**
- * Compatibilidad mínima para suites migradas a Jest. Mapea `jest.*` → `vi.*`.
- */
-if (!(globalThis as any).jest) {
-  const jestCompat = {
-    ...vi,
-    fn: vi.fn,
-    spyOn: vi.spyOn,
-    mock: vi.mock,
-    clearAllMocks: vi.clearAllMocks,
-    resetAllMocks: vi.resetAllMocks,
-    restoreAllMocks: vi.restoreAllMocks,
-    useFakeTimers: vi.useFakeTimers.bind(vi),
-    useRealTimers: vi.useRealTimers.bind(vi),
-    advanceTimersByTime: vi.advanceTimersByTime.bind(vi),
-  } as typeof vi & Record<string, unknown>;
-  (globalThis as any).jest = jestCompat;
-}
+  return {
+    EventEmitter,
+    NativeModulesProxy: {},
+    requireNativeModule: vi.fn(),
+  };
+});
 
-/** Mock ligero de expo-crypto para entorno Node. */
-vi.mock('expo-crypto', () => ({
-  CryptoDigestAlgorithm: {
-    SHA1: 'SHA-1',
-    SHA256: 'SHA-256',
-    SHA384: 'SHA-384',
-    SHA512: 'SHA-512',
-  },
-  digestStringAsync: vi.fn(async (_alg: string, input: string) => {
-    // usa hash simple determinista para tests (no criptográfico)
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-      hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+// -----------------------------------------------------------------------------
+// 🔐 Mock de expo-auth-session
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-auth-session', () => {
+  const ResponseType = {
+    Code: 'code',
+    Token: 'token',
+    IdToken: 'id_token',
+  } as const;
+
+  class AuthRequest {
+    config: any;
+
+    constructor(config: any) {
+      this.config = config;
     }
-    return hash.toString(16);
-  }),
-}));
 
+    async promptAsync(_discovery: any, _options: any) {
+      return {
+        type: 'success',
+        params: {
+          code: 'mock-auth-code',
+        },
+      };
+    }
+  }
+
+  const makeRedirectUri = vi.fn((_options?: any) => 'https://mock.redirect');
+
+  // ⚠️ IMPORTANTE: ahora incluye userinfoEndpoint
+  const fetchDiscoveryAsync = vi.fn(async (issuer: string) => ({
+    authorizationEndpoint: `${issuer}/authorize`,
+    tokenEndpoint: `${issuer}/token`,
+    revocationEndpoint: `${issuer}/revoke`,
+    userinfoEndpoint: `${issuer}/userinfo`,
+  }));
+
+  const exchangeCodeAsync = vi.fn(async (_params: any, _config: any) => ({
+    accessToken: 'mock-access-token',
+    refreshToken: 'mock-refresh-token',
+    idToken: 'mock-id-token',
+    tokenType: 'Bearer',
+    issuedAt: Math.floor(Date.now() / 1000),
+    expiresIn: 3600,
+  }));
+
+  const revokeAsync = vi.fn(async (_options: any, _config: any) => ({}));
+
+  const refreshAsync = vi.fn(async (_input: any, _config: any) => ({
+    accessToken: 'refreshed-access-token',
+    refreshToken: 'refreshed-refresh-token',
+    idToken: 'refreshed-id-token',
+    tokenType: 'Bearer',
+    issuedAt: Math.floor(Date.now() / 1000),
+    expiresIn: 3600,
+  }));
+
+  const exported = {
+    ResponseType,
+    AuthRequest,
+    makeRedirectUri,
+    fetchDiscoveryAsync,
+    exchangeCodeAsync,
+    revokeAsync,
+    refreshAsync,
+  };
+
+  return {
+    ...exported,
+    default: exported,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🧭 Mock de @react-navigation/native (con CommonActions)
+// -----------------------------------------------------------------------------
+
+vi.mock('@react-navigation/native', () => {
+  const NavigationContainer = ({ children }: any) => children;
+
+  const createNavigationContainerRef = vi.fn(() => {
+    return {
+      isReady: () => true,
+      navigate: vi.fn(),
+      reset: vi.fn(),
+      goBack: vi.fn(),
+      getRootState: vi.fn(),
+      dispatch: vi.fn(),
+    } as any;
+  });
+
+  const CommonActions = {
+    reset: vi.fn((config: any) => ({
+      type: 'RESET',
+      ...config,
+    })),
+  };
+
+  const api = {
+    NavigationContainer,
+    createNavigationContainerRef,
+    CommonActions,
+    useNavigation: () => ({
+      navigate: vi.fn(),
+      goBack: vi.fn(),
+    }),
+    useRoute: () => ({ params: {} }),
+    useFocusEffect: () => {},
+    useIsFocused: () => false,
+  };
+
+  return {
+    ...api,
+    default: NavigationContainer,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🧹 Limpiar mocks entre tests
+// -----------------------------------------------------------------------------
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});

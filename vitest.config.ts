@@ -50,8 +50,6 @@ export default defineConfig({
         branches: 70,
       },
     },
-    // 👇 IMPORTANTE: decirle a Vitest que inlinee estos deps para que no
-    // intente ejecutarlos como CJS directamente en Node.
     server: {
       deps: {
         inline: ['react-native', '@testing-library/react-native'],
@@ -85,6 +83,27 @@ export default defineConfig({
           new URL('./tests/jest-native.ts', import.meta.url),
         ),
       },
+      {
+        // Stub para expo-modules-core (NativeModulesProxy, EventEmitter, etc.)
+        find: 'expo-modules-core',
+        replacement: fileURLToPath(
+          new URL('./__mocks__/expo-modules-core.ts', import.meta.url),
+        ),
+      },
+      {
+        // Stub para el deep import inexistente de React Navigation
+        find: '@react-navigation/native/lib/module/useBackButton',
+        replacement: fileURLToPath(
+          new URL('./__mocks__/useBackButton.ts', import.meta.url),
+        ),
+      },
+      {
+        // 👇 NUEVO: mock de expo-web-browser para evitar AppState.currentState
+        find: 'expo-web-browser',
+        replacement: fileURLToPath(
+          new URL('./__mocks__/expo-web-browser.ts', import.meta.url),
+        ),
+      },
     ],
   },
   optimizeDeps: {
@@ -94,3 +113,4 @@ export default defineConfig({
     external: ['react-native', '@testing-library/react-native'],
   },
 });
+

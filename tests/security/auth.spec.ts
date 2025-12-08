@@ -1,76 +1,60 @@
+// tests/security/auth.spec.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as SecureStore from 'expo-secure-store';
 
-vi.mock('expo-web-browser', () => ({ maybeCompleteAuthSession: vi.fn() }));
+// ⚙️ Config común para TODOS los tests de sesión
+beforeEach(() => {
+  // 1) Resetear el mock de SecureStore entre tests (si expone __reset)
+  const secureAsAny = SecureStore as any;
+  if (typeof secureAsAny.__reset === 'function') {
+    secureAsAny.__reset();
+  } else {
+    // Fallback por si acaso
+    void SecureStore.deleteItemAsync('session');
+  }
 
-const secureStoreState: { value: string | null } = { value: null };
-vi.mock('expo-secure-store', () => ({
-  getItemAsync: vi.fn(async () => secureStoreState.value),
-  setItemAsync: vi.fn(async (_key: string, value: string) => {
-    secureStoreState.value = value;
-  }),
-  deleteItemAsync: vi.fn(async () => {
-    secureStoreState.value = null;
-  }),
-}));
-
-const promptAsyncMock = vi.fn();
-const discoveryMock = vi.fn();
-
-vi.mock('expo-auth-session', () => ({
-  ResponseType: { Code: 'code' },
-  AuthRequest: class {
-    config: Record<string, unknown>;
-    constructor(config: Record<string, unknown>) {
-      this.config = config;
-    }
-    promptAsync = promptAsyncMock;
-  },
-  fetchDiscoveryAsync: discoveryMock,
-  makeRedirectUri: vi.fn(() => 'app://redirect'),
-}));
-
-const fetchMock = vi.fn(async () => ({
-  ok: true,
-  json: async () => ({
-    sub: 'user-123',
-    name: 'Nurse Example',
-    roles: ['nurse'],
-    units: ['icu-a'],
-  }),
-}));
-
-globalThis.fetch = fetchMock as unknown as typeof fetch;
+  // 2) Mock global de fetch para que loginWithOAuth pueda llamar al /userinfo
+  const globalAny = globalThis as any;
+  globalAny.fetch = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      sub: 'user-123',
+      email: 'stored@example.com',
+      roles: ['nurse'],
+      units: ['icu-a'],
+    }),
+  }));
+});
 
 describe('auth session', () => {
-  beforeEach(() => {
-    secureStoreState.value = null;
-    promptAsyncMock.mockReset();
-    discoveryMock.mockResolvedValue({
-      authorizationEndpoint: 'https://example/authorize',
-      tokenEndpoint: 'https://example/token',
-      userInfoEndpoint: 'https://example/userinfo',
-    });
-    promptAsyncMock.mockResolvedValue({
-      type: 'success',
-      authentication: {
-        accessToken: 'access-token',
-        refreshToken: 'refresh-token',
-        issuedAt: 1700000000,
-        expiresIn: 1200,
-      },
-    });
+  it('getCurrentSession returns null when there is no stored session', async () => {
+    const { getCurrentSession } = await import('@/src/security/auth');
+
+    const session = await getCurrentSession();
+    expect(session).toBeNull();
   });
 
-  it('loginWithOAuth stores session and hydrates current session', async () => {
+  it('loginWithOAuth stores session and getCurrentSession returns it', async () => {
     const { getCurrentSession, loginWithOAuth } = await import('@/src/security/auth');
 
-    const session = await loginWithOAuth();
-    expect(session.accessToken).toBe('access-token');
-    expect(session.roles).toContain('nurse');
-    expect(session.units).toEqual(['icu-a']);
+    // Hace todo el flujo real de login (pero con mocks de AuthSession, fetch, etc.)
+    const sessionFromLogin = (await loginWithOAuth()) as any;
 
-    const hydrated = await getCurrentSession();
-    expect(hydrated?.userId).toBe('user-123');
+    // Luego hidrata desde SecureStore
+    const hydrated = (await getCurrentSession()) as any;
+
+    expect(hydrated).not.toBeNull();
+
+    // Debe ser el mismo modelo que devolvió loginWithOAuth
+    expect(hydrated).toEqual(sessionFromLogin);
+
+    // Y además debe incorporar la info del userinfo mockeado
+    expect(hydrated.userId).toBe('user-123');
+    expect(hydrated.email).toBe('stored@example.com');
+    expect(hydrated.roles).toContain('nurse');
+    expect(hydrated.units).toContain('icu-a');
+    expect(typeof hydrated.expiresAt).toBe('string');
   });
 
   it('logout clears persisted session', async () => {
@@ -78,8 +62,9 @@ describe('auth session', () => {
 
     await loginWithOAuth();
     await logout();
-    const session = await getCurrentSession();
-    expect(session).toBeNull();
-    expect(secureStoreState.value).toBeNull();
+
+    const afterLogout = await getCurrentSession();
+    expect(afterLogout).toBeNull();
   });
 });
+
