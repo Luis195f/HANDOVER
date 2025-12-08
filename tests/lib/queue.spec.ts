@@ -76,6 +76,41 @@ describe('tx queue (sqlite + fallback)', () => {
     expect(snapshot[0]?.retryCount).toBe(1);
   });
 
+  it('mantiene el item en cola ante 502/503/504 y programa backoff', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    const queue = await loadQueue();
+
+    const key = 'gateway-error';
+    await queue.enqueueTx({ key, payload: { attempt: 0 } });
+
+    const sender = vi
+      .fn(async () => ({ ok: false, status: 502 }))
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: false, status: 504 });
+
+    await queue.flushQueue(sender, { maxRetries: 2, baseDelayMs: 1000 });
+
+    const snapshot = await queue.getQueueSnapshot();
+    expect(sender).toHaveBeenCalledTimes(3);
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]?.attempts).toBe(3);
+    expect(snapshot[0]?.nextRetryAt).toBeGreaterThan(Date.now());
+  });
+
+  it('elimina definitivamente tras errores 4xx', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    const queue = await loadQueue();
+
+    await queue.enqueueTx({ key: 'bad-request', payload: { foo: 'bar' } });
+
+    const sender = vi.fn(async () => ({ ok: false, status: 400 }));
+    await queue.flushQueue(sender, { baseDelayMs: 0 });
+
+    const snapshot = await queue.getQueueSnapshot();
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(snapshot).toHaveLength(0);
+  });
+
   it('respects max attempts configured via env by stopping after the configured retries', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
     process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS = '1';

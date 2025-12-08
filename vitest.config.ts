@@ -39,7 +39,10 @@ export default defineConfig({
       include: [
         'src/lib/auth.ts',
         'src/lib/net.ts',
+        'src/lib/queue.ts',
+        'src/lib/sync.ts',
         'src/screens/HandoverForm.tsx',
+        'src/screens/QRScan.tsx',
         'src/validation/schemas.ts',
         'src/components/Chip.tsx',
       ],
