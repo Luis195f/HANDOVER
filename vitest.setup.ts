@@ -4,6 +4,7 @@
 // -----------------------------------------------------------------------------
 
 import { vi, beforeEach, afterEach } from 'vitest';
+import * as SecureStoreMock from './tests/__mocks__/expo-secure-store';
 
 // -----------------------------------------------------------------------------
 // 🌍 Fallbacks básicos de entorno
@@ -11,9 +12,15 @@ import { vi, beforeEach, afterEach } from 'vitest';
 
 const g = globalThis as any;
 
+// Globals típicos de RN/Expo
 g.window = g.window ?? {};
 g.navigator = g.navigator ?? { userAgent: 'node' };
+g.__DEV__ = false;
+g.IS_REACT_ACT_ENVIRONMENT = true;
+// Hacer que librerías que esperan `jest` funcionen en Vitest
+g.jest = g.jest ?? vi;
 
+// Stub muy básico de `fetch` si no existe
 if (typeof g.fetch !== 'function') {
   g.fetch = vi.fn(async () => ({
     ok: true,
@@ -24,32 +31,10 @@ if (typeof g.fetch !== 'function') {
 }
 
 // -----------------------------------------------------------------------------
-// 🔒 Mock de expo-secure-store
+// 🔒 Mock de expo-secure-store (fuente única: tests/__mocks__/expo-secure-store)
 // -----------------------------------------------------------------------------
 
-type SecureStoreData = Record<string, string | null>;
-const secureStoreState: SecureStoreData = {};
-
-vi.mock('expo-secure-store', () => {
-  const api = {
-    async getItemAsync(key: string): Promise<string | null> {
-      return key in secureStoreState ? secureStoreState[key] ?? null : null;
-    },
-    async setItemAsync(key: string, value: string): Promise<void> {
-      secureStoreState[key] = value;
-    },
-    async deleteItemAsync(key: string): Promise<void> {
-      delete secureStoreState[key];
-    },
-    __reset() {
-      for (const k of Object.keys(secureStoreState)) {
-        delete secureStoreState[k];
-      }
-    },
-  };
-
-  return api;
-});
+vi.mock('expo-secure-store', () => SecureStoreMock);
 
 // -----------------------------------------------------------------------------
 // 🌐 Mock de expo-linking
@@ -95,6 +80,7 @@ vi.mock('expo-web-browser', () => {
 
 vi.mock('expo-modules-core', () => {
   class EventEmitter {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     constructor(_target?: any) {}
     addListener = vi.fn();
     removeAllListeners = vi.fn();
@@ -104,6 +90,141 @@ vi.mock('expo-modules-core', () => {
     EventEmitter,
     NativeModulesProxy: {},
     requireNativeModule: vi.fn(),
+    // Necesario para expo-constants (ExponentConstants / requireOptionalNativeModule)
+    requireOptionalNativeModule: (_name: string) => ({}),
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🌐 Mock de expo-constants
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: { extra: {} },
+    manifest: { extra: {} },
+  },
+}));
+
+// -----------------------------------------------------------------------------
+// 📁 Mock de expo-file-system (para export-pdf y otros)
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-file-system', () => {
+  // Tal como lo espera el test:
+  // import * as FileSystem from 'expo-file-system'
+  // FileSystem.moveAsync(...)
+  // FileSystem.documentDirectory = 'file:///docs/';
+
+  const documentDirectory = 'file:///mock-documents/';
+
+  const writeAsStringAsync = vi.fn(
+    async (_path: string, _data: string, _options?: any): Promise<void> => {
+      return;
+    },
+  );
+
+  const getInfoAsync = vi.fn(
+    async (_path: string): Promise<{
+      exists: boolean;
+      isDirectory: boolean;
+      uri: string;
+    }> => {
+      return {
+        exists: true,
+        isDirectory: false,
+        uri: 'file:///mock-file.pdf',
+      };
+    },
+  );
+
+  const moveAsync = vi.fn(
+    async (_options: { from: string; to: string }): Promise<void> => {
+      // No hace nada, solo para que el spy no reviente
+      return;
+    },
+  );
+
+  const mod = {
+    documentDirectory,
+    writeAsStringAsync,
+    getInfoAsync,
+    moveAsync,
+  };
+
+  return {
+    __esModule: true,
+    ...mod,
+    default: mod,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🔊 Mock de expo-speech
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-speech', () => {
+  const ExponentSpeech = {
+    maxSpeechInputLength: 10000,
+  };
+
+  async function speak(_text: string, _options?: any): Promise<void> {
+    return;
+  }
+
+  async function stop(): Promise<void> {
+    return;
+  }
+
+  return {
+    defaultOptions: {},
+    ExponentSpeech,
+    speak,
+    stop,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🖨️ Mock de expo-print (para export-pdf)
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-print', () => {
+  const Orientation = {
+    PORTRAIT: 'portrait',
+    LANDSCAPE: 'landscape',
+  } as const;
+
+  // No lo usamos directamente en el test, pero así no revienta nada.
+  const printAsync = vi.fn(async (_options?: any) => {
+    return {};
+  });
+
+  // ESTA es la clave: definir printToFileAsync para que vi.spyOn(Print, 'printToFileAsync')
+  // no reviente diciendo "does not exist".
+  const printToFileAsync = vi.fn(async (_options?: any) => {
+    return {
+      uri: 'file:///mock-output.pdf',
+      // expo-print puede devolver también base64, pero aquí no la necesitamos.
+      base64: undefined,
+    } as any;
+  });
+
+  const selectPrinterAsync = vi.fn(async () => {
+    return { name: 'Mock Printer', url: 'mock://printer' };
+  });
+
+  const mod = {
+    Orientation,
+    printAsync,
+    printToFileAsync,
+    selectPrinterAsync,
+  };
+
+  return {
+    __esModule: true,
+    ...mod,
+    default: mod,
   };
 });
 
@@ -125,24 +246,26 @@ vi.mock('expo-auth-session', () => {
       this.config = config;
     }
 
-    async promptAsync(_discovery: any, _options: any) {
+    async makeAuthUrlAsync(): Promise<string> {
+      return 'https://example.com/auth';
+    }
+
+    async promptAsync(
+      _options?: any,
+    ): Promise<{ type: string; params?: Record<string, string> }> {
       return {
         type: 'success',
-        params: {
-          code: 'mock-auth-code',
-        },
+        params: { code: 'mock-auth-code' },
       };
     }
   }
 
-  const makeRedirectUri = vi.fn((_options?: any) => 'https://mock.redirect');
+  const makeRedirectUri = vi.fn((_options?: any) => 'https://example.com/callback');
 
-  // ⚠️ IMPORTANTE: ahora incluye userinfoEndpoint
-  const fetchDiscoveryAsync = vi.fn(async (issuer: string) => ({
-    authorizationEndpoint: `${issuer}/authorize`,
-    tokenEndpoint: `${issuer}/token`,
-    revocationEndpoint: `${issuer}/revoke`,
-    userinfoEndpoint: `${issuer}/userinfo`,
+  const fetchDiscoveryAsync = vi.fn(async (_issuer: string) => ({
+    authorizationEndpoint: 'https://example.com/authorize',
+    tokenEndpoint: 'https://example.com/token',
+    revocationEndpoint: 'https://example.com/revoke',
   }));
 
   const exchangeCodeAsync = vi.fn(async (_params: any, _config: any) => ({
@@ -231,6 +354,8 @@ vi.mock('@react-navigation/native', () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Si el mock de SecureStore implementa __reset, úsalo para empezar limpio
+  (SecureStoreMock as any).__reset?.();
 });
 
 afterEach(() => {
