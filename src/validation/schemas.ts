@@ -20,6 +20,12 @@ import {
   type RiskFlags,
 } from "../types/handover";
 
+const optionalTrimmedString = (maxLength: number) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().max(maxLength),
+  );
+
 const parseCensus = (value: unknown) => {
   if (typeof value === "string") {
     const normalized = value.replace(",", ".").trim();
@@ -32,15 +38,22 @@ const parseCensus = (value: unknown) => {
 
 export const zAdministrativeData = z
   .object({
-    unit: z.string().min(1, "La unidad es obligatoria"),
+    unit: z.string().trim().min(1, "La unidad es obligatoria").max(80),
     census: z
-      .preprocess(parseCensus, z.number().int().min(0, "El censo no puede ser negativo"))
+      .preprocess(
+        parseCensus,
+        z
+          .number()
+          .int()
+          .min(0, "El censo no puede ser negativo")
+          .max(200, "El censo no puede superar 200 pacientes"),
+      )
       .default(0),
-    staffIn: z.array(z.string().min(1, "Nombre requerido")).default([]),
-    staffOut: z.array(z.string().min(1, "Nombre requerido")).default([]),
+    staffIn: z.array(z.string().trim().min(1, "Nombre requerido").max(100)).default([]),
+    staffOut: z.array(z.string().trim().min(1, "Nombre requerido").max(100)).default([]),
     shiftStart: z.string().min(1, "Inicio de turno requerido"),
     shiftEnd: z.string().min(1, "Fin de turno requerido"),
-    incidents: z.array(z.string().min(1)).optional(),
+    incidents: z.array(z.string().trim().min(1).max(500)).optional(),
   })
   .superRefine((data, ctx) => {
     const start = Date.parse(data.shiftStart);
@@ -127,6 +140,14 @@ export const zVitals = z.object({
       });
     }
   }
+
+  if (typeof value.sbp === "number" && typeof value.dbp === "number" && value.dbp >= value.sbp) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "La presión diastólica debe ser menor que la sistólica",
+      path: ["dbp"],
+    });
+  }
 });
 
 export const zOxygen = z
@@ -150,6 +171,14 @@ export const zPainAssessment: z.ZodSchema<PainAssessment> = z
         code: z.ZodIssueCode.custom,
         path: ["evaScore"],
         message: "Ingrese una EVA entre 0 y 10 cuando el paciente tiene dolor.",
+      });
+    }
+
+    if (!value.hasPain && value.evaScore != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["evaScore"],
+        message: "No debe registrar EVA si el paciente no refiere dolor.",
       });
     }
   });
@@ -234,23 +263,23 @@ export const zGlasgowScale: z.ZodSchema<GlasgowScale> = z
 
 export const zNutritionInfo: z.ZodSchema<NutritionInfo> = z.object({
   dietType: z.enum(DIET_TYPES),
-  tolerance: z.string().optional(),
-  intakeMl: z.number().nonnegative().optional(),
+  tolerance: optionalTrimmedString(200).optional(),
+  intakeMl: z.number().nonnegative().max(20000).optional(),
 });
 
 export const zEliminationInfo: z.ZodSchema<EliminationInfo> = z.object({
-  urineMl: z.number().nonnegative().optional(),
+  urineMl: z.number().nonnegative().max(20000).optional(),
   stoolPattern: z.enum(STOOL_PATTERNS).optional(),
   hasRectalTube: z.boolean().optional(),
 });
 
 export const zMobilityInfo: z.ZodSchema<MobilityInfo> = z.object({
   mobilityLevel: z.enum(MOBILITY_LEVELS),
-  repositioningPlan: z.string().optional(),
+  repositioningPlan: optionalTrimmedString(300).optional(),
 });
 
 export const zSkinInfo: z.ZodSchema<SkinInfo> = z.object({
-  skinStatus: z.string().min(1, "Estado de piel requerido"),
+  skinStatus: z.string().trim().min(1, "Estado de piel requerido").max(200),
   hasPressureInjury: z.boolean().optional(),
 });
 
@@ -281,8 +310,8 @@ export const zHandoverBedsideChecklist: z.ZodSchema<HandoverBedsideChecklist> = 
 export const zRiskItem = z.object({
   type: zRiskType,
   present: z.boolean(),
-  notes: z.string().max(1000).optional(),
-  actions: z.array(z.string()).default([]),
+  notes: optionalTrimmedString(500).optional(),
+  actions: z.array(z.string().trim().min(1).max(200)).default([]),
 });
 export type RiskItem = z.infer<typeof zRiskItem>;
 
@@ -301,13 +330,17 @@ export const zHandoverStructuredDiagnosis = z.object({
     .describe('Sistema de codificación: SNOMED CT (dx médicos), NANDA o ICD10'),
   code: z
     .string()
+    .trim()
     .min(1, 'El código no puede estar vacío')
+    .max(50)
     .describe('Código del diagnóstico según el sistema seleccionado (SNOMED/ICD10/NANDA)'),
   display: z
     .string()
+    .trim()
     .min(1, 'La descripción no puede estar vacía')
+    .max(200)
     .describe('Descripción legible asociada al código SNOMED/NANDA'),
-  freeTextNote: z.string().optional(),
+  freeTextNote: optionalTrimmedString(300).optional(),
 });
 
 export const zHandoverStructuredDiagnosisArray = z
@@ -333,23 +366,23 @@ const optionalScheduleString = z.preprocess(
 
 const zMedicationItemBase: z.ZodSchema<MedicationItem> = z.object({
   id: z.string().min(1),
-  name: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
   code: z
     .object({
-      system: z.string().min(1),
-      code: z.string().min(1),
-      display: z.string().min(1),
+      system: z.string().trim().min(1).max(50),
+      code: z.string().trim().min(1).max(50),
+      display: z.string().trim().min(1).max(120),
     })
     .optional(),
   route: zMedicationRoute.optional(),
-  dose: z.string().min(1).optional(),
-  frequency: z.string().min(1).optional(),
+  dose: z.string().trim().min(1).max(80).optional(),
+  frequency: z.string().trim().min(1).max(80).optional(),
   isContinuous: z.boolean().optional(),
   isContinuousInfusion: z.boolean().optional(),
   startTime: optionalScheduleString,
   endTime: optionalScheduleString,
   isHighAlert: z.boolean().optional(),
-  notes: z.string().optional(),
+  notes: optionalTrimmedString(500).optional(),
   signature: z.lazy(() => zHandoverSignature).optional(),
 });
 
@@ -365,7 +398,7 @@ export const zMedicationItem: z.ZodSchema<MedicationItem> = zMedicationItemBase.
 export const zTreatmentItem: z.ZodSchema<TreatmentItem> = z.object({
   id: z.string().min(1),
   type: z.enum(["woundCare", "respiratory", "mobilization", "education", "other"]),
-  description: z.string().min(1),
+  description: z.string().trim().min(1).max(500),
   scheduledAt: z.string().datetime().optional(),
   done: z.boolean().optional(),
 });
@@ -373,9 +406,9 @@ export const zTreatmentItem: z.ZodSchema<TreatmentItem> = z.object({
 // BEGIN HANDOVER: SIGNATURES_DUAL
 const zHandoverSignatureBase = z.object({
   userId: z.string().min(1, "Falta identificador de usuario para la firma"),
-  fullName: z.string().min(1, "Falta nombre completo en la firma"),
+  fullName: z.string().trim().min(1, "Falta nombre completo en la firma").max(100),
   role: z.enum(["nurse", "admin", "supervisor"]).optional(),
-  unitId: z.string().min(1, "Falta unidad clínica en la firma"),
+  unitId: z.string().trim().min(1, "Falta unidad clínica en la firma").max(80),
   signedAt: z.string().datetime().or(z.string()).describe("ISO timestamp de firma"),
   deviceInfo: z.string().optional(),
   method: z.enum(["session", "pin", "biometric"]).default("session"),
@@ -388,7 +421,7 @@ export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
   intakeMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   outputMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   netBalanceMl: z.number().optional(),
-  notes: z.string().optional(),
+  notes: optionalTrimmedString(300).optional(),
 }).superRefine((data, ctx) => {
   if (typeof data.netBalanceMl === "number") {
     const expected = data.intakeMl - data.outputMl;
@@ -414,19 +447,19 @@ export const zHandover = z.object({
   vitals: zVitals.optional(),
 
   // Diagnóstico/Evolución (se mejora en 1D)
-  dxMedical: z.string().optional(),
-  dxNursing: z.string().optional(),
+  dxMedical: optionalTrimmedString(500).optional(),
+  dxNursing: optionalTrimmedString(500).optional(),
   dxMedicalStructured: zHandoverStructuredDiagnosisArray,
   dxNursingStructured: zHandoverStructuredDiagnosisArray,
-  evolution: z.string().optional(),
-  closingSummary: z.string().optional(),
+  evolution: optionalTrimmedString(1200).optional(),
+  closingSummary: optionalTrimmedString(1500).optional(),
 
-  sbarSituation: z.string().optional(),
-  sbarBackground: z.string().optional(),
-  sbarAssessment: z.string().optional(),
-  sbarRecommendation: z.string().optional(),
+  sbarSituation: optionalTrimmedString(800).optional(),
+  sbarBackground: optionalTrimmedString(800).optional(),
+  sbarAssessment: optionalTrimmedString(800).optional(),
+  sbarRecommendation: optionalTrimmedString(800).optional(),
 
-  meds: z.string().optional(),
+  meds: optionalTrimmedString(1000).optional(),
 
   medications: z.array(zMedicationItem).default([]),
   treatments: z.array(zTreatmentItem).default([]),
@@ -456,7 +489,7 @@ export const zHandover = z.object({
     .optional(),
 
   // Multimedia
-  audioUri: z.string().min(1).optional()
+  audioUri: z.string().trim().min(1).max(500).optional()
 }).superRefine((value, ctx) => {
   // BEGIN HANDOVER D1 – BedsideChecklist rules
   const checklist = value.bedsideChecklist;
