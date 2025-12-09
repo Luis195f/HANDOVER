@@ -15,7 +15,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, type Control, type FieldErrors } from 'react-hook-form';
+import { Controller, FormProvider, type FieldErrors } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 
 import { isOn } from '@/src/config/flags';
@@ -74,6 +74,7 @@ import { AdministrativeSection } from '@/src/components/handover/AdministrativeS
 import { PatientSection } from '@/src/components/handover/PatientSection';
 import { VitalsSection } from '@/src/components/handover/VitalsSection';
 import { SummarySection } from '@/src/components/handover/SummarySection';
+import OxygenGroupSection from './components/OxygenGroupSection';
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -150,7 +151,6 @@ const styles = StyleSheet.create({
 });
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
-type HandoverFormControl = Control<HandoverFormValues>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
 export type DictationField =
@@ -334,77 +334,6 @@ async function buildAudioAttachment(uri: string | undefined) {
     console.warn('[handover] audio attachment error', error);
     return undefined;
   }
-}
-
-function OxygenGroup({
-  control,
-  parseNumber,
-  errors,
-}: {
-  control: HandoverFormControl;
-  parseNumber: (value: string) => number | undefined;
-  errors: HandoverFormErrors;
-}) {
-  const deviceError = errors?.oxygenTherapy?.device?.message as string | undefined;
-  const flowError = errors?.oxygenTherapy?.flowLMin?.message as string | undefined;
-  const fio2Error = errors?.oxygenTherapy?.fio2?.message as string | undefined;
-  return (
-    <View>
-      <View style={styles.field}>
-        <Text style={styles.label}>Dispositivo</Text>
-        <Controller
-          control={control}
-          name="oxygenTherapy.device"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={styles.input}
-              placeholder="Cánula / Mascarilla"
-              onBlur={onBlur}
-              value={value ?? ''}
-              onChangeText={onChange}
-            />
-          )}
-        />
-        {deviceError ? <Text style={styles.error}>{deviceError}</Text> : null}
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>Flujo O₂ (L/min)</Text>
-        <Controller
-          control={control}
-          name="oxygenTherapy.flowLMin"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              placeholder="2"
-              onBlur={onBlur}
-              value={value == null ? '' : String(value)}
-              onChangeText={(text) => onChange(parseNumber(text))}
-            />
-          )}
-        />
-        {flowError ? <Text style={styles.error}>{flowError}</Text> : null}
-      </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>FiO₂ (%)</Text>
-        <Controller
-          control={control}
-          name="oxygenTherapy.fio2"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              placeholder="30"
-              onBlur={onBlur}
-              value={value == null ? '' : String(value)}
-              onChangeText={(text) => onChange(parseNumber(text))}
-            />
-          )}
-        />
-        {fio2Error ? <Text style={styles.error}>{fio2Error}</Text> : null}
-      </View>
-    </View>
-  );
 }
 
 export default function HandoverForm({ navigation, route }: Props) {
@@ -1521,7 +1450,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.oxigenoterapia}
             onToggle={() => toggleSection('oxigenoterapia')}
           >
-            <OxygenGroup control={control} parseNumber={parseNumericInput} errors={errors} />
+            <OxygenGroupSection styles={styles} parseNumericInput={parseNumericInput} />
           </CollapsibleSection>
         </View>
       )}
