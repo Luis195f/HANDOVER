@@ -14,7 +14,21 @@ const g = globalThis as any;
 
 // Globals típicos de RN/Expo
 g.window = g.window ?? {};
-g.navigator = g.navigator ?? { userAgent: 'node' };
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(g, 'navigator');
+if (!navigatorDescriptor) {
+  Object.defineProperty(g, 'navigator', {
+    value: g.navigator ?? { userAgent: 'node' },
+    configurable: true,
+    writable: true,
+  });
+} else if (navigatorDescriptor.writable) {
+  g.navigator = g.navigator ?? { userAgent: 'node' };
+} else if (navigatorDescriptor.configurable) {
+  Object.defineProperty(g, 'navigator', {
+    value: g.navigator ?? { userAgent: 'node' },
+    configurable: true,
+  });
+}
 g.__DEV__ = false;
 g.IS_REACT_ACT_ENVIRONMENT = true;
 // Hacer que librerías que esperan `jest` funcionen en Vitest
