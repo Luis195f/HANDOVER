@@ -13,11 +13,13 @@
  */
 
 import * as SQLite from "expo-sqlite";
-import { decryptOfflinePayload, encryptOfflinePayload, hashHex } from "./crypto";
 import {
-  decryptPayload as decryptLegacyPayload,
-  isPayloadEncrypted as isLegacyEncryptedPayload,
-} from "../security/crypto";
+  decryptOfflinePayload,
+  decryptPayload as decryptQueueEncryptedPayload,
+  encryptOfflinePayload,
+  hashHex,
+  payloadIsEncrypted as queuePayloadIsEncrypted,
+} from "./crypto";
 import { mark } from "./otel";
 
 // -------------------------------
@@ -84,9 +86,9 @@ async function encryptQueuePayload(payload: unknown): Promise<string> {
 
 async function decryptQueuePayload<TFallback = unknown>(payload: string): Promise<TFallback | string> {
   try {
-    if (isLegacyEncryptedPayload(payload)) {
-      const legacyPlain = await decryptLegacyPayload(payload);
-      return safeParse(legacyPlain) as TFallback | string;
+    if (queuePayloadIsEncrypted(payload)) {
+      const decrypted = await decryptQueueEncryptedPayload(payload);
+      return safeParse(decrypted) as TFallback | string;
     }
 
     const decrypted = await decryptOfflinePayload(payload);
@@ -108,7 +110,7 @@ export interface QueueItem {
   syncStatus: SyncStatus;
   errorMessage?: string;
   payloadType: "handover-bundle";
-  payload: string;
+  payload: unknown;
   patientId: string;
 }
 
@@ -210,7 +212,7 @@ function persistQueueItem(item: QueueItem): void {
 async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
   const item = rowToQueueItem(row);
   try {
-    return { ...item, payload: String(await decryptQueuePayload(row.payload)) };
+    return { ...item, payload: await decryptQueuePayload(row.payload) };
   } catch (error) {
     console.warn("Fallo al descifrar payload offline", error);
     return { ...item, payload: row.payload };
@@ -235,7 +237,7 @@ export async function listOfflineQueue(): Promise<QueueItem[]> {
     memOfflineQueue
       .slice()
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .map(async (row) => ({ ...row, payload: String(await decryptQueuePayload(row.payload)) }))
+      .map(async (row) => ({ ...row, payload: await decryptQueuePayload(row.payload) }))
   );
 }
 
@@ -249,7 +251,7 @@ export async function getOfflineQueueItem(id: string): Promise<QueueItem | null>
   }
   const found = memOfflineQueue.find((item) => item.id === id);
   if (!found) return null;
-  return { ...found, payload: String(await decryptQueuePayload(found.payload)) };
+  return { ...found, payload: await decryptQueuePayload(found.payload) };
 }
 
 export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {
