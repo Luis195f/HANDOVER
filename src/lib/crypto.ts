@@ -1,5 +1,6 @@
 import CryptoJS from 'crypto-js';
 import * as ExpoCrypto from 'expo-crypto';
+import { gcm } from '@noble/ciphers/aes.js';
 import { sha256 } from 'js-sha256';
 
 import {
@@ -21,9 +22,12 @@ export interface EncryptedEnvelopeV1 {
 }
 
 export class OfflineDecryptionError extends Error {
-  constructor(message: string) {
+  constructor(message: string, cause?: unknown) {
     super(message);
     this.name = 'OfflineDecryptionError';
+    if (cause) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
   }
 }
 
@@ -33,7 +37,7 @@ export function isEncryptionDisabled(): boolean {
   return flag === '1' || flag.toLowerCase() === 'true';
 }
 
-async function deriveKey(): Promise<CryptoKey> {
+async function deriveKeyBytes(): Promise<Uint8Array> {
   const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   if (!rawKey) {
     throw new Error('Missing EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY for offline encryption');
@@ -43,8 +47,7 @@ async function deriveKey(): Promise<CryptoKey> {
   const keyBytes = encoder.encode(rawKey);
   const hashed = await ExpoCrypto.digest(ExpoCrypto.CryptoDigestAlgorithm.SHA256, keyBytes);
   const hashedBytes = Uint8Array.from(Buffer.from(hashed, 'hex'));
-  const crypto = getCrypto();
-  return crypto.subtle.importKey('raw', hashedBytes, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  return hashedBytes;
 }
 
 function toBase64(buffer: ArrayBuffer | Uint8Array): string {
@@ -55,26 +58,17 @@ function fromBase64(base64: string): Uint8Array {
   return new Uint8Array(Buffer.from(base64, 'base64'));
 }
 
-function getCrypto(): Crypto {
-  const crypto = globalThis.crypto;
-  if (!crypto || !crypto.subtle) {
-    throw new Error('WebCrypto API is not available for offline encryption');
-  }
-  return crypto;
-}
-
 export async function encryptOfflinePayload(plaintextJson: string): Promise<string> {
   if (isEncryptionDisabled()) {
     return plaintextJson;
   }
 
-  const crypto = getCrypto();
-  const key = await deriveKey();
+  const keyBytes = await deriveKeyBytes();
   const iv = await ExpoCrypto.getRandomBytesAsync(12);
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintextJson);
-  const cipherBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-  const cipherBytes = new Uint8Array(cipherBuffer);
+  const cipher = gcm(keyBytes, iv);
+  const cipherBytes = cipher.encrypt(data);
   const tagBytes = cipherBytes.slice(cipherBytes.length - 16);
   const ctBytes = cipherBytes.slice(0, cipherBytes.length - 16);
 
@@ -101,39 +95,46 @@ function isEnvelopeV1(input: unknown): input is EncryptedEnvelopeV1 {
   );
 }
 
-export async function decryptOfflinePayload(stored: string): Promise<string> {
-  if (isEncryptionDisabled()) {
-    return stored;
-  }
-
-  let parsed: unknown;
+function tryParseEncryptedEnvelope(stored: string): EncryptedEnvelopeV1 | null {
   try {
-    parsed = JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+    if (isEnvelopeV1(parsed)) {
+      return parsed;
+    }
   } catch (error) {
-    return stored;
+    return null;
   }
 
-  if (!isEnvelopeV1(parsed)) {
-    return stored;
-  }
+  return null;
+}
 
-  const crypto = getCrypto();
-  const key = await deriveKey();
+async function decryptEnvelope(envelope: EncryptedEnvelopeV1): Promise<string> {
+  const keyBytes = await deriveKeyBytes();
+  const iv = fromBase64(envelope.iv);
+  const ctBytes = fromBase64(envelope.ct);
+  const tagBytes = envelope.tag ? fromBase64(envelope.tag) : new Uint8Array();
 
-  const iv = fromBase64(parsed.iv);
-  const tag = fromBase64(parsed.tag);
-  const ct = fromBase64(parsed.ct);
-  const combined = new Uint8Array(ct.length + tag.length);
-  combined.set(ct, 0);
-  combined.set(tag, ct.length);
+  const combined = new Uint8Array(ctBytes.length + tagBytes.length);
+  combined.set(ctBytes, 0);
+  combined.set(tagBytes, ctBytes.length);
 
   try {
-    const decryptedBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
+    const cipher = gcm(keyBytes, iv);
+    const decryptedBytes = cipher.decrypt(combined);
     const decoder = new TextDecoder();
-    return decoder.decode(decryptedBuffer);
+    return decoder.decode(decryptedBytes);
   } catch (error) {
-    throw new OfflineDecryptionError('Failed to decrypt offline payload');
+    throw new OfflineDecryptionError('Failed to decrypt offline payload', error);
   }
+}
+
+export async function decryptOfflinePayload(stored: string): Promise<string> {
+  const envelope = tryParseEncryptedEnvelope(stored);
+  if (!envelope) {
+    return stored;
+  }
+
+  return decryptEnvelope(envelope);
 }
 
 export function hashHex(input: string, len = 64): string {

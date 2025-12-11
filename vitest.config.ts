@@ -158,6 +158,10 @@ export default defineConfig({
         replacement: fromRoot('./tests/__mocks__/expo-av.ts'),
       },
       {
+        find: '@noble/ciphers/aes.js',
+        replacement: fromRoot('./tests/__mocks__/@noble-ciphers-aes.ts'),
+      },
+      {
   find: '@react-native-async-storage/async-storage',
   replacement: fromRoot('./__mocks__/react-native-async-storage.ts'),
 },

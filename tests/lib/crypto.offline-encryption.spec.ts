@@ -74,6 +74,17 @@ describe('encryptOfflinePayload / decryptOfflinePayload', () => {
     expect(decrypted).toBe(plaintext);
   });
 
+  it('decrypts previously encrypted envelopes even when encryption is later disabled', async () => {
+    const plaintext = JSON.stringify({ foo: 'bar' });
+
+    const encrypted = await encryptOfflinePayload(plaintext);
+
+    setEnv('true', 'test-secret-key');
+
+    const decrypted = await decryptOfflinePayload(encrypted);
+    expect(decrypted).toBe(plaintext);
+  });
+
   it('keeps compatibility with plain JSON payloads when enabled', async () => {
     const plaintext = JSON.stringify({ legacy: true });
 
