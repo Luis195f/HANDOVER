@@ -83,10 +83,15 @@ export function QRScanScreen({ navigation, route }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [parsedPayload, setParsedPayload] = useState<ParsedQRCode | null>(null);
+  const [patientMismatch, setPatientMismatch] = useState<
+    { currentId: string; scannedId: string } | null
+  >(null);
   const [prefilledValues, setPrefilledValues] = useState<PrefillOutput | null>(null);
   const [prefillError, setPrefillError] = useState<string | null>(null);
   const [prefillLoading, setPrefillLoading] = useState(false);
-  const { loading, error, summary } = usePatientSummary(parsedPayload?.patientId || undefined);
+  const currentPatientId = route.params?.patientIdParam?.trim();
+  const targetPatientId = patientMismatch ? undefined : parsedPayload?.patientId;
+  const { loading, error, summary } = usePatientSummary(targetPatientId || undefined);
   const { session } = useAuth();
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
@@ -105,11 +110,12 @@ export function QRScanScreen({ navigation, route }: Props) {
       setParsedPayload(null);
       setPrefilledValues(null);
       setPrefillError(null);
+      setPatientMismatch(null);
     }
   }, [isFocused, scanned]);
 
   useEffect(() => {
-    if (!parsedPayload?.patientId) return;
+    if (!parsedPayload?.patientId || patientMismatch) return;
     let cancelled = false;
     const fhirBase = parsedPayload.server
       ?? process.env.EXPO_PUBLIC_FHIR_BASE_URL
@@ -143,7 +149,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [parsedPayload, session?.accessToken]);
+  }, [parsedPayload, patientMismatch, session?.accessToken]);
 
   const handleBarcodeScanned = useCallback(
     (result: BarcodeScanningResult) => {
@@ -166,8 +172,14 @@ export function QRScanScreen({ navigation, route }: Props) {
       }
 
       setParsedPayload(parsed);
+      if (currentPatientId && parsed.patientId !== currentPatientId) {
+        console.warn('[qr] patient mismatch', { currentPatientId, scannedId: parsed.patientId });
+        setPatientMismatch({ currentId: currentPatientId, scannedId: parsed.patientId });
+        return;
+      }
+      setPatientMismatch(null);
     },
-    [scanned],
+    [currentPatientId, scanned],
   );
 
   const handleContinue = () => {
@@ -197,6 +209,20 @@ export function QRScanScreen({ navigation, route }: Props) {
     setParsedPayload(null);
     setPrefilledValues(null);
     setPrefillError(null);
+    setPatientMismatch(null);
+  };
+
+  const handleKeepCurrentPatient = () => {
+    setPatientMismatch(null);
+    setParsedPayload(null);
+    setPrefilledValues(null);
+    setPrefillError(null);
+    setScanned(false);
+  };
+
+  const handleSwitchToScannedPatient = () => {
+    if (!parsedPayload?.patientId) return;
+    setPatientMismatch(null);
   };
 
   const handleRetryPrefill = () => {
@@ -208,8 +234,8 @@ export function QRScanScreen({ navigation, route }: Props) {
   };
 
   const continueDisabled = useMemo(
-    () => !parsedPayload?.patientId || prefillLoading,
-    [parsedPayload?.patientId, prefillLoading],
+    () => !parsedPayload?.patientId || prefillLoading || !!patientMismatch,
+    [parsedPayload?.patientId, patientMismatch, prefillLoading],
   );
 
   if (!permission) {
@@ -253,6 +279,25 @@ export function QRScanScreen({ navigation, route }: Props) {
         {parsedPayload ? (
           <>
             <PatientBanner summary={summary} loading={loading} error={error} />
+            {patientMismatch ? (
+              <View style={styles.warningBox}>
+                <Text style={styles.warningTitle}>El paciente escaneado no coincide</Text>
+                <Text style={styles.warningText}>
+                  Seleccionado: {patientMismatch.currentId || 'N/D'}
+                </Text>
+                <Text style={styles.warningText}>
+                  QR: {patientMismatch.scannedId}
+                </Text>
+                <View style={styles.warningActions}>
+                  <Pressable accessibilityRole="button" onPress={handleKeepCurrentPatient}>
+                    <Text style={styles.link}>Mantener paciente actual</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" onPress={handleSwitchToScannedPatient}>
+                    <Text style={styles.link}>Cambiar al paciente escaneado</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
             {prefillLoading ? (
               <View style={styles.inlineStatus}>
                 <ActivityIndicator color="#BFDBFE" />
@@ -363,5 +408,26 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#E5E5E5',
+  },
+  warningBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+  },
+  warningTitle: {
+    fontWeight: '700',
+    color: '#92400E',
+    marginBottom: 4,
+  },
+  warningText: {
+    color: '#78350F',
+    fontSize: 14,
+  },
+  warningActions: {
+    marginTop: 8,
+    gap: 4,
   },
 });

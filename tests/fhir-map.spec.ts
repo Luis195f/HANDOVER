@@ -443,5 +443,12 @@ describe('buildFhirBundleFromFormData', () => {
     expect((resourcesByType.Observation ?? 0) > 0).toBe(true);
     expect((resourcesByType.MedicationStatement ?? 0) > 0).toBe(true);
     expect(bundle.entry.every((entry) => entry.request.method === 'POST')).toBe(true);
+
+    const composition = bundle.entry.find((entry) => entry.resource.resourceType === 'Composition')
+      ?.resource as any;
+    expect(composition?.event?.[0]?.period).toEqual({
+      start: '2025-01-05T08:00:00Z',
+      end: '2025-01-05T16:00:00Z',
+    });
   });
 });
