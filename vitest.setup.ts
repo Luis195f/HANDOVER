@@ -7,6 +7,7 @@
 
 import { vi, beforeEach, afterEach } from 'vitest';
 import * as SecureStoreMock from './tests/__mocks__/expo-secure-store';
+import crypto from 'node:crypto';
 
 // -----------------------------------------------------------------------------
 // 🌍 Fallbacks básicos de entorno
@@ -70,6 +71,38 @@ vi.mock('expo-secure-store', () => {
     __esModule: true,
     ...mod,
     default: defaultExport,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🔐 Mock de expo-crypto
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-crypto', () => {
+  const digest = async (_algorithm: any, data: Uint8Array) => {
+    const hash = crypto.createHash('sha256');
+    hash.update(Buffer.from(data));
+    return hash.digest('hex');
+  };
+
+  const getRandomBytesAsync = async (length: number) => {
+    return new Uint8Array(crypto.randomBytes(length));
+  };
+
+  return {
+    __esModule: true,
+    CryptoDigestAlgorithm: {
+      SHA256: 'SHA-256',
+    },
+    digest,
+    getRandomBytesAsync,
+    default: {
+      CryptoDigestAlgorithm: {
+        SHA256: 'SHA-256',
+      },
+      digest,
+      getRandomBytesAsync,
+    },
   };
 });
 
