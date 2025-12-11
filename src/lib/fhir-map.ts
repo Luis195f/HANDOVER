@@ -1964,6 +1964,13 @@ export function buildComposition(
 
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
+  const shiftPeriod =
+    values.administrativeData?.shiftStart && values.administrativeData?.shiftEnd
+      ? {
+          start: values.administrativeData.shiftStart,
+          end: values.administrativeData.shiftEnd,
+        }
+      : undefined;
 
   return {
     resourceType: 'Composition',
@@ -1975,6 +1982,7 @@ export function buildComposition(
     author: [authorRef],
     title,
     attester: mapAttesters(attesters),
+    event: shiftPeriod ? [{ period: shiftPeriod }] : undefined,
     section: sections.length > 0 ? sections : undefined,
   };
 }

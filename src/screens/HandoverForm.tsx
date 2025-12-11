@@ -943,7 +943,14 @@ export default function HandoverForm({ navigation, route }: Props) {
     const routeNames = (navigation as { getState?: () => { routeNames?: string[] } }).getState?.()
       ?.routeNames ?? [];
     if (routeNames.includes('QRScan')) {
-      navigation.navigate('QRScan' as never, { returnTo: 'HandoverForm' } as never);
+      const trimmedPatientId =
+        typeof patientIdValue === 'string' && patientIdValue.trim()
+          ? patientIdValue.trim()
+          : undefined;
+      navigation.navigate(
+        'QRScan' as never,
+        { returnTo: 'HandoverForm', patientIdParam: trimmedPatientId } as never,
+      );
     } else {
       Alert.alert('Escáner no disponible', 'Esta build no incluye la pantalla de QR (opcional para demo).');
     }

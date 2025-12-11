@@ -33,6 +33,7 @@ type QRScanParams = {
   returnTo?: 'HandoverForm' | 'PatientList' | 'AudioNote';
   unitIdParam?: string;
   specialtyId?: string;
+  patientIdParam?: string;
   prefillMeta?: PrefillMeta;
 };
 
