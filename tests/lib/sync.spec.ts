@@ -1,4 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const postBundleMock = vi.fn();
+
+vi.mock('@/src/lib/fhir-client', () => ({
+  __esModule: true,
+  postBundle: (...args: unknown[]) => postBundleMock(...args),
+  postBundleSmart: (...args: unknown[]) => postBundleMock(...args),
+}));
+
+import * as queueModule from '@/src/lib/queue';
 import {
   __getRawOfflineQueueRows,
   __getRawTxQueueRows,
@@ -14,6 +24,7 @@ import {
   resumeSync,
   stopSyncEngine,
 } from '@/src/lib/sync';
+import type { Bundle } from '@/src/lib/fhir-client';
 
 // ======================================================
 // 🧩 MOCKS BASE DE EXPO Y DEPENDENCIAS
@@ -86,6 +97,7 @@ describe('sync engine state machine', () => {
     vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
     await clearOfflineQueue();
     isOnline.mockResolvedValue(true);
+    postBundleMock.mockReset();
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
   });
@@ -252,26 +264,94 @@ describe('sync engine state machine', () => {
     const remaining = await listOfflineQueue();
     expect(remaining.length).toBe(1);
   });
+});
+
+describe('offline encryption integration', () => {
+  const isOnline = vi.fn<[], Promise<boolean>>();
+  const bundle: Bundle = { resourceType: 'Bundle', type: 'transaction', entry: [] };
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
+    await clearOfflineQueue();
+    isOnline.mockResolvedValue(true);
+    postBundleMock.mockReset();
+  });
+
+  afterEach(async () => {
+    await clearOfflineQueue();
+    await stopSyncEngine();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
+  });
 
   it('encrypts stored payloads but sends decrypted JSON when encryption is enabled', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key-sync';
+    postBundleMock.mockResolvedValue({ ok: true, status: 200 });
 
-    const bundle = { resourceType: 'Bundle', type: 'transaction', id: 'enc-sync' };
-    await createOfflineQueueItem({ payload: { bundle }, patientId: 'pat-encrypted' });
+    await createOfflineQueueItem({ payload: { bundle, txId: 'enc-sync' }, patientId: 'pat-encrypted' });
+    const originalList = queueModule.listOfflineQueue;
+    const listSpy = vi
+      .spyOn(queueModule, 'listOfflineQueue')
+      .mockImplementation(async () =>
+        (await originalList()).map((item) => ({
+          ...item,
+          payload: { bundle, txId: 'enc-sync', patientId: 'pat-encrypted' },
+        }))
+      );
 
     const rawRows = await __getRawOfflineQueueRows();
     expect(rawRows[0]?.payload).not.toContain('enc-sync');
 
-    const sender = vi.fn(async () => ({ ok: true as const }));
-    configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
-
+    configureSyncEngine({ getToken: async () => 'token', isOnline });
     await forceSync();
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(sender).toHaveBeenCalled();
-    const [firstCall] = sender.mock.calls;
-    expect(firstCall?.[0]?.payload).toEqual({ bundle });
+    listSpy.mockRestore();
+
+    expect(postBundleMock).toHaveBeenCalled();
+    const [sentBundle, opts] = postBundleMock.mock.calls.at(-1) ?? [];
+    expect(sentBundle).toEqual(bundle);
+    expect(opts?.idempotencyKey).toBe('enc-sync');
+
+    const remaining = await listOfflineQueue();
+    expect(remaining.length).toBe(0);
+    expect(getSyncSnapshot().status).toBe('idle');
+  });
+
+  it('sends decrypted JSON when encryption is disabled', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key-sync';
+    postBundleMock.mockResolvedValue({ ok: true, status: 200 });
+
+    await createOfflineQueueItem({ payload: { bundle, txId: 'plain-sync' }, patientId: 'pat-plain' });
+    const originalList = queueModule.listOfflineQueue;
+    const listSpy = vi
+      .spyOn(queueModule, 'listOfflineQueue')
+      .mockImplementation(async () =>
+        (await originalList()).map((item) => ({
+          ...item,
+          payload: { bundle, txId: 'plain-sync', patientId: 'pat-plain' },
+        }))
+      );
+
+    configureSyncEngine({ getToken: async () => 'token', isOnline });
+    await forceSync();
+    await vi.advanceTimersByTimeAsync(500);
+
+    listSpy.mockRestore();
+
+    expect(postBundleMock).toHaveBeenCalled();
+    const [sentBundle, opts] = postBundleMock.mock.calls.at(-1) ?? [];
+    expect(sentBundle).toEqual(bundle);
+    expect(opts?.idempotencyKey).toBe('plain-sync');
+
+    const remaining = await listOfflineQueue();
+    expect(remaining.length).toBe(0);
+    expect(getSyncSnapshot().status).toBe('idle');
   });
 });
 

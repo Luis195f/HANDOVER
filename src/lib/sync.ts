@@ -354,14 +354,27 @@ function buildFailureOutcome(error: unknown): QueueSendResult {
 }
 
 function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const bundle = (payload as { bundle?: unknown }).bundle;
+  let candidate: unknown = payload;
+
+  if (typeof payload === 'string') {
+    try {
+      candidate = JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!candidate || typeof candidate !== 'object') return null;
+  const bundle = (candidate as { bundle?: unknown }).bundle;
   return {
     bundle: bundle as Bundle | undefined,
-    txId: typeof (payload as { txId?: unknown }).txId === 'string' ? (payload as { txId: string }).txId : undefined,
+    txId:
+      typeof (candidate as { txId?: unknown }).txId === 'string'
+        ? (candidate as { txId: string }).txId
+        : undefined,
     patientId:
-      typeof (payload as { patientId?: unknown }).patientId === 'string'
-        ? (payload as { patientId: string }).patientId
+      typeof (candidate as { patientId?: unknown }).patientId === 'string'
+        ? (candidate as { patientId: string }).patientId
         : undefined,
   };
 }
@@ -458,21 +471,7 @@ export async function processQueueOnce(): Promise<void> {
     const startedAt = new Date().toISOString();
     await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
 
-    let parsedPayload: unknown;
-    try {
-      parsedPayload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
-    } catch (error) {
-      console.warn('Error al descifrar/parsear item offline', error);
-      await updateOfflineQueueItem(item.id, {
-        syncStatus: 'error',
-        attempts: item.attempts + 1,
-        lastAttemptAt: startedAt,
-        errorMessage: 'Error al parsear el payload offline',
-      });
-      continue;
-    }
-
-    const itemWithPayload = { ...item, payload: parsedPayload } as OfflineQueueItem;
+    const itemWithPayload = { ...item } as OfflineQueueItem;
 
     let result: QueueSendResult;
     try {
