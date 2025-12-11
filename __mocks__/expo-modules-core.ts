@@ -1,60 +1,73 @@
 // __mocks__/expo-modules-core.ts
-// Stub MUY simple de expo-modules-core para que Vitest no intente
-// usar NativeModules / EventEmitter reales de React Native en Node.
+// Stub ligero pero "creíble" de expo-modules-core para entorno de tests (Vitest)
 
-export type EventCallback = (...args: any[]) => void;
+export type EventSubscription = { remove: () => void };
 
-export class EventEmitter {
-  private listeners: Record<string, EventCallback[]> = {};
+export class EventEmitter<T = any> {
+  private listeners = new Map<string, Set<(event: T) => void>>();
 
-  constructor(_target?: any) {}
+  addListener(eventName: string, listener: (event: T) => void): EventSubscription {
+    if (!this.listeners.has(eventName)) {
+      this.listeners.set(eventName, new Set());
+    }
+    this.listeners.get(eventName)!.add(listener);
 
-  addListener(eventName: string, listener: EventCallback) {
-    if (!this.listeners[eventName]) this.listeners[eventName] = [];
-    this.listeners[eventName].push(listener);
     return {
-      remove: () => this.removeListener(eventName, listener),
+      remove: () => {
+        this.listeners.get(eventName)?.delete(listener);
+      },
     };
   }
 
   removeAllListeners(eventName?: string) {
-    if (eventName) {
-      delete this.listeners[eventName];
+    if (typeof eventName === 'string') {
+      this.listeners.delete(eventName);
     } else {
-      this.listeners = {};
+      this.listeners.clear();
     }
   }
 
-  removeListener(eventName: string, listener: EventCallback) {
-    const arr = this.listeners[eventName];
-    if (!arr) return;
-    this.listeners[eventName] = arr.filter((l) => l !== listener);
-  }
-
-  emit(eventName: string, ...args: any[]) {
-    const arr = this.listeners[eventName];
-    if (!arr) return;
-    for (const l of arr) l(...args);
+  emit(eventName: string, event: T) {
+    this.listeners.get(eventName)?.forEach((listener) => listener(event));
   }
 }
 
-// Lo mínimo que usan algunos módulos de Expo. En tests será NO-OP.
-export const NativeModulesProxy: Record<string, any> = {
-  ExpoModulesCoreJSLogger: {
-    // En el error que te da, intenta hacer algo como `.get(...)`,
-    // así que aquí devolvemos un objeto vacío para que no reviente.
-    get: () => ({}),
-    log: () => {},
+// Simula el objeto de módulos nativos
+export const NativeModulesProxy: Record<string, any> = {};
+
+// 🔴 CLAVE: exportar Platform porque expo-av lo pide
+export const Platform = {
+  OS: 'web' as 'web' | 'ios' | 'android',
+  select<T>(spec: {
+    ios?: T;
+    android?: T;
+    web?: T;
+    native?: T;
+    default?: T;
+  }): T | undefined {
+    return spec.web ?? spec.native ?? spec.default;
   },
 };
 
-// En entorno de tests devolvemos módulos nativos vacíos.
-export function requireNativeModule<T = any>(_moduleName: string): T {
-  return {} as T;
+// Stub de requireNativeViewManager: devuelve un componente tonto
+export function requireNativeViewManager(_viewName: string): any {
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  const DummyComponent = () => null;
+  return DummyComponent;
 }
 
-export function requireOptionalNativeModule<T = any>(
-  _moduleName: string,
-): T | null {
-  return null;
+// Algunas APIs lo llaman para registrar el root component: no hacemos nada
+export function registerRootComponent<T>(component: T): T {
+  return component;
 }
+
+// Default export con todo junto
+const defaultExport = {
+  NativeModulesProxy,
+  EventEmitter,
+  Platform,
+  requireNativeViewManager,
+  registerRootComponent,
+};
+
+export default defaultExport;

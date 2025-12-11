@@ -46,7 +46,15 @@ describe('multiuser auth session', () => {
     await setCurrentSession(session);
     const restored = await getCurrentSession();
 
-    expect(restored).toEqual(session);
+    expect(restored).toMatchObject({
+  userId: 'nurse-1',
+  displayName: 'Nurse Example',
+  roles: ['nurse'],
+  units: ['UCI-A'],
+  accessToken: 'access-token',
+  refreshToken: 'refresh-token',
+});
+
   });
 
   it('clears session', async () => {

@@ -3,6 +3,8 @@
 // Setup global para Vitest en HANDOVER-LIMPIO
 // -----------------------------------------------------------------------------
 
+/// <reference types="vitest" />
+
 import { vi, beforeEach, afterEach } from 'vitest';
 import * as SecureStoreMock from './tests/__mocks__/expo-secure-store';
 
@@ -14,6 +16,7 @@ const g = globalThis as any;
 
 // Globals típicos de RN/Expo
 g.window = g.window ?? {};
+
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(g, 'navigator');
 if (!navigatorDescriptor) {
   Object.defineProperty(g, 'navigator', {
@@ -29,10 +32,21 @@ if (!navigatorDescriptor) {
     configurable: true,
   });
 }
+
 g.__DEV__ = false;
 g.IS_REACT_ACT_ENVIRONMENT = true;
+
 // Hacer que librerías que esperan `jest` funcionen en Vitest
 g.jest = g.jest ?? vi;
+
+// Polyfill de setImmediate / clearImmediate (por si la versión de Node no lo trae)
+if (!g.setImmediate) {
+  g.setImmediate = (cb: (...args: any[]) => void, ...args: any[]) =>
+    setTimeout(cb, 0, ...args);
+}
+if (!g.clearImmediate) {
+  g.clearImmediate = (id: any) => clearTimeout(id);
+}
 
 // Stub muy básico de `fetch` si no existe
 if (typeof g.fetch !== 'function') {
@@ -48,7 +62,28 @@ if (typeof g.fetch !== 'function') {
 // 🔒 Mock de expo-secure-store (fuente única: tests/__mocks__/expo-secure-store)
 // -----------------------------------------------------------------------------
 
-vi.mock('expo-secure-store', () => SecureStoreMock);
+vi.mock('expo-secure-store', () => {
+  const mod: any = SecureStoreMock;
+  const defaultExport = mod.default ?? mod;
+
+  return {
+    __esModule: true,
+    ...mod,
+    default: defaultExport,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🧪 @testing-library/react-native
+// -----------------------------------------------------------------------------
+// NO se mockea aquí. Se resuelve mediante alias en vitest.config.ts:
+//
+// {
+//   find: '@testing-library/react-native',
+//   replacement: './tests/__mocks__/@testing-library-react-native.ts'
+// }
+//
+// Así evitamos paths relativos rotos desde este setup.
 
 // -----------------------------------------------------------------------------
 // 🌐 Mock de expo-linking
@@ -89,36 +124,123 @@ vi.mock('expo-web-browser', () => {
 });
 
 // -----------------------------------------------------------------------------
-// 🧩 Mock de expo-modules-core
+// 🧩 Mock de expo-modules-core (inline, sin require externo)
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-modules-core', () => {
-  class EventEmitter {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    constructor(_target?: any) {}
-    addListener = vi.fn();
-    removeAllListeners = vi.fn();
+  // EventEmitter muy simple, suficiente para que los módulos de Expo no fallen
+  class EventEmitter<T = any> {
+    addListener(_eventName: string, _listener: (event: T) => void) {
+      return { remove: () => {} };
+    }
+    removeAllListeners(_eventName?: string) {
+      // no-op
+    }
   }
 
-  return {
+  const NativeModulesProxy: Record<string, any> = {};
+
+  // 🔴 Platform: utilizado por varios módulos (incluido expo-av)
+  const Platform = {
+    OS: 'web' as const,
+    select<T>(spec: {
+      ios?: T;
+      android?: T;
+      web?: T;
+      native?: T;
+      default?: T;
+    }): T | undefined {
+      return spec.web ?? spec.native ?? spec.default;
+    },
+  };
+
+  const requireNativeViewManager = vi.fn((_viewName: string) => {
+    const Dummy = () => null;
+    return Dummy;
+  });
+
+  const registerRootComponent = <T,>(component: T): T => component;
+
+  const requireNativeModule = vi.fn();
+  const requireOptionalNativeModule = vi.fn(() => ({}));
+
+  // 🔴 NUEVO: createPermissionHook – expo-av lo importa desde expo-modules-core
+  type PermissionStatus = {
+    granted: boolean;
+    canAskAgain?: boolean;
+    expires?: 'never' | number;
+    status?: 'granted' | 'denied' | 'undetermined';
+  };
+
+  const createPermissionHook = <
+    TPermission extends PermissionStatus = PermissionStatus
+  >(
+    _methods: {
+      getAsync?: () => Promise<TPermission>;
+      requestAsync?: () => Promise<TPermission>;
+    },
+    _permissionType?: string,
+  ) => {
+    // Hook que siempre devuelve permisos concedidos.
+    const usePermission = (): [
+      TPermission,
+      () => Promise<TPermission>,
+      Error | null,
+    ] => {
+      const defaultStatus = {
+        granted: true,
+        canAskAgain: false,
+        expires: 'never',
+        status: 'granted',
+      } as TPermission;
+
+      const requestAsync = async () => defaultStatus;
+
+      return [defaultStatus, requestAsync, null];
+    };
+
+    return usePermission;
+  };
+
+  const mod = {
     EventEmitter,
-    NativeModulesProxy: {},
-    requireNativeModule: vi.fn(),
-    // Necesario para expo-constants (ExponentConstants / requireOptionalNativeModule)
-    requireOptionalNativeModule: (_name: string) => ({}),
+    NativeModulesProxy,
+    Platform,
+    requireNativeViewManager,
+    registerRootComponent,
+    requireNativeModule,
+    requireOptionalNativeModule,
+    createPermissionHook,
+  };
+
+  return {
+    __esModule: true,
+    ...mod,
+    default: mod,
   };
 });
 
 // -----------------------------------------------------------------------------
 // 🌐 Mock de expo-constants
 // -----------------------------------------------------------------------------
+//
+// La implementación real para tests está en __mocks__/expo-constants.ts
+// y se resuelve vía alias en vitest.config.ts:
+//
+// {
+//   find: 'expo-constants',
+//   replacement: './__mocks__/expo-constants.ts'
+// }
+//
+// No necesitamos mock adicional aquí, dejamos que el alias haga su trabajo.
 
-vi.mock('expo-constants', () => ({
+// -----------------------------------------------------------------------------
+// 🌐 Mock mínimo de 'expo' (winter/runtime / ImportMetaRegistry)
+// -----------------------------------------------------------------------------
+
+vi.mock('expo', () => ({
   __esModule: true,
-  default: {
-    expoConfig: { extra: {} },
-    manifest: { extra: {} },
-  },
+  default: {},
 }));
 
 // -----------------------------------------------------------------------------
@@ -126,11 +248,6 @@ vi.mock('expo-constants', () => ({
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-file-system', () => {
-  // Tal como lo espera el test:
-  // import * as FileSystem from 'expo-file-system'
-  // FileSystem.moveAsync(...)
-  // FileSystem.documentDirectory = 'file:///docs/';
-
   const documentDirectory = 'file:///mock-documents/';
 
   const writeAsStringAsync = vi.fn(
@@ -155,7 +272,6 @@ vi.mock('expo-file-system', () => {
 
   const moveAsync = vi.fn(
     async (_options: { from: string; to: string }): Promise<void> => {
-      // No hace nada, solo para que el spy no reviente
       return;
     },
   );
@@ -209,17 +325,13 @@ vi.mock('expo-print', () => {
     LANDSCAPE: 'landscape',
   } as const;
 
-  // No lo usamos directamente en el test, pero así no revienta nada.
   const printAsync = vi.fn(async (_options?: any) => {
     return {};
   });
 
-  // ESTA es la clave: definir printToFileAsync para que vi.spyOn(Print, 'printToFileAsync')
-  // no reviente diciendo "does not exist".
   const printToFileAsync = vi.fn(async (_options?: any) => {
     return {
       uri: 'file:///mock-output.pdf',
-      // expo-print puede devolver también base64, pero aquí no la necesitamos.
       base64: undefined,
     } as any;
   });
