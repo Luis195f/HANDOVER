@@ -29,8 +29,9 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    - `EXPO_PUBLIC_API_BASE_URL` (o `API_BASE_URL`) apunta al backend REST si se usa el servidor Django.
    - `EXPO_PUBLIC_API_TOKEN` agrega un token para llamadas autenticadas contra APIs complementarias.
    - `EXPO_PUBLIC_STORAGE_NAMESPACE` personaliza el espacio de almacenamiento seguro y el aislamiento de datos offline.
+   - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` es la base para derivar la clave AES-256-GCM que cifra los bundles en la cola offline (usa al menos 32 caracteres, gestiona el valor como un secreto real).
    - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS` y `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` afinan la cola offline y el backoff exponencial.
-   - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo).
+   - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo; `true/1/TRUE` lo deshabilitan, cualquier otro valor lo deja activo por defecto).
 3. Define `EXPO_TOKEN` o credenciales EAS en CI/CD cuando generes binarios firmados con Expo Application Services.
 
 ## Login y permisos
