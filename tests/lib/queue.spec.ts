@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import CryptoJS from 'crypto-js';
 
 // 1) Mock de expo-sqlite: así `queue.ts` usa el fallback in-memory
 vi.mock('expo-sqlite', () => {
@@ -200,10 +201,17 @@ describe('tx queue (sqlite + fallback)', () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
     const queue = await loadQueue();
 
-    const { encryptPayload: encryptLegacyPayload } = await import('@/src/security/crypto');
+    const { LEGACY_ENCRYPTION_PREFIX } = await import('@/src/lib/crypto');
+    const { secureSetItem } = await import('@/src/security/secure-storage');
 
     const bundle = { resourceType: 'Bundle', id: 'legacy-encrypted' };
-    const legacyCipher = await encryptLegacyPayload(JSON.stringify(bundle));
+    const legacyKey = 'legacy-key-for-tests';
+
+    // Persistir la clave legacy para que el módulo la recupere
+    await secureSetItem('handover_offline_queue_key', legacyKey);
+
+    const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(bundle), legacyKey).toString();
+    const legacyCipher = `${LEGACY_ENCRYPTION_PREFIX}${ciphertext}`;
 
     await queue.enqueueTx({ key: 'legacy-encrypted', payload: legacyCipher });
 

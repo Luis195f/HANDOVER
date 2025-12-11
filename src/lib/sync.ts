@@ -471,7 +471,25 @@ export async function processQueueOnce(): Promise<void> {
     const startedAt = new Date().toISOString();
     await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
 
-    const itemWithPayload = { ...item } as OfflineQueueItem;
+    let preparedPayload: OfflineQueuePayload;
+    try {
+      const extracted = extractOfflinePayload(item.payload);
+      if (!extracted) {
+        throw new Error('Offline payload could not be extracted');
+      }
+      preparedPayload = extracted;
+    } catch (error) {
+      console.warn('Error al preparar/analizar payload offline', error);
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'error',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: 'Error al analizar el payload offline',
+      });
+      continue;
+    }
+
+    const itemWithPayload = { ...item, payload: preparedPayload } as OfflineQueueItem;
 
     let result: QueueSendResult;
     try {

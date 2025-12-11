@@ -208,8 +208,9 @@ describe('sync engine state machine', () => {
     expect(item?.attempts).toBeGreaterThanOrEqual(1);
 
     // ✅ “Conserva el payload”: sigue habiendo datos, aunque ahora vayan cifrados
-    expect(typeof item?.payload).toBe('string');
-    expect((item?.payload as string).length).toBeGreaterThan(0);
+    expect(item?.payload).toBeTruthy();
+    expect(typeof item?.payload).toBe('object');
+    expect((item?.payload as { bundle?: unknown }).bundle).toBeDefined();
   });
 
   // ======================================================
@@ -263,6 +264,23 @@ describe('sync engine state machine', () => {
     expect(sender.mock.calls.length).toBeGreaterThanOrEqual(2);
     const remaining = await listOfflineQueue();
     expect(remaining.length).toBe(1);
+  });
+
+  it('marca como error los payloads offline que no se pueden analizar y no los elimina', async () => {
+    const sender = vi.fn(async () => ({ ok: true as const }));
+
+    await createOfflineQueueItem({ payload: '{invalid-json', patientId: 'pat-corrupt' });
+    configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
+
+    await forceSync();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(sender).not.toHaveBeenCalled();
+
+    const [item] = await listOfflineQueue();
+    expect(item?.syncStatus).toBe('error');
+    expect(item?.attempts).toBe(1);
+    expect(item?.errorMessage).toBe('Error al analizar el payload offline');
   });
 });
 
