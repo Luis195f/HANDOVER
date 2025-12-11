@@ -1,8 +1,140 @@
 import CryptoJS from 'crypto-js';
+import * as ExpoCrypto from 'expo-crypto';
 import { sha256 } from 'js-sha256';
 
-import { decryptPayload as decryptNewPayload, encryptPayload as encryptNewPayload, getOrCreateEncryptionKey, isPayloadEncrypted } from '../security/crypto';
+import {
+  decryptPayload as decryptNewPayload,
+  encryptPayload as encryptNewPayload,
+  getOrCreateEncryptionKey,
+  isPayloadEncrypted,
+} from '../security/crypto';
 import { secureGetItem, secureSetItem } from '../security/secure-storage';
+
+const AES_GCM_ALGO = 'AES-256-GCM' as const;
+
+export interface EncryptedEnvelopeV1 {
+  v: 1;
+  algo: typeof AES_GCM_ALGO;
+  iv: string;
+  tag: string;
+  ct: string;
+}
+
+export class OfflineDecryptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OfflineDecryptionError';
+  }
+}
+
+export function isEncryptionDisabled(): boolean {
+  const flag = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  if (!flag) return false;
+  return flag === '1' || flag.toLowerCase() === 'true';
+}
+
+async function deriveKey(): Promise<CryptoKey> {
+  const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
+  if (!rawKey) {
+    throw new Error('Missing EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY for offline encryption');
+  }
+
+  const encoder = new TextEncoder();
+  const keyBytes = encoder.encode(rawKey);
+  const hashed = await ExpoCrypto.digest(ExpoCrypto.CryptoDigestAlgorithm.SHA256, keyBytes);
+  const hashedBytes = Uint8Array.from(Buffer.from(hashed, 'hex'));
+  const crypto = getCrypto();
+  return crypto.subtle.importKey('raw', hashedBytes, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+function toBase64(buffer: ArrayBuffer | Uint8Array): string {
+  return Buffer.from(buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer).toString('base64');
+}
+
+function fromBase64(base64: string): Uint8Array {
+  return new Uint8Array(Buffer.from(base64, 'base64'));
+}
+
+function getCrypto(): Crypto {
+  const crypto = globalThis.crypto;
+  if (!crypto || !crypto.subtle) {
+    throw new Error('WebCrypto API is not available for offline encryption');
+  }
+  return crypto;
+}
+
+export async function encryptOfflinePayload(plaintextJson: string): Promise<string> {
+  if (isEncryptionDisabled()) {
+    return plaintextJson;
+  }
+
+  const crypto = getCrypto();
+  const key = await deriveKey();
+  const iv = await ExpoCrypto.getRandomBytesAsync(12);
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plaintextJson);
+  const cipherBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+  const cipherBytes = new Uint8Array(cipherBuffer);
+  const tagBytes = cipherBytes.slice(cipherBytes.length - 16);
+  const ctBytes = cipherBytes.slice(0, cipherBytes.length - 16);
+
+  const envelope: EncryptedEnvelopeV1 = {
+    v: 1,
+    algo: AES_GCM_ALGO,
+    iv: toBase64(iv),
+    tag: toBase64(tagBytes),
+    ct: toBase64(ctBytes),
+  };
+
+  return JSON.stringify(envelope);
+}
+
+function isEnvelopeV1(input: unknown): input is EncryptedEnvelopeV1 {
+  if (!input || typeof input !== 'object') return false;
+  const candidate = input as Partial<EncryptedEnvelopeV1>;
+  return (
+    candidate.v === 1 &&
+    candidate.algo === AES_GCM_ALGO &&
+    typeof candidate.iv === 'string' &&
+    typeof candidate.tag === 'string' &&
+    typeof candidate.ct === 'string'
+  );
+}
+
+export async function decryptOfflinePayload(stored: string): Promise<string> {
+  if (isEncryptionDisabled()) {
+    return stored;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch (error) {
+    return stored;
+  }
+
+  if (!isEnvelopeV1(parsed)) {
+    return stored;
+  }
+
+  const crypto = getCrypto();
+  const key = await deriveKey();
+
+  const iv = fromBase64(parsed.iv);
+  const tag = fromBase64(parsed.tag);
+  const ct = fromBase64(parsed.ct);
+  const combined = new Uint8Array(ct.length + tag.length);
+  combined.set(ct, 0);
+  combined.set(tag, ct.length);
+
+  try {
+    const decryptedBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedBuffer);
+  } catch (error) {
+    throw new OfflineDecryptionError('Failed to decrypt offline payload');
+  }
+}
 
 export function hashHex(input: string, len = 64): string {
   const hex = sha256(input);
