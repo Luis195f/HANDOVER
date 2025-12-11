@@ -20,14 +20,7 @@ import {
   type OperationIssue,
   type ResponseLike,
 } from './fhir-client';
-import {
-  ENCRYPTION_PREFIX,
-  OFFLINE_ENCRYPTION_DISABLED,
-  decryptPayload,
-  encryptPayload,
-  hashHex,
-  payloadIsEncrypted,
-} from './crypto';
+import { hashHex } from './crypto';
 import { z } from 'zod';
 import {
   validateBundle as validateFHIRBundle,
@@ -465,23 +458,9 @@ export async function processQueueOnce(): Promise<void> {
     const startedAt = new Date().toISOString();
     await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
 
-    let decryptedPayload: string;
-    try {
-      decryptedPayload = await decryptPayload(item.payload);
-    } catch (error) {
-      console.warn('Error al descifrar/parsear item offline', error);
-      await updateOfflineQueueItem(item.id, {
-        syncStatus: 'error',
-        attempts: item.attempts + 1,
-        lastAttemptAt: startedAt,
-        errorMessage: 'Error al descifrar el payload offline',
-      });
-      continue;
-    }
-
     let parsedPayload: unknown;
     try {
-      parsedPayload = JSON.parse(decryptedPayload);
+      parsedPayload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
     } catch (error) {
       console.warn('Error al descifrar/parsear item offline', error);
       await updateOfflineQueueItem(item.id, {
@@ -491,15 +470,6 @@ export async function processQueueOnce(): Promise<void> {
         errorMessage: 'Error al parsear el payload offline',
       });
       continue;
-    }
-
-    if (!payloadIsEncrypted(item.payload) && !OFFLINE_ENCRYPTION_DISABLED) {
-      try {
-        const reEncrypted = await encryptPayload(JSON.stringify(parsedPayload));
-        await updateOfflineQueueItem(item.id, { payload: reEncrypted });
-      } catch (error) {
-        console.warn('No se pudo migrar el payload legacy a formato cifrado', error);
-      }
     }
 
     const itemWithPayload = { ...item, payload: parsedPayload } as OfflineQueueItem;

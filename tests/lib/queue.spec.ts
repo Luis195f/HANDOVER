@@ -26,6 +26,7 @@ vi.mock('expo-modules-core', () => {
 
 const resetEnv = () => {
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
 };
 
@@ -128,24 +129,55 @@ describe('tx queue (sqlite + fallback)', () => {
     expect(snapshot[0]?.attempts).toBeGreaterThanOrEqual(2);
   });
 
-  it('stores payloads encrypted (or wrapped) and returns decrypted content', async () => {
-    const cryptoModule = await import('@/src/lib/crypto');
-    const encryptSpy = vi
-      .spyOn(cryptoModule, 'encryptPayload')
-      .mockImplementation(async (plaintext) => `enc:${plaintext}`);
-    const decryptSpy = vi
-      .spyOn(cryptoModule, 'decryptPayload')
-      .mockImplementation(async (ciphertext) =>
-        typeof ciphertext === 'string' && ciphertext.startsWith('enc:') ? ciphertext.slice(4) : ciphertext
-      );
-
+  it('stores encrypted payloads when encryption flag is off and decrypts on read', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
     const queue = await loadQueue();
-    const payload = { hello: 'world' };
-    await queue.enqueueTx({ key: 'enc-test', payload });
+
+    const bundle = { resourceType: 'Bundle', id: 'test' };
+    await queue.enqueueTx({ key: 'enc-enabled', payload: bundle });
+
+    const rawRows = await queue.__getRawTxQueueRows();
+    expect(rawRows).toHaveLength(1);
+    const stored = rawRows[0]?.payload ?? '';
+    expect(stored).not.toContain('"Bundle"');
+    const envelope = JSON.parse(stored);
+    expect(envelope).toMatchObject({ v: 1, algo: 'AES-256-GCM' });
+    expect(typeof envelope.ct).toBe('string');
+    expect(typeof envelope.iv).toBe('string');
 
     const snapshot = await queue.getQueueSnapshot();
-    expect(encryptSpy).toHaveBeenCalled();
-    expect(decryptSpy).toHaveBeenCalled();
-    expect(snapshot[0]?.payload).toEqual(payload);
+    expect(snapshot[0]?.payload).toEqual(bundle);
+  });
+
+  it('stores plaintext payloads when encryption is disabled and reads them back', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    const queue = await loadQueue();
+
+    const bundle = { resourceType: 'Bundle', id: 'plain' };
+    await queue.enqueueTx({ key: 'enc-disabled', payload: bundle });
+
+    const rawRows = await queue.__getRawTxQueueRows();
+    expect(rawRows).toHaveLength(1);
+    expect(rawRows[0]?.payload).toContain('"plain"');
+
+    const snapshot = await queue.getQueueSnapshot();
+    expect(snapshot[0]?.payload).toEqual(bundle);
+  });
+
+  it('reads legacy plaintext entries without errors even when encryption is enabled', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    const queue = await loadQueue();
+
+    const bundle = { resourceType: 'Bundle', id: 'legacy' };
+    await queue.enqueueTx({ key: 'legacy-item', payload: bundle });
+
+    // Activar cifrado para la lectura
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+
+    const snapshot = await queue.getQueueSnapshot();
+    expect(snapshot[0]?.payload).toEqual(bundle);
   });
 });
