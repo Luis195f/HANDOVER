@@ -24,6 +24,21 @@ vi.mock('expo-modules-core', () => {
   };
 });
 
+// 3) Mock de expo-secure-store para cifrado legacy
+vi.mock('expo-secure-store', () => {
+  const store = new Map<string, string>();
+
+  return {
+    setItemAsync: vi.fn(async (key: string, value: string) => {
+      store.set(key, value);
+    }),
+    getItemAsync: vi.fn(async (key: string) => store.get(key) ?? null),
+    deleteItemAsync: vi.fn(async (key: string) => {
+      store.delete(key);
+    }),
+  };
+});
+
 const resetEnv = () => {
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
@@ -176,6 +191,21 @@ describe('tx queue (sqlite + fallback)', () => {
 
     // Activar cifrado para la lectura
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+
+    const snapshot = await queue.getQueueSnapshot();
+    expect(snapshot[0]?.payload).toEqual(bundle);
+  });
+
+  it('reads legacy encrypted payloads (v1:/enc:v1) and returns decrypted JSON', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    const queue = await loadQueue();
+
+    const { encryptPayload: encryptLegacyPayload } = await import('@/src/security/crypto');
+
+    const bundle = { resourceType: 'Bundle', id: 'legacy-encrypted' };
+    const legacyCipher = await encryptLegacyPayload(JSON.stringify(bundle));
+
+    await queue.enqueueTx({ key: 'legacy-encrypted', payload: legacyCipher });
 
     const snapshot = await queue.getQueueSnapshot();
     expect(snapshot[0]?.payload).toEqual(bundle);
