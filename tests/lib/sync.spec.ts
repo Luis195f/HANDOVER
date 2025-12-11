@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearOfflineQueue, createOfflineQueueItem, listOfflineQueue } from '@/src/lib/queue';
+import {
+  __getRawOfflineQueueRows,
+  __getRawTxQueueRows,
+  clearOfflineQueue,
+  createOfflineQueueItem,
+  listOfflineQueue,
+} from '@/src/lib/queue';
 import {
   configureSyncEngine,
   forceSync,
@@ -80,6 +86,8 @@ describe('sync engine state machine', () => {
     vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
     await clearOfflineQueue();
     isOnline.mockResolvedValue(true);
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
   });
 
   afterEach(async () => {
@@ -87,6 +95,8 @@ describe('sync engine state machine', () => {
     await stopSyncEngine();
     vi.clearAllTimers();
     vi.useRealTimers();
+    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   });
 
   // ======================================================
@@ -241,6 +251,27 @@ describe('sync engine state machine', () => {
     expect(sender.mock.calls.length).toBeGreaterThanOrEqual(2);
     const remaining = await listOfflineQueue();
     expect(remaining.length).toBe(1);
+  });
+
+  it('encrypts stored payloads but sends decrypted JSON when encryption is enabled', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+
+    const bundle = { resourceType: 'Bundle', type: 'transaction', id: 'enc-sync' };
+    await createOfflineQueueItem({ payload: { bundle }, patientId: 'pat-encrypted' });
+
+    const rawRows = await __getRawOfflineQueueRows();
+    expect(rawRows[0]?.payload).not.toContain('enc-sync');
+
+    const sender = vi.fn(async () => ({ ok: true as const }));
+    configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
+
+    await forceSync();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(sender).toHaveBeenCalled();
+    const [firstCall] = sender.mock.calls;
+    expect(firstCall?.[0]?.payload).toEqual({ bundle });
   });
 });
 

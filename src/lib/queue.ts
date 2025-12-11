@@ -13,7 +13,7 @@
  */
 
 import * as SQLite from "expo-sqlite";
-import { decryptPayload, encryptPayload, hashHex, payloadIsEncrypted } from "./crypto";
+import { decryptOfflinePayload, encryptOfflinePayload, hashHex } from "./crypto";
 import { mark } from "./otel";
 
 // -------------------------------
@@ -70,22 +70,21 @@ if (db?.execSync) {
 
 async function encryptQueuePayload(payload: unknown): Promise<string> {
   const serialized = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
-  if (payloadIsEncrypted(serialized)) return serialized;
   try {
-    return await encryptPayload(serialized);
+    return await encryptOfflinePayload(serialized);
   } catch (error) {
     console.warn("Fallo al cifrar payload offline", error);
     return serialized;
   }
 }
 
-async function decryptQueuePayload(payload: string): Promise<unknown> {
+async function decryptQueuePayload<TFallback = unknown>(payload: string): Promise<TFallback | string> {
   try {
-    const decrypted = await decryptPayload(payload);
-    return safeParse(decrypted);
+    const decrypted = await decryptOfflinePayload(payload);
+    return safeParse(decrypted) as TFallback | string;
   } catch (error) {
     console.warn("Fallo al descifrar payload offline", error);
-    return safeParse(payload);
+    return safeParse(payload) as TFallback | string;
   }
 }
 
@@ -199,6 +198,16 @@ function persistQueueItem(item: QueueItem): void {
   }
 }
 
+async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
+  const item = rowToQueueItem(row);
+  try {
+    return { ...item, payload: String(await decryptOfflinePayload(row.payload)) };
+  } catch (error) {
+    console.warn("Fallo al descifrar payload offline", error);
+    return { ...item, payload: row.payload };
+  }
+}
+
 export async function createOfflineQueueItem(input: QueueItemInput): Promise<QueueItem> {
   const encryptedPayload = await encryptQueuePayload(input.payload);
   const item = normalizeQueueItem({ ...input, payload: encryptedPayload });
@@ -211,11 +220,14 @@ export async function listOfflineQueue(): Promise<QueueItem[]> {
     const rows = (db.getAllSync(
       `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
     ) ?? []) as QueueItemRow[];
-    return rows.map(rowToQueueItem);
+    return Promise.all(rows.map(decryptQueueItemPayload));
   }
-  return memOfflineQueue
-    .slice()
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return Promise.all(
+    memOfflineQueue
+      .slice()
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .map(async (row) => ({ ...row, payload: String(await decryptOfflinePayload(row.payload)) }))
+  );
 }
 
 export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
@@ -224,19 +236,18 @@ export async function getOfflineQueueItem(id: string): Promise<QueueItem | null>
       `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
       [id]
     ) as QueueItemRow | undefined;
-    return row ? rowToQueueItem(row) : null;
+    return row ? decryptQueueItemPayload(row) : null;
   }
   const found = memOfflineQueue.find((item) => item.id === id);
-  return found ? { ...found } : null;
+  if (!found) return null;
+  return { ...found, payload: String(await decryptOfflinePayload(found.payload)) };
 }
 
 export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {
   const current = await getOfflineQueueItem(id);
   if (!current) return null;
-  let payload = current.payload;
-  if (updates.payload !== undefined) {
-    payload = typeof updates.payload === "string" ? updates.payload : await encryptQueuePayload(updates.payload);
-  }
+  const nextPayload = updates.payload !== undefined ? updates.payload : current.payload;
+  const payload = await encryptQueuePayload(nextPayload);
   const next: QueueItem = {
     ...current,
     ...updates,
@@ -599,4 +610,24 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
     enqueuedAt: new Date().toISOString(),
   };
   return enqueueTx({ key, payload, type: "handover-bundle" });
+}
+
+// Solo para pruebas: devuelve las filas crudas de la cola de transacciones
+export async function __getRawTxQueueRows(): Promise<QueueRow[]> {
+  if (db?.getAllSync) {
+    const rows = db.getAllSync("SELECT key,payload,tries,created_at,next_at FROM tx_queue ORDER BY id ASC") as QueueRow[];
+    return rows ?? [];
+  }
+  return memQueue.slice();
+}
+
+// Solo para pruebas: devuelve las filas crudas de la cola offline segura
+export async function __getRawOfflineQueueRows(): Promise<QueueItemRow[]> {
+  if (db?.getAllSync) {
+    const rows = db.getAllSync(
+      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
+    ) as QueueItemRow[];
+    return rows ?? [];
+  }
+  return memOfflineQueue.slice();
 }
