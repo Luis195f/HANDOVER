@@ -66,8 +66,22 @@ export function render(element: React.ReactElement): RenderResult {
 
 export const fireEvent = {
   press(target: any) {
-    if (typeof target.props.onPress === 'function') {
-      target.props.onPress({});
+    const props = target?.props ?? {};
+    const parentProps = target?.parent?.props ?? {};
+    if (props.disabled || parentProps.disabled) return;
+
+    const handler =
+      typeof props.onPress === 'function'
+        ? props.onPress
+        : typeof props.onClick === 'function'
+          ? props.onClick
+        : typeof parentProps.onPress === 'function'
+          ? parentProps.onPress
+          : typeof parentProps.onClick === 'function'
+            ? parentProps.onClick
+          : null;
+    if (handler) {
+      handler({});
     }
   },
   changeText(target: any, value: string) {

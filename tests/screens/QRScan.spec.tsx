@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Text } from 'react-native';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
+import { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import QRScanScreen from '@/src/screens/QRScan';
@@ -22,15 +23,9 @@ vi.mock('expo-camera', () => {
   };
 });
 
-vi.mock('@react-navigation/native', async () => {
-  const actual = await vi.importActual<typeof import('@react-navigation/native')>(
-    '@react-navigation/native',
-  );
-  return {
-    ...actual,
-    useIsFocused: () => true,
-  };
-});
+vi.mock('@react-navigation/native', () => ({
+  useIsFocused: () => true,
+}));
 
 vi.mock('@/src/hooks/usePatientSummary', () => ({
   usePatientSummary: () => ({ loading: false, error: null, summary: { id: '123' } }),
@@ -58,47 +53,47 @@ describe('QRScan screen', () => {
   it('muestra mensaje cuando faltan permisos de cámara', () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: false }, vi.fn()]);
 
-    const { getByText, queryByTestId } = render(
+    const { getByText, queryByText } = render(
       <QRScanScreen navigation={{ navigate } as any} route={{ key: 'qr', name: 'QRScan', params: {} } as any} />,
     );
 
     expect(getByText('Necesitamos acceso a la cámara para escanear el código QR del paciente.')).toBeTruthy();
-    expect(queryByTestId('camera')).toBeNull();
+    expect(queryByText('camera-mock')).toBeNull();
   });
 
   it('procesa un QR válido y navega al formulario', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, vi.fn()]);
 
-    const { getByTestId, getByText } = render(
+    const { getByText } = render(
       <QRScanScreen
         navigation={{ navigate } as any}
         route={{ key: 'qr', name: 'QRScan', params: { unitIdParam: 'U1', specialtyId: 'cardio' } } as any}
       />,
     );
 
-    fireEvent.press(getByTestId('camera'));
-
-    await waitFor(() => {
-      expect(getByText('Continuar con entrega')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(getByText('camera-mock'));
     });
 
-    fireEvent.press(getByText('Continuar con entrega'));
+    expect(getByText('Continuar con entrega')).toBeTruthy();
 
-    await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
-        patientId: 'Patient/123',
-        unitId: 'U1',
-        specialtyId: 'cardio',
-      }));
+    await act(async () => {
+      fireEvent.press(getByText('Continuar con entrega'));
     });
-    expect(prefillFromFHIR).toHaveBeenCalledWith('Patient/123', expect.any(Object));
+
+    expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
+      patientId: '123',
+      unitId: 'U1',
+      specialtyId: 'cardio',
+    }));
+    expect(prefillFromFHIR).toHaveBeenCalledWith('123', expect.any(Object));
   });
 
-  it('bloquea el avance cuando el paciente escaneado no coincide con el activo', async () => {
+  it('no marca desajuste si el mismo paciente llega en distintos formatos', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, vi.fn()]);
-    nextScanPayload = { data: 'Patient/999' };
+    nextScanPayload = { data: '123' };
 
-    const { getByTestId, getByText, queryByText } = render(
+    const { getByText, queryByText } = render(
       <QRScanScreen
         navigation={{ navigate } as any}
         route={{
@@ -109,33 +104,63 @@ describe('QRScan screen', () => {
       />,
     );
 
-    fireEvent.press(getByTestId('camera'));
+    await act(async () => {
+      fireEvent.press(getByText('camera-mock'));
+    });
+    expect(getByText('Continuar con entrega')).toBeTruthy();
+    expect(queryByText('El paciente escaneado no coincide')).toBeNull();
 
-    await waitFor(() => {
-      expect(getByText('El paciente escaneado no coincide')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(getByText('Continuar con entrega'));
     });
 
-    fireEvent.press(getByText('Continuar con entrega'));
+    expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
+      patientId: '123',
+      unitId: 'U1',
+    }));
+  });
+
+  it('bloquea el avance cuando el paciente escaneado no coincide con el activo', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, vi.fn()]);
+    nextScanPayload = { data: '999' };
+
+    const { getByText, queryByText } = render(
+      <QRScanScreen
+        navigation={{ navigate } as any}
+        route={{
+          key: 'qr',
+          name: 'QRScan',
+          params: { patientIdParam: 'Patient/123', unitIdParam: 'U1' },
+        } as any}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.press(getByText('camera-mock'));
+    });
+
+    expect(getByText('El paciente escaneado no coincide')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByText('Continuar con entrega'));
+    });
     expect(navigate).not.toHaveBeenCalled();
 
-    fireEvent.press(getByText('Cambiar al paciente escaneado'));
-
-    await waitFor(() => {
-      expect(queryByText('El paciente escaneado no coincide')).toBeNull();
+    await act(async () => {
+      fireEvent.press(getByText('Cambiar al paciente escaneado'));
     });
 
-    await waitFor(() => {
-      expect(queryByText('Precargando datos FHIR…')).toBeNull();
+    expect(queryByText('El paciente escaneado no coincide')).toBeNull();
+    expect(queryByText('Precargando datos FHIR…')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(getByText('Continuar con entrega'));
     });
 
-    fireEvent.press(getByText('Continuar con entrega'));
-
-    await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
-        patientId: 'Patient/999',
-        unitId: 'U1',
-      }));
-    });
+    expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
+      patientId: '999',
+      unitId: 'U1',
+    }));
   });
 
   it('avisa cuando el QR es vacío o inválido', async () => {
@@ -143,15 +168,30 @@ describe('QRScan screen', () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, vi.fn()]);
     nextScanPayload = { data: '   ' };
 
-    const { getByTestId } = render(
+    const { getByText } = render(
       <QRScanScreen navigation={{ navigate } as any} route={{ key: 'qr', name: 'QRScan', params: {} } as any} />,
     );
 
-    fireEvent.press(getByTestId('camera'));
-
-    await waitFor(() => {
-      expect(alertSpy).toHaveBeenCalledWith('Código no válido', 'No se pudo leer el código QR.');
+    await act(async () => {
+      fireEvent.press(getByText('camera-mock'));
     });
+    expect(alertSpy).toHaveBeenCalledWith('Código no válido', 'No se pudo leer el código QR.');
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('no muestra mismatch cuando no hay paciente activo y se escanea el primero', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, vi.fn()]);
+
+    const { queryByText, getByText } = render(
+      <QRScanScreen navigation={{ navigate } as any} route={{ key: 'qr', name: 'QRScan', params: {} } as any} />,
+    );
+
+    await act(async () => {
+      fireEvent.press(getByText('camera-mock'));
+    });
+
+    expect(getByText('Continuar con entrega')).toBeTruthy();
+
+    expect(queryByText('El paciente escaneado no coincide')).toBeNull();
   });
 });

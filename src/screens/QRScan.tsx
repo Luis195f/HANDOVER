@@ -28,6 +28,16 @@ type ParsedQRCode = {
 
 const PATIENT_URL_REGEX = /(?:Patient|patient)\/([^/?#]+)/;
 
+function normalizePatientId(id?: string | null): string | null {
+  if (!id) return null;
+  const trimmed = id.trim();
+  if (!trimmed) return null;
+  const segments = trimmed.split('/').filter(Boolean);
+  if (!segments.length) return null;
+  const terminal = segments[segments.length - 1].trim();
+  return terminal || null;
+}
+
 function parseJsonPayload(payload: string): ParsedQRCode | null {
   if (!payload.trim().startsWith('{') || !payload.trim().endsWith('}')) return null;
   try {
@@ -172,8 +182,17 @@ export function QRScanScreen({ navigation, route }: Props) {
       }
 
       setParsedPayload(parsed);
-      if (currentPatientId && parsed.patientId !== currentPatientId) {
-        console.warn('[qr] patient mismatch', { currentPatientId, scannedId: parsed.patientId });
+      const normalizedCurrentId = normalizePatientId(currentPatientId);
+      const normalizedScannedId = normalizePatientId(parsed.patientId);
+      if (
+        normalizedCurrentId
+        && normalizedScannedId
+        && normalizedCurrentId !== normalizedScannedId
+      ) {
+        console.warn('[qr] patient mismatch', {
+          currentPatientId,
+          scannedId: parsed.patientId,
+        });
         setPatientMismatch({ currentId: currentPatientId, scannedId: parsed.patientId });
         return;
       }
