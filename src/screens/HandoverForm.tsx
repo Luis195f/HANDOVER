@@ -12,6 +12,7 @@ import {
   NativeSyntheticEvent,
   useWindowDimensions,
   View,
+  type AlertButton,
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -37,6 +38,7 @@ import {
 import { appendAuditEvent, createAsyncStorageAuditStorage, makeAuditEvent, type AuditStorage } from '@/src/lib/audit';
 import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
+import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
@@ -347,7 +349,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefillMeta,
   } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
-  const { session: authSession } = useAuth();
+  const { session: authSession, logout } = useAuth();
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
@@ -1051,162 +1053,203 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
-  const onSubmit = form.handleSubmit(
-    async (values) => {
-      try {
-        const normalizeUnit = (value?: string | null) => {
-          if (typeof value !== 'string') return undefined;
-          const trimmed = value.trim();
-          if (!trimmed || trimmed === ALL_UNITS_OPTION) return undefined;
-          return trimmed;
-        };
+  const submitHandover = async (values: HandoverFormValues, attempt = 0): Promise<void> => {
+    try {
+      const normalizeUnit = (value?: string | null) => {
+        if (typeof value !== 'string') return undefined;
+        const trimmed = value.trim();
+        if (!trimmed || trimmed === ALL_UNITS_OPTION) return undefined;
+        return trimmed;
+      };
 
-        const status = values.status ?? 'draft';
-        const unitFromForm = normalizeUnit(values.administrativeData?.unit);
-        const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
-        const unitFromStore = normalizeUnit(selectedUnitId);
-        const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
+      const status = values.status ?? 'draft';
+      const unitFromForm = normalizeUnit(values.administrativeData?.unit);
+      const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
+      const unitFromStore = normalizeUnit(selectedUnitId);
+      const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
 
-        const riskBeforeSubmit = deriveRiskEvaluationFromValues(
-          values.vitals,
-          values.braden,
-          values.oxygenTherapy,
-        );
+      const riskBeforeSubmit = deriveRiskEvaluationFromValues(
+        values.vitals,
+        values.braden,
+        values.oxygenTherapy,
+      );
 
-        const confirmed = await confirmHighRiskSubmission(status, riskBeforeSubmit, Alert.alert);
-        if (!confirmed) {
-          return;
-        }
-
-        const activeSession = session ?? (await getSession());
-        try {
-          ensureUnitAccess(activeSession, unitEffective ?? '');
-        } catch {
-          Alert.alert('Sin acceso a la unidad');
-          return;
-        }
-
-        const medications = values.medications ?? [];
-        const treatments = values.treatments ?? [];
-        const medsText = values.meds;
-        const oxygenTherapyInput = values.oxygenTherapy ?? {};
-        const hasOxygenValues =
-          oxygenTherapyInput.device ||
-          oxygenTherapyInput.flowLMin != null ||
-          oxygenTherapyInput.fio2 != null;
-
-        const oxygenTherapy = hasOxygenValues
-          ? {
-              status: 'in-progress' as const,
-              device: oxygenTherapyInput.device,
-              deviceDisplay: oxygenTherapyInput.device,
-              flowLMin: oxygenTherapyInput.flowLMin,
-              fio2: oxygenTherapyInput.fio2,
-            }
-          : null;
-
-        const audioAttachment = await buildAudioAttachment(values.audioUri);
-
-        const administrativeData: AdministrativeData = {
-          unit: unitEffective ?? values.administrativeData.unit,
-          census: values.administrativeData.census ?? 0,
-          staffIn: (values.administrativeData.staffIn ?? []).filter(Boolean),
-          staffOut: (values.administrativeData.staffOut ?? []).filter(Boolean),
-          shiftStart: values.administrativeData.shiftStart,
-          shiftEnd: values.administrativeData.shiftEnd,
-          incidents: values.administrativeData.incidents?.filter(Boolean),
-        };
-
-        const nowIso = new Date().toISOString();
-        const bundle = buildHandoverBundle(
-          {
-            patientId: values.patientId,
-            status,
-            author: signatureUser?.userId
-              ? { id: signatureUser.userId, display: signatureUser.fullName ?? signatureUser.displayName }
-              : session?.user?.id
-                ? { id: session.user.id, display: session.user.name }
-                : undefined,
-            vitals: values.vitals,
-            medications,
-            treatments,
-            oxygenTherapy,
-            audioAttachment: audioAttachment ?? undefined,
-            composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
-            administrativeData,
-            closingSummary: values.closingSummary,
-            meds: medsText,
-            sbar: {
-              situation: values.sbarSituation,
-              background: values.sbarBackground,
-              assessment: values.sbarAssessment,
-              recommendation: values.sbarRecommendation,
-            },
-            painAssessment: values.painAssessment,
-            signatures: values.signatures,
-          },
-          { now: () => nowIso },
-        );
-
-        await enqueueBundle(bundle, {
-          patientId: values.patientId,
-          unitId: administrativeData.unit,
-          specialtyId,
-        });
-
-        const activeSessionUser = getSessionUser(activeSession);
-        const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
-        const auditUnitId =
-          activeSessionUser?.activeUnitId ??
-          activeSessionUser?.units?.[0] ??
-          activeSession?.units?.[0] ??
-          administrativeData.unit;
-        if (auditUserId && values.patientId) {
-          const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
-          const auditEvent = makeAuditEvent({
-            type: 'patient_edit',
-            patientId: values.patientId,
-            userId: auditUserId,
-            unitId: auditUnitId ?? undefined,
-            shiftCode,
-          });
-          await appendAuditEvent(auditStorageRef.current, auditEvent);
-        }
-
-        let successMessage = 'Entrega encolada para envío.';
-        if (isOn('ENABLE_ALERTS')) {
-          const alerts: string[] = [];
-          const vitals = values.vitals ?? {};
-          const newsInput = {
-            rr: vitals.rr,
-            spo2: vitals.spo2,
-            temp: vitals.tempC,
-            sbp: vitals.sbp,
-            hr: vitals.hr,
-            o2: hasOxygenValues,
-            avpu: vitals.avpu,
-          };
-          const breakdown = computeNEWS2(newsInput);
-          if (breakdown.total >= 5 || breakdown.anyThree) {
-            alerts.push(`NEWS2 ${breakdown.total} (${breakdown.band})`);
-          }
-          if (typeof vitals.spo2 === 'number' && vitals.spo2 < 90) {
-            alerts.push('SpO₂ menor a 90%');
-          }
-          if (alerts.length > 0) {
-            successMessage = `${successMessage}\n\nAlertas:\n- ${alerts.join('\n- ')}`;
-          }
-        }
-
-        Alert.alert('OK', successMessage);
-        navigation.goBack();
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : null;
-        Alert.alert('Error', message ?? 'No se pudo guardar');
+      const confirmed = await confirmHighRiskSubmission(status, riskBeforeSubmit, Alert.alert);
+      if (!confirmed) {
+        return;
       }
-    },
-    handleInvalidSubmit,
-  );
+
+      const activeSession = session ?? (await getSession());
+      try {
+        ensureUnitAccess(activeSession, unitEffective ?? '');
+      } catch {
+        Alert.alert('Sin acceso a la unidad');
+        return;
+      }
+
+      const medications = values.medications ?? [];
+      const treatments = values.treatments ?? [];
+      const medsText = values.meds;
+      const oxygenTherapyInput = values.oxygenTherapy ?? {};
+      const hasOxygenValues =
+        oxygenTherapyInput.device ||
+        oxygenTherapyInput.flowLMin != null ||
+        oxygenTherapyInput.fio2 != null;
+
+      const oxygenTherapy = hasOxygenValues
+        ? {
+            status: 'in-progress' as const,
+            device: oxygenTherapyInput.device,
+            deviceDisplay: oxygenTherapyInput.device,
+            flowLMin: oxygenTherapyInput.flowLMin,
+            fio2: oxygenTherapyInput.fio2,
+          }
+        : null;
+
+      const audioAttachment = await buildAudioAttachment(values.audioUri);
+
+      const administrativeData: AdministrativeData = {
+        unit: unitEffective ?? values.administrativeData.unit,
+        census: values.administrativeData.census ?? 0,
+        staffIn: (values.administrativeData.staffIn ?? []).filter(Boolean),
+        staffOut: (values.administrativeData.staffOut ?? []).filter(Boolean),
+        shiftStart: values.administrativeData.shiftStart,
+        shiftEnd: values.administrativeData.shiftEnd,
+        incidents: values.administrativeData.incidents?.filter(Boolean),
+      };
+
+      const nowIso = new Date().toISOString();
+      const bundle = buildHandoverBundle(
+        {
+          patientId: values.patientId,
+          status,
+          author: signatureUser?.userId
+            ? { id: signatureUser.userId, display: signatureUser.fullName ?? signatureUser.displayName }
+            : session?.user?.id
+              ? { id: session.user.id, display: session.user.name }
+              : undefined,
+          vitals: values.vitals,
+          medications,
+          treatments,
+          oxygenTherapy,
+          audioAttachment: audioAttachment ?? undefined,
+          composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
+          administrativeData,
+          closingSummary: values.closingSummary,
+          meds: medsText,
+          sbar: {
+            situation: values.sbarSituation,
+            background: values.sbarBackground,
+            assessment: values.sbarAssessment,
+            recommendation: values.sbarRecommendation,
+          },
+          painAssessment: values.painAssessment,
+          signatures: values.signatures,
+        },
+        { now: () => nowIso },
+      );
+
+      await enqueueBundle(bundle, {
+        patientId: values.patientId,
+        unitId: administrativeData.unit,
+        specialtyId,
+      });
+
+      const activeSessionUser = getSessionUser(activeSession);
+      const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
+      const auditUnitId =
+        activeSessionUser?.activeUnitId ??
+        activeSessionUser?.units?.[0] ??
+        activeSession?.units?.[0] ??
+        administrativeData.unit;
+      if (auditUserId && values.patientId) {
+        const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
+        const auditEvent = makeAuditEvent({
+          type: 'patient_edit',
+          patientId: values.patientId,
+          userId: auditUserId,
+          unitId: auditUnitId ?? undefined,
+          shiftCode,
+        });
+        await appendAuditEvent(auditStorageRef.current, auditEvent);
+      }
+
+      let successMessage = 'Entrega encolada para envío.';
+      if (isOn('ENABLE_ALERTS')) {
+        const alerts: string[] = [];
+        const vitals = values.vitals ?? {};
+        const newsInput = {
+          rr: vitals.rr,
+          spo2: vitals.spo2,
+          temp: vitals.tempC,
+          sbp: vitals.sbp,
+          hr: vitals.hr,
+          o2: hasOxygenValues,
+          avpu: vitals.avpu,
+        };
+        const breakdown = computeNEWS2(newsInput);
+        if (breakdown.total >= 5 || breakdown.anyThree) {
+          alerts.push(`NEWS2 ${breakdown.total} (${breakdown.band})`);
+        }
+        if (typeof vitals.spo2 === 'number' && vitals.spo2 < 90) {
+          alerts.push('SpO₂ menor a 90%');
+        }
+        if (alerts.length > 0) {
+          successMessage = `${successMessage}\n\nAlertas:\n- ${alerts.join('\n- ')}`;
+        }
+      }
+
+      Alert.alert('OK', successMessage);
+      navigation.goBack();
+    } catch (error: unknown) {
+      const netError = normalizeNetError(error);
+      const ui = getUserFacingNetworkMessage(netError);
+      const buttons: AlertButton[] = [];
+
+      const handleRetry = () => {
+        if (attempt >= 1) return;
+        submitHandover(values, attempt + 1);
+      };
+
+      switch (ui.cta?.action) {
+        case 'RETRY':
+          buttons.push({ text: 'Cancelar', style: 'cancel' });
+          buttons.push({ text: ui.cta.label, onPress: handleRetry });
+          break;
+        case 'LOGIN':
+          buttons.push({ text: 'Cancelar', style: 'cancel' });
+          buttons.push({
+            text: ui.cta.label,
+            onPress: async () => {
+              try {
+                await logout();
+              } catch {
+                /* ignore logout errors */
+              }
+              navigation.navigate('Login');
+            },
+          });
+          break;
+        case 'OPEN_SYNC':
+          buttons.push({ text: 'Cerrar', style: 'cancel' });
+          buttons.push({
+            text: ui.cta.label,
+            onPress: () => navigation.navigate('SyncCenter'),
+          });
+          break;
+        case 'DISMISS':
+          buttons.push({ text: ui.cta.label, style: 'cancel' });
+          break;
+        default:
+          buttons.push({ text: ui.cta?.label ?? 'Entendido', style: 'cancel' });
+          break;
+      }
+
+      Alert.alert(ui.title, ui.message, buttons);
+    }
+  };
+
+  const onSubmit = form.handleSubmit((values) => submitHandover(values), handleInvalidSubmit);
 
   const handleValidateForExport = async () => {
     const isValid = await form.trigger();
