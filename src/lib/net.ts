@@ -65,31 +65,46 @@ export class NetworkError extends Error {
   code?: string;
   isTransient: boolean;
   details?: unknown;
+  cause?: unknown;
 
-  constructor(message: string, params: { status?: number; code?: string; isTransient?: boolean; details?: unknown } = {}) {
+  constructor(
+    message: string,
+    params: { status?: number; code?: string; isTransient?: boolean; details?: unknown; cause?: unknown } = {},
+  ) {
     super(message);
     this.name = 'NetworkError';
     this.status = params.status;
     this.code = params.code;
     this.isTransient = params.isTransient ?? false;
     this.details = params.details;
+    this.cause = params.cause;
   }
 }
 
 export class TimeoutError extends NetworkError {
-  constructor(message = 'Request timed out') {
-    super(message, { code: 'TIMEOUT', isTransient: true });
+  constructor(message = 'Request timed out', params: { cause?: unknown } = {}) {
+    super(message, { code: 'TIMEOUT', isTransient: true, cause: params.cause });
     this.name = 'TimeoutError';
   }
 }
 
 export class HTTPError extends NetworkError {
   response?: Response;
+  url?: string;
+  retryAfterMs?: number | null;
 
-  constructor(status: number, statusText: string, isTransient: boolean, response?: Response) {
-    super(statusText || `HTTP ${status}`, { status, isTransient });
+  constructor(
+    status: number,
+    statusText: string,
+    isTransient: boolean,
+    response?: Response,
+    extras: { url?: string; retryAfterMs?: number | null; cause?: unknown } = {},
+  ) {
+    super(statusText || `HTTP ${status}`, { status, isTransient, cause: extras.cause });
     this.name = 'HTTPError';
     this.response = response;
+    this.url = extras.url ?? response?.url;
+    this.retryAfterMs = extras.retryAfterMs ?? parseRetryAfter(response?.headers || new Headers());
   }
 }
 
@@ -193,7 +208,11 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       const response = await Promise.race([
         fetchPromise,
         new Promise<Response>((_, reject) => {
-          abortHandler = () => reject(new DOMException('Aborted', 'AbortError'));
+          abortHandler = () => {
+            const abortError = new Error('Aborted');
+            abortError.name = 'AbortError';
+            reject(abortError);
+          };
           attemptController.signal.addEventListener('abort', abortHandler!, { once: true });
         }),
       ]);
@@ -219,7 +238,10 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       if (!shouldRetry || attempt === resolvedRetries) {
         if (timeoutId) clearTimeout(timeoutId);
         if (signal) signal.removeEventListener('abort', onAbort);
-        throw new HTTPError(response.status, response.statusText, shouldRetry, response);
+        throw new HTTPError(response.status, response.statusText, shouldRetry, response, {
+          url: response.url || urlToUse,
+          retryAfterMs: parseRetryAfter(response.headers),
+        });
       }
 
       const retryAfterMs = parseRetryAfter(response.headers);
@@ -237,13 +259,13 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
         throw error;
       }
 
-      const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+      const isAbortError = (error as { name?: string } | undefined)?.name === 'AbortError';
       const isTimeout = isAbortError && timeoutMs !== undefined;
       lastError = error;
 
       if (isTimeout) {
         if (attempt === resolvedRetries) {
-          throw new TimeoutError();
+          throw new TimeoutError('Request timed out', { cause: error });
         }
         await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
         attempt += 1;
@@ -251,7 +273,11 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       }
 
       if (attempt === resolvedRetries) {
-        throw new NetworkError((error as Error)?.message || 'Network error', { isTransient: true, details: error });
+        throw new NetworkError((error as Error)?.message || 'Network error', {
+          isTransient: true,
+          details: error,
+          cause: error,
+        });
       }
 
       await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
@@ -282,6 +308,19 @@ export async function fetchWithRetry(input: RequestInfo | URL, init: ExtendedReq
   });
 
   return response.raw;
+}
+
+export async function safeFetchOrThrow<T = unknown>(input: RequestInfo | URL, options: SafeFetchOptions = {}): Promise<Response> {
+  const result = await safeFetch<T>(input, options);
+
+  if (!result.ok) {
+    throw new HTTPError(result.status, result.statusText, false, result.raw, {
+      url: result.raw.url,
+      retryAfterMs: parseRetryAfter(result.headers),
+    });
+  }
+
+  return result.raw;
 }
 
 export default fetchWithRetry;
