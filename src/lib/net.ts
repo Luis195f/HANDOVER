@@ -65,31 +65,66 @@ export class NetworkError extends Error {
   code?: string;
   isTransient: boolean;
   details?: unknown;
+  url?: string;
+  retryAfterMs?: number;
+  cause?: unknown;
 
-  constructor(message: string, params: { status?: number; code?: string; isTransient?: boolean; details?: unknown } = {}) {
+  constructor(
+    message: string,
+    params: {
+      status?: number;
+      code?: string;
+      isTransient?: boolean;
+      details?: unknown;
+      url?: string;
+      retryAfterMs?: number;
+      cause?: unknown;
+    } = {},
+  ) {
     super(message);
     this.name = 'NetworkError';
     this.status = params.status;
     this.code = params.code;
     this.isTransient = params.isTransient ?? false;
     this.details = params.details;
+    this.url = params.url;
+    this.retryAfterMs = params.retryAfterMs;
+    this.cause = params.cause;
   }
 }
 
 export class TimeoutError extends NetworkError {
-  constructor(message = 'Request timed out') {
-    super(message, { code: 'TIMEOUT', isTransient: true });
+  constructor(message = 'Request timed out', options: { cause?: unknown; url?: string } = {}) {
+    super(message, { code: 'TIMEOUT', isTransient: true, cause: options.cause, url: options.url });
     this.name = 'TimeoutError';
   }
 }
 
 export class HTTPError extends NetworkError {
   response?: Response;
+  retryAfterMs?: number;
 
-  constructor(status: number, statusText: string, isTransient: boolean, response?: Response) {
-    super(statusText || `HTTP ${status}`, { status, isTransient });
+  constructor(
+    status: number,
+    statusText: string,
+    isTransient: boolean,
+    response?: Response,
+    retryAfterMs?: number,
+    url?: string,
+    cause?: unknown,
+  ) {
+    super(statusText || `HTTP ${status}`, {
+      status,
+      isTransient,
+      details: response,
+      url: url ?? response?.url,
+      retryAfterMs,
+      cause,
+    });
     this.name = 'HTTPError';
     this.response = response;
+    this.retryAfterMs = retryAfterMs;
+    this.url = url ?? response?.url;
   }
 }
 
@@ -111,6 +146,22 @@ const parseRetryAfter = (headers: Headers) => {
     return retryAfterSeconds * 1000;
   }
   return null;
+};
+
+const createAbortError = (cause?: unknown) => {
+  const baseMessage = 'Aborted';
+  if (typeof DOMException !== 'undefined') {
+    try {
+      return new DOMException(baseMessage, 'AbortError');
+    } catch {
+      /* noop */
+    }
+  }
+
+  const error = new Error(baseMessage);
+  error.name = 'AbortError';
+  (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 };
 
 const parseJsonIfPossible = async <T>(response: Response, parseJson: boolean): Promise<T | undefined> => {
@@ -176,7 +227,9 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
     const onAbort = () => attemptController.abort();
     if (signal) {
       if (signal.aborted) {
-        throw new NetworkError('Request aborted', { code: 'ABORTED', isTransient: false });
+        const abortedError = new NetworkError('Request aborted', { code: 'ABORTED', isTransient: false, url: urlToUse });
+        abortedError.name = 'AbortError';
+        throw abortedError;
       }
       signal.addEventListener('abort', onAbort, { once: true });
     }
@@ -193,7 +246,7 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       const response = await Promise.race([
         fetchPromise,
         new Promise<Response>((_, reject) => {
-          abortHandler = () => reject(new DOMException('Aborted', 'AbortError'));
+          abortHandler = () => reject(createAbortError());
           attemptController.signal.addEventListener('abort', abortHandler!, { once: true });
         }),
       ]);
@@ -219,7 +272,8 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       if (!shouldRetry || attempt === resolvedRetries) {
         if (timeoutId) clearTimeout(timeoutId);
         if (signal) signal.removeEventListener('abort', onAbort);
-        throw new HTTPError(response.status, response.statusText, shouldRetry, response);
+        const retryAfterMs = parseRetryAfter(response.headers) ?? undefined;
+        throw new HTTPError(response.status, response.statusText, shouldRetry, response, retryAfterMs, urlToUse);
       }
 
       const retryAfterMs = parseRetryAfter(response.headers);
@@ -237,21 +291,30 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
         throw error;
       }
 
-      const isAbortError = error instanceof DOMException && error.name === 'AbortError';
+      const isAbortError = (error as { name?: string } | undefined)?.name === 'AbortError';
       const isTimeout = isAbortError && timeoutMs !== undefined;
       lastError = error;
 
       if (isTimeout) {
         if (attempt === resolvedRetries) {
-          throw new TimeoutError();
+          throw new TimeoutError(undefined, { cause: error, url: urlToUse });
         }
         await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
         attempt += 1;
         continue;
       }
 
+      if (isAbortError) {
+        throw createAbortError(error);
+      }
+
       if (attempt === resolvedRetries) {
-        throw new NetworkError((error as Error)?.message || 'Network error', { isTransient: true, details: error });
+        throw new NetworkError((error as Error)?.message || 'Network error', {
+          isTransient: true,
+          details: error,
+          cause: error,
+          url: urlToUse,
+        });
       }
 
       await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
@@ -261,6 +324,15 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
   }
 
   throw lastError instanceof Error ? lastError : new Error('safeFetch: exhausted retries');
+}
+
+export async function safeFetchOrThrow(input: RequestInfo | URL, options: SafeFetchOptions = {}): Promise<Response> {
+  const response = await safeFetch(input, options);
+  if (!response.ok) {
+    const retryAfterMs = parseRetryAfter(response.headers) ?? undefined;
+    throw new HTTPError(response.status, response.statusText, false, response.raw, retryAfterMs, response.raw.url);
+  }
+  return response.raw;
 }
 
 export async function fetchWithRetry(input: RequestInfo | URL, init: ExtendedRequestInit = {}, opts: RetryOptions = {}): Promise<Response> {
