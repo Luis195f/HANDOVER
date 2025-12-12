@@ -41,6 +41,12 @@ describe('getUserFacingNetworkMessage', () => {
     expect(message.cta?.action).toBe('RETRY');
   });
 
+  it('maps 403 to login CTA', () => {
+    const message = getUserFacingNetworkMessage({ kind: 'HTTP', status: 403 });
+    expect(message.title).toBe('Acceso restringido');
+    expect(message.cta?.action).toBe('LOGIN');
+  });
+
   it('maps offline to sync center CTA', () => {
     const message = getUserFacingNetworkMessage({ kind: 'OFFLINE' });
     expect(message.title).toBe('Sin conexión');

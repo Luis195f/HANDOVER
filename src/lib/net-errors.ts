@@ -112,8 +112,8 @@ export function getUserFacingNetworkMessage(
   if (status === 403) {
     return {
       title: 'Acceso restringido',
-      message: 'No tienes permisos para realizar esta acción.',
-      cta: { label: 'Entendido', action: 'DISMISS' },
+      message: 'No tienes permisos para realizar esta acción. Vuelve a iniciar sesión para continuar.',
+      cta: { label: 'Iniciar sesión', action: 'LOGIN' },
     };
   }
 
@@ -145,7 +145,8 @@ export function getUserFacingNetworkMessage(
   if (err.kind === 'OFFLINE') {
     return {
       title: 'Sin conexión',
-      message: 'Guardamos los cambios localmente y los enviaremos automáticamente cuando vuelva la conexión.',
+      message:
+        'Guardamos los cambios localmente (pendiente de envío). Los enviaremos automáticamente cuando vuelva la conexión.',
       cta: { label: 'Ver estado de envío', action: 'OPEN_SYNC' },
     };
   }
