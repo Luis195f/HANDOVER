@@ -1,6 +1,7 @@
 // src/lib/fhir-client.ts
 import { HTTPError, safeFetch } from './net';
 import { getValidationErrorsFromBundle, validateBundle as validateFhirBundle } from './fhir-validation';
+import { formatIssuesForUser, isOperationOutcome, type OperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { GeneratedPdf } from './export/export-pdf';
 // BEGIN HANDOVER D2 – VitalTrends fhir-client
 import { LOINC, TERMINOLOGY_SYSTEMS } from './codes';
@@ -16,13 +17,6 @@ export interface PatientSummary {
   mrn?: string;
   allergies?: string[];
 }
-export type OperationIssue = {
-  severity?: 'information' | 'warning' | 'error' | 'fatal' | string;
-  code?: string;
-  diagnostics?: string;
-  details?: { text?: string };
-};
-
 export type ResponseLike = {
   ok: boolean;
   status: number;
@@ -211,18 +205,6 @@ export interface FhirOperationOptions {
   timeoutMs?: number;
 }
 
-type OperationOutcomeIssue = {
-  severity?: string;
-  code?: string;
-  diagnostics?: string;
-  details?: { text?: string };
-};
-
-type OperationOutcome = {
-  resourceType: 'OperationOutcome';
-  issue?: OperationOutcomeIssue[];
-};
-
 let hooks: AuthHooks = {};
 let clientConfig: FhirClientConfig = {};
 
@@ -275,7 +257,9 @@ export type FhirResponse<T = unknown> = {
   ok: boolean;
   response: Response;
   data?: T;
-  outcome?: OperationOutcomeIssue[];
+  outcome?: OperationIssue[];
+  status: number;
+  message?: string;
 };
 
 // === Sobrecargas para que los tests puedan llamar fetchFHIR('/Patient', {...})
@@ -321,7 +305,7 @@ export async function fetchFHIR<TResource = unknown, TBody = unknown>(
       idempotencyKey,
     });
 
-    return { ok: true, response: res.raw, data: res.data };
+    return { ok: true, response: res.raw, data: res.data, status: res.status };
   } catch (error) {
     if (error instanceof HTTPError) {
       if (error.status === 401 || error.status === 403) {
@@ -332,8 +316,15 @@ export async function fetchFHIR<TResource = unknown, TBody = unknown>(
       const data = await parseResponseJson<TResource>(error.response);
       const response =
         error.response ?? new Response('', { status: error.status ?? 0, statusText: error.message });
-      const outcome = (data as OperationOutcome | undefined)?.issue;
-      return { ok: false, response, data, outcome };
+      const outcome = isOperationOutcome(data) ? data.issue : undefined;
+      return {
+        ok: false,
+        response,
+        data,
+        outcome,
+        status: error.status ?? response.status ?? 0,
+        message: outcome ? formatIssuesForUser(outcome).message : error.message,
+      };
     }
     throw error;
   }
@@ -423,11 +414,18 @@ export async function postBundle(
 
     if (!result.ok) {
       const json = result.data as OperationOutcome | Record<string, unknown> | undefined;
-      const issues = result.outcome ?? (json as OperationOutcome | undefined)?.issue;
-      if (issues && issues.length > 0) {
-        return { ok: false, status: result.response.status, issues, issue: issues, json, location };
-      }
-      return { ok: false, status: result.response.status, issue: undefined, json, location };
+      const issues = result.outcome ?? (isOperationOutcome(json) ? json.issue : undefined);
+      const formatted = issues ? formatIssuesForUser(issues) : undefined;
+      return {
+        ok: false,
+        status: result.status,
+        issues: issues ?? undefined,
+        issue: issues ?? undefined,
+        json,
+        location,
+        message: formatted?.message ?? result.message,
+        outcome: issues ? { resourceType: 'OperationOutcome', issue: issues } : undefined,
+      };
     }
 
     return { ok: true, status: result.response.status, json: result.data, location };

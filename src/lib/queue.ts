@@ -109,6 +109,8 @@ export interface QueueItem {
   attempts: number;
   syncStatus: SyncStatus;
   errorMessage?: string;
+  errorStatus?: number;
+  errorIssuesJson?: string;
   payloadType: "handover-bundle";
   payload: unknown;
   patientId: string;
@@ -127,6 +129,8 @@ type QueueItemRow = {
   attempts: number;
   sync_status: SyncStatus;
   error_message?: string | null;
+  error_status?: number | null;
+  error_issues_json?: string | null;
   payload_type: string;
   payload: string;
   patient_id: string;
@@ -143,10 +147,14 @@ if (db?.execSync) {
     attempts INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL,
     error_message TEXT,
+    error_status INTEGER,
+    error_issues_json TEXT,
     payload_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     patient_id TEXT NOT NULL
   );`);
+  try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN error_status INTEGER;`); } catch {}
+  try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN error_issues_json TEXT;`); } catch {}
 }
 
 function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueueItem {
@@ -158,6 +166,8 @@ function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueueI
     attempts: input.attempts ?? 0,
     syncStatus: input.syncStatus ?? "pending",
     errorMessage: input.errorMessage,
+    errorStatus: input.errorStatus,
+    errorIssuesJson: input.errorIssuesJson,
     payloadType: input.payloadType ?? "handover-bundle",
     payload: input.payload,
     patientId: input.patientId,
@@ -172,6 +182,8 @@ function rowToQueueItem(row: QueueItemRow): QueueItem {
     attempts: Number.isFinite(row.attempts) ? Number(row.attempts) : 0,
     syncStatus: row.sync_status,
     errorMessage: row.error_message ?? undefined,
+    errorStatus: row.error_status ?? undefined,
+    errorIssuesJson: row.error_issues_json ?? undefined,
     payloadType: (row.payload_type as QueueItem["payloadType"]) ?? "handover-bundle",
     payload: row.payload,
     patientId: row.patient_id,
@@ -185,7 +197,7 @@ function computeLegacyStatus(attempts: number): OfflineQueueStatus {
 function persistQueueItem(item: QueueItem): void {
   if (db?.runSync) {
     db.runSync(
-      `INSERT OR REPLACE INTO ${OFFLINE_TABLE}(id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id) VALUES(?,?,?,?,?,?,?,?,?)`,
+      `INSERT OR REPLACE INTO ${OFFLINE_TABLE}(id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
       [
         item.id,
         item.createdAt,
@@ -193,6 +205,8 @@ function persistQueueItem(item: QueueItem): void {
         item.attempts,
         item.syncStatus,
         item.errorMessage ?? null,
+        item.errorStatus ?? null,
+        item.errorIssuesJson ?? null,
         item.payloadType,
         item.payload,
         item.patientId,
@@ -229,7 +243,7 @@ export async function createOfflineQueueItem(input: QueueItemInput): Promise<Que
 export async function listOfflineQueue(): Promise<QueueItem[]> {
   if (db?.getAllSync) {
     const rows = (db.getAllSync(
-      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
+      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
     ) ?? []) as QueueItemRow[];
     return Promise.all(rows.map(decryptQueueItemPayload));
   }
@@ -244,7 +258,7 @@ export async function listOfflineQueue(): Promise<QueueItem[]> {
 export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
   if (db?.getFirstSync) {
     const row = db.getFirstSync(
-      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
+      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
       [id]
     ) as QueueItemRow | undefined;
     return row ? decryptQueueItemPayload(row) : null;
@@ -636,7 +650,7 @@ export async function __getRawTxQueueRows(): Promise<QueueRow[]> {
 export async function __getRawOfflineQueueRows(): Promise<QueueItemRow[]> {
   if (db?.getAllSync) {
     const rows = db.getAllSync(
-      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
+      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
     ) as QueueItemRow[];
     return rows ?? [];
   }

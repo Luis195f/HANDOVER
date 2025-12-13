@@ -13,13 +13,8 @@ import {
   type HandoverValues,
 } from './fhir-map';
 import type { AdministrativeData } from '../types/administrative';
-import {
-  postBundleSmart,
-  postBundle,
-  type Bundle,
-  type OperationIssue,
-  type ResponseLike,
-} from './fhir-client';
+import { postBundleSmart, postBundle, type Bundle, type ResponseLike } from './fhir-client';
+import { formatIssuesForUser, hasFatalOutcome, type OperationIssue } from './fhir-outcome';
 import { hashHex } from './crypto';
 import { z } from 'zod';
 import {
@@ -109,6 +104,24 @@ function formatFhirErrors(errors: string[]): ValidationResult['errors'] {
   return errors.map((err) => ({ path: '$', message: err }));
 }
 
+function serializeIssuesForStorage(issues?: OperationIssue[], max = 10): string | undefined {
+  if (!Array.isArray(issues) || issues.length === 0) return undefined;
+  return JSON.stringify(issues.slice(0, max));
+}
+
+function capIssuesJson(value?: string, max = 10): string | undefined {
+  if (!value) return value;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return JSON.stringify(parsed.slice(0, max));
+    }
+  } catch {
+    return value;
+  }
+  return value;
+}
+
 function resolveValidationMode(input?: ValidationMode): ValidationMode {
   if (input === 'off' || input === 'local' || input === 'remote') return input;
   if (ENV_VALIDATION_MODE === 'local' || ENV_VALIDATION_MODE === 'remote') return ENV_VALIDATION_MODE;
@@ -143,7 +156,10 @@ async function remoteValidateResource(
   const resourceType = typeof resource?.resourceType === 'string' ? resource.resourceType : undefined;
   if (!resourceType) return null;
   const url = `${opts.fhirBaseUrl.replace(/\/+$/, '')}/${resourceType}/$validate`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/fhir+json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/fhir+json',
+    Accept: 'application/fhir+json',
+  };
   if (opts.accessToken) headers.Authorization = `Bearer ${opts.accessToken}`;
 
   try {
@@ -167,7 +183,7 @@ async function remoteValidateResource(
   }
 }
 
-async function enforceBundleValidationWithMode(
+export async function enforceBundleValidationWithMode(
   bundle: any,
   context: string,
   opts?: ValidationOptions
@@ -187,16 +203,24 @@ async function enforceBundleValidationWithMode(
     .filter((res): res is Record<string, unknown> => !!res && typeof res === 'object');
 
   const errors: ValidationErrorDetail[] = [];
-  for (const resource of resources) {
-    const result = await remoteValidateResource(resource, { accessToken, fhirBaseUrl });
-    if (result && result.length > 0) {
-      errors.push(...result);
+  const concurrency = 3;
+  for (let i = 0; i < resources.length; i += concurrency) {
+    const slice = resources.slice(i, i + concurrency);
+    const results = await Promise.all(
+      slice.map((resource) => remoteValidateResource(resource, { accessToken, fhirBaseUrl })),
+    );
+    for (const result of results) {
+      if (result && result.length > 0) {
+        errors.push(...result);
+      }
     }
   }
 
   if (errors.length > 0) {
     annotateValidationErrors(bundle, errors);
-    const error = new Error(`Remote validation failed (${context})`);
+    const issues = errors.map((err) => ({ diagnostics: err.message, expression: [err.path] }));
+    const formatted = formatIssuesForUser(issues, { max: 5 });
+    const error = new Error(formatted.message);
     (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = errors;
     throw error;
   }
@@ -235,7 +259,9 @@ export function getNextDelayMs(attempts: number): number {
   return Math.min(delay, 60_000);
 }
 
-type QueueSendResult = { ok: true } | { ok: false; status?: number; message?: string; recoverable?: boolean };
+type QueueSendResult =
+  | { ok: true }
+  | { ok: false; status?: number; message?: string; recoverable?: boolean; errorIssuesJson?: string };
 type QueueSendHandler = (item: OfflineQueueItem) => Promise<QueueSendResult>;
 type OfflineQueuePayload = { bundle?: Bundle; txId?: string; patientId?: string };
 
@@ -379,11 +405,6 @@ function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
   };
 }
 
-function hasFatalOutcome(issues?: OperationIssue[]): OperationIssue | undefined {
-  if (!Array.isArray(issues)) return undefined;
-  return issues.find((issue) => issue?.severity === 'fatal' || issue?.severity === 'error');
-}
-
 function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
   return async (item) => {
     const parsed = extractOfflinePayload(item.payload);
@@ -410,12 +431,23 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
 
       const issues = response.issue ?? response.issues;
       const fatal = hasFatalOutcome(issues);
-      const message = fatal?.diagnostics ?? (response.body as { error?: string } | undefined)?.error;
+      const message = fatal?.diagnostics ?? (response.body as { error?: string } | undefined)?.error ?? response.message;
 
       if (response.status === 401 || response.status === 403) {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(new Error('unauthorized'));
         return { ok: false, status: response.status, recoverable: false, message: message ?? 'Unauthorized' };
+      }
+
+      if (response.status === 422) {
+        const formatted = formatIssuesForUser(issues, { max: 5 });
+        return {
+          ok: false,
+          status: response.status,
+          recoverable: false,
+          message: formatted.message,
+          errorIssuesJson: serializeIssuesForStorage(issues),
+        };
       }
 
       if (!response.ok) {
@@ -424,6 +456,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
           status: response.status,
           recoverable: fatal ? false : undefined,
           message: message ?? `HTTP ${response.status}`,
+          errorIssuesJson: serializeIssuesForStorage(issues),
         };
       }
 
@@ -433,6 +466,18 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(error);
         return { ok: false, status: 401, recoverable: false, message: error.message };
+      }
+      if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
+        const errs = (error as Error & { validationErrors?: ValidationResult['errors'] }).validationErrors;
+        const issues = errs?.map((err) => ({ diagnostics: err.message, expression: [err.path] }));
+        const formatted = formatIssuesForUser(issues, { max: 5 });
+        return {
+          ok: false,
+          status: 422,
+          recoverable: false,
+          message: formatted.message,
+          errorIssuesJson: serializeIssuesForStorage(issues),
+        };
       }
       return {
         ok: false,
@@ -511,6 +556,8 @@ export async function processQueueOnce(): Promise<void> {
 
     const isAuthError = result.status === 401 || result.status === 403;
     const recoverable = result.recoverable ?? isRecoverableStatus(result.status);
+    const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
+
     if (recoverable || isAuthError) {
       if (isAuthError) {
         pauseSync('Autenticación requerida');
@@ -521,6 +568,8 @@ export async function processQueueOnce(): Promise<void> {
         attempts: item.attempts + 1,
         lastAttemptAt: startedAt,
         errorMessage: result.message ?? undefined,
+        errorStatus: result.status,
+        errorIssuesJson: cappedIssuesJson,
       });
       continue;
     }
@@ -530,6 +579,8 @@ export async function processQueueOnce(): Promise<void> {
       attempts: item.attempts + 1,
       lastAttemptAt: startedAt,
       errorMessage: result.message ?? (result.status ? `HTTP ${result.status}` : undefined),
+      errorStatus: result.status,
+      errorIssuesJson: cappedIssuesJson,
     });
   }
 }
