@@ -5,10 +5,19 @@ import {
   Pressable, StyleSheet, Alert, useColorScheme, Switch
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import { readQueue } from '@/src/lib/offlineQueue';
+import { listOfflineQueue } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 
-type QueueItemMeta = { id: string; createdAt: number | string; tries: number; hash?: string };
+type QueueItemMeta = {
+  id: string;
+  createdAt: number | string;
+  tries: number;
+  hash?: string;
+  syncStatus?: string;
+  errorMessage?: string | null;
+  errorStatus?: number | null;
+  errorIssuesJson?: string | null;
+};
 
 function resolveSyncOpts(): SyncOpts | null {
   try {
@@ -48,12 +57,16 @@ export default function SyncCenter() {
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
-      const queue = await readQueue();
+      const queue = await listOfflineQueue();
       const meta: QueueItemMeta[] = queue.map((item) => ({
-        id: item.key,
+        id: item.id,
         createdAt: item.createdAt,
-        tries: item.tries,
+        tries: item.attempts ?? item.tries ?? 0,
         hash: item.hash,
+        syncStatus: item.syncStatus,
+        errorMessage: item.errorMessage,
+        errorStatus: item.errorStatus,
+        errorIssuesJson: item.errorIssuesJson,
       }));
       setItems(meta);
     } finally {
@@ -196,19 +209,98 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
     if (!s) return '';
     return s.length > n ? `${s.slice(0, n)}…` : s;
   };
+
+  const parseIssues = React.useCallback(() => {
+    if (!item.errorIssuesJson) return [] as Array<Record<string, unknown>>;
+    try {
+      const parsed = JSON.parse(item.errorIssuesJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [item.errorIssuesJson]);
+
+  const isError = item.syncStatus === 'error';
+  const isValidation422 = isError && item.errorStatus === 422;
+  const statusLabel = isValidation422
+    ? 'Error de validación FHIR (422)'
+    : isError
+    ? 'Error de sincronización'
+    : (item.syncStatus ?? 'pending').toUpperCase();
+
+  const rowStyle = [
+    styles.row,
+    { backgroundColor: C.card, borderColor: C.border },
+    isError && { borderColor: C.stateError },
+  ];
+
+  const showErrorAlert = React.useCallback(() => {
+    if (!isError) return;
+    const issues = parseIssues();
+    const issuesText = issues
+      .map((issue) => {
+        const diag = typeof issue?.diagnostics === 'string' ? issue.diagnostics : null;
+        const expr = Array.isArray(issue?.expression)
+          ? (issue.expression as unknown[])
+              .filter((it) => typeof it === 'string')
+              .join(', ')
+          : typeof issue?.expression === 'string'
+          ? issue.expression
+          : null;
+        if (diag && expr) return `• ${diag} (${expr})`;
+        if (diag) return `• ${diag}`;
+        if (expr) return `• ${expr}`;
+        return null;
+      })
+      .filter(Boolean)
+      .join('\n');
+
+    const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [];
+
+    if (issuesText) {
+      buttons.push({
+        text: 'Ver detalle',
+        onPress: () => Alert.alert('Detalle de error', issuesText),
+      });
+    }
+
+    buttons.push({ text: 'Cerrar', style: 'cancel' });
+
+    Alert.alert(
+      'Error de validación FHIR',
+      item.errorMessage || 'No se encontró mensaje de error.',
+      buttons,
+    );
+  }, [isError, item.errorMessage, parseIssues]);
+
+  const RowWrapper = isError ? Pressable : View;
+
   return (
-    <View style={[styles.row, { backgroundColor: C.card, borderColor: C.border }]}>
+    <RowWrapper
+      onPress={isError ? showErrorAlert : undefined}
+      style={isError ? ({ pressed }: { pressed?: boolean }) => [...rowStyle, pressed && { opacity: 0.95 }] : rowStyle}
+    >
       <View style={{ flex: 1 }}>
         <Text style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
         <Text style={[styles.sub, { color: C.textSecondary }]}>Fecha: {when}</Text>
         <Text style={[styles.sub, { color: C.textSecondary }]}>Tries: {item.tries}</Text>
+        {isError && (
+          <Text style={[styles.sub, { color: C.stateError, marginTop: 4 }]}>
+            Toca para ver el error
+          </Text>
+        )}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={[styles.hash, { color: C.textHint }]}>hash</Text>
         <Text style={[styles.hashVal, { color: C.textPrimary }]}>{short(item.hash, 24) || '—'}</Text>
-        <Text style={[styles.state, { color: C.statePending }]}>PENDING</Text>
+        <Text
+          style={[styles.state, { color: isError ? C.stateError : C.statePending }]}
+          numberOfLines={2}
+        >
+          {statusLabel}
+        </Text>
       </View>
-    </View>
+    </RowWrapper>
   );
 }
 
@@ -225,6 +317,7 @@ type Colors = {
   btnDisabled: string;
   btnText: string;
   statePending: string;
+  stateError: string;
 };
 
 const L_COLORS: Colors = {
@@ -239,6 +332,7 @@ const L_COLORS: Colors = {
   btnDisabled: '#90CAF9',
   btnText: '#ffffff',
   statePending: '#FF8F00',
+  stateError: '#C62828',
 };
 
 const D_COLORS: Colors = {
@@ -253,6 +347,7 @@ const D_COLORS: Colors = {
   btnDisabled: '#4F6B9B',
   btnText: '#000000',
   statePending: '#FFB300',
+  stateError: '#EF9A9A',
 };
 
 /* ===== STYLES ===== */
