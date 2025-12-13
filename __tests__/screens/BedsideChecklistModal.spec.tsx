@@ -64,7 +64,7 @@ function Harness({ onSubmit }: HarnessProps) {
   );
 }
 
-describe.skip('BedsideChecklistModal', () => {
+describe('BedsideChecklistModal', () => {
   it('no permite finalizar con checklist incompleto', async () => {
     const onSubmit = vi.fn();
     const { getByText, getByTestId, queryByText } = render(<Harness onSubmit={onSubmit} />);

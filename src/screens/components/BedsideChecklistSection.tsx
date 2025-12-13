@@ -10,10 +10,17 @@ export function BedsideChecklistSection({
 }: { highlightMissing?: boolean } = {}) {
   const {
     control,
-    formState: { errors },
+    watch,
+    formState: { errors, submitCount },
   } = useFormContext<HandoverValues>();
   const checklistErrors = (errors as any)?.bedsideChecklist;
-  const checklistMessage = typeof checklistErrors?.message === 'string' ? checklistErrors.message : undefined;
+  const checklist = watch('bedsideChecklist');
+  const checklistMessage =
+    typeof checklistErrors?.message === 'string'
+      ? checklistErrors.message
+      : submitCount > 0 && (!checklist?.patientIdentityConfirmed || !checklist?.allergiesReviewed)
+        ? 'Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.'
+        : undefined;
 
   const renderSwitch = (
     name: keyof HandoverValues['bedsideChecklist'],
