@@ -35,7 +35,7 @@ if (!navigatorDescriptor) {
 }
 
 g.__DEV__ = false;
-g.IS_REACT_ACT_ENVIRONMENT = true;
+g.IS_REACT_ACT_ENVIRONMENT = false;
 
 // Hacer que librerías que esperan `jest` funcionen en Vitest
 g.jest = g.jest ?? vi;

@@ -61,6 +61,7 @@ import { PatientBanner } from './components/PatientBanner';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { ExportPdfButton } from './components/ExportPdfButton';
+import { BedsideChecklistModal } from './components/BedsideChecklistModal';
 import { BedsideChecklistSection } from './components/BedsideChecklistSection';
 import SpecificCareSection from './components/SpecificCareSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
@@ -77,6 +78,7 @@ import { PatientSection } from '@/src/components/handover/PatientSection';
 import { VitalsSection } from '@/src/components/handover/VitalsSection';
 import { SummarySection } from '@/src/components/handover/SummarySection';
 import OxygenGroupSection from './components/OxygenGroupSection';
+import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -372,6 +374,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     sectionsInfo.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
   );
   const [activeSection, setActiveSection] = useState<SectionKey | null>(sectionsInfo[0]?.key ?? null);
+  const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1265,6 +1268,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const handleFinalize = () => {
+    const checklist = form.getValues('bedsideChecklist');
+    if (!isBedsideChecklistComplete(checklist)) {
+      setBedsideModalVisible(true);
+      return;
+    }
     form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
     onSubmit();
   };
@@ -1922,6 +1930,16 @@ export default function HandoverForm({ navigation, route }: Props) {
         </View>
       </ScrollView>
       </View>
+
+      <BedsideChecklistModal
+        visible={bedsideModalVisible}
+        onCancel={() => setBedsideModalVisible(false)}
+        onConfirm={() => {
+          setBedsideModalVisible(false);
+          form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
+          onSubmit();
+        }}
+      />
     </FormProvider>
   );
 }

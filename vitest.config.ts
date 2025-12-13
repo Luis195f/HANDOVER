@@ -105,9 +105,7 @@ export default defineConfig({
       // Stub explícito de @testing-library/react-native
       {
         find: '@testing-library/react-native',
-        replacement: fromRoot(
-          './tests/__mocks__/@testing-library-react-native.ts',
-        ),
+        replacement: fromRoot('./tests/__mocks__/@testing-library-react-native.ts'),
       },
 
       // jest-native -> nuestro adaptador local

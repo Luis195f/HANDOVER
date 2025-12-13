@@ -5,7 +5,9 @@ import { StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { HandoverValues } from '@/src/validation/schemas';
 
 // BEGIN HANDOVER D1 – BedsideChecklist
-export function BedsideChecklistSection() {
+export function BedsideChecklistSection({
+  highlightMissing = false,
+}: { highlightMissing?: boolean } = {}) {
   const {
     control,
     formState: { errors },
@@ -23,7 +25,14 @@ export function BedsideChecklistSection() {
       name={`bedsideChecklist.${name}` as const}
       render={({ field: { onChange, value } }) => (
         <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>{label}</Text>
+          <Text
+            style={[
+              styles.switchLabel,
+              highlightMissing && !value ? styles.missingLabel : null,
+            ]}
+          >
+            {label}
+          </Text>
           <Switch
             accessibilityLabel={label}
             value={Boolean(value)}
@@ -93,4 +102,5 @@ const styles = StyleSheet.create({
   },
   textArea: { height: 120, textAlignVertical: 'top' },
   error: { color: '#DC2626', marginTop: 6 },
+  missingLabel: { color: '#DC2626', fontWeight: '600' },
 });
