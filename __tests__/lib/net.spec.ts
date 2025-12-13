@@ -19,7 +19,11 @@ describe('safeFetch', () => {
 
     const response = await safeFetch('https://api/foo', {
       fetchImpl: fetchMock,
-      retry: { retries: 1, baseDelayMs: 0, maxDelayMs: 0 },
+      retries: 1,
+      backoffMs: 0,
+      backoffFactor: 1,
+      maxBackoffMs: 0,
+      random: () => 0,
     });
 
     expect(response.ok).toBe(true);
@@ -33,11 +37,13 @@ describe('safeFetch', () => {
     const promise = safeFetch('https://api/slow', {
       fetchImpl: fetchMock,
       timeoutMs: 10,
-      retry: { retries: 0 },
+      retries: 0,
     });
 
+    const rejection = expect(promise).rejects.toBeInstanceOf(TimeoutError);
     await vi.advanceTimersByTimeAsync(20);
-    await expect(promise).rejects.toBeInstanceOf(TimeoutError);
+    await rejection;
+    await vi.runAllTimersAsync();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -45,7 +51,7 @@ describe('safeFetch', () => {
     const fetchMock = vi.fn(async () => new Response('fail', { status: 404 }));
 
     await expect(
-      safeFetch('https://api/not-found', { fetchImpl: fetchMock, retry: { retries: 0 } })
+      safeFetch('https://api/not-found', { fetchImpl: fetchMock, retries: 0 })
     ).rejects.toBeInstanceOf(HTTPError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
