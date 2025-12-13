@@ -60,7 +60,7 @@ function buildWrapper(options = {}) {
   return React.createElement(Wrapper);
 }
 
-describe.skip('BedsideChecklistSection', () => {
+describe('BedsideChecklistSection', () => {
   it('actualiza el estado del formulario al alternar los switches', () => {
     let methods = null;
     function Wrapper() {

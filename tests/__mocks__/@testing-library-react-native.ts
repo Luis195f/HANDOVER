@@ -23,8 +23,11 @@ type RenderResult = {
 };
 
 export function render(element: React.ReactElement): RenderResult {
-  const renderer = TestRenderer.create(element);
-  const root = renderer.root;
+  let renderer: ReactTestRenderer;
+  TestRenderer.act(() => {
+    renderer = TestRenderer.create(element);
+  });
+  const root = renderer!.root;
 
   const matchText = (node: ReactTestInstance, matcher: string | RegExp) => {
     const text = node.props.children;
@@ -92,7 +95,9 @@ export function fireEvent(target: any, eventName?: string, ...args: any[]) {
         : `on${eventName.charAt(0).toUpperCase()}${eventName.slice(1)}`;
     const handler = target.props[propName];
     if (typeof handler === 'function') {
-      handler(...args);
+      TestRenderer.act(() => {
+        handler(...args);
+      });
     }
   }
 }
@@ -101,18 +106,40 @@ fireEvent.press = (target: any) => {
   if (!target || !target.props) return;
   const handler = target.props.onPress ?? target.props.onClick;
   if (typeof handler === 'function') {
-    handler({});
+    TestRenderer.act(() => {
+      handler({});
+    });
   }
 };
 
 fireEvent.changeText = (target: any, value: string) => {
   if (typeof target?.props?.onChangeText === 'function') {
-    target.props.onChangeText(value);
+    TestRenderer.act(() => {
+      target.props.onChangeText(value);
+    });
   }
 };
 
-export async function waitFor(callback: () => void | Promise<void>) {
-  await callback();
+export async function waitFor(
+  callback: () => void | Promise<void>,
+  { timeout = 200, interval = 10 }: { timeout?: number; interval?: number } = {},
+) {
+  const start = Date.now();
+  // Pequeña implementación de waitFor que reintenta hasta que el callback no falle
+  // o se alcance el timeout.
+  // Uso mínimo para nuestros tests: sin configuraciones avanzadas.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      await callback();
+      return;
+    } catch (error) {
+      if (Date.now() - start >= timeout) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
 }
 
 export const screen = {

@@ -90,7 +90,15 @@ export const Text = createPrimitive('Text');
 export const ScrollView = createPrimitive('ScrollView');
 export const SafeAreaView = createPrimitive('SafeAreaView');
 export const ActivityIndicator = createPrimitive('ActivityIndicator');
-export const Modal = createPrimitive('Modal');
+export interface ModalProps extends RNProps {
+  visible?: boolean;
+  onRequestClose?: () => void;
+  transparent?: boolean;
+  animationType?: 'none' | 'slide' | 'fade';
+}
+
+export const Modal: React.FC<ModalProps> = ({ visible = true, children, ...props }) =>
+  visible ? React.createElement('Modal', props, children) : null;
 
 // -----------------------------------------------------------------------------
 // TextInput
@@ -142,6 +150,7 @@ export const Switch: React.FC<SwitchProps> = ({
   React.createElement('Switch', {
     ...props,
     value,
+    onValueChange,
     onChange: () => onValueChange?.(!value),
   });
 Switch.displayName = 'Switch';
