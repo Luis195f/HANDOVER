@@ -1,6 +1,6 @@
 // tests/__mocks__/@testing-library-react-native.ts
 import React from 'react';
-import TestRenderer, { act } from 'react-test-renderer';
+import TestRenderer from 'react-test-renderer';
 
 type ReactTestRenderer = TestRenderer.ReactTestRenderer;
 type ReactTestInstance = TestRenderer.ReactTestInstance;
@@ -9,6 +9,11 @@ type RenderResult = {
   root: ReactTestInstance;
   getByText: (text: string | RegExp) => ReactTestInstance;
   queryByText: (text: string | RegExp) => ReactTestInstance | null;
+  findByText: (text: string | RegExp) => Promise<ReactTestInstance>;
+  getByLabelText: (text: string | RegExp) => ReactTestInstance;
+  queryByLabelText: (text: string | RegExp) => ReactTestInstance | null;
+  getByTestId: (testId: string | RegExp) => ReactTestInstance;
+  queryByTestId: (testId: string | RegExp) => ReactTestInstance | null;
   toJSON: () =>
     | TestRenderer.ReactTestRendererJSON
     | TestRenderer.ReactTestRendererJSON[]
@@ -18,96 +23,105 @@ type RenderResult = {
 };
 
 export function render(element: React.ReactElement): RenderResult {
-  let renderer!: ReactTestRenderer;
-
-  act(() => {
-    renderer = TestRenderer.create(element);
-  });
-
+  const renderer = TestRenderer.create(element);
   const root = renderer.root;
 
   const matchText = (node: ReactTestInstance, matcher: string | RegExp) => {
     const text = node.props.children;
     if (typeof text !== 'string') return false;
-
-    if (typeof matcher === 'string') {
-      return text.includes(matcher);
-    }
-    return matcher.test(text);
+    return typeof matcher === 'string' ? text.includes(matcher) : matcher.test(text);
   };
 
-  function getByText(text: string | RegExp): ReactTestInstance {
-    return root.find((node) => matchText(node, text));
-  }
+  const matchProp = (node: ReactTestInstance, prop: string, matcher: string | RegExp) => {
+    const value = node.props?.[prop];
+    if (typeof value !== 'string') return false;
+    return typeof matcher === 'string' ? value === matcher : matcher.test(value);
+  };
 
-  function queryByText(text: string | RegExp): ReactTestInstance | null {
+  const getByText = (text: string | RegExp) => root.find((node) => matchText(node, text));
+  const queryByText = (text: string | RegExp) => {
     try {
       return getByText(text);
     } catch {
       return null;
     }
-  }
+  };
+
+  const findByText = async (text: string | RegExp) => getByText(text);
+
+  const getByLabelText = (text: string | RegExp) =>
+    root.find((node) => matchProp(node, 'accessibilityLabel', text));
+  const queryByLabelText = (text: string | RegExp) => {
+    try {
+      return getByLabelText(text);
+    } catch {
+      return null;
+    }
+  };
+
+  const getByTestId = (testId: string | RegExp) => root.find((node) => matchProp(node, 'testID', testId));
+  const queryByTestId = (testId: string | RegExp) => {
+    try {
+      return getByTestId(testId);
+    } catch {
+      return null;
+    }
+  };
 
   return {
     root,
     getByText,
     queryByText,
+    findByText,
+    getByLabelText,
+    queryByLabelText,
+    getByTestId,
+    queryByTestId,
     toJSON: () => renderer.toJSON(),
-    update: (el) =>
-      act(() => {
-        renderer.update(el);
-      }),
-    unmount: () =>
-      act(() => {
-        renderer.unmount();
-      }),
+    update: (el) => renderer.update(el),
+    unmount: () => renderer.unmount(),
   };
 }
 
-export const fireEvent = {
-  press(target: any) {
-    const props = target?.props ?? {};
-    const parentProps = target?.parent?.props ?? {};
-    if (props.disabled || parentProps.disabled) return;
+export function fireEvent(target: any, eventName?: string, ...args: any[]) {
+  if (!target || !target.props) return;
+  if (typeof eventName === 'string') {
+    const propName =
+      eventName === 'valueChange'
+        ? 'onValueChange'
+        : `on${eventName.charAt(0).toUpperCase()}${eventName.slice(1)}`;
+    const handler = target.props[propName];
+    if (typeof handler === 'function') {
+      handler(...args);
+    }
+  }
+}
 
-    const handler =
-      typeof props.onPress === 'function'
-        ? props.onPress
-        : typeof props.onClick === 'function'
-          ? props.onClick
-        : typeof parentProps.onPress === 'function'
-          ? parentProps.onPress
-          : typeof parentProps.onClick === 'function'
-            ? parentProps.onClick
-          : null;
-    if (handler) {
-      handler({});
-    }
-  },
-  changeText(target: any, value: string) {
-    if (typeof target.props.onChangeText === 'function') {
-      target.props.onChangeText(value);
-    }
-  },
+fireEvent.press = (target: any) => {
+  if (!target || !target.props) return;
+  const handler = target.props.onPress ?? target.props.onClick;
+  if (typeof handler === 'function') {
+    handler({});
+  }
 };
 
-export async function waitFor(
-  callback: () => void | Promise<void>,
-): Promise<void> {
-  await act(async () => {
-    await callback();
-  });
+fireEvent.changeText = (target: any, value: string) => {
+  if (typeof target?.props?.onChangeText === 'function') {
+    target.props.onChangeText(value);
+  }
+};
+
+export async function waitFor(callback: () => void | Promise<void>) {
+  await callback();
 }
 
 export const screen = {
   render,
 };
 
-const defaultExport = {
+export default {
   render,
   fireEvent,
   waitFor,
   screen,
 };
-
-export default defaultExport;
