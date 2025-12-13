@@ -26,6 +26,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
       - `"off"` (por defecto): el backend reenviará los Bundles sin validarlos.
       - `"remote"`: se invocará `$validate` contra el servidor FHIR (`FHIR_BASE/Bundle/$validate`) antes de reenviar; si se detectan errores `error`/`fatal` se responderá `422` con detalles.
 2. Variables adicionales leídas desde Expo (`app.json > expo.extra`) o el entorno:
+   - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`: `off | local | remote` controla la validación del cliente (por defecto `off` en desarrollo; en producción se recomienda `remote` para validar contra el servidor FHIR antes de enviar). Requiere que el backend tenga `HANDOVER_FHIR_VALIDATION_MODE=remote` para que el servidor valide.
    - `EXPO_PUBLIC_API_BASE_URL` (o `API_BASE_URL`) apunta al backend REST si se usa el servidor Django.
    - `EXPO_PUBLIC_API_TOKEN` agrega un token para llamadas autenticadas contra APIs complementarias.
    - `EXPO_PUBLIC_STORAGE_NAMESPACE` personaliza el espacio de almacenamiento seguro y el aislamiento de datos offline.
