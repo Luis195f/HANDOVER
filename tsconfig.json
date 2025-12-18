@@ -11,10 +11,10 @@
     },
     "jsx": "react-jsx",
     "lib": ["es2021", "dom"],
-    "typeRoots": ["./types", "./node_modules/@types"],
+    "typeRoots": ["./node_modules/@types"],
     "noImplicitAny": false
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "jest-tests/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
   "exclude": [
     "node_modules",
     "tests/**",

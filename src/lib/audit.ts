@@ -107,11 +107,15 @@ export function pruneOldEvents(events: AuditEvent[], options: PruneOptions): Aud
   });
 }
 
-async function getAsyncStorage(): Promise<{ getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> } | null> {
+type AsyncStorageAdapter = { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> };
+
+async function getAsyncStorage(): Promise<AsyncStorageAdapter | null> {
   try {
     const mod = await import('@react-native-async-storage/async-storage');
-    const storage = (mod as unknown as { default?: { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> } }).default ?? (mod as unknown as { getItem?: (key: string) => Promise<string | null>; setItem?: (key: string, value: string) => Promise<void> });
-    if (storage?.getItem && storage?.setItem) return storage;
+    const storage =
+      (mod as unknown as { default?: AsyncStorageAdapter }).default ??
+      (mod as unknown as Partial<AsyncStorageAdapter>);
+    if (storage?.getItem && storage?.setItem) return storage as AsyncStorageAdapter;
     return null;
   } catch {
     return null;

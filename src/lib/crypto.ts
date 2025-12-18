@@ -1,5 +1,5 @@
 import CryptoJS from 'crypto-js';
-import * as ExpoCrypto from 'expo-crypto';
+import * as Crypto from 'expo-crypto';
 import { gcm } from '@noble/ciphers/aes.js';
 import { sha256 } from 'js-sha256';
 
@@ -45,8 +45,8 @@ async function deriveKeyBytes(): Promise<Uint8Array> {
 
   const encoder = new TextEncoder();
   const keyBytes = encoder.encode(rawKey);
-  const hashed = await ExpoCrypto.digest(ExpoCrypto.CryptoDigestAlgorithm.SHA256, keyBytes);
-  const hashedBytes = Uint8Array.from(Buffer.from(hashed, 'hex'));
+  const hashed = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, keyBytes);
+  const hashedBytes = hashed instanceof Uint8Array ? hashed : new Uint8Array(hashed);
   return hashedBytes;
 }
 
@@ -64,7 +64,7 @@ export async function encryptOfflinePayload(plaintextJson: string): Promise<stri
   }
 
   const keyBytes = await deriveKeyBytes();
-  const iv = await ExpoCrypto.getRandomBytesAsync(12);
+  const iv = await Crypto.getRandomBytesAsync(12);
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintextJson);
   const cipher = gcm(keyBytes, iv);

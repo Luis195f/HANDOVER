@@ -1,5 +1,4 @@
 import * as AuthSession from 'expo-auth-session';
-import type { AuthSessionResult } from 'expo-auth-session';
 import Constants from 'expo-constants';
 import { clearAuthState, getAuthState, setAuthState, subscribe, type AuthTokens } from '@/src/state/auth-store';
 
@@ -67,7 +66,7 @@ type AuthRequestLike = {
     discovery: DiscoveryDocument,
     options?: Record<string, unknown>
   ) => Promise<
-    | ({ type: 'success'; params?: Record<string, string | undefined> } & AuthSessionResult)
+    | ({ type: 'success'; params?: Record<string, string | undefined> } & AuthSession.AuthSessionResult)
     | { type: 'dismiss' | 'cancel'; params?: Record<string, string | undefined> }
   >;
 };
