@@ -31,7 +31,7 @@ export interface HandoverSession {
 
 export interface AuthSession extends HandoverSession {
   fullName?: string;
-  expiresAt?: string | number; // epoch seconds (legacy) o ISO
+  expiresAt?: string; // ISO
   roles: UserRole[] | string[];
 }
 // END HANDOVER_AUTH

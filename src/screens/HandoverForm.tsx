@@ -22,7 +22,7 @@ import * as Speech from 'expo-speech';
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
 import { hashHex } from '@/src/lib/crypto';
-import { buildHandoverBundle } from '@/src/lib/fhir-map';
+import { buildHandoverBundle, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { refineSBARWithAI } from '@/src/lib/ai-sbar';
@@ -226,7 +226,11 @@ const findActiveSection = (
 
 function deriveInitialRisksStructured(values: HandoverFormValues): RiskItem[] {
   if (Array.isArray(values.risksStructured) && values.risksStructured.length > 0) {
-    return values.risksStructured;
+    return values.risksStructured.map((item) => ({
+      ...item,
+      actions: item.actions ?? [],
+      notes: typeof item.notes === 'string' ? item.notes : undefined,
+    }));
   }
 
   const items: RiskItem[] = [];
@@ -325,7 +329,8 @@ async function buildAudioAttachment(uri: string | undefined) {
       encoding: 'base64',
     });
     const info = await FileSystem.getInfoAsync(uri);
-    const reportedSize = typeof info.size === 'number' ? info.size : undefined;
+    const reportedSize =
+      info.exists && !info.isDirectory && typeof info.size === 'number' ? info.size : undefined;
     const size = reportedSize ?? Math.floor((dataBase64.length * 3) / 4);
     return {
       dataBase64,
@@ -365,7 +370,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           acc[key] = React.createRef<View>();
           return acc;
         },
-        {} as Record<SectionKey, React.RefObject<View>>,
+        {} as Record<SectionKey, React.RefObject<View | null>>,
       ),
     [],
   );
@@ -443,12 +448,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbarRecommendation: '',
       vitals: prefilledVitals ?? {},
       oxygenTherapy: {},
-      fluidBalance: {
-        intakeMl: undefined,
-        outputMl: undefined,
-        netBalanceMl: undefined,
-        notes: '',
-      },
+      fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
         evaScore: null,
@@ -713,7 +713,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     if (activeDictationField === field && sttStatus === 'processing') {
       return <Text style={styles.dictationStatus}>Procesando dictado…</Text>;
     }
-    if (lastDictationField === field && sttError && sttError !== 'UNSUPPORTED') {
+    if (lastDictationField === field && sttError && !dictationUnavailable) {
       const message =
         sttError === 'PERMISSION_DENIED'
           ? 'Activa los permisos de micrófono para dictar las notas.'
@@ -952,10 +952,10 @@ export default function HandoverForm({ navigation, route }: Props) {
         typeof patientIdValue === 'string' && patientIdValue.trim()
           ? patientIdValue.trim()
           : undefined;
-      navigation.navigate(
-        'QRScan' as never,
-        { returnTo: 'HandoverForm', patientIdParam: trimmedPatientId } as never,
-      );
+      (navigation as any).navigate('QRScan', {
+        returnTo: 'HandoverForm',
+        patientIdParam: trimmedPatientId,
+      });
     } else {
       Alert.alert('Escáner no disponible', 'Esta build no incluye la pantalla de QR (opcional para demo).');
     }
@@ -968,8 +968,9 @@ export default function HandoverForm({ navigation, route }: Props) {
       Alert.alert('Falta firma', 'Para finalizar la entrega falta la firma de enfermera saliente.');
       return;
     }
-    const message = typeof formErrors?.message === 'string' ? formErrors.message : 'No se pudo guardar';
-    Alert.alert('Error', typeof message === 'string' ? message : 'No se pudo guardar');
+    const message =
+      typeof formErrors?.root?.message === 'string' ? formErrors.root.message : 'No se pudo guardar';
+    Alert.alert('Error', message);
   };
 
   const truncateNote = (value?: string | null, maxLength = 400) => {
@@ -1094,10 +1095,11 @@ export default function HandoverForm({ navigation, route }: Props) {
       const treatments = values.treatments ?? [];
       const medsText = values.meds;
       const oxygenTherapyInput = values.oxygenTherapy ?? {};
-      const hasOxygenValues =
+      const hasOxygenValues = Boolean(
         oxygenTherapyInput.device ||
         oxygenTherapyInput.flowLMin != null ||
-        oxygenTherapyInput.fio2 != null;
+        oxygenTherapyInput.fio2 != null
+      );
 
       const oxygenTherapy = hasOxygenValues
         ? {
@@ -1122,35 +1124,34 @@ export default function HandoverForm({ navigation, route }: Props) {
       };
 
       const nowIso = new Date().toISOString();
-      const bundle = buildHandoverBundle(
-        {
-          patientId: values.patientId,
-          status,
-          author: signatureUser?.userId
-            ? { id: signatureUser.userId, display: signatureUser.fullName ?? signatureUser.displayName }
-            : session?.user?.id
-              ? { id: session.user.id, display: session.user.name }
-              : undefined,
-          vitals: values.vitals,
-          medications,
-          treatments,
-          oxygenTherapy,
-          audioAttachment: audioAttachment ?? undefined,
-          composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
-          administrativeData,
-          closingSummary: values.closingSummary,
-          meds: medsText,
-          sbar: {
-            situation: values.sbarSituation,
-            background: values.sbarBackground,
-            assessment: values.sbarAssessment,
-            recommendation: values.sbarRecommendation,
-          },
-          painAssessment: values.painAssessment,
-          signatures: values.signatures,
+      const handoverInput: FhirHandoverInput = {
+        ...values,
+        status,
+        author: signatureUser?.userId
+          ? { id: signatureUser.userId, display: signatureUser.fullName ?? signatureUser.displayName }
+          : session?.user?.id
+            ? { id: session.user.id, display: session.user.name }
+            : undefined,
+        vitals: values.vitals,
+        medications,
+        treatments,
+        oxygenTherapy,
+        audioAttachment: audioAttachment ?? undefined,
+        composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
+        administrativeData,
+        closingSummary: values.closingSummary,
+        meds: medsText,
+        sbar: {
+          situation: values.sbarSituation,
+          background: values.sbarBackground,
+          assessment: values.sbarAssessment,
+          recommendation: values.sbarRecommendation,
         },
-        { now: () => nowIso },
-      );
+        painAssessment: values.painAssessment,
+        signatures: values.signatures,
+      };
+
+      const bundle = buildHandoverBundle(handoverInput, { now: () => nowIso });
 
       await enqueueBundle(bundle, {
         patientId: values.patientId,
@@ -1286,9 +1287,10 @@ export default function HandoverForm({ navigation, route }: Props) {
     setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleIndexSelect = (key: SectionKey) => {
-    setCollapsedSections((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
-    const y = sectionPositions[key];
+  const handleIndexSelect = (key: string) => {
+    const sectionKey = key as SectionKey;
+    setCollapsedSections((prev) => (prev[sectionKey] ? { ...prev, [sectionKey]: false } : prev));
+    const y = sectionPositions[sectionKey];
     if (typeof y !== 'number') return;
 
     requestAnimationFrame(() => {

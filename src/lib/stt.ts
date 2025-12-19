@@ -1,7 +1,8 @@
 // Fase 3 – Bloque A (STT) implementado: servicio de transcripción de voz con adaptador y fallback.
 import { Platform } from 'react-native';
-import { Audio, type PermissionResponse } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import { Audio } from 'expo-av';
+import type { PermissionResponse } from 'expo-modules-core';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { AI_BACKEND_BASE_URL, STT_ENDPOINT } from '@/src/config/env';
 

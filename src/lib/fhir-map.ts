@@ -26,8 +26,37 @@ import { validateResource as validateFhirResource } from './fhir-validation';
 export type HandoverData = z.infer<typeof zHandover>;
 
 const DEFAULT_OPTS = { now: () => new Date().toISOString() } as const;
-const resolveOptions = (options?: Partial<typeof DEFAULT_OPTS>) =>
-  ({ ...DEFAULT_OPTS, ...options }) as typeof DEFAULT_OPTS;
+
+type HandoverBuildOptionExtras = {
+  normalizeGlucoseToMgdl?: boolean;
+  normalizeGlucoseToMgDl?: boolean;
+  glucoseDecimals?: number;
+  emitPanel?: (resource: unknown) => void;
+  emitHasMember?: (resource: unknown) => void;
+  emitBpPanel?: (resource: unknown) => void;
+  emitIndividuals?: (resource: unknown) => void;
+  profileUrls?: Record<string, unknown>;
+};
+
+export type BuildOptions = Partial<Omit<typeof DEFAULT_OPTS, 'now'>> &
+  Partial<HandoverBuildOptionExtras> & {
+    now?: (() => string) | Date | string;
+  };
+
+type ResolvedBuildOptions = (typeof DEFAULT_OPTS & BuildOptions) & { now: () => string };
+
+const resolveOptions = (options?: BuildOptions): ResolvedBuildOptions => {
+  const merged = { ...DEFAULT_OPTS, ...(options ?? {}) };
+  const normalizeNow =
+    typeof merged.now === 'function'
+      ? merged.now
+      : () => {
+          if (merged.now instanceof Date) return merged.now.toISOString();
+          if (typeof merged.now === 'string') return merged.now;
+          return DEFAULT_OPTS.now();
+        };
+  return { ...merged, now: normalizeNow };
+};
 
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
 
@@ -213,6 +242,10 @@ type CompositionSection = {
   text?: Narrative;
 };
 
+type CompositionEvent = {
+  period?: Period;
+};
+
 type Composition = {
   resourceType: 'Composition';
   id?: string;
@@ -224,6 +257,7 @@ type Composition = {
   author: Reference[];
   title: string;
   attester?: CompositionAttester[];
+  event?: CompositionEvent[];
   section?: CompositionSection[];
 };
 
@@ -591,7 +625,6 @@ export type HandoverValues = {
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
 
-export type BuildOptions = Partial<typeof DEFAULT_OPTS>;
 
 type MappingContext = {
   subject: Reference;
@@ -778,7 +811,7 @@ function assignStableIds(
 
 function ensureEffectiveDate(
   parsed: ObservationVitalsInput,
-  optionsMerged: typeof DEFAULT_OPTS,
+  optionsMerged: ResolvedBuildOptions,
 ): { effective: string; issued: string } {
   const effective = parsed.recordedAt ?? optionsMerged.now();
   const issued = parsed.issuedAt ?? effective;
@@ -957,7 +990,7 @@ export function mapObservationVitals(
   return observations;
 }
 
-const MEDICATION_ROUTE_LABELS: Partial<Record<MedicationItem['route'], string>> = {
+const MEDICATION_ROUTE_LABELS: Partial<Record<NonNullable<MedicationItem['route']>, string>> = {
   oral: 'Oral',
   iv: 'IV',
   im: 'IM',
@@ -1992,14 +2025,14 @@ export function buildHandoverBundle(
   options?: BuildOptions,
 ): Bundle {
   const values = 'values' in input ? input.values : input;
-  const optionsMerged = resolveOptions(options);
+  const optionsMerged: ResolvedBuildOptions = resolveOptions(options);
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => nowIso };
 
   const mappingContext: MappingContext = {
     subject: patientReference(values.patientId),
     encounter: encounterReference(values.encounterId),
-    effectiveDateTime: sharedOptions.now(),
+    effectiveDateTime: nowIso,
   };
   const patient: Patient = {
     resourceType: 'Patient',
@@ -2334,12 +2367,13 @@ function mapDiagnoses(
   const addCondition = (text: string | undefined, categoryCode?: TerminologyCode<string>) => {
     const trimmed = text?.trim();
     if (!trimmed) return;
+    const coding = categoryCode ? [categoryCode] : [];
     conditions.push({
       resourceType: 'Condition',
       clinicalStatus: conditionClinicalStatusActive,
       verificationStatus: conditionVerificationStatusUnconfirmed,
       category: categoryCode ? [codeableConceptFromCode(categoryCode)] : undefined,
-      code: { coding: categoryCode ? [categoryCode] : undefined, text: trimmed },
+      code: { coding, text: trimmed },
       subject: context.subject,
       encounter: context.encounter,
       onsetDateTime: context.effectiveDateTime,
@@ -2413,11 +2447,15 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     effectiveDateTime: timestamp,
   };
 
+    const oxygenTherapyInput: OxygenTherapyInput | undefined = data.oxygenTherapy
+      ? ({ status: 'in-progress', ...data.oxygenTherapy } as OxygenTherapyInput)
+      : undefined;
+
   const vitals = data.vitals
     ? mapObservationVitals({ patientId: data.patientId, ...data.vitals }, sharedOptions)
     : [];
   const oxygenObservations = mapOxygenObservations(
-    { patientId: data.patientId, oxygenTherapy: data.oxygenTherapy },
+    { patientId: data.patientId, oxygenTherapy: oxygenTherapyInput },
     sharedOptions,
   );
   const nutrition = mapNutritionCare(
@@ -2454,12 +2492,12 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     sharedOptions,
   );
   const oxygenDevices = mapDeviceUse(
-    { patientId: data.patientId, oxygenTherapy: data.oxygenTherapy },
+    { patientId: data.patientId, oxygenTherapy: oxygenTherapyInput },
     sharedOptions,
   );
   const document = data.audioUri
     ? mapDocumentReferenceAudio(
-        { patientId: data.patientId, audioAttachment: { url: data.audioUri } },
+        { patientId: data.patientId, audioAttachment: { url: data.audioUri, contentType: 'audio/mpeg' } },
         sharedOptions,
       )
     : undefined;
@@ -2579,7 +2617,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   return { resourceType: 'Bundle', type: 'transaction', entry: entries } satisfies FhirBundleTransaction;
 }
 
-const transactionBundleSchema: z.ZodType<FhirBundleTransaction> = z.object({
+  const transactionBundleSchema = z.object({
   resourceType: z.literal('Bundle'),
   type: z.literal('transaction'),
   entry: z

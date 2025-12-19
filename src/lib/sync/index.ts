@@ -14,10 +14,9 @@ import NetInfo from '@/src/lib/netinfo';
 import { configureFHIRClient, postBundle } from '../fhir-client';
 import {
   validateBundle as validateFHIRBundle,
-  validateResource,
-  type FhirValidationResult,
+  validateResourceWithZod,
   type ValidationResult,
-} from '../fhir-validation';
+} from '../fhir-validation/zod';
 import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
@@ -44,10 +43,12 @@ function enforceBundleValidation(bundle: unknown, context: string): ValidationEr
     throw error;
   }
 
-  const fhirValidation: FhirValidationResult = validateResource(bundle, 'Bundle');
-  if (!fhirValidation.ok) {
-    const mappedErrors = fhirValidation.errors.map((message) => ({ path: '$', message }));
-    const error = new Error(`FHIR structure validation failed (${context}): ${fhirValidation.errors.join('; ')}`);
+  const fhirValidation = validateResourceWithZod(bundle);
+  if (!fhirValidation.isValid) {
+    const mappedErrors = fhirValidation.errors;
+    const error = new Error(
+      `FHIR structure validation failed (${context}): ${mappedErrors.map((err) => err.message).join('; ')}`
+    );
     (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = mappedErrors;
     if (bundle && typeof bundle === 'object') {
       (bundle as Record<string, unknown>)._validationErrors = mappedErrors;
@@ -162,7 +163,10 @@ function createFlusher(opts: SyncOpts) {
     let processed = 0;
 
     await runQueueFlush(async (tx) => {
-      const payload = tx.payload ?? {};
+      const payload =
+        tx.payload && typeof tx.payload === 'object'
+          ? (tx.payload as { bundle?: unknown; meta?: { hash?: string } })
+          : {};
       const bundle = payload.bundle;
       const hash = payload.meta?.hash ?? tx.key;
 

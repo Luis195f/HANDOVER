@@ -1,4 +1,5 @@
 import type { HandoverValues } from '@/src/validation/schemas';
+import type { AlertButton } from 'react-native';
 
 import { calculateBraden } from './braden';
 import type { BradenInput } from './braden';
@@ -62,7 +63,7 @@ export function deriveRiskEvaluationFromValues(
 export async function confirmHighRiskSubmission(
   status: HandoverValues['status'] | undefined,
   evaluation: RiskEvaluation,
-  alertFn: (title: string, message?: string, buttons?: Array<{ text?: string; style?: string; onPress?: () => void }>) => void,
+  alertFn: (title: string, message?: string, buttons?: AlertButton[]) => void,
 ): Promise<boolean> {
   if (status === 'draft' || evaluation.level !== 'high') {
     return true;

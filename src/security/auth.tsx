@@ -37,7 +37,7 @@ const REDIRECT_URI =
 // EXPO_PUBLIC_AUTH0_LOGOUT_URI debe ser un deep link válido (ej: handover-pro://auth/logout) cuando se defina.
 const LOGOUT_REDIRECT_URI =
   process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
-  AuthSession.makeRedirectUri({ useProxy: false, path: 'auth/logout' });
+  AuthSession.makeRedirectUri({ path: 'auth/logout' });
 
 const DEFAULT_AUTH_CONFIG = {
   issuer: `https://${AUTH0_DOMAIN}`,
@@ -71,31 +71,45 @@ let migrationAttempted = false;
 async function getLegacyAsyncStorage(): Promise<AsyncStorageLike | null> {
   try {
     const mod = await import('@react-native-async-storage/async-storage');
-    const storage = (mod as unknown as { default?: AsyncStorageLike }).default ?? (mod as unknown as AsyncStorageLike);
-    if (storage?.getItem && storage?.removeItem) return storage;
+    const storage =
+      (mod as unknown as { default?: Partial<AsyncStorageLike> }).default ?? (mod as unknown as Partial<AsyncStorageLike>);
+    if (storage?.getItem && storage?.removeItem) return storage as AsyncStorageLike;
     return null;
   } catch {
     return null;
   }
 }
 
-  function parseSession(raw: string | null): StoredAuthSession | null {
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as StoredAuthSession;
-    } catch {
-      return null;
-    }
+function parseSession(raw: string | null): StoredAuthSession | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredAuthSession;
+  } catch {
+    return null;
   }
+}
 
-function normalizeExpiresAt(expiresAt: StoredAuthSession['expiresAt']): string | undefined {
-  if (typeof expiresAt === 'number') {
-    return new Date(expiresAt * 1000).toISOString();
+function toIsoExpiresAt(value: string | number | undefined): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'number') {
+    const millis = value < 1e12 ? value * 1000 : value;
+    return new Date(millis).toISOString();
   }
-  if (!expiresAt) return undefined;
-  const parsed = new Date(expiresAt);
-  if (Number.isNaN(parsed.getTime())) return undefined;
-  return parsed.toISOString();
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric)) {
+      const millis = numeric < 1e12 ? numeric * 1000 : numeric;
+      const dateFromNumber = new Date(millis);
+      if (!Number.isNaN(dateFromNumber.getTime())) return dateFromNumber.toISOString();
+    }
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return undefined;
+}
+
+function normalizeExpiresAt(expiresAt: string | number | undefined): string | undefined {
+  return toIsoExpiresAt(expiresAt);
 }
 
 function normalizeSession(session: StoredAuthSession | null): HandoverSession | null {
@@ -234,6 +248,29 @@ function decodeIdToken(idToken?: string) {
   }
 }
 
+function extractAuthParams(result: unknown): Record<string, string> | null {
+  if (!result || typeof result !== 'object') return null;
+
+  if ('params' in result) {
+    const params = (result as { params?: unknown }).params;
+    if (params && typeof params === 'object') {
+      return params as Record<string, string>;
+    }
+  }
+
+  const url = (result as { url?: unknown }).url;
+  if (typeof url === 'string' && url.length > 0) {
+    try {
+      const u = new URL(url);
+      return Object.fromEntries(u.searchParams.entries());
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+}
+
 function extractRoles(profile: Record<string, unknown>): UserRole[] {
   const rawRoles = (profile['roles'] ?? profile['app_metadata']) as unknown;
   const roles: string[] = Array.isArray(rawRoles)
@@ -289,8 +326,10 @@ async function resolveTokensFromResult(options: {
 }): Promise<AuthTokens> {
   const { request, result, discovery, clientId, redirectUri } = options;
 
+  const params = extractAuthParams(result);
+
   if (result.type !== 'success') {
-    throw new Error(result.params?.error_description ?? 'OAUTH_CANCELLED');
+    throw new Error(params?.error_description ?? 'OAUTH_CANCELLED');
   }
 
   if (result.authentication?.accessToken) {
@@ -303,7 +342,6 @@ async function resolveTokensFromResult(options: {
     };
   }
 
-  const params = result.params as Record<string, string | undefined>;
   if (params?.access_token || params?.id_token) {
     return {
       accessToken: params.access_token,
@@ -351,7 +389,7 @@ async function buildSessionFromTokens(tokens: AuthTokens, discovery: AuthSession
     throw new Error('MISSING_ACCESS_TOKEN');
   }
 
-  const userInfo = await fetchUserInfo(discovery?.userinfoEndpoint ?? discovery?.userInfoEndpoint, tokens.accessToken);
+  const userInfo = await fetchUserInfo(discovery?.userInfoEndpoint, tokens.accessToken);
   const decodedIdToken = decodeIdToken(tokens.idToken);
   const profile = { ...(decodedIdToken ?? {}), ...(userInfo ?? {}) } as Record<string, unknown>;
 
@@ -409,11 +447,11 @@ async function performAuth0Login(options: {
   const config = buildAuthConfig(options.config);
   const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
 
-  const authResult = await options.promptAsync({ useProxy: false });
+    const authResult = await options.promptAsync();
 
   if (isDev) {
     console.log('[auth] Auth result type:', authResult.type);
-    console.log('[auth] Auth result params:', authResult.params);
+    console.log('[auth] Auth result params:', extractAuthParams(authResult));
     console.log('[auth] Using redirectUri:', config.redirectUri);
   }
 
@@ -443,7 +481,7 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
   const session = await performAuth0Login({
     config: merged,
     discovery,
-    promptAsync: (options) => request.promptAsync(discovery, { ...options, useProxy: false }),
+    promptAsync: (options) => request.promptAsync(discovery, options),
     request,
   });
   return session;
@@ -652,17 +690,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const loginWithAuth0 = useCallback(async () => {
-    if (!authRequest) {
-      throw new Error('AUTH_REQUEST_NOT_READY');
-    }
-    return performAuth0Login({
-      config: authConfig,
-      discovery,
-      promptAsync: (options) => promptAsync({ ...options, useProxy: false }),
-      request: authRequest,
-    });
-  }, [authConfig, authRequest, discovery, promptAsync]);
+    const loginWithAuth0 = useCallback(async () => {
+      if (!authRequest) {
+        throw new Error('AUTH_REQUEST_NOT_READY');
+      }
+      return performAuth0Login({
+        config: authConfig,
+        discovery,
+        promptAsync: (options) => promptAsync(options),
+        request: authRequest,
+      });
+    }, [authConfig, authRequest, discovery, promptAsync]);
 
   const value = useMemo<AuthContextValue>(() => ({
     session,

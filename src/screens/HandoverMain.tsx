@@ -258,7 +258,8 @@ const s = StyleSheet.create({
   badge:{paddingVertical:8,paddingHorizontal:12,borderRadius:999},
   noteBox:{backgroundColor:'#EEF2FF',borderRadius:12,padding:12},
   noteTitle:{fontSize:12,fontWeight:'700',color:'#6366F1',marginBottom:4},
-  noteText:{color:'#312e81'}
+  noteText:{color:'#312e81'},
+  chipsWrap:{flexDirection:'row',flexWrap:'wrap',gap:4},
+  divider:{height:1,backgroundColor:'#e5e7eb',borderRadius:4},
 });
-
 

@@ -4,8 +4,13 @@ import * as React from 'react';
 export type NetInfoState = { isConnected: boolean | null; isInternetReachable: boolean | null };
 type NetInfoListener = (state: NetInfoState) => void;
 
+type NetInfoSubscription = { remove(): void } | (() => void) | void;
+type NetInfoModuleLike = {
+  addEventListener: (cb: NetInfoListener) => NetInfoSubscription;
+  fetch: () => Promise<NetInfoState>;
+};
 type NetInfoModule = {
-  addEventListener: (cb: NetInfoListener) => { remove(): void } | (() => void);
+  addEventListener: (cb: NetInfoListener) => () => void;
   fetch: () => Promise<NetInfoState>;
 };
 
@@ -15,17 +20,34 @@ type NetworkModule = {
 };
 
 let NetInfo: NetInfoModule | null = null;
-let useNetInfo: (() => NetInfoState) | null = null;
+let netInfoHook: (() => NetInfoState) | null = null;
+
+const normalizeSubscription = (subscription: NetInfoSubscription): (() => void) => {
+  if (typeof subscription === 'function') return subscription;
+  if (subscription && typeof subscription === 'object' && typeof subscription.remove === 'function') {
+    return () => subscription.remove();
+  }
+  return () => {};
+};
+
+const fallbackState: NetInfoState = { isConnected: null, isInternetReachable: null };
 
 try {
   // Intenta usar @react-native-community/netinfo si existe
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const mod = require('@react-native-community/netinfo') as {
-    default?: NetInfoModule;
+    default?: NetInfoModuleLike;
     useNetInfo?: () => NetInfoState;
   };
-  NetInfo = mod?.default ?? null;
-  useNetInfo = mod?.useNetInfo ?? null;
+  NetInfo = mod?.default
+    ? {
+        ...mod.default,
+        addEventListener(cb: NetInfoListener) {
+          return normalizeSubscription(mod.default!.addEventListener(cb));
+        },
+      }
+    : null;
+  netInfoHook = mod?.useNetInfo ?? null;
 } catch {
   // Fallback: expo-network si está disponible. Si tampoco lo está, usar stub síncrono.
   let Network: NetworkModule | null = null;
@@ -51,7 +73,7 @@ try {
         return { isConnected: true, isInternetReachable: true };
       },
     };
-    useNetInfo = function useNetInfoStub() {
+    netInfoHook = function useNetInfoStub() {
       return { isConnected: true, isInternetReachable: true };
     };
   } else {
@@ -75,7 +97,7 @@ try {
     };
 
     // Hook compatible con useNetInfo()
-    useNetInfo = function useNetInfoPolyfill() {
+    netInfoHook = function useNetInfoPolyfill() {
       const [state, setState] = React.useState<NetInfoState>({
         isConnected: null,
         isInternetReachable: null,
@@ -103,5 +125,17 @@ try {
   }
 }
 
-export default NetInfo as NetInfoModule;
-export { useNetInfo };
+const resolvedNetInfo: NetInfoModule = NetInfo ?? {
+  addEventListener: (cb: NetInfoListener) => {
+    cb(fallbackState);
+    return () => {};
+  },
+  async fetch() {
+    return fallbackState;
+  },
+};
+
+export default resolvedNetInfo;
+export function useNetInfo(): NetInfoState {
+  return (netInfoHook ?? (() => fallbackState))();
+}

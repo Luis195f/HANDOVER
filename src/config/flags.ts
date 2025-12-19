@@ -19,6 +19,7 @@ export const flags = {
   ENABLE_ALERTS: extra.FEATURES?.handover?.enableAlerts ?? process.env.EXPO_PUBLIC_ENABLE_ALERTS,
   AI_SUGGESTIONS_ENABLED:
     extra.FEATURES?.handover?.aiSuggestions ?? process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED,
+  REMOTE_CONFIG_DISABLED_FOR_NOW: extra.FEATURES?.handover?.remoteConfigDisabled,
 };
 
 export const isOn = (k: keyof typeof flags) => truthy(flags[k]);

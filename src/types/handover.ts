@@ -5,6 +5,7 @@ import type { zMedicationItem, zRiskItem, zRiskType, zTreatmentItem } from '../v
 // BEGIN HANDOVER D3 – StructuredDiagnosis types
 import type { DiagnosisSystem } from '../catalogs/diagnosisCodes';
 // END HANDOVER D3 – StructuredDiagnosis types
+import { DIET_TYPES, MOBILITY_LEVELS, STOOL_PATTERNS } from './handover-constants';
 
 // BEGIN HANDOVER: SIGNATURES_DUAL_TYPES
 export type HandoverSignature = {
@@ -18,13 +19,10 @@ export type HandoverSignature = {
 };
 // END HANDOVER: SIGNATURES_DUAL_TYPES
 
-export const DIET_TYPES = ['oral', 'enteral', 'parenteral', 'npo', 'other'] as const;
 export type DietType = (typeof DIET_TYPES)[number];
 
-export const STOOL_PATTERNS = ['normal', 'diarrhea', 'constipation', 'no_stool'] as const;
 export type StoolPattern = (typeof STOOL_PATTERNS)[number];
 
-export const MOBILITY_LEVELS = ['independent', 'assisted', 'bedbound'] as const;
 export type MobilityLevel = (typeof MOBILITY_LEVELS)[number];
 
 export type NutritionInfo = {
@@ -213,3 +211,5 @@ export type HandoverValues = {
 };
 
 export type Handover = HandoverValues;
+
+export { DIET_TYPES, MOBILITY_LEVELS, STOOL_PATTERNS };
