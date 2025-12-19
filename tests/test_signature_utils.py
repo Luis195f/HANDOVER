@@ -10,6 +10,7 @@ import pytest
 from django.core.management import call_command
 from django.utils import timezone
 
+# Configura entorno Django antes de importar módulos internos
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
@@ -26,8 +27,10 @@ from backend.api.models import HandoverSignatureAudit  # noqa: E402  pylint: dis
 
 @pytest.fixture(scope="module", autouse=True)
 def migrate_db(django_db_setup, django_db_blocker):
+    """Ejecuta migraciones automáticamente antes de las pruebas."""
     with django_db_blocker.unblock():
         call_command("migrate", run_syncdb=True, verbosity=0)
+
 
 def generate_ec_keypair(tmp_path):
     private_path = tmp_path / "private.pem"
@@ -84,7 +87,9 @@ def test_signature_detects_tampering(tmp_path):
         verify_bundle_signature(tampered, settings=settings)
 
 
+@pytest.mark.django_db
 def test_audit_log_is_idempotent(tmp_path):
+    """Verifica que no se dupliquen registros de auditoría con la misma firma."""
     settings = generate_ec_keypair(tmp_path)
     bundle = minimal_bundle()
 
