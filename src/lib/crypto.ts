@@ -37,17 +37,23 @@ export function isEncryptionDisabled(): boolean {
   return flag === '1' || flag.toLowerCase() === 'true';
 }
 
-async function deriveKeyBytes(): Promise<Uint8Array> {
-  const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
-  if (!rawKey) {
-    throw new Error('Missing EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY for offline encryption');
-  }
+const OFFLINE_KEY_STORAGE = 'handover_offline_encryption_key_v1';
+const GCM_KEY_SIZE = 32;
+const GCM_IV_SIZE = 12;
+let cachedOfflineKey: Uint8Array | null = null;
 
+async function sha256Bytes(input: Uint8Array | string): Promise<Uint8Array> {
   const encoder = new TextEncoder();
-  const keyBytes = encoder.encode(rawKey);
-  const hashed = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, keyBytes);
-  const hashedBytes = hashed instanceof Uint8Array ? hashed : new Uint8Array(hashed);
-  return hashedBytes;
+  const data = typeof input === 'string' ? encoder.encode(input) : input;
+  const hashed = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data);
+  if (typeof hashed === 'string') {
+    const fromHex = Buffer.from(hashed, 'hex');
+    if (fromHex.length === GCM_KEY_SIZE) return new Uint8Array(fromHex);
+    const asBase64 = Buffer.from(hashed, 'base64');
+    if (asBase64.length > 0) return new Uint8Array(asBase64).slice(0, GCM_KEY_SIZE);
+    return encoder.encode(hashed).slice(0, GCM_KEY_SIZE);
+  }
+  return hashed instanceof Uint8Array ? hashed : new Uint8Array(hashed);
 }
 
 function toBase64(buffer: ArrayBuffer | Uint8Array): string {
@@ -55,18 +61,74 @@ function toBase64(buffer: ArrayBuffer | Uint8Array): string {
 }
 
 function fromBase64(base64: string): Uint8Array {
-  return new Uint8Array(Buffer.from(base64, 'base64'));
+  try {
+    return new Uint8Array(Buffer.from(base64, 'base64'));
+  } catch {
+    return new Uint8Array();
+  }
 }
 
-export async function encryptOfflinePayload(plaintextJson: string): Promise<string> {
+async function persistOfflineKey(bytes: Uint8Array): Promise<void> {
+  const base64 = toBase64(bytes);
+  try {
+    await secureSetItem(OFFLINE_KEY_STORAGE, base64);
+  } catch (error) {
+    console.warn('No se pudo persistir la clave de cifrado offline', error);
+  }
+}
+
+async function deriveKeyBytes(): Promise<Uint8Array> {
+  if (cachedOfflineKey?.length === GCM_KEY_SIZE) return cachedOfflineKey;
+
+  try {
+    const stored = await secureGetItem(OFFLINE_KEY_STORAGE);
+    if (stored) {
+      const decoded = fromBase64(stored);
+      if (decoded.length === GCM_KEY_SIZE) {
+        cachedOfflineKey = decoded;
+        return decoded;
+      }
+      console.warn('Clave de cifrado offline con longitud inválida, regenerando.');
+    }
+  } catch (error) {
+    console.warn('No se pudo leer la clave de cifrado offline', error);
+  }
+
+  const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
+  let keyBytes: Uint8Array;
+  if (rawKey) {
+    keyBytes = await sha256Bytes(rawKey);
+  } else {
+    keyBytes = await Crypto.getRandomBytesAsync(GCM_KEY_SIZE);
+  }
+
+  if (keyBytes.length !== GCM_KEY_SIZE) {
+    keyBytes = (await sha256Bytes(keyBytes)).slice(0, GCM_KEY_SIZE);
+  }
+
+  if (keyBytes.length !== GCM_KEY_SIZE) {
+    keyBytes = await Crypto.getRandomBytesAsync(GCM_KEY_SIZE);
+  }
+
+  await persistOfflineKey(keyBytes);
+  cachedOfflineKey = keyBytes;
+  return keyBytes;
+}
+
+function ensurePlaintext(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  return JSON.stringify(payload ?? null);
+}
+
+export async function encryptOfflinePayload(plaintext: unknown): Promise<string> {
   if (isEncryptionDisabled()) {
-    return plaintextJson;
+    return ensurePlaintext(plaintext);
   }
 
   const keyBytes = await deriveKeyBytes();
-  const iv = await Crypto.getRandomBytesAsync(12);
+  const iv = await Crypto.getRandomBytesAsync(GCM_IV_SIZE);
   const encoder = new TextEncoder();
-  const data = encoder.encode(plaintextJson);
+  const data = encoder.encode(ensurePlaintext(plaintext));
   const cipher = gcm(keyBytes, iv);
   const cipherBytes = cipher.encrypt(data);
   const tagBytes = cipherBytes.slice(cipherBytes.length - 16);
@@ -233,7 +295,8 @@ export async function decryptPayload(ciphertext: string): Promise<string> {
     return ciphertext;
   }
 
-  return decryptNewPayload(ciphertext);
+  const decrypted = await decryptNewPayload(ciphertext);
+  return typeof decrypted === 'string' ? decrypted : JSON.stringify(decrypted);
 }
 
 /**
