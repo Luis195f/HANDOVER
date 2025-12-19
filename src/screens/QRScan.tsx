@@ -105,6 +105,11 @@ export function QRScanScreen({ navigation, route }: Props) {
   const { session } = useAuth();
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
+  const clearTransientStates = useCallback(() => {
+    setPrefillError(null);
+    setPrefillLoading(false);
+    setPatientMismatch(null);
+  }, []);
 
   // Pedir permisos de cámara al entrar
   useEffect(() => {
@@ -125,7 +130,7 @@ export function QRScanScreen({ navigation, route }: Props) {
   }, [isFocused, scanned]);
 
   useEffect(() => {
-    if (!parsedPayload?.patientId || patientMismatch) return;
+    if (!parsedPayload?.patientId) return;
     let cancelled = false;
     const fhirBase = parsedPayload.server
       ?? process.env.EXPO_PUBLIC_FHIR_BASE_URL
@@ -165,6 +170,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     (result: BarcodeScanningResult) => {
       if (scanned) return; // evita doble disparo
 
+      clearTransientStates();
       setScanned(true);
 
       const data = result.data?.trim();
@@ -198,11 +204,11 @@ export function QRScanScreen({ navigation, route }: Props) {
       }
       setPatientMismatch(null);
     },
-    [currentPatientId, scanned],
+    [clearTransientStates, currentPatientId, scanned],
   );
 
   const handleContinue = () => {
-    if (!parsedPayload?.patientId) return;
+    if (!parsedPayload?.patientId || patientMismatch) return;
     const targetRoute = returnTo ?? 'HandoverForm';
     const params =
       targetRoute === 'HandoverForm'
@@ -218,8 +224,9 @@ export function QRScanScreen({ navigation, route }: Props) {
               bed: parsedPayload.bed,
               visitId: parsedPayload.visitId,
             },
-          }
+        }
         : { patientId: parsedPayload.patientId };
+    clearTransientStates();
     (navigation as any).navigate(targetRoute, params);
   };
 
@@ -229,6 +236,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     setPrefilledValues(null);
     setPrefillError(null);
     setPatientMismatch(null);
+    setPrefillLoading(false);
   };
 
   const handleKeepCurrentPatient = () => {
@@ -236,12 +244,13 @@ export function QRScanScreen({ navigation, route }: Props) {
     setParsedPayload(null);
     setPrefilledValues(null);
     setPrefillError(null);
+    setPrefillLoading(false);
     setScanned(false);
   };
 
   const handleSwitchToScannedPatient = () => {
     if (!parsedPayload?.patientId) return;
-    setPatientMismatch(null);
+    clearTransientStates();
   };
 
   const handleRetryPrefill = () => {
@@ -253,8 +262,8 @@ export function QRScanScreen({ navigation, route }: Props) {
   };
 
   const continueDisabled = useMemo(
-    () => !parsedPayload?.patientId || prefillLoading || !!patientMismatch,
-    [parsedPayload?.patientId, patientMismatch, prefillLoading],
+    () => !parsedPayload?.patientId || !!patientMismatch,
+    [parsedPayload?.patientId, patientMismatch],
   );
 
   if (!permission) {
@@ -309,10 +318,14 @@ export function QRScanScreen({ navigation, route }: Props) {
                 </Text>
                 <View style={styles.warningActions}>
                   <Pressable accessibilityRole="button" onPress={handleKeepCurrentPatient}>
-                    <Text style={styles.link}>Mantener paciente actual</Text>
+                    <Text style={styles.link} onPress={handleKeepCurrentPatient}>
+                      Mantener paciente actual
+                    </Text>
                   </Pressable>
                   <Pressable accessibilityRole="button" onPress={handleSwitchToScannedPatient}>
-                    <Text style={styles.link}>Cambiar al paciente escaneado</Text>
+                    <Text style={styles.link} onPress={handleSwitchToScannedPatient}>
+                      Cambiar al paciente escaneado
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -332,15 +345,19 @@ export function QRScanScreen({ navigation, route }: Props) {
               style={[styles.primaryButton, continueDisabled && styles.primaryButtonDisabled]}
               disabled={continueDisabled}
             >
-              <Text style={styles.primaryButtonText}>Continuar con entrega</Text>
+              <Text style={styles.primaryButtonText} onPress={handleContinue}>
+                Continuar con entrega
+              </Text>
             </Pressable>
             {prefillError ? (
               <Pressable accessibilityRole="button" onPress={handleRetryPrefill}>
-                <Text style={styles.link}>Reintentar precarga</Text>
+                <Text style={styles.link} onPress={handleRetryPrefill}>Reintentar precarga</Text>
               </Pressable>
             ) : null}
             <Pressable accessibilityRole="button" onPress={handleRescan}>
-              <Text style={styles.link}>Escanear nuevamente</Text>
+              <Text style={styles.link} onPress={handleRescan}>
+                Escanear nuevamente
+              </Text>
             </Pressable>
           </>
         ) : (
