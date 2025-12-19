@@ -25,15 +25,9 @@ from backend.api.models import HandoverSignatureAudit  # noqa: E402  pylint: dis
 
 
 @pytest.fixture(scope="module", autouse=True)
-<<<<<<< Updated upstream
-def migrate_db():
-    call_command("migrate", run_syncdb=True, verbosity=0)
-
-=======
 def migrate_db(django_db_setup, django_db_blocker):
     with django_db_blocker.unblock():
         call_command("migrate", run_syncdb=True, verbosity=0)
->>>>>>> Stashed changes
 
 def generate_ec_keypair(tmp_path):
     private_path = tmp_path / "private.pem"
