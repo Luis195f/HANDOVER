@@ -36,14 +36,27 @@ function normalizeKey(keyBase64: string | null): CryptoJS.lib.WordArray | null {
 }
 
 async function persistKey(base64: string): Promise<void> {
-  cachedKey = base64;
+  let persisted = 0;
+  let lastError: unknown;
   for (const storageKey of STORAGE_KEYS) {
     try {
       await secureSetItem(storageKey, base64);
+      persisted += 1;
     } catch (error) {
+      lastError = error;
       console.warn(`No se pudo persistir la clave de cifrado (${storageKey}).`, error);
     }
   }
+
+  if (persisted === 0) {
+    const error = new Error('ENCRYPTION_KEY_PERSIST_FAILED');
+    if (lastError !== undefined) {
+      (error as Error & { cause?: unknown }).cause = lastError;
+    }
+    throw error;
+  }
+
+  cachedKey = base64;
 }
 
 async function readStoredKey(): Promise<string | null> {

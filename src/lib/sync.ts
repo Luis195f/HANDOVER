@@ -528,7 +528,7 @@ export async function processQueueOnce(): Promise<void> {
       if (!extracted) {
         throw new Error('Offline payload could not be extracted');
       }
-      preparedPayload = extracted;
+      preparedPayload = { ...extracted, patientId: extracted.patientId ?? item.patientId };
     } catch (error) {
       console.warn('Error al preparar/analizar payload offline', error);
       await updateOfflineQueueItem(item.id, {

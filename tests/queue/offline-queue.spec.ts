@@ -1,7 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('expo-secure-store');
 vi.mock('expo-sqlite', () => ({
   openDatabaseSync: vi.fn(() => null),
   openDatabase: vi.fn(() => null),
@@ -25,12 +23,14 @@ describe('offline queue end-to-end', () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
   });
 
-  it('almacena el payload cifrado con prefijo v1', async () => {
+  it('almacena el payload cifrado con sobre AES-GCM', async () => {
     await queue.createOfflineQueueItem({ payload: { foo: 'secret' }, patientId: 'pat-1' });
 
-    const [stored] = await queue.listOfflineQueue();
-    expect(stored?.payload.startsWith('v1:')).toBe(true);
-    expect(stored?.payload.includes('secret')).toBe(false);
+    const [stored] = await queue.listOfflineQueue({ decrypt: false });
+    const payload = typeof stored?.payload === 'string' ? stored.payload : '';
+    expect(payload).not.toContain('secret');
+    const parsed = payload ? JSON.parse(payload) : null;
+    expect(parsed?.algo).toBe('AES-256-GCM');
   });
 
   it('descifra al procesar la cola y elimina tras éxito', async () => {
@@ -46,7 +46,8 @@ describe('offline queue end-to-end', () => {
 
     await sync.processQueueOnce();
 
-    expect(sent).toEqual(payload);
+    expect((sent as { bundle?: unknown; patientId?: string }).bundle).toEqual(payload);
+    expect((sent as { patientId?: string }).patientId).toBe('pat-2');
     expect(await queue.listOfflineQueue()).toHaveLength(0);
   });
 

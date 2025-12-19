@@ -1,7 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ENCRYPTION_PREFIX } from '@/src/lib/crypto';
 import {
   clearOfflineQueue,
   createOfflineQueueItem,
@@ -9,8 +8,6 @@ import {
   updateOfflineQueueItem,
 } from '@/src/lib/queue';
 import { processQueueOnce, setQueueSendHandler } from '@/src/lib/sync';
-
-vi.mock('expo-secure-store');
 
 const secureStore = SecureStore as typeof SecureStore & { __reset?: () => void };
 
@@ -28,9 +25,11 @@ describe('offline queue encryption', () => {
 
     await createOfflineQueueItem({ payload, patientId: 'pat-enc' });
 
-    const [stored] = await listOfflineQueue();
-    expect(stored?.payload.startsWith(ENCRYPTION_PREFIX)).toBe(true);
-    expect(stored?.payload).not.toContain('SECRET-VALUE-12345');
+    const [stored] = await listOfflineQueue({ decrypt: false });
+    const payloadString = typeof stored?.payload === 'string' ? stored.payload : '';
+    expect(payloadString).not.toContain('SECRET-VALUE-12345');
+    const parsed = payloadString ? JSON.parse(payloadString) : null;
+    expect(parsed?.algo).toBe('AES-256-GCM');
   });
 
   it('procesa registros legacy sin cifrar y los migra', async () => {
@@ -51,7 +50,7 @@ describe('offline queue encryption', () => {
 
     await processQueueOnce();
 
-    expect(sentPayload).toEqual(legacyPayload);
+    expect((sentPayload as { bundle?: unknown }).bundle).toEqual(legacyPayload);
 
     const remaining = await listOfflineQueue();
     expect(remaining.length).toBe(0);
