@@ -1,9 +1,7 @@
 import httpx
 import respx
 from fastapi.testclient import TestClient
-
 import main
-
 
 client = TestClient(main.app)
 
@@ -22,9 +20,10 @@ def build_bundle():
 
 
 def test_validation_mode_off_does_not_block(monkeypatch):
+    """Should skip remote validation when mode=off."""
     monkeypatch.setattr(main, "HANDOVER_FHIR_VALIDATION_MODE", "off")
 
-    with respx.mock(base_url=main.FHIR_BASE) as mock:
+    with respx.mock(base_url=main.FHIR_BASE, assert_all_called=False) as mock:
         validate_route = mock.post("/Bundle/$validate").mock(
             return_value=httpx.Response(200, json={"resourceType": "OperationOutcome", "issue": []})
         )
@@ -42,19 +41,17 @@ def test_validation_mode_off_does_not_block(monkeypatch):
 
 
 def test_remote_validation_allows_success(monkeypatch):
+    """Should allow successful remote validation."""
     monkeypatch.setattr(main, "HANDOVER_FHIR_VALIDATION_MODE", "remote")
 
-    with respx.mock(base_url=main.FHIR_BASE) as mock:
+    with respx.mock(base_url=main.FHIR_BASE, assert_all_called=False) as mock:
         mock.post("/Bundle/$validate").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "resourceType": "OperationOutcome",
                     "issue": [
-                        {
-                            "severity": "information",
-                            "details": {"text": "Valid"},
-                        }
+                        {"severity": "information", "details": {"text": "Valid"}},
                     ],
                 },
             )
@@ -72,19 +69,17 @@ def test_remote_validation_allows_success(monkeypatch):
 
 
 def test_remote_validation_blocks_on_error(monkeypatch):
+    """Should block and return 422 on remote validation error."""
     monkeypatch.setattr(main, "HANDOVER_FHIR_VALIDATION_MODE", "remote")
 
-    with respx.mock(base_url=main.FHIR_BASE) as mock:
+    with respx.mock(base_url=main.FHIR_BASE, assert_all_called=False) as mock:
         mock.post("/Bundle/$validate").mock(
             return_value=httpx.Response(
                 200,
                 json={
                     "resourceType": "OperationOutcome",
                     "issue": [
-                        {
-                            "severity": "error",
-                            "details": {"text": "Profile XYZ not satisfied"},
-                        }
+                        {"severity": "error", "details": {"text": "Profile XYZ not satisfied"}},
                     ],
                 },
             )
@@ -103,9 +98,10 @@ def test_remote_validation_blocks_on_error(monkeypatch):
 
 
 def test_remote_validation_not_supported_allows_flow(monkeypatch):
+    """Should continue when remote validation is not supported (HTTP 404)."""
     monkeypatch.setattr(main, "HANDOVER_FHIR_VALIDATION_MODE", "remote")
 
-    with respx.mock(base_url=main.FHIR_BASE) as mock:
+    with respx.mock(base_url=main.FHIR_BASE, assert_all_called=False) as mock:
         mock.post("/Bundle/$validate").mock(return_value=httpx.Response(404, text="Not supported"))
         tx_route = mock.post("/").mock(
             return_value=httpx.Response(

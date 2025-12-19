@@ -193,7 +193,7 @@ export function QRScanScreen({ navigation, route }: Props) {
           currentPatientId,
           scannedId: parsed.patientId,
         });
-        setPatientMismatch({ currentId: currentPatientId, scannedId: parsed.patientId });
+        setPatientMismatch({ currentId: currentPatientId ?? '', scannedId: parsed.patientId });
         return;
       }
       setPatientMismatch(null);
@@ -220,7 +220,7 @@ export function QRScanScreen({ navigation, route }: Props) {
             },
           }
         : { patientId: parsedPayload.patientId };
-    navigation.navigate(targetRoute as never, params as never);
+    (navigation as any).navigate(targetRoute, params);
   };
 
   const handleRescan = () => {

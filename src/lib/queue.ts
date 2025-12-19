@@ -251,7 +251,7 @@ export async function listOfflineQueue(): Promise<QueueItem[]> {
     memOfflineQueue
       .slice()
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .map(async (row) => ({ ...row, payload: await decryptQueuePayload(row.payload) }))
+      .map(async (row) => ({ ...row, payload: await decryptQueuePayload(String(row.payload ?? "")) }))
   );
 }
 
@@ -265,7 +265,7 @@ export async function getOfflineQueueItem(id: string): Promise<QueueItem | null>
   }
   const found = memOfflineQueue.find((item) => item.id === id);
   if (!found) return null;
-  return { ...found, payload: await decryptQueuePayload(found.payload) };
+  return { ...found, payload: await decryptQueuePayload(String(found.payload ?? "")) };
 }
 
 export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {
@@ -314,11 +314,13 @@ export type OfflineQueueJobType = "fhir-bundle" | "handover-bundle" | "sync-audi
 
 export type OfflineQueueStatus = "pending" | "processing" | "failed" | "done";
 
+type LegacyPayload<TPayload = unknown> = TPayload | { bundle: unknown; fhirBase?: string };
+
 export interface OfflineQueueItem<TPayload = unknown> {
   id: string;
   key: string;
   type: OfflineQueueJobType;
-  payload: TPayload; // { fhirBase, bundle, token? } o lo que el caller necesite
+  payload: LegacyPayload<TPayload>; // { fhirBase, bundle, token? } o lo que el caller necesite
   retryCount: number; // mapea a tries
   createdAt: number;
   nextRetryAt: number; // timestamp ms para backoff
@@ -370,7 +372,7 @@ export function setOnline(online: boolean) {
 type EnqueuePayload<TPayload = unknown> = {
   key?: string;
   id?: string;
-  payload?: TPayload;
+  payload?: LegacyPayload<TPayload>;
   bundle?: unknown;
   fhirBase?: string;
   type?: OfflineQueueJobType;
@@ -378,10 +380,12 @@ type EnqueuePayload<TPayload = unknown> = {
   nextAt?: number;
 };
 
-function _normalizeInput<TPayload>(input: EnqueuePayload<TPayload>): LegacyTxQueueItem<TPayload> {
+function _normalizeInput<TPayload>(
+  input: EnqueuePayload<TPayload>
+): LegacyTxQueueItem<LegacyPayload<TPayload>> {
   const now = input?.createdAt ?? Date.now();
   const key = input?.key || input?.id || `tx-${now}-${Math.random().toString(36).slice(2)}`;
-  const payload =
+  const payload: LegacyPayload<TPayload> =
     input?.payload ??
     (input?.bundle
       ? { bundle: input.bundle, fhirBase: input.fhirBase }
@@ -405,7 +409,9 @@ function _normalizeInput<TPayload>(input: EnqueuePayload<TPayload>): LegacyTxQue
 // -------------------------------
 // Enqueue
 // -------------------------------
-export async function enqueueTx<TPayload = unknown>(input: EnqueuePayload<TPayload>): Promise<LegacyTxQueueItem<TPayload>> {
+export async function enqueueTx<TPayload = unknown>(
+  input: EnqueuePayload<TPayload>
+): Promise<LegacyTxQueueItem<LegacyPayload<TPayload>>> {
   const item = _normalizeInput(input);
   const serializedPayload = await encryptQueuePayload(item.payload);
 
@@ -434,8 +440,9 @@ export async function enqueueTx<TPayload = unknown>(input: EnqueuePayload<TPaylo
 
 export function getQueueLength(): number {
   if (db?.getFirstSync) {
-    const row = db.getFirstSync("SELECT COUNT(*) as n FROM tx_queue");
-    return Number(row?.n ?? 0);
+    const row = db.getFirstSync("SELECT COUNT(*) as n FROM tx_queue") as { n?: unknown } | undefined;
+    const value = row?.n;
+    return typeof value === "number" ? value : Number(value ?? 0);
   }
   return memQueue.length;
 }
@@ -448,7 +455,7 @@ export async function clearTxQueue(): Promise<void> {
   memId = 1;
 }
 
-export async function getQueueSnapshot(): Promise<LegacyTxQueueItem[]> {
+export async function getQueueSnapshot(): Promise<LegacyTxQueueItem<LegacyPayload<unknown>>[]> {
   if (db?.getAllSync) {
     const rows = db.getAllSync(
       "SELECT key,payload,tries,created_at,next_at FROM tx_queue ORDER BY COALESCE(next_at,0) ASC, id ASC"
@@ -654,5 +661,17 @@ export async function __getRawOfflineQueueRows(): Promise<QueueItemRow[]> {
     ) as QueueItemRow[];
     return rows ?? [];
   }
-  return memOfflineQueue.slice();
+  return memOfflineQueue.map((item) => ({
+    id: item.id,
+    created_at: item.createdAt,
+    last_attempt_at: item.lastAttemptAt ?? null,
+    attempts: item.attempts,
+    sync_status: item.syncStatus,
+    error_message: item.errorMessage ?? null,
+    error_status: item.errorStatus ?? null,
+    error_issues_json: item.errorIssuesJson ?? null,
+    payload_type: item.payloadType,
+    payload: String(item.payload ?? ""),
+    patient_id: item.patientId,
+  }));
 }

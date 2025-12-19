@@ -5,15 +5,15 @@ import {
   Pressable, StyleSheet, Alert, useColorScheme, Switch
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import { listOfflineQueue } from '@/src/lib/queue';
+import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 
 type QueueItemMeta = {
   id: string;
   createdAt: number | string;
-  tries: number;
+  attempts: number;
   hash?: string;
-  syncStatus?: string;
+  syncStatus: SyncStatus;
   errorMessage?: string | null;
   errorStatus?: number | null;
   errorIssuesJson?: string | null;
@@ -56,18 +56,18 @@ export default function SyncCenter() {
 
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
-    try {
-      const queue = await listOfflineQueue();
-      const meta: QueueItemMeta[] = queue.map((item) => ({
-        id: item.id,
-        createdAt: item.createdAt,
-        tries: item.attempts ?? item.tries ?? 0,
-        hash: item.hash,
-        syncStatus: item.syncStatus,
-        errorMessage: item.errorMessage,
-        errorStatus: item.errorStatus,
-        errorIssuesJson: item.errorIssuesJson,
-      }));
+      try {
+        const queue = await listOfflineQueue();
+        const meta: QueueItemMeta[] = queue.map((item) => ({
+          id: item.id,
+          createdAt: item.createdAt,
+          attempts: item.attempts ?? 0,
+          hash: item.id,
+          syncStatus: item.syncStatus,
+          errorMessage: item.errorMessage,
+          errorStatus: item.errorStatus,
+          errorIssuesJson: item.errorIssuesJson,
+        }));
       setItems(meta);
     } finally {
       setRefreshing(false);
@@ -283,7 +283,7 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
       <View style={{ flex: 1 }}>
         <Text style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
         <Text style={[styles.sub, { color: C.textSecondary }]}>Fecha: {when}</Text>
-        <Text style={[styles.sub, { color: C.textSecondary }]}>Tries: {item.tries}</Text>
+        <Text style={[styles.sub, { color: C.textSecondary }]}>Intentos: {item.attempts}</Text>
         {isError && (
           <Text style={[styles.sub, { color: C.stateError, marginTop: 4 }]}>
             Toca para ver el error

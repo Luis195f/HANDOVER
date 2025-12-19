@@ -10,10 +10,10 @@ export interface SectionInfo {
 interface SidebarIndexProps {
   sectionsInfo: readonly SectionInfo[];
   sectionPositions: Partial<Record<string, number>>;
-  scrollRef: React.RefObject<ScrollView>;
+  scrollRef: React.RefObject<ScrollView | null>;
   activeSection?: string | null;
   isTablet: boolean;
-  onSelect: (key: string) => void;
+  onSelect: (key: SectionInfo['key']) => void;
 }
 
 export const SidebarIndex: React.FC<SidebarIndexProps> = ({
@@ -151,4 +151,3 @@ const styles = StyleSheet.create({
     color: '#2563EB',
   },
 });
-

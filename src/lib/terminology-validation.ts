@@ -69,6 +69,20 @@ const cacheKey = (system: string, code: string, display?: string) => `${system}|
 
 export const clearValidationCache = () => cache.clear();
 
+type ValidationOutcome = {
+  result?: unknown;
+  issue?: unknown;
+  message?: unknown;
+};
+
+type OutcomeIssue = {
+  diagnostics?: unknown;
+  details?: { text?: unknown };
+};
+
+const asOutcome = (value: unknown): ValidationOutcome =>
+  value && typeof value === 'object' ? (value as ValidationOutcome) : {};
+
 async function validateRemotely({
   system,
   code,
@@ -87,15 +101,16 @@ async function validateRemotely({
       method: 'GET',
     });
 
-    if (ok && data?.result === true) {
+    const outcome = asOutcome(data);
+    if (ok && outcome.result === true) {
       return { valid: true, source: 'remote' };
     }
 
-    const issues = Array.isArray(data?.issue) ? data.issue : [];
+    const issues = Array.isArray(outcome.issue) ? (outcome.issue as OutcomeIssue[]) : [];
     const outcomeMessage =
-      data?.message ||
-      issues.find((issue: any) => issue?.diagnostics)?.diagnostics ||
-      issues.find((issue: any) => issue?.details?.text)?.details?.text;
+      (typeof outcome.message === 'string' ? outcome.message : undefined) ||
+      (issues.find((issue) => typeof issue?.diagnostics === 'string')?.diagnostics as string | undefined) ||
+      (issues.find((issue) => typeof issue?.details?.text === 'string')?.details?.text as string | undefined);
 
     return {
       valid: false,

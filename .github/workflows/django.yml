@@ -47,9 +47,11 @@ jobs:
           pytest tests --ds=backend.settings --cov=backend --cov=main \
             --cov-report=xml --cov-report=html --cov-report=term \
             --ignore=.venv --ignore=.venv-stt
+      - name: Install genbadge
+        run: pip install genbadge[all]      
       - name: Generate badges
         run: |
-          python -m genbadge coverage -i coverage.xml -o coverage-badge.svg
+          genbadge coverage -i coverage.xml -o coverage-badge.svg
           curl -s "https://img.shields.io/badge/backend%20tests-passing-brightgreen" -o ci-badge.svg
       - name: Extract coverage value
         id: coverage_value

@@ -46,6 +46,6 @@ function formatAjvError(err: ErrorObject): string {
 export {
   getValidationErrorsFromBundle,
   validateBundle,
-  validateResource as validateResourceWithZod,
+  validateResourceWithZod,
   type ValidationResult,
 } from './zod';

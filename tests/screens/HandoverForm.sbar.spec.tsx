@@ -52,6 +52,7 @@ const baseValues: HandoverValues = {
     incidents: [],
   },
   patientId: 'P-10',
+  status: 'draft',
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
@@ -60,6 +61,10 @@ const baseValues: HandoverValues = {
     safetyMeasuresApplied: false,
     questionsAnswered: false,
   },
+  medications: [],
+  treatments: [],
+  risksStructured: [],
+  meds: '',
   dxMedical: 'Neumonía bilateral',
   evolution: 'Estable con oxígeno nasal',
   closingSummary: '',

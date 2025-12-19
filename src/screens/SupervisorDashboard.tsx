@@ -1,6 +1,6 @@
 // Dashboard de supervisión de turno basado en un TurnFilter de unidad y franja horaria.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 
@@ -90,7 +90,7 @@ export function SupervisorDashboardScreen() {
       const priorityStyleKey = `priority_${item.level}` as keyof typeof styles;
       return (
         <Pressable
-          style={styles.patientCard}
+          style={styles.patientCard as ViewStyle}
           onPress={() => navigation.navigate('HandoverMain', { patientId: item.patientId })}
           accessibilityRole="button"
           testID={`patient-card-${item.patientId}`}
@@ -100,7 +100,7 @@ export function SupervisorDashboardScreen() {
               <Text style={styles.patientName}>{item.displayName}</Text>
               {item.bedLabel ? <Text style={styles.patientBed}>Cama {item.bedLabel}</Text> : null}
             </View>
-            <View style={[styles.priorityBadge, styles[priorityStyleKey]]}>
+            <View style={[styles.priorityBadge as ViewStyle, styles[priorityStyleKey] as ViewStyle]}>
               <Text style={styles.priorityBadgeText}>{priorityLabels[item.level]}</Text>
             </View>
           </View>

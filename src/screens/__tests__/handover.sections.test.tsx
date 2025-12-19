@@ -17,6 +17,7 @@ const defaultValues: HandoverFormValues = {
     incidents: [],
   },
   patientId: 'pat-001',
+  status: 'draft',
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
@@ -28,6 +29,7 @@ const defaultValues: HandoverFormValues = {
   medications: [],
   treatments: [],
   meds: '',
+  risksStructured: [],
 };
 
 describe('MedicationSection', () => {

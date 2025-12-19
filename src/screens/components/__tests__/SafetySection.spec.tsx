@@ -19,6 +19,8 @@ const defaultValues: HandoverValues = {
   },
   patientId: 'pat-001',
   status: 'draft',
+  medications: [],
+  treatments: [],
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
@@ -29,6 +31,7 @@ const defaultValues: HandoverValues = {
   },
   risks: {},
   risksStructured: [],
+  meds: '',
 };
 
 function Wrapper() {

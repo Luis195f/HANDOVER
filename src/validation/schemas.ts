@@ -1,30 +1,19 @@
 import { z } from "zod";
 
-import {
-  DIET_TYPES,
-  MOBILITY_LEVELS,
-  STOOL_PATTERNS,
-  // BEGIN HANDOVER D1 – BedsideChecklist types
-  type HandoverBedsideChecklist,
-  // END HANDOVER D1 – BedsideChecklist types
-  type MedicationItem,
-  type TreatmentItem,
-  type EliminationInfo,
-  type FluidBalanceInfo,
-  type MobilityInfo,
-  type NutritionInfo,
-  type PainAssessment,
-  type SkinInfo,
-  type BradenScale,
-  type GlasgowScale,
-  type RiskFlags,
-} from "../types/handover";
+import { DIET_TYPES, MOBILITY_LEVELS, STOOL_PATTERNS } from "../types/handover-constants";
 
 const optionalTrimmedString = (maxLength: number) =>
-  z.preprocess(
-    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-    z.string().trim().max(maxLength),
-  );
+  z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (typeof value !== "string") return undefined;
+      const trimmed = value.trim();
+      return trimmed === "" ? undefined : trimmed;
+    })
+    .refine((value) => value === undefined || value.length <= maxLength, {
+      message: `Debe tener máximo ${maxLength} caracteres`,
+    });
 
 const parseCensus = (value: unknown) => {
   if (typeof value === "string") {
@@ -158,7 +147,7 @@ export const zOxygen = z
   })
   .partial();
 
-export const zPainAssessment: z.ZodSchema<PainAssessment> = z
+export const zPainAssessment = z
   .object({
     hasPain: z.boolean(),
     evaScore: z.number().min(0).max(10).nullable().optional(),
@@ -183,16 +172,21 @@ export const zPainAssessment: z.ZodSchema<PainAssessment> = z
     }
   });
 
-const zBradenSubscale = z.number().int().min(1).max(4);
+const zBradenSubscale = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
 
-export const zBradenScale: z.ZodSchema<BradenScale> = z
+export const zBradenScale = z
   .object({
     sensoryPerception: zBradenSubscale,
     moisture: zBradenSubscale,
     activity: zBradenSubscale,
     mobility: zBradenSubscale,
     nutrition: zBradenSubscale,
-    frictionShear: z.number().int().min(1).max(4),
+    frictionShear: zBradenSubscale,
     totalScore: z.number().int().min(6).max(24),
     riskLevel: z.enum(["alto", "moderado", "bajo", "sin_riesgo"]),
   })
@@ -213,7 +207,7 @@ export const zBradenScale: z.ZodSchema<BradenScale> = z
       });
     }
 
-    let expectedRisk: BradenScale["riskLevel"];
+    let expectedRisk: "alto" | "moderado" | "bajo" | "sin_riesgo";
     if (computedTotal <= 12) expectedRisk = "alto";
     else if (computedTotal <= 14) expectedRisk = "moderado";
     else if (computedTotal <= 18) expectedRisk = "bajo";
@@ -228,11 +222,28 @@ export const zBradenScale: z.ZodSchema<BradenScale> = z
     }
   });
 
-export const zGlasgowScale: z.ZodSchema<GlasgowScale> = z
+const zGlasgowEye = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const zGlasgowVerbal = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+]);
+const zGlasgowMotor = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+  z.literal(6),
+]);
+
+export const zGlasgowScale = z
   .object({
-    eye: z.number().int().min(1).max(4),
-    verbal: z.number().int().min(1).max(5),
-    motor: z.number().int().min(1).max(6),
+    eye: zGlasgowEye,
+    verbal: zGlasgowVerbal,
+    motor: zGlasgowMotor,
     total: z.number().int().min(3).max(15),
     severity: z.enum(["grave", "moderado", "leve"]),
   })
@@ -247,7 +258,7 @@ export const zGlasgowScale: z.ZodSchema<GlasgowScale> = z
       });
     }
 
-    let expectedSeverity: GlasgowScale["severity"];
+    let expectedSeverity: "grave" | "moderado" | "leve";
     if (computedTotal <= 8) expectedSeverity = "grave";
     else if (computedTotal <= 12) expectedSeverity = "moderado";
     else expectedSeverity = "leve";
@@ -261,24 +272,24 @@ export const zGlasgowScale: z.ZodSchema<GlasgowScale> = z
     }
   });
 
-export const zNutritionInfo: z.ZodSchema<NutritionInfo> = z.object({
+export const zNutritionInfo = z.object({
   dietType: z.enum(DIET_TYPES),
   tolerance: optionalTrimmedString(200).optional(),
   intakeMl: z.number().nonnegative().max(20000).optional(),
 });
 
-export const zEliminationInfo: z.ZodSchema<EliminationInfo> = z.object({
+export const zEliminationInfo = z.object({
   urineMl: z.number().nonnegative().max(20000).optional(),
   stoolPattern: z.enum(STOOL_PATTERNS).optional(),
   hasRectalTube: z.boolean().optional(),
 });
 
-export const zMobilityInfo: z.ZodSchema<MobilityInfo> = z.object({
+export const zMobilityInfo = z.object({
   mobilityLevel: z.enum(MOBILITY_LEVELS),
   repositioningPlan: optionalTrimmedString(300).optional(),
 });
 
-export const zSkinInfo: z.ZodSchema<SkinInfo> = z.object({
+export const zSkinInfo = z.object({
   skinStatus: z.string().trim().min(1, "Estado de piel requerido").max(200),
   hasPressureInjury: z.boolean().optional(),
 });
@@ -296,7 +307,7 @@ export const zRiskType = z.enum([
 export type RiskType = z.infer<typeof zRiskType>;
 
 // BEGIN HANDOVER D1 – BedsideChecklist
-export const zHandoverBedsideChecklist: z.ZodSchema<HandoverBedsideChecklist> = z.object({
+export const zHandoverBedsideChecklist = z.object({
   patientIdentityConfirmed: z.boolean().default(false),
   allergiesReviewed: z.boolean().default(false),
   linesAndDevicesChecked: z.boolean().default(false),
@@ -315,7 +326,7 @@ export const zRiskItem = z.object({
 });
 export type RiskItem = z.infer<typeof zRiskItem>;
 
-export const zRiskFlags: z.ZodSchema<RiskFlags> = z
+export const zRiskFlags = z
   .object({
     fall: z.boolean().optional(),
     pressureUlcer: z.boolean().optional(),
@@ -359,12 +370,19 @@ export const zMedicationRoute = z.enum([
 ]);
 
 // BEGIN HANDOVER D7 – MedicationModule
-const optionalScheduleString = z.preprocess(
-  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-  z.string().trim().min(1).optional(),
-);
+const optionalScheduleString = z
+  .string()
+  .optional()
+  .transform((value) => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  })
+  .refine((value) => value === undefined || value.length >= 1, {
+    message: "Debe tener al menos 1 caracter",
+  });
 
-const zMedicationItemBase: z.ZodSchema<MedicationItem> = z.object({
+const zMedicationItemBase = z.object({
   id: z.string().min(1),
   name: z.string().trim().min(1).max(120),
   code: z
@@ -386,7 +404,7 @@ const zMedicationItemBase: z.ZodSchema<MedicationItem> = z.object({
   signature: z.lazy(() => zHandoverSignature).optional(),
 });
 
-export const zMedicationItem: z.ZodSchema<MedicationItem> = zMedicationItemBase.transform(
+export const zMedicationItem = zMedicationItemBase.transform(
   (item) => ({
     ...item,
     isContinuous: item.isContinuous ?? item.isContinuousInfusion,
@@ -395,7 +413,7 @@ export const zMedicationItem: z.ZodSchema<MedicationItem> = zMedicationItemBase.
 );
 // END HANDOVER D7 – MedicationModule
 
-export const zTreatmentItem: z.ZodSchema<TreatmentItem> = z.object({
+export const zTreatmentItem = z.object({
   id: z.string().min(1),
   type: z.enum(["woundCare", "respiratory", "mobilization", "education", "other"]),
   description: z.string().trim().min(1).max(500),
@@ -417,7 +435,7 @@ const zHandoverSignatureBase = z.object({
 export const zHandoverSignature = zHandoverSignatureBase;
 // END HANDOVER: SIGNATURES_DUAL
 
-export const zFluidBalanceInfo: z.ZodSchema<FluidBalanceInfo> = z.object({
+export const zFluidBalanceInfo = z.object({
   intakeMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   outputMl: z.number().nonnegative({ message: "No puede ser negativo" }),
   netBalanceMl: z.number().optional(),
@@ -512,5 +530,6 @@ export const zHandover = z.object({
   }
 });
 
-export type HandoverFormData = z.infer<typeof zHandover>;
-export type HandoverValues = HandoverFormData;
+export type HandoverFormData = z.output<typeof zHandover>;
+export type HandoverValues = z.output<typeof zHandover>;
+export type HandoverInputValues = z.input<typeof zHandover>;
