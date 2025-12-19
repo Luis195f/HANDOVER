@@ -11,7 +11,12 @@ export default function LoginMock() {
   const onLogin = async () => {
     await loginWithMockUser();
     // tras login: a la lista de pacientes
-    nav.replace("PatientList");
+    const navigator: any = nav;
+    if (typeof navigator.replace === 'function') {
+      navigator.replace("PatientList");
+    } else {
+      navigator.navigate?.("PatientList");
+    }
   };
 
   return (

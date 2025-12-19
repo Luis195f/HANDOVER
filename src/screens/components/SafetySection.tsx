@@ -34,13 +34,17 @@ function getRiskItem(values: RiskItem[] | undefined, type: RiskType): RiskItem {
 export default function SafetySection({ control, watch }: SafetySectionProps) {
   const riskTypes = useMemo(() => Object.keys(RISK_LABELS) as RiskType[], []);
   const watchedRisks = watch('risksStructured');
+  const normalizeRisks = (items: HandoverValues['risksStructured'] | undefined): RiskItem[] =>
+    Array.isArray(items)
+      ? items.map((item) => ({ ...EMPTY_RISK, ...item, actions: item.actions ?? [] }))
+      : [];
 
   return (
     <Controller
       control={control}
       name="risksStructured"
       render={({ field: { value, onChange } }) => {
-        const currentRisks = Array.isArray(watchedRisks) ? watchedRisks : value ?? [];
+        const currentRisks = normalizeRisks(watchedRisks ?? value);
 
         const updateRisk = (type: RiskType, updater: (item: RiskItem) => RiskItem) => {
           const next = updater(getRiskItem(currentRisks, type));

@@ -51,6 +51,9 @@ const BRADEN_LABELS: Record<NonNullable<HandoverValues["braden"]>["riskLevel"], 
   sin_riesgo: "sin riesgo",
 };
 
+const isNonEmptyString = (value: string | undefined | null): value is string =>
+  typeof value === "string" && value.length > 0;
+
 function truncateText(value: string, limit?: number): string {
   if (!limit || value.length <= limit) return value;
   const slice = value.slice(0, limit);
@@ -60,7 +63,7 @@ function truncateText(value: string, limit?: number): string {
 }
 
 function joinSentences(parts: Array<string | undefined>): string {
-  return parts.filter(Boolean).join(". ");
+  return parts.filter(isNonEmptyString).join(". ");
 }
 
 function formatOxygenTherapy(oxygen?: OxygenTherapy): string | undefined {
@@ -106,7 +109,7 @@ function describePain(pain?: PainAssessment): string | undefined {
   if (!pain?.hasPain) return undefined;
   const eva = typeof pain.evaScore === "number" ? `EVA ${pain.evaScore}` : undefined;
   const location = pain.location ? `en ${pain.location}` : undefined;
-  const details = [eva, location].filter(Boolean).join(" ");
+  const details = [eva, location].filter(isNonEmptyString).join(" ");
   return details ? `Dolor ${details}` : "Dolor reportado";
 }
 
@@ -164,7 +167,7 @@ function buildBackground(data: HandoverValues): string {
   const skin = data.skin?.skinStatus ? `Piel: ${data.skin.skinStatus}` : undefined;
   const allergies = data.bedsideChecklist?.allergiesReviewed ? "Alergias revisadas" : undefined;
   const bedsideNotes = data.bedsideChecklist?.bedsideNotes;
-  antecedentes.push(...[diet, mobility, skin, allergies, bedsideNotes].filter(Boolean));
+  antecedentes.push(...[diet, mobility, skin, allergies, bedsideNotes].filter(isNonEmptyString));
   const background = antecedentes.join(". ");
   return background || "Antecedentes relevantes recogidos en la historia clínica, revisar para más detalles.";
 }
@@ -271,7 +274,7 @@ export function formatSbar(summary: SBARSummary, locale: "es" | "en" = "es"): st
   ].join("\n");
 }
 
-export function generateSbarText(data: HandoverValues, options: SbarOptions = {}): string {
+export function generateSbarText(data: HandoverFormData, options: SbarOptions = {}): string {
   const summary = generateSbarSummary(data, options);
   return formatSbar(summary, options.locale ?? "es");
 }

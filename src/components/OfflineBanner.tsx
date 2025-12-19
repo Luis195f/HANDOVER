@@ -1,7 +1,7 @@
 // FILE: src/components/OfflineBanner.tsx
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, useColorScheme } from 'react-native';
-import NetInfo, { useNetInfo } from '@/src/lib/netinfo';
+import { useNetInfo } from '@/src/lib/netinfo';
 import { getQueueSize } from '@/src/lib/sync';
 
 type Props = { onPress?: () => void };
@@ -12,7 +12,7 @@ export default function OfflineBanner({ onPress }: Props) {
   const scheme = useColorScheme();
   const C = scheme === 'dark' ? D_COLORS : L_COLORS;
 
-  const netInfo = useNetInfo();
+  const { isConnected, isInternetReachable } = useNetInfo();
   const [count, setCount] = React.useState<number>(0);
 
   const lastTapRef = React.useRef<number>(0);
@@ -25,10 +25,8 @@ export default function OfflineBanner({ onPress }: Props) {
   }, []);
 
   React.useEffect(() => {
-    const sub = NetInfo.addEventListener(() => refresh());
     refresh();
-    return () => sub();
-  }, [refresh]);
+  }, [refresh, isConnected, isInternetReachable]);
 
   React.useEffect(() => {
     return () => {
@@ -49,7 +47,7 @@ export default function OfflineBanner({ onPress }: Props) {
     onPress?.();
   }, [onPress]);
 
-  const offline = !(netInfo.isConnected && (netInfo.isInternetReachable ?? true));
+  const offline = !((isConnected ?? false) && (isInternetReachable ?? true));
   const show = offline || count > 0;
   if (!show) return null;
 

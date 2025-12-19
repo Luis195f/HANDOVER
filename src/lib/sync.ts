@@ -13,16 +13,15 @@ import {
   type HandoverValues,
 } from './fhir-map';
 import type { AdministrativeData } from '../types/administrative';
-import { postBundleSmart, postBundle, type Bundle, type ResponseLike } from './fhir-client';
+import { postBundleSmart, postBundle, type ResponseLike } from './fhir-client';
 import { formatIssuesForUser, hasFatalOutcome, type OperationIssue } from './fhir-outcome';
 import { hashHex } from './crypto';
 import { z } from 'zod';
 import {
   validateBundle as validateFHIRBundle,
-  validateResource,
-  type FhirValidationResult,
+  validateResourceWithZod,
   type ValidationResult,
-} from './fhir-validation';
+} from './fhir-validation/zod';
 import {
   deleteOfflineQueueItem,
   listOfflineQueue,
@@ -63,6 +62,7 @@ export type FlushCompatOptions = {
 };
 
 type ValidationErrorDetail = ValidationResult['errors'][number];
+type Bundle = { resourceType: 'Bundle'; type?: string; entry?: any[]; identifier?: any; meta?: any };
 type TransactionBundle = {
   resourceType: 'Bundle';
   type: 'transaction';
@@ -109,6 +109,10 @@ function serializeIssuesForStorage(issues?: OperationIssue[], max = 10): string 
   return JSON.stringify(issues.slice(0, max));
 }
 
+function extractHandoverValues(input: HandoverInput | HandoverValues): HandoverValues {
+  return (input as { values?: HandoverValues }).values ?? (input as HandoverValues);
+}
+
 function capIssuesJson(value?: string, max = 10): string | undefined {
   if (!value) return value;
   try {
@@ -137,10 +141,12 @@ function enforceBundleValidation(bundle: any, context: string) {
     throw error;
   }
 
-  const fhirValidation: FhirValidationResult = validateResource(bundle, 'Bundle');
-  if (!fhirValidation.ok) {
-    const mappedErrors = formatFhirErrors(fhirValidation.errors);
-    const error = new Error(`FHIR structure validation failed (${context}): ${fhirValidation.errors.join('; ')}`);
+  const fhirValidation = validateResourceWithZod(bundle);
+  if (!fhirValidation.isValid) {
+    const mappedErrors = fhirValidation.errors;
+    const error = new Error(
+      `FHIR structure validation failed (${context}): ${mappedErrors.map((err) => err.message).join('; ')}`
+    );
     (error as Error & { validationErrors: ValidationResult['errors'] }).validationErrors = mappedErrors;
     annotateValidationErrors(bundle, mappedErrors);
     throw error;
@@ -727,7 +733,7 @@ function handleNetworkFailure(error: unknown): boolean {
     return true;
   }
   if (error instanceof HTTPError) {
-    const status = error.payload?.status ?? error.response?.status ?? 0;
+    const status = error.status ?? error.response?.status ?? 0;
     if (status === 502 || status === 503 || status === 504) {
       markOffline();
       return true;
@@ -779,7 +785,10 @@ function attachTxIdToEntry(entry: any, txId: string, index: number) {
   };
 }
 
-function ensureBundleTx(bundle: { resourceType: 'Bundle'; entry?: any[]; identifier?: any }, existingTxId?: string) {
+function ensureBundleTx(
+  bundle: { resourceType: 'Bundle'; entry?: any[]; identifier?: any; type?: string },
+  existingTxId?: string
+): { txId: string; bundle: TransactionBundle } {
   const txId = typeof existingTxId === 'string' && existingTxId.length > 0 ? existingTxId : uuidv4();
   const entries = Array.isArray(bundle.entry) ? bundle.entry.map((entry, index) => attachTxIdToEntry(entry, txId, index)) : [];
   const identifier =
@@ -791,10 +800,11 @@ function ensureBundleTx(bundle: { resourceType: 'Bundle'; entry?: any[]; identif
     txId,
     bundle: {
       ...bundle,
+      type: 'transaction',
       entry: entries,
       identifier,
       _validationErrors: (bundle as any)._validationErrors,
-    },
+    } as TransactionBundle,
   };
 }
 
@@ -1543,16 +1553,10 @@ export function buildTransactionBundleForQueue(
   input: HandoverInput | HandoverValues,
   opts: BuildOptions = {},
 ) {
-  const isWrapped = typeof input === 'object' && input !== null && 'values' in (input as HandoverInput);
-  if (isWrapped) {
-    const maybeValues = (input as HandoverInput).values;
-    if (!maybeValues || typeof maybeValues.patientId !== 'string' || maybeValues.patientId.length === 0) {
-      throw new Error('patientId required');
-    }
-  } else if (!('patientId' in (input as HandoverValues)) || !(input as HandoverValues).patientId) {
+  const values = extractHandoverValues(input);
+  if (!values || typeof values.patientId !== 'string' || values.patientId.length === 0) {
     throw new Error('patientId required');
   }
-  const values: HandoverValues = isWrapped ? (input as HandoverInput).values : (input as HandoverValues);
 
   const patientIdRaw = values.patientId;
   const patientId = patientIdRaw ?? 'unknown';
@@ -1647,7 +1651,7 @@ export function buildTransactionBundleForQueue(
     });
   });
 
-  const baseBundle = {
+  const baseBundle: TransactionBundle = {
     resourceType: 'Bundle',
     type: 'transaction',
     entry: entries,
@@ -1682,13 +1686,10 @@ export async function enqueueTx(
   input: HandoverInput | HandoverValues,
   opts?: BuildOptions & { authorId?: string },
 ) {
-  if (input && typeof input === 'object' && 'values' in (input as HandoverInput)) {
-    return enqueueTxFromValues((input as HandoverInput).values, opts);
-  }
-  if (typeof input !== 'object' || input === null || !('patientId' in input) || !(input as any).patientId) {
+  const values = extractHandoverValues(input as HandoverInput | HandoverValues);
+  if (typeof values !== 'object' || values === null || !('patientId' in values) || !(values as any).patientId) {
     throw new Error('patientId required');
   }
-  const values: HandoverValues = input as any;
   return enqueueTxFromValues(values, opts);
 }
 
@@ -1709,4 +1710,3 @@ export function validateHandoverInput(input: unknown) {
 export const __test__ = {
   ensureBundleTx,
 };
-

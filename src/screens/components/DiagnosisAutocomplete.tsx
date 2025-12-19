@@ -141,7 +141,7 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
         style={styles.input}
       />
       {query.trim() ? (
-        <View style={styles.helperText}>
+        <View>
           <Text style={styles.helperText}>
             Sugerencias limitadas al catálogo demo ({DIAGNOSIS_CODES.length} códigos)
           </Text>

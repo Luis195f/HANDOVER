@@ -7,7 +7,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@/src/*": ["src/*"]
+      "@/src/*": ["src/*"],
+      "expo-file-system": ["src/types/expo-file-system-stub"],
+      "expo-file-system/*": ["src/types/expo-file-system-stub"]
     },
     "jsx": "react-jsx",
     "lib": ["es2021", "dom"],

@@ -25,6 +25,38 @@ export type ResponseLike = {
   body?: unknown;
 };
 
+type PostBundleSuccess = {
+  ok: true;
+  status: number;
+  json?: unknown;
+  location?: string;
+  body?: unknown;
+  issue?: OperationIssue[];
+  issues?: OperationIssue[];
+  message?: string;
+  outcome?: OperationOutcome;
+};
+type PostBundleFailure = {
+  ok: false;
+  status: number;
+  issues?: OperationIssue[];
+  issue?: OperationIssue[];
+  json?: unknown;
+  body?: unknown;
+  message?: string;
+  location?: string;
+  outcome?: OperationOutcome;
+};
+type PostBundleResult = PostBundleSuccess | PostBundleFailure;
+
+type BundleEntryLike = {
+  resource?: { resourceType?: string; id?: string; identifier?: unknown; [key: string]: unknown };
+};
+type BundleLike = { resourceType?: string; type?: string; entry?: BundleEntryLike[] };
+
+const isBundleLike = (value: unknown): value is BundleLike =>
+  typeof value === 'object' && value !== null;
+
 /**
  * Obtiene un resumen de paciente a partir de su ID.
  * - Lee el recurso Patient (nombre, fecha de nacimiento, género, identificadores MRN).
@@ -71,16 +103,17 @@ export async function fetchPatientSummary(
     const { ok, data } = await fetchFHIR(
       `Encounter?subject=Patient/${encodeURIComponent(patientId)}&_include=Encounter:location`,
     );
-    if (ok && data?.resourceType === 'Bundle' && Array.isArray(data.entry)) {
+    const bundle = ok && isBundleLike(data) && data.resourceType === 'Bundle' ? data : undefined;
+    if (bundle && Array.isArray(bundle.entry)) {
       const locations = new Map<string, any>();
-      for (const entry of data.entry) {
+      for (const entry of bundle.entry) {
         const res = entry?.resource;
         if (res?.resourceType === 'Location' && res.id) {
           locations.set(`Location/${res.id}`, res);
         }
       }
 
-      const encounterEntry = data.entry.find((entry: any) => entry?.resource?.resourceType === 'Encounter');
+      const encounterEntry = bundle.entry.find((entry: any) => entry?.resource?.resourceType === 'Encounter');
       const encounter = encounterEntry?.resource;
       const encounterLocations = Array.isArray(encounter?.location) ? encounter.location : [];
       for (const loc of encounterLocations) {
@@ -106,8 +139,9 @@ export async function fetchPatientSummary(
     const { ok, data } = await fetchFHIR(
       `AllergyIntolerance?patient=Patient/${encodeURIComponent(patientId)}&clinical-status=active`,
     );
-    if (ok && data?.resourceType === 'Bundle' && Array.isArray(data.entry)) {
-      allergies = data.entry
+    const bundle = ok && isBundleLike(data) && data.resourceType === 'Bundle' ? data : undefined;
+    if (bundle && Array.isArray(bundle.entry)) {
+      allergies = bundle.entry
         .map((entry: any) => {
           const resource = entry?.resource;
           const coding = (resource?.code?.coding ?? []) as any[];
@@ -338,7 +372,7 @@ export async function fetchFHIR<TResource = unknown, TBody = unknown>(
 export async function postBundle(
   bundle: unknown,
   opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string } | string
-) {
+): Promise<PostBundleResult> {
   const embeddedErrors = getValidationErrorsFromBundle(bundle);
   if (embeddedErrors) {
     return {
@@ -445,6 +479,7 @@ export async function postBundle(
 
 /** === Compat con código existente === */
 export const postBundleSmart = postBundle;
+const postBundleFn = postBundle;
 
 export interface PdfUploadContext {
   patientId: string;
@@ -556,8 +591,9 @@ export async function fetchVitalTrends(
       return fallback(!ok ? new Error('fetchVitalTrends response not ok') : undefined);
     }
 
-    const observations = Array.isArray(data?.entry)
-      ? (data.entry as any[])
+    const bundle = isBundleLike(data) && data.resourceType === 'Bundle' ? data : undefined;
+    const observations = Array.isArray(bundle?.entry)
+      ? bundle.entry
           .map((entry) => entry?.resource)
           .filter((res) => res?.resourceType === 'Observation')
       : [];
@@ -632,7 +668,7 @@ export class FhirClient {
   async postBundle(bundle: any, opts?: { token?: string; headers?: Record<string, string> }): Promise<any>;
   async postBundle(bundle: any, opts?: any): Promise<any> {
     if (typeof opts === 'string') {
-      const result = await postBundle(bundle, opts);
+      const result: PostBundleResult = await postBundleFn(bundle, opts);
       // Devuelve objeto con .text() para compat con sync
       const resp = {
         ok: !!result.ok,
