@@ -7,6 +7,13 @@ type Store = Record<string, string>;
 // Almacenamiento en memoria compartido por todos los tests
 const store: Store = {};
 
+type SetItemFailureHandler = (key: string, value: string) => unknown | Promise<unknown>;
+let setItemFailure: SetItemFailureHandler | Error | null = null;
+
+export const SecureStoreAccessibility = {
+  AFTER_FIRST_UNLOCK: 'AFTER_FIRST_UNLOCK',
+};
+
 /**
  * Devuelve el valor guardado o null si no existe.
  */
@@ -17,7 +24,11 @@ export async function getItemAsync(key: string): Promise<string | null> {
 /**
  * Guarda un valor string bajo una clave.
  */
-export async function setItemAsync(key: string, value: string): Promise<void> {
+export async function setItemAsync(key: string, value: string, _options?: unknown): Promise<void> {
+  const failure = typeof setItemFailure === 'function' ? await setItemFailure(key, value) : setItemFailure;
+  if (failure) {
+    throw failure instanceof Error ? failure : new Error(String(failure));
+  }
   store[key] = value;
 }
 
@@ -35,6 +46,10 @@ export async function isAvailableAsync(): Promise<boolean> {
   return true;
 }
 
+export function __setSetItemFailure(handler: SetItemFailureHandler | Error | null): void {
+  setItemFailure = handler;
+}
+
 /**
  * Utilidad SOLO PARA TESTS: vacía todo el store.
  * La usamos desde vitest.setup.ts en beforeEach.
@@ -43,6 +58,7 @@ export function __reset(): void {
   for (const key of Object.keys(store)) {
     delete store[key];
   }
+  setItemFailure = null;
 }
 
 /**
@@ -55,6 +71,8 @@ const SecureStore = {
   deleteItemAsync,
   isAvailableAsync,
   __reset,
+  __setSetItemFailure,
+  SecureStoreAccessibility,
 };
 
 export default SecureStore;

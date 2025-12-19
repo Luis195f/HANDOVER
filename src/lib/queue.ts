@@ -74,8 +74,33 @@ if (db?.execSync) {
   try { db.execSync("ALTER TABLE tx_queue ADD COLUMN next_at INTEGER NOT NULL DEFAULT 0;"); } catch {}
 }
 
-async function encryptQueuePayload(payload: unknown): Promise<string> {
-  const serialized = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
+function tryParsePayloadString(payload: string): unknown {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return payload;
+  }
+}
+
+function wrapQueuePayload(payload: unknown, patientId?: string): unknown {
+  if (typeof payload === "string") {
+    return { bundle: tryParsePayloadString(payload), patientId };
+  }
+
+  if (payload && typeof payload === "object") {
+    const candidate = payload as { bundle?: unknown; txId?: unknown; patientId?: unknown };
+    const normalizedPatientId = typeof candidate.patientId === "string" ? candidate.patientId : patientId;
+    if ("bundle" in candidate || "txId" in candidate || "patientId" in candidate) {
+      return { ...candidate, patientId: normalizedPatientId };
+    }
+  }
+
+  return { bundle: payload, patientId };
+}
+
+async function encryptQueuePayload(payload: unknown, patientId?: string): Promise<string> {
+  const wrapped = wrapQueuePayload(payload, patientId);
+  const serialized = typeof wrapped === "string" ? wrapped : JSON.stringify(wrapped ?? null);
   try {
     return await encryptOfflinePayload(serialized);
   } catch (error) {
@@ -234,25 +259,32 @@ async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
 }
 
 export async function createOfflineQueueItem(input: QueueItemInput): Promise<QueueItem> {
-  const encryptedPayload = await encryptQueuePayload(input.payload);
+  const encryptedPayload = await encryptQueuePayload(input.payload, input.patientId);
   const item = normalizeQueueItem({ ...input, payload: encryptedPayload });
   persistQueueItem(item);
   return item;
 }
 
-export async function listOfflineQueue(): Promise<QueueItem[]> {
+export async function listOfflineQueue(options?: { decrypt?: boolean }): Promise<QueueItem[]> {
+  const decrypt = options?.decrypt ?? true;
   if (db?.getAllSync) {
     const rows = (db.getAllSync(
       `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
     ) ?? []) as QueueItemRow[];
+    if (!decrypt) {
+      return rows.map(rowToQueueItem);
+    }
     return Promise.all(rows.map(decryptQueueItemPayload));
   }
-  return Promise.all(
-    memOfflineQueue
-      .slice()
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .map(async (row) => ({ ...row, payload: await decryptQueuePayload(String(row.payload ?? "")) }))
-  );
+  const rows = memOfflineQueue
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  if (!decrypt) {
+    return rows.map((row) => ({ ...row }));
+  }
+
+  return Promise.all(rows.map(async (row) => ({ ...row, payload: await decryptQueuePayload(String(row.payload ?? "")) })));
 }
 
 export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
@@ -272,7 +304,7 @@ export async function updateOfflineQueueItem(id: string, updates: Partial<QueueI
   const current = await getOfflineQueueItem(id);
   if (!current) return null;
   const nextPayload = updates.payload !== undefined ? updates.payload : current.payload;
-  const payload = await encryptQueuePayload(nextPayload);
+  const payload = await encryptQueuePayload(nextPayload, updates.patientId ?? current.patientId);
   const next: QueueItem = {
     ...current,
     ...updates,
