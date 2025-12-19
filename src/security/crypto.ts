@@ -3,7 +3,7 @@ import CryptoJS from 'crypto-js';
 
 import { secureGetItem, secureSetItem } from './secure-storage';
 
-const STORAGE_KEY = 'handover_encryption_key_v1';
+const STORAGE_KEYS = ['handover_local_crypto_key', 'handover_encryption_key_v1'] as const;
 const VERSION_TAG = 'v1';
 const PREFIX = `${VERSION_TAG}:`;
 const LEGACY_PREFIX = 'enc:v1:'; // compatibilidad con versiones previas
@@ -23,22 +23,57 @@ function isPayloadEncrypted(payload: string): boolean {
   return typeof payload === 'string' && (payload.startsWith(PREFIX) || payload.startsWith(LEGACY_PREFIX));
 }
 
+function normalizeKey(keyBase64: string | null): CryptoJS.lib.WordArray | null {
+  if (!keyBase64) return null;
+  try {
+    const parsed = CryptoJS.enc.Base64.parse(keyBase64);
+    const bytes = parsed.sigBytes;
+    if (bytes === 16 || bytes === 24 || bytes === 32) return parsed;
+  } catch {
+    // swallow to regenerate
+  }
+  return null;
+}
+
+async function persistKey(base64: string): Promise<void> {
+  cachedKey = base64;
+  for (const storageKey of STORAGE_KEYS) {
+    try {
+      await secureSetItem(storageKey, base64);
+    } catch (error) {
+      console.warn(`No se pudo persistir la clave de cifrado (${storageKey}).`, error);
+    }
+  }
+}
+
+async function readStoredKey(): Promise<string | null> {
+  for (const storageKey of STORAGE_KEYS) {
+    try {
+      const stored = await secureGetItem(storageKey);
+      if (stored) return stored;
+    } catch (error) {
+      console.warn(`No se pudo leer la clave de cifrado (${storageKey}).`, error);
+    }
+  }
+  return null;
+}
+
 export async function getOrCreateEncryptionKey(): Promise<string> {
   if (cachedKey) return cachedKey;
-  try {
-    const stored = await secureGetItem(STORAGE_KEY);
-    if (stored) {
-      cachedKey = stored;
-      return stored;
-    }
-    const nextKey = getRandomKeyBase64();
-    await secureSetItem(STORAGE_KEY, nextKey);
-    cachedKey = nextKey;
-    return nextKey;
-  } catch (error) {
-    console.error('No se pudo acceder a SecureStore para la clave de cifrado.', error);
-    throw new Error('No se pudo obtener la clave de cifrado.');
+  const stored = await readStoredKey();
+  const normalizedStored = normalizeKey(stored);
+  if (normalizedStored) {
+    cachedKey = CryptoJS.enc.Base64.stringify(normalizedStored);
+    return cachedKey;
   }
+
+  if (stored) {
+    console.warn('Clave de cifrado inválida, regenerando un nuevo valor.');
+  }
+
+  const nextKey = getRandomKeyBase64();
+  await persistKey(nextKey);
+  return nextKey;
 }
 
 function parseNewFormat(cipherText: string): { iv: CryptoJS.lib.WordArray; cipher: CryptoJS.lib.CipherParams } | null {
@@ -51,12 +86,33 @@ function parseNewFormat(cipherText: string): { iv: CryptoJS.lib.WordArray; ciphe
   };
 }
 
-export async function encryptPayload(plainText: string): Promise<string> {
-  if (isPayloadEncrypted(plainText)) return plainText;
+const WRAPPER_FLAG = '__handover_payload__';
+
+function wrapPayload(input: unknown): string {
+  if (typeof input === 'string') return input;
+  return JSON.stringify({ [WRAPPER_FLAG]: true, value: input });
+}
+
+function unwrapPayload(input: string): unknown {
+  try {
+    const parsed = JSON.parse(input) as { [WRAPPER_FLAG]?: unknown; value?: unknown };
+    if (parsed && typeof parsed === 'object' && parsed[WRAPPER_FLAG]) {
+      return 'value' in parsed ? parsed.value : null;
+    }
+  } catch {
+    return input;
+  }
+  return input;
+}
+
+export async function encryptPayload(plainText: unknown): Promise<string> {
+  const serialized = wrapPayload(plainText);
+  if (isPayloadEncrypted(serialized)) return serialized;
+
   const keyBase64 = await getOrCreateEncryptionKey();
-  const key = CryptoJS.enc.Base64.parse(keyBase64);
+  const key = normalizeKey(keyBase64) ?? CryptoJS.enc.Base64.parse(getRandomKeyBase64());
   const iv = getIvWordArray();
-  const encrypted = CryptoJS.AES.encrypt(plainText, key, {
+  const encrypted = CryptoJS.AES.encrypt(serialized, key, {
     iv,
     mode: CryptoJS.mode.CBC,
     padding: CryptoJS.pad.Pkcs7,
@@ -66,8 +122,8 @@ export async function encryptPayload(plainText: string): Promise<string> {
   return `${PREFIX}${ivBase64}:${cipherBase64}`;
 }
 
-export async function decryptPayload(cipherText: string): Promise<string> {
-  if (!isPayloadEncrypted(cipherText)) return cipherText;
+export async function decryptPayload(cipherText: string): Promise<unknown> {
+  if (!isPayloadEncrypted(cipherText)) return unwrapPayload(cipherText);
 
   if (cipherText.startsWith(LEGACY_PREFIX)) {
     // Compatibilidad: devolvemos tal cual; el descifrado legacy ocurre en lib/crypto.
@@ -80,7 +136,7 @@ export async function decryptPayload(cipherText: string): Promise<string> {
   }
 
   const keyBase64 = await getOrCreateEncryptionKey();
-  const key = CryptoJS.enc.Base64.parse(keyBase64);
+  const key = normalizeKey(keyBase64) ?? CryptoJS.enc.Base64.parse(getRandomKeyBase64());
   const decrypted = CryptoJS.AES.decrypt(parsed.cipher, key, {
     iv: parsed.iv,
     mode: CryptoJS.mode.CBC,
@@ -92,7 +148,7 @@ export async function decryptPayload(cipherText: string): Promise<string> {
     throw new Error('No se pudo descifrar el payload cifrado local.');
   }
 
-  return plain;
+  return unwrapPayload(plain);
 }
 
 export { isPayloadEncrypted };
