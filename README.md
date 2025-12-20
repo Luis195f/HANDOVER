@@ -33,6 +33,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` es la base para derivar la clave AES-256-GCM que cifra los bundles en la cola offline (usa al menos 32 caracteres, gestiona el valor como un secreto real).
    - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS` y `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` afinan la cola offline y el backoff exponencial.
    - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo; `true/1/TRUE` lo deshabilitan, cualquier otro valor lo deja activo por defecto).
+   - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` habilita una validación remota rápida (`Bundle/$validate`) antes de encolar si hay conectividad. Si el servidor devuelve un `OperationOutcome` con severidad `error`/`fatal`, se muestra un alert con los detalles y no se encola el bundle; en modo offline sigue encolando para respetar offline-first. Recomendado en entornos de staging/producción para detectar problemas de estructura antes de ocupar la cola.
 3. Define `EXPO_TOKEN` o credenciales EAS en CI/CD cuando generes binarios firmados con Expo Application Services.
 
 ## Login y permisos
@@ -46,7 +47,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 
 - `safeFetch` en `src/lib/net.ts` fuerza HTTPS en producción, aplica timeouts y reintentos con backoff exponencial frente a errores 502/503/504, y añade cabeceras de idempotencia.
 - La cola offline (`src/lib/queue.ts` + `src/lib/sync.ts`) genera UUID por bundle, persiste en SQLite y reintenta envíos cuando detecta conectividad con `@react-native-community/netinfo`.
-- Puedes inspeccionar y vaciar la cola desde la pantalla `SyncCenter` (`src/screens/SyncCenter.tsx`).
+- Puedes inspeccionar y vaciar la cola desde la pantalla `SyncCenter` (`src/screens/SyncCenter.tsx`). Los elementos con `syncStatus=error` muestran el estado específico (incluyendo `422 Error de validación FHIR`), un badge “Error” y detalle de issues FHIR cuando el servidor devolvió un `OperationOutcome`.
 - Los borradores se guardan en SecureStore; al reconectar se validan mediante esquemas Zod antes de sincronizar.
 
 ## Instalación y ejecución

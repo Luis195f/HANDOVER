@@ -38,6 +38,8 @@ import {
 import { appendAuditEvent, createAsyncStorageAuditStorage, makeAuditEvent, type AuditStorage } from '@/src/lib/audit';
 import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
+import NetInfo from '@/src/lib/netinfo';
+import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -1152,6 +1154,19 @@ export default function HandoverForm({ navigation, route }: Props) {
       };
 
       const bundle = buildHandoverBundle(handoverInput, { now: () => nowIso });
+
+      if (isFastValidateEnabled()) {
+        const netState = await NetInfo.fetch();
+        if (hasNetwork(netState)) {
+          const validation = await fastValidateBundleRemotely(bundle, {
+            token: activeSession?.accessToken ?? null,
+          });
+          if (!validation.ok) {
+            Alert.alert('Error de validación FHIR', validation.message ?? 'El servidor rechazó el Bundle.');
+            return;
+          }
+        }
+      }
 
       await enqueueBundle(bundle, {
         patientId: values.patientId,
