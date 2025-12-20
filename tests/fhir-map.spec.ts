@@ -186,6 +186,36 @@ const documentReferenceSchema = z.object({
     .min(1),
 });
 
+const patientSchema = z.object({
+  resourceType: z.literal('Patient'),
+  id: z.string().min(1),
+  identifier: z
+    .array(
+      z
+        .object({
+          system: z.string().optional(),
+          value: z.string().min(1),
+          type: z.any().optional(),
+        })
+        .catchall(z.unknown()),
+    )
+    .optional(),
+  name: z
+    .array(
+      z
+        .object({
+          given: z.array(z.string()).optional(),
+          family: z.string().optional(),
+          use: z.string().optional(),
+        })
+        .catchall(z.unknown()),
+    )
+    .optional(),
+  gender: z.string().optional(),
+  birthDate: z.string().optional(),
+})
+  .catchall(z.unknown());
+
 const compositionSchema = z.object({
   resourceType: z.literal('Composition'),
   status: z.enum(['final', 'amended']),
@@ -212,6 +242,7 @@ const resourceValidators = {
   DeviceUseStatement: deviceUseStatementSchema,
   DocumentReference: documentReferenceSchema,
   Composition: compositionSchema,
+  Patient: patientSchema,
 } as const;
 
 function collectReferenceStrings(resource: unknown): string[] {

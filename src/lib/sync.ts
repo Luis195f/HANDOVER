@@ -385,6 +385,27 @@ function buildFailureOutcome(error: unknown): QueueSendResult {
   return { ok: false, message: typeof error === 'string' ? error : 'Unknown error' };
 }
 
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOfflineBundle(bundle: unknown): Bundle | null {
+  const parsed = typeof bundle === 'string' ? safeParse(bundle) : bundle;
+  if (!isRecord(parsed)) return null;
+  if (parsed.resourceType && parsed.resourceType !== 'Bundle') return null;
+  if (parsed.entry !== undefined && !Array.isArray(parsed.entry)) return null;
+
+  return {
+    ...(parsed as Bundle),
+    resourceType: (parsed as Bundle).resourceType ?? 'Bundle',
+    entry: Array.isArray(parsed.entry) ? parsed.entry : [],
+  };
+}
+
 function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
   let candidate: unknown = payload;
 
@@ -396,18 +417,16 @@ function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
     }
   }
 
-  if (!candidate || typeof candidate !== 'object') return null;
-  const bundle = (candidate as { bundle?: unknown }).bundle;
+  if (!isRecord(candidate)) return null;
+  const bundle = normalizeOfflineBundle((candidate as { bundle?: unknown }).bundle);
+  if (!bundle) return null;
+
+  const txId = (candidate as { txId?: unknown }).txId;
+  const patientId = (candidate as { patientId?: unknown }).patientId;
   return {
-    bundle: bundle as Bundle | undefined,
-    txId:
-      typeof (candidate as { txId?: unknown }).txId === 'string'
-        ? (candidate as { txId: string }).txId
-        : undefined,
-    patientId:
-      typeof (candidate as { patientId?: unknown }).patientId === 'string'
-        ? (candidate as { patientId: string }).patientId
-        : undefined,
+    bundle,
+    txId: typeof txId === 'string' && txId.length > 0 ? txId : undefined,
+    patientId: typeof patientId === 'string' && patientId.length > 0 ? patientId : undefined,
   };
 }
 

@@ -160,9 +160,23 @@ export default defineConfig({
         replacement: fromRoot('./tests/__mocks__/@noble-ciphers-aes.ts'),
       },
       {
-  find: '@react-native-async-storage/async-storage',
-  replacement: fromRoot('./__mocks__/react-native-async-storage.ts'),
-},
+        find: '@react-native-async-storage/async-storage',
+        replacement: fromRoot('./__mocks__/react-native-async-storage.ts'),
+      },
+
+      // Mock agresivo de expo-secure-store para evitar deep imports reales
+      {
+        find: 'expo-secure-store',
+        replacement: fromRoot('./tests/__mocks__/expo-secure-store.ts'),
+      },
+      {
+        find: 'expo-secure-store/build/ExpoSecureStore',
+        replacement: fromRoot('./tests/__mocks__/expo-secure-store.ts'),
+      },
+      {
+        find: 'expo-secure-store/build/SecureStore',
+        replacement: fromRoot('./tests/__mocks__/expo-secure-store.ts'),
+      },
 
     ],
   },

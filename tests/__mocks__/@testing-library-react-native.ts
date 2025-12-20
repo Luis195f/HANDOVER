@@ -1,4 +1,5 @@
 // tests/__mocks__/@testing-library-react-native.ts
+/// <reference types="vitest" />
 import React from 'react';
 import TestRenderer from 'react-test-renderer';
 
@@ -8,6 +9,7 @@ type ReactTestInstance = TestRenderer.ReactTestInstance;
 type RenderResult = {
   root: ReactTestInstance;
   getByText: (text: string | RegExp) => ReactTestInstance;
+  getAllByText: (text: string | RegExp) => ReactTestInstance[];
   queryByText: (text: string | RegExp) => ReactTestInstance | null;
   findByText: (text: string | RegExp) => Promise<ReactTestInstance>;
   getByLabelText: (text: string | RegExp) => ReactTestInstance;
@@ -22,26 +24,52 @@ type RenderResult = {
   unmount: () => void;
 };
 
-export function render(element: React.ReactElement): RenderResult {
+const isTextual = (value: unknown): value is string | number =>
+  typeof value === 'string' || typeof value === 'number';
+
+const collectText = (node: ReactTestInstance): string => {
+  const walk = (child: React.ReactNode): string => {
+    if (isTextual(child)) return String(child);
+    if (Array.isArray(child)) return child.map(walk).join('');
+    if (child && typeof child === 'object' && 'children' in (child as any)) {
+      return collectText(child as ReactTestInstance);
+    }
+    return '';
+  };
+
+  return (node.children as React.ReactNode[]).map(walk).join('');
+};
+
+const matchText = (node: ReactTestInstance, matcher: string | RegExp) => {
+  const text = collectText(node);
+  if (!text) return false;
+  return typeof matcher === 'string' ? text.includes(matcher) : matcher.test(text);
+};
+
+const matchProp = (node: ReactTestInstance, prop: string, matcher: string | RegExp) => {
+  const value = node.props?.[prop];
+  if (!isTextual(value)) return false;
+  const strValue = String(value);
+  return typeof matcher === 'string' ? strValue === matcher : matcher.test(strValue);
+};
+
+function renderInternal(element: React.ReactElement): RenderResult {
   let renderer: ReactTestRenderer;
   TestRenderer.act(() => {
     renderer = TestRenderer.create(element);
   });
   const root = renderer!.root;
 
-  const matchText = (node: ReactTestInstance, matcher: string | RegExp) => {
-    const text = node.props.children;
-    if (typeof text !== 'string') return false;
-    return typeof matcher === 'string' ? text.includes(matcher) : matcher.test(text);
+  const getAllByText = (text: string | RegExp) => {
+    const results = root.findAll((node) => matchText(node, text), { deep: true });
+    if (results.length === 0) {
+      throw new Error(`No instances found matching text: ${text.toString()}`);
+    }
+    return results;
   };
 
-  const matchProp = (node: ReactTestInstance, prop: string, matcher: string | RegExp) => {
-    const value = node.props?.[prop];
-    if (typeof value !== 'string') return false;
-    return typeof matcher === 'string' ? value === matcher : matcher.test(value);
-  };
+  const getByText = (text: string | RegExp) => getAllByText(text)[0];
 
-  const getByText = (text: string | RegExp) => root.find((node) => matchText(node, text));
   const queryByText = (text: string | RegExp) => {
     try {
       return getByText(text);
@@ -74,6 +102,7 @@ export function render(element: React.ReactElement): RenderResult {
   return {
     root,
     getByText,
+    getAllByText,
     queryByText,
     findByText,
     getByLabelText,
@@ -85,6 +114,28 @@ export function render(element: React.ReactElement): RenderResult {
     unmount: () => renderer.unmount(),
   };
 }
+
+let lastRender: RenderResult | null = null;
+
+const cleanup = () => {
+  if (lastRender) {
+    lastRender.unmount();
+    lastRender = null;
+  }
+};
+
+export function render(element: React.ReactElement): RenderResult {
+  cleanup();
+  lastRender = renderInternal(element);
+  return lastRender;
+}
+
+const requireLastRender = (): RenderResult => {
+  if (!lastRender) {
+    throw new Error('No render has been executed. Call render() first.');
+  }
+  return lastRender;
+};
 
 export function fireEvent(target: any, eventName?: string, ...args: any[]) {
   if (!target || !target.props) return;
@@ -144,7 +195,26 @@ export async function waitFor(
 
 export const screen = {
   render,
+  get root() {
+    return requireLastRender().root;
+  },
+  getByText: (...args: Parameters<RenderResult['getByText']>) => requireLastRender().getByText(...args),
+  getAllByText: (...args: Parameters<RenderResult['getAllByText']>) => requireLastRender().getAllByText(...args),
+  queryByText: (...args: Parameters<RenderResult['queryByText']>) => requireLastRender().queryByText(...args),
+  findByText: (...args: Parameters<RenderResult['findByText']>) => requireLastRender().findByText(...args),
+  getByLabelText: (...args: Parameters<RenderResult['getByLabelText']>) => requireLastRender().getByLabelText(...args),
+  queryByLabelText: (...args: Parameters<RenderResult['queryByLabelText']>) =>
+    requireLastRender().queryByLabelText(...args),
+  getByTestId: (...args: Parameters<RenderResult['getByTestId']>) => requireLastRender().getByTestId(...args),
+  queryByTestId: (...args: Parameters<RenderResult['queryByTestId']>) => requireLastRender().queryByTestId(...args),
+  toJSON: () => requireLastRender().toJSON(),
+  update: (...args: Parameters<RenderResult['update']>) => requireLastRender().update(...args),
+  unmount: () => requireLastRender().unmount(),
 };
+
+afterEach(() => {
+  cleanup();
+});
 
 export default {
   render,
