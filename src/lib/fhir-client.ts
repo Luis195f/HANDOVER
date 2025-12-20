@@ -224,6 +224,14 @@ type AuthHooks = {
   baseUrl?: string;
 };
 
+type ScopedFHIRClientConfig = {
+  baseUrl?: string | (() => string | undefined);
+  getToken?: () => Promise<string | null>;
+  timeoutMs?: number;
+  defaultHeaders?: Record<string, string>;
+  logout?: () => Promise<void> | void;
+};
+
 export interface FhirClientConfig {
   baseUrl?: string;
   getToken?: () => Promise<string | null>;
@@ -256,11 +264,16 @@ export function configureFHIRClient(h: AuthHooks & FhirClientConfig) {
 function getBaseUrl(): string {
   const fromHook = hooks.getBaseUrl?.();
   const fromConfig = clientConfig.baseUrl;
+  return resolveBaseUrl(fromHook ?? fromConfig);
+}
+
+const resolveBaseUrl = (baseUrl?: string | undefined): string => {
   const fromEnv =
     ((process.env as any)?.FHIR_BASE_URL as string | undefined) ||
     ((process.env as any)?.EXPO_PUBLIC_FHIR_BASE_URL as string | undefined);
-  return (fromHook || fromConfig || fromEnv || 'https://example.invalid/fhir').replace(/\/$/, '');
-}
+  const resolved = baseUrl || fromEnv || 'https://example.invalid/fhir';
+  return resolved.replace(/\/$/, '');
+};
 
 export type FetchFHIRParams<TBody = unknown> = {
   path: string;
@@ -296,6 +309,14 @@ export type FhirResponse<T = unknown> = {
   message?: string;
 };
 
+type FhirClientRuntimeConfig = {
+  getBaseUrl: () => string;
+  getToken?: () => Promise<string | null>;
+  logout?: () => Promise<void> | void;
+  getDefaultHeaders?: () => Record<string, string> | undefined;
+  getTimeout?: () => number | undefined;
+};
+
 // === Sobrecargas para que los tests puedan llamar fetchFHIR('/Patient', {...})
 export async function fetchFHIR<TResource = unknown, TBody = unknown>(
   path: string,
@@ -310,58 +331,89 @@ export async function fetchFHIR<TResource = unknown, TBody = unknown>(
   arg1: string | FetchFHIRParams<TBody>,
   arg2?: Omit<FetchFHIRParams<TBody>, 'path'>
 ) {
-  const p: FetchFHIRParams<TBody> =
-    typeof arg1 === 'string' ? { path: arg1, ...(arg2 || {}) } : arg1;
+  return fetchFHIRWithConfig(defaultClientConfig)(arg1 as any, arg2 as any);
+}
 
-  const { path, method = 'GET', body, token, headers, signal, timeoutMs, idempotencyKey } = p;
+const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
+  const fetcher = async <TResource = unknown, TBody = unknown>(
+    arg1: string | FetchFHIRParams<TBody>,
+    arg2?: Omit<FetchFHIRParams<TBody>, 'path'>
+  ) => {
+    const p: FetchFHIRParams<TBody> =
+      typeof arg1 === 'string' ? { path: arg1, ...(arg2 || {}) } : arg1;
 
-  const authToken = token ?? (await getAuthToken() ?? undefined);
+    const { path, method = 'GET', body, token, headers, signal, timeoutMs, idempotencyKey } = p;
 
-  const url = /^https?:\/\//i.test(path)
-    ? path
-    : `${getBaseUrl()}/${path.replace(/^\//, '')}`;
+    const authToken = token ?? (runtimeConfig.getToken ? await runtimeConfig.getToken() ?? undefined : undefined);
 
-  const requestHeaders: Record<string, string> = {
-    Accept: 'application/fhir+json',
-    ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
-    ...(clientConfig.defaultHeaders ?? {}),
-    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-    ...headers,
+    const url = /^https?:\/\//i.test(path)
+      ? path
+      : `${runtimeConfig.getBaseUrl()}/${path.replace(/^\//, '')}`;
+
+    const requestHeaders: Record<string, string> = {
+      Accept: 'application/fhir+json',
+      ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
+      ...(runtimeConfig.getDefaultHeaders?.() ?? {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...headers,
+    };
+
+    try {
+      const res = await safeFetch<TResource>(url, {
+        method,
+        headers: requestHeaders,
+        body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+        signal,
+        timeoutMs: timeoutMs ?? runtimeConfig.getTimeout?.(),
+        idempotencyKey,
+      });
+
+      return { ok: true, response: res.raw, data: res.data, status: res.status };
+    } catch (error) {
+      if (error instanceof HTTPError) {
+        if (error.status === 401 || error.status === 403) {
+          if (runtimeConfig.logout) await runtimeConfig.logout();
+          throw new Error('unauthorized');
+        }
+
+        const data = await parseResponseJson<TResource>(error.response);
+        const response =
+          error.response ?? new Response('', { status: error.status ?? 0, statusText: error.message });
+        const outcome = isOperationOutcome(data) ? data.issue : undefined;
+        return {
+          ok: false,
+          response,
+          data,
+          outcome,
+          status: error.status ?? response.status ?? 0,
+          message: outcome ? formatIssuesForUser(outcome).message : error.message,
+        };
+      }
+      throw error;
+    }
   };
 
-  try {
-    const res = await safeFetch<TResource>(url, {
-      method,
-      headers: requestHeaders,
-      body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
-      signal,
-      timeoutMs: timeoutMs ?? clientConfig.timeoutMs,
-      idempotencyKey,
-    });
+  return fetcher as typeof fetchFHIR;
+};
 
-    return { ok: true, response: res.raw, data: res.data, status: res.status };
-  } catch (error) {
-    if (error instanceof HTTPError) {
-      if (error.status === 401 || error.status === 403) {
-        if (hooks.logout) await hooks.logout();
-        throw new Error('unauthorized');
-      }
+const defaultClientConfig: FhirClientRuntimeConfig = {
+  getBaseUrl,
+  getToken: getAuthToken,
+  logout: () => hooks.logout?.(),
+  getDefaultHeaders: () => clientConfig.defaultHeaders,
+  getTimeout: () => clientConfig.timeoutMs,
+};
 
-      const data = await parseResponseJson<TResource>(error.response);
-      const response =
-        error.response ?? new Response('', { status: error.status ?? 0, statusText: error.message });
-      const outcome = isOperationOutcome(data) ? data.issue : undefined;
-      return {
-        ok: false,
-        response,
-        data,
-        outcome,
-        status: error.status ?? response.status ?? 0,
-        message: outcome ? formatIssuesForUser(outcome).message : error.message,
-      };
-    }
-    throw error;
-  }
+export function createFHIRClient(config: ScopedFHIRClientConfig) {
+  const scopedConfig: FhirClientRuntimeConfig = {
+    getBaseUrl: () => resolveBaseUrl(typeof config.baseUrl === 'function' ? config.baseUrl() : config.baseUrl),
+    getToken: config.getToken,
+    logout: config.logout,
+    getDefaultHeaders: () => config.defaultHeaders,
+    getTimeout: () => config.timeoutMs,
+  };
+
+  return { fetchFHIR: fetchFHIRWithConfig(scopedConfig) };
 }
 
 /**

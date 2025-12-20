@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { ENV, FHIR_BASE_URL } from '@/src/config/env';
-import { configureFHIRClient, fetchFHIR } from './fhir-client';
+import { createFHIRClient } from './fhir-client';
 import { formatIssuesForUser, hasFatalOutcome, isOperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { NetInfoState } from './netinfo';
 
@@ -29,13 +29,14 @@ export async function fastValidateBundleRemotely(
   bundle: unknown,
   opts: { token?: string | null; fhirBaseUrl?: string } = {},
 ): Promise<FastValidateResult> {
+  const fhirBaseUrl = opts.fhirBaseUrl ?? ENV.FHIR_BASE_URL ?? FHIR_BASE_URL;
+  const scopedClient = createFHIRClient({
+    baseUrl: () => fhirBaseUrl,
+    getToken: async () => opts.token ?? null,
+  });
+
   try {
-    const fhirBaseUrl = opts.fhirBaseUrl ?? ENV.FHIR_BASE_URL ?? FHIR_BASE_URL;
-    configureFHIRClient({
-      getBaseUrl: () => fhirBaseUrl,
-      ensureFreshToken: async () => opts.token ?? null,
-    });
-    const result = await fetchFHIR<OperationIssue[]>({
+    const result = await scopedClient.fetchFHIR<OperationIssue[]>({
       path: '/Bundle/$validate',
       method: 'POST',
       body: bundle,
