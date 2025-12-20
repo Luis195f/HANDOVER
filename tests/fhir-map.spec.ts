@@ -205,6 +205,12 @@ const compositionSchema = z.object({
     .optional(),
 });
 
+const patientSchema = z.object({
+  resourceType: z.literal('Patient'),
+  id: z.string().optional(),
+  identifier: z.array(z.object({ system: z.string(), value: z.string() })).optional(),
+});
+
 const resourceValidators = {
   Observation: observationSchema,
   MedicationStatement: medicationStatementSchema,
@@ -212,6 +218,7 @@ const resourceValidators = {
   DeviceUseStatement: deviceUseStatementSchema,
   DocumentReference: documentReferenceSchema,
   Composition: compositionSchema,
+  Patient: patientSchema,
 } as const;
 
 function collectReferenceStrings(resource: unknown): string[] {
@@ -340,6 +347,27 @@ describe('buildHandoverBundle', () => {
         .forEach((reference) => {
           expect(fullUrlSet.has(reference)).toBe(true);
         });
+    });
+  });
+
+  it('uses the patient fullUrl for every patient reference', () => {
+    const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
+    const patientEntry = bundle.entry.find((entry) => entry.resource.resourceType === 'Patient');
+    expect(patientEntry).toBeDefined();
+    expect(patientEntry?.fullUrl).toMatch(/^urn:uuid:[0-9a-f]{32}$/);
+
+    const expectedPatientReference = patientEntry!.fullUrl;
+    const patientIdReference = `Patient/${baseValues.patientId}`;
+
+    bundle.entry
+      .filter((entry) => 'subject' in entry.resource && entry.resource.resourceType !== 'Patient')
+      .forEach((entry) => {
+        expect((entry.resource as any).subject?.reference).toBe(expectedPatientReference);
+      });
+
+    bundle.entry.forEach((entry) => {
+      const references = collectReferenceStrings(entry.resource);
+      expect(references).not.toContain(patientIdReference);
     });
   });
 

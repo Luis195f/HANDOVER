@@ -171,6 +171,8 @@ vi.mock('expo-modules-core', () => {
     }
   }
 
+  class NativeModule {}
+
   const NativeModulesProxy: Record<string, any> = {};
 
   // 🔴 Platform: utilizado por varios módulos (incluido expo-av)
@@ -194,8 +196,13 @@ vi.mock('expo-modules-core', () => {
 
   const registerRootComponent = <T,>(component: T): T => component;
 
-  const requireNativeModule = vi.fn();
-  const requireOptionalNativeModule = vi.fn(() => ({}));
+  const createNativeModule = () => ({
+    addListener: vi.fn(),
+    removeListeners: vi.fn(),
+  });
+
+  const requireNativeModule = vi.fn(() => createNativeModule());
+  const requireOptionalNativeModule = vi.fn(() => null);
 
   // 🔴 NUEVO: createPermissionHook – expo-av lo importa desde expo-modules-core
   type PermissionStatus = {
@@ -237,6 +244,7 @@ vi.mock('expo-modules-core', () => {
 
   const mod = {
     EventEmitter,
+    NativeModule,
     NativeModulesProxy,
     Platform,
     requireNativeViewManager,

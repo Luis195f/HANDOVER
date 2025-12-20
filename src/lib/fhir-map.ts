@@ -809,6 +809,13 @@ function assignStableIds(
   return { resource: withId, fullUrl: urn };
 }
 
+function replaceSubjectReference<T extends FhirResource>(resource: T, subject: Reference): T {
+  if ('subject' in resource) {
+    return { ...resource, subject } as T;
+  }
+  return resource;
+}
+
 function ensureEffectiveDate(
   parsed: ObservationVitalsInput,
   optionsMerged: ResolvedBuildOptions,
@@ -2029,15 +2036,19 @@ export function buildHandoverBundle(
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => nowIso };
 
-  const mappingContext: MappingContext = {
-    subject: patientReference(values.patientId),
-    encounter: encounterReference(values.encounterId),
-    effectiveDateTime: nowIso,
-  };
   const patient: Patient = {
     resourceType: 'Patient',
     id: values.patientId,
     identifier: [{ system: 'urn:handover-pro:patient-id', value: values.patientId }],
+  };
+
+  const { resource: patientWithId, fullUrl: patientFullUrl } = assignStableIds(patient, values.patientId);
+  const patientSubjectReference: Reference = { reference: patientFullUrl, type: 'Patient' };
+
+  const mappingContext: MappingContext = {
+    subject: patientSubjectReference,
+    encounter: encounterReference(values.encounterId),
+    effectiveDateTime: nowIso,
   };
 
   const diagnoses = mapDiagnoses(values as HandoverData, mappingContext);
@@ -2051,7 +2062,7 @@ export function buildHandoverBundle(
           ...values.vitals,
         },
         sharedOptions,
-      )
+      ).map((observation) => replaceSubjectReference(observation, patientSubjectReference))
     : [];
 
   const oxygenObservations = mapOxygenObservations(
@@ -2061,17 +2072,17 @@ export function buildHandoverBundle(
       oxygenTherapy: values.oxygenTherapy,
     },
     sharedOptions,
-  );
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const nutritionObservations = mapNutritionCare(
     { patientId: values.patientId, encounterId: values.encounterId, nutrition: values.nutrition },
     sharedOptions,
-  );
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const eliminationObservations = mapEliminationCare(
     { patientId: values.patientId, encounterId: values.encounterId, elimination: values.elimination },
     sharedOptions,
-  );
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const mobilitySkinObservations = mapMobilitySkinCare(
     {
@@ -2081,12 +2092,12 @@ export function buildHandoverBundle(
       skin: values.skin,
     },
     sharedOptions,
-  );
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const fluidBalanceObservations = mapFluidBalanceCare(
     { patientId: values.patientId, encounterId: values.encounterId, fluidBalance: values.fluidBalance },
     sharedOptions,
-  );
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const evaObservation = mapEvaObservation(values.painAssessment, mappingContext);
   const bradenObservation = mapBradenObservation(values.braden, mappingContext);
@@ -2101,12 +2112,12 @@ export function buildHandoverBundle(
       meds: values.meds,
     },
     sharedOptions,
-  );
+  ).map((medication) => replaceSubjectReference(medication, patientSubjectReference));
 
   const treatmentProcedures = mapTreatments(
     { patientId: values.patientId, encounterId: values.encounterId, treatments: values.treatments },
     sharedOptions,
-  );
+  ).map((procedure) => replaceSubjectReference(procedure, patientSubjectReference));
 
   const oxygenResources = mapDeviceUse(
     {
@@ -2115,7 +2126,7 @@ export function buildHandoverBundle(
       oxygenTherapy: values.oxygenTherapy,
     },
     sharedOptions,
-  );
+  ).map((resource) => replaceSubjectReference(resource, patientSubjectReference));
 
   const document = mapDocumentReferenceAudio(
     {
@@ -2126,9 +2137,12 @@ export function buildHandoverBundle(
     },
     sharedOptions,
   );
+  const documentWithPatientReference = document
+    ? replaceSubjectReference(document, patientSubjectReference)
+    : undefined;
 
   const entries: BundleEntry[] = [
-    { fullUrl: `Patient/${values.patientId}`, resource: patient, request: { method: 'POST', url: 'Patient' } },
+    { fullUrl: patientFullUrl, resource: patientWithId, request: { method: 'POST', url: 'Patient' } },
   ];
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];
@@ -2276,8 +2290,8 @@ export function buildHandoverBundle(
     oxygenRefs.push(fullUrl);
   });
 
-  if (document) {
-    const { resource, fullUrl } = assignStableIds(document, values.patientId);
+  if (documentWithPatientReference) {
+    const { resource, fullUrl } = assignStableIds(documentWithPatientReference, values.patientId);
     entries.push({
       fullUrl,
       resource,
@@ -2286,35 +2300,38 @@ export function buildHandoverBundle(
     attachmentRefs.push(fullUrl);
   }
 
-  const composition = buildComposition(
-    {
-      patientId: values.patientId,
-      encounterId: values.encounterId,
-      author: values.author,
-      composition: values.composition,
-      closingSummary: values.closingSummary,
-      administrativeData: values.administrativeData,
-      sbar: values.sbar,
-      signatures: values.signatures,
-    },
-    {
-      vitals: vitalsRefs,
-      medications: medicationRefs,
-      treatments: treatmentRefs,
-      oxygen: oxygenRefs,
-      attachments: attachmentRefs,
-      nutrition: nutritionRefs,
-      elimination: eliminationRefs,
-      mobilitySkin: mobilitySkinRefs,
-      fluidBalance: fluidBalanceRefs,
-      pain: painRefs,
-      braden: bradenRefs,
-      glasgow: glasgowRefs,
-      risks: riskRefs,
-      detectedIssues: issueRefs,
-      diagnoses: diagnosisRefs,
-    },
-    sharedOptions,
+  const composition = replaceSubjectReference(
+    buildComposition(
+      {
+        patientId: values.patientId,
+        encounterId: values.encounterId,
+        author: values.author,
+        composition: values.composition,
+        closingSummary: values.closingSummary,
+        administrativeData: values.administrativeData,
+        sbar: values.sbar,
+        signatures: values.signatures,
+      },
+      {
+        vitals: vitalsRefs,
+        medications: medicationRefs,
+        treatments: treatmentRefs,
+        oxygen: oxygenRefs,
+        attachments: attachmentRefs,
+        nutrition: nutritionRefs,
+        elimination: eliminationRefs,
+        mobilitySkin: mobilitySkinRefs,
+        fluidBalance: fluidBalanceRefs,
+        pain: painRefs,
+        braden: bradenRefs,
+        glasgow: glasgowRefs,
+        risks: riskRefs,
+        detectedIssues: issueRefs,
+        diagnoses: diagnosisRefs,
+      },
+      sharedOptions,
+    ),
+    patientSubjectReference,
   );
 
   const { resource: compositionWithId, fullUrl: compositionFullUrl } = assignStableIds(
