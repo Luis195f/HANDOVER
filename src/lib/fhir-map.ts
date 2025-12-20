@@ -2039,6 +2039,7 @@ export function buildHandoverBundle(
     id: values.patientId,
     identifier: [{ system: 'urn:handover-pro:patient-id', value: values.patientId }],
   };
+  const patientWithId = assignStableIds(patient, values.patientId);
 
   const diagnoses = mapDiagnoses(values as HandoverData, mappingContext);
   const detectedIssues = mapDetectedIssuesFromRisks(values.risksStructured, mappingContext);
@@ -2128,7 +2129,7 @@ export function buildHandoverBundle(
   );
 
   const entries: BundleEntry[] = [
-    { fullUrl: `Patient/${values.patientId}`, resource: patient, request: { method: 'POST', url: 'Patient' } },
+    { fullUrl: patientWithId.fullUrl, resource: patientWithId.resource, request: { method: 'POST', url: 'Patient' } },
   ];
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];

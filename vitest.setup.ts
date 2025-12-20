@@ -5,10 +5,6 @@
 
 /// <reference types="vitest" />
 
-import { vi, beforeEach, afterEach } from 'vitest';
-import * as SecureStoreMock from './tests/__mocks__/expo-secure-store';
-import crypto from 'node:crypto';
-
 // -----------------------------------------------------------------------------
 // 🌍 Fallbacks básicos de entorno
 // -----------------------------------------------------------------------------
@@ -60,17 +56,39 @@ if (typeof g.fetch !== 'function') {
 }
 
 // -----------------------------------------------------------------------------
-// 🔒 Mock de expo-secure-store (fuente única: tests/__mocks__/expo-secure-store)
+// 🔒 Mock de expo-secure-store (fuente única para tests)
 // -----------------------------------------------------------------------------
 
-vi.mock('expo-secure-store', () => {
-  const mod: any = SecureStoreMock;
-  const defaultExport = mod.default ?? mod;
+const __secureStore = new Map<string, string>();
+const __resetSecureStore = () => __secureStore.clear();
 
+vi.mock('expo-secure-store', () => {
   return {
     __esModule: true,
-    ...mod,
-    default: defaultExport,
+    AFTER_FIRST_UNLOCK: 'AFTER_FIRST_UNLOCK',
+    WHEN_UNLOCKED: 'WHEN_UNLOCKED',
+    isAvailableAsync: vi.fn(async () => true),
+    setItemAsync: vi.fn(async (key: string, value: string) => {
+      __secureStore.set(key, value);
+    }),
+    getItemAsync: vi.fn(async (key: string) => __secureStore.get(key) ?? null),
+    deleteItemAsync: vi.fn(async (key: string) => {
+      __secureStore.delete(key);
+    }),
+    __reset: __resetSecureStore,
+    default: {
+      AFTER_FIRST_UNLOCK: 'AFTER_FIRST_UNLOCK',
+      WHEN_UNLOCKED: 'WHEN_UNLOCKED',
+      isAvailableAsync: vi.fn(async () => true),
+      setItemAsync: vi.fn(async (key: string, value: string) => {
+        __secureStore.set(key, value);
+      }),
+      getItemAsync: vi.fn(async (key: string) => __secureStore.get(key) ?? null),
+      deleteItemAsync: vi.fn(async (key: string) => {
+        __secureStore.delete(key);
+      }),
+      __reset: __resetSecureStore,
+    },
   };
 });
 
@@ -78,15 +96,17 @@ vi.mock('expo-secure-store', () => {
 // 🔐 Mock de expo-crypto
 // -----------------------------------------------------------------------------
 
-vi.mock('expo-crypto', () => {
+vi.mock('expo-crypto', async () => {
+  const { createHash, randomBytes } = await import('node:crypto');
+
   const digest = async (_algorithm: any, data: Uint8Array) => {
-    const hash = crypto.createHash('sha256');
+    const hash = createHash('sha256');
     hash.update(Buffer.from(data));
     return hash.digest('hex');
   };
 
   const getRandomBytesAsync = async (length: number) => {
-    return new Uint8Array(crypto.randomBytes(length));
+    return new Uint8Array(randomBytes(length));
   };
 
   return {
@@ -160,7 +180,8 @@ vi.mock('expo-web-browser', () => {
 // 🧩 Mock de expo-modules-core (inline, sin require externo)
 // -----------------------------------------------------------------------------
 
-vi.mock('expo-modules-core', () => {
+vi.mock('expo-modules-core', async (importOriginal) => {
+  const actual = await importOriginal<any>().catch(() => ({}));
   // EventEmitter muy simple, suficiente para que los módulos de Expo no fallen
   class EventEmitter<T = any> {
     addListener(_eventName: string, _listener: (event: T) => void) {
@@ -170,6 +191,8 @@ vi.mock('expo-modules-core', () => {
       // no-op
     }
   }
+
+  class NativeModule {}
 
   const NativeModulesProxy: Record<string, any> = {};
 
@@ -194,8 +217,8 @@ vi.mock('expo-modules-core', () => {
 
   const registerRootComponent = <T,>(component: T): T => component;
 
-  const requireNativeModule = vi.fn();
-  const requireOptionalNativeModule = vi.fn(() => ({}));
+  const requireNativeModule = vi.fn(() => ({}));
+  const requireOptionalNativeModule = vi.fn(() => null);
 
   // 🔴 NUEVO: createPermissionHook – expo-av lo importa desde expo-modules-core
   type PermissionStatus = {
@@ -236,7 +259,9 @@ vi.mock('expo-modules-core', () => {
   };
 
   const mod = {
+    ...actual,
     EventEmitter,
+    NativeModule,
     NativeModulesProxy,
     Platform,
     requireNativeViewManager,
@@ -271,10 +296,16 @@ vi.mock('expo-modules-core', () => {
 // 🌐 Mock mínimo de 'expo' (winter/runtime / ImportMetaRegistry)
 // -----------------------------------------------------------------------------
 
-vi.mock('expo', () => ({
-  __esModule: true,
-  default: {},
-}));
+vi.mock('expo', async (importOriginal) => {
+  const actual = await importOriginal<any>();
+  const requireNativeModule = vi.fn(() => ({}));
+  return {
+    __esModule: true,
+    ...actual,
+    requireNativeModule,
+    default: { ...(actual?.default ?? {}), requireNativeModule },
+  };
+});
 
 // -----------------------------------------------------------------------------
 // 📁 Mock de expo-file-system (para export-pdf y otros)
@@ -467,18 +498,15 @@ vi.mock('expo-auth-session', () => {
 // 🧭 Mock de @react-navigation/native (con CommonActions)
 // -----------------------------------------------------------------------------
 
-vi.mock('@react-navigation/native', () => {
+vi.mock('@react-navigation/native', async (importOriginal) => {
+  const actual = await importOriginal<any>();
   const NavigationContainer = ({ children }: any) => children;
 
-  const createNavigationContainerRef = vi.fn(() => {
-    return {
-      isReady: () => true,
-      navigate: vi.fn(),
-      reset: vi.fn(),
-      goBack: vi.fn(),
-      getRootState: vi.fn(),
-      dispatch: vi.fn(),
-    } as any;
+  const createNavigationContainerRef = () => ({
+    current: null,
+    isReady: () => true,
+    navigate: vi.fn(),
+    reset: vi.fn(),
   });
 
   const CommonActions = {
@@ -488,7 +516,8 @@ vi.mock('@react-navigation/native', () => {
     })),
   };
 
-  const api = {
+  return {
+    ...actual,
     NavigationContainer,
     createNavigationContainerRef,
     CommonActions,
@@ -499,22 +528,30 @@ vi.mock('@react-navigation/native', () => {
     useRoute: () => ({ params: {} }),
     useFocusEffect: () => {},
     useIsFocused: () => false,
-  };
-
-  return {
-    ...api,
     default: NavigationContainer,
   };
 });
 
 // -----------------------------------------------------------------------------
+// 🧭 Mock de @react-navigation/native-stack (evita NativeStackView nativo)
+// -----------------------------------------------------------------------------
+
+vi.mock('@react-navigation/native-stack', () => ({
+  __esModule: true,
+  createNativeStackNavigator: () => ({
+    Navigator: ({ children }: any) => children,
+    Screen: ({ children }: any) => children,
+    Group: ({ children }: any) => children,
+  }),
+}));
+
+// -----------------------------------------------------------------------------
 // 🧹 Limpiar mocks entre tests
 // -----------------------------------------------------------------------------
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  // Si el mock de SecureStore implementa __reset, úsalo para empezar limpio
-  (SecureStoreMock as any).__reset?.();
+  __resetSecureStore();
 });
 
 afterEach(() => {
