@@ -7,6 +7,7 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
+import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
 
 type QueueItemMeta = {
   id: string;
@@ -210,23 +211,12 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
     return s.length > n ? `${s.slice(0, n)}…` : s;
   };
 
-  const parseIssues = React.useCallback(() => {
-    if (!item.errorIssuesJson) return [] as Array<Record<string, unknown>>;
-    try {
-      const parsed = JSON.parse(item.errorIssuesJson);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }, [item.errorIssuesJson]);
+  const issues = React.useMemo(() => parseErrorIssuesJson(item.errorIssuesJson), [item.errorIssuesJson]);
 
   const isError = item.syncStatus === 'error';
   const isValidation422 = isError && item.errorStatus === 422;
-  const statusLabel = isValidation422
-    ? 'Error de validación FHIR (422)'
-    : isError
-    ? 'Error de sincronización'
-    : (item.syncStatus ?? 'pending').toUpperCase();
+  const { subtitle, title } = resolveErrorCopy(item.errorStatus);
+  const statusLabel = isError ? subtitle : (item.syncStatus ?? 'pending').toUpperCase();
 
   const rowStyle = [
     styles.row,
@@ -236,24 +226,7 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
 
   const showErrorAlert = React.useCallback(() => {
     if (!isError) return;
-    const issues = parseIssues();
-    const issuesText = issues
-      .map((issue) => {
-        const diag = typeof issue?.diagnostics === 'string' ? issue.diagnostics : null;
-        const expr = Array.isArray(issue?.expression)
-          ? (issue.expression as unknown[])
-              .filter((it) => typeof it === 'string')
-              .join(', ')
-          : typeof issue?.expression === 'string'
-          ? issue.expression
-          : null;
-        if (diag && expr) return `• ${diag} (${expr})`;
-        if (diag) return `• ${diag}`;
-        if (expr) return `• ${expr}`;
-        return null;
-      })
-      .filter(Boolean)
-      .join('\n');
+    const issuesText = buildIssuesText(issues);
 
     const buttons: Array<{ text: string; onPress?: () => void; style?: 'cancel' }> = [];
 
@@ -267,11 +240,11 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
     buttons.push({ text: 'Cerrar', style: 'cancel' });
 
     Alert.alert(
-      'Error de validación FHIR',
-      item.errorMessage || 'No se encontró mensaje de error.',
+      title,
+      item.errorMessage || 'Se produjo un error al sincronizar.',
       buttons,
     );
-  }, [isError, item.errorMessage, parseIssues]);
+  }, [isError, item.errorMessage, issues, title]);
 
   const RowWrapper = isError ? Pressable : View;
 
@@ -281,13 +254,25 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
       style={isError ? ({ pressed }: { pressed?: boolean }) => [...rowStyle, pressed && { opacity: 0.95 }] : rowStyle}
     >
       <View style={{ flex: 1 }}>
-        <Text style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
+        <View style={styles.rowBetween}>
+          <Text style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
+          {isError && (
+            <View style={[styles.errorBadge, { backgroundColor: `${C.stateError}22`, borderColor: C.stateError }]}>
+              <Text style={[styles.errorBadgeText, { color: C.stateError }]}>Error</Text>
+            </View>
+          )}
+        </View>
         <Text style={[styles.sub, { color: C.textSecondary }]}>Fecha: {when}</Text>
         <Text style={[styles.sub, { color: C.textSecondary }]}>Intentos: {item.attempts}</Text>
         {isError && (
-          <Text style={[styles.sub, { color: C.stateError, marginTop: 4 }]}>
-            Toca para ver el error
-          </Text>
+          <>
+            <Text style={[styles.sub, { color: C.stateError, marginTop: 4 }]} numberOfLines={2}>
+              {subtitle}
+            </Text>
+            <Pressable onPress={showErrorAlert} style={({ pressed }) => pressed && { opacity: 0.85 }}>
+              <Text style={[styles.errorAction, { color: C.stateError }]}>Ver error</Text>
+            </Pressable>
+          </>
         )}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
@@ -371,7 +356,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: 8,
   },
   id: { fontWeight: '700' },
+  errorBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, borderWidth: 1 },
+  errorBadgeText: { fontSize: 12, fontWeight: '700' },
   sub: { marginTop: 2 },
+  errorAction: { marginTop: 6, fontWeight: '700' },
   hash: { fontSize: 12 },
   hashVal: { fontFamily: 'monospace', fontSize: 12 },
   state: { marginTop: 4, fontWeight: '700', fontSize: 12 },
