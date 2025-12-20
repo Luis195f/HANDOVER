@@ -33,13 +33,16 @@
   - La clave derivada de `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` es el secreto real y debe gestionarse como un secreto sensible.
 
 ## Interfaz de usuario
-- `src/screens/SyncCenter.tsx` permite inspeccionar, reintentar o vaciar la cola manualmente.
+- `src/screens/SyncCenter.tsx` permite inspeccionar, reintentar o vaciar la cola manualmente. Los elementos con `syncStatus="error"` muestran un badge “Error”, diferencian `422 Error de validación FHIR` del resto de fallos, y ofrecen un botón “Ver error” que abre un alert con el mensaje y, si existe, un detalle de issues (`expression` + `diagnostics`) devuelto por el servidor.
 
 ## Variables relacionadas
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: número máximo de reintentos.
 - `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`: base del backoff exponencial.
 - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY`: semilla para derivar la clave simétrica (256 bits) del cifrado offline. Debe tener al menos 32 caracteres y gestionarse como secreto (vault/CI/CD), no en texto plano.
 - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`: feature flag para desactivar el cifrado offline (solo debugging local). Valores `true/1/TRUE` lo desactivan; cualquier otro valor lo mantiene activo por defecto.
+
+## Validación rápida antes de encolar
+- `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` (por defecto `false`) activa una validación remota previa (`Bundle/$validate`) siempre que haya conectividad. Si el servidor responde con un `OperationOutcome` severidad `error` o `fatal`, la app muestra un alert con `formatIssuesForUser(...)` y no encola el bundle; sin conectividad, la cola sigue funcionando en modo offline-first. Se recomienda habilitarlo en staging/producción para atrapar errores estructurales antes de saturar la cola.
 
 ## Estado de sincronización
 - La sync expone `SyncSnapshot` (`status`, `pendingCount`, `lastRunAt`, `lastError`, `nextRetryAt`).
