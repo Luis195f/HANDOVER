@@ -76,8 +76,9 @@ export async function getOrCreateEncryptionKey(): Promise<string> {
   const stored = await readStoredKey();
   const normalizedStored = normalizeKey(stored);
   if (normalizedStored) {
-    cachedKey = CryptoJS.enc.Base64.stringify(normalizedStored);
-    return cachedKey;
+    const key = CryptoJS.enc.Base64.stringify(normalizedStored);
+    cachedKey = key;
+    return key;
   }
 
   if (stored) {
@@ -86,6 +87,7 @@ export async function getOrCreateEncryptionKey(): Promise<string> {
 
   const nextKey = getRandomKeyBase64();
   await persistKey(nextKey);
+  cachedKey = nextKey;
   return nextKey;
 }
 

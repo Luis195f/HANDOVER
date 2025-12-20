@@ -45,7 +45,7 @@ let cachedOfflineKey: Uint8Array | null = null;
 async function sha256Bytes(input: Uint8Array | string): Promise<Uint8Array> {
   const encoder = new TextEncoder();
   const data = typeof input === 'string' ? encoder.encode(input) : input;
-  const hashed = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data);
+  const hashed = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, toArrayBuffer(data));
   if (typeof hashed === 'string') {
     const fromHex = Buffer.from(hashed, 'hex');
     if (fromHex.length === GCM_KEY_SIZE) return new Uint8Array(fromHex);
@@ -58,6 +58,12 @@ async function sha256Bytes(input: Uint8Array | string): Promise<Uint8Array> {
 
 function toBase64(buffer: ArrayBuffer | Uint8Array): string {
   return Buffer.from(buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer).toString('base64');
+}
+
+function toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return copy.buffer;
 }
 
 function fromBase64(base64: string): Uint8Array {
