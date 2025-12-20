@@ -540,7 +540,24 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
-    const itemWithPayload = { ...item, payload: preparedPayload } as OfflineQueueItem;
+    const normalizedPayload = { ...preparedPayload };
+    if (typeof preparedPayload.bundle === 'string') {
+      try {
+        normalizedPayload.bundle = JSON.parse(preparedPayload.bundle) as Bundle;
+      } catch (error) {
+        console.warn('Payload offline corrupto, no se pudo parsear JSON', error);
+        await updateOfflineQueueItem(item.id, {
+          syncStatus: 'error',
+          attempts: item.attempts + 1,
+          lastAttemptAt: startedAt,
+          errorMessage: 'Error al analizar el payload offline',
+          errorStatus: 0,
+        });
+        continue;
+      }
+    }
+
+    const itemWithPayload = { ...item, payload: normalizedPayload } as OfflineQueueItem;
 
     let result: QueueSendResult;
     try {
