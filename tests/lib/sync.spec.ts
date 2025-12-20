@@ -269,6 +269,7 @@ describe('sync engine state machine', () => {
   it('marca como error los payloads offline que no se pueden analizar y no los elimina', async () => {
     const sender = vi.fn(async () => ({ ok: true as const }));
 
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await createOfflineQueueItem({ payload: '{invalid-json', patientId: 'pat-corrupt' });
     configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
 
@@ -281,6 +282,8 @@ describe('sync engine state machine', () => {
     expect(item?.syncStatus).toBe('error');
     expect(item?.attempts).toBe(1);
     expect(item?.errorMessage).toBe('Error al analizar el payload offline');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
@@ -372,4 +375,3 @@ describe('offline encryption integration', () => {
     expect(getSyncSnapshot().status).toBe('idle');
   });
 });
-

@@ -84,6 +84,11 @@ const ENV_VALIDATION_MODE =
   (process.env.HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
   'off';
 
+const SHOULD_LOG = process.env.NODE_ENV !== 'test';
+const logWarn = (...args: Parameters<typeof console.warn>) => {
+  if (SHOULD_LOG) console.warn(...args);
+};
+
 function annotateValidationErrors(bundle: any, errors: ValidationErrorDetail[]) {
   if (!bundle || typeof bundle !== 'object') return;
   (bundle as any)._validationErrors = errors;
@@ -294,7 +299,7 @@ function notifySyncListeners() {
     try {
       listener(syncSnapshot);
     } catch (error) {
-      console.warn('Sync listener failed', error);
+      logWarn('Sync listener failed', error);
     }
   }
 }
@@ -530,7 +535,7 @@ export async function processQueueOnce(): Promise<void> {
       }
       preparedPayload = { ...extracted, patientId: extracted.patientId ?? item.patientId };
     } catch (error) {
-      console.warn('Error al preparar/analizar payload offline', error);
+      logWarn('Error al preparar/analizar payload offline', error);
       await updateOfflineQueueItem(item.id, {
         syncStatus: 'error',
         attempts: item.attempts + 1,
@@ -545,7 +550,7 @@ export async function processQueueOnce(): Promise<void> {
       try {
         normalizedPayload.bundle = JSON.parse(preparedPayload.bundle) as Bundle;
       } catch (error) {
-        console.warn('Payload offline corrupto, no se pudo parsear JSON', error);
+        logWarn('Payload offline corrupto, no se pudo parsear JSON', error);
         await updateOfflineQueueItem(item.id, {
           syncStatus: 'error',
           attempts: item.attempts + 1,
