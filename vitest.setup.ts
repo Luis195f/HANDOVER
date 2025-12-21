@@ -279,10 +279,55 @@ vi.mock('expo-modules-core', () => {
 // 🌐 Mock mínimo de 'expo' (winter/runtime / ImportMetaRegistry)
 // -----------------------------------------------------------------------------
 
-vi.mock('expo', () => ({
-  __esModule: true,
-  default: {},
-}));
+vi.mock('expo', () => {
+  const createNativeModule = () => ({
+    addListener: vi.fn(),
+    removeListeners: vi.fn(),
+  });
+
+  const mod = {
+    requireNativeModule: vi.fn((_name: string) => createNativeModule()),
+    requireOptionalNativeModule: vi.fn((_name: string) => null),
+  };
+
+  return {
+    __esModule: true,
+    ...mod,
+    default: mod,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🧱 Mock de expo-sqlite (para evitar parseo de node_modules)
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-sqlite', async () => {
+  const mod = await import('./tests/__mocks__/expo-sqlite');
+  const defaultExport = (mod as any).default ?? mod;
+  return {
+    __esModule: true,
+    ...(mod as any),
+    default: defaultExport,
+  };
+});
+vi.mock('expo-sqlite/next', async () => {
+  const mod = await import('./tests/__mocks__/expo-sqlite');
+  const defaultExport = (mod as any).default ?? mod;
+  return {
+    __esModule: true,
+    ...(mod as any),
+    default: defaultExport,
+  };
+});
+vi.mock('expo-sqlite/legacy', async () => {
+  const mod = await import('./tests/__mocks__/expo-sqlite');
+  const defaultExport = (mod as any).default ?? mod;
+  return {
+    __esModule: true,
+    ...(mod as any),
+    default: defaultExport,
+  };
+});
 
 // -----------------------------------------------------------------------------
 // 📁 Mock de expo-file-system (para export-pdf y otros)

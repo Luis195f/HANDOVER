@@ -160,9 +160,23 @@ export default defineConfig({
         replacement: fromRoot('./tests/__mocks__/@noble-ciphers-aes.ts'),
       },
       {
-  find: '@react-native-async-storage/async-storage',
-  replacement: fromRoot('./__mocks__/react-native-async-storage.ts'),
-},
+        find: '@react-native-async-storage/async-storage',
+        replacement: fromRoot('./__mocks__/react-native-async-storage.ts'),
+      },
+
+      // Stub de expo-sqlite para evitar análisis de Vite en node_modules
+      {
+        find: 'expo-sqlite',
+        replacement: fromRoot('./tests/__mocks__/expo-sqlite.ts'),
+      },
+      {
+        find: 'expo-sqlite/next',
+        replacement: fromRoot('./tests/__mocks__/expo-sqlite.ts'),
+      },
+      {
+        find: 'expo-sqlite/legacy',
+        replacement: fromRoot('./tests/__mocks__/expo-sqlite.ts'),
+      },
 
     ],
   },
@@ -177,6 +191,9 @@ export default defineConfig({
       'expo-av',
       'expo-modules-core',
       'expo-file-system',
+      'expo-sqlite',
+      'expo-sqlite/next',
+      'expo-sqlite/legacy',
     ],
   },
 
@@ -189,6 +206,9 @@ export default defineConfig({
       'expo-av',
       'expo-modules-core',
       'expo-file-system',
+      'expo-sqlite',
+      'expo-sqlite/next',
+      'expo-sqlite/legacy',
     ],
   },
 });

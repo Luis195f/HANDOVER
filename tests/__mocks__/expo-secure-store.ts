@@ -10,8 +10,10 @@ const store: Store = {};
 type SetItemFailureHandler = (key: string, value: string) => unknown | Promise<unknown>;
 let setItemFailure: SetItemFailureHandler | Error | null = null;
 
+export const AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY = 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY';
 export const SecureStoreAccessibility = {
   AFTER_FIRST_UNLOCK: 'AFTER_FIRST_UNLOCK',
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
 /**
@@ -73,6 +75,7 @@ const SecureStore = {
   __reset,
   __setSetItemFailure,
   SecureStoreAccessibility,
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
 export default SecureStore;

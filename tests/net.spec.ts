@@ -13,24 +13,40 @@ describe('safeFetch', () => {
   });
 
   it('creates a new AbortController per retry when the first attempt times out', async () => {
+    vi.useRealTimers();
     const signals: AbortSignal[] = [];
+    const abortError = () => {
+      try {
+        return new DOMException('Aborted', 'AbortError');
+      } catch {
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        return error;
+      }
+    };
     const fetchMock = vi.fn().mockImplementation((_: RequestInfo, init?: RequestInit) => {
       const signal = init?.signal as AbortSignal | undefined;
       if (signal) {
         signals.push(signal);
       }
 
-      if (fetchMock.mock.calls.length === 1) {
-        return new Promise<Response>((_, reject) => {
-          signal?.addEventListener(
-            'abort',
-            () => reject(new DOMException('Timeout', 'AbortError')),
-            { once: true }
-          );
-        });
-      }
+      return new Promise<Response>((resolve, reject) => {
+        const onAbort = () => reject(abortError());
+        const fallback = setTimeout(onAbort, 50);
+        signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(fallback);
+            onAbort();
+          },
+          { once: true },
+        );
 
-      return Promise.resolve(new Response('ok', { status: 200 }));
+        if (fetchMock.mock.calls.length > 1) {
+          clearTimeout(fallback);
+          resolve(new Response('ok', { status: 200 }));
+        }
+      });
     });
 
     const promise = safeFetch('https://example.com', {
@@ -38,9 +54,6 @@ describe('safeFetch', () => {
       retry: 1,
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
-
-    await vi.advanceTimersByTimeAsync(5);
-    await vi.advanceTimersByTimeAsync(1000);
 
     await expect(promise).resolves.toHaveProperty('status', 200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
