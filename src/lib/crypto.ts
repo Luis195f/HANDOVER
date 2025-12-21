@@ -279,7 +279,7 @@ export function payloadIsEncrypted(payload: unknown): payload is string {
 }
 
 export async function encryptPayload(plaintext: string): Promise<string> {
-  if (OFFLINE_ENCRYPTION_DISABLED) {
+  if (isEncryptionDisabled()) {
     return plaintext;
   }
   if (payloadIsEncrypted(plaintext)) return plaintext;
@@ -287,7 +287,8 @@ export async function encryptPayload(plaintext: string): Promise<string> {
 }
 
 export async function decryptPayload(ciphertext: string): Promise<string> {
-  if (OFFLINE_ENCRYPTION_DISABLED && !payloadIsEncrypted(ciphertext)) {
+  const encryptionDisabled = isEncryptionDisabled();
+  if (encryptionDisabled && !payloadIsEncrypted(ciphertext)) {
     return ciphertext;
   }
 
@@ -320,7 +321,7 @@ export async function encryptDraft(plaintext: string): Promise<string> {
  * descifrar para mantener compatibilidad.
  */
 export async function decryptDraft(ciphertext: string): Promise<string> {
-  const encryptionDisabledAndPlain = OFFLINE_ENCRYPTION_DISABLED && !payloadIsEncrypted(ciphertext);
+  const encryptionDisabledAndPlain = isEncryptionDisabled() && !payloadIsEncrypted(ciphertext);
   if (encryptionDisabledAndPlain) {
     return ciphertext;
   }
