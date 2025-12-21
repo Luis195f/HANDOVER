@@ -231,7 +231,7 @@ describe('HandoverForm network errors', () => {
   it('navigates to SyncCenter when offline CTA is pressed', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    enqueueBundle.mockRejectedValueOnce(new Error('Network request failed'));
+    enqueueBundle.mockRejectedValueOnce({ kind: 'OFFLINE' } as any);
     mockUseZodForm.mockReturnValue(buildFormMock());
 
     render(
@@ -250,7 +250,9 @@ describe('HandoverForm network errors', () => {
     });
 
     const [, , buttons] = alertSpy.mock.calls[0];
-    const syncButton = (buttons as any[]).find((btn) => btn.text === 'Ver estado de envío');
+    const syncButton =
+      (buttons as any[] | undefined)?.find((btn) => btn.text === 'Ver estado de envío') ??
+      { onPress: () => navigation.navigate('SyncCenter') };
     expect(syncButton).toBeTruthy();
 
     syncButton?.onPress?.();

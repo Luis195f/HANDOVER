@@ -73,13 +73,13 @@ describe('AudioNote', () => {
     const screen = renderScreen();
 
     await waitFor(() => {
-      expect(screen.getByText('Transcribir nota con IA')).toBeTruthy();
+      expect(screen.getByTestId('audio-ai-transcribe')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Transcribir nota con IA'));
+    await fireEvent.press(screen.getByTestId('audio-ai-transcribe'));
 
     await waitFor(() => {
-      const input = screen.getByPlaceholderText('Transcripción editable de la nota');
+      const input = screen.getByTestId('audio-transcription-input');
       expect(input.props.value).toContain('mock transcription');
     });
 
@@ -91,12 +91,12 @@ describe('AudioNote', () => {
     const screen = renderScreen();
 
     await waitFor(() => {
-      expect(screen.getByText('Transcribir nota con IA')).toBeTruthy();
+      expect(screen.getByTestId('audio-ai-transcribe')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Transcribir nota con IA'));
+    await fireEvent.press(screen.getByTestId('audio-ai-transcribe'));
 
-    const input = screen.getByPlaceholderText('Transcripción editable de la nota');
+    const input = screen.getByTestId('audio-transcription-input');
     fireEvent.changeText(input, 'manual note');
 
     await waitFor(() => {
@@ -108,8 +108,8 @@ describe('AudioNote', () => {
   it('añade texto dictado cuando el STT notifica un resultado final', async () => {
     const screen = renderScreen();
 
-    const dictationButton = await screen.findByText('Dictar nota (transcripción)');
-    fireEvent.press(dictationButton);
+    const dictationButton = screen.getByTestId('audio-dictation-toggle');
+    await fireEvent.press(dictationButton);
 
     const { __emitSttResult } = await import('@/src/lib/stt');
     await act(async () => {

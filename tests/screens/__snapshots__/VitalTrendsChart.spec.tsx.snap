@@ -1,0 +1,326 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`VitalTrendsChart > coincide con el snapshot de estructura básica 1`] = `
+<View
+  style={
+    {
+      "gap": 8,
+    }
+  }
+>
+  <Text
+    style={
+      {
+        "fontSize": 15,
+        "fontWeight": "700",
+        "marginBottom": 4,
+      }
+    }
+  >
+    Gráficos de tendencia (24h)
+  </Text>
+  <ScrollView
+    contentContainerStyle={
+      {
+        "paddingVertical": 4,
+      }
+    }
+    horizontal={true}
+    showsHorizontalScrollIndicator={false}
+  >
+    <View
+      style={
+        {
+          "gap": 12,
+        }
+      }
+    >
+      <View
+        style={
+          {
+            "marginBottom": 12,
+          }
+        }
+        testID="vital-series-hr"
+      >
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#111827",
+                "flex": 1,
+                "fontSize": 13,
+                "fontWeight": "500",
+              }
+            }
+          >
+            Frecuencia cardíaca (lpm)
+          </Text>
+          <Text
+            style={
+              {
+                "color": "#1F2937",
+                "fontSize": 13,
+                "fontWeight": "600",
+                "marginLeft": 12,
+              }
+            }
+          >
+            85
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "backgroundColor": "#F9FAFB",
+              "borderColor": "#E5E7EB",
+              "borderRadius": 8,
+              "borderWidth": 1,
+              "height": 48,
+              "marginTop": 6,
+              "padding": 4,
+              "width": 140,
+            }
+          }
+        />
+      </View>
+      <View
+        style={
+          {
+            "marginBottom": 12,
+          }
+        }
+        testID="vital-series-sbp"
+      >
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#111827",
+                "flex": 1,
+                "fontSize": 13,
+                "fontWeight": "500",
+              }
+            }
+          >
+            PA sistólica (mmHg)
+          </Text>
+          <Text
+            style={
+              {
+                "color": "#1F2937",
+                "fontSize": 13,
+                "fontWeight": "600",
+                "marginLeft": 12,
+              }
+            }
+          >
+            121
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "backgroundColor": "#F9FAFB",
+              "borderColor": "#E5E7EB",
+              "borderRadius": 8,
+              "borderWidth": 1,
+              "height": 48,
+              "marginTop": 6,
+              "padding": 4,
+              "width": 140,
+            }
+          }
+        />
+      </View>
+      <View
+        style={
+          {
+            "marginBottom": 12,
+          }
+        }
+        testID="vital-series-rr"
+      >
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#111827",
+                "flex": 1,
+                "fontSize": 13,
+                "fontWeight": "500",
+              }
+            }
+          >
+            FR (rpm)
+          </Text>
+          <Text
+            style={
+              {
+                "color": "#1F2937",
+                "fontSize": 13,
+                "fontWeight": "600",
+                "marginLeft": 12,
+              }
+            }
+          >
+            19
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "backgroundColor": "#F9FAFB",
+              "borderColor": "#E5E7EB",
+              "borderRadius": 8,
+              "borderWidth": 1,
+              "height": 48,
+              "marginTop": 6,
+              "padding": 4,
+              "width": 140,
+            }
+          }
+        />
+      </View>
+      <View
+        style={
+          {
+            "marginBottom": 12,
+          }
+        }
+        testID="vital-series-spo2"
+      >
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#111827",
+                "flex": 1,
+                "fontSize": 13,
+                "fontWeight": "500",
+              }
+            }
+          >
+            SpO₂ (%)
+          </Text>
+          <Text
+            style={
+              {
+                "color": "#1F2937",
+                "fontSize": 13,
+                "fontWeight": "600",
+                "marginLeft": 12,
+              }
+            }
+          >
+            97
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "backgroundColor": "#F9FAFB",
+              "borderColor": "#E5E7EB",
+              "borderRadius": 8,
+              "borderWidth": 1,
+              "height": 48,
+              "marginTop": 6,
+              "padding": 4,
+              "width": 140,
+            }
+          }
+        />
+      </View>
+      <View
+        style={
+          {
+            "marginBottom": 12,
+          }
+        }
+        testID="vital-series-temp"
+      >
+        <View
+          style={
+            {
+              "alignItems": "center",
+              "flexDirection": "row",
+              "justifyContent": "space-between",
+            }
+          }
+        >
+          <Text
+            style={
+              {
+                "color": "#111827",
+                "flex": 1,
+                "fontSize": 13,
+                "fontWeight": "500",
+              }
+            }
+          >
+            Temperatura (°C)
+          </Text>
+          <Text
+            style={
+              {
+                "color": "#1F2937",
+                "fontSize": 13,
+                "fontWeight": "600",
+                "marginLeft": 12,
+              }
+            }
+          >
+            37.3
+          </Text>
+        </View>
+        <View
+          style={
+            {
+              "backgroundColor": "#F9FAFB",
+              "borderColor": "#E5E7EB",
+              "borderRadius": 8,
+              "borderWidth": 1,
+              "height": 48,
+              "marginTop": 6,
+              "padding": 4,
+              "width": 140,
+            }
+          }
+        />
+      </View>
+    </View>
+  </ScrollView>
+</View>
+`;

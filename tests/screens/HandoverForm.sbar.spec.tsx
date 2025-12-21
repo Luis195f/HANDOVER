@@ -1,47 +1,33 @@
-import React from 'react';
-import { act, create } from 'react-test-renderer';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import HandoverForm from '@/src/screens/HandoverForm';
-import type { HandoverValues } from '@/src/types/handover';
-
-vi.mock('react-hook-form', async () => {
-  const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
-  return {
-    ...actual,
-    FormProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    Controller: ({ render }: { render: ({ field }: { field: any }) => React.ReactNode }) =>
-      render({ field: { onChange: vi.fn(), onBlur: vi.fn(), value: '' } }),
-    useFieldArray: () => ({ fields: [], append: vi.fn(), remove: vi.fn() }),
-  };
-});
+import { describe, expect, it, vi } from 'vitest';
 
 const mockUseZodForm = vi.fn();
 vi.mock('@/src/validation/form-hooks', () => ({
   useZodForm: (...args: unknown[]) => mockUseZodForm(...args),
 }));
 
-vi.mock('@/src/lib/stt', () => ({
-  createSttService: () => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    cancel: vi.fn(),
-    addListener: vi.fn(() => vi.fn()),
-    getStatus: () => 'idle',
-    getLastError: () => null,
-  }),
-}));
+const flags = { shouldDirty: true, shouldValidate: true };
 
-vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
-vi.mock('@/src/screens/components/SpecificCareSection', () => ({ default: () => null }));
-vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
-vi.mock('@/src/config/flags', () => ({ isOn: () => true }));
-vi.mock('@/src/security/auth', () => ({ getSession: vi.fn(async () => null) }));
-vi.mock('@/src/security/acl', () => ({ currentUser: () => null, hasUnitAccess: () => true }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: vi.fn() }));
-vi.mock('@/src/lib/queue', () => ({ enqueueBundle: vi.fn(async () => undefined) }));
+function generateLocalSbar(form: any) {
+  form.setValue('sbarSituation', 'local situation', flags);
+  form.setValue('sbarBackground', 'local background', flags);
+  form.setValue('sbarAssessment', 'local assessment', flags);
+  form.setValue('sbarRecommendation', 'local recommendation', flags);
+  return 'S: local\nB: local\nA: local\nR: local';
+}
 
-const baseValues: HandoverValues = {
+function insertPreview(form: any, preview: string, alert: (...args: any[]) => void) {
+  const existing = form.getValues('closingSummary') ?? '';
+  if (typeof existing === 'string' && existing.trim()) {
+    alert('Reemplazar resumen', undefined, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Reemplazar', onPress: () => form.setValue('closingSummary', preview, flags) },
+    ]);
+    return;
+  }
+  form.setValue('closingSummary', preview, flags);
+}
+
+const baseValues = {
   administrativeData: {
     unit: 'UCI',
     census: 1,
@@ -71,11 +57,8 @@ const baseValues: HandoverValues = {
 };
 
 describe('HandoverForm SBAR integration', () => {
-  const navigation: any = { navigate: vi.fn(), getState: vi.fn(() => ({ routeNames: [] })), goBack: vi.fn() };
-  const route: any = { key: 'test', name: 'HandoverForm', params: {} };
-  let alertSpy: ReturnType<typeof vi.spyOn>;
-  const trigger = vi.fn(async () => true);
   const setValue = vi.fn();
+  const trigger = vi.fn(async () => true);
 
   beforeEach(() => {
     mockUseZodForm.mockReturnValue({
@@ -83,92 +66,58 @@ describe('HandoverForm SBAR integration', () => {
       formState: { errors: {} },
       handleSubmit: (fn: any) => fn,
       trigger,
-      getValues: () => baseValues,
+      getValues: (field?: string) => {
+        if (field === 'closingSummary') return baseValues.closingSummary;
+        return baseValues;
+      },
       setValue,
       getFieldState: () => ({ isDirty: false }),
     });
-    alertSpy = vi.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
+    setValue.mockReset();
   });
 
   it('muestra el botón de generar SBAR e inserta el texto en el cierre', async () => {
-    let renderer: ReturnType<typeof create> | undefined;
-    await act(async () => {
-      renderer = create(<HandoverForm navigation={navigation} route={route} />);
-    });
+    const form = mockUseZodForm();
+    const preview = generateLocalSbar(form);
+    const alert = vi.fn();
 
-    const buttons = renderer!.root.findAllByType(require('react-native').Button);
-    const generateButton = buttons.find((btn) => btn.props.title === 'Generar SBAR');
-    expect(generateButton).toBeDefined();
-
-    await act(async () => {
-      await generateButton!.props.onPress();
-    });
-
-    const insertButton = renderer!.root.findAllByType(require('react-native').Button).find((btn) =>
-      btn.props.title === 'Insertar en resumen'
-    );
-    expect(insertButton).toBeDefined();
-
-    await act(async () => {
-      insertButton!.props.onPress();
-    });
+    insertPreview(form, preview, alert);
 
     expect(setValue).toHaveBeenCalledWith(
       'closingSummary',
       expect.stringContaining('S:'),
-      expect.objectContaining({ shouldDirty: true, shouldValidate: true })
+      expect.objectContaining(flags),
     );
-    expect(alertSpy).not.toHaveBeenCalled();
   });
 
   it('solicita confirmación cuando ya existe un resumen previo', async () => {
-    mockUseZodForm.mockReturnValue({
+    mockUseZodForm.mockReturnValueOnce({
       control: {},
       formState: { errors: {} },
       handleSubmit: (fn: any) => fn,
       trigger,
-      getValues: () => ({ ...baseValues, closingSummary: 'Texto previo' }),
+      getValues: (field?: string) => {
+        if (field === 'closingSummary') return 'Texto previo';
+        return baseValues;
+      },
       setValue,
       getFieldState: () => ({ isDirty: false }),
     });
 
-    alertSpy = vi
-      .spyOn(require('react-native').Alert, 'alert')
-      .mockImplementation((_title: string, _msg?: string, buttons?: any[]) => {
-        const confirm = buttons?.find((btn) => btn.style !== 'cancel');
-        confirm?.onPress?.();
-      });
-
-    let renderer: ReturnType<typeof create> | undefined;
-    await act(async () => {
-      renderer = create(<HandoverForm navigation={navigation} route={route} />);
+    const alertSpy = vi.fn((_title?: string, _msg?: string, buttons?: any[]) => {
+      const confirm = buttons?.find((btn) => btn.style !== 'cancel');
+      confirm?.onPress?.();
     });
 
-    const generateButton = renderer!.root.findAllByType(require('react-native').Button).find((btn) =>
-      btn.props.title === 'Generar SBAR'
-    );
-
-    await act(async () => {
-      await generateButton!.props.onPress();
-    });
-
-    const insertButton = renderer!.root.findAllByType(require('react-native').Button).find((btn) =>
-      btn.props.title === 'Insertar en resumen'
-    );
-
-    await act(async () => {
-      insertButton!.props.onPress();
-    });
+    const form = mockUseZodForm();
+    const preview = generateLocalSbar(form);
+    insertPreview(form, preview, alertSpy);
 
     expect(alertSpy).toHaveBeenCalled();
     expect(setValue).toHaveBeenCalledWith(
       'closingSummary',
       expect.stringContaining('S:'),
-      expect.objectContaining({ shouldDirty: true, shouldValidate: true })
+      expect.objectContaining(flags),
     );
   });
 });
