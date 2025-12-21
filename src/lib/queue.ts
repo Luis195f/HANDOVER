@@ -246,13 +246,27 @@ function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueueI
   };
 }
 
+function normalizeSyncStatus(row: QueueItemRow): SyncStatus {
+  if (row.sync_status === "pending" || row.sync_status === "inFlight" || row.sync_status === "synced" || row.sync_status === "error") {
+    return row.sync_status;
+  }
+  if ((row as any).status === "pending" || (row as any).status === "inFlight" || (row as any).status === "synced" || (row as any).status === "error") {
+    return (row as any).status as SyncStatus;
+  }
+  if ((row as any).syncStatus === "pending" || (row as any).syncStatus === "inFlight" || (row as any).syncStatus === "synced" || (row as any).syncStatus === "error") {
+    return (row as any).syncStatus as SyncStatus;
+  }
+  return "pending";
+}
+
 function rowToQueueItem(row: QueueItemRow): QueueItem {
+  const syncStatus = normalizeSyncStatus(row);
   return {
     id: String(row.id),
     createdAt: typeof row.created_at === "string" ? row.created_at : new Date().toISOString(),
     lastAttemptAt: row.last_attempt_at ?? undefined,
     attempts: Number.isFinite(row.attempts) ? Number(row.attempts) : 0,
-    syncStatus: row.sync_status,
+    syncStatus,
     errorMessage: row.error_message ?? undefined,
     errorStatus: row.error_status ?? undefined,
     errorIssuesJson: row.error_issues_json ?? undefined,

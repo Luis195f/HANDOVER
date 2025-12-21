@@ -259,10 +259,15 @@ type SyncEngineOptions = {
 };
 
 // BEGIN HANDOVER_OFFLINE
-export function getNextDelayMs(attempts: number): number {
-  if (attempts <= 0) return 0;
-  const delay = 1_000 * 2 ** Math.max(0, attempts - 1);
-  return Math.min(delay, 60_000);
+const OFFLINE_BACKOFF_SCHEDULE_MS = [60_000, 5 * 60_000, 15 * 60_000];
+const OFFLINE_MAX_BACKOFF_MS = 60 * 60_000;
+
+export function getNextDelayMs(attempts = 0): number {
+  const normalized = Number.isFinite(attempts) ? Math.max(0, Math.trunc(attempts)) : 0;
+  if (normalized < OFFLINE_BACKOFF_SCHEDULE_MS.length) {
+    return OFFLINE_BACKOFF_SCHEDULE_MS[normalized];
+  }
+  return OFFLINE_MAX_BACKOFF_MS;
 }
 
 type QueueSendResult =
@@ -573,7 +578,6 @@ export async function processQueueOnce(): Promise<void> {
         lastAttemptAt: startedAt,
         errorMessage: undefined,
       });
-      await deleteOfflineQueueItem(item.id);
       continue;
     }
 
@@ -655,6 +659,12 @@ async function runSyncCycle(): Promise<SyncSnapshot> {
     lastRunAt: new Date().toISOString(),
     lastError: errored?.errorMessage ?? syncSnapshot.lastError ?? null,
   });
+
+  // Limpia entradas marcadas como sincronizadas para no dejar basura en la cola.
+  const synced = refreshed.filter((item) => item.syncStatus === 'synced');
+  if (synced.length > 0) {
+    await Promise.all(synced.map((item) => deleteOfflineQueueItem(item.id)));
+  }
 
   if (pausedForAuth) {
     return updateSyncSnapshot({ status: 'paused' });
