@@ -109,18 +109,65 @@ async function encryptQueuePayload(payload: unknown, patientId?: string): Promis
   }
 }
 
-async function decryptQueuePayload<TFallback = unknown>(payload: string): Promise<TFallback | string> {
+async function decryptQueuePayload<TFallback = unknown>(payload: unknown, opts: { unwrap?: boolean } = {}): Promise<TFallback | unknown> {
+  if (payload === null || typeof payload === "undefined") return payload as TFallback | unknown;
+  if (typeof payload !== "string") return payload as TFallback | unknown;
+
+  const unwrapBundle = (value: unknown) => {
+    if (opts.unwrap === false) return value;
+    if (value && typeof value === "object" && "bundle" in (value as Record<string, unknown>)) {
+      const inner = (value as Record<string, unknown>).bundle;
+      return inner !== undefined ? inner : value;
+    }
+    return value;
+  };
+
+  const parseAndReturn = (raw: string) => {
+    try {
+      const parsed = JSON.parse(raw) as TFallback | unknown;
+      return unwrapBundle(parsed);
+    } catch {
+      return raw as TFallback | unknown;
+    }
+  };
+
   try {
     if (queuePayloadIsEncrypted(payload)) {
       const decrypted = await decryptQueueEncryptedPayload(payload);
-      return safeParse(decrypted) as TFallback | string;
+      return parseAndReturn(decrypted);
+    }
+
+    const maybeEnvelope = parseAndReturn(payload);
+    if (typeof maybeEnvelope === "object" && maybeEnvelope && "v" in (maybeEnvelope as any) && "ct" in (maybeEnvelope as any)) {
+      const decrypted = await decryptOfflinePayload(payload);
+      return parseAndReturn(decrypted);
     }
 
     const decrypted = await decryptOfflinePayload(payload);
-    return safeParse(decrypted) as TFallback | string;
+    if (decrypted !== payload) {
+      return parseAndReturn(decrypted);
+    }
+
+    const parsed = parseAndReturn(payload);
+    if (typeof parsed === "string" && queuePayloadIsEncrypted(parsed)) {
+      try {
+        const decrypted = await decryptQueueEncryptedPayload(parsed);
+        return parseAndReturn(decrypted);
+      } catch {
+        return parsed;
+      }
+    }
+    return parsed;
   } catch (error) {
     console.warn("Fallo al descifrar payload offline", error);
-    return safeParse(payload) as TFallback | string;
+    const fallback = parseAndReturn(payload);
+    if (typeof fallback === "string" && queuePayloadIsEncrypted(fallback)) {
+      try {
+        const decrypted = await decryptQueueEncryptedPayload(fallback);
+        return parseAndReturn(decrypted);
+      } catch {}
+    }
+    return fallback;
   }
 }
 
@@ -251,7 +298,7 @@ function persistQueueItem(item: QueueItem): void {
 async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
   const item = rowToQueueItem(row);
   try {
-    return { ...item, payload: await decryptQueuePayload(row.payload) };
+    return { ...item, payload: await decryptQueuePayload(row.payload, { unwrap: false }) };
   } catch (error) {
     console.warn("Fallo al descifrar payload offline", error);
     return { ...item, payload: row.payload };
@@ -284,7 +331,7 @@ export async function listOfflineQueue(options?: { decrypt?: boolean }): Promise
     return rows.map((row) => ({ ...row }));
   }
 
-  return Promise.all(rows.map(async (row) => ({ ...row, payload: await decryptQueuePayload(String(row.payload ?? "")) })));
+  return Promise.all(rows.map(async (row) => ({ ...row, payload: await decryptQueuePayload(String(row.payload ?? ""), { unwrap: false }) })));
 }
 
 export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
@@ -297,7 +344,7 @@ export async function getOfflineQueueItem(id: string): Promise<QueueItem | null>
   }
   const found = memOfflineQueue.find((item) => item.id === id);
   if (!found) return null;
-  return { ...found, payload: await decryptQueuePayload(String(found.payload ?? "")) };
+  return { ...found, payload: await decryptQueuePayload(String(found.payload ?? ""), { unwrap: false }) };
 }
 
 export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {

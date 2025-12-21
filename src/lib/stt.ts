@@ -2,7 +2,7 @@
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import type { PermissionResponse } from 'expo-modules-core';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 
 import { AI_BACKEND_BASE_URL, STT_ENDPOINT } from '@/src/config/env';
 
@@ -30,11 +30,13 @@ export interface SttTranscriptionResult {
 
 export class STTError extends Error {
   code: SttErrorCode;
+  status?: number;
 
-  constructor(code: SttErrorCode, message: string) {
+  constructor(code: SttErrorCode, message: string, status?: number) {
     super(message);
     this.name = 'STTError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -315,6 +317,45 @@ function resolveMimeType(fileUri: string): string {
   return AUDIO_MIME_BY_EXTENSION[normalized] ?? 'audio/m4a';
 }
 
+const isAbortError = (error: unknown): error is Error =>
+  error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+
+const normalizeSttError = (error: unknown): STTError => {
+  if (error instanceof STTError) return error;
+  if (isAbortError(error)) {
+    return new STTError('TIMEOUT', 'Request timed out');
+  }
+  if (error instanceof TypeError || (error instanceof Error && /network|fetch/i.test(error.message))) {
+    return new STTError('NETWORK', 'Network error');
+  }
+  if (error instanceof Error) {
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === 'number') {
+      return new STTError('ENGINE', `Engine error (${status})`, status);
+    }
+  }
+  return new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
+};
+
+const parseJsonSafe = async (response: Response): Promise<any | undefined> => {
+  const anyResponse = response as unknown as { json?: () => Promise<any>; clone?: () => Response };
+  if (typeof anyResponse?.json === 'function') {
+    try {
+      return await anyResponse.json();
+    } catch {
+      // ignore
+    }
+  }
+  if (typeof anyResponse?.clone === 'function') {
+    try {
+      return await anyResponse.clone().json();
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+};
+
 export type TranscriptionOptions = { language?: string; timeoutMs?: number };
 export type STTProvider = (fileUri: string, options?: TranscriptionOptions) => Promise<SttTranscriptionResult>;
 
@@ -324,11 +365,6 @@ export async function transcribeAudioViaBackend(
 ): Promise<string> {
   if (!AI_BACKEND_BASE_URL) {
     throw new STTError('UNAVAILABLE', 'AI backend not configured');
-  }
-
-  const info = await FileSystem.getInfoAsync(fileUri);
-  if (!info.exists) {
-    throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
   }
 
   const name = fileUri.split('/').pop() ?? 'audio.m4a';
@@ -341,36 +377,48 @@ export async function transcribeAudioViaBackend(
 
   const timeoutMs = options?.timeoutMs ?? 20_000;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timeoutReject: (() => void) | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutReject = () => reject(new STTError('TIMEOUT', TRANSCRIPTION_ERROR_MESSAGE));
+  });
+  const timer = setTimeout(() => {
+    controller.abort();
+    timeoutReject?.();
+  }, timeoutMs);
+
+  const info =
+    typeof FileSystem.getInfoAsync === 'function'
+      ? await FileSystem.getInfoAsync(fileUri)
+      : { exists: true as const };
+  if (!info?.exists) {
+    throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
+  }
 
   try {
-    const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal,
-    });
+    const response = await Promise.race([
+      fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      }),
+      timeoutPromise,
+    ]);
 
     if (!response.ok) {
-      throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
+      const data = await parseJsonSafe(response);
+      const status = response.status || (data as { status?: number } | undefined)?.status;
+      const resolvedStatus = typeof status === 'number' ? status : response.status;
+      throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE, resolvedStatus);
     }
 
-    const data = (await response.json()) as { text?: string };
-    if (typeof data.text !== 'string') {
+    const data = (await parseJsonSafe(response)) as { text?: string } | undefined;
+    if (!data || typeof data.text !== 'string') {
       throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE);
     }
 
     return data.text;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new STTError('TIMEOUT', TRANSCRIPTION_ERROR_MESSAGE);
-    }
-    if (error instanceof STTError) {
-      throw error;
-    }
-    if (error instanceof TypeError) {
-      throw new STTError('NETWORK', TRANSCRIPTION_ERROR_MESSAGE);
-    }
-    throw new STTError('UNKNOWN', TRANSCRIPTION_ERROR_MESSAGE);
+    throw normalizeSttError(error);
   } finally {
     clearTimeout(timer);
   }
@@ -387,10 +435,7 @@ export async function transcribeAudio(
   try {
     return await transcribeAudioViaBackend(fileUri, options);
   } catch (error) {
-    if (error instanceof STTError) {
-      throw error;
-    }
-    throw new STTError('UNKNOWN', TRANSCRIPTION_ERROR_MESSAGE);
+    throw normalizeSttError(error);
   }
 }
 
@@ -406,9 +451,9 @@ export async function transcribeAudioWithResult(
     const text = await transcribeAudio(fileUri, options);
     return { ok: true, text };
   } catch (error) {
-    const message = error instanceof Error ? error.message : TRANSCRIPTION_ERROR_MESSAGE;
-    const code: SttErrorCode | undefined = error instanceof STTError ? error.code : undefined;
-    return { ok: false, error: message || TRANSCRIPTION_ERROR_MESSAGE, code };
+    const normalized = normalizeSttError(error);
+    const message = normalized.message || TRANSCRIPTION_ERROR_MESSAGE;
+    return { ok: false, error: message, code: normalized.code };
   }
 }
 

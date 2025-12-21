@@ -28,10 +28,10 @@ interface RefineSbarResponse {
 }
 
 function getAiSbarConfig(): AISBARConfig | null {
-  const baseUrl = AI_SBAR_BASE_URL ?? AI_BACKEND_BASE_URL;
-  if (!baseUrl) {
-    return null;
-  }
+  const baseUrl = typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim()
+    ? AI_SBAR_BASE_URL.trim()
+    : null;
+  if (!baseUrl) return null;
   return { baseUrl, apiKey: AI_SBAR_API_KEY };
 }
 
