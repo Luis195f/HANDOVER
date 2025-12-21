@@ -16,8 +16,10 @@ import * as SQLite from "expo-sqlite";
 import {
   decryptOfflinePayload,
   decryptPayload as decryptQueueEncryptedPayload,
+  encryptPayload,
   encryptOfflinePayload,
   hashHex,
+  isEncryptionDisabled,
   payloadIsEncrypted as queuePayloadIsEncrypted,
 } from "./crypto";
 import { mark } from "./otel";
@@ -101,12 +103,28 @@ function wrapQueuePayload(payload: unknown, patientId?: string): unknown {
 async function encryptQueuePayload(payload: unknown, patientId?: string): Promise<string> {
   const wrapped = wrapQueuePayload(payload, patientId);
   const serialized = typeof wrapped === "string" ? wrapped : JSON.stringify(wrapped ?? null);
+  if (isEncryptionDisabled()) {
+    return serialized;
+  }
+  const warnMetadata = (error: unknown) => ({
+    code: (error as { code?: string | number })?.code,
+    name: error instanceof Error ? error.name : undefined,
+    message: error instanceof Error ? error.message : undefined,
+    payloadSize: serialized.length,
+    hasPatientId: typeof (wrapped as { patientId?: unknown })?.patientId === "string",
+  });
   try {
     return await encryptOfflinePayload(serialized);
   } catch (error) {
-    console.warn("Fallo al cifrar payload offline", error);
-    return serialized;
+    console.warn("Fallo al cifrar payload offline", warnMetadata(error));
   }
+  try {
+    return await encryptPayload(serialized);
+  } catch (error) {
+    console.warn("Fallo al cifrar payload offline v1", warnMetadata(error));
+  }
+  const payloadHash = hashHex(serialized);
+  return JSON.stringify({ __encryptionFailed: true, payloadHash, v: 1 });
 }
 
 async function decryptQueuePayload<TFallback = unknown>(payload: unknown, opts: { unwrap?: boolean } = {}): Promise<TFallback | unknown> {
@@ -169,6 +187,18 @@ async function decryptQueuePayload<TFallback = unknown>(payload: unknown, opts: 
     }
     return fallback;
   }
+}
+
+function parseEncryptionFailureSentinel(payload: string): { payloadHash: string } | null {
+  try {
+    const parsed = JSON.parse(payload) as { __encryptionFailed?: unknown; payloadHash?: unknown; v?: unknown };
+    if (parsed && parsed.__encryptionFailed === true && typeof parsed.payloadHash === "string") {
+      return { payloadHash: parsed.payloadHash };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 // BEGIN HANDOVER_OFFLINE
@@ -321,7 +351,12 @@ async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
 
 export async function createOfflineQueueItem(input: QueueItemInput): Promise<QueueItem> {
   const encryptedPayload = await encryptQueuePayload(input.payload, input.patientId);
-  const item = normalizeQueueItem({ ...input, payload: encryptedPayload });
+  const encryptionFailed = parseEncryptionFailureSentinel(encryptedPayload);
+  const item = normalizeQueueItem({
+    ...input,
+    payload: encryptedPayload,
+    ...(encryptionFailed ? { syncStatus: "error", errorMessage: "offline_encryption_failed" } : {}),
+  });
   persistQueueItem(item);
   return item;
 }
@@ -366,11 +401,13 @@ export async function updateOfflineQueueItem(id: string, updates: Partial<QueueI
   if (!current) return null;
   const nextPayload = updates.payload !== undefined ? updates.payload : current.payload;
   const payload = await encryptQueuePayload(nextPayload, updates.patientId ?? current.patientId);
+  const encryptionFailed = parseEncryptionFailureSentinel(payload);
   const next: QueueItem = {
     ...current,
     ...updates,
     attempts: updates.attempts ?? current.attempts,
-    syncStatus: updates.syncStatus ?? current.syncStatus,
+    syncStatus: encryptionFailed ? "error" : updates.syncStatus ?? current.syncStatus,
+    errorMessage: encryptionFailed ? "offline_encryption_failed" : updates.errorMessage ?? current.errorMessage,
     payload,
     payloadType: "handover-bundle",
   };
