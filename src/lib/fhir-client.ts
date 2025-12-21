@@ -283,13 +283,46 @@ export type FetchFHIRParams<TBody = unknown> = {
 
 const parseResponseJson = async <T>(response?: Response): Promise<T | undefined> => {
   if (!response) return undefined;
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('json')) return undefined;
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+  const looksJson = contentType.includes('json') || contentType.includes('+fhir');
   try {
     return (await response.clone().json()) as T;
   } catch {
+    if (!looksJson) {
+      return undefined;
+    }
+  }
+  try {
+    const text = await response.clone().text();
+    return JSON.parse(text) as T;
+  } catch {
     return undefined;
   }
+};
+
+type NormalizedOutcome = {
+  issues: OperationIssue[];
+  userMessage: string;
+  fatal: boolean;
+  outcome: OperationOutcome;
+};
+
+const normalizeOutcome = (maybeOutcome: unknown): NormalizedOutcome | null => {
+  if (!maybeOutcome || typeof maybeOutcome !== 'object') return null;
+  const outcomeIssues = isOperationOutcome(maybeOutcome)
+    ? maybeOutcome.issue
+    : Array.isArray((maybeOutcome as { issue?: unknown }).issue)
+      ? (maybeOutcome as { issue?: unknown }).issue
+      : undefined;
+  if (!Array.isArray(outcomeIssues) || outcomeIssues.length === 0) return null;
+  const formatted = formatIssuesForUser(outcomeIssues);
+  const fatal = outcomeIssues.some((issue) => issue?.severity === 'fatal' || issue?.severity === 'error');
+  return {
+    issues: outcomeIssues,
+    userMessage: formatted.message,
+    fatal,
+    outcome: { resourceType: 'OperationOutcome', issue: outcomeIssues },
+  };
 };
 
 const getAuthToken = async (): Promise<string | null> => {
@@ -379,14 +412,15 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
         const data = await parseResponseJson<TResource>(error.response);
         const response =
           error.response ?? new Response('', { status: error.status ?? 0, statusText: error.message });
-        const outcome = isOperationOutcome(data) ? data.issue : undefined;
+        const outcomeInfo = normalizeOutcome(data);
+        const outcome = outcomeInfo?.issues ?? (isOperationOutcome(data) ? data.issue : undefined);
         return {
           ok: false,
           response,
           data,
           outcome,
           status: error.status ?? response.status ?? 0,
-          message: outcome ? formatIssuesForUser(outcome).message : error.message,
+          message: outcomeInfo?.userMessage ?? (outcome ? formatIssuesForUser(outcome).message : error.message),
         };
       }
       throw error;
@@ -500,8 +534,18 @@ export async function postBundle(
 
     if (!result.ok) {
       const json = result.data as OperationOutcome | Record<string, unknown> | undefined;
-      const issues = result.outcome ?? (isOperationOutcome(json) ? json.issue : undefined);
-      const formatted = issues ? formatIssuesForUser(issues) : undefined;
+      const outcomeInfo = normalizeOutcome(json);
+      const issues = outcomeInfo?.issues ?? result.outcome ?? (isOperationOutcome(json) ? json.issue : undefined);
+      const formatted =
+        outcomeInfo ??
+        (issues
+          ? {
+              userMessage: formatIssuesForUser(issues).message,
+              fatal: false,
+              issues,
+              outcome: { resourceType: 'OperationOutcome', issue: issues },
+            }
+          : undefined);
       return {
         ok: false,
         status: result.status,
@@ -509,8 +553,8 @@ export async function postBundle(
         issue: issues ?? undefined,
         json,
         location,
-        message: formatted?.message ?? result.message,
-        outcome: issues ? { resourceType: 'OperationOutcome', issue: issues } : undefined,
+        message: formatted?.userMessage ?? result.message,
+        outcome: formatted?.outcome ?? (issues ? { resourceType: 'OperationOutcome', issue: issues } : undefined),
       };
     }
 
