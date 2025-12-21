@@ -14,6 +14,8 @@ type RenderResult = {
   queryByLabelText: (text: string | RegExp) => ReactTestInstance | null;
   getByTestId: (testId: string | RegExp) => ReactTestInstance;
   queryByTestId: (testId: string | RegExp) => ReactTestInstance | null;
+  getByPlaceholderText: (text: string | RegExp) => ReactTestInstance;
+  queryByPlaceholderText: (text: string | RegExp) => ReactTestInstance | null;
   toJSON: () =>
     | TestRenderer.ReactTestRendererJSON
     | TestRenderer.ReactTestRendererJSON[]
@@ -40,6 +42,8 @@ export function render(element: React.ReactElement): RenderResult {
     if (typeof value !== 'string') return false;
     return typeof matcher === 'string' ? value === matcher : matcher.test(value);
   };
+  const matchPlaceholder = (node: ReactTestInstance, matcher: string | RegExp) =>
+    matchProp(node, 'placeholder', matcher);
 
   const getByText = (text: string | RegExp) => root.find((node) => matchText(node, text));
   const queryByText = (text: string | RegExp) => {
@@ -71,6 +75,15 @@ export function render(element: React.ReactElement): RenderResult {
     }
   };
 
+  const getByPlaceholderText = (text: string | RegExp) => root.find((node) => matchPlaceholder(node, text));
+  const queryByPlaceholderText = (text: string | RegExp) => {
+    try {
+      return getByPlaceholderText(text);
+    } catch {
+      return null;
+    }
+  };
+
   return {
     root,
     getByText,
@@ -80,6 +93,8 @@ export function render(element: React.ReactElement): RenderResult {
     queryByLabelText,
     getByTestId,
     queryByTestId,
+    getByPlaceholderText,
+    queryByPlaceholderText,
     toJSON: () => renderer.toJSON(),
     update: (el) => renderer.update(el),
     unmount: () => renderer.unmount(),
@@ -95,8 +110,8 @@ export function fireEvent(target: any, eventName?: string, ...args: any[]) {
         : `on${eventName.charAt(0).toUpperCase()}${eventName.slice(1)}`;
     const handler = target.props[propName];
     if (typeof handler === 'function') {
-      TestRenderer.act(() => {
-        handler(...args);
+      return TestRenderer.act(async () => {
+        await handler(...args);
       });
     }
   }
@@ -106,8 +121,8 @@ fireEvent.press = (target: any) => {
   if (!target || !target.props) return;
   const handler = target.props.onPress ?? target.props.onClick;
   if (typeof handler === 'function') {
-    TestRenderer.act(() => {
-      handler({});
+    return TestRenderer.act(async () => {
+      await handler({});
     });
   }
 };
@@ -146,9 +161,12 @@ export const screen = {
   render,
 };
 
+export const act = TestRenderer.act;
+
 export default {
   render,
   fireEvent,
   waitFor,
   screen,
+  act,
 };
