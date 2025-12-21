@@ -28,13 +28,15 @@ export type FhirResourceType = keyof typeof validators;
 
 export type FhirValidationResult = { ok: true } | { ok: false; errors: string[] };
 
-export function validateResource(resource: unknown, type: FhirResourceType): FhirValidationResult {
+export function validateResourceWithAjv(resource: unknown, type: FhirResourceType): FhirValidationResult {
   const validate = validators[type];
   const valid = validate(resource);
   if (valid) return { ok: true } as const;
   const errors = (validate.errors ?? []).map(formatAjvError);
   return { ok: false, errors } as const;
 }
+
+export const validateResourceAjv = validateResourceWithAjv;
 
 function formatAjvError(err: ErrorObject): string {
   const path = err.instancePath || '/';
@@ -47,5 +49,6 @@ export {
   getValidationErrorsFromBundle,
   validateBundle,
   validateResourceWithZod,
+  validateResourceWithZod as validateResource,
   type ValidationResult,
 } from './zod';

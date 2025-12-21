@@ -634,13 +634,29 @@ type MappingContext = {
 
 const UCUM = 'http://unitsofmeasure.org';
 
+const normalizeId = (value: string | undefined, fallback: string): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed) return trimmed;
+  return fallback;
+};
+
+const normalizePatientId = (patientId: string): string => {
+  const normalized = normalizeId(patientId, 'unknown');
+  if (normalized === 'unknown') {
+    console.warn('fhir-map: patientId is missing, using placeholder "unknown"');
+  }
+  return normalized;
+};
+
 function patientReference(patientId: string): Reference {
-  return { reference: `Patient/${patientId}`, type: 'Patient' };
+  const normalized = normalizePatientId(patientId);
+  return { reference: `Patient/${normalized}`, type: 'Patient' };
 }
 
 function encounterReference(encounterId?: string): Reference | undefined {
-  if (!encounterId) return undefined;
-  return { reference: `Encounter/${encounterId}`, type: 'Encounter' };
+  const normalized = normalizeId(encounterId, '');
+  if (!normalized) return undefined;
+  return { reference: `Encounter/${normalized}`, type: 'Encounter' };
 }
 
 function codeableConceptFromCode(
@@ -800,8 +816,9 @@ function assignStableIds(
   resource: FhirResource,
   patientId: string,
 ): { resource: FhirResource; fullUrl: string } {
+  const normalizedPatientId = normalizePatientId(patientId);
   const { id: _ignored, ...rest } = resource;
-  const key = `${resource.resourceType}|${patientId}|${stableStringify(rest)}`;
+  const key = `${resource.resourceType}|${normalizedPatientId}|${stableStringify(rest)}`;
   const prefix = FHIR_ID_PREFIX[resource.resourceType] ?? '';
   const id = fhirId(prefix, key);
   const urn = `urn:uuid:${hashHex(key, 32)}`;
@@ -2035,14 +2052,15 @@ export function buildHandoverBundle(
   const optionsMerged: ResolvedBuildOptions = resolveOptions(options);
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => nowIso };
+  const normalizedPatientId = normalizePatientId(values.patientId);
 
   const patient: Patient = {
     resourceType: 'Patient',
-    id: values.patientId,
-    identifier: [{ system: 'urn:handover-pro:patient-id', value: values.patientId }],
+    id: normalizedPatientId,
+    identifier: [{ system: 'urn:handover-pro:patient-id', value: normalizedPatientId }],
   };
 
-  const { resource: patientWithId, fullUrl: patientFullUrl } = assignStableIds(patient, values.patientId);
+  const { resource: patientWithId, fullUrl: patientFullUrl } = assignStableIds(patient, normalizedPatientId);
   const patientSubjectReference: Reference = { reference: patientFullUrl, type: 'Patient' };
 
   const mappingContext: MappingContext = {
