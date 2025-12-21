@@ -1,7 +1,7 @@
 // FILE: src/lib/drafts.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { decryptDraft, encryptDraft, ENCRYPTION_PREFIX, OFFLINE_ENCRYPTION_DISABLED } from './crypto';
+import { decryptDraft, encryptDraft, ENCRYPTION_PREFIX, isEncryptionDisabled } from './crypto';
 
 /**
  * Almacenamiento de borradores por paciente, con prioridad:
@@ -122,7 +122,7 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
   const parsed1 = await parseStoredDraft<T>(raw1);
 
   if (parsed1.value != null) {
-    if (parsed1.shouldEncrypt && !OFFLINE_ENCRYPTION_DISABLED) {
+    if (parsed1.shouldEncrypt && !isEncryptionDisabled()) {
       const encrypted = await encryptDraft(safeStringify(parsed1.value));
       try { await storage.setItem(k1, encrypted); } catch {}
     }
@@ -135,7 +135,7 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
     const raw2 = await storage.getItem(k2);
     const parsed2 = await parseStoredDraft<T>(raw2);
     if (parsed2.value != null) {
-      if (parsed2.shouldEncrypt && !OFFLINE_ENCRYPTION_DISABLED) {
+      if (parsed2.shouldEncrypt && !isEncryptionDisabled()) {
         const encrypted = await encryptDraft(safeStringify(parsed2.value));
         try { await storage.setItem(k1, encrypted); } catch {}
       }
@@ -148,7 +148,7 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
 export async function setDraft<T = any>(patientId: string, data: T): Promise<void> {
   const k1 = keyNorm(patientId);
   const serialized = safeStringify(data ?? {});
-  const payload = OFFLINE_ENCRYPTION_DISABLED ? serialized : await encryptDraft(serialized);
+  const payload = isEncryptionDisabled() ? serialized : await encryptDraft(serialized);
   await storage.setItem(k1, payload);
 }
 
