@@ -7,6 +7,22 @@ import HandoverForm from '@/src/screens/HandoverForm';
 const mockUsePatientSummary = vi.fn();
 const mockUseZodForm = vi.fn();
 
+vi.mock('react-hook-form', async () => {
+  const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
+  let currentContext: any;
+  return {
+    ...actual,
+    FormProvider: ({ children, ...ctx }: any) => {
+      currentContext = ctx;
+      return <>{children}</>;
+    },
+    useFormContext: () => currentContext,
+    Controller: ({ render, defaultValue }: any) =>
+      render({ field: { onChange: vi.fn(), onBlur: vi.fn(), value: defaultValue }, fieldState: { error: undefined } }),
+    useFieldArray: () => ({ fields: [], append: vi.fn(), remove: vi.fn() }),
+  };
+});
+
 vi.mock('@/src/hooks/usePatientSummary', () => ({
   usePatientSummary: (...args: unknown[]) => mockUsePatientSummary(...args),
 }));
@@ -72,6 +88,26 @@ function buildFormMock(patientId: string) {
     },
     getFieldState: () => ({ isDirty: false }),
     watch: (field?: string) => {
+      if (Array.isArray(field)) {
+        return field.map((key) => {
+          if (key === 'patientId') return patientId;
+          if (key === 'signatures') return {};
+          if (key === 'administrativeData.unit') return baseAdministrative.unit;
+          return undefined;
+        });
+      }
+      if (!field) {
+        return {
+          administrativeData: baseAdministrative,
+          patientId,
+          status: 'draft',
+          signatures: {},
+          risksStructured: [],
+          vitals: {},
+          braden: null,
+          oxygenTherapy: null,
+        };
+      }
       if (field === 'patientId') return patientId;
       if (field === 'administrativeData.unit') return baseAdministrative.unit;
       if (field === 'signatures') return {};
@@ -95,28 +131,32 @@ describe('HandoverForm patient header', () => {
     });
     mockUseZodForm.mockReturnValue(buildFormMock('123'));
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <HandoverForm
         navigation={{ navigate: vi.fn() } as any}
         route={{ key: '1', name: 'HandoverForm', params: { patientId: '123' } } as any}
       />,
     );
 
-    expect(getByText('Ana Pérez')).toBeTruthy();
-    expect(getByText('Femenino, 30 años')).toBeTruthy();
-    expect(getByText('Cama 7B')).toBeTruthy();
-    expect(getByText('MRN MRN-7')).toBeTruthy();
+    expect(getByTestId('patient-name').props.children).toBe('Ana Pérez');
+    expect(getByTestId('patient-gender-age').props.children).toBe('Femenino, 30 años');
+    const bedChildren = getByTestId('patient-bed').props.children;
+    const bedText = Array.isArray(bedChildren) ? bedChildren.join('') : bedChildren;
+    expect(bedText).toBe('Cama 7B');
+    const mrnChildren = getByTestId('patient-mrn').props.children;
+    const mrnText = Array.isArray(mrnChildren) ? mrnChildren.join('') : mrnChildren;
+    expect(mrnText).toBe('MRN MRN-7');
   });
 
   it('indica que no hay paciente vinculado cuando falta patientId', () => {
     mockUsePatientSummary.mockReturnValue({ loading: false, error: null, summary: null });
     mockUseZodForm.mockReturnValue(buildFormMock(''));
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <HandoverForm navigation={{ navigate: vi.fn() } as any} route={{ key: '2', name: 'HandoverForm', params: {} } as any} />,
     );
 
-    expect(getByText('Paciente no vinculado')).toBeTruthy();
-    expect(getByText('Asocia un ID para mostrar el banner.')).toBeTruthy();
+    expect(getByTestId('patient-banner-empty-title').props.children).toContain('Paciente no vinculado');
+    expect(getByTestId('patient-banner-empty-subtitle').props.children).toContain('Asocia un ID para mostrar el banner.');
   });
 });

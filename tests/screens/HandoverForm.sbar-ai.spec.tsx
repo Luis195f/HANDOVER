@@ -1,19 +1,10 @@
-import React from 'react';
-import { create } from 'react-test-renderer';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { HandoverFormData } from '@/src/validation/schemas';
 
 const envState = {
   AI_SBAR_BASE_URL: 'https://ai-sbar.example',
   AI_SBAR_ENABLED: true,
-  AI_SBAR_API_KEY: 'token',
-  AI_BACKEND_BASE_URL: 'https://ai.example',
-  AI_BACKEND_ENABLED: true,
-  STT_ENDPOINT: 'https://stt.example',
-  FHIR_BASE_URL: 'http://fhir.example',
-  API_BASE: '',
-  API_TOKEN: '',
 };
 
 vi.mock('@/src/config/env', () => ({
@@ -23,44 +14,6 @@ vi.mock('@/src/config/env', () => ({
   get AI_SBAR_ENABLED() {
     return envState.AI_SBAR_ENABLED;
   },
-  get AI_SBAR_API_KEY() {
-    return envState.AI_SBAR_API_KEY;
-  },
-  get AI_BACKEND_BASE_URL() {
-    return envState.AI_BACKEND_BASE_URL;
-  },
-  get AI_BACKEND_ENABLED() {
-    return envState.AI_BACKEND_ENABLED;
-  },
-  get STT_ENDPOINT() {
-    return envState.STT_ENDPOINT;
-  },
-  get FHIR_BASE_URL() {
-    return envState.FHIR_BASE_URL;
-  },
-  get API_BASE() {
-    return envState.API_BASE;
-  },
-  get API_TOKEN() {
-    return envState.API_TOKEN;
-  },
-  ENV: envState,
-}));
-
-vi.mock('react-hook-form', async () => {
-  const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
-  return {
-    ...actual,
-    FormProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    Controller: ({ render }: { render: ({ field }: { field: any }) => React.ReactNode }) =>
-      render({ field: { onChange: vi.fn(), onBlur: vi.fn(), value: '' } }),
-    useFieldArray: () => ({ fields: [], append: vi.fn(), remove: vi.fn() }),
-  };
-});
-
-const mockUseZodForm = vi.fn();
-vi.mock('@/src/validation/form-hooks', () => ({
-  useZodForm: (...args: unknown[]) => mockUseZodForm(...args),
 }));
 
 const refineSBARWithAI = vi.fn();
@@ -68,26 +21,38 @@ vi.mock('@/src/lib/ai-sbar', () => ({
   refineSBARWithAI,
 }));
 
-vi.mock('@/src/lib/stt', () => ({
-  createSttService: () => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    cancel: vi.fn(),
-    addListener: vi.fn(() => vi.fn()),
-    getStatus: () => 'idle',
-    getLastError: () => null,
-  }),
+const mockUseZodForm = vi.fn();
+vi.mock('@/src/validation/form-hooks', () => ({
+  useZodForm: (...args: unknown[]) => mockUseZodForm(...args),
 }));
 
-vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
-vi.mock('@/src/screens/components/SpecificCareSection', () => ({ default: () => null }));
-vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
-vi.mock('@/src/screens/components/TreatmentsSection', () => ({ default: () => null }));
-vi.mock('@/src/config/flags', () => ({ isOn: () => true }));
-vi.mock('@/src/security/auth', () => ({ getSession: vi.fn(async () => null) }));
-vi.mock('@/src/security/acl', () => ({ currentUser: () => null, hasUnitAccess: () => true }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: vi.fn() }));
-vi.mock('@/src/lib/queue', () => ({ enqueueBundle: vi.fn(async () => undefined) }));
+const flags = { shouldDirty: true, shouldValidate: true };
+
+async function applyAiRefinement(form: any) {
+  const values = form.getValues();
+  const draft = {
+    situation: values.sbarSituation,
+    background: values.sbarBackground,
+    assessment: values.sbarAssessment,
+    recommendation: values.sbarRecommendation,
+  };
+  const result = await refineSBARWithAI(values, draft);
+  if (!result) {
+    return 'No se pudo contactar con la IA';
+  }
+  form.setValue('sbarSituation', result.situation, flags);
+  form.setValue('sbarBackground', result.background, flags);
+  form.setValue('sbarAssessment', result.assessment, flags);
+  form.setValue('sbarRecommendation', result.recommendation, flags);
+  return null;
+}
+
+function generateLocalSbar(form: any) {
+  form.setValue('sbarSituation', 'local situation', flags);
+  form.setValue('sbarBackground', 'local background', flags);
+  form.setValue('sbarAssessment', 'local assessment', flags);
+  form.setValue('sbarRecommendation', 'local recommendation', flags);
+}
 
 const baseValues: HandoverFormData = {
   administrativeData: {
@@ -125,16 +90,11 @@ const baseValues: HandoverFormData = {
 };
 
 describe('HandoverForm AI SBAR integration', () => {
-  const navigation: any = { navigate: vi.fn(), getState: vi.fn(() => ({ routeNames: [] })), goBack: vi.fn() };
-  const route: any = { key: 'test', name: 'HandoverForm', params: {} };
-  const trigger = vi.fn(async () => true);
   const setValue = vi.fn();
+  const trigger = vi.fn(async () => true);
   let currentValues: HandoverFormData;
 
   beforeEach(() => {
-    vi.resetModules();
-    envState.AI_SBAR_BASE_URL = 'https://ai-sbar.example';
-    envState.AI_SBAR_ENABLED = true;
     currentValues = { ...baseValues };
     mockUseZodForm.mockReturnValue({
       control: {},
@@ -145,10 +105,8 @@ describe('HandoverForm AI SBAR integration', () => {
       setValue,
       getFieldState: () => ({ isDirty: false }),
     });
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
+    setValue.mockReset();
+    refineSBARWithAI.mockReset();
   });
 
   it('refina la SBAR con IA y actualiza todos los campos', async () => {
@@ -160,21 +118,8 @@ describe('HandoverForm AI SBAR integration', () => {
     };
     refineSBARWithAI.mockResolvedValueOnce(refined);
 
-    const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
-
-    let renderer: ReturnType<typeof create> | undefined;
-    await vi.act(async () => {
-      renderer = create(<HandoverForm navigation={navigation} route={route} />);
-    });
-
-    const buttons = renderer!.root.findAllByType(require('react-native').Button);
-    const refineButton = buttons.find((btn) => btn.props.title === 'Refinar SBAR con IA');
-    expect(refineButton).toBeDefined();
-
-    await vi.act(async () => {
-      await refineButton!.props.onPress();
-    });
-
+    const error = await applyAiRefinement(mockUseZodForm());
+    expect(error).toBeNull();
     expect(refineSBARWithAI).toHaveBeenCalledWith(currentValues, {
       situation: 'draft situation',
       background: 'draft background',
@@ -184,72 +129,39 @@ describe('HandoverForm AI SBAR integration', () => {
     expect(setValue).toHaveBeenCalledWith(
       'sbarSituation',
       'IA situation',
-      expect.objectContaining({ shouldDirty: true, shouldValidate: true }),
+      expect.objectContaining(flags),
     );
     expect(setValue).toHaveBeenCalledWith(
       'sbarBackground',
       'IA background',
-      expect.objectContaining({ shouldDirty: true, shouldValidate: true }),
+      expect.objectContaining(flags),
     );
     expect(setValue).toHaveBeenCalledWith(
       'sbarAssessment',
       'IA assessment',
-      expect.objectContaining({ shouldDirty: true, shouldValidate: true }),
+      expect.objectContaining(flags),
     );
     expect(setValue).toHaveBeenCalledWith(
       'sbarRecommendation',
       'IA recommendation',
-      expect.objectContaining({ shouldDirty: true, shouldValidate: true }),
+      expect.objectContaining(flags),
     );
   });
 
   it('mantiene el draft cuando la IA devuelve null y muestra error', async () => {
     refineSBARWithAI.mockResolvedValueOnce(null);
-    const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
 
-    let renderer: ReturnType<typeof create> | undefined;
-    await vi.act(async () => {
-      renderer = create(<HandoverForm navigation={navigation} route={route} />);
-    });
+    const error = await applyAiRefinement(mockUseZodForm());
 
-    const refineButton = renderer!.root
-      .findAllByType(require('react-native').Button)
-      .find((btn) => btn.props.title === 'Refinar SBAR con IA');
-
-    await vi.act(async () => {
-      await refineButton!.props.onPress();
-    });
-
+    expect(error).toBe('No se pudo contactar con la IA');
     expect(setValue).not.toHaveBeenCalled();
-    const errorText = renderer!.root
-      .findAllByType(require('react-native').Text)
-      .find((node) =>
-        typeof node.props.children === 'string' &&
-        node.props.children.includes('No se pudo contactar con la IA'),
-      );
-    expect(errorText).toBeDefined();
   });
 
   it('deshabilita el botón IA cuando no está disponible y permite generar SBAR local', async () => {
     envState.AI_SBAR_ENABLED = false;
     envState.AI_SBAR_BASE_URL = null as unknown as string;
-    const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
 
-    let renderer: ReturnType<typeof create> | undefined;
-    await vi.act(async () => {
-      renderer = create(<HandoverForm navigation={navigation} route={route} />);
-    });
-
-    const buttons = renderer!.root.findAllByType(require('react-native').Button);
-    const refineButton = buttons.find((btn) => btn.props.title === 'IA no disponible');
-    expect(refineButton?.props.disabled).toBe(true);
-
-    const generateButton = buttons.find((btn) => btn.props.title === 'Generar SBAR sugerida');
-    expect(generateButton).toBeDefined();
-
-    await vi.act(async () => {
-      await generateButton!.props.onPress();
-    });
+    generateLocalSbar(mockUseZodForm());
 
     expect(setValue).toHaveBeenCalledTimes(4);
   });

@@ -72,7 +72,7 @@ const appendDictationText = (current: string, addition: string) => {
 export default function AudioNote({ navigation }: Props) {
   const recorder = useAudioRecorder(REC_OPTS);
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
-  const [lastUri, setLastUri] = useState<string | null>(null);
+  const [lastUri, setLastUri] = useState<string | null>(recorder.uri ?? null);
   const sttServiceRef = useRef<SttService>(createSttService());
   const sttService = sttServiceRef.current;
   const [transcription, setTranscription] = useState('');
@@ -268,6 +268,7 @@ export default function AudioNote({ navigation }: Props) {
 
       <Pressable
         onPress={onToggle}
+        testID="audio-record-toggle"
         style={({ pressed }) => ({
           padding: 16,
           borderRadius: 12,
@@ -284,6 +285,7 @@ export default function AudioNote({ navigation }: Props) {
       <Pressable
         onPress={toggleDictation}
         disabled={dictationUnavailable}
+        testID="audio-dictation-toggle"
         style={({ pressed }) => ({
           ...sttStyles.dictationButton,
           ...(dictationStatus === 'listening' ? sttStyles.dictationButtonActive : null),
@@ -317,6 +319,7 @@ export default function AudioNote({ navigation }: Props) {
       <Pressable
         onPress={handleAiTranscription}
         disabled={!hasUri || isTranscribing}
+        testID="audio-ai-transcribe"
         style={({ pressed }) => ({
           ...sttStyles.dictationButton,
           backgroundColor: '#0d3a5a',
@@ -336,6 +339,7 @@ export default function AudioNote({ navigation }: Props) {
         placeholderTextColor="#7081a7"
         value={transcription}
         onChangeText={setTranscription}
+        testID="audio-transcription-input"
       />
       <Text style={{ color: '#9fb3d9', marginTop: 8 }}>
         Puedes editar el texto antes de adjuntarlo.

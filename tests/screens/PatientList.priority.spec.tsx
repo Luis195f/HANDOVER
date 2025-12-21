@@ -5,9 +5,24 @@ import { describe, expect, it, vi } from 'vitest';
 
 import PatientList from '@/src/screens/PatientList';
 
+vi.mock('expo', () => ({
+  requireNativeModule: () => ({}),
+}));
+vi.mock('expo-sqlite', () => ({
+  openDatabaseSync: () => ({
+    getAllSync: vi.fn(() => []),
+    runSync: vi.fn(),
+    withTransactionSync: (fn: any) =>
+      fn({ getAllSync: vi.fn(() => []), runSync: vi.fn(), withTransactionSync: (cb: any) => cb({}) }),
+  }),
+  SQLiteProvider: ({ children }: any) => children,
+}));
 vi.mock('@/src/security/acl', () => ({
   currentUser: () => ({ id: 'tester' }),
   hasUnitAccess: () => true,
+}));
+vi.mock('@/src/security/auth', () => ({
+  useAuth: () => ({ session: null, loading: false, loginWithOAuth: vi.fn(), logout: vi.fn() }),
 }));
 
 vi.mock('@/src/lib/otel', () => ({
@@ -16,7 +31,7 @@ vi.mock('@/src/lib/otel', () => ({
 
 describe('PatientList – prioridad clínica', () => {
   type NavigationMock = { navigate: (...args: unknown[]) => void };
-  const navigation: NavigationMock = { navigate: vi.fn() };
+  const navigation: any = { navigate: vi.fn(), setOptions: vi.fn() };
 
   it('ordena por prioridad clínica y muestra el resumen', () => {
     let renderer: ReturnType<typeof create>;

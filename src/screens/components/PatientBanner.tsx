@@ -30,10 +30,12 @@ const formatGenderAge = (gender?: string, age?: number) => {
 export function PatientBanner({ summary, loading, error }: PatientBannerProps) {
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={styles.container} testID="patient-banner">
         <View style={styles.row}>
           <ActivityIndicator />
-          <Text style={styles.loadingText}>Cargando datos del paciente…</Text>
+          <Text style={styles.loadingText} testID="patient-banner-loading">
+            Cargando datos del paciente…
+          </Text>
         </View>
       </View>
     );
@@ -41,9 +43,13 @@ export function PatientBanner({ summary, loading, error }: PatientBannerProps) {
 
   if (!summary) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.placeholderTitle}>Paciente no vinculado</Text>
-        <Text style={styles.placeholderText}>Asocia un ID para mostrar el banner.</Text>
+      <View style={styles.container} testID="patient-banner">
+        <Text style={styles.placeholderTitle} testID="patient-banner-empty-title">
+          Paciente no vinculado
+        </Text>
+        <Text style={styles.placeholderText} testID="patient-banner-empty-subtitle">
+          Asocia un ID para mostrar el banner.
+        </Text>
       </View>
     );
   }
@@ -52,27 +58,45 @@ export function PatientBanner({ summary, loading, error }: PatientBannerProps) {
   const hasAllergies = Array.isArray(summary.allergies) && summary.allergies.length > 0;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID="patient-banner">
       <View style={styles.rowBetween}>
-        <Text style={styles.name}>{summary.name}</Text>
-        {genderAge ? <Text style={styles.meta}>{genderAge}</Text> : null}
+        <Text style={styles.name} testID="patient-name">
+          {summary.name}
+        </Text>
+        {genderAge ? (
+          <Text style={styles.meta} testID="patient-gender-age">
+            {genderAge}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.rowBetween}>
-        {summary.bed ? <Text style={styles.meta}>Cama {summary.bed}</Text> : null}
-        {summary.mrn ? <Text style={styles.meta}>MRN {summary.mrn}</Text> : null}
+        {summary.bed ? (
+          <Text style={styles.meta} testID="patient-bed">
+            Cama {summary.bed}
+          </Text>
+        ) : null}
+        {summary.mrn ? (
+          <Text style={styles.meta} testID="patient-mrn">
+            MRN {summary.mrn}
+          </Text>
+        ) : null}
       </View>
 
       {hasAllergies ? (
-        <View style={styles.allergyRow}>
-          {summary.allergies!.map((item) => (
-            <View style={styles.chip} key={item}>
+        <View style={styles.allergyRow} testID="patient-allergies">
+          {summary.allergies!.map((item, index) => (
+            <View style={styles.chip} key={item} testID={`patient-allergy-${index}`}>
               <Text style={styles.chipText}>{item}</Text>
             </View>
           ))}
         </View>
       ) : null}
 
-      {error ? <Text style={styles.error}>No se pudo obtener la información del paciente</Text> : null}
+      {error ? (
+        <Text style={styles.error} testID="patient-banner-error">
+          No se pudo obtener la información del paciente
+        </Text>
+      ) : null}
     </View>
   );
 }
