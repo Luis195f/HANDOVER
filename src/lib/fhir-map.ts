@@ -1749,7 +1749,12 @@ export function mapExamObservations(
     result: 'final',
     pending: 'registered',
   };
-
+const EXAM_CODE_SYSTEM = 'https://handover.app/fhir/CodeSystem/handover-exam';
+  const codeByType: Record<ExamItem['type'], CodeableConcept> = {
+    laboratory: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'lab' }], text: 'Laboratory result' },
+    imaging: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'imaging' }], text: 'Imaging result' },
+    other: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'other' }], text: 'Diagnostic result' },
+  };
   return normalizedExams.items.flatMap((exam) => {
     const descriptionRaw = (exam as ExamItem | Record<string, unknown>)?.description;
     const description =
