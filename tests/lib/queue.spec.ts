@@ -4,7 +4,6 @@ import CryptoJS from 'crypto-js';
 // 1) Mock de expo-sqlite: así `queue.ts` usa el fallback in-memory
 vi.mock('expo-sqlite', () => {
   return {
-    
     openDatabaseSync: undefined,
     openDatabase: undefined,
   };
@@ -46,9 +45,16 @@ const resetEnv = () => {
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
 };
 
+const clearSecureStore = async () => {
+  const { secureDeleteItem } = await import('@/src/security/secure-storage');
+  await secureDeleteItem('handover_offline_encryption_key_v1');
+  await secureDeleteItem('handover_offline_queue_key');
+};
+
 const loadQueue = async () => {
   const queue = await import('@/src/lib/queue');
   await queue.clearTxQueue();
+  await queue.clearOfflineQueue();
   return queue;
 };
 
@@ -61,6 +67,8 @@ describe('tx queue (sqlite + fallback)', () => {
   afterEach(async () => {
     const queue = await import('@/src/lib/queue');
     await queue.clearTxQueue();
+    await queue.clearOfflineQueue();
+    await clearSecureStore();
     vi.restoreAllMocks();
     resetEnv();
   });
@@ -195,6 +203,70 @@ describe('tx queue (sqlite + fallback)', () => {
 
     const snapshot = await queue.getQueueSnapshot();
     expect(snapshot[0]?.payload).toEqual(bundle);
+  });
+
+  it('performs a full roundtrip with offline queue items and preserves the payload', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    const queue = await loadQueue();
+
+    const payload = { bundle: { id: 'offline-1', resourceType: 'Bundle' }, patientId: '123', note: 'keep-me' };
+    await queue.createOfflineQueueItem({ payload, patientId: '123' });
+
+    const offlineItems = await queue.listOfflineQueue();
+    expect(offlineItems).toHaveLength(1);
+    expect(offlineItems[0]?.payload).toEqual(payload);
+    expect(offlineItems[0]?.patientId).toBe('123');
+  });
+
+  it('does not leak plaintext into the offline queue storage when encryption is enabled', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    const queue = await loadQueue();
+
+    const payload = { bundle: { id: 'anti-leak', resourceType: 'Bundle' }, patientId: 'patient-123' };
+    await queue.createOfflineQueueItem({ payload, patientId: 'patient-123' });
+
+    const rawOfflineRows = await queue.__getRawOfflineQueueRows();
+    expect(rawOfflineRows).toHaveLength(1);
+    const storedPayload = rawOfflineRows[0]?.payload ?? '';
+    expect(storedPayload).not.toContain('patientId');
+    expect(storedPayload).not.toContain('patient-123');
+    expect(JSON.parse(storedPayload)).toMatchObject({ v: 1, algo: 'AES-256-GCM' });
+  });
+
+  it('stores plaintext in the offline queue when encryption is disabled and reads it back', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    const queue = await loadQueue();
+
+    const payload = { bundle: { id: 'offline-plain', resourceType: 'Bundle' }, patientId: 'patient-plain' };
+    await queue.createOfflineQueueItem({ payload, patientId: 'patient-plain' });
+
+    const rawOfflineRows = await queue.__getRawOfflineQueueRows();
+    expect(rawOfflineRows).toHaveLength(1);
+    expect(rawOfflineRows[0]?.payload).toContain('patientId');
+    expect(rawOfflineRows[0]?.payload).toContain('patient-plain');
+
+    const offlineItems = await queue.listOfflineQueue();
+    expect(offlineItems[0]?.payload).toEqual(payload);
+  });
+
+  it('reads legacy plaintext offline queue entries even when encryption is later enabled', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
+    const queue = await loadQueue();
+
+    const payload = { bundle: { id: 'legacy-offline', resourceType: 'Bundle' }, patientId: 'legacy-patient' };
+    await queue.createOfflineQueueItem({ payload, patientId: 'legacy-patient' });
+
+    const rawOfflineRows = await queue.__getRawOfflineQueueRows();
+    expect(rawOfflineRows[0]?.payload).toContain('legacy-patient');
+
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+
+    const offlineItems = await queue.listOfflineQueue();
+    expect(offlineItems[0]?.payload).toEqual(payload);
   });
 
   it('reads legacy encrypted payloads (v1:/enc:v1) and returns decrypted JSON', async () => {
