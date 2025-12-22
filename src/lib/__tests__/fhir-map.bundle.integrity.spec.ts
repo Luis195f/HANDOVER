@@ -128,4 +128,45 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
     expect(members).toEqual([`urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`]);
   });
+
+  it('incluye secciones y referencias para exámenes y procedimientos', () => {
+    const bundle = buildHandoverBundle(
+      {
+        patientId: 'pat-exams-001',
+        exams: [
+          { type: 'laboratory', state: 'result', description: 'Hemograma' },
+          { type: 'imaging', state: 'pending', description: 'TC tórax' },
+        ],
+        procedures: [
+          { description: 'Curación de herida', done: false },
+          { description: 'Suturas retiradas', done: true },
+        ],
+      },
+      { now },
+    );
+
+    const entries = bundle.entry as Array<{ resource: any; fullUrl?: string }>;
+    const fullUrls = new Set(entries.map((e) => e.fullUrl));
+    const observations = entries.filter((e) => e.resource?.resourceType === 'Observation');
+    const procedures = entries.filter((e) => e.resource?.resourceType === 'Procedure');
+    expect(observations.length).toBeGreaterThan(0);
+    expect(procedures.length).toBeGreaterThan(0);
+
+    const composition = entries.find((e) => e.resource?.resourceType === 'Composition')?.resource;
+    expect(composition).toBeTruthy();
+    const sectionTitles = (composition?.section ?? []).map((s: any) => s.title);
+    expect(sectionTitles).toEqual(expect.arrayContaining(['Exámenes', 'Procedimientos']));
+
+    const examsSection = composition?.section?.find((s: any) => s.title === 'Exámenes');
+    expect(examsSection?.entry?.length).toBeGreaterThan(0);
+    examsSection?.entry?.forEach((entry: any) => {
+      expect(fullUrls.has(entry.reference)).toBe(true);
+    });
+
+    const proceduresSection = composition?.section?.find((s: any) => s.title === 'Procedimientos');
+    expect(proceduresSection?.entry?.length).toBeGreaterThan(0);
+    proceduresSection?.entry?.forEach((entry: any) => {
+      expect(fullUrls.has(entry.reference)).toBe(true);
+    });
+  });
 });

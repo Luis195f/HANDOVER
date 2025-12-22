@@ -546,6 +546,7 @@ type CompositionValues = {
   sbar?: SbarValues;
   administrativeData?: AdministrativeData;
   signatures?: HandoverSignatures;
+  sectionSources?: Partial<Record<'exams' | 'procedures', number>>;
 };
 
 type SbarValues = {
@@ -1575,6 +1576,87 @@ export function mapFluidBalanceCare(
   ];
 }
 
+type NormalizedExamInput = {
+  items: Array<ExamItem | unknown>;
+  legacyFields: string[];
+  legacyCount: number;
+  inputCount: number;
+};
+
+const warnExamsItemSkipped = (payload: {
+  code: 'HANDOVER_EXAMS_ITEM_SKIPPED';
+  reason: 'invalid_shape' | 'empty_description' | 'unknown_type' | 'unknown_state';
+  examType?: string;
+  examState?: string;
+  len?: number;
+}) => {
+  console.warn(payload, 'Exams item skipped during mapping.');
+};
+
+const warnProceduresItemSkipped = (payload: {
+  code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED';
+  reason: 'invalid_shape' | 'empty_description';
+  done?: boolean;
+  len?: number;
+}) => {
+  console.warn(payload, 'Procedures item skipped during mapping.');
+};
+
+const warnCompositionSectionOmitted = (section: 'exams' | 'procedures') => {
+  console.warn(
+    { code: 'HANDOVER_COMPOSITION_SECTION_OMITTED_EMPTY', section },
+    'Composition section omitted: no references.',
+  );
+};
+
+const normalizeExamInputs = (values: { exams?: unknown; examsPending?: unknown }): NormalizedExamInput => {
+  const items: Array<ExamItem | unknown> = [];
+  const legacyFields = new Set<string>();
+  let legacyCount = 0;
+
+  const pushLegacyStrings = (input: unknown, state: ExamItem['state'], field: string) => {
+    if (input === undefined || input === null) return;
+    legacyFields.add(field);
+    const list = Array.isArray(input) ? input : [input];
+    list.forEach((entry) => {
+      if (typeof entry !== 'string') return;
+      const trimmed = entry.trim();
+      if (!trimmed) return;
+      items.push({ type: 'other', state, description: trimmed });
+      legacyCount += 1;
+    });
+  };
+
+  if (Array.isArray(values.exams)) {
+    values.exams.forEach((entry) => {
+      if (typeof entry === 'string') {
+        legacyFields.add('exams');
+        const trimmed = entry.trim();
+        if (trimmed) {
+          items.push({ type: 'other', state: 'result', description: trimmed });
+          legacyCount += 1;
+        }
+        return;
+      }
+      items.push(entry);
+    });
+  } else if (values.exams && typeof values.exams === 'object') {
+    items.push(values.exams as ExamItem);
+  } else {
+    pushLegacyStrings(values.exams, 'result', 'exams');
+  }
+
+  pushLegacyStrings((values as { examsPending?: unknown }).examsPending, 'pending', 'examsPending');
+
+  return { items, legacyFields: Array.from(legacyFields), legacyCount, inputCount: items.length };
+};
+
+const isExamType = (value: unknown): value is ExamItem['type'] =>
+  value === 'laboratory' || value === 'imaging' || value === 'other';
+
+const isExamState = (value: unknown): value is ExamItem['state'] =>
+  value === 'result' || value === 'pending';
+
 const TREATMENT_TYPE_LABELS: Record<TreatmentItem['type'], string> = {
   woundCare: 'Curación de heridas',
   respiratory: 'Respiratorio',
@@ -1626,10 +1708,23 @@ export function mapTreatments(
 }
 
 export function mapExamObservations(
-  values: CareValues & { exams?: ExamItem[] },
+  values: CareValues & { exams?: ExamItem[]; examsPending?: unknown },
   options?: BuildOptions,
+  normalizedInput?: NormalizedExamInput,
 ): Observation[] {
-  if (!values.exams || values.exams.length === 0) return [];
+  const normalizedExams = normalizedInput ?? normalizeExamInputs(values);
+  if (normalizedExams.legacyFields.length > 0) {
+    console.warn(
+      {
+        code: 'HANDOVER_LEGACY_EXAMS_PARSE_APPLIED',
+        legacyFields: normalizedExams.legacyFields,
+        producedCount: normalizedExams.legacyCount,
+      },
+      'Legacy exams fields detected; parse+merge applied.',
+    );
+  }
+
+  if (normalizedExams.inputCount === 0) return [];
   const optionsMerged = resolveOptions(options);
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
@@ -1655,44 +1750,144 @@ export function mapExamObservations(
     pending: 'registered',
   };
 
-  return values.exams.map((exam) => ({
-    resourceType: 'Observation',
-    status: statusByState[exam.state],
-    category: categoryByType[exam.type] ? [categoryByType[exam.type] as CodeableConcept] : [],
-    code: { text: exam.description },
-    subject,
-    encounter,
-    effectiveDateTime,
-  }));
+  return normalizedExams.items.flatMap((exam) => {
+    const descriptionRaw = (exam as ExamItem | Record<string, unknown>)?.description;
+    const description =
+      typeof descriptionRaw === 'string' ? descriptionRaw.trim() : typeof descriptionRaw === 'number' ? String(descriptionRaw) : '';
+    const len = typeof descriptionRaw === 'string' ? description.length : undefined;
+    const examType = (exam as ExamItem | Record<string, unknown>)?.type as ExamItem['type'] | undefined;
+    const examState = (exam as ExamItem | Record<string, unknown>)?.state as ExamItem['state'] | undefined;
+
+    if (!exam || typeof exam !== 'object' || examType === undefined || examState === undefined) {
+      warnExamsItemSkipped({
+        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
+        reason: 'invalid_shape',
+        examType: typeof examType === 'string' ? examType : undefined,
+        examState: typeof examState === 'string' ? examState : undefined,
+        len,
+      });
+      return [];
+    }
+
+    if (!description) {
+      warnExamsItemSkipped({
+        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
+        reason: 'empty_description',
+        examType: typeof examType === 'string' ? examType : undefined,
+        examState: typeof examState === 'string' ? examState : undefined,
+        len: len ?? 0,
+      });
+      return [];
+    }
+
+    if (!isExamType(examType)) {
+      warnExamsItemSkipped({
+        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
+        reason: 'unknown_type',
+        examType: typeof examType === 'string' ? examType : undefined,
+        examState: typeof examState === 'string' ? examState : undefined,
+        len,
+      });
+      return [];
+    }
+
+    if (!isExamState(examState)) {
+      warnExamsItemSkipped({
+        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
+        reason: 'unknown_state',
+        examType,
+        examState: typeof examState === 'string' ? examState : undefined,
+        len,
+      });
+      return [];
+    }
+
+    return [
+      {
+        resourceType: 'Observation',
+        status: statusByState[examState],
+        category: categoryByType[examType] ? [categoryByType[examType] as CodeableConcept] : [],
+        code: { text: description },
+        subject,
+        encounter,
+        effectiveDateTime,
+      },
+    ];
+  });
 }
 
 export function mapProcedures(
   values: CareValues & { procedures?: ProcedureItem[] },
   options?: BuildOptions,
 ): Procedure[] {
-  if (!values.procedures || values.procedures.length === 0) return [];
+  const procedures = Array.isArray(values.procedures)
+    ? values.procedures
+    : values.procedures !== undefined && values.procedures !== null
+      ? ([values.procedures] as Array<ProcedureItem | unknown>)
+      : [];
+  if (procedures.length === 0) return [];
   const optionsMerged = resolveOptions(options);
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
   const performedDateTime = optionsMerged.now();
 
-  return values.procedures.map((procedure) => ({
-    resourceType: 'Procedure',
-    status: procedure.done ? 'completed' : 'preparation',
-    code: {
-      coding: [
-        {
-          system: 'urn:handover-pro:procedure',
-          code: procedure.done ? 'completed' : 'planned',
-          display: 'Procedure',
+  return procedures.flatMap((procedure) => {
+    if (!procedure || typeof procedure !== 'object') {
+      warnProceduresItemSkipped({
+        code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED',
+        reason: 'invalid_shape',
+        done: undefined,
+      });
+      return [];
+    }
+
+    const descriptionRaw = (procedure as ProcedureItem | Record<string, unknown>).description;
+    const description =
+      typeof descriptionRaw === 'string' ? descriptionRaw.trim() : typeof descriptionRaw === 'number' ? String(descriptionRaw) : '';
+    const len = typeof descriptionRaw === 'string' ? description.length : undefined;
+    const doneRaw = (procedure as ProcedureItem | Record<string, unknown>).done;
+
+    if (doneRaw !== undefined && typeof doneRaw !== 'boolean') {
+      warnProceduresItemSkipped({
+        code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED',
+        reason: 'invalid_shape',
+        done: undefined,
+        len,
+      });
+      return [];
+    }
+
+    if (!description) {
+      warnProceduresItemSkipped({
+        code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED',
+        reason: 'empty_description',
+        done: typeof doneRaw === 'boolean' ? doneRaw : undefined,
+        len: len ?? 0,
+      });
+      return [];
+    }
+
+    const done = doneRaw === true;
+    return [
+      {
+        resourceType: 'Procedure',
+        status: done ? 'completed' : 'preparation',
+        code: {
+          coding: [
+            {
+              system: 'urn:handover-pro:procedure',
+              code: done ? 'completed' : 'planned',
+              display: 'Procedure',
+            },
+          ],
+          text: description,
         },
-      ],
-      text: procedure.description,
-    },
-    subject,
-    encounter,
-    performedDateTime: procedure.done ? performedDateTime : undefined,
-  }));
+        subject,
+        encounter,
+        performedDateTime: done ? performedDateTime : undefined,
+      },
+    ];
+  });
 }
 
 function mapEvaObservation(
@@ -2027,6 +2222,8 @@ export function buildComposition(
       title: 'Exámenes',
       entry: refs.exams.map((reference) => ({ reference })),
     });
+  } else if ((values.sectionSources?.exams ?? 0) > 0) {
+    warnCompositionSectionOmitted('exams');
   }
 
   if (refs.procedures.length > 0) {
@@ -2034,6 +2231,8 @@ export function buildComposition(
       title: 'Procedimientos',
       entry: refs.procedures.map((reference) => ({ reference })),
     });
+  } else if ((values.sectionSources?.procedures ?? 0) > 0) {
+    warnCompositionSectionOmitted('procedures');
   }
 
   if (refs.oxygen.length > 0) {
@@ -2209,9 +2408,26 @@ export function buildHandoverBundle(
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
+  const normalizedExams = normalizeExamInputs({
+    exams: values.exams,
+    examsPending: (values as { examsPending?: unknown }).examsPending,
+  });
+  const examInputCount = normalizedExams.inputCount;
+  const procedureInputCount = Array.isArray(values.procedures)
+    ? values.procedures.length
+    : values.procedures
+      ? 1
+      : 0;
+
   const examObservations = mapExamObservations(
-    { patientId: values.patientId, encounterId: values.encounterId, exams: values.exams },
+    {
+      patientId: values.patientId,
+      encounterId: values.encounterId,
+      exams: values.exams,
+      examsPending: (values as { examsPending?: unknown }).examsPending,
+    },
     sharedOptions,
+    normalizedExams,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const procedureResources = mapProcedures(
@@ -2453,6 +2669,7 @@ export function buildHandoverBundle(
         administrativeData: values.administrativeData,
         sbar: values.sbar,
         signatures: values.signatures,
+        sectionSources: { exams: examInputCount, procedures: procedureInputCount },
       },
       {
         vitals: vitalsRefs,
@@ -2635,9 +2852,24 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     { patientId: data.patientId, fluidBalance: data.fluidBalance },
     sharedOptions,
   );
+  const normalizedExamsForm = normalizeExamInputs({
+    exams: data.exams,
+    examsPending: (data as { examsPending?: unknown }).examsPending,
+  });
+  const examInputCount = normalizedExamsForm.inputCount;
+  const procedureInputCount = Array.isArray(data.procedures)
+    ? data.procedures.length
+    : data.procedures
+      ? 1
+      : 0;
   const examObservations = mapExamObservations(
-    { patientId: data.patientId, exams: data.exams },
+    {
+      patientId: data.patientId,
+      exams: data.exams,
+      examsPending: (data as { examsPending?: unknown }).examsPending,
+    },
     sharedOptions,
+    normalizedExamsForm,
   );
   const procedureResources = mapProcedures(
     { patientId: data.patientId, procedures: data.procedures },
@@ -2798,6 +3030,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         recommendation: data.sbarRecommendation,
       },
       signatures: data.signatures,
+      sectionSources: { exams: examInputCount, procedures: procedureInputCount },
     },
     refs,
     sharedOptions,
