@@ -16,14 +16,15 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
 
     include: [
-      '**/__tests__/**/*.{spec,test}.{ts,tsx}',
-      'tests/**/*.{spec,test}.{ts,tsx}',
-      'tests/patientlist-*.test.ts',
-      'tests/qr-scan.test.ts',
-      'tests/security/**/*.spec.ts',
-    ],
+  'src/**/*.{spec,test}.{ts,tsx}',
+  'src/**/__tests__/**/*.{spec,test}.{ts,tsx}',
+  'tests/**/*.{spec,test}.{ts,tsx}',
+],
+
 
     exclude: [
+      '**/node_modules/**',
+      '**/.pnpm/**',
       'src/validation/**',
       'src/security/**',
       'src/**/__tests__/**/fhir-map.test.ts',
