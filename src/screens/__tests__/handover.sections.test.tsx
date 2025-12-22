@@ -28,6 +28,8 @@ const defaultValues: HandoverFormValues = {
   },
   medications: [],
   treatments: [],
+  exams: [],
+  procedures: [],
   meds: '',
   risksStructured: [],
 };

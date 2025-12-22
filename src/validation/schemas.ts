@@ -334,6 +334,25 @@ export const zRiskFlags = z
   })
   .partial();
 
+export const zExamItem = z.object({
+  type: z.enum(["laboratory", "imaging", "other"]),
+  state: z.enum(["result", "pending"]).default("result"),
+  description: z
+    .string()
+    .trim()
+    .min(1, "Detalle requerido")
+    .max(200, "Máx. 200 caracteres"),
+});
+
+export const zProcedureItem = z.object({
+  description: z
+    .string()
+    .trim()
+    .min(1, "Detalle requerido")
+    .max(200, "Máx. 200 caracteres"),
+  done: z.boolean().default(false),
+});
+
 // BEGIN HANDOVER D3 – StructuredDiagnosis schema
 export const zHandoverStructuredDiagnosis = z.object({
   system: z
@@ -481,6 +500,8 @@ export const zHandover = z.object({
 
   medications: z.array(zMedicationItem).default([]),
   treatments: z.array(zTreatmentItem).default([]),
+  exams: z.array(zExamItem).default([]),
+  procedures: z.array(zProcedureItem).default([]),
 
   oxygenTherapy: zOxygen.optional(),
 

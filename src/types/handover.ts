@@ -1,7 +1,14 @@
 import { z } from 'zod';
 
 import type { AdministrativeData } from './administrative';
-import type { zMedicationItem, zRiskItem, zRiskType, zTreatmentItem } from '../validation/schemas';
+import type {
+  zExamItem,
+  zMedicationItem,
+  zProcedureItem,
+  zRiskItem,
+  zRiskType,
+  zTreatmentItem,
+} from '../validation/schemas';
 // BEGIN HANDOVER D3 – StructuredDiagnosis types
 import type { DiagnosisSystem } from '../catalogs/diagnosisCodes';
 // END HANDOVER D3 – StructuredDiagnosis types
@@ -168,6 +175,8 @@ export type MedicationItem = z.infer<typeof zMedicationItem> & {
 };
 // END HANDOVER D7 – MedicationModule
 export type TreatmentItem = z.infer<typeof zTreatmentItem>;
+export type ExamItem = z.infer<typeof zExamItem>;
+export type ProcedureItem = z.infer<typeof zProcedureItem>;
 
 export type HandoverValues = {
   administrativeData: AdministrativeData;
@@ -189,6 +198,8 @@ export type HandoverValues = {
   meds?: string;
   medications?: MedicationItem[];
   treatments?: TreatmentItem[];
+  exams?: ExamItem[];
+  procedures?: ProcedureItem[];
   oxygenTherapy?: OxygenTherapy;
   audioUri?: string;
   nutrition?: NutritionInfo;

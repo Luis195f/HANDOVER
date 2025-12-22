@@ -444,6 +444,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       meds: '',
       medications: [],
       treatments: [],
+      exams: [],
+      procedures: [],
       sbarSituation: '',
       sbarBackground: '',
       sbarAssessment: '',

@@ -32,6 +32,8 @@ const defaultValues: HandoverValues = {
   risks: {},
   risksStructured: [],
   meds: '',
+  exams: [],
+  procedures: [],
 };
 
 function Wrapper() {
