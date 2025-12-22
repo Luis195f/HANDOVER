@@ -1,5 +1,5 @@
 // __tests__/fhir-map.spec.ts
-import { buildHandoverBundle } from '../fhir-map';
+import { buildHandoverBundle, mapExamObservations, mapProcedures } from '../fhir-map';
 import { TEST_SNOMED_CODES, TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 
 type Entry = { fullUrl?: string; resource: any; request?: any };
@@ -124,5 +124,58 @@ describe('mapVitalsToObservations (vía buildHandoverBundle con emitIndividuals)
     expect(sbp.valueQuantity.code).toBe('mm[Hg]');
     expect(tmp.valueQuantity.unit).toBe('Cel');
     expect(tmp.valueQuantity.code).toBe('Cel');
+  });
+});
+
+describe('exams and procedures mapping', () => {
+  test('maps laboratory result exams to Observation with lab category and final status', () => {
+    const observations = mapExamObservations(
+      {
+        patientId: 'pat-exam-1',
+        exams: [{ type: 'laboratory', state: 'result', description: 'Hemograma completo' }],
+      },
+      { now: '2025-01-01T00:00:00Z' },
+    );
+
+    expect(observations).toHaveLength(1);
+    const exam = observations[0];
+    expect(exam.status).toBe('final');
+    expect(exam.category?.[0]?.coding?.[0]?.code).toBe('laboratory');
+    expect(exam.code?.text).toBe('Hemograma completo');
+  });
+
+  test('maps imaging pending exams to Observation with imaging category and registered status', () => {
+    const observations = mapExamObservations(
+      {
+        patientId: 'pat-exam-2',
+        exams: [{ type: 'imaging', state: 'pending', description: 'TAC de tórax' }],
+      },
+      { now: '2025-01-01T00:00:00Z' },
+    );
+
+    expect(observations).toHaveLength(1);
+    const exam = observations[0];
+    expect(exam.status).toBe('registered');
+    expect(exam.category?.[0]?.coding?.[0]?.code).toBe('imaging');
+  });
+
+  test('maps incomplete procedures as preparation', () => {
+    const procedures = mapProcedures(
+      { patientId: 'pat-proc-1', procedures: [{ description: 'Curación de herida', done: false }] },
+      { now: '2025-01-01T00:00:00Z' },
+    );
+
+    expect(procedures).toHaveLength(1);
+    expect(procedures[0]?.status).toBe('preparation');
+  });
+
+  test('maps completed procedures with completed status', () => {
+    const procedures = mapProcedures(
+      { patientId: 'pat-proc-2', procedures: [{ description: 'Retiro de suturas', done: true }] },
+      { now: '2025-01-01T00:00:00Z' },
+    );
+
+    expect(procedures).toHaveLength(1);
+    expect(procedures[0]?.status).toBe('completed');
   });
 });

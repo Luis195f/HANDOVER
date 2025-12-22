@@ -116,13 +116,25 @@ export function ExamsProceduresSection() {
   );
 
   const handleAddExam = () => {
-    if (!canAddExam) return;
+    if (!canAddExam) {
+      console.warn(
+        { code: 'HANDOVER_UI_EXAMS_ADD_BLOCKED_EMPTY', field: 'exams.description', len: 0 },
+        'UI blocked adding exam: empty description.',
+      );
+      return;
+    }
     appendExam({ ...nextExam, description: nextExam.description.trim() });
     setNextExam((prev) => ({ ...prev, description: '' }));
   };
 
   const handleAddProcedure = () => {
-    if (!canAddProcedure) return;
+    if (!canAddProcedure) {
+      console.warn(
+        { code: 'HANDOVER_UI_PROCEDURES_ADD_BLOCKED_EMPTY', field: 'procedures.description', len: 0 },
+        'UI blocked adding procedure: empty description.',
+      );
+      return;
+    }
     appendProcedure({ ...nextProcedure, description: nextProcedure.description.trim() });
     setNextProcedure((prev) => ({ ...prev, description: '' }));
   };
@@ -191,7 +203,7 @@ export function ExamsProceduresSection() {
         <Pressable
           accessibilityLabel="Añadir examen"
           onPress={handleAddExam}
-          disabled={!canAddExam}
+          accessibilityState={{ disabled: !canAddExam }}
           style={[styles.addButton, !canAddExam ? styles.addButtonDisabled : null]}
         >
           <Text style={styles.addButtonText}>Añadir examen</Text>
@@ -250,7 +262,7 @@ export function ExamsProceduresSection() {
         <Pressable
           accessibilityLabel="Añadir procedimiento"
           onPress={handleAddProcedure}
-          disabled={!canAddProcedure}
+          accessibilityState={{ disabled: !canAddProcedure }}
           style={[styles.addButton, !canAddProcedure ? styles.addButtonDisabled : null]}
         >
           <Text style={styles.addButtonText}>Añadir procedimiento</Text>
