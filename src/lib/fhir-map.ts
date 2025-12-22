@@ -15,6 +15,8 @@ import type {
   GlasgowScale,
   SkinInfo,
   TreatmentItem,
+  ExamItem,
+  ProcedureItem,
   RiskFlags,
   RiskItem,
 } from '../types/handover';
@@ -114,7 +116,7 @@ type Observation = {
   resourceType: 'Observation';
   id?: string;
   meta?: Meta;
-  status: 'final';
+  status: 'final' | 'registered' | 'preliminary';
   category: CodeableConcept[];
   code: CodeableConcept;
   subject: Reference;
@@ -147,7 +149,7 @@ type Procedure = {
   resourceType: 'Procedure';
   identifier?: Array<{ system: string; value: string }>;
   id?: string;
-  status: 'in-progress' | 'completed';
+  status: 'in-progress' | 'completed' | 'preparation';
   code: CodeableConcept;
   subject: Reference;
   encounter?: Reference;
@@ -566,6 +568,8 @@ type BundleReferenceIndex = {
   pain: string[];
   braden: string[];
   glasgow: string[];
+  exams: string[];
+  procedures: string[];
   risks: string[];
   detectedIssues?: string[];
   diagnoses?: string[];
@@ -612,6 +616,8 @@ export type HandoverValues = {
   skin?: SkinInfo;
   fluidBalance?: FluidBalanceInfo;
   painAssessment?: PainAssessment;
+  exams?: ExamItem[];
+  procedures?: ProcedureItem[];
   braden?: BradenScale;
   glasgow?: GlasgowScale;
   // BEGIN HANDOVER D1 – BedsideChecklist types
@@ -1577,6 +1583,8 @@ const TREATMENT_TYPE_LABELS: Record<TreatmentItem['type'], string> = {
   other: 'Otro',
 };
 
+const OBSERVATION_CATEGORY_SYSTEM = 'http://terminology.hl7.org/CodeSystem/observation-category';
+
 export function mapTreatments(
   values: TreatmentValues,
   _options?: BuildOptions,
@@ -1615,6 +1623,76 @@ export function mapTreatments(
 
     return procedure;
   });
+}
+
+export function mapExamObservations(
+  values: CareValues & { exams?: ExamItem[] },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.exams || values.exams.length === 0) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+
+  const categoryByType: Record<ExamItem['type'], CodeableConcept | undefined> = {
+    laboratory: {
+      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'laboratory', display: 'Laboratory' }],
+      text: 'Laboratory',
+    },
+    imaging: {
+      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'imaging', display: 'Imaging' }],
+      text: 'Imaging',
+    },
+    other: {
+      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'survey', display: 'Survey' }],
+      text: 'Survey',
+    },
+  };
+
+  const statusByState: Record<ExamItem['state'], Observation['status']> = {
+    result: 'final',
+    pending: 'registered',
+  };
+
+  return values.exams.map((exam) => ({
+    resourceType: 'Observation',
+    status: statusByState[exam.state],
+    category: categoryByType[exam.type] ? [categoryByType[exam.type] as CodeableConcept] : [],
+    code: { text: exam.description },
+    subject,
+    encounter,
+    effectiveDateTime,
+  }));
+}
+
+export function mapProcedures(
+  values: CareValues & { procedures?: ProcedureItem[] },
+  options?: BuildOptions,
+): Procedure[] {
+  if (!values.procedures || values.procedures.length === 0) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const performedDateTime = optionsMerged.now();
+
+  return values.procedures.map((procedure) => ({
+    resourceType: 'Procedure',
+    status: procedure.done ? 'completed' : 'preparation',
+    code: {
+      coding: [
+        {
+          system: 'urn:handover-pro:procedure',
+          code: procedure.done ? 'completed' : 'planned',
+          display: 'Procedure',
+        },
+      ],
+      text: procedure.description,
+    },
+    subject,
+    encounter,
+    performedDateTime: procedure.done ? performedDateTime : undefined,
+  }));
 }
 
 function mapEvaObservation(
@@ -1944,6 +2022,20 @@ export function buildComposition(
     });
   }
 
+  if (refs.exams.length > 0) {
+    sections.push({
+      title: 'Exámenes',
+      entry: refs.exams.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.procedures.length > 0) {
+    sections.push({
+      title: 'Procedimientos',
+      entry: refs.procedures.map((reference) => ({ reference })),
+    });
+  }
+
   if (refs.oxygen.length > 0) {
     sections.push({
       title: 'Oxygen therapy',
@@ -2117,6 +2209,16 @@ export function buildHandoverBundle(
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
+  const examObservations = mapExamObservations(
+    { patientId: values.patientId, encounterId: values.encounterId, exams: values.exams },
+    sharedOptions,
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
+
+  const procedureResources = mapProcedures(
+    { patientId: values.patientId, encounterId: values.encounterId, procedures: values.procedures },
+    sharedOptions,
+  ).map((procedure) => replaceSubjectReference(procedure, patientSubjectReference));
+
   const evaObservation = mapEvaObservation(values.painAssessment, mappingContext);
   const bradenObservation = mapBradenObservation(values.braden, mappingContext);
   const glasgowObservation = mapGlasgowObservation(values.glasgow, mappingContext);
@@ -2174,6 +2276,8 @@ export function buildHandoverBundle(
   const painRefs: string[] = [];
   const bradenRefs: string[] = [];
   const glasgowRefs: string[] = [];
+  const examRefs: string[] = [];
+  const procedureRefs: string[] = [];
   const riskRefs: string[] = [];
   const issueRefs: string[] = [];
   const diagnosisRefs: string[] = [];
@@ -2238,6 +2342,16 @@ export function buildHandoverBundle(
     fluidBalanceRefs.push(fullUrl);
   });
 
+  examObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    examRefs.push(fullUrl);
+  });
+
   if (evaObservation) {
     const { resource, fullUrl } = assignStableIds(evaObservation, values.patientId);
     entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
@@ -2298,6 +2412,16 @@ export function buildHandoverBundle(
     treatmentRefs.push(fullUrl);
   });
 
+  procedureResources.forEach((procedure) => {
+    const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Procedure' },
+    });
+    procedureRefs.push(fullUrl);
+  });
+
   oxygenResources.forEach((resource) => {
     const { resource: withId, fullUrl } = assignStableIds(resource, values.patientId);
     entries.push({
@@ -2343,6 +2467,8 @@ export function buildHandoverBundle(
         pain: painRefs,
         braden: bradenRefs,
         glasgow: glasgowRefs,
+        exams: examRefs,
+        procedures: procedureRefs,
         risks: riskRefs,
         detectedIssues: issueRefs,
         diagnoses: diagnosisRefs,
@@ -2509,6 +2635,14 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     { patientId: data.patientId, fluidBalance: data.fluidBalance },
     sharedOptions,
   );
+  const examObservations = mapExamObservations(
+    { patientId: data.patientId, exams: data.exams },
+    sharedOptions,
+  );
+  const procedureResources = mapProcedures(
+    { patientId: data.patientId, procedures: data.procedures },
+    sharedOptions,
+  );
   const evaObservation = mapEvaObservation(data.painAssessment, mappingContext);
   const bradenObservation = mapBradenObservation(data.braden, mappingContext);
   const glasgowObservation = mapGlasgowObservation(data.glasgow, mappingContext);
@@ -2559,6 +2693,8 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     pain: [],
     braden: [],
     glasgow: [],
+    exams: [],
+    procedures: [],
     risks: [],
     detectedIssues: [],
     diagnoses: [],
@@ -2574,12 +2710,26 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.BRADEN.code) refs.braden.push(entry.fullUrl);
         else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.GLASGOW.code) refs.glasgow.push(entry.fullUrl);
         else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'vital-signs'))) refs.vitals.push(entry.fullUrl);
+        else if (
+          !resource.code?.coding?.length &&
+          resource.category?.some((c) =>
+            c.coding?.some((coding) => coding.system === OBSERVATION_CATEGORY_SYSTEM),
+          )
+        )
+          refs.exams.push(entry.fullUrl);
         else refs.mobilitySkin.push(entry.fullUrl);
         break;
       case 'MedicationStatement':
         refs.medications.push(entry.fullUrl);
         break;
-      case 'Procedure':
+      case 'Procedure': {
+        const hasTreatmentCoding = resource.code?.coding?.some(
+          (coding) => coding.system === TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE,
+        );
+        if (hasTreatmentCoding) refs.treatments.push(entry.fullUrl);
+        else refs.procedures.push(entry.fullUrl);
+        break;
+      }
       case 'DeviceUseStatement':
         refs.oxygen.push(entry.fullUrl);
         break;
@@ -2615,6 +2765,9 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     pushEntry(obs);
     refs.fluidBalance.push(entries[entries.length - 1].fullUrl);
   });
+  examObservations.forEach((obs) => {
+    pushEntry(obs);
+  });
   pushEntry(evaObservation);
   pushEntry(bradenObservation);
   pushEntry(glasgowObservation);
@@ -2627,6 +2780,9 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   });
   medications.forEach(pushEntry);
   treatmentProcedures.forEach(pushEntry);
+  procedureResources.forEach((procedure) => {
+    pushEntry(procedure);
+  });
   oxygenDevices.forEach(pushEntry);
   if (document) pushEntry(document);
 
