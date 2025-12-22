@@ -29,6 +29,7 @@ export const SENSITIVE_FIELDS = [
   'medications',
   'exams',
   'examsPending',
+  'procedures',
   'risks',
   'incidents',
   'summary',

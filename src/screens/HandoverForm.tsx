@@ -69,6 +69,7 @@ import SpecificCareSection from './components/SpecificCareSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
 import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
 import MedicationSection from './components/MedicationSection';
+import ExamsProceduresSection from './components/ExamsProceduresSection';
 import TreatmentsSection from './components/TreatmentsSection';
 import SafetySection from './components/SafetySection';
 // END HANDOVER D2 – VitalTrends imports
@@ -177,6 +178,7 @@ const sectionsInfo = [
   { key: 'alertas', title: 'Alertas' },
   { key: 'cuidados', title: 'Cuidados específicos' },
   { key: 'escalas', title: 'Escalas clínicas' },
+  { key: 'examenes', title: 'Exámenes y procedimientos' },
   { key: 'medicacion', title: 'Medicación y tratamientos' },
   { key: 'adjuntos', title: 'Adjuntos' },
   { key: 'diagnosticos', title: 'Diagnósticos médicos/ enfermería' },
@@ -1627,6 +1629,20 @@ export default function HandoverForm({ navigation, route }: Props) {
         </CollapsibleSection>
       </View>
       {/* END HANDOVER D4 – Conditional sections */}
+
+      <View
+        ref={sectionRefs.examenes}
+        onLayout={handleSectionLayout('examenes')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Exámenes y procedimientos"
+          isCollapsed={collapsedSections.examenes}
+          onToggle={() => toggleSection('examenes')}
+        >
+          <ExamsProceduresSection />
+        </CollapsibleSection>
+      </View>
 
       {isOn('SHOW_MEDS') && (
         <View
