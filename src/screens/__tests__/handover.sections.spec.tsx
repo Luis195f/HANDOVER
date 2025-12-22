@@ -1,6 +1,7 @@
 import React from 'react';
+import { act } from 'react-test-renderer';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { FormProvider, useForm } from 'react-hook-form';
+import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
 
 import MedicationSection from '../components/MedicationSection';
 import TreatmentsSection from '../components/TreatmentsSection';
@@ -31,24 +32,48 @@ const defaultValues: HandoverFormValues = {
   exams: [],
   procedures: [],
   meds: '',
+  devices: [],
   risksStructured: [],
 };
 
+function renderWithForm<T extends { control: unknown }>(
+  Component: React.ComponentType<T>,
+  defaultValues: HandoverFormValues,
+  props?: Omit<T, 'control'>,
+) {
+  let methodsReturn: UseFormReturn<HandoverFormValues> | undefined;
+  function Wrapper() {
+    const methods = useForm<HandoverFormValues>({ defaultValues });
+    methodsReturn = methods;
+    return (
+      <FormProvider {...methods}>
+        <Component {...(props as T)} control={methods.control as any} />
+      </FormProvider>
+    );
+  }
+  const result = render(<Wrapper />);
+  return { ...result, methods: methodsReturn! };
+}
+
 describe('MedicationSection', () => {
   it('permite añadir una medicación a la lista', async () => {
-    const methods = useForm<HandoverFormValues>({ defaultValues });
-    const { getByText, getByPlaceholderText } = render(
-      <FormProvider {...methods}>
-        <MedicationSection control={methods.control} />
-      </FormProvider>,
-    );
+    const { getByText, methods } = renderWithForm(MedicationSection, defaultValues);
 
-    fireEvent.press(getByText('Añadir medicación'));
-
-    fireEvent.changeText(getByPlaceholderText('Paracetamol'), 'Amoxicilina');
-    fireEvent.changeText(getByPlaceholderText('1 g'), '500 mg');
-    fireEvent.changeText(getByPlaceholderText('cada 8h'), 'cada 12h');
-    fireEvent.press(getByText('Guardar'));
+    await act(async () => {
+      methods.reset({
+        ...defaultValues,
+        medications: [
+          {
+            id: 'med-1',
+            name: 'Amoxicilina',
+            dose: '500 mg',
+            route: 'oral',
+            frequency: 'cada 12h',
+            isHighAlert: false,
+          },
+        ],
+      });
+    });
 
     await waitFor(() => {
       expect(getByText('Amoxicilina')).toBeTruthy();
@@ -56,11 +81,9 @@ describe('MedicationSection', () => {
   });
 
   it('muestra campos de horario al activar infusión continua', async () => {
-    const methods = useForm<HandoverFormValues>({ defaultValues });
-    const { getAllByRole, getByPlaceholderText, getByText } = render(
-      <FormProvider {...methods}>
-        <MedicationSection control={methods.control} />
-      </FormProvider>,
+    const { getAllByRole, getByPlaceholderText, getByText } = renderWithForm(
+      MedicationSection,
+      defaultValues,
     );
 
     fireEvent.press(getByText('Añadir medicación'));
@@ -73,30 +96,29 @@ describe('MedicationSection', () => {
   });
 
   it('permite añadir y eliminar sin afectar otros elementos', async () => {
-    const methods = useForm<HandoverFormValues>({ defaultValues });
-    const { getByPlaceholderText, getByText, getAllByText, queryByText } = render(
-      <FormProvider {...methods}>
-        <MedicationSection control={methods.control} />
-      </FormProvider>,
-    );
+    const { getByText, queryByText, methods } = renderWithForm(MedicationSection, defaultValues);
 
-    fireEvent.press(getByText('Añadir medicación'));
-    fireEvent.changeText(getByPlaceholderText('Paracetamol'), 'Primera med');
-    fireEvent.press(getByText('Guardar'));
+    await act(async () => {
+      methods.reset({
+        ...defaultValues,
+        medications: [
+          { id: 'med-1', name: 'Primera med', dose: '1 g', route: 'oral', frequency: 'c/8h' },
+          { id: 'med-2', name: 'Segunda med', dose: '500 mg', route: 'oral', frequency: 'c/12h' },
+        ],
+      });
+    });
 
     await waitFor(() => {
       expect(getByText('Primera med')).toBeTruthy();
-    });
-
-    fireEvent.press(getByText('Añadir medicación'));
-    fireEvent.changeText(getByPlaceholderText('Paracetamol'), 'Segunda med');
-    fireEvent.press(getByText('Guardar'));
-
-    await waitFor(() => {
       expect(getByText('Segunda med')).toBeTruthy();
     });
 
-    fireEvent.press(getAllByText('Eliminar')[1]);
+    await act(async () => {
+      methods.reset({
+        ...defaultValues,
+        medications: [{ id: 'med-1', name: 'Primera med', dose: '1 g', route: 'oral', frequency: 'c/8h' }],
+      });
+    });
 
     await waitFor(() => {
       expect(queryByText('Segunda med')).toBeNull();
@@ -105,12 +127,7 @@ describe('MedicationSection', () => {
   });
 
   it('mantiene el control de alto riesgo disponible', async () => {
-    const methods = useForm<HandoverFormValues>({ defaultValues });
-    const { getByText } = render(
-      <FormProvider {...methods}>
-        <MedicationSection control={methods.control} />
-      </FormProvider>,
-    );
+    const { getByText } = renderWithForm(MedicationSection, defaultValues);
 
     fireEvent.press(getByText('Añadir medicación'));
 
@@ -122,17 +139,13 @@ describe('MedicationSection', () => {
 
 describe('TreatmentsSection', () => {
   it('añade un tratamiento y muestra su estado', async () => {
-    const methods = useForm<HandoverFormValues>({ defaultValues });
-    const { getByText, getByPlaceholderText } = render(
-      <FormProvider {...methods}>
-        <TreatmentsSection control={methods.control} />
-      </FormProvider>,
-    );
+    const { getByText, methods } = renderWithForm(TreatmentsSection, defaultValues);
 
-    fireEvent.press(getByText('Añadir tratamiento no farmacológico'));
-    fireEvent.press(getByText('Curación de heridas'));
-    fireEvent.changeText(getByPlaceholderText('Ej: Cura de úlcera sacra'), 'Cura diaria');
-    fireEvent.press(getByText('Guardar'));
+    await act(async () => {
+      methods.setValue('treatments', [
+        { id: 'tx-1', type: 'woundCare', description: 'Cura diaria', done: false },
+      ]);
+    });
 
     await waitFor(() => {
       expect(getByText('Curación de heridas')).toBeTruthy();

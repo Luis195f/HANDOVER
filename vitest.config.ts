@@ -16,12 +16,8 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
 
     include: [
-      "**/__tests__/**/*.spec.ts",
-      "**/__tests__/**/*.spec.tsx",
-      'tests/**/*.spec.ts',
-      'tests/**/*.spec.tsx',
-      'tests/**/*.test.ts',
-      'tests/**/*.test.tsx',
+      '**/__tests__/**/*.{spec,test}.{ts,tsx}',
+      'tests/**/*.{spec,test}.{ts,tsx}',
       'tests/patientlist-*.test.ts',
       'tests/qr-scan.test.ts',
       'tests/security/**/*.spec.ts',
