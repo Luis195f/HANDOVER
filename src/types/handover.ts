@@ -115,6 +115,11 @@ export type VitalsSnapshot = {
   scale2?: boolean;
 };
 
+export type DeviceItem = {
+  name: string;
+  active: boolean;
+};
+
 export type DeviceSummary = {
   id: string;
   label: string;
@@ -201,6 +206,7 @@ export type HandoverValues = {
   exams?: ExamItem[];
   procedures?: ProcedureItem[];
   oxygenTherapy?: OxygenTherapy;
+  devices?: DeviceItem[];
   audioUri?: string;
   nutrition?: NutritionInfo;
   elimination?: EliminationInfo;

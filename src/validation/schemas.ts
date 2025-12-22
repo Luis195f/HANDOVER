@@ -284,6 +284,11 @@ export const zEliminationInfo = z.object({
   hasRectalTube: z.boolean().optional(),
 });
 
+export const zDeviceItem = z.object({
+  name: z.string().trim().min(1, "Detalle requerido").max(200),
+  active: z.boolean().default(true),
+});
+
 export const zMobilityInfo = z.object({
   mobilityLevel: z.enum(MOBILITY_LEVELS),
   repositioningPlan: optionalTrimmedString(300).optional(),
@@ -504,6 +509,7 @@ export const zHandover = z.object({
   procedures: z.array(zProcedureItem).default([]),
 
   oxygenTherapy: zOxygen.optional(),
+  devices: z.array(zDeviceItem).default([]),
 
   nutrition: zNutritionInfo.optional(),
   elimination: zEliminationInfo.optional(),

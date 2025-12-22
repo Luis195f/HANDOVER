@@ -1,3 +1,4 @@
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 // vitest.setup.ts
 // -----------------------------------------------------------------------------
 // Setup global para Vitest en HANDOVER-LIMPIO
@@ -35,7 +36,6 @@ if (!navigatorDescriptor) {
 }
 
 g.__DEV__ = false;
-g.IS_REACT_ACT_ENVIRONMENT = false;
 
 // Hacer que librerías que esperan `jest` funcionen en Vitest
 g.jest = g.jest ?? vi;
