@@ -81,6 +81,7 @@ import { PatientSection } from '@/src/components/handover/PatientSection';
 import { VitalsSection } from '@/src/components/handover/VitalsSection';
 import { SummarySection } from '@/src/components/handover/SummarySection';
 import OxygenGroupSection from './components/OxygenGroupSection';
+import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
 
 const styles = StyleSheet.create({
@@ -174,6 +175,7 @@ const sectionsInfo = [
   { key: 'sbar', title: 'SBAR' },
   { key: 'signos', title: 'Signos vitales' },
   { key: 'oxigenoterapia', title: 'Oxigenoterapia' },
+  { key: 'dispositivos', title: 'Dispositivos Médicos' },
   { key: 'seguridad', title: 'Seguridad y riesgos' },
   { key: 'alertas', title: 'Alertas' },
   { key: 'cuidados', title: 'Cuidados específicos' },
@@ -454,6 +456,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbarRecommendation: '',
       vitals: prefilledVitals ?? {},
       oxygenTherapy: {},
+      devices: [],
       fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
@@ -1533,6 +1536,20 @@ export default function HandoverForm({ navigation, route }: Props) {
           </CollapsibleSection>
         </View>
       )}
+
+      <View
+        ref={sectionRefs.dispositivos}
+        onLayout={handleSectionLayout('dispositivos')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Dispositivos Médicos"
+          isCollapsed={collapsedSections.dispositivos}
+          onToggle={() => toggleSection('dispositivos')}
+        >
+          <DevicesSection styles={styles} />
+        </CollapsibleSection>
+      </View>
 
       <View
         ref={sectionRefs.seguridad}

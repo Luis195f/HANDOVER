@@ -34,6 +34,7 @@ const defaultValues: HandoverValues = {
   meds: '',
   exams: [],
   procedures: [],
+  devices: [],
 };
 
 function Wrapper() {

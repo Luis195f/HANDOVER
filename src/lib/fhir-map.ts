@@ -1807,7 +1807,7 @@ export function mapExamObservations(
         resourceType: 'Observation',
         status: statusByState[examState],
         category: categoryByType[examType] ? [categoryByType[examType] as CodeableConcept] : [],
-        code: { text: description },
+        code: { coding: [], text: description },
         subject,
         encounter,
         effectiveDateTime,
