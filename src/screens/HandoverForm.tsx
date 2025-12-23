@@ -1284,8 +1284,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const onSubmit = form.handleSubmit(
   (values) => {
     // Tri-estado real: si el usuario NO tocó el switch, no registramos "false"
-    const visitsTouched =
-      form.getFieldState('psychosocial.familyVisits', form.formState).isDirty;
+    const visitsTouched = Boolean(
+  (form.formState as any)?.dirtyFields?.psychosocial?.familyVisits
+);
 
     // Copia mínima para no mutar el objeto del form
     const normalized: HandoverFormValues = {
