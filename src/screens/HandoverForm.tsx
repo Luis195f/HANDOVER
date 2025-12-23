@@ -1275,7 +1275,27 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
-  const onSubmit = form.handleSubmit((values) => submitHandover(values), handleInvalidSubmit);
+  const onSubmit = form.handleSubmit(
+  (values) => {
+    // Tri-estado real: si el usuario NO tocó el switch, no registramos "false"
+    const visitsTouched =
+      form.getFieldState('psychosocial.familyVisits', form.formState).isDirty;
+
+    // Copia mínima para no mutar el objeto del form
+    const normalized: HandoverFormValues = {
+      ...values,
+      psychosocial: values.psychosocial ? { ...values.psychosocial } : undefined,
+    };
+
+    // Si no fue tocado, dejamos familyVisits como undefined (no registrado)
+    if (!visitsTouched && normalized.psychosocial) {
+      delete normalized.psychosocial.familyVisits;
+    }
+
+    return submitHandover(normalized);
+  },
+  handleInvalidSubmit
+);
 
   const handleValidateForExport = async () => {
     const isValid = await form.trigger();
