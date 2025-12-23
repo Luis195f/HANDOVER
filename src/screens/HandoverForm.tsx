@@ -16,7 +16,8 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, type FieldErrors } from 'react-hook-form';
+import { Controller, FormProvider } from 'react-hook-form';
+import type { FieldErrors, UseFormReturn } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 
 import { isOn } from '@/src/config/flags';
@@ -499,7 +500,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefillMeta,
   ]);
 
-  const form = useZodForm(zHandover, defaultValues);
+ const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
 
   const { control, formState } = form;
   const errors: HandoverFormErrors = formState.errors ?? {};
