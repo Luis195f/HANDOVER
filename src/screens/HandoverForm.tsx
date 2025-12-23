@@ -54,7 +54,12 @@ import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
-import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { zHandover, type HandoverValues as BaseHandoverFormValues } from '@/src/validation/schemas';
+import type { PsychosocialCare } from '@/src/types/handover';
+type HandoverFormValues = BaseHandoverFormValues & {
+  psychosocial?: PsychosocialCare;
+};
+
 // BEGIN HANDOVER D4 – Form imports
 import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
 // END HANDOVER D4 – Form imports
