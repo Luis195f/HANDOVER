@@ -91,6 +91,12 @@ export type FluidBalanceInfo = {
   notes?: string;
 };
 
+export type PsychosocialCare = {
+  emotionalStatus?: string;
+  familyVisits?: boolean;
+  familyNotes?: string;
+};
+
 export type Vitals = {
   hr?: number;
   rr?: number;
@@ -212,6 +218,7 @@ export type HandoverValues = {
   elimination?: EliminationInfo;
   mobility?: MobilityInfo;
   skin?: SkinInfo;
+  psychosocial?: PsychosocialCare;
   fluidBalance?: FluidBalanceInfo;
   painAssessment?: PainAssessment;
   braden?: BradenScale;

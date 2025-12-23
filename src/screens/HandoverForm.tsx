@@ -16,7 +16,8 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, type FieldErrors } from 'react-hook-form';
+import { Controller, FormProvider } from 'react-hook-form';
+import type { FieldErrors, UseFormReturn } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 
 import { isOn } from '@/src/config/flags';
@@ -54,7 +55,12 @@ import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
-import { zHandover, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { zHandover, type HandoverValues as BaseHandoverFormValues } from '@/src/validation/schemas';
+import type { PsychosocialCare } from '@/src/types/handover';
+type HandoverFormValues = BaseHandoverFormValues & {
+  psychosocial?: PsychosocialCare;
+};
+
 // BEGIN HANDOVER D4 – Form imports
 import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
 // END HANDOVER D4 – Form imports
@@ -494,7 +500,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefillMeta,
   ]);
 
-  const form = useZodForm(zHandover, defaultValues);
+ const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
 
   const { control, formState } = form;
   const errors: HandoverFormErrors = formState.errors ?? {};
@@ -1275,7 +1281,27 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
-  const onSubmit = form.handleSubmit((values) => submitHandover(values), handleInvalidSubmit);
+  const onSubmit = form.handleSubmit(
+  (values) => {
+    // Tri-estado real: si el usuario NO tocó el switch, no registramos "false"
+    const visitsTouched =
+      form.getFieldState('psychosocial.familyVisits', form.formState).isDirty;
+
+    // Copia mínima para no mutar el objeto del form
+    const normalized: HandoverFormValues = {
+      ...values,
+      psychosocial: values.psychosocial ? { ...values.psychosocial } : undefined,
+    };
+
+    // Si no fue tocado, dejamos familyVisits como undefined (no registrado)
+    if (!visitsTouched && normalized.psychosocial) {
+      delete normalized.psychosocial.familyVisits;
+    }
+
+    return submitHandover(normalized);
+  },
+  handleInvalidSubmit
+);
 
   const handleValidateForExport = async () => {
     const isValid = await form.trigger();
