@@ -299,6 +299,14 @@ export const zSkinInfo = z.object({
   hasPressureInjury: z.boolean().optional(),
 });
 
+export const zPsychosocialCare = z
+  .object({
+    emotionalStatus: z.string().trim().min(1).optional(),
+    familyNotes: z.string().trim().min(1).optional(),
+    familyVisits: z.boolean().optional(), // tri-estado: undefined/true/false
+  })
+  .partial();
+
 export const zRiskType = z.enum([
   "fall",
   "pressureUlcer",
@@ -515,6 +523,7 @@ export const zHandover = z.object({
   elimination: zEliminationInfo.optional(),
   mobility: zMobilityInfo.optional(),
   skin: zSkinInfo.optional(),
+  psychosocial: zPsychosocialCare.optional(),
   fluidBalance: zFluidBalanceInfo.optional(),
   painAssessment: zPainAssessment.optional(),
   braden: zBradenScale.optional(),
