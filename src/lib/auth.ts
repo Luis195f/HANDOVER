@@ -87,45 +87,63 @@ type SecureStoreModule = {
   deleteItemAsync(key: string, options?: SecureStoreOptions): Promise<void>;
 };
 
-function loadSecureStore(): SecureStoreModule | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('expo-secure-store');
-    const resolved = mod?.default ?? mod;
-    if (resolved?.getItemAsync && resolved?.setItemAsync && resolved?.deleteItemAsync) {
-      return resolved as SecureStoreModule;
-    }
-  } catch (error) {
-    console.warn('expo-secure-store unavailable, falling back to in-memory storage for tests', error);
-  }
-  return null;
-}
-
-const secureStore = loadSecureStore();
+// Lazy-loaded to avoid Node/Vitest ESM/CJS interop issues with expo-secure-store.
+// - In runtime (app), we expect expo-secure-store to be available.
+// - In tests, we fall back to an in-memory implementation.
+let secureStore: SecureStoreModule | null | undefined;
 const memoryStore = new Map<string, string>();
+
+export async function loadSecureStore(): Promise<SecureStoreModule | null> {
+  if (secureStore !== undefined) return secureStore;
+
+  try {
+    const mod: any = await import('expo-secure-store');
+    const resolved: any = mod?.default ?? mod;
+
+    if (resolved?.getItemAsync && resolved?.setItemAsync && resolved?.deleteItemAsync) {
+      secureStore = resolved as SecureStoreModule;
+      return secureStore;
+    }
+
+    secureStore = null;
+    return null;
+  } catch (err) {
+    // En tests, NO reventar; fallback a memoria
+    if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+      console.warn('expo-secure-store unavailable, falling back to in-memory storage for tests');
+      secureStore = null;
+      return null;
+    }
+    throw err;
+  }
+}
 
 const TOKEN_EXPIRY_SAFETY_WINDOW = 5;
 
 const SECURE_STORE_OPTIONS: SecureStoreOptions = { keychainService: 'handoverpro' };
 
 async function storeSet(key: string, value: string | null): Promise<void> {
+  const ss = await loadSecureStore();
+
   if (!value) {
-    if (secureStore) {
-      await secureStore.deleteItemAsync(key, SECURE_STORE_OPTIONS);
+    if (ss) {
+      await ss.deleteItemAsync(key, SECURE_STORE_OPTIONS);
     }
     memoryStore.delete(key);
     return;
   }
-  if (secureStore) {
-    await secureStore.setItemAsync(key, value, SECURE_STORE_OPTIONS);
+
+  if (ss) {
+    await ss.setItemAsync(key, value, SECURE_STORE_OPTIONS);
   } else {
     memoryStore.set(key, value);
   }
 }
 
 async function storeGet(key: string): Promise<string | null> {
-  if (secureStore) {
-    return secureStore.getItemAsync(key, SECURE_STORE_OPTIONS);
+  const ss = await loadSecureStore();
+  if (ss) {
+    return ss.getItemAsync(key, SECURE_STORE_OPTIONS);
   }
   return memoryStore.has(key) ? (memoryStore.get(key) as string) : null;
 }
@@ -745,18 +763,15 @@ export function resetAuthState(): void {
   discoveryPromise = null;
   memoryStore.clear();
   clearAuthState();
-
-  if (secureStore) {
-    void Promise.all([
-      secureStore.deleteItemAsync(ACCESS_KEY),
-      secureStore.deleteItemAsync(REFRESH_KEY),
-      secureStore.deleteItemAsync(EXP_KEY),
-      secureStore.deleteItemAsync(ID_TOKEN_KEY),
-      secureStore.deleteItemAsync(USER_KEY),
-    ]).catch((error) => {
-      console.warn('Failed to reset secure storage', error);
-    });
-  }
+  void Promise.all([
+    storeSet(ACCESS_KEY, null),
+    storeSet(REFRESH_KEY, null),
+    storeSet(EXP_KEY, null),
+    storeSet(ID_TOKEN_KEY, null),
+    storeSet(USER_KEY, null),
+  ]).catch((error) => {
+    console.warn('Failed to reset secure storage', error);
+  });
 }
 
 export function getCurrentUser(): User | null {
