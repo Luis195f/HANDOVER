@@ -6,6 +6,8 @@ import { navigationRef } from "@/src/navigation/navigation";
 import { AppThemeProvider } from "@/src/theme";
 import { AuthProvider } from "@/src/security/auth";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
+import * as WebBrowser from "expo-web-browser";
+WebBrowser.maybeCompleteAuthSession();
 
 export default function App() {
   React.useEffect(() => {

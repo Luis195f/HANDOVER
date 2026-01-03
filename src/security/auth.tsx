@@ -11,6 +11,9 @@ import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage
 import navigation from '@/src/navigation/navigation';
 import { configureFHIRClient } from '@/src/lib/fhir-client';
 
+const AUTH_DISABLED =
+  (process.env.EXPO_PUBLIC_AUTH_DISABLED ?? '').trim().toLowerCase() === 'true';
+
 const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
 
 try {
@@ -432,7 +435,7 @@ async function performAuth0Login(options: {
   discovery?: AuthSession.DiscoveryDocument | null;
   request: AuthSession.AuthRequest;
 }): Promise<HandoverSession> {
-  if (process.env.EXPO_PUBLIC_AUTH_DISABLED === 'true') {
+  if (AUTH_DISABLED) {
     // Creamos una sesión real local, sin modo demo
     return login({
       user: {
