@@ -100,7 +100,7 @@ function AuthGate() {
   return (
     <View style={{ flex: 1 }}>
       <DemoModeBanner visible={session?.mode === 'demo'} onExit={logout} />
-      <Stack.Navigator initialRouteName={initialRouteName}>
+      <Stack.Navigator key={initialRouteName} initialRouteName={initialRouteName}>
         {onboardingScreen}
         {canSubmitHandover ? (
           <>

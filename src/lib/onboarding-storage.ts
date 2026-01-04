@@ -1,7 +1,14 @@
+// src/lib/onboarding-storage.ts
 import { secureGetItem, secureSetItem } from "@/src/security/secure-storage";
 
-const STORAGE_NAMESPACE = process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? "handover";
-const ONBOARDING_KEY = `${STORAGE_NAMESPACE}:onboarding.completed.v1`;
+const safeKey = (k: string) => k.replace(/[^A-Za-z0-9._-]/g, "_");
+
+const NS_RAW = process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? "handover";
+const NS = (NS_RAW ?? "handover").trim() || "handover";
+
+// usa "." en vez de ":" y sanitiza
+const ONBOARDING_KEY = safeKey(`${NS}.onboarding.completed.v1`);
+
 
 export async function getOnboardingCompleted(): Promise<boolean> {
   try {

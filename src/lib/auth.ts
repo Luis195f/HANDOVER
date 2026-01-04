@@ -1,6 +1,17 @@
 import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import { clearAuthState, getAuthState, setAuthState, subscribe, type AuthTokens } from '@/src/state/auth-store';
+
+// Ensure the auth session can be completed when the app is reopened via the redirect URI.
+// Guarded to avoid test/runtime environments where WebBrowser may be unavailable.
+try {
+  if (!(process.env.VITEST || process.env.NODE_ENV === 'test')) {
+    WebBrowser.maybeCompleteAuthSession();
+  }
+} catch {
+  // no-op
+}
 
 export type { AuthTokens } from '@/src/state/auth-store';
 
@@ -166,7 +177,7 @@ function resolveNamespace(): string {
 type OIDCConfig = {
   issuer: string;
   clientId: string;
-  audience: string;
+  audience?: string;
   scope: string;
   redirectScheme: string;
 };
@@ -206,7 +217,7 @@ function validateRedirectScheme(scheme: string): void {
 function loadOIDCConfig(): OIDCConfig {
   const issuer = requireEnv('OIDC_ISSUER');
   const clientId = requireEnv('OIDC_CLIENT_ID');
-  const audience = requireEnv('OIDC_AUDIENCE');
+  const audience = readEnv('OIDC_AUDIENCE')?.trim() || undefined;
   const scope = requireEnv('OIDC_SCOPE');
   const redirectScheme = requireEnv('OIDC_REDIRECT_SCHEME');
   validateIssuer(issuer);
@@ -215,6 +226,17 @@ function loadOIDCConfig(): OIDCConfig {
 }
 
 const oidcConfig = loadOIDCConfig();
+
+if (__DEV__) {
+  console.info('[auth] OIDC runtime config', {
+    issuer: oidcConfig.issuer,
+    clientId: oidcConfig.clientId,
+    redirectScheme: oidcConfig.redirectScheme,
+    scope: oidcConfig.scope,
+    hasAudience: !!oidcConfig.audience,
+  });
+}
+
 
 let cachedDiscovery: DiscoveryDocument | null = null;
 let discoveryPromise: Promise<DiscoveryDocument> | null = null;
@@ -447,7 +469,7 @@ function assertValidClaims(claims: JwtClaims): ValidatedClaims {
   if (iss !== oidcConfig.issuer) {
     throw new AuthError('TOKEN_INVALID', 'ID token issuer mismatch');
   }
-  if (!aud.includes(oidcConfig.audience)) {
+    if (!aud.includes(oidcConfig.clientId)) {
     throw new AuthError('TOKEN_INVALID', 'ID token audience mismatch');
   }
   const exp = expRaw;
@@ -625,7 +647,9 @@ async function handleTokenResponse(response: TokenResponse, discovery: Discovery
 let pendingAuthRequest: AuthRequestLike | null = null;
 
 function createAuthRequest(): AuthRequestLike {
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme });
+  const redirectUri = AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme, path: 'redirect' });
+   if (__DEV__) console.log("OIDC redirectUri =", redirectUri);
+
   const request = new AuthSession.AuthRequest({
     clientId: oidcConfig.clientId,
     responseType: AuthSession.ResponseType.Code,
@@ -633,29 +657,34 @@ function createAuthRequest(): AuthRequestLike {
     scopes: oidcConfig.scope.split(/\s+/).filter(Boolean),
     redirectUri,
     extraParams: oidcConfig.audience ? { audience: oidcConfig.audience } : undefined,
-  }) as unknown as AuthRequestLike;
-  return request;
+  });
+  return request as unknown as AuthRequestLike;
 }
 
 export async function loginWithOIDC(): Promise<AuthFlowResult> {
   const discovery = await getDiscovery();
   const request = createAuthRequest();
   pendingAuthRequest = request;
-  try {
-    const result = await request.promptAsync(discovery, { useProxy: false });
-    if (result.type === 'cancel' || result.type === 'dismiss') {
-      return { status: 'cancelled' };
+   try {
+     if (__DEV__) console.log("[auth] promptAsync starting…", { redirectUri: request.redirectUri });
+
+const result = await request.promptAsync(discovery, { useProxy: false, preferEphemeralSession: true });
+
+if (__DEV__) console.log("[auth] promptAsync result =", result);
+
+
+    if (result.type === "cancel" || result.type === "dismiss") {
+      return { status: "cancelled" };
     }
-    if (result.type !== 'success' || !result.params?.code) {
-      throw new AuthError('CANCELLED', result.params?.error_description ?? 'OIDC login cancelled');
+    if (result.type !== "success" || !result.params?.code) {
+      throw new AuthError("CANCELLED", result.params?.error_description ?? "OIDC login cancelled");
     }
+
     await exchangeCodeForTokens(result.params.code, request, discovery);
-    return { status: 'success' };
+    return { status: "success" };
   } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    throw new AuthError('NETWORK', (error as Error)?.message ?? 'OIDC login failed');
+    if (error instanceof AuthError) throw error;
+    throw new AuthError("NETWORK", (error as Error)?.message ?? "OIDC login failed");
   } finally {
     pendingAuthRequest = null;
   }
@@ -666,7 +695,7 @@ async function exchangeCodeForTokens(
   request: AuthRequestLike,
   discovery: DiscoveryDocument
 ): Promise<void> {
-  const redirectUri = request.redirectUri ?? AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme });
+  const redirectUri = request.redirectUri ?? AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme, path: 'redirect' });
   const extraParams = {
     ...(oidcConfig.audience ? { audience: oidcConfig.audience } : {}),
     ...(request.codeVerifier ? { code_verifier: request.codeVerifier } : {}),
@@ -823,7 +852,7 @@ function buildMockIdToken(user: User, exp: number): string {
   const payload = encodeBase64Url(
     JSON.stringify({
       iss: oidcConfig.issuer,
-      aud: oidcConfig.audience,
+      aud: oidcConfig.clientId,
       exp,
       sub: user.sub,
       role: user.role,

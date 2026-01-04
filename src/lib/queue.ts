@@ -25,6 +25,25 @@ import {
 import { mark } from "./otel";
 
 // -------------------------------
+// Web polyfills (SharedArrayBuffer)
+// -------------------------------
+// Some web runtimes (non crossOriginIsolated) do not expose SharedArrayBuffer.
+// Some dependencies may reference it directly and crash with ReferenceError.
+// We provide a conservative fallback symbol on web, while still preferring
+// the real SharedArrayBuffer when available.
+const _isWebRuntime = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+if (_isWebRuntime && typeof (globalThis as any).SharedArrayBuffer === 'undefined') {
+  (globalThis as any).SharedArrayBuffer = ArrayBuffer;
+}
+
+const SAB = (globalThis as any).SharedArrayBuffer as (typeof SharedArrayBuffer | undefined);
+
+export function allocBuffer(bytes: number): ArrayBuffer | SharedArrayBuffer {
+  return SAB ? new SAB(bytes) : new ArrayBuffer(bytes);
+}
+
+// -------------------------------
 // DB bootstrap (Expo SQLite) + fallback
 // -------------------------------
 type SQLiteSyncDatabase = {
