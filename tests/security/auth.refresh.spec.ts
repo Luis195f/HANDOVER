@@ -1,127 +1,96 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let sessionJson: string | null = null;
+vi.mock('expo-auth-session');
+vi.mock('@/src/security/secure-storage', () => {
+  const store = new Map<string, string>();
+  return {
+    secureSetItem: async (key: string, value: string) => {
+      store.set(key, value);
+    },
+    secureGetItem: async (key: string) => (store.has(key) ? store.get(key)! : null),
+    secureDeleteItem: async (key: string) => {
+      store.delete(key);
+    },
+  };
+});
 
-vi.mock('expo-web-browser', () => ({
-  maybeCompleteAuthSession: () => {},
-  openAuthSessionAsync: vi.fn(async () => ({ type: 'success' })),
-}));
+const EXPIRES_SOON = new Date(Date.now() + 2_000).toISOString();
 
-vi.mock('react-native', () => ({
-  Alert: { alert: vi.fn() },
-}));
-
-vi.mock('@/src/navigation/navigation', () => ({
-  default: { resetTo: vi.fn() },
-}));
-
-vi.mock('@/src/lib/fhir-client', () => ({
-  configureFHIRClient: vi.fn(),
-}));
-
-vi.mock('@/src/demo/fixtures', () => ({
-  ensureDemoSessionTemplate: vi.fn(),
-}));
-
-vi.mock('expo-auth-session', async () => ({
-  ResponseType: { Code: 'code' },
-  makeRedirectUri: () => 'handover-pro://callback',
-  fetchDiscoveryAsync: vi.fn(async () => ({ tokenEndpoint: 'https://issuer.example/token' })),
-  AuthRequest: class {
-    constructor(_: any) {}
-    promptAsync = vi.fn(async () => ({ type: 'success', params: { code: 'x' } }));
-  },
-}));
-
-// IMPORTANT: mockea secure storage por alias (normalmente resuelve al mismo módulo)
-vi.mock('@/src/security/secure-storage', () => ({
-  secureGetItem: vi.fn(async (key: string) => {
-    if (!sessionJson) return null;
-    const k = (key ?? '').toLowerCase();
-    if (k.includes('session') || k.includes('auth')) return sessionJson;
-    return null;
-  }),
-  secureSetItem: vi.fn(async (key: string, value: string) => {
-    const k = (key ?? '').toLowerCase();
-    if (k.includes('session') || k.includes('auth')) sessionJson = value;
-  }),
-  secureDeleteItem: vi.fn(async (key: string) => {
-    const k = (key ?? '').toLowerCase();
-    if (k.includes('session') || k.includes('auth')) sessionJson = null;
-  }),
-}));
-
-type EnsureFreshTokenFn = (target: string) => Promise<string>;
-
-async function loadEnsureFreshToken(): Promise<EnsureFreshTokenFn> {
-  const mod = await import('@/src/security/auth');
-
-  const fn =
-    (mod as any).ensureFreshToken ??
-    (mod as any).default?.ensureFreshToken;
-
-  if (typeof fn !== 'function') {
-    throw new Error(
-      "ensureFreshToken export not found. Export it from '@/src/security/auth' (named or default)."
-    );
-  }
-
-  return fn as EnsureFreshTokenFn;
-}
+const setEnv = () => {
+  process.env.EXPO_PUBLIC_OIDC_ISSUER = 'https://issuer.example';
+  process.env.EXPO_PUBLIC_OIDC_CLIENT_ID = 'client-123';
+  process.env.EXPO_PUBLIC_OIDC_AUDIENCE = 'api://aud';
+  process.env.EXPO_PUBLIC_OIDC_SCOPES = 'openid profile email';
+  process.env.EXPO_PUBLIC_OIDC_REDIRECT_URI = 'handover-pro://callback';
+  process.env.EXPO_PUBLIC_OIDC_LOGOUT_URI = 'handover-pro://logout';
+};
 
 beforeEach(() => {
-  vi.resetModules();
-  vi.clearAllMocks();
-
-  sessionJson = null;
-
-  process.env.EXPO_PUBLIC_OIDC_ISSUER = 'https://issuer.example';
-  process.env.EXPO_PUBLIC_OIDC_CLIENT_ID = 'client_test';
-  process.env.EXPO_PUBLIC_OIDC_SCOPES = 'openid profile email offline_access';
-
-  (globalThis as any).fetch = vi.fn(async () => ({
+  setEnv();
+  const globalAny = globalThis as any;
+  globalAny.fetch = vi.fn(async () => ({
     ok: true,
     status: 200,
     json: async () => ({
       access_token: 'NEW_ACCESS',
-      refresh_token: 'NEW_REFRESH',
-      expires_in: 3600,
+      refresh_token: 'ROTATED_REFRESH',
+      expires_in: 1800,
     }),
   }));
 });
 
 describe('auth refresh', () => {
-  it('refreshes token when expiring', async () => {
-    const ensureFreshToken = await loadEnsureFreshToken();
+  it('refreshes expiring session and rotates tokens', async () => {
+    const { setCurrentSession, getCurrentSession, ensureFreshAccessToken } = await import('@/src/security/auth');
 
-    sessionJson = JSON.stringify({
+    await setCurrentSession({
       accessToken: 'OLD_ACCESS',
       refreshToken: 'OLD_REFRESH',
-      expiresAt: new Date(Date.now() - 10_000).toISOString(),
-      user: { id: 'u', name: 'd', roles: ['nurse'], units: ['UCI'] },
-    });
+      expiresAt: EXPIRES_SOON,
+      userId: 'user-1',
+      displayName: 'User One',
+      roles: ['nurse'],
+      units: ['icu-a'],
+    } as any);
 
-    const token = await ensureFreshToken('fhir');
+    const token = await ensureFreshAccessToken('fhir');
     expect(token).toBe('NEW_ACCESS');
+
+    const refreshed = await getCurrentSession();
+    expect(refreshed?.accessToken).toBe('NEW_ACCESS');
+    expect(refreshed?.refreshToken).toBe('ROTATED_REFRESH');
   });
 
-  it('single-flight: concurrent refresh only hits token endpoint once', async () => {
-    const ensureFreshToken = await loadEnsureFreshToken();
+  it('performs refresh in single flight when called concurrently', async () => {
+    const { setCurrentSession, ensureFreshAccessToken } = await import('@/src/security/auth');
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementationOnce(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: 'NEW_ACCESS_SINGLE',
+        refresh_token: 'NEW_REFRESH_SINGLE',
+        expires_in: 1800,
+      }),
+    }));
 
-    sessionJson = JSON.stringify({
+    await setCurrentSession({
       accessToken: 'OLD_ACCESS',
       refreshToken: 'OLD_REFRESH',
-      expiresAt: new Date(Date.now() - 10_000).toISOString(),
-      user: { id: 'u', name: 'd', roles: ['nurse'], units: ['UCI'] },
-    });
+      expiresAt: EXPIRES_SOON,
+      userId: 'user-1',
+      displayName: 'User One',
+      roles: ['nurse'],
+      units: ['icu-a'],
+    } as any);
 
-    const [a, b] = await Promise.all([
-      ensureFreshToken('fhir'),
-      ensureFreshToken('fhir'),
+    const [t1, t2] = await Promise.all([
+      ensureFreshAccessToken('fhir'),
+      ensureFreshAccessToken('fhir'),
     ]);
 
-    expect(a).toBe('NEW_ACCESS');
-    expect(b).toBe('NEW_ACCESS');
-    expect((globalThis as any).fetch).toHaveBeenCalledTimes(1);
+    expect(t1).toBe('NEW_ACCESS_SINGLE');
+    expect(t2).toBe('NEW_ACCESS_SINGLE');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
