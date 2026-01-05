@@ -7,7 +7,7 @@ import { Buffer } from 'buffer';
 
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
-import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
+import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/secure-storage';
 import navigation from '@/src/navigation/navigation';
 import { configureFHIRClient } from '@/src/lib/fhir-client';
 
@@ -15,6 +15,48 @@ const AUTH_DISABLED =
   (process.env.EXPO_PUBLIC_AUTH_DISABLED ?? '').trim().toLowerCase() === 'true';
 
 const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+
+type AuthWarnCode =
+  | 'AUTH_RUNTIME_CONFIG'
+  | 'AUTH_OIDC_MISCONFIG'
+  | 'AUTH_LOGIN_START'
+  | 'AUTH_LOGIN_RESULT'
+  | 'AUTH_LOGIN_SUCCESS'
+  | 'AUTH_LOGIN_CANCELLED'
+  | 'AUTH_LOGIN_FAILED'
+  | 'AUTH_LOGOUT'
+  | 'AUTH_REFRESH_START'
+  | 'AUTH_REFRESH_SUCCESS'
+  | 'AUTH_REFRESH_FAILED'
+  | 'AUTH_REFRESH_NO_TOKEN_ENDPOINT'
+  | 'AUTH_REFRESH_ERROR'
+  | 'AUTH_REQUEST_NOT_READY';
+
+const AUTH_WARN_PREFIX = '[AUTH]';
+
+/**
+ * Logger de eventos de autenticación (solo en DEV).
+ * Importante: no loguear PHI ni secretos (tokens, auth headers, emails, etc.).
+ */
+function warnAuth(code: AuthWarnCode, meta: Record<string, unknown> = {}): void {
+  if (!isDev) return;
+
+  const redacted: Record<string, unknown> = { ...meta };
+  const redactKeys = ['access', 'refresh', 'id_token', 'token', 'authorization', 'email'];
+  for (const k of Object.keys(redacted)) {
+    const key = k.toLowerCase();
+    if (redactKeys.some((rk) => key.includes(rk))) {
+      redacted[k] = '[REDACTED]';
+    }
+  }
+
+  // eslint-disable-next-line no-console
+  console.warn(AUTH_WARN_PREFIX, code, redacted);
+}
+
+let refreshInFlight: Promise<string | null> | null = null;
+const REFRESH_SKEW_MS = 60_000;
+
 
 try {
   WebBrowser.maybeCompleteAuthSession();
@@ -163,6 +205,7 @@ async function migrateFromAsyncStorage(): Promise<HandoverSession | null> {
 
 let hydrated = false;
 let currentSession: HandoverSession | null = null;
+let hydrateInFlight: Promise<HandoverSession | null> | null = null;
 const listeners: Array<(session: HandoverSession | null) => void> = [];
 let logoutInFlight: Promise<void> | null = null;
 let pendingLogoutMessage: string | undefined;
@@ -195,28 +238,38 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
 
 async function hydrateSession(): Promise<HandoverSession | null> {
   if (hydrated) return currentSession;
-  hydrated = true;
-  try {
-    const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
-    if (persisted) {
-      currentSession = normalizeSession(parseSession(persisted));
+  if (hydrateInFlight) return hydrateInFlight;
+
+  hydrateInFlight = (async () => {
+    try {
+      try {
+        const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
+        if (persisted) {
+          currentSession = normalizeSession(parseSession(persisted));
+          return currentSession;
+        }
+      } catch (error) {
+        if (isDev) console.warn('[auth] Failed to read persisted session', error);
+      }
+
+      try {
+        currentSession = await migrateFromAsyncStorage();
+        if (currentSession) {
+          await persistSession(currentSession);
+        }
+      } catch (error) {
+        if (isDev) console.warn('[auth] Failed to migrate session', error);
+        currentSession = null;
+      }
+
       return currentSession;
+    } finally {
+      hydrated = true;
+      hydrateInFlight = null;
     }
-  } catch (error) {
-    if (isDev) console.warn('[auth] Failed to read persisted session', error);
-  }
+  })();
 
-  try {
-    currentSession = await migrateFromAsyncStorage();
-    if (currentSession) {
-      await persistSession(currentSession);
-    }
-  } catch (error) {
-    if (isDev) console.warn('[auth] Failed to migrate session', error);
-    currentSession = null;
-  }
-
-  return currentSession;
+  return hydrateInFlight;
 }
 
 async function setSession(session: HandoverSession | null): Promise<void> {
@@ -449,14 +502,14 @@ async function performAuth0Login(options: {
   }
   const config = buildAuthConfig(options.config);
   const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
+    
+  const authResult = await options.promptAsync();
 
-    const authResult = await options.promptAsync();
-
-  if (isDev) {
-    console.log('[auth] Auth result type:', authResult.type);
-    console.log('[auth] Auth result params:', extractAuthParams(authResult));
-    console.log('[auth] Using redirectUri:', config.redirectUri);
-  }
+if (isDev) {
+  warnAuth('AUTH_LOGIN_RESULT', { type: authResult.type });
+  console.log('[auth] Auth result type:', authResult.type);
+  console.log('[auth] Using redirectUri:', config.redirectUri);
+}
 
   const tokens = await resolveTokensFromResult({
     request: options.request,
@@ -588,6 +641,109 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
   return currentSession;
 }
 
+/**
+ * Retorna un access token vigente. Si el access token está expirado (o por expirar),
+ * intenta refrescarlo mediante refresh_token (OIDC).
+ *
+ * - Implementa "single-flight": múltiples llamadas concurrentes comparten 1 solo refresh.
+ * - Nunca loguea tokens.
+ */
+// (refreshInFlight se declara una sola vez a nivel de módulo, cerca del inicio)
+
+export async function ensureFreshToken(_audience?: string): Promise<string | null> {
+  // IMPORTANTE: si tu módulo usa hidratación cacheada, asegúrate de que aquí
+  // se lea el storage al menos una vez. Si ya lo haces dentro de getCurrentSession(), ok.
+  const session = await getCurrentSession();
+  if (!session?.accessToken) return null;
+
+  const accessToken = session.accessToken;
+
+  // Si no hay expiresAt o es inválido => tratamos como "expiring" (fuerza refresh si hay refreshToken)
+  const expiresAtMs = session.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
+  const isExpiring =
+    !Number.isFinite(expiresAtMs) || expiresAtMs - Date.now() <= REFRESH_SKEW_MS;
+
+  if (!isExpiring) return accessToken;
+
+  // Asegura refreshToken en variable local (narrowing estable para TS y closures)
+  const refreshToken = session.refreshToken;
+  if (!refreshToken) return accessToken;
+
+  // Single-flight
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      warnAuth('AUTH_REFRESH_START');
+
+      const config = buildAuthConfig();
+      const discovery = await AuthSession.fetchDiscoveryAsync(config.issuer);
+
+      const tokenEndpoint = discovery?.tokenEndpoint;
+      if (!tokenEndpoint) {
+        warnAuth('AUTH_REFRESH_NO_TOKEN_ENDPOINT');
+        return accessToken;
+      }
+
+      const body = new URLSearchParams();
+      body.set('grant_type', 'refresh_token');
+      body.set('client_id', config.clientId);
+      body.set('refresh_token', refreshToken);
+
+      // opcional: si tu backend requiere scope en refresh
+      if (config.scopes?.length) body.set('scope', config.scopes.join(' '));
+
+      const resp = await fetch(tokenEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+
+      if (!resp.ok) {
+        warnAuth('AUTH_REFRESH_FAILED', { status: resp.status });
+        return accessToken;
+      }
+
+      const data = (await resp.json()) as Record<string, unknown>;
+
+      const newAccess =
+        (data['access_token'] as string | undefined) ??
+        (data['accessToken'] as string | undefined);
+
+      const newRefresh =
+        (data['refresh_token'] as string | undefined) ??
+        (data['refreshToken'] as string | undefined) ??
+        refreshToken;
+
+      const expiresInRaw = data['expires_in'] ?? data['expiresIn'];
+      const expiresIn = typeof expiresInRaw === 'number' ? expiresInRaw : Number(expiresInRaw);
+
+      const nextExpiresAt = Number.isFinite(expiresIn)
+        ? new Date(Date.now() + expiresIn * 1000).toISOString()
+        : session.expiresAt;
+
+      const nextSession: HandoverSession = {
+        ...session,
+        accessToken: newAccess ?? accessToken,
+        refreshToken: newRefresh,
+        expiresAt: nextExpiresAt,
+      };
+
+      await setSession(nextSession);
+      warnAuth('AUTH_REFRESH_SUCCESS');
+
+      return nextSession.accessToken ?? null;
+    } catch (error) {
+      warnAuth('AUTH_REFRESH_ERROR', { message: (error as any)?.message });
+      return accessToken;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 export async function setCurrentSession(session: SessionModel | null): Promise<void> {
   await setSession(session);
 }
@@ -684,7 +840,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     configureFHIRClient({
-      ensureFreshToken: async () => (await getCurrentSession())?.accessToken ?? null,
+        ensureFreshToken: () => ensureFreshToken('fhir'),
       logout: async () =>
         logoutAndClear({
           skipRemote: true,
