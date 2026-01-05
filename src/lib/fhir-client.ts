@@ -383,48 +383,81 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
       ? path
       : `${runtimeConfig.getBaseUrl()}/${path.replace(/^\//, '')}`;
 
-    const requestHeaders: Record<string, string> = {
-      Accept: 'application/fhir+json',
-      ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
-      ...(runtimeConfig.getDefaultHeaders?.() ?? {}),
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...headers,
+    const buildHeaders = (tokenOverride?: string): Record<string, string> => {
+      const bearer = tokenOverride ?? authToken;
+      return {
+        Accept: 'application/fhir+json',
+        ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
+        ...(runtimeConfig.getDefaultHeaders?.() ?? {}),
+        ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+        ...headers,
+      };
     };
 
-    try {
-      const res = await safeFetch<TResource>(url, {
+    const fetchOnce = async (tokenOverride?: string) =>
+      safeFetch<TResource>(url, {
         method,
-        headers: requestHeaders,
+        headers: buildHeaders(tokenOverride),
         body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
         signal,
         timeoutMs: timeoutMs ?? runtimeConfig.getTimeout?.(),
         idempotencyKey,
       });
 
-      return { ok: true, response: res.raw, data: res.data, status: res.status };
-    } catch (error) {
-      if (error instanceof HTTPError) {
-        if (error.status === 401 || error.status === 403) {
-          if (runtimeConfig.logout) await runtimeConfig.logout();
-          throw new Error('unauthorized');
-        }
+    const handleHttpError = async (httpError: HTTPError): Promise<FhirResponse<TResource>> => {
+      const data = await parseResponseJson<TResource>(httpError.response);
+      const response =
+        httpError.response ?? new Response('', { status: httpError.status ?? 0, statusText: httpError.message });
+      const outcomeInfo = normalizeOutcome(data);
+      const outcome = outcomeInfo?.issues ?? (isOperationOutcome(data) ? data.issue : undefined);
+      return {
+        ok: false,
+        response,
+        data,
+        outcome,
+        status: httpError.status ?? response.status ?? 0,
+        message: outcomeInfo?.userMessage ?? (outcome ? formatIssuesForUser(outcome).message : httpError.message),
+      };
+    };
 
-        const data = await parseResponseJson<TResource>(error.response);
-        const response =
-          error.response ?? new Response('', { status: error.status ?? 0, statusText: error.message });
-        const outcomeInfo = normalizeOutcome(data);
-        const outcome = outcomeInfo?.issues ?? (isOperationOutcome(data) ? data.issue : undefined);
-        return {
-          ok: false,
-          response,
-          data,
-          outcome,
-          status: error.status ?? response.status ?? 0,
-          message: outcomeInfo?.userMessage ?? (outcome ? formatIssuesForUser(outcome).message : error.message),
-        };
+    const attempt = async (tokenOverride?: string, retried = false): Promise<FhirResponse<TResource>> => {
+      try {
+        const res = await fetchOnce(tokenOverride);
+        return { ok: true, response: res.raw, data: res.data, status: res.status };
+      } catch (error) {
+        if (error instanceof HTTPError) {
+          if (error.status === 401 && !retried) {
+            const freshToken = hooks.ensureFreshToken ? await hooks.ensureFreshToken() : null;
+            if (freshToken) {
+              try {
+                return await attempt(freshToken, true);
+              } catch (retryError) {
+                if (retryError instanceof HTTPError && retryError.status === 401) {
+                  if (runtimeConfig.logout) await runtimeConfig.logout();
+                  throw new Error('unauthorized');
+                }
+                if (retryError instanceof HTTPError) {
+                  return handleHttpError(retryError);
+                }
+                throw retryError;
+              }
+            }
+            if (runtimeConfig.logout) await runtimeConfig.logout();
+            throw new Error('unauthorized');
+          }
+
+          if (error.status === 401 || error.status === 403) {
+            if (runtimeConfig.logout) await runtimeConfig.logout();
+            throw new Error('unauthorized');
+          }
+
+          return handleHttpError(error);
+        }
+        throw error;
       }
-      throw error;
-    }
+    };
+
+    return attempt();
   };
 
   return fetcher as typeof fetchFHIR;

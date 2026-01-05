@@ -13,20 +13,84 @@ import { configureFHIRClient } from '@/src/lib/fhir-client';
 
 const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
 
+type AuthWarnCode =
+  | 'AUTH_RUNTIME_CONFIG'
+  | 'AUTH_OIDC_MISCONFIG'
+  | 'AUTH_LOGIN_START'
+  | 'AUTH_LOGIN_RESULT'
+  | 'AUTH_LOGIN_SUCCESS'
+  | 'AUTH_LOGIN_CANCELLED'
+  | 'AUTH_LOGIN_FAILED'
+  | 'AUTH_LOGOUT'
+  | 'AUTH_REFRESH_FAILED'
+  | 'AUTH_REFRESH_START'
+  | 'AUTH_REFRESH_SUCCESS'
+  | 'AUTH_REFRESH_SKIPPED';
+
+function warnAuth(code: AuthWarnCode, meta: Record<string, unknown> = {}) {
+  // PHI-SAFE: NO tokens, NO OAuth params (code), NO emails/nombres, NO claims completos.
+  console.warn(`[AUTH][${code}]`, { ts: new Date().toISOString(), ...meta });
+}
+
+function safeIssuerHost(issuer?: string): string | null {
+  if (!issuer) return null;
+  try { return new URL(issuer).host; } catch { return null; }
+}
+
+function parseScopes(raw: string | undefined, fallback: string[]): string[] {
+  if (!raw) return fallback;
+  const parts = raw
+    .split(/[\s,]+/g)
+    .map(s => s.trim())
+    .filter(Boolean);
+  return parts.length ? parts : fallback;
+}
+
+function lastChars(value: string | undefined, n = 6): string | null {
+  if (!value) return null;
+  return value.length <= n ? value : value.slice(-n);
+}
+
 try {
   WebBrowser.maybeCompleteAuthSession();
 } catch (error) {
   if (isDev) console.warn('[auth] Failed to complete auth session', error);
 }
 
-// BEGIN HANDOVER: AUTH_CONFIG
+/* BEGIN HANDOVER: AUTH_CONFIG */
+const PLACEHOLDER_AUTH0_DOMAIN = 'dev-6jmxxysflz2kx61w.us.auth0.com';
+const PLACEHOLDER_AUTH0_CLIENT_ID = 'zJxhI0SK1J4hmzr1KNzEbWddgZWJDUlL';
+
+// Auth0 legacy (compat)
 const AUTH0_DOMAIN =
-  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? 'dev-6jmxxysflz2kx61w.us.auth0.com';
+  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? PLACEHOLDER_AUTH0_DOMAIN;
 
 const AUTH0_CLIENT_ID =
-  process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? 'zJxhI0SK1J4hmzr1KNzEbWddgZWJDUlL';
+  process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? PLACEHOLDER_AUTH0_CLIENT_ID;
+
+// OIDC genérico preferente (prod)
+const OIDC_ISSUER =
+  process.env.EXPO_PUBLIC_OIDC_ISSUER ??
+  // fallback a Auth0 issuer si no se setea OIDC_ISSUER
+  (AUTH0_DOMAIN ? `https://${AUTH0_DOMAIN}` : undefined);
+
+const OIDC_CLIENT_ID =
+  process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ??
+  AUTH0_CLIENT_ID;
+
+const OIDC_AUDIENCE =
+  process.env.EXPO_PUBLIC_OIDC_AUDIENCE ??
+  process.env.EXPO_PUBLIC_AUTH0_AUDIENCE;
+
+// scopes preferentes (permitir offline_access si el IdP lo soporta)
+const DEFAULT_SCOPES = ['openid', 'profile', 'email'];
+const OIDC_SCOPES = parseScopes(
+  process.env.EXPO_PUBLIC_OIDC_SCOPES ?? process.env.EXPO_PUBLIC_AUTH0_SCOPES,
+  DEFAULT_SCOPES,
+);
 
 const REDIRECT_URI =
+  process.env.EXPO_PUBLIC_OIDC_REDIRECT_URI ??
   process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
   AuthSession.makeRedirectUri({
     native: 'handover-pro://callback',
@@ -36,17 +100,30 @@ const REDIRECT_URI =
 
 // EXPO_PUBLIC_AUTH0_LOGOUT_URI debe ser un deep link válido (ej: handover-pro://auth/logout) cuando se defina.
 const LOGOUT_REDIRECT_URI =
+  process.env.EXPO_PUBLIC_OIDC_LOGOUT_URI ??
   process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
   AuthSession.makeRedirectUri({ path: 'auth/logout' });
 
 const DEFAULT_AUTH_CONFIG = {
-  issuer: `https://${AUTH0_DOMAIN}`,
-  clientId: AUTH0_CLIENT_ID,
+  issuer: OIDC_ISSUER ?? `https://${AUTH0_DOMAIN}`,
+  clientId: OIDC_CLIENT_ID,
+  audience: OIDC_AUDIENCE,
   redirectUri: REDIRECT_URI,
   logoutUri: LOGOUT_REDIRECT_URI,
-  scopes: ['openid', 'profile', 'email'],
+  scopes: OIDC_SCOPES,
 };
-// END HANDOVER: AUTH_CONFIG
+/* END HANDOVER: AUTH_CONFIG */
+
+let cachedDiscovery: AuthSession.DiscoveryDocument | null = null;
+let cachedDiscoveryIssuer: string | null = null;
+
+async function getDiscovery(issuer: string): Promise<AuthSession.DiscoveryDocument> {
+  if (cachedDiscovery && cachedDiscoveryIssuer === issuer) return cachedDiscovery;
+  const discovery = await AuthSession.fetchDiscoveryAsync(issuer);
+  cachedDiscovery = discovery;
+  cachedDiscoveryIssuer = issuer;
+  return discovery;
+}
 
 type SessionModel = HandoverSession;
 
@@ -163,6 +240,44 @@ let currentSession: HandoverSession | null = null;
 const listeners: Array<(session: HandoverSession | null) => void> = [];
 let logoutInFlight: Promise<void> | null = null;
 let pendingLogoutMessage: string | undefined;
+let refreshPromise: Promise<boolean> | null = null;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function isoToMs(iso?: string): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+function isExpiringSoon(expiresAtIso?: string, skewMs = 90_000): boolean {
+  const ms = isoToMs(expiresAtIso);
+  if (!ms) return false;
+  return Date.now() >= ms - skewMs;
+}
+
+function clearRefreshTimer() {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+function scheduleRefreshForSession(session: SessionModel | null) {
+  clearRefreshTimer();
+  if (!session) return;
+  if (session.mode === 'demo') return;
+  if (!session.refreshToken) return;
+
+  const expiresMs = isoToMs(session.expiresAt);
+  if (!expiresMs) return;
+
+  const skewMs = 90_000;
+  const delay = Math.max(5_000, expiresMs - Date.now() - skewMs);
+
+  refreshTimer = setTimeout(() => {
+    void refreshAccessToken('timer');
+  }, delay);
+}
 
 function notify(session: SessionModel | null) {
   listeners.forEach((listener) => {
@@ -197,6 +312,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
     const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
     if (persisted) {
       currentSession = normalizeSession(parseSession(persisted));
+      scheduleRefreshForSession(currentSession);
       return currentSession;
     }
   } catch (error) {
@@ -207,12 +323,14 @@ async function hydrateSession(): Promise<HandoverSession | null> {
     currentSession = await migrateFromAsyncStorage();
     if (currentSession) {
       await persistSession(currentSession);
+      scheduleRefreshForSession(currentSession);
     }
   } catch (error) {
     if (isDev) console.warn('[auth] Failed to migrate session', error);
     currentSession = null;
   }
 
+  scheduleRefreshForSession(currentSession);
   return currentSession;
 }
 
@@ -220,6 +338,119 @@ async function setSession(session: HandoverSession | null): Promise<void> {
   currentSession = session ? normalizeSession({ ...session }) : null;
   await persistSession(currentSession);
   notify(currentSession);
+  scheduleRefreshForSession(currentSession);
+}
+
+async function refreshAccessToken(reason: 'startup' | 'timer' | 'fhir' | '401'): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    const cfg = buildAuthConfig();
+    // en prod, si misconfig, aquí debe fallar temprano
+    assertOidcConfigOrThrow(cfg as any);
+
+    // Asegura que hay sesión cargada
+    await getCurrentSession();
+    const session = currentSession;
+
+    if (!session) {
+      warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'no_session' });
+      return false;
+    }
+    if (session.mode === 'demo') {
+      warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'demo_mode' });
+      return false;
+    }
+    if (!session.refreshToken) {
+      warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'missing_refresh_token' });
+      return false;
+    }
+
+    // Si no está por expirar y no es 401, no refrescar
+    if (reason !== '401' && !isExpiringSoon(session.expiresAt)) {
+      warnAuth('AUTH_REFRESH_SKIPPED', { reason, issuerHost: safeIssuerHost(cfg.issuer) });
+      return true;
+    }
+
+    warnAuth('AUTH_REFRESH_START', { op: 'refresh', reason, issuerHost: safeIssuerHost(cfg.issuer) });
+
+    let discovery: AuthSession.DiscoveryDocument;
+    try {
+      discovery = await getDiscovery(cfg.issuer);
+    } catch {
+      warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'discovery_failed' });
+      return false;
+    }
+
+    if (!discovery.tokenEndpoint) {
+      warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'missing_token_endpoint' });
+      return false;
+    }
+
+    try {
+      const body = new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: cfg.clientId,
+        refresh_token: session.refreshToken,
+      });
+
+      const resp = await fetch(discovery.tokenEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+
+      const payload = (await resp.json().catch(() => ({}))) as any;
+
+      if (!resp.ok) {
+        const status = resp.status;
+        const err = String(payload?.error ?? '');
+        warnAuth('AUTH_REFRESH_FAILED', { reason, status, why: err || 'http_error' });
+
+        // Fatal → logout local (sin remote) SOLO si invalid_grant / 400/401
+        if (status === 400 || status === 401 || err === 'invalid_grant') {
+          await logoutAndClear({
+            skipRemote: true,
+            message: 'Sesión expirada, inicia sesión de nuevo',
+          });
+        }
+        return false;
+      }
+
+      const nextAccess = payload?.access_token as string | undefined;
+      const nextRefresh = payload?.refresh_token as string | undefined;
+      const expiresIn = payload?.expires_in as number | undefined;
+      const nextId = payload?.id_token as string | undefined;
+
+      if (!nextAccess) {
+        warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'missing_access_token' });
+        return false;
+      }
+
+      const nextExpiresAt = expiresIn
+        ? normalizeExpiresAt(Math.floor(Date.now() / 1000) + expiresIn)
+        : session.expiresAt;
+
+      await setSession({
+        ...session,
+        accessToken: nextAccess,
+        refreshToken: nextRefresh ?? session.refreshToken,
+        idToken: nextId ?? session.idToken,
+        expiresAt: nextExpiresAt,
+      });
+
+      warnAuth('AUTH_REFRESH_SUCCESS', { op: 'refresh', reason, hasRefreshToken: true });
+      return true;
+    } catch {
+      // Red/timeout → NO logout automático
+      warnAuth('AUTH_REFRESH_FAILED', { reason, why: 'network_or_exception' });
+      return false;
+    }
+  })().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
 }
 
 async function fetchUserInfo(userInfoEndpoint: string | undefined, accessToken: string) {
@@ -301,10 +532,56 @@ function buildAuthConfig(config?: Partial<typeof DEFAULT_AUTH_CONFIG>) {
   return {
     issuer: config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer,
     clientId: config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId,
+    audience: config?.audience ?? DEFAULT_AUTH_CONFIG.audience,
     redirectUri: config?.redirectUri ?? DEFAULT_AUTH_CONFIG.redirectUri,
     logoutUri: config?.logoutUri ?? DEFAULT_AUTH_CONFIG.logoutUri,
     scopes: config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes,
   };
+}
+
+function isPlaceholderConfig(cfg: ReturnType<typeof buildAuthConfig>): boolean {
+  const issuerHost = safeIssuerHost(cfg.issuer) ?? '';
+  const isAuth0Placeholder =
+    issuerHost === PLACEHOLDER_AUTH0_DOMAIN &&
+    cfg.clientId === PLACEHOLDER_AUTH0_CLIENT_ID;
+
+  const hasExplicitOidc =
+    !!process.env.EXPO_PUBLIC_OIDC_ISSUER || !!process.env.EXPO_PUBLIC_OIDC_CLIENT_ID;
+
+  // Placeholder si está usando defaults y no hay OIDC explícito
+  return isAuth0Placeholder && !hasExplicitOidc;
+}
+
+function assertOidcConfigOrThrow(cfg: ReturnType<typeof buildAuthConfig>) {
+  const issues: string[] = [];
+  if (!cfg.issuer) issues.push('issuer');
+  if (!cfg.clientId) issues.push('clientId');
+  if (!cfg.redirectUri) issues.push('redirectUri');
+  if (!cfg.logoutUri) issues.push('logoutUri');
+  if (!cfg.scopes || !cfg.scopes.length) issues.push('scopes');
+
+  const placeholder = isPlaceholderConfig(cfg);
+
+  // En producción (no dev), NO aceptar placeholders o faltantes
+  if (!isDev && (issues.length > 0 || placeholder)) {
+    warnAuth('AUTH_OIDC_MISCONFIG', {
+      issues,
+      placeholder,
+      issuerHost: safeIssuerHost(cfg.issuer),
+      clientIdSuffix: lastChars(cfg.clientId),
+      scopesCount: cfg.scopes?.length ?? 0,
+      hasAudience: !!cfg.audience,
+    });
+    throw new Error('AUTH_OIDC_MISCONFIG');
+  }
+
+  // En dev, solo log informativo (PHI-safe)
+  warnAuth('AUTH_RUNTIME_CONFIG', {
+    issuerHost: safeIssuerHost(cfg.issuer),
+    clientIdSuffix: lastChars(cfg.clientId),
+    scopesCount: cfg.scopes?.length ?? 0,
+    hasAudience: !!cfg.audience,
+  });
 }
 
 type AuthTokens = {
@@ -437,7 +714,7 @@ async function performAuth0Login(options: {
     return login({
       user: {
         id: 'nurse001',
-        name: 'Luis Enfermero',
+        name: 'Local Dev User',
         roles: ['nurse'],
         units: ['UCI'],
       },
@@ -445,15 +722,17 @@ async function performAuth0Login(options: {
     });
   }
   const config = buildAuthConfig(options.config);
-  const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
+  const discovery = options.discovery ?? (await getDiscovery(config.issuer));
 
-    const authResult = await options.promptAsync();
+  const authResult = await options.promptAsync();
 
-  if (isDev) {
-    console.log('[auth] Auth result type:', authResult.type);
-    console.log('[auth] Auth result params:', extractAuthParams(authResult));
-    console.log('[auth] Using redirectUri:', config.redirectUri);
-  }
+  warnAuth('AUTH_LOGIN_RESULT', { type: authResult.type });
+  warnAuth('AUTH_RUNTIME_CONFIG', {
+    issuerHost: safeIssuerHost(config.issuer),
+    clientIdSuffix: lastChars(config.clientId),
+    scopesCount: config.scopes?.length ?? 0,
+    hasAudience: !!(config as any).audience,
+  });
 
   const tokens = await resolveTokensFromResult({
     request: options.request,
@@ -469,13 +748,15 @@ async function performAuth0Login(options: {
 
 export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG>): Promise<SessionModel> {
   const merged = buildAuthConfig(config);
-  const discovery = await AuthSession.fetchDiscoveryAsync(merged.issuer);
+  assertOidcConfigOrThrow(merged);
+  const discovery = await getDiscovery(merged.issuer);
   const request = new AuthSession.AuthRequest({
     clientId: merged.clientId,
     redirectUri: merged.redirectUri,
     scopes: merged.scopes,
     usePKCE: true,
     responseType: AuthSession.ResponseType.Code,
+    extraParams: merged.audience ? { audience: String(merged.audience) } : undefined,
   });
 
   const session = await performAuth0Login({
@@ -531,21 +812,27 @@ export async function logout(): Promise<void> {
   const runner = async () => {
     await hydrateSession();
     const config = buildAuthConfig();
-    const domain = AUTH0_DOMAIN;
+    const issuerHost = safeIssuerHost(config.issuer);
+    const isAuth0 = !!issuerHost && issuerHost.endsWith('.auth0.com');
 
-    try {
-      const authUrl = `https://${domain}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
+    if (isAuth0) {
+      const authUrl = `https://${issuerHost}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
         config.logoutUri,
       )}`;
-      await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
-    } catch (error) {
-      if (isDev) console.warn('[auth] Failed to complete logout', error);
+      try {
+        await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
+      } catch (error) {
+        if (isDev) console.warn('[auth] logout failed', error);
+      }
+    } else {
+      warnAuth('AUTH_LOGOUT', { reason: 'local_only', issuerHost });
     }
 
     await setSession(null);
     if (message) {
       Alert.alert('Sesión expirada', message);
     }
+    warnAuth('AUTH_LOGOUT', { reason: message ? 'expired' : 'manual', issuerHost });
     navigation.resetTo('Login');
   };
 
@@ -587,6 +874,19 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
 
 export async function setCurrentSession(session: SessionModel | null): Promise<void> {
   await setSession(session);
+}
+
+export async function ensureFreshAccessToken(reason: 'startup' | 'fhir' | 'manual' = 'fhir'): Promise<string | null> {
+  const session = await getCurrentSession();
+  if (!session) return null;
+  if (session.mode === 'demo') return session.accessToken ?? null;
+
+  // Si está por expirar, intenta refresh
+  if (session.refreshToken && isExpiringSoon(session.expiresAt)) {
+    await refreshAccessToken(reason === 'startup' ? 'startup' : 'fhir');
+  }
+
+  return currentSession?.accessToken ?? null;
 }
 
 export const getSession = getCurrentSession;
@@ -651,6 +951,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       scopes: authConfig.scopes,
       usePKCE: true,
       responseType: AuthSession.ResponseType.Code,
+      extraParams: authConfig.audience ? { audience: String((authConfig as any).audience) } : undefined,
     },
     discovery,
   );
@@ -662,6 +963,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const hydratedSession = await getCurrentSession();
         if (!mounted) return;
         setSessionState(hydratedSession);
+        scheduleRefreshForSession(hydratedSession);
+        if (hydratedSession?.refreshToken && isExpiringSoon(hydratedSession.expiresAt)) {
+          await refreshAccessToken('startup');
+          if (!mounted) return;
+          setSessionState(currentSession);
+        }
       } catch (error) {
         if (isDev) console.warn('[auth] Failed to hydrate session', error);
         if (!mounted) return;
@@ -681,7 +988,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     configureFHIRClient({
-      ensureFreshToken: async () => (await getCurrentSession())?.accessToken ?? null,
+      ensureFreshToken: async () => await ensureFreshAccessToken('fhir'),
       logout: async () =>
         logoutAndClear({
           skipRemote: true,
@@ -694,6 +1001,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!authRequest) {
         throw new Error('AUTH_REQUEST_NOT_READY');
       }
+      assertOidcConfigOrThrow(authConfig as any);
       return performAuth0Login({
         config: authConfig,
         discovery,
