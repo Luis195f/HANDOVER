@@ -29,6 +29,7 @@ import {
   type QueueItem as OfflineQueueItem,
   type SyncStatus,
 } from './queue';
+import { signBundleIfEnabled } from '../security/crypto';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -1365,9 +1366,12 @@ export async function enqueueBundle(
   const existingIndex = queue.findIndex((it) => it.patientId === patientId);
   const existingTxId = existingIndex >= 0 ? queue[existingIndex].txId : undefined;
   const { txId, bundle } = ensureBundleTx(ensured, existingTxId);
+  const { bundle: maybeSignedBundle } = await signBundleIfEnabled<TransactionBundle>(bundle as TransactionBundle, {
+    queueId: txId,
+  });
   const updated: LegacyQueueItem = {
     patientId,
-    bundle,
+    bundle: maybeSignedBundle,
     attempts: 0,
     nextAttemptAt: nowIso,
     createdAt: existingIndex >= 0 ? queue[existingIndex].createdAt : nowIso,
