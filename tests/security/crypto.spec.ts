@@ -72,4 +72,71 @@ describe('security/crypto', () => {
     expect(storedPrimary).toBeNull();
     expect(storedSecondary).toBe(key);
   });
+
+  it('no firma cuando la bandera está desactivada', async () => {
+    const { signBundleIfEnabled } = await loadModule();
+    const originalFlag = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+
+    const bundle = { resourceType: 'Bundle', entry: [] as unknown[] };
+    const result = await signBundleIfEnabled(bundle);
+
+    expect(result.signed).toBe(false);
+    expect(result.bundle).toBe(bundle);
+
+    if (originalFlag === undefined) {
+      delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    } else {
+      process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = originalFlag;
+    }
+  });
+
+  it('omite la firma cuando no hay WebCrypto y emite HNDR_SIGN_110', async () => {
+    const originalFlag = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'true';
+    const originalCrypto = (globalThis as any).crypto;
+    // @ts-expect-error override para simular runtime sin WebCrypto
+    (globalThis as any).crypto = undefined;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { signBundleIfEnabled } = await loadModule();
+    const bundle = { resourceType: 'Bundle', entry: [] as unknown[] };
+    const result = await signBundleIfEnabled(bundle, { queueId: 'q-110' });
+
+    expect(result.signed).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('HNDR_SIGN_110'),
+      expect.objectContaining({ queueId: 'q-110', runtimeHasWebCrypto: false })
+    );
+
+    warnSpy.mockRestore();
+    (globalThis as any).crypto = originalCrypto;
+    if (originalFlag === undefined) {
+      delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    } else {
+      process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = originalFlag;
+    }
+  });
+
+  it('adjunta signature al bundle cuando está habilitado', async () => {
+    const originalFlag = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'true';
+    const { signBundleIfEnabled } = await loadModule();
+    const bundle = { resourceType: 'Bundle', entry: [] as unknown[] };
+
+    const result = await signBundleIfEnabled(bundle, { signerId: 'practitioner-1' });
+
+    expect(result.signed).toBe(true);
+    expect((result.bundle as any).signature).toBeDefined();
+    expect((result.bundle as any).signature.data).toEqual(expect.any(String));
+    expect((result.bundle as any).signature.data.length).toBeGreaterThan(10);
+    expect((result.bundle as any).signature.who.identifier.value).toBe('practitioner-1');
+    expect((bundle as any).signature).toBeUndefined();
+
+    if (originalFlag === undefined) {
+      delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    } else {
+      process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = originalFlag;
+    }
+  });
 });

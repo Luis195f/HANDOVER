@@ -1,5 +1,6 @@
 // BEGIN HANDOVER_SECURE_STORAGE
 import CryptoJS from 'crypto-js';
+import { Buffer } from 'buffer';
 
 import { secureGetItem, secureSetItem } from './secure-storage';
 
@@ -168,3 +169,210 @@ export async function decryptPayload(cipherText: string): Promise<unknown> {
 
 export { isPayloadEncrypted };
 // END HANDOVER_SECURE_STORAGE
+
+// ---------------------------------------------------------------------------
+// Cliente: firma opcional de Bundles FHIR (ECDSA P-256 + SHA-256)
+// ---------------------------------------------------------------------------
+
+type SigningWarningMeta = Partial<{
+  queueId: string;
+  attempt: number;
+  platform: string;
+  appVersion: string;
+  runtimeHasWebCrypto: boolean;
+  errorName: string;
+}>;
+
+const CLIENT_SIGNING_KEY_STORAGE = 'handover_client_signing_keypair_v1';
+
+const SIGNING_ENABLED_FLAG = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+
+function isTruthyFlag(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
+function hasWebCrypto(): boolean {
+  return typeof globalThis !== 'undefined' && !!globalThis.crypto?.subtle;
+}
+
+function logSigningWarning(code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130', message: string, meta: SigningWarningMeta = {}): void {
+  const allowedKeys: Array<keyof SigningWarningMeta> = [
+    'queueId',
+    'attempt',
+    'platform',
+    'appVersion',
+    'runtimeHasWebCrypto',
+    'errorName',
+  ];
+  const safeMeta: Record<string, unknown> = {};
+  for (const key of allowedKeys) {
+    const value = meta[key];
+    if (value !== undefined) {
+      safeMeta[key] = value;
+    }
+  }
+  console.warn(`[${code}] ${message}`, safeMeta);
+}
+
+export function isClientSigningEnabled(): boolean {
+  return isTruthyFlag(SIGNING_ENABLED_FLAG);
+}
+
+function parseStoredKeypair(raw: string | null): { privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { privateJwk?: JsonWebKey; publicJwk?: JsonWebKey };
+    if (parsed && parsed.privateJwk && parsed.publicJwk) {
+      return { privateJwk: parsed.privateJwk, publicJwk: parsed.publicJwk };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function persistSigningKeypair(keypair: { privateJwk: JsonWebKey; publicJwk: JsonWebKey }): Promise<void> {
+  const serialized = JSON.stringify({ privateJwk: keypair.privateJwk, publicJwk: keypair.publicJwk });
+  await secureSetItem(CLIENT_SIGNING_KEY_STORAGE, serialized);
+}
+
+export async function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
+  if (!hasWebCrypto()) return null;
+
+  const stored = await secureGetItem(CLIENT_SIGNING_KEY_STORAGE);
+  const parsed = parseStoredKeypair(stored);
+  if (parsed?.privateJwk && parsed?.publicJwk) {
+    return parsed;
+  }
+
+  try {
+    const generated = await globalThis.crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const [privateJwk, publicJwk] = await Promise.all([
+      globalThis.crypto.subtle.exportKey('jwk', generated.privateKey),
+      globalThis.crypto.subtle.exportKey('jwk', generated.publicKey),
+    ]);
+    const keypair = { privateJwk, publicJwk };
+    await persistSigningKeypair(keypair);
+    return keypair;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function cloneWithoutSignature<T extends Record<string, unknown>>(value: T): T {
+  const copy = JSON.parse(JSON.stringify(value)) as T;
+  if ('signature' in copy) {
+    delete (copy as Record<string, unknown>).signature;
+  }
+  return copy;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+  if (isRecord(value)) {
+    const sorted: Record<string, unknown> = {};
+    Object.keys(value)
+      .sort()
+      .forEach((key) => {
+        sorted[key] = canonicalize(value[key]);
+      });
+    return sorted;
+  }
+  return value;
+}
+
+function base64FromBuffer(buffer: ArrayBuffer): string {
+  return Buffer.from(new Uint8Array(buffer)).toString('base64');
+}
+
+type SignBundleMeta = SigningWarningMeta & { signerId?: string };
+
+export async function signBundleIfEnabled<T extends Record<string, unknown>>(bundle: T, meta: SignBundleMeta = {}): Promise<{ bundle: T; signed: boolean }> {
+  if (!isClientSigningEnabled()) {
+    return { bundle, signed: false };
+  }
+
+  if (!hasWebCrypto()) {
+    logSigningWarning('HNDR_SIGN_110', 'Client signing enabled but WebCrypto is unavailable; sending unsigned bundle.', {
+      ...meta,
+      runtimeHasWebCrypto: false,
+    });
+    return { bundle, signed: false };
+  }
+
+  if (!isRecord(bundle) || bundle.resourceType !== 'Bundle') {
+    return { bundle, signed: false };
+  }
+
+  if ('signature' in bundle) {
+    return { bundle, signed: false };
+  }
+
+  const keypair = await getOrCreateClientSigningKeypair();
+  if (!keypair?.privateJwk) {
+    logSigningWarning('HNDR_SIGN_120', 'Failed to generate client signing keypair; sending unsigned bundle.', {
+      ...meta,
+      runtimeHasWebCrypto: true,
+      errorName: undefined,
+    });
+    return { bundle, signed: false };
+  }
+
+  try {
+    const unsigned = cloneWithoutSignature(bundle);
+    const canonical = canonicalize(unsigned);
+    const canonicalJson = JSON.stringify(canonical);
+    const encoder = new TextEncoder();
+    const payload = encoder.encode(canonicalJson);
+    const privateKey = await globalThis.crypto.subtle.importKey(
+      'jwk',
+      keypair.privateJwk,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign']
+    );
+    const signatureBuffer = await globalThis.crypto.subtle.sign(
+      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      privateKey,
+      payload
+    );
+    const signatureB64 = base64FromBuffer(signatureBuffer);
+
+    const signature = {
+      type: [
+        {
+          system: 'urn:iso-astm:E1762-95:2013',
+          code: '1.2.840.10065.1.12.1.1',
+          display: "Author's Signature",
+        },
+      ],
+      when: new Date().toISOString(),
+      who: meta.signerId ? { identifier: { value: meta.signerId } } : { identifier: { value: 'client' } },
+      sigFormat: 'application/pkcs7-signature',
+      data: signatureB64,
+    };
+
+    const signedBundle = { ...unsigned, signature } as T;
+    return { bundle: signedBundle, signed: true };
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : undefined;
+    logSigningWarning('HNDR_SIGN_130', 'Failed to sign bundle on client; sending unsigned bundle.', {
+      ...meta,
+      runtimeHasWebCrypto: true,
+      errorName,
+    });
+    return { bundle, signed: false };
+  }
+}

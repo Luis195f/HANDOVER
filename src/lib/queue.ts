@@ -23,6 +23,7 @@ import {
   payloadIsEncrypted as queuePayloadIsEncrypted,
 } from "./crypto";
 import { mark } from "./otel";
+import { signBundleIfEnabled } from "../security/crypto";
 
 // -------------------------------
 // Web polyfills (SharedArrayBuffer)
@@ -781,8 +782,11 @@ type BundleMeta = {
 export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
   const patientId = meta.patientId ?? 'unknown';
   const key = `handover:${hashHex(`${patientId}|${Date.now()}|${Math.random()}`, 32)}`;
+  const { bundle: maybeSignedBundle } = await signBundleIfEnabled(bundle as Record<string, unknown>, {
+    queueId: key,
+  });
   const payload = {
-    bundle,
+    bundle: maybeSignedBundle,
     meta: {
       patientId,
       unitId: meta.unitId,
