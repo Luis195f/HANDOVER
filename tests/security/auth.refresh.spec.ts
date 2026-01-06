@@ -29,7 +29,7 @@ vi.mock('react-native', () => ({
 }));
 
 vi.mock('@/src/navigation/navigation', () => ({
-  default: { resetRoot: vi.fn() },
+  default: { resetRoot: vi.fn(), resetTo: vi.fn() },
 }));
 
 vi.mock('@/src/lib/fhir-client', () => ({
@@ -83,7 +83,7 @@ async function loadEnsureFresh() {
       'No se encontró ensureFreshAccessToken/ensureFreshToken exportado desde src/security/auth.tsx.'
     );
   }
-  return { ensureFresh };
+  return { ensureFresh, mod };
 }
 
 function seedSession(opts: { accessToken: string; refreshToken?: string; expiresAt: string }) {
@@ -162,5 +162,52 @@ describe('auth refresh', () => {
     expect(t2).toBe('NEW_ACCESS');
     expect((globalThis as any).fetch).toHaveBeenCalledTimes(1);
   });
-});
 
+  it('forces refresh when reason is 401 even if token is not expiring soon', async () => {
+    seedSession({
+      accessToken: 'OLD_ACCESS',
+      refreshToken: 'OLD_REFRESH',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    });
+    const { ensureFresh } = await loadEnsureFresh();
+
+    const token = await ensureFresh('401');
+
+    expect(token).toBe('NEW_ACCESS');
+    expect((globalThis as any).fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not persist refreshed session if logout happens during refresh', async () => {
+    seedSession({
+      accessToken: 'OLD_ACCESS',
+      refreshToken: 'OLD_REFRESH',
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    let resolveFetch: (() => void) | null = null;
+    (globalThis as any).fetch = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = () =>
+            resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                access_token: 'NEW_ACCESS',
+                refresh_token: 'NEW_REFRESH',
+                expires_in: 3600,
+              }),
+            });
+        }),
+    );
+
+    const { ensureFresh, mod } = await loadEnsureFresh();
+    const refreshPromise = ensureFresh('fhir');
+    await mod.logoutAndClear({ skipRemote: true });
+    resolveFetch?.();
+
+    const token = await refreshPromise;
+    expect(token).toBeNull();
+    expect(store.get(sessionKey())).toBeUndefined();
+  });
+});

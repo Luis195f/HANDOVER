@@ -241,10 +241,18 @@ async function persistSigningKeypair(keypair: { privateJwk: JsonWebKey; publicJw
 export async function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
   if (!hasWebCrypto()) return null;
 
-  const stored = await secureGetItem(CLIENT_SIGNING_KEY_STORAGE);
-  const parsed = parseStoredKeypair(stored);
-  if (parsed?.privateJwk && parsed?.publicJwk) {
-    return parsed;
+  try {
+    const stored = await secureGetItem(CLIENT_SIGNING_KEY_STORAGE);
+    const parsed = parseStoredKeypair(stored);
+    if (parsed?.privateJwk && parsed?.publicJwk) {
+      return parsed;
+    }
+  } catch (error) {
+    logSigningWarning('HNDR_SIGN_120', 'Failed to read client signing keypair; sending unsigned bundle.', {
+      errorName: error instanceof Error ? error.name : undefined,
+      runtimeHasWebCrypto: true,
+    });
+    return null;
   }
 
   try {
@@ -360,8 +368,15 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
       ],
       when: new Date().toISOString(),
       who: meta.signerId ? { identifier: { value: meta.signerId } } : { identifier: { value: 'client' } },
-      sigFormat: 'application/pkcs7-signature',
+      sigFormat: 'application/vnd.handover.ecdsa-der',
+      targetFormat: 'application/fhir+json',
       data: signatureB64,
+      extension: [
+        {
+          url: 'https://handover.app/signature/algorithm',
+          valueString: 'ECDSA-P256-SHA256-DER',
+        },
+      ],
     };
 
     const signedBundle = { ...unsigned, signature } as T;

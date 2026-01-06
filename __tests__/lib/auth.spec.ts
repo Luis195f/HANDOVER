@@ -195,6 +195,29 @@ describe('auth token helpers', () => {
     expect(getAuthState().tokens?.accessToken).toBe('new_access');
   });
 
+  it('acepta audience que coincida con clientId o audience configurado', async () => {
+    const now = Math.floor(Date.now() / 1000) + 600;
+    const { persistAuth, refresh, getAuthState } = await import('@/src/lib/auth');
+    await persistAuth(
+      {
+        accessToken: 'existing',
+        refreshToken: 'refresh123',
+        expiresAt: now,
+        idToken: buildIdToken({ aud: ['client-123', 'extra'] }),
+      },
+      {
+        sub: 'nurse-1',
+        role: 'nurse',
+        unitIds: ['icu'],
+      }
+    );
+
+    const freshIdToken = buildIdToken({ aud: ['other', 'api://handover'] });
+    const tokens = await refresh({ access_token: 'fresh', refresh_token: 'refresh123', expires_in: 1200, id_token: freshIdToken });
+    expect(tokens.accessToken).toBe('fresh');
+    expect(getAuthState().tokens?.idToken).toBe(freshIdToken);
+  });
+
   it('rechaza sesión almacenada expirada', async () => {
     const idToken = buildIdToken({ exp: Math.floor(Date.now() / 1000) - 10 });
     const { ensureFreshToken, getAuthState, persistAuth } = await import('@/src/lib/auth');

@@ -469,7 +469,9 @@ function assertValidClaims(claims: JwtClaims): ValidatedClaims {
   if (iss !== oidcConfig.issuer) {
     throw new AuthError('TOKEN_INVALID', 'ID token issuer mismatch');
   }
-    if (!aud.includes(oidcConfig.clientId)) {
+  const allowedAudiences = [oidcConfig.audience, oidcConfig.clientId].filter(Boolean);
+  const matchesAudience = allowedAudiences.some((allowed) => aud.includes(allowed as string));
+  if (!matchesAudience) {
     throw new AuthError('TOKEN_INVALID', 'ID token audience mismatch');
   }
   const exp = expRaw;

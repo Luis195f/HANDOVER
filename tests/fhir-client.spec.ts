@@ -116,7 +116,16 @@ describe('postBundle', () => {
 
     const result = await postBundle(bundle, { token: 'tk' });
 
-    expect(result).toEqual({ ok: false, status: 500, json: undefined, issue: undefined, location: undefined });
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        status: 500,
+        json: undefined,
+        issue: undefined,
+        issues: undefined,
+        location: undefined,
+      })
+    );
   });
 
   it('returns validation error without performing fetch', async () => {
@@ -132,5 +141,33 @@ describe('postBundle', () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe(400);
     expect(result.issues?.[0]?.diagnostics).toContain('entry');
+  });
+
+  it('does not retry unauthorized responses when Authorization header is provided', async () => {
+    vi.resetModules();
+    vi.doMock('@/src/lib/net', async () => {
+      const actual = await vi.importActual<typeof import('@/src/lib/net')>('@/src/lib/net');
+      return {
+        ...actual,
+        safeFetch: vi.fn(async () => {
+          const response = new Response(JSON.stringify({ error: 'unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+          throw new actual.HTTPError(401, 'Unauthorized', false, response);
+        }),
+      };
+    });
+    process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://fhir.test/api';
+    const ensureFreshToken = vi.fn(async () => 'fresh-token');
+    const { fetchFHIR, configureFHIRClient } = await import('@/src/lib/fhir-client');
+
+    configureFHIRClient({ ensureFreshToken, baseUrl: 'https://fhir.test/api' });
+    const result = await fetchFHIR('Patient/1', { headers: { Authorization: 'Bearer external' } });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(401);
+    expect(ensureFreshToken).not.toHaveBeenCalled();
+    vi.doUnmock('@/src/lib/net');
   });
 });

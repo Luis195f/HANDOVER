@@ -95,8 +95,8 @@ describe('security/crypto', () => {
     const originalFlag = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
     process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'true';
     const originalCrypto = (globalThis as any).crypto;
-    // @ts-expect-error override para simular runtime sin WebCrypto
-    (globalThis as any).crypto = undefined;
+    const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true, writable: true });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { signBundleIfEnabled } = await loadModule();
@@ -110,7 +110,11 @@ describe('security/crypto', () => {
     );
 
     warnSpy.mockRestore();
-    (globalThis as any).crypto = originalCrypto;
+    if (cryptoDescriptor?.configurable) {
+      Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
+    } else {
+      (globalThis as any).crypto = originalCrypto;
+    }
     if (originalFlag === undefined) {
       delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
     } else {
@@ -128,9 +132,12 @@ describe('security/crypto', () => {
 
     expect(result.signed).toBe(true);
     expect((result.bundle as any).signature).toBeDefined();
-    expect((result.bundle as any).signature.data).toEqual(expect.any(String));
-    expect((result.bundle as any).signature.data.length).toBeGreaterThan(10);
-    expect((result.bundle as any).signature.who.identifier.value).toBe('practitioner-1');
+    const signature = (result.bundle as any).signature;
+    expect(signature.data).toEqual(expect.any(String));
+    expect(signature.data.length).toBeGreaterThan(10);
+    expect(signature.sigFormat).toBe('application/vnd.handover.ecdsa-der');
+    expect(signature.extension?.[0]?.valueString).toBe('ECDSA-P256-SHA256-DER');
+    expect(signature.who.identifier.value).toBe('practitioner-1');
     expect((bundle as any).signature).toBeUndefined();
 
     if (originalFlag === undefined) {
@@ -138,5 +145,32 @@ describe('security/crypto', () => {
     } else {
       process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = originalFlag;
     }
+  });
+
+  it('devuelve null si SecureStore falla al leer el keypair', async () => {
+    vi.doMock('@/src/security/secure-storage', async () => {
+      const actual = await vi.importActual<typeof import('@/src/security/secure-storage')>(
+        '@/src/security/secure-storage'
+      );
+      return {
+        ...actual,
+        secureGetItem: vi.fn(async () => {
+          throw new Error('read-fail');
+        }),
+      };
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mod = await import('@/src/security/crypto');
+    const keypair = await mod.getOrCreateClientSigningKeypair();
+
+    expect(keypair).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('HNDR_SIGN_120'),
+      expect.objectContaining({ errorName: 'Error' })
+    );
+
+    warnSpy.mockRestore();
+    vi.doUnmock('@/src/security/secure-storage');
   });
 });

@@ -217,7 +217,7 @@ const extractMrn = (patient: any): string | undefined => {
 // END HANDOVER D6 – fetchPatientSummary
 
 type AuthHooks = {
-  ensureFreshToken?: () => Promise<string | null>;
+  ensureFreshToken?: (reason?: string) => Promise<string | null>;
   logout?: () => Promise<void> | void;
   getBaseUrl?: () => string | undefined;
   /** Compat: algunos callers pasan baseUrl directo */
@@ -377,18 +377,29 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
 
     const { path, method = 'GET', body, token, headers, signal, timeoutMs, idempotencyKey } = p;
 
-    const authToken = token ?? (runtimeConfig.getToken ? await runtimeConfig.getToken() ?? undefined : undefined);
+    const defaultHeaders = runtimeConfig.getDefaultHeaders?.() ?? {};
+    const headerAuth = headers?.Authorization ?? (headers as Record<string, string> | undefined)?.authorization;
+    const defaultAuth =
+      defaultHeaders.Authorization ?? (defaultHeaders as Record<string, string> | undefined)?.authorization;
+    const explicitAuthHeader = headerAuth ?? defaultAuth;
+    const hasExternalAuth = token !== undefined || !!explicitAuthHeader;
+    const authToken = hasExternalAuth
+      ? token ?? undefined
+      : runtimeConfig.getToken
+        ? await runtimeConfig.getToken() ?? undefined
+        : undefined;
+    const isUsingSessionAuth = !hasExternalAuth && !!authToken;
 
     const url = /^https?:\/\//i.test(path)
       ? path
       : `${runtimeConfig.getBaseUrl()}/${path.replace(/^\//, '')}`;
 
     const buildHeaders = (tokenOverride?: string): Record<string, string> => {
-      const bearer = tokenOverride ?? authToken;
+      const bearer = explicitAuthHeader ? undefined : tokenOverride ?? authToken;
       return {
         Accept: 'application/fhir+json',
         ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
-        ...(runtimeConfig.getDefaultHeaders?.() ?? {}),
+        ...defaultHeaders,
         ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
         ...headers,
       };
@@ -426,8 +437,9 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
         return { ok: true, response: res.raw, data: res.data, status: res.status };
       } catch (error) {
         if (error instanceof HTTPError) {
-          if (error.status === 401 && !retried) {
-            const freshToken = hooks.ensureFreshToken ? await hooks.ensureFreshToken() : null;
+          const sessionAuthActive = isUsingSessionAuth || !!tokenOverride;
+          if (error.status === 401 && !retried && sessionAuthActive) {
+            const freshToken = hooks.ensureFreshToken ? await hooks.ensureFreshToken('401') : null;
             if (freshToken) {
               try {
                 return await attempt(freshToken, true);
@@ -447,8 +459,11 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
           }
 
           if (error.status === 401 || error.status === 403) {
-            if (runtimeConfig.logout) await runtimeConfig.logout();
-            throw new Error('unauthorized');
+            if (sessionAuthActive && runtimeConfig.logout) await runtimeConfig.logout();
+            if (sessionAuthActive) {
+              throw new Error('unauthorized');
+            }
+            return handleHttpError(error);
           }
 
           return handleHttpError(error);
