@@ -1,10 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let sessionJson: string | null = null;
+/**
+ * tests/security/auth.refresh.spec.ts
+ *
+ * - ensureFreshToken/ensureFreshAccessToken refresca cuando el token expira pronto.
+ * - "single-flight": llamadas concurrentes comparten 1 solo refresh.
+ *
+ * Este módulo importa Expo/React Native; por eso se mockean dependencias.
+ * Importante: NO se mockea el módulo bajo test.
+ */
+
+const store = new Map<string, string>();
+
+function sessionKey(): string {
+  const nsRaw = process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover';
+  const ns = nsRaw.replace(/[^\w.-]/g, '') || 'handover';
+  return `${ns}_auth_session`;
+}
 
 vi.mock('expo-web-browser', () => ({
   maybeCompleteAuthSession: () => {},
-  openAuthSessionAsync: vi.fn(async () => ({ type: 'success' })),
+  openAuthSessionAsync: vi.fn(),
+  dismissBrowser: vi.fn(),
 }));
 
 vi.mock('react-native', () => ({
@@ -12,7 +29,7 @@ vi.mock('react-native', () => ({
 }));
 
 vi.mock('@/src/navigation/navigation', () => ({
-  default: { resetTo: vi.fn() },
+  default: { resetRoot: vi.fn() },
 }));
 
 vi.mock('@/src/lib/fhir-client', () => ({
@@ -20,64 +37,82 @@ vi.mock('@/src/lib/fhir-client', () => ({
 }));
 
 vi.mock('@/src/demo/fixtures', () => ({
-  ensureDemoSessionTemplate: vi.fn(),
+  ensureDemoSessionTemplate: vi.fn(async () => null),
 }));
 
-vi.mock('expo-auth-session', async () => ({
-  ResponseType: { Code: 'code' },
-  makeRedirectUri: () => 'handover-pro://callback',
-  fetchDiscoveryAsync: vi.fn(async () => ({ tokenEndpoint: 'https://issuer.example/token' })),
-  AuthRequest: class {
-    constructor(_: any) {}
-    promptAsync = vi.fn(async () => ({ type: 'success', params: { code: 'x' } }));
-  },
-}));
-
-// IMPORTANT: mockea secure storage por alias (normalmente resuelve al mismo módulo)
+// secure storage usado por src/security/auth.tsx
 vi.mock('@/src/security/secure-storage', () => ({
-  secureGetItem: vi.fn(async (key: string) => {
-    if (!sessionJson) return null;
-    const k = (key ?? '').toLowerCase();
-    if (k.includes('session') || k.includes('auth')) return sessionJson;
-    return null;
-  }),
+  secureGetItem: vi.fn(async (key: string) => store.get(key) ?? null),
   secureSetItem: vi.fn(async (key: string, value: string) => {
-    const k = (key ?? '').toLowerCase();
-    if (k.includes('session') || k.includes('auth')) sessionJson = value;
+    store.set(key, value);
   }),
   secureDeleteItem: vi.fn(async (key: string) => {
-    const k = (key ?? '').toLowerCase();
-    if (k.includes('session') || k.includes('auth')) sessionJson = null;
+    store.delete(key);
   }),
 }));
 
-type EnsureFreshTokenFn = (target: string) => Promise<string>;
+// expo-auth-session (namespace import en src/security/auth.tsx)
+vi.mock('expo-auth-session', () => ({
+  ResponseType: { Code: 'code' },
+  makeRedirectUri: vi.fn(() => 'handover-pro://redirect'),
+  fetchDiscoveryAsync: vi.fn(async () => ({
+    issuer: 'https://issuer.example',
+    tokenEndpoint: 'https://issuer.example/token',
+    authorizationEndpoint: 'https://issuer.example/authorize',
+  })),
+  exchangeCodeAsync: vi.fn(async () => ({
+    accessToken: 'NEW_ACCESS',
+    refreshToken: 'NEW_REFRESH',
+    expiresIn: 3600,
+  })),
+}));
 
-async function loadEnsureFreshToken(): Promise<EnsureFreshTokenFn> {
-  const mod = await import('@/src/security/auth');
+// hook usado por login (no se ejecuta en estos tests, pero debe existir)
+vi.mock('expo-auth-session/providers/auth0', () => ({
+  useAuthRequest: () => [null, null, vi.fn()],
+}));
 
-  const fn =
-    (mod as any).ensureFreshToken ??
-    (mod as any).default?.ensureFreshToken;
+async function loadEnsureFresh() {
+  const mod = await import('../../src/security/auth');
+  const ensureFresh =
+    (mod as any).ensureFreshAccessToken ??
+    (mod as any).ensureFreshToken;
 
-  if (typeof fn !== 'function') {
+  if (typeof ensureFresh !== 'function') {
     throw new Error(
-      "ensureFreshToken export not found. Export it from '@/src/security/auth' (named or default)."
+      'No se encontró ensureFreshAccessToken/ensureFreshToken exportado desde src/security/auth.tsx.'
     );
   }
+  return { ensureFresh };
+}
 
-  return fn as EnsureFreshTokenFn;
+function seedSession(opts: { accessToken: string; refreshToken?: string; expiresAt: string }) {
+  store.set(
+    sessionKey(),
+    JSON.stringify({
+      // Campos relevantes para ensureFreshToken
+      accessToken: opts.accessToken,
+      refreshToken: opts.refreshToken,
+      expiresAt: opts.expiresAt,
+
+      // Campos extra para compatibilidad con normalizeSession (no usados en este spec)
+      userId: 'u1',
+      displayName: 'User One',
+      roles: ['nurse'],
+      units: ['ward'],
+    })
+  );
 }
 
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-
-  sessionJson = null;
+  store.clear();
 
   process.env.EXPO_PUBLIC_OIDC_ISSUER = 'https://issuer.example';
   process.env.EXPO_PUBLIC_OIDC_CLIENT_ID = 'client_test';
   process.env.EXPO_PUBLIC_OIDC_SCOPES = 'openid profile email offline_access';
+  process.env.EXPO_PUBLIC_STORAGE_NAMESPACE = 'handover';
 
   (globalThis as any).fetch = vi.fn(async () => ({
     ok: true,
@@ -91,37 +126,41 @@ beforeEach(() => {
 });
 
 describe('auth refresh', () => {
-  it('refreshes token when expiring', async () => {
-    const ensureFreshToken = await loadEnsureFreshToken();
-
-    sessionJson = JSON.stringify({
+  it('refreshes expiring session and rotates tokens', async () => {
+    seedSession({
       accessToken: 'OLD_ACCESS',
       refreshToken: 'OLD_REFRESH',
-      expiresAt: new Date(Date.now() - 10_000).toISOString(),
-      user: { id: 'u', name: 'd', roles: ['nurse'], units: ['UCI'] },
+      expiresAt: new Date(Date.now() - 10_000).toISOString(), // expirado
     });
 
-    const token = await ensureFreshToken('fhir');
+    const { ensureFresh } = await loadEnsureFresh();
+
+    const token = await ensureFresh('fhir');
     expect(token).toBe('NEW_ACCESS');
+
+    // persistió sesión rotada
+    const persisted = store.get(sessionKey());
+    expect(persisted).toBeTruthy();
+    const parsed = JSON.parse(persisted as string);
+    expect(parsed.accessToken).toBe('NEW_ACCESS');
+    expect(parsed.refreshToken).toBe('NEW_REFRESH');
+
+    expect((globalThis as any).fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('single-flight: concurrent refresh only hits token endpoint once', async () => {
-    const ensureFreshToken = await loadEnsureFreshToken();
-
-    sessionJson = JSON.stringify({
+  it('performs refresh in single flight when called concurrently', async () => {
+    seedSession({
       accessToken: 'OLD_ACCESS',
       refreshToken: 'OLD_REFRESH',
       expiresAt: new Date(Date.now() - 10_000).toISOString(),
-      user: { id: 'u', name: 'd', roles: ['nurse'], units: ['UCI'] },
     });
 
-    const [a, b] = await Promise.all([
-      ensureFreshToken('fhir'),
-      ensureFreshToken('fhir'),
-    ]);
+    const { ensureFresh } = await loadEnsureFresh();
 
-    expect(a).toBe('NEW_ACCESS');
-    expect(b).toBe('NEW_ACCESS');
+    const [t1, t2] = await Promise.all([ensureFresh('fhir'), ensureFresh('fhir')]);
+    expect(t1).toBe('NEW_ACCESS');
+    expect(t2).toBe('NEW_ACCESS');
     expect((globalThis as any).fetch).toHaveBeenCalledTimes(1);
   });
 });
+

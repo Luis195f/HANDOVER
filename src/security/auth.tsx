@@ -28,6 +28,7 @@ type AuthWarnCode =
   | 'AUTH_REFRESH_START'
   | 'AUTH_REFRESH_SUCCESS'
   | 'AUTH_REFRESH_FAILED'
+  | 'AUTH_REFRESH_SKIP'
   | 'AUTH_REFRESH_NO_TOKEN_ENDPOINT'
   | 'AUTH_REFRESH_ERROR'
   | 'AUTH_REQUEST_NOT_READY';
@@ -650,24 +651,41 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
  */
 // (refreshInFlight se declara una sola vez a nivel de módulo, cerca del inicio)
 
-export async function ensureFreshToken(_audience?: string): Promise<string | null> {
-  // IMPORTANTE: si tu módulo usa hidratación cacheada, asegúrate de que aquí
-  // se lea el storage al menos una vez. Si ya lo haces dentro de getCurrentSession(), ok.
+/**
+ * Retorna un access token vigente. Si el access token está expirado (o por expirar),
+ * intenta refrescarlo mediante refresh_token (OIDC).
+ *
+ * - Implementa "single-flight": múltiples llamadas concurrentes comparten 1 solo refresh.
+ * - Nunca loguea tokens.
+ * - Si audience === '401', fuerza refresh (útil tras un 401 real).
+ */
+export async function ensureFreshToken(audience?: string): Promise<string | null> {
   const session = await getCurrentSession();
-  if (!session?.accessToken) return null;
+
+  if (!session?.accessToken) {
+    warnAuth('AUTH_REFRESH_SKIP', { reason: 'no-session' });
+    return null;
+  }
 
   const accessToken = session.accessToken;
 
-  // Si no hay expiresAt o es inválido => tratamos como "expiring" (fuerza refresh si hay refreshToken)
+  // Determinar si hay que refrescar (expiringSoon o forzado por "401")
+  const forceRefresh = audience === '401';
+
+  // Si REFRESH_SKEW_MS no está definido correctamente, fuerza a 60s por defecto
+  const skewMs =
+    typeof REFRESH_SKEW_MS === 'number' && REFRESH_SKEW_MS > 0 ? REFRESH_SKEW_MS : 60_000;
+
   const expiresAtMs = session.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
-  const isExpiring =
-    !Number.isFinite(expiresAtMs) || expiresAtMs - Date.now() <= REFRESH_SKEW_MS;
+  const isExpiring = !Number.isFinite(expiresAtMs) || expiresAtMs - Date.now() <= skewMs;
 
-  if (!isExpiring) return accessToken;
+  if (!isExpiring && !forceRefresh) return accessToken;
 
-  // Asegura refreshToken en variable local (narrowing estable para TS y closures)
   const refreshToken = session.refreshToken;
-  if (!refreshToken) return accessToken;
+  if (!refreshToken) {
+    warnAuth('AUTH_REFRESH_SKIP', { reason: 'no-refresh-token' });
+    return accessToken;
+  }
 
   // Single-flight
   if (refreshInFlight) return refreshInFlight;
@@ -732,7 +750,7 @@ export async function ensureFreshToken(_audience?: string): Promise<string | nul
       await setSession(nextSession);
       warnAuth('AUTH_REFRESH_SUCCESS');
 
-      return nextSession.accessToken ?? null;
+      return nextSession.accessToken ?? accessToken;
     } catch (error) {
       warnAuth('AUTH_REFRESH_ERROR', { message: (error as any)?.message });
       return accessToken;
@@ -743,6 +761,10 @@ export async function ensureFreshToken(_audience?: string): Promise<string | nul
 
   return refreshInFlight;
 }
+
+// Alias usado por algunos tests / consumers
+export const ensureFreshAccessToken = ensureFreshToken;
+
 
 export async function setCurrentSession(session: SessionModel | null): Promise<void> {
   await setSession(session);
