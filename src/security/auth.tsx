@@ -210,6 +210,8 @@ let hydrateInFlight: Promise<HandoverSession | null> | null = null;
 const listeners: Array<(session: HandoverSession | null) => void> = [];
 let logoutInFlight: Promise<void> | null = null;
 let pendingLogoutMessage: string | undefined;
+let sessionGeneration = 0;
+let lastLogoutAt = 0;
 
 function notify(session: SessionModel | null) {
   listeners.forEach((listener) => {
@@ -247,6 +249,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
         const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
         if (persisted) {
           currentSession = normalizeSession(parseSession(persisted));
+          sessionGeneration += 1;
           return currentSession;
         }
       } catch (error) {
@@ -263,6 +266,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
         currentSession = null;
       }
 
+      sessionGeneration += 1;
       return currentSession;
     } finally {
       hydrated = true;
@@ -274,6 +278,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
 }
 
 async function setSession(session: HandoverSession | null): Promise<void> {
+  sessionGeneration += 1;
   currentSession = session ? normalizeSession({ ...session }) : null;
   await persistSession(currentSession);
   notify(currentSession);
@@ -586,6 +591,7 @@ export async function logout(): Promise<void> {
   if (logoutInFlight) return logoutInFlight;
 
   const runner = async () => {
+    lastLogoutAt = Date.now();
     await hydrateSession();
     const config = buildAuthConfig();
     const domain = AUTH0_DOMAIN;
@@ -618,6 +624,7 @@ export async function logoutAndClear(options: LogoutOptions = {}): Promise<void>
   if (options.skipRemote) {
     if (logoutInFlight) return logoutInFlight;
     logoutInFlight = (async () => {
+      lastLogoutAt = Date.now();
       await setSession(null);
       if (options.message) Alert.alert('Sesión expirada', options.message);
       navigation.resetTo('Login');
@@ -660,7 +667,13 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
  * - Si audience === '401', fuerza refresh (útil tras un 401 real).
  */
 export async function ensureFreshToken(audience?: string): Promise<string | null> {
+  const startLogoutMarker = lastLogoutAt;
   const session = await getCurrentSession();
+  if (lastLogoutAt !== startLogoutMarker) {
+    warnAuth('AUTH_REFRESH_SKIP', { reason: 'logout-in-flight' });
+    return null;
+  }
+  const logoutMarker = startLogoutMarker;
 
   if (!session?.accessToken) {
     warnAuth('AUTH_REFRESH_SKIP', { reason: 'no-session' });
@@ -689,6 +702,9 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
 
   // Single-flight
   if (refreshInFlight) return refreshInFlight;
+
+  const startingGeneration = sessionGeneration;
+  const startingSession = session;
 
   refreshInFlight = (async () => {
     try {
@@ -746,6 +762,13 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
         refreshToken: newRefresh,
         expiresAt: nextExpiresAt,
       };
+
+      const latestSession = await getCurrentSession();
+      const sessionChanged = latestSession !== startingSession || sessionGeneration !== startingGeneration;
+      if (logoutInFlight || sessionChanged || !latestSession || lastLogoutAt !== logoutMarker) {
+        warnAuth('AUTH_REFRESH_SKIP', { reason: logoutInFlight ? 'logout-in-flight' : 'session-changed' });
+        return latestSession?.accessToken ?? null;
+      }
 
       await setSession(nextSession);
       warnAuth('AUTH_REFRESH_SUCCESS');
