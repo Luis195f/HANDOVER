@@ -21,23 +21,32 @@ type QueueItemMeta = {
 };
 
 function resolveSyncOpts(): SyncOpts | null {
+  const envFallback = (process?.env?.EXPO_PUBLIC_FHIR_BASE as string) ?? '';
+  let base = envFallback;
+
   try {
     // ENV tolerante
     const env = require('@/src/config/env') as { ENV?: { FHIR_BASE?: string }; FHIR_BASE?: string };
-    const base: string =
-      env?.ENV?.FHIR_BASE ?? env?.FHIR_BASE ?? (process?.env?.EXPO_PUBLIC_FHIR_BASE as string) ?? '';
-    if (!base) return null;
+    base = env?.ENV?.FHIR_BASE ?? env?.FHIR_BASE ?? base;
+  } catch {
+    // ignore missing env module
+  }
+
+  if (!base) return null;
+
+  let getToken: SyncOpts['getToken'] = async () => null;
+  try {
     // Auth tolerante
     const auth = require('@/src/services/AuthService') as {
       getToken?: SyncOpts['getToken'];
       default?: { getToken?: SyncOpts['getToken'] };
     };
-    const getToken: SyncOpts['getToken'] =
-      auth?.getToken ?? auth?.default?.getToken ?? (async () => null);
-    return { fhirBaseUrl: base, getToken, backoff: { retries: 5, minMs: 500, maxMs: 15000 } };
+    getToken = auth?.getToken ?? auth?.default?.getToken ?? getToken;
   } catch {
-    return null;
+    // ignore missing auth module
   }
+
+  return { fhirBaseUrl: base, getToken, backoff: { retries: 5, minMs: 500, maxMs: 15000 } };
 }
 
 export default function SyncCenter() {
