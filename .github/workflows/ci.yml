@@ -14,7 +14,6 @@ jobs:
   node:
     name: Node CI (non-blocking)
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
       CI: "true"
       NODE_OPTIONS: "--dns-result-order=ipv4first"
@@ -51,6 +50,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm -w typecheck || true
+
+      - name: Validate FHIR Bundles
+        run: pnpm -w validate:fhir
 
       - name: Lint
         run: pnpm -w lint --fix || true
