@@ -7,6 +7,7 @@ import type {
   FluidBalanceInfo,
   HandoverBedsideChecklist,
   HandoverSignature,
+  AttachmentItem,
   MedicationItem,
   MobilityInfo,
   NutritionInfo,
@@ -59,6 +60,34 @@ const resolveOptions = (options?: BuildOptions): ResolvedBuildOptions => {
         };
   return { ...merged, now: normalizeNow };
 };
+
+type AttachWarnCode =
+  | 'ATTACH_PICK_CANCELLED'
+  | 'ATTACH_PERMISSION_DENIED'
+  | 'ATTACH_TOO_LARGE'
+  | 'ATTACH_UNSUPPORTED_TYPE'
+  | 'ATTACH_READ_FAILED'
+  | 'ATTACH_MIME_FALLBACK'
+  | 'ATTACH_EMBED_OK'
+  | 'ATTACH_EMBED_SKIPPED';
+
+function warnAttach(code: AttachWarnCode, meta?: Record<string, unknown>) {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) return;
+  console.warn(`[handover][attachments][${code}]`, meta ?? {});
+}
+
+export type AttachErrorCode = 'ATTACH_TOO_LARGE' | 'ATTACH_UNSUPPORTED_TYPE' | 'ATTACH_READ_FAILED';
+
+export class AttachError extends Error {
+  code: AttachErrorCode;
+
+  constructor(code: AttachErrorCode) {
+    super(code);
+    this.code = code;
+  }
+}
+
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
 
@@ -517,6 +546,16 @@ type OxygenTherapyInput = z.infer<typeof OxygenTherapySchema>;
 type AudioAttachmentInput = z.infer<typeof AudioAttachmentSchema>;
 type AttesterInput = z.infer<typeof AttesterSchema>;
 
+type UrlAttachmentInput = {
+  url: string;
+  contentType?: string;
+  name?: string;
+  title?: string;
+  description?: string;
+};
+
+type AttachmentInput = AttachmentItem | UrlAttachmentInput;
+
 type MedicationValues = {
   patientId: string;
   encounterId?: string;
@@ -607,6 +646,7 @@ export type HandoverValues = {
   medications?: Array<MedicationStatementInput | MedicationItem>;
   oxygenTherapy?: OxygenTherapyInput | null;
   audioAttachment?: AudioAttachmentInput | null;
+  attachments?: AttachmentInput[];
   composition?: CompositionInput;
   closingSummary?: string | null;
   sbar?: SbarValues;
@@ -665,6 +705,31 @@ function encounterReference(encounterId?: string): Reference | undefined {
   if (!normalized) return undefined;
   return { reference: `Encounter/${normalized}`, type: 'Encounter' };
 }
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  pdf: 'application/pdf',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/m4a',
+  wav: 'audio/wav',
+};
+
+const isSupportedContentType = (contentType: string) =>
+  contentType === 'application/pdf' ||
+  contentType === 'application/octet-stream' ||
+  contentType.startsWith('image/') ||
+  contentType.startsWith('audio/');
+
+const inferContentType = (input?: string) => {
+  const match = input?.match(/\.([a-z0-9]+)(?:\?|#|$)/i);
+  const ext = match?.[1]?.toLowerCase();
+  if (ext && MIME_BY_EXTENSION[ext]) {
+    return { contentType: MIME_BY_EXTENSION[ext], ext, inferred: true };
+  }
+  return { contentType: 'application/octet-stream', ext, inferred: false };
+};
 
 function codeableConceptFromCode(
   code: TerminologyCode<string>,
@@ -2150,6 +2215,137 @@ export function mapDocumentReferenceAudio(
   };
 }
 
+const isUrlAttachmentInput = (attachment: AttachmentInput): attachment is UrlAttachmentInput =>
+  typeof (attachment as UrlAttachmentInput).url === 'string';
+
+const isAttachmentItem = (attachment: AttachmentInput): attachment is AttachmentItem =>
+  typeof (attachment as AttachmentItem).uri === 'string';
+
+const resolveAttachmentContentType = (attachment: AttachmentInput) => {
+  const source = isAttachmentItem(attachment) ? attachment.name ?? attachment.uri : attachment.url ?? attachment.name;
+  const provided = attachment.contentType?.trim();
+  if (provided) {
+    if (!isSupportedContentType(provided)) {
+      warnAttach('ATTACH_UNSUPPORTED_TYPE', { contentType: provided, ext: inferContentType(source).ext });
+      throw new AttachError('ATTACH_UNSUPPORTED_TYPE');
+    }
+    return { contentType: provided, ext: inferContentType(source).ext, usedFallback: false };
+  }
+  const inferred = inferContentType(source);
+  if (inferred.contentType === 'application/octet-stream') {
+    warnAttach('ATTACH_MIME_FALLBACK', { ext: inferred.ext, chosen: inferred.contentType });
+  }
+  if (!isSupportedContentType(inferred.contentType)) {
+    warnAttach('ATTACH_UNSUPPORTED_TYPE', { contentType: inferred.contentType, ext: inferred.ext });
+    throw new AttachError('ATTACH_UNSUPPORTED_TYPE');
+  }
+  return { contentType: inferred.contentType, ext: inferred.ext, usedFallback: true };
+};
+
+async function mapDocumentReferenceFromAttachment(args: {
+  attachment: AttachmentInput;
+  subjectRef: Reference;
+  encounterRef?: Reference;
+  authorRef: Reference;
+  nowIso: string;
+}): Promise<{ document: DocumentReference; bytes?: number }> {
+  const { attachment, subjectRef, encounterRef, authorRef, nowIso } = args;
+  const { contentType } = resolveAttachmentContentType(attachment);
+
+  const attachmentTitle =
+    attachment.name ??
+    ('title' in attachment ? attachment.title : undefined) ??
+    ('description' in attachment ? attachment.description : undefined) ??
+    'attachment';
+  const attachmentResource: Attachment = {
+    contentType,
+    title: attachmentTitle,
+  };
+
+  if (isUrlAttachmentInput(attachment)) {
+    if (!/^https:\/\//i.test(attachment.url)) {
+      warnAttach('ATTACH_UNSUPPORTED_TYPE', { ext: inferContentType(attachment.url).ext });
+      throw new AttachError('ATTACH_UNSUPPORTED_TYPE');
+    }
+    attachmentResource.url = attachment.url;
+    return {
+      document: {
+        resourceType: 'DocumentReference',
+        status: 'current',
+        subject: subjectRef,
+        encounter: encounterRef,
+        author: [authorRef],
+        date: nowIso,
+        type: { text: 'Handover attachment' },
+        content: [{ attachment: attachmentResource }],
+      },
+    };
+  }
+
+  if (!isAttachmentItem(attachment)) {
+    throw new AttachError('ATTACH_UNSUPPORTED_TYPE');
+  }
+
+  const FileSystem = await import('expo-file-system').catch(() => null);
+  if (!FileSystem) {
+    warnAttach('ATTACH_READ_FAILED', { kind: attachment.kind, contentType, step: 'getInfo' });
+    throw new AttachError('ATTACH_READ_FAILED');
+  }
+
+  let info;
+  try {
+    info = await FileSystem.getInfoAsync(attachment.uri, { size: true });
+  } catch {
+    warnAttach('ATTACH_READ_FAILED', { kind: attachment.kind, contentType, step: 'getInfo' });
+    throw new AttachError('ATTACH_READ_FAILED');
+  }
+
+  if (!info?.exists || info.isDirectory) {
+    warnAttach('ATTACH_READ_FAILED', { kind: attachment.kind, contentType, step: 'getInfo' });
+    throw new AttachError('ATTACH_READ_FAILED');
+  }
+
+  const reportedSize =
+    typeof info.size === 'number' ? info.size : attachment.size;
+
+  if (typeof reportedSize === 'number' && reportedSize > MAX_ATTACHMENT_BYTES) {
+    warnAttach('ATTACH_TOO_LARGE', {
+      bytes: reportedSize,
+      maxBytes: MAX_ATTACHMENT_BYTES,
+      kind: attachment.kind,
+      contentType,
+    });
+    throw new AttachError('ATTACH_TOO_LARGE');
+  }
+
+  let dataBase64: string;
+  try {
+    dataBase64 = await FileSystem.readAsStringAsync(attachment.uri, { encoding: 'base64' });
+  } catch {
+    warnAttach('ATTACH_READ_FAILED', { kind: attachment.kind, contentType, step: 'readAsString' });
+    throw new AttachError('ATTACH_READ_FAILED');
+  }
+
+  const bytes = reportedSize ?? Math.floor((dataBase64.length * 3) / 4);
+  attachmentResource.data = dataBase64;
+  attachmentResource.size = bytes;
+  attachmentResource.hash = hashHex(dataBase64);
+
+  return {
+    document: {
+      resourceType: 'DocumentReference',
+      status: 'current',
+      subject: subjectRef,
+      encounter: encounterRef,
+      author: [authorRef],
+      date: nowIso,
+      type: { text: 'Handover attachment' },
+      content: [{ attachment: attachmentResource }],
+    },
+    bytes,
+  };
+}
+
 export function buildComposition(
   values: CompositionValues,
   refs: BundleReferenceIndex,
@@ -2342,9 +2538,17 @@ export function buildComposition(
 }
 
 export function buildHandoverBundle(
+  input: HandoverInput & { attachments?: undefined | [] },
+  options?: BuildOptions,
+): Bundle;
+export function buildHandoverBundle(
+  input: HandoverInput & { attachments: AttachmentInput[] },
+  options?: BuildOptions,
+): Promise<Bundle>;
+export function buildHandoverBundle(
   input: HandoverInput,
   options?: BuildOptions,
-): Bundle {
+): Bundle | Promise<Bundle> {
   const values = 'values' in input ? input.values : input;
   const optionsMerged: ResolvedBuildOptions = resolveOptions(options);
   const nowIso = optionsMerged.now();
@@ -2482,253 +2686,290 @@ export function buildHandoverBundle(
   const documentWithPatientReference = document
     ? replaceSubjectReference(document, patientSubjectReference)
     : undefined;
+  const buildBundle = (mappedAttachments: Array<{ document: DocumentReference; bytes?: number }>): Bundle => {
+    const entries: BundleEntry[] = [
+      { fullUrl: patientFullUrl, resource: patientWithId, request: { method: 'POST', url: 'Patient' } },
+    ];
+    const vitalsRefs: string[] = [];
+    const medicationRefs: string[] = [];
+    const treatmentRefs: string[] = [];
+    const oxygenRefs: string[] = [];
+    const attachmentRefs: string[] = [];
+    const nutritionRefs: string[] = [];
+    const eliminationRefs: string[] = [];
+    const mobilitySkinRefs: string[] = [];
+    const fluidBalanceRefs: string[] = [];
+    const painRefs: string[] = [];
+    const bradenRefs: string[] = [];
+    const glasgowRefs: string[] = [];
+    const examRefs: string[] = [];
+    const procedureRefs: string[] = [];
+    const riskRefs: string[] = [];
+    const issueRefs: string[] = [];
+    const diagnosisRefs: string[] = [];
 
-  const entries: BundleEntry[] = [
-    { fullUrl: patientFullUrl, resource: patientWithId, request: { method: 'POST', url: 'Patient' } },
-  ];
-  const vitalsRefs: string[] = [];
-  const medicationRefs: string[] = [];
-  const treatmentRefs: string[] = [];
-  const oxygenRefs: string[] = [];
-  const attachmentRefs: string[] = [];
-  const nutritionRefs: string[] = [];
-  const eliminationRefs: string[] = [];
-  const mobilitySkinRefs: string[] = [];
-  const fluidBalanceRefs: string[] = [];
-  const painRefs: string[] = [];
-  const bradenRefs: string[] = [];
-  const glasgowRefs: string[] = [];
-  const examRefs: string[] = [];
-  const procedureRefs: string[] = [];
-  const riskRefs: string[] = [];
-  const issueRefs: string[] = [];
-  const diagnosisRefs: string[] = [];
-
-  vitalObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    vitalObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      vitalsRefs.push(fullUrl);
     });
-    vitalsRefs.push(fullUrl);
-  });
 
-  oxygenObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    oxygenObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      oxygenRefs.push(fullUrl);
     });
-    oxygenRefs.push(fullUrl);
-  });
 
-  nutritionObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    nutritionObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      nutritionRefs.push(fullUrl);
     });
-    nutritionRefs.push(fullUrl);
-  });
 
-  eliminationObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    eliminationObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      eliminationRefs.push(fullUrl);
     });
-    eliminationRefs.push(fullUrl);
-  });
 
-  mobilitySkinObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    mobilitySkinObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      mobilitySkinRefs.push(fullUrl);
     });
-    mobilitySkinRefs.push(fullUrl);
-  });
 
-  fluidBalanceObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    fluidBalanceObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      fluidBalanceRefs.push(fullUrl);
     });
-    fluidBalanceRefs.push(fullUrl);
-  });
 
-  examObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Observation' },
+    examObservations.forEach((observation) => {
+      const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      examRefs.push(fullUrl);
     });
-    examRefs.push(fullUrl);
-  });
 
-  if (evaObservation) {
-    const { resource, fullUrl } = assignStableIds(evaObservation, values.patientId);
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
-    painRefs.push(fullUrl);
-  }
+    if (evaObservation) {
+      const { resource, fullUrl } = assignStableIds(evaObservation, values.patientId);
+      entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+      painRefs.push(fullUrl);
+    }
 
-  if (bradenObservation) {
-    const { resource, fullUrl } = assignStableIds(bradenObservation, values.patientId);
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
-    bradenRefs.push(fullUrl);
-  }
+    if (bradenObservation) {
+      const { resource, fullUrl } = assignStableIds(bradenObservation, values.patientId);
+      entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+      bradenRefs.push(fullUrl);
+    }
 
-  if (glasgowObservation) {
-    const { resource, fullUrl } = assignStableIds(glasgowObservation, values.patientId);
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
-    glasgowRefs.push(fullUrl);
-  }
+    if (glasgowObservation) {
+      const { resource, fullUrl } = assignStableIds(glasgowObservation, values.patientId);
+      entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+      glasgowRefs.push(fullUrl);
+    }
 
-  riskConditions.forEach((condition) => {
-    const { resource, fullUrl } = assignStableIds(condition, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Condition' },
+    riskConditions.forEach((condition) => {
+      const { resource, fullUrl } = assignStableIds(condition, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Condition' },
+      });
+      riskRefs.push(fullUrl);
     });
-    riskRefs.push(fullUrl);
-  });
 
-  detectedIssues.forEach((issue) => {
-    const { resource, fullUrl } = assignStableIds(issue, values.patientId);
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'DetectedIssue' } });
-    issueRefs.push(fullUrl);
-  });
-
-  diagnoses.forEach((condition) => {
-    const { resource, fullUrl } = assignStableIds(condition, values.patientId);
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Condition' } });
-    diagnosisRefs.push(fullUrl);
-  });
-
-  medications.forEach((medication) => {
-    const { resource, fullUrl } = assignStableIds(medication, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'MedicationStatement' },
+    detectedIssues.forEach((issue) => {
+      const { resource, fullUrl } = assignStableIds(issue, values.patientId);
+      entries.push({ fullUrl, resource, request: { method: 'POST', url: 'DetectedIssue' } });
+      issueRefs.push(fullUrl);
     });
-    medicationRefs.push(fullUrl);
-  });
 
-  treatmentProcedures.forEach((procedure) => {
-    const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Procedure' },
+    diagnoses.forEach((condition) => {
+      const { resource, fullUrl } = assignStableIds(condition, values.patientId);
+      entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Condition' } });
+      diagnosisRefs.push(fullUrl);
     });
-    treatmentRefs.push(fullUrl);
-  });
 
-  procedureResources.forEach((procedure) => {
-    const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'Procedure' },
+    medications.forEach((medication) => {
+      const { resource, fullUrl } = assignStableIds(medication, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'MedicationStatement' },
+      });
+      medicationRefs.push(fullUrl);
     });
-    procedureRefs.push(fullUrl);
-  });
 
-  oxygenResources.forEach((resource) => {
-    const { resource: withId, fullUrl } = assignStableIds(resource, values.patientId);
-    entries.push({
-      fullUrl,
-      resource: withId,
-      request: { method: 'POST', url: resource.resourceType },
+    treatmentProcedures.forEach((procedure) => {
+      const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Procedure' },
+      });
+      treatmentRefs.push(fullUrl);
     });
-    oxygenRefs.push(fullUrl);
-  });
 
-  if (documentWithPatientReference) {
-    const { resource, fullUrl } = assignStableIds(documentWithPatientReference, values.patientId);
-    entries.push({
-      fullUrl,
-      resource,
-      request: { method: 'POST', url: 'DocumentReference' },
+    procedureResources.forEach((procedure) => {
+      const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Procedure' },
+      });
+      procedureRefs.push(fullUrl);
     });
-    attachmentRefs.push(fullUrl);
-  }
 
-  const composition = replaceSubjectReference(
-    buildComposition(
-      {
-        patientId: values.patientId,
-        encounterId: values.encounterId,
-        author: values.author,
-        composition: values.composition,
-        closingSummary: values.closingSummary,
-        administrativeData: values.administrativeData,
-        sbar: values.sbar,
-        signatures: values.signatures,
-        sectionSources: { exams: examInputCount, procedures: procedureInputCount },
-      },
-      {
-        vitals: vitalsRefs,
-        medications: medicationRefs,
-        treatments: treatmentRefs,
-        oxygen: oxygenRefs,
-        attachments: attachmentRefs,
-        nutrition: nutritionRefs,
-        elimination: eliminationRefs,
-        mobilitySkin: mobilitySkinRefs,
-        fluidBalance: fluidBalanceRefs,
-        pain: painRefs,
-        braden: bradenRefs,
-        glasgow: glasgowRefs,
-        exams: examRefs,
-        procedures: procedureRefs,
-        risks: riskRefs,
-        detectedIssues: issueRefs,
-        diagnoses: diagnosisRefs,
-      },
-      sharedOptions,
-    ),
-    patientSubjectReference,
-  );
+    oxygenResources.forEach((resource) => {
+      const { resource: withId, fullUrl } = assignStableIds(resource, values.patientId);
+      entries.push({
+        fullUrl,
+        resource: withId,
+        request: { method: 'POST', url: resource.resourceType },
+      });
+      oxygenRefs.push(fullUrl);
+    });
 
-  const { resource: compositionWithId, fullUrl: compositionFullUrl } = assignStableIds(
-    composition,
-    values.patientId,
-  );
+    if (documentWithPatientReference) {
+      const { resource, fullUrl } = assignStableIds(documentWithPatientReference, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'DocumentReference' },
+      });
+      attachmentRefs.push(fullUrl);
+    }
 
-  entries.push({
-    fullUrl: compositionFullUrl,
-    resource: compositionWithId,
-    request: { method: 'POST', url: 'Composition' },
-  });
+    mappedAttachments.forEach(({ document: attachmentDocument }) => {
+      const { resource, fullUrl } = assignStableIds(attachmentDocument, values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'DocumentReference' },
+      });
+      attachmentRefs.push(fullUrl);
+    });
 
-  const bundle: Bundle = {
-    resourceType: 'Bundle',
-    type: 'transaction',
-    entry: entries,
+    const composition = replaceSubjectReference(
+      buildComposition(
+        {
+          patientId: values.patientId,
+          encounterId: values.encounterId,
+          author: values.author,
+          composition: values.composition,
+          closingSummary: values.closingSummary,
+          administrativeData: values.administrativeData,
+          sbar: values.sbar,
+          signatures: values.signatures,
+          sectionSources: { exams: examInputCount, procedures: procedureInputCount },
+        },
+        {
+          vitals: vitalsRefs,
+          medications: medicationRefs,
+          treatments: treatmentRefs,
+          oxygen: oxygenRefs,
+          attachments: attachmentRefs,
+          nutrition: nutritionRefs,
+          elimination: eliminationRefs,
+          mobilitySkin: mobilitySkinRefs,
+          fluidBalance: fluidBalanceRefs,
+          pain: painRefs,
+          braden: bradenRefs,
+          glasgow: glasgowRefs,
+          exams: examRefs,
+          procedures: procedureRefs,
+          risks: riskRefs,
+          detectedIssues: issueRefs,
+          diagnoses: diagnosisRefs,
+        },
+        sharedOptions,
+      ),
+      patientSubjectReference,
+    );
+
+    const { resource: compositionWithId, fullUrl: compositionFullUrl } = assignStableIds(
+      composition,
+      values.patientId,
+    );
+
+    entries.push({
+      fullUrl: compositionFullUrl,
+      resource: compositionWithId,
+      request: { method: 'POST', url: 'Composition' },
+    });
+
+    const bundle: Bundle = {
+      resourceType: 'Bundle',
+      type: 'transaction',
+      entry: entries,
+    };
+
+    // BEGIN HANDOVER_FHIR_VALIDATION
+    const validation = validateFhirResource(bundle);
+    if (!validation.isValid) {
+      const messages = validation.errors.map((err) => `${err.path}: ${err.message}`);
+      const error = new Error(messages.join('; '));
+      (error as Error & { details: string[] }).details = messages;
+      throw error;
+    }
+    // END HANDOVER_FHIR_VALIDATION
+
+    return bundle;
   };
 
-  // BEGIN HANDOVER_FHIR_VALIDATION
-  const validation = validateFhirResource(bundle);
-  if (!validation.isValid) {
-    const messages = validation.errors.map((err) => `${err.path}: ${err.message}`);
-    const error = new Error(messages.join('; '));
-    (error as Error & { details: string[] }).details = messages;
-    throw error;
+  const attachmentInputs = values.attachments ?? [];
+  if (attachmentInputs.length === 0) {
+    return buildBundle([]);
   }
-  // END HANDOVER_FHIR_VALIDATION
 
-  return bundle;
+  const authorRef = ensureAuthorReference(values);
+  return (async () => {
+    const mappedAttachments = await Promise.all(
+      attachmentInputs.map((attachment) =>
+        mapDocumentReferenceFromAttachment({
+          attachment,
+          subjectRef: patientSubjectReference,
+          encounterRef: encounterReference(values.encounterId),
+          authorRef,
+          nowIso,
+        }),
+      ),
+    );
+    const totalBytes = mappedAttachments.reduce((sum, current) => sum + (current.bytes ?? 0), 0);
+    warnAttach('ATTACH_EMBED_OK', {
+      count: mappedAttachments.length,
+      totalBytes: totalBytes > 0 ? totalBytes : undefined,
+    });
+    return buildBundle(mappedAttachments);
+  })();
 }
 
 type BundleEntryTransaction = FhirBundleTransaction['entry'][number];
@@ -2821,7 +3062,10 @@ function mapDetectedIssuesFromRisks(
     });
 }
 
-export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildOptions): FhirBundleTransaction {
+export async function buildFhirBundleFromFormData(
+  data: HandoverData,
+  options?: BuildOptions,
+): Promise<FhirBundleTransaction> {
   const optionsMerged = resolveOptions(options);
   const timestamp = data.administrativeData.shiftEnd ?? optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => timestamp };
@@ -2908,6 +3152,19 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         sharedOptions,
       )
     : undefined;
+  const authorRef = ensureAuthorReference({ author: undefined });
+  const attachmentInputs = data.attachments ?? [];
+  const mappedAttachments = await Promise.all(
+    attachmentInputs.map((attachment) =>
+      mapDocumentReferenceFromAttachment({
+        attachment,
+        subjectRef: mappingContext.subject,
+        encounterRef: mappingContext.encounter,
+        authorRef,
+        nowIso: timestamp,
+      }),
+    ),
+  );
 
   const diagnoses = mapDiagnoses(data, mappingContext);
 
@@ -3023,6 +3280,9 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   });
   oxygenDevices.forEach(pushEntry);
   if (document) pushEntry(document);
+  mappedAttachments.forEach(({ document: attachmentDocument }) => {
+    pushEntry(attachmentDocument);
+  });
 
   const composition = buildComposition(
     {

@@ -63,6 +63,14 @@ export type SkinInfo = {
   hasPressureInjury?: boolean;
 };
 
+export type AttachmentItem = {
+  uri: string;
+  contentType?: string;
+  name?: string;
+  size?: number;
+  kind?: 'image' | 'pdf' | 'other';
+};
+
 export type RiskType = z.infer<typeof zRiskType>;
 export type RiskItem = z.infer<typeof zRiskItem>;
 
@@ -214,6 +222,7 @@ export type HandoverValues = {
   oxygenTherapy?: OxygenTherapy;
   devices?: DeviceItem[];
   audioUri?: string;
+  attachments?: AttachmentItem[];
   nutrition?: NutritionInfo;
   elimination?: EliminationInfo;
   mobility?: MobilityInfo;

@@ -22,8 +22,9 @@ import * as Speech from 'expo-speech';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
+import { FileAttach } from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
-import { buildHandoverBundle, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
+import { AttachError, buildHandoverBundle, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { refineSBARWithAI } from '@/src/lib/ai-sbar';
@@ -463,6 +464,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       vitals: prefilledVitals ?? {},
       oxygenTherapy: {},
       devices: [],
+      attachments: [],
       fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
@@ -500,7 +502,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefillMeta,
   ]);
 
- const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
+  const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
 
   const { control, formState } = form;
   const errors: HandoverFormErrors = formState.errors ?? {};
@@ -518,6 +520,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   // END HANDOVER D4 – Get active unit
   const signaturesValue = form.watch('signatures');
   const outgoingSignature = signaturesValue?.outgoing;
+  const attachmentsValue = form.watch('attachments') ?? [];
   const signatureErrors = errors.signatures ?? {};
   const outgoingSignatureError = signatureErrors.outgoing?.message as string | undefined;
   const incomingSignatureError = signatureErrors.incoming?.message as string | undefined;
@@ -1152,6 +1155,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         treatments,
         oxygenTherapy,
         audioAttachment: audioAttachment ?? undefined,
+        attachments: values.attachments ?? [],
         composition: { title: 'Clinical handover summary', status: status === 'final' ? 'final' : 'amended' },
         administrativeData,
         closingSummary: values.closingSummary,
@@ -1166,7 +1170,19 @@ export default function HandoverForm({ navigation, route }: Props) {
         signatures: values.signatures,
       };
 
-      const bundle = buildHandoverBundle(handoverInput, { now: () => nowIso });
+      let bundle;
+      try {
+        bundle = await buildHandoverBundle(handoverInput, { now: () => nowIso });
+      } catch (error) {
+        if (error instanceof AttachError) {
+          Alert.alert(
+            'Adjuntos',
+            'No se pudo adjuntar un archivo. Reintenta o elimina el adjunto.',
+          );
+          return;
+        }
+        throw error;
+      }
 
       if (isFastValidateEnabled()) {
         const netState = await NetInfo.fetch();
@@ -1757,6 +1773,12 @@ export default function HandoverForm({ navigation, route }: Props) {
               onRecorded={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
               onAttach={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
             />
+            <View style={{ marginTop: 16 }}>
+              <FileAttach
+                value={attachmentsValue}
+                onChange={(next) => form.setValue('attachments', next, { shouldDirty: true })}
+              />
+            </View>
           </CollapsibleSection>
         </View>
       )}

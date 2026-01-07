@@ -7,8 +7,8 @@ describe('Attachments — URL y MIME permitidos', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T19:22:00Z';
 
-  it('acepta audio mp3 con contentType correcto', () => {
-    const b = buildHandoverBundle(
+  it('acepta audio mp3 con contentType correcto', async () => {
+    const b = await buildHandoverBundle(
       { patientId, attachments: [{ url: 'https://cdn.example.org/aud.mp3', contentType: 'audio/mpeg', description: 'Audio SBAR' }] },
       { now }
     );
@@ -17,8 +17,8 @@ describe('Attachments — URL y MIME permitidos', () => {
     expect(docs[0]?.content?.[0]?.attachment?.contentType).toBe('audio/mpeg');
   });
 
-  it('infiera contentType por extensión cuando no se provee', () => {
-    const b = buildHandoverBundle(
+  it('infiera contentType por extensión cuando no se provee', async () => {
+    const b = await buildHandoverBundle(
       { patientId, attachments: [{ url: 'https://cdn.example.org/nota.pdf', description: 'Informe' }] },
       { now }
     );
@@ -26,17 +26,17 @@ describe('Attachments — URL y MIME permitidos', () => {
     expect(docs[0]?.content?.[0]?.attachment?.contentType).toBe('application/pdf');
   });
 
-  it('rechaza MIME no permitido si el usuario lo provee (p.ej., text/plain)', () => {
-    expect(() =>
+  it('rechaza MIME no permitido si el usuario lo provee (p.ej., text/plain)', async () => {
+    await expect(
       buildHandoverBundle(
         { patientId, attachments: [{ url: 'https://x.example.org/voice.mp3', contentType: 'text/plain' }] },
         { now }
       )
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it('permite URL sin contentType con extensión desconocida (no rompe, queda octet-stream)', () => {
-    const b = buildHandoverBundle(
+  it('permite URL sin contentType con extensión desconocida (no rompe, queda octet-stream)', async () => {
+    const b = await buildHandoverBundle(
       { patientId, attachments: [{ url: 'https://x.example.org/blob.unknown' }] },
       { now }
     );
@@ -44,12 +44,12 @@ describe('Attachments — URL y MIME permitidos', () => {
     expect(docs[0]?.content?.[0]?.attachment?.contentType).toBe('application/octet-stream');
   });
 
-  it('rechaza URL no http/https', () => {
-    expect(() =>
+  it('rechaza URL no http/https', async () => {
+    await expect(
       buildHandoverBundle(
         { patientId, attachments: [{ url: 'ftp://host/file.mp3', contentType: 'audio/mpeg' }] as any },
         { now }
       )
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });

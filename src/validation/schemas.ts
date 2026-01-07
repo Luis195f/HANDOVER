@@ -485,6 +485,14 @@ export const zFluidBalanceInfo = z.object({
   }
 });
 
+export const zAttachmentItem = z.object({
+  uri: z.string().min(1),
+  contentType: z.string().optional(),
+  name: z.string().optional(),
+  size: z.number().int().positive().optional(),
+  kind: z.enum(["image", "pdf", "other"]).optional(),
+});
+
 export const zHandover = z.object({
   administrativeData: zAdministrativeData,
 
@@ -543,7 +551,8 @@ export const zHandover = z.object({
     .optional(),
 
   // Multimedia
-  audioUri: z.string().trim().min(1).max(500).optional()
+  audioUri: z.string().trim().min(1).max(500).optional(),
+  attachments: z.array(zAttachmentItem).default([]),
 }).superRefine((value, ctx) => {
   // BEGIN HANDOVER D1 – BedsideChecklist rules
   const checklist = value.bedsideChecklist;
