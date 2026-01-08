@@ -583,8 +583,21 @@ export async function processQueueOnce(): Promise<void> {
     }
 
     const isAuthError = result.status === 401 || result.status === 403;
-    const recoverable = result.recoverable ?? isRecoverableStatus(result.status);
+    const status = result.status;
+    const recoverable = result.recoverable ?? isRecoverableStatus(status);
     const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
+
+    if (status && status >= 400 && status < 500 && !isAuthError) {
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'error',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: result.message ?? 'Unrecoverable sync error',
+        errorStatus: status,
+        errorIssuesJson: cappedIssuesJson,
+      });
+      continue;
+    }
 
     if (recoverable || isAuthError) {
       if (isAuthError) {

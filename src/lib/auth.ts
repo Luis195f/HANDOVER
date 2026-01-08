@@ -171,7 +171,7 @@ function resolveNamespace(): string {
     process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ??
     process.env.STORAGE_NAMESPACE ??
     (Constants.expoConfig?.extra?.STORAGE_NAMESPACE as string | undefined);
-  return explicit ?? 'handover';
+  return explicit && /^[\w.-]+$/.test(explicit) ? explicit : 'handover';
 }
 
 type OIDCConfig = {
