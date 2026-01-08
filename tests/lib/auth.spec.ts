@@ -157,7 +157,7 @@ describe('token validation and hydration', () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const idToken = buildIdToken({
       iss: baseEnv.OIDC_ISSUER,
-      aud: baseEnv.OIDC_AUDIENCE,
+      aud: baseEnv.OIDC_CLIENT_ID,
       exp,
       sub: 'user-123',
       role: 'nurse',
@@ -188,7 +188,7 @@ describe('token validation and hydration', () => {
     const exp = Math.floor(Date.now() / 1000) - 10;
     const idToken = buildIdToken({
       iss: baseEnv.OIDC_ISSUER,
-      aud: baseEnv.OIDC_AUDIENCE,
+      aud: baseEnv.OIDC_CLIENT_ID,
       exp,
       sub: 'user-123',
       role: 'nurse',
@@ -210,7 +210,7 @@ describe('token validation and hydration', () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const idToken = buildIdToken({
       iss: 'https://evil.example',
-      aud: baseEnv.OIDC_AUDIENCE,
+      aud: baseEnv.OIDC_CLIENT_ID,
       exp,
       sub: 'user-123',
       role: 'nurse',
@@ -231,7 +231,7 @@ describe('token validation and hydration', () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const idToken = buildIdToken({
       iss: baseEnv.OIDC_ISSUER,
-      aud: baseEnv.OIDC_AUDIENCE,
+      aud: baseEnv.OIDC_CLIENT_ID,
       exp,
       role: 'nurse',
     });
@@ -285,7 +285,7 @@ describe('auth flow outcomes', () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const idToken = buildIdToken({
       iss: baseEnv.OIDC_ISSUER,
-      aud: baseEnv.OIDC_AUDIENCE,
+      aud: baseEnv.OIDC_CLIENT_ID,
       exp,
       sub: 'user-123',
       role: 'nurse',
@@ -347,7 +347,7 @@ describe('storage, logout, and public profile', () => {
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const idToken = buildIdToken({
       iss: baseEnv.OIDC_ISSUER,
-      aud: baseEnv.OIDC_AUDIENCE,
+      aud: baseEnv.OIDC_CLIENT_ID,
       exp,
       sub: 'user-123',
       role: 'nurse',
