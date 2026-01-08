@@ -12,7 +12,7 @@
     "test:watch": "jest --config jest.config.cjs --watch",
     "test:cov": "jest --config jest.config.cjs --coverage",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
-    "validate:fhir": "ts-node scripts/validate-fhir.ts"
+    "validate:fhir": "ts-node --esm scripts/validate-fhir.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -92,3 +92,4 @@
   },
   "private": true
 }
+
