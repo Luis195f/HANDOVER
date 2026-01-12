@@ -116,7 +116,16 @@ describe('postBundle', () => {
 
     const result = await postBundle(bundle, { token: 'tk' });
 
-    expect(result).toEqual({ ok: false, status: 500, json: undefined, issue: undefined, location: undefined });
+    expect(result).toEqual({
+      ok: false,
+      status: 500,
+      json: undefined,
+      issue: undefined,
+      issues: undefined,
+      location: undefined,
+      message: 'HTTP 500',
+      outcome: undefined,
+    });
   });
 
   it('returns validation error without performing fetch', async () => {

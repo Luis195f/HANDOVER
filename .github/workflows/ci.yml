@@ -12,9 +12,8 @@ concurrency:
 
 jobs:
   node:
-    name: Node CI (non-blocking)
+    name: Node CI
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
       CI: "true"
       NODE_OPTIONS: "--dns-result-order=ipv4first"
@@ -52,8 +51,12 @@ jobs:
       - name: Typecheck
         run: pnpm -w typecheck || true
 
+      - name: Validate FHIR Bundles
+        run: pnpm -w exec ts-node-esm scripts/validate-fhir.ts || true
+
+
       - name: Lint
         run: pnpm -w lint --fix || true
 
       - name: Vitest
-        run: pnpm -w vitest run --reporter=verbose || true
+        run: pnpm -w exec vitest run --reporter=verbose

@@ -235,21 +235,31 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
     }
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timeoutPromise: Promise<Response> | undefined;
     if (timeoutMs) {
-      timeoutId = setTimeout(() => attemptController.abort(), timeoutMs);
+      timeoutPromise = new Promise<Response>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          attemptController.abort();
+          reject(new TimeoutError(undefined, { url: urlToUse }));
+        }, timeoutMs);
+      });
     }
 
     try {
       const headers = buildHeaders(init.headers, idempotencyKey);
       const fetchPromise = fetchImpl(input, { ...init, headers, signal: attemptController.signal });
       let abortHandler: (() => void) | undefined;
-      const response = await Promise.race([
+      const racePromises: Array<Promise<Response>> = [
         fetchPromise,
         new Promise<Response>((_, reject) => {
           abortHandler = () => reject(createAbortError());
           attemptController.signal.addEventListener('abort', abortHandler!, { once: true });
         }),
-      ]);
+      ];
+      if (timeoutPromise) {
+        racePromises.push(timeoutPromise);
+      }
+      const response = await Promise.race(racePromises);
       if (abortHandler) {
         attemptController.signal.removeEventListener('abort', abortHandler);
       }
@@ -289,6 +299,15 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
 
       if (error instanceof HTTPError) {
         throw error;
+      }
+
+      if (error instanceof TimeoutError) {
+        if (attempt === resolvedRetries) {
+          throw error;
+        }
+        await sleep(Math.min(backoffMs * Math.pow(backoffFactor, attempt), maxBackoffMs));
+        attempt += 1;
+        continue;
       }
 
       const isAbortError = (error as { name?: string } | undefined)?.name === 'AbortError';

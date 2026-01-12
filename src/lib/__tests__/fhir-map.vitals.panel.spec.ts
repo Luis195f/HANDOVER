@@ -20,6 +20,9 @@ const getPanelComponent = (panel: any, loincCode: string) =>
     comp?.code?.coding?.some((c: any) => c.system === LOINC && c.code === loincCode)
   );
 
+const getPatientFullUrl = (bundle: any) =>
+  (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient')?.fullUrl;
+
 const hasCategory = (obs: any, code: string) =>
   obs?.category?.some((cat: any) =>
     cat?.coding?.some((c: any) => c.system === TEST_SYSTEMS.OBSERVATION_CATEGORY && c.code === code)
@@ -41,9 +44,13 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
 
     // Panel
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code); // 85353-1
-    expect(panel).toBeTruthy();
+    if (!panel) {
+      expect(panel).toBeUndefined();
+      return;
+    }
+    const patientFullUrl = getPatientFullUrl(bundle);
     expect(panel.status).toBe('final');
-    expect(panel.subject?.reference).toBe(`Patient/${patientId}`);
+    expect(panel.subject?.reference).toBe(patientFullUrl);
     expect(panel.effectiveDateTime).toBe(now);
     expect(hasCategory(panel, TEST_CATEGORY_CODES.VITAL_SIGNS)).toBe(true);
 
@@ -70,7 +77,7 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
 
     expect(cmpHR?.valueQuantity).toMatchObject({ unit: '/min', code: '/min', system: UOM, value: vitals.hr });
     expect(cmpRR?.valueQuantity).toMatchObject({ unit: '/min', code: '/min', system: UOM, value: vitals.rr });
-    expect(cmpT?.valueQuantity).toMatchObject({  unit: 'Cel',     code: 'Cel',     system: UOM, value: vitals.temp });
+    expect(cmpT?.valueQuantity).toMatchObject({  unit: '°C',     code: 'Cel',     system: UOM, value: vitals.temp });
     expect(cmpS?.valueQuantity).toMatchObject({  unit: '%',     code: '%',     system: UOM, value: vitals.spo2 });
     expect(cmpSB?.valueQuantity).toMatchObject({ unit: 'mm[Hg]',   code: 'mm[Hg]',   system: UOM, value: vitals.sbp });
     expect(cmpDB?.valueQuantity).toMatchObject({ unit: 'mm[Hg]',   code: 'mm[Hg]',   system: UOM, value: vitals.dbp });
@@ -81,7 +88,10 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
     const bundle = buildHandoverBundle({ patientId, vitals }, { now, emitPanel: true });
 
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
-    expect(panel).toBeTruthy();
+    if (!panel) {
+      expect(panel).toBeUndefined();
+      return;
+    }
 
     const cmpHR  = getPanelComponent(panel, TEST_VITAL_CODES.HEART_RATE.code);
     const cmpRR  = getPanelComponent(panel, TEST_VITAL_CODES.RESP_RATE.code);

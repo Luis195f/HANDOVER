@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import * as Print from 'expo-print';
 
 import type { HandoverValues } from '../../types/handover';
@@ -37,12 +37,11 @@ export async function generateHandoverPdf(
   const fallbackId = handover.id ?? handover.patientId ?? 'unknown';
   const fileName = `handover_${fallbackId}_${Date.now()}.pdf`;
   const documentDirectory = FileSystem.documentDirectory;
-  if (!documentDirectory) {
-    throw new Error('Document directory not available');
-  }
-  const targetUri = `${documentDirectory}${fileName}`;
+  const targetUri = documentDirectory ? `${documentDirectory}${fileName}` : uri;
 
-  await FileSystem.moveAsync({ from: uri, to: targetUri });
+  if (documentDirectory) {
+    await FileSystem.moveAsync({ from: uri, to: targetUri });
+  }
 
   return {
     uri: targetUri,

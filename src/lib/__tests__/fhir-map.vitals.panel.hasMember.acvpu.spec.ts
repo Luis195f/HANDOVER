@@ -9,10 +9,15 @@ const findObsByLoinc = (bundle: any, code: string) =>
       r?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
     );
 
+const findEntryByLoinc = (bundle: any, code: string) =>
+  (bundle?.entry ?? []).find((e: any) =>
+    e?.resource?.resourceType === 'Observation' &&
+    e?.resource?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
+  );
+
 describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T12:45:00Z';
-  const acvpuRef = `urn:uuid:obs-acvpu-${patientId}-${now.slice(0,10)}`;
 
   it('incluye ACVPU en hasMember si emitHasMember=true y hay acvpu', () => {
     const bundle = buildHandoverBundle(
@@ -24,8 +29,13 @@ describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
     expect(panel).toBeTruthy();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`); // HR incluido
-    expect(refs).toContain(acvpuRef); // ACVPU incluido
+    const hrEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code);
+    const acvpuEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code);
+
+    expect(hrEntry).toBeDefined();
+    expect(acvpuEntry).toBeDefined();
+    expect(refs).toContain(hrEntry?.fullUrl); // HR incluido
+    expect(refs).toContain(acvpuEntry?.fullUrl); // ACVPU incluido
   });
 
   it('no incluye ACVPU si no está presente en vitals', () => {
@@ -36,7 +46,12 @@ describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
 
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`);
-    expect(refs).not.toContain(acvpuRef);
+    const hrEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code);
+    const acvpuEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code);
+
+    expect(hrEntry).toBeDefined();
+    expect(refs).toContain(hrEntry?.fullUrl);
+    expect(acvpuEntry).toBeUndefined();
+    expect(refs).not.toContain(acvpuEntry?.fullUrl);
   });
 });

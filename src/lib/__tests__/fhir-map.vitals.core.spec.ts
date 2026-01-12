@@ -41,7 +41,7 @@ describe('Vitales LOINC núcleo — individuos + UCUM', () => {
 
     expect(hr.valueQuantity).toMatchObject({ unit: '/min',   code: '/min',   system: UOM, value: 88 });
     expect(rr.valueQuantity).toMatchObject({ unit: '/min',   code: '/min',   system: UOM, value: 18 });
-    expect(t.valueQuantity).toMatchObject({ unit: 'Cel',     code: 'Cel',    system: UOM, value: 37.2 });
+    expect(t.valueQuantity).toMatchObject({ unit: '°C',      code: 'Cel',    system: UOM, value: 37.2 });
     expect(s.valueQuantity).toMatchObject({ unit: '%',       code: '%',      system: UOM, value: 96 });
     expect(sb.valueQuantity).toMatchObject({ unit: 'mm[Hg]', code: 'mm[Hg]', system: UOM, value: 120 });
     expect(db.valueQuantity).toMatchObject({ unit: 'mm[Hg]', code: 'mm[Hg]', system: UOM, value: 75 });

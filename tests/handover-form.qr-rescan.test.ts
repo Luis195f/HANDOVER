@@ -9,8 +9,43 @@ vi.mock('react-hook-form', async () => {
   return {
     ...actual,
     Controller: () => null,
+    useFieldArray: () => ({
+      fields: [],
+      append: vi.fn(),
+      remove: vi.fn(),
+    }),
+    useFormContext: () => ({
+      control: {},
+      register: vi.fn(),
+      setValue: vi.fn(),
+      getValues: vi.fn(),
+      watch: vi.fn(),
+      formState: { errors: {} },
+      trigger: vi.fn(),
+      clearErrors: vi.fn(),
+      setFocus: vi.fn(),
+    }),
+    useWatch: vi.fn(() => undefined),
   };
 });
+
+vi.mock('expo-audio', () => ({
+  RecordingPresets: { HIGH_QUALITY: 'HIGH_QUALITY' },
+  useAudioRecorder: vi.fn(() => ({
+    isRecording: false,
+    uri: null,
+    prepareToRecordAsync: vi.fn(async () => undefined),
+    record: vi.fn(),
+    stop: vi.fn(async () => undefined),
+  })),
+  getRecordingPermissionsAsync: vi.fn(async () => ({ granted: true })),
+  requestRecordingPermissionsAsync: vi.fn(async () => ({ granted: true })),
+}));
+
+vi.mock('@/src/security/auth', () => ({
+  getSession: vi.fn(async () => null),
+  useAuth: () => ({ session: null, logout: vi.fn() }),
+}));
 
 const mockUseZodForm = vi.fn();
 vi.mock('@/src/validation/form-hooks', () => ({
@@ -32,18 +67,30 @@ describe('HandoverForm QR re-scan', () => {
   });
 
   it('actualiza patientId y unitId en re-scans cuando no están dirty', async () => {
-    const values: Record<string, string> = { patientId: '', unitId: '' };
-    const dirtiness: Record<string, boolean> = { patientId: false, unitId: false };
+    const values: Record<string, string> = { patientId: '', 'administrativeData.unit': '' };
+    const dirtiness: Record<string, boolean> = {
+      patientId: false,
+      'administrativeData.unit': false,
+    };
     const setValueSpy = vi.fn((field: string, value: string, _options: unknown) => {
       values[field] = value;
     });
 
     mockUseZodForm.mockReturnValue({
       control: {},
-      formState: {},
+      formState: { errors: {} },
       handleSubmit: (fn: any) => fn,
       getValues: (field: string) => values[field],
       getFieldState: (field: string) => ({ isDirty: dirtiness[field] }),
+      watch: (field?: string | string[]) => {
+        if (Array.isArray(field)) {
+          return field.map((key) => values[key]);
+        }
+        if (!field) {
+          return { risksStructured: [] };
+        }
+        return values[field];
+      },
       setValue: (field: string, value: string, options: unknown) => {
         setValueSpy(field, value, options);
       },
@@ -52,10 +99,10 @@ describe('HandoverForm QR re-scan', () => {
     let renderer: ReturnType<typeof create> | undefined;
     await act(async () => {
       renderer = create(
-        <HandoverForm
-          navigation={navigation}
-          route={{ key: 'test', name: 'HandoverForm', params: { patientId: 'A', unitId: 'U1' } } as any}
-        />
+        React.createElement(HandoverForm, {
+          navigation,
+          route: { key: 'test', name: 'HandoverForm', params: { patientId: 'A', unitId: 'U1' } } as any,
+        })
       );
     });
 
@@ -65,7 +112,7 @@ describe('HandoverForm QR re-scan', () => {
       expect.objectContaining({ shouldDirty: false, shouldValidate: true })
     );
     expect(setValueSpy).toHaveBeenCalledWith(
-      'unitId',
+      'administrativeData.unit',
       'U1',
       expect.objectContaining({ shouldDirty: false, shouldValidate: true })
     );
@@ -74,10 +121,10 @@ describe('HandoverForm QR re-scan', () => {
 
     await act(async () => {
       renderer!.update(
-        <HandoverForm
-          navigation={navigation}
-          route={{ key: 'test', name: 'HandoverForm', params: { patientId: 'B', unitId: 'U2' } } as any}
-        />
+        React.createElement(HandoverForm, {
+          navigation,
+          route: { key: 'test', name: 'HandoverForm', params: { patientId: 'B', unitId: 'U2' } } as any,
+        })
       );
     });
 
@@ -87,7 +134,7 @@ describe('HandoverForm QR re-scan', () => {
       expect.objectContaining({ shouldDirty: false })
     );
     expect(setValueSpy).toHaveBeenCalledWith(
-      'unitId',
+      'administrativeData.unit',
       'U2',
       expect.objectContaining({ shouldDirty: false })
     );
@@ -96,28 +143,40 @@ describe('HandoverForm QR re-scan', () => {
 
     await act(async () => {
       renderer!.update(
-        <HandoverForm
-          navigation={navigation}
-          route={{ key: 'test', name: 'HandoverForm', params: { patientId: 'C', unitId: 'U3' } } as any}
-        />
+        React.createElement(HandoverForm, {
+          navigation,
+          route: { key: 'test', name: 'HandoverForm', params: { patientId: 'C', unitId: 'U3' } } as any,
+        })
       );
     });
 
     expect(setValueSpy).toHaveBeenCalledWith('patientId', 'C', expect.any(Object));
-    expect(setValueSpy).toHaveBeenCalledWith('unitId', 'U3', expect.any(Object));
+    expect(setValueSpy).toHaveBeenCalledWith('administrativeData.unit', 'U3', expect.any(Object));
   });
 
   it('no sobreescribe campos dirty en re-scan', async () => {
-    const values: Record<string, string> = { patientId: 'A', unitId: 'U1' };
-    const dirtiness: Record<string, boolean> = { patientId: true, unitId: false };
+    const values: Record<string, string> = { patientId: 'A', 'administrativeData.unit': 'U1' };
+    const dirtiness: Record<string, boolean> = {
+      patientId: true,
+      'administrativeData.unit': false,
+    };
     const setValueSpy = vi.fn();
 
     mockUseZodForm.mockReturnValue({
       control: {},
-      formState: {},
+      formState: { errors: {} },
       handleSubmit: (fn: any) => fn,
       getValues: (field: string) => values[field],
       getFieldState: (field: string) => ({ isDirty: dirtiness[field] }),
+      watch: (field?: string | string[]) => {
+        if (Array.isArray(field)) {
+          return field.map((key) => values[key]);
+        }
+        if (!field) {
+          return { risksStructured: [] };
+        }
+        return values[field];
+      },
       setValue: (field: string, value: string, options: unknown) => {
         values[field] = value;
         setValueSpy(field, value, options);
@@ -127,14 +186,14 @@ describe('HandoverForm QR re-scan', () => {
     let renderer: ReturnType<typeof create> | undefined;
     await act(async () => {
       renderer = create(
-        <HandoverForm
-          navigation={navigation}
-          route={{
+        React.createElement(HandoverForm, {
+          navigation,
+          route: {
             key: 'test',
             name: 'HandoverForm',
             params: { patientId: 'A', unitId: 'U1' },
-          } as any}
-        />
+          } as any,
+        })
       );
     });
 
@@ -142,14 +201,14 @@ describe('HandoverForm QR re-scan', () => {
 
     await act(async () => {
       renderer!.update(
-        <HandoverForm
-          navigation={navigation}
-          route={{
+        React.createElement(HandoverForm, {
+          navigation,
+          route: {
             key: 'test',
             name: 'HandoverForm',
             params: { patientId: 'B', unitId: 'U2' },
-          } as any}
-        />
+          } as any,
+        })
       );
     });
 
@@ -159,7 +218,7 @@ describe('HandoverForm QR re-scan', () => {
       expect.objectContaining({ shouldDirty: false })
     );
     expect(setValueSpy).toHaveBeenCalledWith(
-      'unitId',
+      'administrativeData.unit',
       'U2',
       expect.objectContaining({ shouldDirty: false })
     );

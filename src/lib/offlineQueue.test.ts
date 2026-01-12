@@ -1,23 +1,25 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 const secureStoreData = new Map<string, string>();
 
-jest.mock('expo-secure-store', () => ({
-  getItemAsync: jest.fn(async (key: string) => secureStoreData.get(key) ?? null),
-  setItemAsync: jest.fn(async (key: string, value: string) => {
+const secureStore = vi.hoisted(() => ({
+  getItemAsync: vi.fn(async (key: string) => secureStoreData.get(key) ?? null),
+  setItemAsync: vi.fn(async (key: string, value: string) => {
     secureStoreData.set(key, value);
   }),
-  deleteItemAsync: jest.fn(async (key: string) => {
+  deleteItemAsync: vi.fn(async (key: string) => {
     secureStoreData.delete(key);
   }),
 }));
 
-import * as SecureStore from 'expo-secure-store';
+vi.mock('expo-secure-store', () => secureStore);
 
 import { OFFLINE_QUEUE_KEY, enqueueTx, readQueue, removeItem, clearAll, flushQueue, type SendFn } from './offlineQueue';
 
 describe('offline queue', () => {
   beforeEach(async () => {
     secureStoreData.clear();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('enqueue → persiste item en cola cifrada', async () => {

@@ -107,6 +107,11 @@ const memoryStore = new Map<string, string>();
 export async function loadSecureStore(): Promise<SecureStoreModule | null> {
   if (secureStore !== undefined) return secureStore;
 
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    secureStore = null;
+    return null;
+  }
+
   try {
     const mod: any = await import('expo-secure-store');
     const resolved: any = mod?.default ?? mod;
@@ -171,13 +176,13 @@ function resolveNamespace(): string {
     process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ??
     process.env.STORAGE_NAMESPACE ??
     (Constants.expoConfig?.extra?.STORAGE_NAMESPACE as string | undefined);
-  return explicit ?? 'handover';
+  return explicit && /^[\w.-]+$/.test(explicit) ? explicit : 'handover';
 }
 
 type OIDCConfig = {
   issuer: string;
   clientId: string;
-  audience?: string;
+  audience: string;
   scope: string;
   redirectScheme: string;
 };
@@ -217,7 +222,7 @@ function validateRedirectScheme(scheme: string): void {
 function loadOIDCConfig(): OIDCConfig {
   const issuer = requireEnv('OIDC_ISSUER');
   const clientId = requireEnv('OIDC_CLIENT_ID');
-  const audience = readEnv('OIDC_AUDIENCE')?.trim() || undefined;
+  const audience = requireEnv('OIDC_AUDIENCE');
   const scope = requireEnv('OIDC_SCOPE');
   const redirectScheme = requireEnv('OIDC_REDIRECT_SCHEME');
   validateIssuer(issuer);
@@ -233,7 +238,7 @@ if (__DEV__) {
     clientId: oidcConfig.clientId,
     redirectScheme: oidcConfig.redirectScheme,
     scope: oidcConfig.scope,
-    hasAudience: !!oidcConfig.audience,
+    hasAudience: true,
   });
 }
 
@@ -656,7 +661,7 @@ function createAuthRequest(): AuthRequestLike {
     usePKCE: true,
     scopes: oidcConfig.scope.split(/\s+/).filter(Boolean),
     redirectUri,
-    extraParams: oidcConfig.audience ? { audience: oidcConfig.audience } : undefined,
+    extraParams: { audience: oidcConfig.audience },
   });
   return request as unknown as AuthRequestLike;
 }
@@ -697,7 +702,7 @@ async function exchangeCodeForTokens(
 ): Promise<void> {
   const redirectUri = request.redirectUri ?? AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme, path: 'redirect' });
   const extraParams = {
-    ...(oidcConfig.audience ? { audience: oidcConfig.audience } : {}),
+    audience: oidcConfig.audience,
     ...(request.codeVerifier ? { code_verifier: request.codeVerifier } : {}),
   };
   try {

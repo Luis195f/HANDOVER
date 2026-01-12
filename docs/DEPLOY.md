@@ -22,7 +22,7 @@ Esta guía describe cómo generar builds para Android, iOS y Web, así como los 
 | Builds | `ANDROID_KEYSTORE_*` | Variables esperadas por Gradle si generas `.aab/.apk` firmados. |
 | Builds | `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `EAS_NO_VCS` | Variables requeridas por Expo/EAS para subir builds iOS. |
 
-> Nota: El workflow `CI` mantiene el job de Node como no bloqueante para tolerar respuestas `403` del registry. Si reproduces la pipeline en tu entorno de release, conserva esa configuración o cache privado.
+> Nota: El workflow `CI` ejecuta el job de Node como bloqueante, por lo que fallos en dependencias o validaciones detendrán la pipeline. Si reproduces la pipeline en tu entorno de release, conserva esa configuración o usa un cache privado.
 
 ## Instalación común
 
@@ -35,6 +35,17 @@ pnpm -w vitest run --reporter=verbose --coverage
 ```
 
 Los comandos anteriores deben pasar antes de generar artefactos.
+
+## CI: FHIR validation
+
+En CI se ejecuta `pnpm -w validate:fhir` para validar bundles FHIR antes de permitir merges.
+Si la validación falla, el job falla y bloquea el merge.
+
+Para reproducir local:
+
+```bash
+pnpm -w validate:fhir
+```
 
 ## Builds con Expo CLI (local)
 

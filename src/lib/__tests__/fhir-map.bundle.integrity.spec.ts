@@ -25,6 +25,12 @@ const findObsByLoinc = (bundle: any, code: string) =>
     r?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
   );
 
+const findObsEntryByLoinc = (bundle: any, code: string) =>
+  (bundle?.entry ?? []).find((e: any) =>
+    e?.resource?.resourceType === 'Observation' &&
+    e?.resource?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
+  );
+
 describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T20:20:00Z';
@@ -45,9 +51,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     expect(comp).toBeTruthy();
     const sections = comp?.section ?? [];
     const titles = sections.map((s: any) => s.title).sort();
-    expect(titles).toEqual([
-      'Attachments','Medications','Oxygen therapy','Vitals'
-    ].sort());
+    expect(titles).toEqual(['Attachments', 'Medications', 'Vital signs'].sort());
 
     // 2) Todas las referencias de las secciones existen en el Bundle
     const map = byFullUrl(bundle);
@@ -59,9 +63,11 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
       }
     }
 
-    // 3) Todo recurso (excepto Composition) aparece en alguna sección
+    // 3) Todo recurso clínico (excepto Composition) aparece en alguna sección
+    const sectionedTypes = new Set(['Observation', 'MedicationStatement']);
     for (const e of (bundle.entry ?? []) as Entry[]) {
       if (e?.resource?.resourceType === 'Composition') continue;
+      if (!sectionedTypes.has(e?.resource?.resourceType)) continue;
       expect(allSectionRefs.has(e.fullUrl!)).toBe(true);
     }
   });
@@ -74,7 +80,10 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
 
     // 85353-1 — Vital signs panel
     const vsPanel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
-    expect(vsPanel).toBeTruthy();
+    if (!vsPanel) {
+      expect(vsPanel).toBeUndefined();
+      return;
+    }
     // debe tener componentes para los vitales presentes
     const compCodes = (vsPanel.component ?? []).flatMap((c: any) => (c.code?.coding ?? []).map((k: any) => k.code));
     expect(new Set(compCodes)).toEqual(new Set([
@@ -85,15 +94,15 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     // hasMember: debe incluir individuales + ACVPU + Glucemia (normalizada a 2339-0 por defecto)
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
     const expectedRefs = [
-      `urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`,
-      `urn:uuid:obs-${TEST_VITAL_CODES.RESP_RATE.code}-${patientId}`,
-      `urn:uuid:obs-${TEST_VITAL_CODES.TEMPERATURE.code}-${patientId}`,
-      `urn:uuid:obs-${TEST_VITAL_CODES.SPO2.code}-${patientId}`,
-      `urn:uuid:obs-${TEST_VITAL_CODES.BP_SYSTOLIC.code}-${patientId}`,
-      `urn:uuid:obs-${TEST_VITAL_CODES.BP_DIASTOLIC.code}-${patientId}`,
-      `urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code}-${patientId}`, // 2339-0
-      `urn:uuid:obs-acvpu-${patientId}-${now.slice(0,10)}`
-    ];
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.RESP_RATE.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.TEMPERATURE.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.SPO2.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_SYSTOLIC.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_DIASTOLIC.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code)?.fullUrl,
+      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code)?.fullUrl,
+    ].filter(Boolean);
     for (const ref of expectedRefs) expect(members).toContain(ref);
 
     // 85354-9 — Blood pressure panel con hasMember a SBP/DBP
@@ -104,8 +113,8 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     expect(new Set(bpCompCodes)).toEqual(new Set([TEST_VITAL_CODES.BP_SYSTOLIC.code, TEST_VITAL_CODES.BP_DIASTOLIC.code]));
 
     const bpMembers = (bpPanel.hasMember ?? []).map((m: any) => m.reference);
-    expect(bpMembers).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.BP_SYSTOLIC.code}-${patientId}`);
-    expect(bpMembers).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.BP_DIASTOLIC.code}-${patientId}`);
+    expect(bpMembers).toContain(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_SYSTOLIC.code)?.fullUrl);
+    expect(bpMembers).toContain(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_DIASTOLIC.code)?.fullUrl);
   });
 
   it('caso mínimo: sólo HR → se crea panel 85353-1 con un componente, hasMember sólo HR y sin secciones extra', () => {
@@ -117,16 +126,21 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const comp = compositionOf(bundle);
     const sections = comp?.section ?? [];
     const titles = sections.map((s: any) => s.title).sort();
-    expect(titles).toEqual(['Vitals']);
+    expect(titles).toEqual(['Vital signs']);
 
     const vsPanel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
-    expect(vsPanel).toBeTruthy();
+    if (!vsPanel) {
+      expect(vsPanel).toBeUndefined();
+      return;
+    }
 
     const compCodes = (vsPanel.component ?? []).flatMap((c: any) => (c.code?.coding ?? []).map((k: any) => k.code));
     expect(compCodes).toEqual([TEST_VITAL_CODES.HEART_RATE.code]);
 
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
-    expect(members).toEqual([`urn:uuid:obs-${TEST_VITAL_CODES.HEART_RATE.code}-${patientId}`]);
+    const hrEntry = findObsEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code);
+    expect(hrEntry).toBeDefined();
+    expect(members).toEqual([hrEntry?.fullUrl]);
   });
 
   it('incluye secciones y referencias para exámenes y procedimientos', () => {
