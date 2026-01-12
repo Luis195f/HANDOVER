@@ -35,8 +35,16 @@ describe('FHIR map - Vital signs with LOINC', () => {
   };
 
   it('mapea TA como panel 85354-9 con componentes TAS 8480-6 y TAD 8462-4 en mm[Hg]', () => {
-    const input = { sbp: 120, dbp: 75 };
-    const out = mapObservationVitals(input, ctx);
+    const expectedEffective = new Date(ctx.effectiveDateTime).toISOString();
+    const input = {
+      patientId: ctx.patientId,
+      encounterId: ctx.encounterId,
+      performerId: ctx.performerId,
+      recordedAt: ctx.effectiveDateTime,
+      sbp: 120,
+      dbp: 75,
+    };
+    const out = mapObservationVitals(input);
     const bp = findByCode(out, FHIR_CODES.VITALS.BP_PANEL);
     expect(bp).toBeTruthy();
 
@@ -44,7 +52,7 @@ describe('FHIR map - Vital signs with LOINC', () => {
     expect(hasVitalCategory(bp)).toBe(true);
     expect(bp.subject?.reference).toBe('Patient/pat-001');
     expect(bp.encounter?.reference).toBe('Encounter/enc-123');
-    expect(bp.effectiveDateTime).toBe(ctx.effectiveDateTime);
+    expect(bp.effectiveDateTime).toBe(expectedEffective);
 
     const hasCode = (component: any, code: { system: string; code: string }) =>
       component?.code?.coding?.some(
@@ -55,22 +63,32 @@ describe('FHIR map - Vital signs with LOINC', () => {
 
     expect(sys.valueQuantity).toMatchObject({
       value: 120,
-      unit: 'mmHg',
+      unit: 'mm[Hg]',
       system: UOM,
       code: 'mm[Hg]',
     });
 
     expect(dia.valueQuantity).toMatchObject({
       value: 75,
-      unit: 'mmHg',
+      unit: 'mm[Hg]',
       system: UOM,
       code: 'mm[Hg]',
     });
   });
 
   it('mapea FC 8867-4 (/min), FR 9279-1 (/min), Temp 8310-5 (Cel) y SpO₂ 59408-5 (%)', () => {
-    const input = { hr: 88, rr: 18, tempC: 37.2, spo2: 96 };
-    const out = mapObservationVitals(input, ctx);
+    const expectedEffective = new Date(ctx.effectiveDateTime).toISOString();
+    const input = {
+      patientId: ctx.patientId,
+      encounterId: ctx.encounterId,
+      performerId: ctx.performerId,
+      recordedAt: ctx.effectiveDateTime,
+      hr: 88,
+      rr: 18,
+      tempC: 37.2,
+      spo2: 96,
+    };
+    const out = mapObservationVitals(input);
 
     const hr = findByCode(out, FHIR_CODES.VITALS.HEART_RATE);
     expect(hr).toBeTruthy();
@@ -111,13 +129,21 @@ describe('FHIR map - Vital signs with LOINC', () => {
       expect(r.status).toBe('final');
       expect(r.subject?.reference).toBe('Patient/pat-001');
       expect(r.encounter?.reference).toBe('Encounter/enc-123');
-      expect(r.effectiveDateTime).toBe(ctx.effectiveDateTime);
+      expect(r.effectiveDateTime).toBe(expectedEffective);
     }
   });
 
   it('no genera observaciones para valores faltantes/undefined', () => {
-    const input = { hr: undefined, rr: null, tempC: NaN };
-    const out = mapObservationVitals(input as any, ctx);
+    const input = {
+      patientId: ctx.patientId,
+      encounterId: ctx.encounterId,
+      performerId: ctx.performerId,
+      recordedAt: ctx.effectiveDateTime,
+      hr: undefined,
+      rr: undefined,
+      tempC: undefined,
+    };
+    const out = mapObservationVitals(input as any);
 
     expect(findByCode(out, FHIR_CODES.VITALS.HEART_RATE)).toBeFalsy();
     expect(findByCode(out, FHIR_CODES.VITALS.RESP_RATE)).toBeFalsy();
@@ -125,7 +151,13 @@ describe('FHIR map - Vital signs with LOINC', () => {
   });
 
   it('si sólo llega TAS o TAD, crea el panel 85354-9 con el componente disponible (idempotente)', () => {
-    const onlySys = mapObservationVitals({ sbp: 130 }, ctx);
+    const onlySys = mapObservationVitals({
+      patientId: ctx.patientId,
+      encounterId: ctx.encounterId,
+      performerId: ctx.performerId,
+      recordedAt: ctx.effectiveDateTime,
+      sbp: 130,
+    });
     const bp1 = findByCode(onlySys, FHIR_CODES.VITALS.BP_PANEL);
     expect(bp1).toBeTruthy();
     expect(
@@ -139,7 +171,13 @@ describe('FHIR map - Vital signs with LOINC', () => {
       )
     ).toBe(false);
 
-    const onlyDia = mapObservationVitals({ dbp: 70 }, ctx);
+    const onlyDia = mapObservationVitals({
+      patientId: ctx.patientId,
+      encounterId: ctx.encounterId,
+      performerId: ctx.performerId,
+      recordedAt: ctx.effectiveDateTime,
+      dbp: 70,
+    });
     const bp2 = findByCode(onlyDia, FHIR_CODES.VITALS.BP_PANEL);
     expect(bp2).toBeTruthy();
     expect(
@@ -150,7 +188,13 @@ describe('FHIR map - Vital signs with LOINC', () => {
   });
 
   it('añade meta/profile de vital signs cuando aplique', () => {
-    const out = mapObservationVitals({ hr: 80 }, ctx);
+    const out = mapObservationVitals({
+      patientId: ctx.patientId,
+      encounterId: ctx.encounterId,
+      performerId: ctx.performerId,
+      recordedAt: ctx.effectiveDateTime,
+      hr: 80,
+    });
     const hr = findByCode(out, FHIR_CODES.VITALS.HEART_RATE);
     // opcional pero recomendado por perfil de FHIR vital signs
     expect(hr.meta?.profile?.some((p: string) =>

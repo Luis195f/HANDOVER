@@ -83,6 +83,8 @@ export function validateResource(resource: unknown): ValidationResult {
   return { isValid: true, errors: [] };
 }
 
+export const validateResourceWithZod = validateResource;
+
 export function validateBundle(bundle: unknown): ValidationResult {
   const parsed = bundleSchema.safeParse(bundle);
   if (!parsed.success) {

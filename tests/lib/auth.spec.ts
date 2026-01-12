@@ -194,13 +194,19 @@ describe('token validation and hydration', () => {
       role: 'nurse',
       unitIds: ['icu'],
     });
-    const namespace = 'handover';
-    secureStoreData.set(`${namespace}:auth:access`, 'stored-access');
-    secureStoreData.set(`${namespace}:auth:exp`, String(exp));
-    secureStoreData.set(`${namespace}:auth:id`, idToken);
 
     await withEnv({}, async () => {
       const auth = await importAuth();
+      await auth.persistAuth(
+        {
+          accessToken: 'stored-access',
+          refreshToken: null,
+          expiresAt: exp,
+          idToken,
+          scope: baseEnv.OIDC_SCOPE,
+        },
+        null
+      );
       await expect(auth.ensureFreshToken()).rejects.toThrow(/not authenticated/i);
       expect(auth.getCurrentUser()).toBeNull();
     });
@@ -215,13 +221,19 @@ describe('token validation and hydration', () => {
       sub: 'user-123',
       role: 'nurse',
     });
-    const namespace = 'handover';
-    secureStoreData.set(`${namespace}:auth:access`, 'stored-access');
-    secureStoreData.set(`${namespace}:auth:exp`, String(exp));
-    secureStoreData.set(`${namespace}:auth:id`, idToken);
 
     await withEnv({}, async () => {
       const auth = await importAuth();
+      await auth.persistAuth(
+        {
+          accessToken: 'stored-access',
+          refreshToken: null,
+          expiresAt: exp,
+          idToken,
+          scope: baseEnv.OIDC_SCOPE,
+        },
+        null
+      );
       await expect(auth.ensureFreshToken()).rejects.toThrow();
       expect(auth.getCurrentUser()).toBeNull();
     });
@@ -235,13 +247,19 @@ describe('token validation and hydration', () => {
       exp,
       role: 'nurse',
     });
-    const namespace = 'handover';
-    secureStoreData.set(`${namespace}:auth:access`, 'stored-access');
-    secureStoreData.set(`${namespace}:auth:exp`, String(exp));
-    secureStoreData.set(`${namespace}:auth:id`, idToken);
 
     await withEnv({}, async () => {
       const auth = await importAuth();
+      await auth.persistAuth(
+        {
+          accessToken: 'stored-access',
+          refreshToken: null,
+          expiresAt: exp,
+          idToken,
+          scope: baseEnv.OIDC_SCOPE,
+        },
+        null
+      );
       await expect(auth.ensureFreshToken()).rejects.toThrow();
       expect(auth.getCurrentUser()).toBeNull();
     });
@@ -275,7 +293,7 @@ describe('auth flow outcomes', () => {
       const auth = await importAuth();
       const result = await auth.loginWithOIDC();
       expect(result.status).toBe('cancelled');
-      expect(secureStoreData.size).toBe(0);
+      await expect(auth.ensureFreshToken()).rejects.toThrow(/not authenticated/i);
       expect(auth.getCurrentUser()).toBeNull();
     });
   });
@@ -316,7 +334,7 @@ describe('auth flow outcomes', () => {
       const auth = await importAuth();
       await expect(auth.loginWithOIDC()).rejects.toThrow();
       expect(auth.getCurrentUser()).toBeNull();
-      expect(secureStoreData.size).toBe(0);
+      await expect(auth.ensureFreshToken()).rejects.toThrow(/not authenticated/i);
     });
   });
 });

@@ -30,9 +30,10 @@ describe('fetchAdminDashboardData', () => {
   });
 
   it('cae a mocks cuando la API falla', async () => {
-    vi.spyOn(net, 'fetchWithRetry').mockRejectedValueOnce(new Error('Network'));
+    const apiSpy = vi.spyOn(net, 'fetchWithRetry').mockRejectedValue(new Error('Network'));
 
     const result = await fetchAdminDashboardData();
     expect(result.units).toEqual(mockUnitSummaries);
+    expect(apiSpy).toHaveBeenCalledTimes(3);
   });
 });

@@ -15,14 +15,10 @@ describe('safeFetch', () => {
   });
 
   it('throws TimeoutError when request exceeds timeout', async () => {
-    vi.useFakeTimers();
     const fetchMock = vi.fn(() => new Promise(() => {}));
-
-    const promise = safeFetch(HTTPS_URL, { fetchImpl: fetchMock, timeoutMs: 500, retries: 0 });
-
-    await vi.advanceTimersByTimeAsync(500);
-
-    await expect(promise).rejects.toBeInstanceOf(TimeoutError);
+    await expect(
+      safeFetch(HTTPS_URL, { fetchImpl: fetchMock, timeoutMs: 10, retries: 0 })
+    ).rejects.toBeInstanceOf(TimeoutError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -59,7 +55,9 @@ describe('safeFetch', () => {
       throw new TypeError('Network down');
     });
 
-    await expect(safeFetch(HTTPS_URL, { fetchImpl: fetchMock })).rejects.toBeInstanceOf(NetworkError);
+    await expect(
+      safeFetch(HTTPS_URL, { fetchImpl: fetchMock, retries: 0 })
+    ).rejects.toBeInstanceOf(NetworkError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
