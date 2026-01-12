@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import type { UseFormReturn } from 'react-hook-form';
 import { FormProvider, useForm } from 'react-hook-form';
 
 import DiagnosisAutocomplete from '../DiagnosisAutocomplete';
@@ -12,19 +13,27 @@ type FormValues = {
 function renderWithForm(
   props: Partial<React.ComponentProps<typeof DiagnosisAutocomplete>> = {},
 ) {
-  const methods = useForm<FormValues>({
-    defaultValues: { dxMedicalStructured: [], dxNursingStructured: [] },
-  });
-  const utils = render(
-    <FormProvider {...methods}>
-      <DiagnosisAutocomplete
-        name="dxMedicalStructured"
-        label="Diagnósticos médicos (estructurados)"
-        systemsAllowed={['SNOMED', 'ICD10']}
-        {...props}
-      />
-    </FormProvider>,
-  );
+  let methods: UseFormReturn<FormValues> | undefined;
+  const Wrapper = () => {
+    const form = useForm<FormValues>({
+      defaultValues: { dxMedicalStructured: [], dxNursingStructured: [] },
+    });
+    methods = form;
+    return (
+      <FormProvider {...form}>
+        <DiagnosisAutocomplete
+          name="dxMedicalStructured"
+          label="Diagnósticos médicos (estructurados)"
+          systemsAllowed={['SNOMED', 'ICD10']}
+          {...props}
+        />
+      </FormProvider>
+    );
+  };
+  const utils = render(<Wrapper />);
+  if (!methods) {
+    throw new Error('Form methods not initialized');
+  }
   return { methods, ...utils };
 }
 

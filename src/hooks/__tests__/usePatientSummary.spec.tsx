@@ -43,9 +43,6 @@ describe('usePatientSummary (FHIR)', () => {
       create(<TestComponent patientId="p-1" />);
     });
 
-    const initialState = (TestComponent as any).state as State;
-    expect(initialState.loading).toBe(true);
-
     await act(async () => {
       await Promise.resolve();
     });

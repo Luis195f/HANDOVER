@@ -19,6 +19,9 @@ const findObsByLoinc = (bundle: any, loincCode: string) =>
         )
     );
 
+const getPatientFullUrl = (bundle: any) =>
+  (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient')?.fullUrl;
+
 const hasCoding = (cc: any, system: string, code: string) =>
   (cc?.coding ?? []).some((c: any) => c.system === system && c.code === code);
 
@@ -45,12 +48,13 @@ describe('ACVPU — mapeo LOINC+SNOMED y no afecta otros vitales', () => {
         patientId,
         vitals: { acvpu: c.avpu, hr: 80 },
       });
+      const patientFullUrl = getPatientFullUrl(bundle);
 
       // ACVPU
       const acvpu = findObsByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code); // 67775-7
       expect(acvpu).toBeTruthy();
       expect(hasCategory(acvpu, TEST_CATEGORY_CODES.VITAL_SIGNS)).toBe(true);
-      expect(acvpu.subject?.reference).toBe(`Patient/${patientId}`);
+      expect(acvpu.subject?.reference).toBe(patientFullUrl);
 
       const vcc = acvpu.valueCodeableConcept;
       expect(vcc).toBeTruthy();

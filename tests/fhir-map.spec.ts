@@ -254,13 +254,20 @@ describe('mapObservationVitals', () => {
     );
 
     expect(observations).toHaveLength(6);
+    const glucoseCodes = new Set(['2339-0', '15074-8']);
     const effectiveDates = new Set(observations.map((obs) => obs.effectiveDateTime));
     expect(effectiveDates).toEqual(new Set(['2025-01-05T09:45:00.000Z']));
     observations.forEach((obs) => {
-      expect(obs.category[0]?.coding[0]?.code).toBe('vital-signs');
+      const obsCode = obs.code?.coding?.[0]?.code;
+      if (obsCode && glucoseCodes.has(obsCode)) {
+        expect(obs.category[0]?.coding[0]?.code).toBe('laboratory');
+        expect(obs.meta?.profile ?? []).not.toContain('http://hl7.org/fhir/StructureDefinition/vitalsigns');
+      } else {
+        expect(obs.category[0]?.coding[0]?.code).toBe('vital-signs');
+        expect(obs.meta?.profile?.length).toBeGreaterThan(0);
+      }
       expect(obs.issued).toBe('2025-01-05T09:50:00.000Z');
       expect(obs.subject.reference).toBe(`Patient/${baseValues.patientId}`);
-      expect(obs.meta?.profile?.length).toBeGreaterThan(0);
     });
   });
 

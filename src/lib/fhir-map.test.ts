@@ -33,18 +33,23 @@ describe('fhir-map bundle', () => {
   it('incluye DocumentReference si hay audio', () => {
     const b = buildHandoverBundle({
       ...base,
-      close: { audioUri: 'https://cdn/app/audio.m4a' }
+      audioAttachment: {
+        url: 'https://cdn/app/audio.m4a',
+        contentType: 'audio/m4a',
+      },
     });
     const types = b.entry.map((e: any) => e.resource.resourceType);
     expect(types).toContain('DocumentReference');
   });
 
-  it('identifier de Composition es determinista y se usa en ifNoneExist', () => {
-    const b1 = buildHandoverBundle({ ...base });
-    const b2 = buildHandoverBundle({ ...base });
+  it('id de Composition es determinista', () => {
+    const fixedNow = '2025-10-21T10:00:00Z';
+    const b1 = buildHandoverBundle({ ...base }, { now: fixedNow });
+    const b2 = buildHandoverBundle({ ...base }, { now: fixedNow });
     const comp1 = b1.entry.find((e: any) => e.resource.resourceType === 'Composition')!;
     const comp2 = b2.entry.find((e: any) => e.resource.resourceType === 'Composition')!;
-    expect(comp1.resource.identifier.value).toBe(comp2.resource.identifier.value);
-    expect(comp1.request?.ifNoneExist).toContain('identifier=urn:uuid|');
+    expect(comp1.resource.id).toBe(comp2.resource.id);
+    expect(comp1.request?.method).toBe('POST');
+    expect(comp1.request?.url).toBe('Composition');
   });
 });

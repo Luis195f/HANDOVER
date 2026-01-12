@@ -33,8 +33,12 @@ describe('mapRiskConditions', () => {
       TEST_RISK_CODES.PRESSURE_ULCER.code,
     ].sort());
 
+    const patientEntry = (bundle.entry as BundleEntry[]).find(
+      (entry) => entry.resource?.resourceType === 'Patient'
+    );
+
     conditions.forEach((condition) => {
-      expect(condition.subject?.reference).toBe('Patient/pat-risk-001');
+      expect(condition.subject?.reference).toBe(patientEntry?.fullUrl);
       expect(condition.recordedDate).toBe(NOW);
       expect(condition.category?.[0]?.coding?.[0]?.code).toBe('problem-list-item');
     });

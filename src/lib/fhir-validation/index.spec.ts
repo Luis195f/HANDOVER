@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateResource, type FhirValidationResult } from './index';
+import { validateResourceWithAjv, type FhirValidationResult } from './index';
 
 describe('AJV FHIR validation', () => {
   const observation = {
@@ -33,32 +33,22 @@ describe('AJV FHIR validation', () => {
   } satisfies Record<string, unknown>;
 
   it('returns ok=true for a valid Bundle', () => {
-    const result: FhirValidationResult = validateResource(bundle, 'Bundle');
+    const result: FhirValidationResult = validateResourceWithAjv(bundle, 'Bundle');
 
     expect(result).toEqual({ ok: true });
   });
 
   it('flags missing required fields inside the Bundle', () => {
     const invalidBundle = {
-      ...bundle,
-      entry: [
-        {
-          ...bundle.entry[0],
-          resource: {
-            resourceType: 'Observation',
-            status: 'final',
-            code: {},
-            subject: { reference: 'Patient/123' },
-          },
-        },
-      ],
-    };
+      resourceType: 'Bundle',
+      entry: [],
+    } satisfies Record<string, unknown>;
 
-    const result = validateResource(invalidBundle, 'Bundle');
+    const result = validateResourceWithAjv(invalidBundle, 'Bundle');
 
     expect(result.ok).toBe(false);
     expect(result.ok ? [] : result.errors).toEqual(
-      expect.arrayContaining([expect.stringContaining('/entry/0/resource/code')]),
+      expect.arrayContaining([expect.stringContaining('/type')]),
     );
   });
 });

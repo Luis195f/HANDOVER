@@ -60,6 +60,30 @@ const resolveOptions = (options?: BuildOptions): ResolvedBuildOptions => {
   return { ...merged, now: normalizeNow };
 };
 
+const mergeProfileUrls = <T extends FhirResource>(
+  resource: T,
+  options: ResolvedBuildOptions,
+): T => {
+  const customProfiles = options.profileUrls?.[resource.resourceType];
+  if (!Array.isArray(customProfiles)) {
+    return resource;
+  }
+
+  const filteredProfiles = customProfiles.filter(
+    (url): url is string => typeof url === 'string' && url.trim().length > 0,
+  );
+  if (filteredProfiles.length === 0) {
+    return resource;
+  }
+
+  const existingProfiles = Array.isArray((resource as ResourceWithMeta).meta?.profile)
+    ? Array.from((resource as ResourceWithMeta).meta?.profile ?? [])
+    : [];
+  const mergedProfiles = Array.from(new Set([...existingProfiles, ...filteredProfiles]));
+  const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
+  return { ...(resource as ResourceWithMeta), meta } as unknown as T;
+};
+
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
 
 type Coding = {
@@ -123,6 +147,7 @@ type Observation = {
   encounter?: Reference;
   effectiveDateTime: string;
   issued?: string;
+  hasMember?: Reference[];
   valueQuantity?: Quantity;
   valueCodeableConcept?: CodeableConcept;
   valueString?: string;
@@ -294,6 +319,8 @@ type Bundle = {
   entry: BundleEntry[];
 };
 
+type ResourceWithMeta = FhirResource & { meta?: Meta };
+
 export interface FhirBundleTransaction {
   resourceType: 'Bundle';
   type: 'transaction';
@@ -321,6 +348,7 @@ const TEST_LOINC = {
 
 const PROFILE_VITAL_SIGNS = 'http://hl7.org/fhir/StructureDefinition/vitalsigns';
 const PROFILE_BLOOD_PRESSURE = 'http://hl7.org/fhir/StructureDefinition/bp';
+const PROFILE_OBSERVATION = 'http://hl7.org/fhir/StructureDefinition/Observation';
 const DEFAULT_COMPOSITION_TYPE: CodeableConcept = {
   coding: [
     {
@@ -340,6 +368,17 @@ const vitalCategoryConcept: CodeableConcept = {
       display: 'Vital Signs',
     },
   ],
+};
+
+const laboratoryCategoryConcept: CodeableConcept = {
+  coding: [
+    {
+      system: CATEGORY.laboratory.system,
+      code: CATEGORY.laboratory.code,
+      display: 'Laboratory',
+    },
+  ],
+  text: 'Laboratory',
 };
 
 const surveyCategoryConcept: CodeableConcept = {
@@ -397,19 +436,26 @@ const isoDateTime = z
   .datetime({ offset: true })
   .transform((value) => new Date(value).toISOString());
 
+const normalizeIsoDateTimeValue = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return undefined;
+  return new Date(parsed).toISOString();
+};
+
 const ObservationVitalsSchema = z.object({
   patientId: z.string().min(1),
   encounterId: z.string().min(1).optional(),
   recordedAt: isoDateTime.optional(),
   issuedAt: isoDateTime.optional(),
-  hr: z.number().min(30).max(220).optional(),
-  rr: z.number().min(5).max(60).optional(),
-  tempC: z.number().min(30).max(45).optional(),
-  spo2: z.number().min(50).max(100).optional(),
-  sbp: z.number().min(60).max(260).optional(),
-  dbp: z.number().min(30).max(160).optional(),
-  glucoseMgDl: z.number().min(20).max(1000).optional(),
-  glucoseMmolL: z.number().min(1).max(55).optional(),
+  hr: z.coerce.number().min(30).max(220).optional(),
+  rr: z.coerce.number().min(5).max(60).optional(),
+  tempC: z.coerce.number().min(30).max(45).optional(),
+  spo2: z.coerce.number().min(50).max(100).optional(),
+  sbp: z.coerce.number().min(60).max(260).optional(),
+  dbp: z.coerce.number().min(30).max(160).optional(),
+  glucoseMgDl: z.coerce.number().min(20).max(1000).optional(),
+  glucoseMmolL: z.coerce.number().min(1).max(55).optional(),
   avpu: z.enum(['A', 'C', 'V', 'P', 'U']).optional(),
 });
 
@@ -498,6 +544,23 @@ const AudioAttachmentSchema = z
     path: ['size'],
   });
 
+const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  mp4: 'audio/mp4',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  opus: 'audio/opus',
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+};
+
+const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(
+  Object.values(ATTACHMENT_MIME_BY_EXTENSION).concat(['application/octet-stream']),
+);
+
 const AttesterSchema = z.object({
   mode: z.enum(['professional', 'legal', 'official', 'personal']),
   time: isoDateTime.optional(),
@@ -516,6 +579,11 @@ type MedicationStatementInput = z.infer<typeof MedicationStatementSchema>;
 type OxygenTherapyInput = z.infer<typeof OxygenTherapySchema>;
 type AudioAttachmentInput = z.infer<typeof AudioAttachmentSchema>;
 type AttesterInput = z.infer<typeof AttesterSchema>;
+type AttachmentInput = {
+  url: string;
+  contentType?: string;
+  description?: string;
+};
 
 type MedicationValues = {
   patientId: string;
@@ -535,6 +603,7 @@ type DocumentValues = {
   encounterId?: string;
   author?: AuthorInput;
   audioAttachment?: AudioAttachmentInput | null;
+  attachments?: AttachmentInput[] | null;
 };
 
 type CompositionValues = {
@@ -607,6 +676,7 @@ export type HandoverValues = {
   medications?: Array<MedicationStatementInput | MedicationItem>;
   oxygenTherapy?: OxygenTherapyInput | null;
   audioAttachment?: AudioAttachmentInput | null;
+  attachments?: AttachmentInput[];
   composition?: CompositionInput;
   closingSummary?: string | null;
   sbar?: SbarValues;
@@ -710,6 +780,34 @@ function ensureAuthorReference(values: { author?: AuthorInput }): Reference {
     type: 'Practitioner',
     display: author?.display ?? 'Handover Practitioner',
   };
+}
+
+function assertAttachmentUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Attachment URL must be valid');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Attachment URL must use http or https');
+  }
+}
+
+function inferAttachmentContentType(url: string): string {
+  const clean = url.split('?')[0]?.split('#')[0] ?? '';
+  const ext = clean.split('.').pop()?.toLowerCase() ?? '';
+  return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
+}
+
+function resolveAttachmentContentType(input: AttachmentInput): string {
+  if (input.contentType) {
+    if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(input.contentType)) {
+      throw new Error('Attachment contentType is not allowed');
+    }
+    return input.contentType;
+  }
+  return inferAttachmentContentType(input.url);
 }
 
 function mapAttesters(inputs?: CompositionInput['attesters']): CompositionAttester[] | undefined {
@@ -819,17 +917,17 @@ const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
   DetectedIssue: 'di-',
 };
 
-function assignStableIds(
-  resource: FhirResource,
+function assignStableIds<T extends FhirResource>(
+  resource: T,
   patientId: string,
-): { resource: FhirResource; fullUrl: string } {
+): { resource: T; fullUrl: string } {
   const normalizedPatientId = normalizePatientId(patientId);
   const { id: _ignored, ...rest } = resource;
   const key = `${resource.resourceType}|${normalizedPatientId}|${stableStringify(rest)}`;
   const prefix = FHIR_ID_PREFIX[resource.resourceType] ?? '';
   const id = fhirId(prefix, key);
   const urn = `urn:uuid:${hashHex(key, 32)}`;
-  const withId = { ...resource, id } as FhirResource;
+  const withId = { ...resource, id } as T;
   return { resource: withId, fullUrl: urn };
 }
 
@@ -861,7 +959,8 @@ export function mapObservationVitals(
     values.sbp !== undefined ||
     values.dbp !== undefined ||
     values.glucoseMgDl !== undefined ||
-    values.glucoseMmolL !== undefined;
+    values.glucoseMmolL !== undefined ||
+    values.avpu !== undefined;
 
   if (!hasMeasurement) {
     return [];
@@ -872,6 +971,11 @@ export function mapObservationVitals(
   const { effective, issued } = ensureEffectiveDate(parsed, optionsMerged);
   const subject = patientReference(parsed.patientId);
   const encounter = encounterReference(parsed.encounterId);
+  const normalizeGlucoseToMgDl =
+    optionsMerged.normalizeGlucoseToMgDl ??
+    optionsMerged.normalizeGlucoseToMgdl ??
+    true;
+  const glucoseDecimals = optionsMerged.glucoseDecimals ?? 0;
 
   const observations: Observation[] = [];
 
@@ -891,7 +995,7 @@ export function mapObservationVitals(
     }
     observations.push({
       resourceType: 'Observation',
-      meta: { profile: [PROFILE_BLOOD_PRESSURE] },
+      meta: { profile: [PROFILE_BLOOD_PRESSURE, PROFILE_VITAL_SIGNS] },
       status: 'final',
       category: [vitalCategoryConcept],
       code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_PANEL),
@@ -914,7 +1018,7 @@ export function mapObservationVitals(
       encounter,
       effectiveDateTime: effective,
       issued,
-      valueQuantity: quantity(parsed.hr, 'beats/minute', '/min'),
+      valueQuantity: quantity(parsed.hr, '/min', '/min'),
     });
   }
 
@@ -929,7 +1033,7 @@ export function mapObservationVitals(
       encounter,
       effectiveDateTime: effective,
       issued,
-      valueQuantity: quantity(parsed.rr, 'breaths/minute', '/min'),
+      valueQuantity: quantity(parsed.rr, '/min', '/min'),
     });
   }
 
@@ -966,9 +1070,9 @@ export function mapObservationVitals(
   if (parsed.glucoseMgDl !== undefined) {
     observations.push({
       resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
+      meta: { profile: [PROFILE_OBSERVATION] },
       status: 'final',
-      category: [vitalCategoryConcept],
+      category: [laboratoryCategoryConcept],
       code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD),
       subject,
       encounter,
@@ -976,21 +1080,41 @@ export function mapObservationVitals(
       issued,
       valueQuantity: quantity(parsed.glucoseMgDl, 'mg/dL', 'mg/dL'),
     });
-  }
-
-  if (parsed.glucoseMmolL !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MOLES_BLD),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.glucoseMmolL, 'mmol/L', 'mmol/L'),
-    });
+  } else if (parsed.glucoseMmolL !== undefined) {
+    if (normalizeGlucoseToMgDl) {
+      const factor = 18.0182;
+      const converted = Number((parsed.glucoseMmolL * factor).toFixed(glucoseDecimals));
+      observations.push({
+        resourceType: 'Observation',
+        meta: { profile: [PROFILE_OBSERVATION] },
+        status: 'final',
+        category: [laboratoryCategoryConcept],
+        code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD),
+        subject,
+        encounter,
+        effectiveDateTime: effective,
+        issued,
+        valueQuantity: quantity(converted, 'mg/dL', 'mg/dL'),
+        note: [
+          {
+            text: `Convertido desde ${parsed.glucoseMmolL} mmol/L (factor ${factor}).`,
+          },
+        ],
+      });
+    } else {
+      observations.push({
+        resourceType: 'Observation',
+        meta: { profile: [PROFILE_OBSERVATION] },
+        status: 'final',
+        category: [laboratoryCategoryConcept],
+        code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MOLES_BLD),
+        subject,
+        encounter,
+        effectiveDateTime: effective,
+        issued,
+        valueQuantity: quantity(parsed.glucoseMmolL, 'mmol/L', 'mmol/L'),
+      });
+    }
   }
 
   if (parsed.avpu !== undefined) {
@@ -1019,6 +1143,130 @@ export function mapObservationVitals(
   }
 
   return observations;
+}
+
+export function mapVitalsToObservations(
+  input: { patientId: string; encounterId?: string; vitals?: VitalsValues },
+  options?: BuildOptions,
+): Observation[] {
+  if (!input.vitals) {
+    return [];
+  }
+
+  const sanitizeNumber = (value: unknown, min: number, max: number) =>
+    Number.isFinite(value) && Number(value) >= min && Number(value) <= max
+      ? Number(value)
+      : undefined;
+  const rawVitals = input.vitals as VitalsValues & {
+    bgMgDl?: number;
+    bgMmolL?: number;
+    temp?: number;
+    acvpu?: ObservationVitalsInput['avpu'];
+  };
+  const legacyBgMgDl = (input.vitals as { bgMgDl?: number }).bgMgDl;
+  const legacyBgMmolL = (input.vitals as { bgMmolL?: number }).bgMmolL;
+  const glucoseMgDl = Number.isFinite(input.vitals.glucoseMgDl)
+    ? input.vitals.glucoseMgDl
+    : undefined;
+  const glucoseMmolL = Number.isFinite(input.vitals.glucoseMmolL)
+    ? input.vitals.glucoseMmolL
+    : undefined;
+  const tempValue = Number.isFinite(rawVitals.tempC)
+    ? rawVitals.tempC
+    : Number.isFinite(rawVitals.temp)
+      ? rawVitals.temp
+      : undefined;
+  const rawAvpu = rawVitals.avpu ?? rawVitals.acvpu;
+  const avpuValue =
+    typeof rawAvpu === 'string' && rawAvpu in AVPU_MAP
+      ? rawAvpu
+      : undefined;
+  const recordedAt = typeof rawVitals.recordedAt === 'string' ? rawVitals.recordedAt : undefined;
+  const issuedAt = typeof rawVitals.issuedAt === 'string' ? rawVitals.issuedAt : undefined;
+
+  const normalizedVitals: VitalsValues = {
+    hr: sanitizeNumber(rawVitals.hr, 30, 220),
+    rr: sanitizeNumber(rawVitals.rr, 5, 60),
+    tempC: sanitizeNumber(tempValue, 30, 45),
+    spo2: sanitizeNumber(rawVitals.spo2, 50, 100),
+    sbp: sanitizeNumber(rawVitals.sbp, 60, 260),
+    dbp: sanitizeNumber(rawVitals.dbp, 30, 160),
+    glucoseMgDl: sanitizeNumber(
+      glucoseMgDl ?? (Number.isFinite(legacyBgMgDl) ? legacyBgMgDl : undefined),
+      20,
+      1000,
+    ),
+    glucoseMmolL: sanitizeNumber(
+      glucoseMmolL ?? (Number.isFinite(legacyBgMmolL) ? legacyBgMmolL : undefined),
+      1,
+      55,
+    ),
+    avpu: avpuValue,
+    recordedAt,
+    issuedAt,
+  };
+
+  const baseObservations = mapObservationVitals(
+    {
+      patientId: input.patientId,
+      encounterId: input.encounterId,
+      ...normalizedVitals,
+    },
+    options,
+  );
+
+  const filteredObservations = baseObservations.filter(
+    (observation) =>
+      !observation.code?.coding?.some(
+        (coding) =>
+          coding.system === TERMINOLOGY_SYSTEMS.LOINC &&
+          coding.code === FHIR_CODES.VITALS.BP_PANEL.code,
+      ),
+  );
+
+  if (normalizedVitals.sbp === undefined && normalizedVitals.dbp === undefined) {
+    return filteredObservations;
+  }
+
+  const optionsMerged = resolveOptions(options);
+  const normalizedRecordedAt = normalizeIsoDateTimeValue(normalizedVitals.recordedAt);
+  const normalizedIssuedAt = normalizeIsoDateTimeValue(normalizedVitals.issuedAt);
+  const effective = normalizedRecordedAt ?? optionsMerged.now();
+  const issued = normalizedIssuedAt ?? effective;
+  const subject = patientReference(input.patientId);
+  const encounter = encounterReference(input.encounterId);
+
+  const bpIndividuals: Observation[] = [];
+  if (normalizedVitals.sbp !== undefined) {
+    bpIndividuals.push({
+      resourceType: 'Observation',
+      meta: { profile: [PROFILE_VITAL_SIGNS] },
+      status: 'final',
+      category: [vitalCategoryConcept],
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_SYSTOLIC),
+      subject,
+      encounter,
+      effectiveDateTime: effective,
+      issued,
+      valueQuantity: quantity(normalizedVitals.sbp, 'mm[Hg]', 'mm[Hg]'),
+    });
+  }
+  if (normalizedVitals.dbp !== undefined) {
+    bpIndividuals.push({
+      resourceType: 'Observation',
+      meta: { profile: [PROFILE_VITAL_SIGNS] },
+      status: 'final',
+      category: [vitalCategoryConcept],
+      code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_DIASTOLIC),
+      subject,
+      encounter,
+      effectiveDateTime: effective,
+      issued,
+      valueQuantity: quantity(normalizedVitals.dbp, 'mm[Hg]', 'mm[Hg]'),
+    });
+  }
+
+  return [...filteredObservations, ...bpIndividuals];
 }
 
 const MEDICATION_ROUTE_LABELS: Partial<Record<NonNullable<MedicationItem['route']>, string>> = {
@@ -2150,6 +2398,50 @@ export function mapDocumentReferenceAudio(
   };
 }
 
+function mapDocumentReferenceAttachments(
+  values: DocumentValues,
+  options?: BuildOptions,
+): DocumentReference[] {
+  const attachments = values.attachments ?? [];
+  if (!Array.isArray(attachments) || attachments.length === 0) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const authorRef = ensureAuthorReference(values);
+
+  return attachments.map((input) => {
+    assertAttachmentUrl(input.url);
+    const contentType = resolveAttachmentContentType(input);
+    const attachment: Attachment = {
+      contentType,
+      url: input.url,
+      title: input.description,
+    };
+
+    return {
+      resourceType: 'DocumentReference',
+      status: 'current',
+      subject,
+      encounter,
+      author: [authorRef],
+      date: optionsMerged.now(),
+      content: [{ attachment }],
+      category: [
+        {
+          coding: [
+            {
+              system: 'http://terminology.hl7.org/CodeSystem/document-classcodes',
+              code: 'LP29684-5',
+              display: 'Attachment',
+            },
+          ],
+          text: 'Attachment',
+        },
+      ],
+    };
+  });
+}
+
 export function buildComposition(
   values: CompositionValues,
   refs: BundleReferenceIndex,
@@ -2348,7 +2640,9 @@ export function buildHandoverBundle(
   const values = 'values' in input ? input.values : input;
   const optionsMerged: ResolvedBuildOptions = resolveOptions(options);
   const nowIso = optionsMerged.now();
-  const sharedOptions: BuildOptions = { now: () => nowIso };
+  const sharedOptions: BuildOptions = { ...optionsMerged, now: () => nowIso };
+  const applyProfiles = <T extends FhirResource>(resource: T) =>
+    mergeProfileUrls(resource, optionsMerged);
   const normalizedPatientId = normalizePatientId(values.patientId);
 
   const patient: Patient = {
@@ -2357,7 +2651,10 @@ export function buildHandoverBundle(
     identifier: [{ system: 'urn:handover-pro:patient-id', value: normalizedPatientId }],
   };
 
-  const { resource: patientWithId, fullUrl: patientFullUrl } = assignStableIds(patient, normalizedPatientId);
+  const { resource: patientWithId, fullUrl: patientFullUrl } = assignStableIds(
+    applyProfiles(patient),
+    normalizedPatientId,
+  );
   const patientSubjectReference: Reference = { reference: patientFullUrl, type: 'Patient' };
 
   const mappingContext: MappingContext = {
@@ -2369,16 +2666,105 @@ export function buildHandoverBundle(
   const diagnoses = mapDiagnoses(values as HandoverData, mappingContext);
   const detectedIssues = mapDetectedIssuesFromRisks(values.risksStructured, mappingContext);
 
-  const vitalObservations = values.vitals
-    ? mapObservationVitals(
-        {
-          patientId: values.patientId,
-          encounterId: values.encounterId,
+  const normalizedVitals = values.vitals
+    ? (() => {
+        const legacyBgMgDl = (values.vitals as { bgMgDl?: number }).bgMgDl;
+        const legacyBgMmolL = (values.vitals as { bgMmolL?: number }).bgMmolL;
+        const rawVitals = values.vitals as VitalsValues & { temp?: unknown; acvpu?: ObservationVitalsInput['avpu'] };
+        const parseNumber = (value: unknown) => {
+          if (typeof value === 'string') {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : undefined;
+          }
+          return Number.isFinite(value as number) ? Number(value) : undefined;
+        };
+        const tempValue = parseNumber(rawVitals.tempC) ?? parseNumber(rawVitals.temp);
+        const avpuValue = rawVitals.avpu ?? rawVitals.acvpu;
+        const glucoseMgDl = Number.isFinite(values.vitals.glucoseMgDl)
+          ? values.vitals.glucoseMgDl
+          : undefined;
+        const glucoseMmolL = Number.isFinite(values.vitals.glucoseMmolL)
+          ? values.vitals.glucoseMmolL
+          : undefined;
+
+        return {
           ...values.vitals,
-        },
-        sharedOptions,
+          tempC: tempValue,
+          avpu: avpuValue,
+          glucoseMgDl:
+            glucoseMgDl ?? (Number.isFinite(legacyBgMgDl) ? legacyBgMgDl : undefined),
+          glucoseMmolL:
+            glucoseMmolL ?? (Number.isFinite(legacyBgMmolL) ? legacyBgMmolL : undefined),
+        };
+      })()
+    : undefined;
+
+  const useIndividuals = Boolean(optionsMerged.emitIndividuals);
+  const vitalObservations = normalizedVitals
+    ? (useIndividuals
+        ? mapVitalsToObservations(
+            {
+              patientId: values.patientId,
+              encounterId: values.encounterId,
+              vitals: normalizedVitals,
+            },
+            sharedOptions,
+          )
+        : mapObservationVitals(
+            {
+              patientId: values.patientId,
+              encounterId: values.encounterId,
+              ...(normalizedVitals as VitalsValues),
+            },
+            sharedOptions,
+          )
       ).map((observation) => replaceSubjectReference(observation, patientSubjectReference))
     : [];
+
+  if (!useIndividuals && normalizedVitals) {
+    const normalizedRecordedAt = normalizeIsoDateTimeValue(normalizedVitals.recordedAt);
+    const normalizedIssuedAt = normalizeIsoDateTimeValue(normalizedVitals.issuedAt);
+    const effective = normalizedRecordedAt ?? nowIso;
+    const issued = normalizedIssuedAt ?? effective;
+    if (normalizedVitals.sbp !== undefined) {
+      vitalObservations.push(
+        replaceSubjectReference(
+          {
+            resourceType: 'Observation',
+            meta: { profile: [PROFILE_VITAL_SIGNS] },
+            status: 'final',
+            category: [vitalCategoryConcept],
+            code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_SYSTOLIC),
+            subject: patientReference(values.patientId),
+            encounter: mappingContext.encounter,
+            effectiveDateTime: effective,
+            issued,
+            valueQuantity: quantity(normalizedVitals.sbp, 'mm[Hg]', 'mm[Hg]'),
+          },
+          patientSubjectReference,
+        ),
+      );
+    }
+    if (normalizedVitals.dbp !== undefined) {
+      vitalObservations.push(
+        replaceSubjectReference(
+          {
+            resourceType: 'Observation',
+            meta: { profile: [PROFILE_VITAL_SIGNS] },
+            status: 'final',
+            category: [vitalCategoryConcept],
+            code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_DIASTOLIC),
+            subject: patientReference(values.patientId),
+            encounter: mappingContext.encounter,
+            effectiveDateTime: effective,
+            issued,
+            valueQuantity: quantity(normalizedVitals.dbp, 'mm[Hg]', 'mm[Hg]'),
+          },
+          patientSubjectReference,
+        ),
+      );
+    }
+  }
 
   const oxygenObservations = mapOxygenObservations(
     {
@@ -2479,6 +2865,15 @@ export function buildHandoverBundle(
     },
     sharedOptions,
   );
+  const attachmentDocuments = mapDocumentReferenceAttachments(
+    {
+      patientId: values.patientId,
+      encounterId: values.encounterId,
+      author: values.author,
+      attachments: values.attachments ?? [],
+    },
+    sharedOptions,
+  ).map((doc) => replaceSubjectReference(doc, patientSubjectReference));
   const documentWithPatientReference = document
     ? replaceSubjectReference(document, patientSubjectReference)
     : undefined;
@@ -2486,6 +2881,8 @@ export function buildHandoverBundle(
   const entries: BundleEntry[] = [
     { fullUrl: patientFullUrl, resource: patientWithId, request: { method: 'POST', url: 'Patient' } },
   ];
+  const vitalObservationByCode = new Map<string, Observation>();
+  const vitalFullUrlsByCode = new Map<string, string>();
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];
   const treatmentRefs: string[] = [];
@@ -2505,17 +2902,117 @@ export function buildHandoverBundle(
   const diagnosisRefs: string[] = [];
 
   vitalObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
     vitalsRefs.push(fullUrl);
+    const loincCode = resource.code?.coding?.find(
+      (coding) => coding.system === TERMINOLOGY_SYSTEMS.LOINC,
+    )?.code;
+    if (loincCode) {
+      vitalObservationByCode.set(loincCode, resource);
+      vitalFullUrlsByCode.set(loincCode, fullUrl);
+    }
   });
 
+  if (optionsMerged.emitHasMember) {
+    const bpPanelResource = vitalObservationByCode.get(FHIR_CODES.VITALS.BP_PANEL.code);
+    if (bpPanelResource) {
+      const bpMembers: Reference[] = [];
+      const addBpMember = (code: string) => {
+        const ref = vitalFullUrlsByCode.get(code);
+        if (ref) {
+          bpMembers.push({ reference: ref });
+        }
+      };
+      addBpMember(FHIR_CODES.VITALS.BP_SYSTOLIC.code);
+      addBpMember(FHIR_CODES.VITALS.BP_DIASTOLIC.code);
+      if (bpMembers.length > 0) {
+        bpPanelResource.hasMember = bpMembers;
+      }
+    }
+  }
+
+  const shouldEmitVitalsPanel = Boolean(optionsMerged.emitPanel) && !useIndividuals && normalizedVitals;
+  if (shouldEmitVitalsPanel && normalizedVitals) {
+    const components: ObservationComponent[] = [];
+    const addComponent = (
+      code: TerminologyCode<string>,
+      value: number | undefined,
+      unit: string,
+      ucumCode: string,
+    ) => {
+      if (value === undefined) return;
+      components.push({
+        code: codeableConceptFromCode(code),
+        valueQuantity: quantity(value, unit, ucumCode),
+      });
+    };
+
+    addComponent(FHIR_CODES.VITALS.HEART_RATE, normalizedVitals.hr, '/min', '/min');
+    addComponent(FHIR_CODES.VITALS.RESP_RATE, normalizedVitals.rr, '/min', '/min');
+    addComponent(FHIR_CODES.VITALS.TEMPERATURE, normalizedVitals.tempC, '°C', 'Cel');
+    addComponent(FHIR_CODES.VITALS.SPO2, normalizedVitals.spo2, '%', '%');
+    addComponent(FHIR_CODES.VITALS.BP_SYSTOLIC, normalizedVitals.sbp, 'mm[Hg]', 'mm[Hg]');
+    addComponent(FHIR_CODES.VITALS.BP_DIASTOLIC, normalizedVitals.dbp, 'mm[Hg]', 'mm[Hg]');
+
+    if (components.length > 0) {
+      const panel: Observation = {
+        resourceType: 'Observation',
+        meta: { profile: [PROFILE_VITAL_SIGNS] },
+        status: 'final',
+        category: [vitalCategoryConcept],
+        code: codeableConceptFromCode(FHIR_CODES.VITALS.VITAL_SIGNS_PANEL, 'Vital signs'),
+        subject: patientSubjectReference,
+        encounter: mappingContext.encounter,
+        effectiveDateTime: nowIso,
+        issued: nowIso,
+        component: components,
+      };
+
+      if (optionsMerged.emitHasMember) {
+        const members: Reference[] = [];
+        const addMemberByCode = (code: string) => {
+          const ref = vitalFullUrlsByCode.get(code);
+          if (ref) {
+            members.push({ reference: ref });
+          }
+        };
+        addMemberByCode(FHIR_CODES.VITALS.HEART_RATE.code);
+        addMemberByCode(FHIR_CODES.VITALS.RESP_RATE.code);
+        addMemberByCode(FHIR_CODES.VITALS.TEMPERATURE.code);
+        addMemberByCode(FHIR_CODES.VITALS.SPO2.code);
+        addMemberByCode(FHIR_CODES.VITALS.BP_SYSTOLIC.code);
+        addMemberByCode(FHIR_CODES.VITALS.BP_DIASTOLIC.code);
+        addMemberByCode(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD.code);
+        addMemberByCode(FHIR_CODES.VITALS.GLUCOSE_MOLES_BLD.code);
+        addMemberByCode(FHIR_CODES.VITALS.ACVPU.code);
+        if (members.length > 0) {
+          panel.hasMember = members;
+        }
+      }
+
+      const { resource, fullUrl } = assignStableIds(applyProfiles(panel), values.patientId);
+      entries.push({
+        fullUrl,
+        resource,
+        request: { method: 'POST', url: 'Observation' },
+      });
+      vitalsRefs.push(fullUrl);
+    }
+  }
+
   oxygenObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2525,7 +3022,10 @@ export function buildHandoverBundle(
   });
 
   nutritionObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2535,7 +3035,10 @@ export function buildHandoverBundle(
   });
 
   eliminationObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2545,7 +3048,10 @@ export function buildHandoverBundle(
   });
 
   mobilitySkinObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2555,7 +3061,10 @@ export function buildHandoverBundle(
   });
 
   fluidBalanceObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2565,7 +3074,10 @@ export function buildHandoverBundle(
   });
 
   examObservations.forEach((observation) => {
-    const { resource, fullUrl } = assignStableIds(observation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2575,25 +3087,37 @@ export function buildHandoverBundle(
   });
 
   if (evaObservation) {
-    const { resource, fullUrl } = assignStableIds(evaObservation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(evaObservation),
+      values.patientId,
+    );
     entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
     painRefs.push(fullUrl);
   }
 
   if (bradenObservation) {
-    const { resource, fullUrl } = assignStableIds(bradenObservation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(bradenObservation),
+      values.patientId,
+    );
     entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
     bradenRefs.push(fullUrl);
   }
 
   if (glasgowObservation) {
-    const { resource, fullUrl } = assignStableIds(glasgowObservation, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(glasgowObservation),
+      values.patientId,
+    );
     entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
     glasgowRefs.push(fullUrl);
   }
 
   riskConditions.forEach((condition) => {
-    const { resource, fullUrl } = assignStableIds(condition, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(condition),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2603,19 +3127,25 @@ export function buildHandoverBundle(
   });
 
   detectedIssues.forEach((issue) => {
-    const { resource, fullUrl } = assignStableIds(issue, values.patientId);
+    const { resource, fullUrl } = assignStableIds(applyProfiles(issue), values.patientId);
     entries.push({ fullUrl, resource, request: { method: 'POST', url: 'DetectedIssue' } });
     issueRefs.push(fullUrl);
   });
 
   diagnoses.forEach((condition) => {
-    const { resource, fullUrl } = assignStableIds(condition, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(condition),
+      values.patientId,
+    );
     entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Condition' } });
     diagnosisRefs.push(fullUrl);
   });
 
   medications.forEach((medication) => {
-    const { resource, fullUrl } = assignStableIds(medication, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(medication),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2625,7 +3155,10 @@ export function buildHandoverBundle(
   });
 
   treatmentProcedures.forEach((procedure) => {
-    const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(procedure),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2635,7 +3168,10 @@ export function buildHandoverBundle(
   });
 
   procedureResources.forEach((procedure) => {
-    const { resource, fullUrl } = assignStableIds(procedure, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(procedure),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2645,7 +3181,10 @@ export function buildHandoverBundle(
   });
 
   oxygenResources.forEach((resource) => {
-    const { resource: withId, fullUrl } = assignStableIds(resource, values.patientId);
+    const { resource: withId, fullUrl } = assignStableIds(
+      applyProfiles(resource),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource: withId,
@@ -2655,7 +3194,10 @@ export function buildHandoverBundle(
   });
 
   if (documentWithPatientReference) {
-    const { resource, fullUrl } = assignStableIds(documentWithPatientReference, values.patientId);
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(documentWithPatientReference),
+      values.patientId,
+    );
     entries.push({
       fullUrl,
       resource,
@@ -2663,6 +3205,19 @@ export function buildHandoverBundle(
     });
     attachmentRefs.push(fullUrl);
   }
+
+  attachmentDocuments.forEach((attachmentDoc) => {
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(attachmentDoc),
+      values.patientId,
+    );
+    entries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'DocumentReference' },
+    });
+    attachmentRefs.push(fullUrl);
+  });
 
   const composition = replaceSubjectReference(
     buildComposition(
@@ -2702,7 +3257,7 @@ export function buildHandoverBundle(
   );
 
   const { resource: compositionWithId, fullUrl: compositionFullUrl } = assignStableIds(
-    composition,
+    applyProfiles(composition),
     values.patientId,
   );
 
@@ -2825,6 +3380,8 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const optionsMerged = resolveOptions(options);
   const timestamp = data.administrativeData.shiftEnd ?? optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => timestamp };
+  const applyProfiles = <T extends FhirResource>(resource: T) =>
+    mergeProfileUrls(resource, optionsMerged);
   const mappingContext: MappingContext = {
     subject: patientReference(data.patientId),
     encounter: encounterReference(undefined),
@@ -2917,7 +3474,9 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     identifier: [{ system: 'urn:handover-pro:patient-id', value: data.patientId }],
   };
 
-  const entries: BundleEntryTransaction[] = [createTransactionEntry(patient, uuidv4())];
+  const entries: BundleEntryTransaction[] = [
+    createTransactionEntry(applyProfiles(patient), uuidv4()),
+  ];
   const refs: BundleReferenceIndex & { detectedIssues?: string[]; diagnoses?: string[] } = {
     vitals: [],
     medications: [],
@@ -2940,7 +3499,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
 
   const pushEntry = (resource: FhirResource | undefined | null) => {
     if (!resource) return;
-    const entry = createTransactionEntry(resource);
+    const entry = createTransactionEntry(applyProfiles(resource));
     entries.push(entry);
     switch (resource.resourceType) {
       case 'Observation':
@@ -3012,7 +3571,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   riskConditions.forEach(pushEntry);
   detectedIssues.forEach(pushEntry);
   diagnoses.forEach((condition) => {
-    const entry = createTransactionEntry(condition);
+    const entry = createTransactionEntry(applyProfiles(condition));
     entries.push(entry);
     refs.diagnoses?.push(entry.fullUrl);
   });
@@ -3042,7 +3601,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     sharedOptions,
   );
 
-  entries.push(createTransactionEntry(composition));
+  entries.push(createTransactionEntry(applyProfiles(composition)));
 
   return { resourceType: 'Bundle', type: 'transaction', entry: entries } satisfies FhirBundleTransaction;
 }

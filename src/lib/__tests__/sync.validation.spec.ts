@@ -20,6 +20,7 @@ describe('enqueueBundle validation modes', () => {
     type: 'transaction',
     entry: [
       {
+        fullUrl: 'urn:uuid:patient-pat-1',
         request: { method: 'POST', url: 'Patient' },
         resource: { resourceType: 'Patient', id: 'pat-1' },
       },
@@ -59,7 +60,7 @@ describe('enqueueBundle validation modes', () => {
         fhirBaseUrl: 'http://example.com/fhir',
         accessToken: 'token',
       })
-    ).rejects.toThrow(/Remote validation/);
+    ).rejects.toThrow(/Profile mismatch/);
 
     expect(fetchMock).toHaveBeenCalled();
   });
