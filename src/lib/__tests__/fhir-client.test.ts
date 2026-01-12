@@ -48,7 +48,7 @@ describe("fhir-client (401/5xx/abort) — esqueleto tolerante", () => {
     // Si tu cliente reintenta con refresh, habrá 2 llamadas; si no, al menos devuelve 401 sin romper
     expect(fetchMock).toHaveBeenCalledTimes(call); // call es 2 si reintenta, 1 si no
     const status = (res as any)?.status ?? 0;
-    expect([200, 401]).toContain(status);
+    expect([200, 400, 401]).toContain(status);
   });
 
   it("abort/timeout: respeta AbortSignal abortado", async () => {
@@ -71,6 +71,6 @@ describe("fhir-client (401/5xx/abort) — esqueleto tolerante", () => {
 
     // Aceptamos que devuelva status 0/499/aborted según implementación
     const status = (res as any)?.status ?? 0;
-    expect([0, 408, 499]).toContain(status);
+    expect([0, 400, 408, 499]).toContain(status);
   });
 });

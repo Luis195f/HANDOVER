@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildHandoverBundle } from '../fhir-map';
+import { FHIR_CODES } from '../codes';
 
 const NOW = '2025-02-20T10:00:00Z';
 
@@ -19,9 +20,10 @@ describe('buildHandoverBundle care blocks', () => {
 
     const entries = bundle.entry as Array<{ resource: any }>;
     const observations = entries.filter((e) => e.resource?.resourceType === 'Observation').map((e) => e.resource);
-    const byCodeText = (text: string) => observations.find((o) => o.code?.text === text);
+    const byCode = (code: string) =>
+      observations.find((o) => o.code?.coding?.some((coding: any) => coding.code === code));
 
-    const nutrition = byCodeText('Nutrition care (TODO code)');
+    const nutrition = byCode(FHIR_CODES.CARE.NUTRITION.code);
     expect(nutrition).toBeDefined();
     const dietComponent = nutrition?.component?.find((c: any) => c.code?.coding?.[0]?.code === 'diet-type');
     expect(dietComponent?.valueCodeableConcept?.coding?.[0]?.code).toBe('oral');
@@ -30,22 +32,22 @@ describe('buildHandoverBundle care blocks', () => {
     const intakeComponent = nutrition?.component?.find((c: any) => c.code?.coding?.[0]?.code === 'intake');
     expect(intakeComponent?.valueQuantity?.value).toBe(600);
 
-    const urine = byCodeText('Urine output (TODO code)');
+    const urine = byCode(FHIR_CODES.CARE.URINE_OUTPUT.code);
     expect(urine?.valueQuantity?.value).toBe(900);
-    const stool = byCodeText('Stool pattern (TODO code)');
+    const stool = byCode(FHIR_CODES.CARE.STOOL_PATTERN.code);
     expect(stool?.valueCodeableConcept?.coding?.[0]?.code).toBe('diarrhea');
     expect(stool?.note?.[0]?.text).toContain('Rectal tube present');
 
-    const mobility = byCodeText('Mobility assessment (TODO code)');
+    const mobility = byCode(FHIR_CODES.CARE.MOBILITY.code);
     expect(mobility?.valueCodeableConcept?.coding?.[0]?.code).toBe('assisted');
     expect(mobility?.note?.[0]?.text).toContain('Repositioning plan');
 
-    const skin = byCodeText('Skin assessment (TODO code)');
+    const skin = byCode(FHIR_CODES.CARE.SKIN.code);
     expect(skin?.valueString).toBe('Lesión sacra');
     const pressureComponent = skin?.component?.find((c: any) => c.code?.coding?.[0]?.code === 'pressure-injury');
     expect(pressureComponent?.valueCodeableConcept?.coding?.[0]?.code).toBe('yes');
 
-    const fluid = byCodeText('Fluid balance (TODO code)');
+    const fluid = byCode(FHIR_CODES.CARE.FLUID_BALANCE.code);
     expect(fluid?.component?.find((c: any) => c.code?.coding?.[0]?.code === 'intake')?.valueQuantity?.value).toBe(1500);
     expect(fluid?.component?.find((c: any) => c.code?.coding?.[0]?.code === 'output')?.valueQuantity?.value).toBe(1200);
     expect(fluid?.component?.find((c: any) => c.code?.coding?.[0]?.code === 'net')?.valueQuantity?.value).toBe(300);

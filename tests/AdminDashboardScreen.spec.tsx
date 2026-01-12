@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { render } from '@testing-library/react-native';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { AdminDashboardScreen } from '@/src/screens/admin/AdminDashboardScreen';
@@ -54,10 +54,10 @@ describe('AdminDashboardScreen', () => {
       reload: vi.fn(),
     });
 
-    render(<AdminDashboardScreen />);
+    const { getByText } = render(<AdminDashboardScreen />);
 
-    expect(screen.getByText('Dashboard administrativo')).toBeTruthy();
-    expect(screen.getByText('UCI')).toBeTruthy();
+    expect(getByText('Dashboard administrativo')).toBeTruthy();
+    expect(getByText('UCI')).toBeTruthy();
   });
 
   it('restringe acceso a usuarios no admin', () => {
@@ -77,8 +77,8 @@ describe('AdminDashboardScreen', () => {
       reload: vi.fn(),
     });
 
-    render(<AdminDashboardScreen />);
+    const { getByText } = render(<AdminDashboardScreen />);
 
-    expect(screen.getByText(/Acceso restringido/)).toBeTruthy();
+    expect(getByText(/Acceso restringido/)).toBeTruthy();
   });
 });

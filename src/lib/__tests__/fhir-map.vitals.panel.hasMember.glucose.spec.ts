@@ -11,6 +11,12 @@ const findObsByLoinc = (bundle: any, code: string) =>
       r?.code?.coding?.some((c: any) => c.system === LOINC && String(c.code) === String(code))
     );
 
+const findEntryByLoinc = (bundle: any, code: string) =>
+  (bundle?.entry ?? []).find((e: any) =>
+    e?.resource?.resourceType === 'Observation' &&
+    e?.resource?.code?.coding?.some((c: any) => c.system === LOINC && String(c.code) === String(code))
+  );
+
 describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T13:10:00Z';
@@ -24,11 +30,11 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
     expect(panel).toBeTruthy();
 
-    const glu = findObsByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code); // 2339-0
-    expect(glu).toBeTruthy();
+    const gluEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code); // 2339-0
+    expect(gluEntry).toBeDefined();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code}-${patientId}`);
+    expect(refs).toContain(gluEntry?.fullUrl);
   });
 
   it('normaliza mmol/L→mg/dL por defecto: incluye 2339-0', () => {
@@ -38,11 +44,11 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     );
 
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
-    const glu = findObsByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code);
-    expect(panel && glu).toBeTruthy();
+    const gluEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code);
+    expect(panel && gluEntry).toBeTruthy();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code}-${patientId}`);
+    expect(refs).toContain(gluEntry?.fullUrl);
   });
 
   it('si se desactiva la normalización, incluye 14743-9 (mmol/L)', () => {
@@ -52,11 +58,11 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     );
 
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
-    const gluMol = findObsByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code); // 14743-9
-    expect(panel && gluMol).toBeTruthy();
+    const gluMolEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code); // 14743-9
+    expect(panel && gluMolEntry).toBeTruthy();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(`urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code}-${patientId}`);
+    expect(refs).toContain(gluMolEntry?.fullUrl);
   });
 
   it('no incluye glucemia si no existe', () => {
@@ -67,8 +73,12 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
 
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    // no debe contener ni 2339-0 ni 14743-9
-    expect(refs).not.toContain(`urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code}-${patientId}`);
-    expect(refs).not.toContain(`urn:uuid:obs-${TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code}-${patientId}`);
+    const gluEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code);
+    const gluMolEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code);
+
+    expect(gluEntry).toBeUndefined();
+    expect(gluMolEntry).toBeUndefined();
+    expect(refs).not.toContain(gluEntry?.fullUrl);
+    expect(refs).not.toContain(gluMolEntry?.fullUrl);
   });
 });

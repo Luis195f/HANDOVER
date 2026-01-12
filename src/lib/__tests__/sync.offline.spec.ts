@@ -56,7 +56,20 @@ describe('sync.ts offline queue determinism & retries', () => {
     expect(state.size).toBe(1);
     const [firstItem] = state.items;
     const initialCreatedAt = firstItem.createdAt;
-    const snapshot = JSON.parse(JSON.stringify(firstItem.bundle));
+    const normalizeBundle = (bundle: any) => {
+      const copy = JSON.parse(JSON.stringify(bundle));
+      delete copy._validationErrors;
+      (copy.entry ?? []).forEach((entry: any) => {
+        if (entry?.request?.ifNoneExist) {
+          entry.request.ifNoneExist = entry.request.ifNoneExist.replace(
+            /identifier=urn%3Ahandover-pro%3Atx\|[0-9a-f-]+-\d+/gi,
+            'identifier=urn%3Ahandover-pro%3Atx|<tx>'
+          );
+        }
+      });
+      return copy;
+    };
+    const snapshot = normalizeBundle(firstItem.bundle);
 
     const patientEntry = firstItem.bundle.entry[0];
     expect(patientEntry.fullUrl).toBe(`urn:uuid:patient-${patientId}`);
@@ -77,7 +90,7 @@ describe('sync.ts offline queue determinism & retries', () => {
     const [current] = state.items;
     expect(current.createdAt).toBe(initialCreatedAt);
     expect(new Date(current.updatedAt).toISOString()).toBe(later.toISOString());
-    expect(current.bundle).toStrictEqual(snapshot);
+    expect(normalizeBundle(current.bundle)).toStrictEqual(snapshot);
     expect(current.bundle.type).toBe('transaction');
     expect(current.bundle.entry[0].fullUrl).toBe(`urn:uuid:patient-${patientId}`);
   });

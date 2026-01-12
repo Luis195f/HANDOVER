@@ -80,10 +80,13 @@ type ValidationOptions = {
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-const ENV_VALIDATION_MODE =
-  (process.env.EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
-  (process.env.HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
-  'off';
+function resolveEnvValidationMode(): ValidationMode {
+  return (
+    (process.env.EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
+    (process.env.HANDOVER_FHIR_VALIDATION_MODE as ValidationMode | undefined) ||
+    'off'
+  );
+}
 
 function annotateValidationErrors(bundle: any, errors: ValidationErrorDetail[]) {
   if (!bundle || typeof bundle !== 'object') return;
@@ -129,7 +132,8 @@ function capIssuesJson(value?: string, max = 10): string | undefined {
 
 function resolveValidationMode(input?: ValidationMode): ValidationMode {
   if (input === 'off' || input === 'local' || input === 'remote') return input;
-  if (ENV_VALIDATION_MODE === 'local' || ENV_VALIDATION_MODE === 'remote') return ENV_VALIDATION_MODE;
+  const envMode = resolveEnvValidationMode();
+  if (envMode === 'local' || envMode === 'remote') return envMode;
   return 'off';
 }
 
@@ -503,6 +507,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
 
 function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
   if (item.syncStatus !== 'pending') return false;
+  if (item.attempts === 0 && !item.lastAttemptAt) return true;
   const reference = item.lastAttemptAt ?? item.createdAt;
   const base = Date.parse(reference);
   const baseline = Number.isFinite(base) ? base : 0;
@@ -511,6 +516,9 @@ function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
 }
 
 function nextEligibleAt(item: OfflineQueueItem): number {
+  if (item.attempts === 0 && !item.lastAttemptAt) {
+    return Date.now();
+  }
   const reference = item.lastAttemptAt ?? item.createdAt;
   const base = Date.parse(reference);
   const baseline = Number.isFinite(base) ? base : Date.now();
@@ -579,12 +587,26 @@ export async function processQueueOnce(): Promise<void> {
         lastAttemptAt: startedAt,
         errorMessage: undefined,
       });
+      await deleteOfflineQueueItem(item.id);
       continue;
     }
 
     const isAuthError = result.status === 401 || result.status === 403;
-    const recoverable = result.recoverable ?? isRecoverableStatus(result.status);
+    const status = result.status;
+    const recoverable = result.recoverable ?? isRecoverableStatus(status);
     const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
+
+    if (status && status >= 400 && status < 500 && !isAuthError) {
+      await updateOfflineQueueItem(item.id, {
+        syncStatus: 'error',
+        attempts: item.attempts + 1,
+        lastAttemptAt: startedAt,
+        errorMessage: result.message ?? 'Unrecoverable sync error',
+        errorStatus: status,
+        errorIssuesJson: cappedIssuesJson,
+      });
+      continue;
+    }
 
     if (recoverable || isAuthError) {
       if (isAuthError) {
@@ -1609,7 +1631,33 @@ export function buildTransactionBundleForQueue(
     glucoseDecimals: opts.glucoseDecimals,
   };
 
-  const observations = mapObservationVitals(values, observationOptions);
+  const rawVitals = values.vitals ?? {};
+  const tempValue = Number.isFinite((rawVitals as { tempC?: number }).tempC)
+    ? (rawVitals as { tempC?: number }).tempC
+    : Number.isFinite((rawVitals as { temp?: number }).temp)
+      ? (rawVitals as { temp?: number }).temp
+      : undefined;
+  const avpuValue = (() => {
+    const candidate =
+      (rawVitals as { avpu?: unknown }).avpu ??
+      (rawVitals as { acvpu?: unknown }).acvpu;
+    if (candidate === 'A' || candidate === 'C' || candidate === 'V' || candidate === 'P' || candidate === 'U') {
+      return candidate;
+    }
+    return undefined;
+  })();
+  const observations = values.vitals
+    ? mapObservationVitals(
+        {
+          patientId: values.patientId,
+          encounterId: values.encounterId,
+          ...rawVitals,
+          tempC: tempValue,
+          avpu: avpuValue,
+        },
+        observationOptions
+      )
+    : [];
 
   const entries: Array<{
     fullUrl: string;

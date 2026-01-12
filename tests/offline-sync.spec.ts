@@ -34,9 +34,8 @@ describe('offline queue processing', () => {
 
     await processQueueOnce();
 
-    const [item] = await listOfflineQueue();
-    expect(item?.syncStatus).toBe('synced');
-    expect(item?.attempts).toBe(1);
+    const items = await listOfflineQueue();
+    expect(items).toHaveLength(0);
   });
 
   it('marks permanent failures with error status', async () => {
