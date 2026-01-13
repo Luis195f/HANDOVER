@@ -1,7 +1,8 @@
 import React from 'react';
-import { Button, View } from 'react-native';
+import { View } from 'react-native';
 import { ExportPdfButton } from '../components/ExportPdfButton';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import BotonPrimario from '../../components/BotonPrimario';
 
 export type HandoverFormActionsProps = {
   styles: Record<string, any>;
@@ -21,9 +22,13 @@ export const HandoverFormActions: React.FC<HandoverFormActionsProps> = ({
   onBeforeExport,
 }) => (
   <>
-    <Button title="Guardar borrador" onPress={onSaveDraft} />
+    <BotonPrimario label="Guardar borrador" onPress={onSaveDraft} />
     <View style={styles.secondaryButton}>
-      <Button title="Finalizar entrega" onPress={onFinalize} disabled={finalizeDisabled} />
+      <BotonPrimario
+        label="Finalizar entrega"
+        onPress={onFinalize}
+        disabled={finalizeDisabled}
+      />
     </View>
     <View style={styles.secondaryButton}>
       <ExportPdfButton handover={handover} onBeforeExport={onBeforeExport} />
