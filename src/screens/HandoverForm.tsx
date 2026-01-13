@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  ActivityIndicator,
   Button,
   Pressable,
   ScrollView,
@@ -68,7 +67,6 @@ import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
 import { PatientBanner } from './components/PatientBanner';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
-import { ExportPdfButton } from './components/ExportPdfButton';
 import { BedsideChecklistModal } from './components/BedsideChecklistModal';
 import { BedsideChecklistSection } from './components/BedsideChecklistSection';
 import SpecificCareSection from './components/SpecificCareSection';
@@ -89,6 +87,8 @@ import { SummarySection } from '@/src/components/handover/SummarySection';
 import OxygenGroupSection from './components/OxygenGroupSection';
 import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
+import { SbarSection } from './handover/SbarSection';
+import { HandoverFormActions } from './handover/HandoverFormActions';
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -1429,93 +1429,19 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.sbar}
             onToggle={() => toggleSection('sbar')}
           >
-            <View style={styles.inlineActions}>
-              <Button title="Generar SBAR sugerida" onPress={handleGenerateSbarSuggestion} />
-              <View style={styles.secondaryButton}>
-                <Button
-                  title={
-                    aiSbarAvailable
-                      ? isRefiningSbarWithAI
-                        ? 'Refinando SBAR con IA…'
-                        : 'Refinar SBAR con IA'
-                      : 'IA no disponible'
-                  }
-                  onPress={handleRefineSbarWithAi}
-                  disabled={!aiSbarAvailable || isRefiningSbarWithAI}
-                />
-              </View>
-              {isRefiningSbarWithAI ? <ActivityIndicator style={{ marginLeft: 12 }} /> : null}
-            </View>
-            {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
-            {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
-            <View style={styles.field}>
-              <Text style={styles.label}>SBAR - Situation</Text>
-              <Controller
-                control={control}
-                name="sbarSituation"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {sbarSituationError ? <Text style={styles.error}>{sbarSituationError}</Text> : null}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>SBAR - Background</Text>
-              <Controller
-                control={control}
-                name="sbarBackground"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {sbarBackgroundError ? <Text style={styles.error}>{sbarBackgroundError}</Text> : null}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>SBAR - Assessment</Text>
-              <Controller
-                control={control}
-                name="sbarAssessment"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {sbarAssessmentError ? <Text style={styles.error}>{sbarAssessmentError}</Text> : null}
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>SBAR - Recommendation</Text>
-              <Controller
-                control={control}
-                name="sbarRecommendation"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    multiline
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
-              />
-              {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
-            </View>
+            <SbarSection
+              styles={styles}
+              aiSbarAvailable={aiSbarAvailable}
+              isRefiningSbarWithAI={isRefiningSbarWithAI}
+              handleGenerateSbarSuggestion={handleGenerateSbarSuggestion}
+              handleRefineSbarWithAi={handleRefineSbarWithAi}
+              sbarHelperMessage={sbarHelperMessage}
+              sbarAiError={sbarAiError}
+              sbarSituationError={sbarSituationError}
+              sbarBackgroundError={sbarBackgroundError}
+              sbarAssessmentError={sbarAssessmentError}
+              sbarRecommendationError={sbarRecommendationError}
+            />
           </CollapsibleSection>
         </View>
       )}
@@ -1995,18 +1921,15 @@ export default function HandoverForm({ navigation, route }: Props) {
       {/* END HANDOVER: SIGNATURES_DUAL_UI */}
 
       <View style={styles.buttonRow}>
-        <Button title="Guardar borrador" onPress={handleSaveDraft} />
-        <View style={styles.secondaryButton}>
-          <Button
-            title="Finalizar entrega"
-            onPress={handleFinalize}
-            disabled={formState.isSubmitting || hasValidationErrors}
-          />
-        </View>
-        <View style={styles.secondaryButton}>
-          <ExportPdfButton handover={form.getValues()} onBeforeExport={handleValidateForExport} />
-        </View>
-        </View>
+        <HandoverFormActions
+          styles={styles}
+          onSaveDraft={handleSaveDraft}
+          onFinalize={handleFinalize}
+          finalizeDisabled={formState.isSubmitting || hasValidationErrors}
+          handover={form.getValues()}
+          onBeforeExport={handleValidateForExport}
+        />
+      </View>
       </ScrollView>
       </View>
 
