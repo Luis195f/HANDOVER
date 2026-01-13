@@ -1,6 +1,8 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+
+import { useThemeTokens } from '../../theme';
 
 interface CollapsibleSectionProps {
   title: string;
@@ -15,54 +17,90 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   onToggle,
   children,
 }) => {
+  const { colors, fontSizes, spacing, radius } = useThemeTokens();
+  const titleLabel = typeof title === 'string' ? title.trim() : '';
+  const safeTitle = titleLabel || 'Sección';
+
+  React.useEffect(() => {
+    if (Platform.OS === 'android') {
+      if (UIManager.setLayoutAnimationEnabledExperimental) {
+        UIManager.setLayoutAnimationEnabledExperimental(true);
+      } else {
+        console.warn('[handover-ui] UI_COLLAPSIBLE_ANIMATION_DISABLED_ANDROID', {
+          component: 'CollapsibleSection',
+        });
+      }
+    }
+  }, []);
+
+  if (!titleLabel) {
+    console.warn('[handover-ui] UI_A11Y_MISSING_LABEL', { component: 'CollapsibleSection' });
+  }
+
+  const handleToggle = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    onToggle();
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { borderRadius: radius.sm, borderColor: colors.border, backgroundColor: colors.background }]}>
       <Pressable
-        onPress={onToggle}
-        style={styles.header}
+        onPress={handleToggle}
+        style={[
+          styles.header,
+          {
+            minHeight: 44,
+            paddingVertical: spacing.md,
+            paddingHorizontal: spacing.lg,
+            borderRadius: radius.sm,
+            borderColor: colors.border,
+            backgroundColor: colors.surface,
+          },
+        ]}
+        accessible
         accessibilityRole="button"
+        accessibilityLabel={`Sección ${safeTitle}. ${isCollapsed ? 'Contraída' : 'Expandida'}.`}
+        accessibilityHint="Doble toque para expandir o contraer"
         accessibilityState={{ expanded: !isCollapsed }}
       >
-        <Text style={styles.title}>{title}</Text>
+        <Text style={[styles.title, { color: colors.text, fontSize: fontSizes.lg }]}>{title}</Text>
         <MaterialIcons
           name={isCollapsed ? 'expand-more' : 'expand-less'}
           size={20}
-          color="#2563EB"
+          color={colors.primary}
           accessibilityElementsHidden
           importantForAccessibility="no"
         />
       </Pressable>
-      {!isCollapsed && <View style={styles.content}>{children}</View>}
+      {!isCollapsed && (
+        <View
+          style={[
+            styles.content,
+            { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, paddingTop: spacing.xs },
+          ]}
+        >
+          {children}
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#CBD5F5',
-    backgroundColor: '#fff',
     overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: '#F8FAFF',
+    borderWidth: 1,
   },
   title: {
-    fontSize: 18,
     fontWeight: '600',
-    color: '#1E3A8A',
   },
   content: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    paddingTop: 4,
     gap: 12,
   },
 });
-

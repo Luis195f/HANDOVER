@@ -29,6 +29,7 @@ import {
 import type { Handover } from "@/src/types/handover";
 import { computeAlerts } from "@/src/lib/alerts";
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
+import { useThemeTokens } from "../theme";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
@@ -76,6 +77,7 @@ type PickerProps = {
 function PickerSelect({ label, value, options, onValueChange, disabled }: PickerProps) {
   const [visible, setVisible] = useState(false);
   const selectedOption = options.find((option) => option.value === value);
+  const { colors, radius, spacing } = useThemeTokens();
 
   const handleOpen = useCallback(() => {
     if (!disabled) {
@@ -100,25 +102,35 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
       <Text style={styles.pickerLabel}>{label}</Text>
       <Pressable
         accessibilityRole="button"
-        style={[styles.pickerButton, disabled && styles.pickerButtonDisabled]}
+        style={[
+          styles.pickerButton,
+          {
+            borderColor: colors.border,
+            backgroundColor: colors.background,
+            borderRadius: radius.sm,
+            minHeight: 44,
+            paddingVertical: spacing.sm,
+          },
+          disabled && styles.pickerButtonDisabled,
+        ]}
         onPress={handleOpen}
         disabled={disabled}
       >
-        <Text style={styles.pickerButtonText}>
+        <Text style={[styles.pickerButtonText, { color: colors.text }]}>
           {selectedOption?.label ?? "Seleccionar"}
         </Text>
       </Pressable>
       <Modal transparent visible={visible} animationType="fade" onRequestClose={handleClose}>
         <Pressable style={styles.modalBackdrop} onPress={handleClose}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
             {options.map((option) => (
               <Pressable
                 key={option.value}
-                style={styles.modalOption}
+                style={[styles.modalOption, { minHeight: 44, paddingVertical: spacing.sm }]}
                 onPress={() => handleSelect(option.value)}
                 accessibilityRole="button"
               >
-                <Text style={styles.modalOptionText}>{option.label}</Text>
+                <Text style={[styles.modalOptionText, { color: colors.text }]}>{option.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -129,6 +141,7 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 }
 
 export default function PatientList({ navigation }: Props) {
+  const { colors } = useThemeTokens();
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriority, setSortByPriority] = useState(false);
@@ -173,11 +186,11 @@ export default function PatientList({ navigation }: Props) {
           accessibilityLabel="Ver tutorial de inicio"
           onPress={handleShowOnboarding}
         >
-          <Text style={styles.headerLink}>Ver tutorial</Text>
+          <Text style={[styles.headerLink, { color: colors.info }]}>Ver tutorial</Text>
         </Pressable>
       ),
     });
-  }, [handleShowOnboarding, navigation]);
+  }, [colors.info, handleShowOnboarding, navigation]);
   // END HANDOVER: ONBOARDING
 
   useEffect(() => {
@@ -354,20 +367,20 @@ export default function PatientList({ navigation }: Props) {
       low: "BAJO",
     };
     const colorMap: Record<PrioritizedPatient['level'], string> = {
-      critical: "#b91c1c",
-      high: "#ea580c",
+      critical: colors.danger,
+      high: colors.warning,
       medium: "#ca8a04",
-      low: "#16a34a",
+      low: colors.success,
     };
     return (
       <View style={[styles.priorityBadge, { backgroundColor: colorMap[level] }]}> 
         <Text style={styles.priorityBadgeText}>{labelMap[level]}</Text>
       </View>
     );
-  }, []);
+  }, [colors.danger, colors.success, colors.warning]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.surface }]}>
       <View style={styles.filters}>
         <PickerSelect
           label="Especialidad"
@@ -383,7 +396,7 @@ export default function PatientList({ navigation }: Props) {
           disabled={availableUnits.length === 0 && selectedSpecialtyId !== ALL_SPECIALTIES_OPTION}
         />
         <View style={styles.chipSection}>
-          <Text style={styles.chipLabel}>Especialidades</Text>
+          <Text style={[styles.chipLabel, { color: colors.text }]}>Especialidades</Text>
           <View style={styles.chipGroup}>
             {specialtyChips.map((chip) => (
               <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
@@ -391,7 +404,7 @@ export default function PatientList({ navigation }: Props) {
           </View>
         </View>
         <View style={styles.chipSection}>
-          <Text style={styles.chipLabel}>Unidades</Text>
+          <Text style={[styles.chipLabel, { color: colors.text }]}>Unidades</Text>
           <View style={styles.chipGroup}>
             {unitChips.map((chip) => (
               <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
@@ -399,12 +412,14 @@ export default function PatientList({ navigation }: Props) {
           </View>
         </View>
         <View style={styles.priorityToggle}>
-          <Text style={styles.priorityToggleLabel}>Ordenar por prioridad clínica</Text>
+          <Text style={[styles.priorityToggleLabel, { color: colors.text }]}>
+            Ordenar por prioridad clínica
+          </Text>
           <Switch value={sortByPriority} onValueChange={setSortByPriority} />
         </View>
         <Pressable
           accessibilityRole="button"
-          style={styles.supervisorButton}
+          style={[styles.supervisorButton, { backgroundColor: colors.primary }]}
           onPress={() => navigation.navigate("SupervisorDashboard")}
         >
           <Text style={styles.supervisorButtonTitle}>Ver dashboard de turno</Text>
@@ -427,19 +442,27 @@ export default function PatientList({ navigation }: Props) {
           const hasCriticalAlert = alerts.some(alert => alert.severity === 'critical');
           const hasWarningAlert = alerts.some(alert => alert.severity === 'warning');
           return (
-            <Pressable onPress={() => onOpenPatient(item.patientId)} style={styles.patientCard}>
-              <Text style={styles.patientName}>{item.displayName}</Text>
-              <Text style={styles.patientMeta}>{unit?.name ?? basePatient?.unitId ?? "Unidad desconocida"}</Text>
+            <Pressable
+              onPress={() => onOpenPatient(item.patientId)}
+              style={[
+                styles.patientCard,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.patientName, { color: colors.text }]}>{item.displayName}</Text>
+              <Text style={[styles.patientMeta, { color: colors.muted }]}>
+                {unit?.name ?? basePatient?.unitId ?? "Unidad desconocida"}
+              </Text>
               {/* BEGIN HANDOVER_OFFLINE */}
               <View style={styles.syncRow}>
                 <Text
                   style={[
                     styles.syncBadge,
                     syncState === "error"
-                      ? styles.syncBadgeError
+                      ? { backgroundColor: "#FEE2E2", color: colors.danger }
                       : syncState === "pending"
-                      ? styles.syncBadgePending
-                      : styles.syncBadgeSynced,
+                      ? { backgroundColor: colors.warning, color: colors.text }
+                      : { backgroundColor: "#DCFCE7", color: colors.success },
                   ]}
                 >
                   {syncState === "error" ? "Error de envío" : syncState === "pending" ? "En cola" : "Sincronizado"}
@@ -453,19 +476,19 @@ export default function PatientList({ navigation }: Props) {
               {alerts.length > 0 ? (
                 <View style={styles.alertChipRow}>
                   {hasCriticalAlert ? (
-                    <View style={[styles.alertChip, styles.alertChipCritical]}>
-                      <Text style={styles.alertChipText}>Alerta crítica</Text>
+                    <View style={[styles.alertChip, { backgroundColor: "#FEE2E2", borderColor: colors.danger }]}>
+                      <Text style={[styles.alertChipText, { color: colors.danger }]}>Alerta crítica</Text>
                     </View>
                   ) : null}
                   {hasWarningAlert ? (
-                    <View style={[styles.alertChip, styles.alertChipWarning]}>
-                      <Text style={styles.alertChipText}>Riesgo activo</Text>
+                    <View style={[styles.alertChip, { backgroundColor: colors.surface, borderColor: colors.warning }]}>
+                      <Text style={[styles.alertChipText, { color: colors.warning }]}>Riesgo activo</Text>
                     </View>
                   ) : null}
                 </View>
               ) : null}
               <Pressable
-                style={styles.handoverButton}
+                style={[styles.handoverButton, { backgroundColor: colors.info }]}
                 onPress={(event) => {
                   event.stopPropagation();
                   navigation.navigate('HandoverMain', { patientId: item.patientId });
@@ -523,6 +546,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 8,
+    minHeight: 44,
   },
   pickerButtonDisabled: {
     opacity: 0.5,
@@ -546,10 +570,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    elevation: 2,
+    minHeight: 44,
   },
   supervisorButtonTitle: {
     color: '#fff',
@@ -574,6 +599,7 @@ const styles = StyleSheet.create({
   modalOption: {
     paddingHorizontal: 16,
     paddingVertical: 12,
+    minHeight: 44,
   },
   modalOptionText: {
     fontSize: 16,
@@ -586,10 +612,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
+    elevation: 2,
   },
   patientName: {
     fontSize: 16,
@@ -690,6 +716,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   handoverButtonText: {
     color: '#FFFFFF',
