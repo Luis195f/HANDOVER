@@ -1,6 +1,6 @@
 // src/screens/AudioNote.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   useAudioRecorder,
   setAudioModeAsync,
@@ -74,6 +74,7 @@ export default function AudioNote({ navigation }: Props) {
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(recorder.uri ?? null);
   const sttServiceRef = useRef<SttService>(createSttService());
+  const hasLoggedPermissionRef = useRef(false);
   const sttService = sttServiceRef.current;
   const [transcription, setTranscription] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -106,6 +107,17 @@ export default function AudioNote({ navigation }: Props) {
       return;
     }
     void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+  }, [permission]);
+
+  useEffect(() => {
+    if (!permission || permission.granted) return;
+    if (hasLoggedPermissionRef.current) return;
+    hasLoggedPermissionRef.current = true;
+    console.warn('[HNDV][WARN][PERM_MIC_DENIED]', {
+      screen: 'AudioAttach',
+      status: permission.status,
+      canAskAgain: permission.canAskAgain,
+    });
   }, [permission]);
 
   const ensurePermissionGranted = useCallback(async () => {
@@ -259,6 +271,52 @@ export default function AudioNote({ navigation }: Props) {
   };
 
   const hasUri = useMemo(() => !!(lastUri ?? recorder.uri), [lastUri, recorder.uri]);
+
+  const handleOpenSettings = async () => {
+    try {
+      await Linking.openSettings();
+    } catch {
+      console.warn('[HNDV][WARN][PERM_OPEN_SETTINGS_FAILED]', { screen: 'AudioAttach' });
+    }
+  };
+
+  if (permission && !permission.granted) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "#0b1220", padding: 16, justifyContent: "center" }}>
+        <Text style={{ color: "#eaf2ff", fontSize: 16, textAlign: "center" }}>
+          Permiso de micrófono denegado. Actívalo en Ajustes para grabar audio.
+        </Text>
+        <Pressable
+          onPress={handleOpenSettings}
+          accessibilityRole="button"
+          style={({ pressed }) => ({
+            marginTop: 16,
+            paddingVertical: 12,
+            borderRadius: 12,
+            backgroundColor: pressed ? "#1d3a73" : "#2563EB",
+            alignItems: "center",
+          })}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700" }}>Abrir Ajustes</Text>
+        </Pressable>
+        {permission.canAskAgain ? (
+          <Pressable
+            onPress={requestPermission}
+            accessibilityRole="button"
+            style={({ pressed }) => ({
+              marginTop: 12,
+              paddingVertical: 12,
+              borderRadius: 12,
+              backgroundColor: pressed ? "#1f2937" : "#E5E7EB",
+              alignItems: "center",
+            })}
+          >
+            <Text style={{ color: "#111827", fontWeight: "700" }}>Reintentar</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0b1220", padding: 16 }}>

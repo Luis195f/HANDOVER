@@ -1068,8 +1068,9 @@ export default function HandoverForm({ navigation, route }: Props) {
       setSuggestionsState((prev) => ({ ...prev, [section]: result }));
       suggestionsCacheRef.current[section] = { timestamp: now, contextHash, result };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : null;
-      setSuggestionsError(message ?? 'No se pudieron cargar sugerencias de IA');
+      const netError = normalizeNetError(error);
+      const ui = getUserFacingNetworkMessage(netError, { screen: 'HandoverForm', op: 'suggestions' });
+      setSuggestionsError(ui.message);
     } finally {
       setSuggestionsLoading(null);
     }
@@ -1238,7 +1239,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       navigation.goBack();
     } catch (error: unknown) {
       const netError = normalizeNetError(error);
-      const ui = getUserFacingNetworkMessage(netError);
+      const ui = getUserFacingNetworkMessage(netError, { screen: 'HandoverForm', op: 'submit' });
       const buttons: AlertButton[] = [];
 
       const handleRetry = () => {

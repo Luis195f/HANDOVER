@@ -11,6 +11,34 @@ export type NetError = {
   cause?: unknown;
 };
 
+type UserFacingNetworkMessageContext = {
+  screen?: string;
+  op?: string;
+  httpStatus?: number;
+  retryable?: boolean;
+  log?: boolean;
+};
+
+const warn = (code: string, ctx: Record<string, unknown>) => {
+  if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
+  console.warn(`[HNDV][WARN][${code}]`, ctx);
+};
+
+const buildWarnContext = (err: NetError, ctx?: UserFacingNetworkMessageContext) => {
+  const payload: Record<string, unknown> = {};
+  if (ctx?.screen) payload.screen = ctx.screen;
+  if (ctx?.op) payload.op = ctx.op;
+  const status = ctx?.httpStatus ?? err.status;
+  if (typeof status === 'number') payload.httpStatus = status;
+  if (typeof ctx?.retryable === 'boolean') payload.retryable = ctx.retryable;
+  return payload;
+};
+
+const maybeWarn = (code: string, err: NetError, ctx?: UserFacingNetworkMessageContext) => {
+  if (ctx?.log === false) return;
+  warn(code, buildWarnContext(err, ctx));
+};
+
 const isAbortError = (error: unknown) => {
   const abortName = (error as { name?: string } | undefined)?.name;
   if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
@@ -52,6 +80,9 @@ const offlineHints = [
   /TypeError:\s*Failed to fetch/i,
   /DNS lookup failed/i,
   /Network connection lost/i,
+  /ECONNRESET/i,
+  /ENOTFOUND/i,
+  /EAI_AGAIN/i,
 ];
 
 export function normalizeNetError(error: unknown, ctx?: { url?: string; response?: Response }): NetError {
@@ -98,62 +129,85 @@ export function normalizeNetError(error: unknown, ctx?: { url?: string; response
 
 export function getUserFacingNetworkMessage(
   err: NetError,
+  ctx?: UserFacingNetworkMessageContext,
 ): { title: string; message: string; cta?: { label: string; action: 'RETRY' | 'LOGIN' | 'OPEN_SYNC' | 'DISMISS' } } {
   const status = err.status;
 
   if (status === 401) {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
+    maybeWarn('NET_UNAUTHORIZED_401', err, nextCtx);
     return {
       title: 'Sesión expirada',
-      message: 'Vuelve a iniciar sesión para continuar.',
+      message: 'Tu sesión caducó. Inicia sesión nuevamente para continuar.',
       cta: { label: 'Iniciar sesión', action: 'LOGIN' },
     };
   }
 
   if (status === 403) {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
+    maybeWarn('NET_FORBIDDEN_403', err, nextCtx);
     return {
-      title: 'Acceso restringido',
-      message: 'No tienes permisos para realizar esta acción. Vuelve a iniciar sesión para continuar.',
-      cta: { label: 'Iniciar sesión', action: 'LOGIN' },
-    };
-  }
-
-  if (status === 408 || err.kind === 'TIMEOUT') {
-    return {
-      title: 'Tiempo de espera agotado',
-      message: 'Revisa tu conexión e inténtalo de nuevo.',
-      cta: { label: 'Reintentar', action: 'RETRY' },
-    };
-  }
-
-  if (status === 429) {
-    const retryAfterText = err.retryAfterMs ? ` Espera ${Math.ceil(err.retryAfterMs / 1000)}s y vuelve a intentar.` : '';
-    return {
-      title: 'Demasiadas solicitudes',
-      message: `Has alcanzado el límite de solicitudes.${retryAfterText}`.trim(),
+      title: 'Permisos insuficientes',
+      message: 'Tu cuenta no tiene permisos para realizar esta acción. Si crees que es un error, contacta a soporte.',
       cta: { label: 'Entendido', action: 'DISMISS' },
     };
   }
 
-  if (status === 502 || status === 503 || status === 504) {
+  if (status === 408 || err.kind === 'TIMEOUT' || err.kind === 'ABORT') {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? true };
+    maybeWarn('NET_TIMEOUT', err, nextCtx);
     return {
-      title: 'Servidor no disponible / inestable',
-      message: 'Estamos teniendo problemas para conectar con el servidor. Intenta nuevamente en unos momentos.',
+      title: 'Tiempo de espera',
+      message: 'El servidor no respondió a tiempo. Intenta nuevamente.',
+      cta: { label: 'Reintentar', action: 'RETRY' },
+    };
+  }
+
+  if (status && status >= 500 && status <= 599) {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? true };
+    maybeWarn('NET_HTTP_5XX', err, nextCtx);
+    return {
+      title: 'Error del servidor',
+      message: 'El servidor tuvo un problema. Intenta más tarde.',
       cta: { label: 'Reintentar', action: 'RETRY' },
     };
   }
 
   if (err.kind === 'OFFLINE') {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? true };
+    maybeWarn('NET_OFFLINE_ENQUEUE', err, nextCtx);
     return {
       title: 'Sin conexión',
       message:
-        'Guardamos los cambios localmente (pendiente de envío). Los enviaremos automáticamente cuando vuelva la conexión.',
-      cta: { label: 'Ver estado de envío', action: 'OPEN_SYNC' },
+        'No se pudo conectar. Revisa tu conexión a internet. Si estás sin red, el envío quedará en cola y se reintentará automáticamente.',
+      cta: { label: 'Ver cola', action: 'OPEN_SYNC' },
     };
   }
 
+  if (status === 422) {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
+    maybeWarn('NET_HTTP_4XX_OTHER', err, nextCtx);
+    return {
+      title: 'Datos inválidos',
+      message: 'Los datos requieren corrección antes de enviarse.',
+      cta: { label: 'Entendido', action: 'DISMISS' },
+    };
+  }
+
+  if (status && status >= 400 && status <= 499) {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
+    maybeWarn('NET_HTTP_4XX_OTHER', err, nextCtx);
+    return {
+      title: 'No se pudo completar',
+      message: 'Ocurrió un error inesperado. Intenta nuevamente.',
+      cta: { label: 'Entendido', action: 'DISMISS' },
+    };
+  }
+
+  maybeWarn('NET_UNKNOWN', err, ctx);
   return {
-    title: 'No pudimos completar la acción',
-    message: 'Ocurrió un problema inesperado. Intenta nuevamente o consulta con soporte si persiste.',
+    title: 'No se pudo completar',
+    message: 'Ocurrió un error inesperado. Intenta nuevamente.',
     cta: { label: 'Entendido', action: 'DISMISS' },
   };
 }
@@ -162,5 +216,5 @@ export function getUserFacingNetworkMessage(
 Ejemplos rápidos:
 - normalizeNetError(new HTTPError(401, 'Unauthorized', false)) => { kind: 'HTTP', status: 401 }
 - normalizeNetError(new Error('Network request failed')) => { kind: 'OFFLINE' }
-- getUserFacingNetworkMessage({ kind: 'HTTP', status: 504 }) => CTA de reintento con título de servidor no disponible
+- getUserFacingNetworkMessage({ kind: 'HTTP', status: 504 }) => CTA de reintento con título de error del servidor
 */
