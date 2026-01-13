@@ -2675,9 +2675,9 @@ export function buildHandoverBundle(
           if (value === undefined || value === null) return undefined;
           if (typeof value === 'string') {
             const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : Number.NaN;
+            return Number.isFinite(parsed) ? parsed : undefined;
           }
-          return Number.isFinite(value as number) ? Number(value) : Number.NaN;
+          return Number.isFinite(value as number) ? Number(value) : undefined;
         };
         const hrValue = normalizeNumeric(rawVitals.hr);
         const rrValue = normalizeNumeric(rawVitals.rr);

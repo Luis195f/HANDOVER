@@ -109,11 +109,6 @@ export default function SyncCenter() {
     if (!token && process.env.EXPO_PUBLIC_AUTH_TOKEN) {
       token = process.env.EXPO_PUBLIC_AUTH_TOKEN;
     }
-    if (!token) {
-      setAuthRequired(true);
-      Alert.alert('Sync', 'Autenticación requerida.');
-      return { processed: 0, remaining: -1 };
-    }
     setAuthRequired(false);
     setBusy(true);
     try {
