@@ -5,6 +5,7 @@ import { Controller, type Control, type UseFormWatch } from 'react-hook-form';
 import { RISK_ACTIONS_BY_TYPE } from '@/src/config/risks';
 import type { RiskItem, RiskType } from '@/src/types/handover';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { useThemeTokens } from '../../theme';
 
 interface SafetySectionProps {
   control: Control<HandoverValues>;
@@ -32,6 +33,7 @@ function getRiskItem(values: RiskItem[] | undefined, type: RiskType): RiskItem {
 }
 
 export default function SafetySection({ control, watch }: SafetySectionProps) {
+  const { colors, fontSizes, spacing, radius } = useThemeTokens();
   const riskTypes = useMemo(() => Object.keys(RISK_LABELS) as RiskType[], []);
   const watchedRisks = watch('risksStructured');
   const normalizeRisks = (items: HandoverValues['risksStructured'] | undefined): RiskItem[] =>
@@ -77,11 +79,37 @@ export default function SafetySection({ control, watch }: SafetySectionProps) {
               const riskItem = getRiskItem(currentRisks, type);
               const actions = RISK_ACTIONS_BY_TYPE[type];
               return (
-                <View key={type} style={styles.riskCard}>
+                <View
+                  key={type}
+                  style={[
+                    styles.riskCard,
+                    {
+                      borderRadius: radius.md,
+                      borderColor: colors.border,
+                      backgroundColor: colors.background,
+                    },
+                    riskItem.present && {
+                      borderColor: colors.danger,
+                      backgroundColor: '#FEE2E2',
+                    },
+                  ]}
+                >
                   <View style={styles.riskHeader}>
                     <View style={styles.headerText}>
-                      <Text style={styles.riskTitle}>{RISK_LABELS[type]}</Text>
-                      <Text style={styles.riskHint}>Marca y documenta medidas preventivas.</Text>
+                      <Text
+                        style={[
+                          styles.riskTitle,
+                          {
+                            color: riskItem.present ? colors.danger : colors.text,
+                            fontSize: fontSizes.base,
+                          },
+                        ]}
+                      >
+                        {RISK_LABELS[type]}
+                      </Text>
+                      <Text style={[styles.riskHint, { color: colors.muted }]}>
+                        Marca y documenta medidas preventivas.
+                      </Text>
                     </View>
                     <Switch
                       accessibilityRole="switch"
@@ -101,21 +129,58 @@ export default function SafetySection({ control, watch }: SafetySectionProps) {
                                 key={action.id}
                                 accessibilityRole="checkbox"
                                 accessibilityState={{ checked }}
-                                style={[styles.checkbox, checked && styles.checkboxChecked]}
+                                style={[
+                                  styles.checkbox,
+                                  {
+                                    borderColor: colors.border,
+                                    backgroundColor: colors.background,
+                                    borderRadius: radius.sm,
+                                    minHeight: 44,
+                                    paddingVertical: spacing.sm,
+                                    paddingHorizontal: spacing.md,
+                                  },
+                                  checked && {
+                                    backgroundColor: '#EEF2FF',
+                                    borderColor: colors.info,
+                                  },
+                                ]}
                                 onPress={() => toggleAction(type, action.id)}
                               >
-                                <View style={[styles.checkboxIcon, checked && styles.checkboxIconChecked]} />
-                                <Text style={styles.checkboxLabel}>{action.label}</Text>
+                                <View
+                                  style={[
+                                    styles.checkboxIcon,
+                                    { borderColor: colors.border },
+                                    checked && { backgroundColor: colors.info, borderColor: colors.info },
+                                  ]}
+                                />
+                                <Text style={[styles.checkboxLabel, { color: colors.text }]}>
+                                  {action.label}
+                                </Text>
                               </Pressable>
                             );
                           })}
                         </View>
                       ) : (
-                        <Text style={styles.mutedText}>Registra las medidas aplicadas en notas.</Text>
+                        <Text style={[styles.mutedText, { color: colors.muted }]}>
+                          Registra las medidas aplicadas en notas.
+                        </Text>
                       )}
                       <TextInput
-                        style={[styles.notesInput, styles.input]}
+                        style={[
+                          styles.notesInput,
+                          styles.input,
+                          {
+                            borderColor: colors.border,
+                            borderRadius: radius.sm,
+                            paddingVertical: spacing.sm,
+                            paddingHorizontal: spacing.md,
+                            backgroundColor: colors.background,
+                            color: colors.text,
+                            fontSize: fontSizes.sm,
+                          },
+                        ]}
                         placeholder="Notas o medidas adicionales"
+                        placeholderTextColor={colors.muted}
                         value={riskItem.notes ?? ''}
                         onChangeText={(text) => updateNotes(type, text)}
                         multiline

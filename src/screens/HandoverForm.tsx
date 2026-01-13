@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Button,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  type TextStyle,
   NativeScrollEvent,
   NativeSyntheticEvent,
   useWindowDimensions,
@@ -56,6 +56,8 @@ import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as BaseHandoverFormValues } from '@/src/validation/schemas';
 import type { PsychosocialCare } from '@/src/types/handover';
+import BotonPrimario from '../components/BotonPrimario';
+import { useThemeTokens } from '../theme';
 type HandoverFormValues = BaseHandoverFormValues & {
   psychosocial?: PsychosocialCare;
 };
@@ -373,6 +375,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<ScrollView>(null);
+  const { colors, fontSizes, spacing, radius } = useThemeTokens();
   const { width } = useWindowDimensions();
   const isTablet = width >= 900;
   const sectionRefs = useMemo(
@@ -1354,9 +1357,23 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const contentContainerStyle = useMemo(
-    () => [styles.container, isTablet && styles.containerWithSidebar],
-    [isTablet],
+    () => [styles.container, { padding: spacing.lg }, isTablet && styles.containerWithSidebar],
+    [isTablet, spacing.lg],
   );
+  const tokenInputStyle: TextStyle = {
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.background,
+    color: colors.text,
+  };
+  const tokenErrorTextStyle: TextStyle = {
+    color: colors.danger,
+    fontSize: fontSizes.sm,
+    fontWeight: '600',
+  };
 
   return (
     <FormProvider {...form}>
@@ -1759,9 +1776,10 @@ export default function HandoverForm({ navigation, route }: Props) {
                   name="dxNursing"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
-                      style={[styles.input, styles.textArea]}
+                      style={[styles.input, styles.textArea, tokenInputStyle]}
                       multiline
                       placeholder="Diagnósticos de enfermería en texto libre (legado)"
+                      placeholderTextColor={colors.muted}
                       onBlur={onBlur}
                       value={value ?? ''}
                       onChangeText={onChange}
@@ -1783,12 +1801,14 @@ export default function HandoverForm({ navigation, route }: Props) {
               />
             </View>
             {renderDictationStatus('dxNursing')}
-            {dxNursingError ? <Text style={styles.error}>{dxNursingError}</Text> : null}
+            {dxNursingError ? (
+              <Text style={[styles.error, tokenErrorTextStyle]}>{dxNursingError}</Text>
+            ) : null}
           </View>
           {aiSuggestionsEnabled ? (
             <View style={styles.inlineActions}>
-              <Button
-                title="Sugerencias IA de cuidados"
+              <BotonPrimario
+                label="Sugerencias IA de cuidados"
                 onPress={() => requestSuggestions('diagnosis')}
                 disabled={suggestionsLoading === 'diagnosis'}
               />
@@ -1824,9 +1844,10 @@ export default function HandoverForm({ navigation, route }: Props) {
                 name="evolution"
                 render={({ field: { onChange, onBlur, value } }) => (
                   <TextInput
-                    style={[styles.input, styles.textArea]}
+                    style={[styles.input, styles.textArea, tokenInputStyle]}
                     multiline
                     placeholder="Notas de evolución"
+                    placeholderTextColor={colors.muted}
                     onBlur={onBlur}
                     value={value ?? ''}
                     onChangeText={onChange}
@@ -1848,7 +1869,9 @@ export default function HandoverForm({ navigation, route }: Props) {
             />
           </View>
           {renderDictationStatus('evolution')}
-          {evolutionError ? <Text style={styles.error}>{evolutionError}</Text> : null}
+          {evolutionError ? (
+            <Text style={[styles.error, tokenErrorTextStyle]}>{evolutionError}</Text>
+          ) : null}
         </View>
         </CollapsibleSection>
       </View>

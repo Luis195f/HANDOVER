@@ -8,6 +8,8 @@ import { useIsFocused } from '@react-navigation/native';
 import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
+import BotonPrimario from '../components/BotonPrimario';
+import { useThemeTokens } from '../theme';
 
 type QueueItemMeta = {
   id: string;
@@ -52,6 +54,22 @@ function resolveSyncOpts(): SyncOpts | null {
 export default function SyncCenter() {
   const scheme = useColorScheme();
   const C = scheme === 'dark' ? D_COLORS : L_COLORS;
+  const { colors } = useThemeTokens();
+  const palette: Colors = {
+    ...C,
+    bg: colors.background,
+    textPrimary: colors.text,
+    textSecondary: colors.muted,
+    textHint: colors.muted,
+    card: colors.surface,
+    border: colors.border,
+    accent: colors.info,
+    btn: colors.primary,
+    btnDisabled: colors.muted,
+    btnText: '#ffffff',
+    statePending: colors.warning,
+    stateError: colors.danger,
+  };
 
   const isFocused = useIsFocused();
   const [items, setItems] = React.useState<QueueItemMeta[]>([]);
@@ -157,54 +175,49 @@ export default function SyncCenter() {
   const incInterval = () => setIntervalSec((s) => Math.min(60, s + 5));
 
   return (
-    <View style={[styles.container, { backgroundColor: C.bg }]}>
+    <View style={[styles.container, { backgroundColor: palette.bg }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: C.textPrimary }]}>Sync Center</Text>
+        <Text style={[styles.title, { color: palette.textPrimary }]}>Sync Center</Text>
 
         <View style={styles.actionsRow}>
-          <Pressable
+          <BotonPrimario
             testID="sync-flush"
             disabled={busy}
             onPress={doFlush}
-            style={({ pressed }) => [
-              styles.btn, { backgroundColor: busy ? C.btnDisabled : C.btn },
-              pressed && { opacity: 0.85 }
-            ]}
-          >
-            <Text style={[styles.btnText, { color: C.btnText }]}>{busy ? 'Reintentando…' : 'Reintentar ahora'}</Text>
-          </Pressable>
+            label={busy ? 'Reintentando…' : 'Reintentar ahora'}
+          />
         </View>
       </View>
       {authRequired && (
-        <Text style={[styles.authWarning, { color: C.stateError }]}>Autenticación requerida.</Text>
+        <Text style={[styles.authWarning, { color: palette.stateError }]}>Autenticación requerida.</Text>
       )}
 
       {/* Controles de Auto-retry */}
-      <View style={[styles.card, { backgroundColor: C.card, borderColor: C.border }]}>
+      <View style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.cardTitle, { color: C.textPrimary }]}>Auto-retry</Text>
+          <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>Auto-retry</Text>
           <Switch value={autoRetry} onValueChange={setAutoRetry} />
         </View>
         <View style={[styles.rowBetween, { marginTop: 10 }]}>
-          <Text style={{ color: C.textSecondary }}>Intervalo</Text>
+          <Text style={{ color: palette.textSecondary }}>Intervalo</Text>
           <View style={styles.intervalRow}>
             <Pressable
               onPress={decInterval}
-              style={[styles.intervalBtn, { borderColor: C.border }]}
+              style={[styles.intervalBtn, { borderColor: palette.border }]}
             >
-              <Text style={{ color: C.textPrimary }}>−</Text>
+              <Text style={{ color: palette.textPrimary }}>−</Text>
             </Pressable>
-            <Text style={{ color: C.textPrimary, marginHorizontal: 8 }}>{intervalSec}s</Text>
+            <Text style={{ color: palette.textPrimary, marginHorizontal: 8 }}>{intervalSec}s</Text>
             <Pressable
               onPress={incInterval}
-              style={[styles.intervalBtn, { borderColor: C.border }]}
+              style={[styles.intervalBtn, { borderColor: palette.border }]}
             >
-              <Text style={{ color: C.textPrimary }}>＋</Text>
+              <Text style={{ color: palette.textPrimary }}>＋</Text>
             </Pressable>
           </View>
         </View>
         {lastRun && (
-          <Text style={{ marginTop: 8, color: C.textHint }}>Última ejecución: {lastRun}</Text>
+          <Text style={{ marginTop: 8, color: palette.textHint }}>Última ejecución: {lastRun}</Text>
         )}
       </View>
 
@@ -216,14 +229,14 @@ export default function SyncCenter() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={refresh}
-            tintColor={C.textSecondary}
-            colors={[C.accent]}
+            tintColor={palette.textSecondary}
+            colors={[palette.accent]}
           />
         }
-        renderItem={({ item }) => <ItemRow item={item} C={C} />}
+        renderItem={({ item }) => <ItemRow item={item} C={palette} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ color: C.textSecondary }}>No hay elementos en cola 🎉</Text>
+            <Text style={{ color: palette.textSecondary }}>No hay elementos en cola 🎉</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: 24 }}
