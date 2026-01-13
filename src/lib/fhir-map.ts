@@ -2667,48 +2667,44 @@ export function buildHandoverBundle(
   const detectedIssues = mapDetectedIssuesFromRisks(values.risksStructured, mappingContext);
 
   const normalizedVitals = values.vitals
-    ? (() => {
-        const legacyBgMgDl = (values.vitals as { bgMgDl?: number }).bgMgDl;
-        const legacyBgMmolL = (values.vitals as { bgMmolL?: number }).bgMmolL;
-        const rawVitals = values.vitals as VitalsValues & { temp?: unknown; acvpu?: ObservationVitalsInput['avpu'] };
-        const normalizeNumeric = (value: unknown): number | undefined => {
-          if (value === undefined || value === null) return undefined;
-          if (typeof value === 'string') {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : undefined;
-          }
-          return Number.isFinite(value as number) ? Number(value) : undefined;
-        };
-        const hrValue = normalizeNumeric(rawVitals.hr);
-        const rrValue = normalizeNumeric(rawVitals.rr);
-        const spo2Value = normalizeNumeric(rawVitals.spo2);
-        const sbpValue = normalizeNumeric(rawVitals.sbp);
-        const dbpValue = normalizeNumeric(rawVitals.dbp);
-        const tempValue = normalizeNumeric(rawVitals.tempC) ?? normalizeNumeric(rawVitals.temp);
-        const avpuValue = rawVitals.avpu ?? rawVitals.acvpu;
-        const glucoseMgDl = Number.isFinite(values.vitals.glucoseMgDl)
-          ? values.vitals.glucoseMgDl
-          : undefined;
-        const glucoseMmolL = Number.isFinite(values.vitals.glucoseMmolL)
-          ? values.vitals.glucoseMmolL
-          : undefined;
+  ? (() => {
+      const rawVitals = values.vitals as VitalsValues & { temp?: unknown; avcpu?: ObservationVitalsInput['avpu'] };
 
-        return {
-          ...values.vitals,
-          hr: hrValue,
-          rr: rrValue,
-          tempC: tempValue,
-          spo2: spo2Value,
-          sbp: sbpValue,
-          dbp: dbpValue,
-          avpu: avpuValue,
-          glucoseMgDl:
-            glucoseMgDl ?? (Number.isFinite(legacyBgMgDl) ? legacyBgMgDl : undefined),
-          glucoseMmolL:
-            glucoseMmolL ?? (Number.isFinite(legacyBgMmolL) ? legacyBgMmolL : undefined),
-        };
-      })()
-    : undefined;
+      const normalizeNumeric = (value: unknown): number | undefined => {
+        if (value === undefined || value === null) return undefined;
+        if (typeof value === 'string') {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        }
+        return Number.isFinite(value as number) ? Number(value) : undefined;
+      };
+
+      const vitals: Record<string, unknown> = {
+        ...rawVitals,
+        hr: normalizeNumeric(rawVitals.hr),
+        rr: normalizeNumeric(rawVitals.rr),
+        spo2: normalizeNumeric(rawVitals.spo2),
+        sbp: normalizeNumeric(rawVitals.sbp),
+        dbp: normalizeNumeric(rawVitals.dbp),
+        temp: normalizeNumeric(rawVitals.temp),
+        // avpu/avcpu se mantiene sin conversión si aplica
+        avpu: rawVitals.avpu ?? rawVitals.avcpu,
+        glucoseMgDl: Number.isFinite(rawVitals.glucoseMgDl)
+          ? rawVitals.glucoseMgDl
+          : undefined,
+        glucoseMmoll: Number.isFinite(rawVitals.glucoseMmoll)
+          ? rawVitals.glucoseMmoll
+          : undefined,
+      };
+
+      // 🔑 Eliminar keys con undefined para no generar NaN en Zod
+      for (const k of Object.keys(vitals)) {
+        if (vitals[k] === undefined) delete vitals[k];
+      }
+
+      return vitals as typeof rawVitals;
+    })()
+  : undefined;
 
   const useIndividuals = Boolean(optionsMerged.emitIndividuals);
   const vitalObservations = normalizedVitals
