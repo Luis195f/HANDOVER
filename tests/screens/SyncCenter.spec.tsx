@@ -42,6 +42,7 @@ describe('SyncCenter', () => {
     flushQueueNow.mockReset();
     process.env.EXPO_PUBLIC_FHIR_BASE = 'https://example.test';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
+    process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
     listOfflineQueue.mockResolvedValue(queueItems);
     flushQueueNow.mockResolvedValue({ processed: 2, remaining: 0 });
   });
@@ -54,14 +55,15 @@ describe('SyncCenter', () => {
     });
 
     expect(view.getByText('Sync Center')).toBeTruthy();
-    expect(view.getByText('Reintentar ahora')).toBeTruthy();
-    expect(view.getByText('#pending-1')).toBeTruthy();
-    expect(view.getByText('#error-1')).toBeTruthy();
+    expect(view.getByTestId('sync-flush')).toBeTruthy();
+    expect(view.getByTestId('sync-item-pending-1')).toBeTruthy();
+    expect(view.getByTestId('sync-item-error-1')).toBeTruthy();
     expect(view.getByText('Intentos: 1')).toBeTruthy();
     expect(view.getByText('Intentos: 2')).toBeTruthy();
     expect(view.getByText('PENDING')).toBeTruthy();
     expect(view.getByText('Error de sincronización')).toBeTruthy();
     expect(view.getByText('Ver error')).toBeTruthy();
+    expect(view.getByText('Error')).toBeTruthy();
   });
 
   it('dispara el reintento y recarga la cola', async () => {
@@ -73,7 +75,9 @@ describe('SyncCenter', () => {
 
     const initialCalls = listOfflineQueue.mock.calls.length;
 
-    fireEvent.press(view.getByText('Reintentar ahora'));
+    await act(async () => {
+      fireEvent.press(view.getByTestId('sync-flush'));
+    });
 
     await waitFor(() => {
       expect(flushQueueNow).toHaveBeenCalled();
