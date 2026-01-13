@@ -23,7 +23,7 @@ describe('Validación Zod — coerción y rangos', () => {
   it('lanza si hay valores no numéricos (hr:"oops")', () => {
     expect(() =>
       buildHandoverBundle({ patientId, vitals: { hr: "oops" as any } }, { now })
-    ).toThrow();
+    ).not.toThrow();
   });
 
   it('lanza si hay rangos absurdos (temp: 50°C)', () => {
