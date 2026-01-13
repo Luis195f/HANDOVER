@@ -20,11 +20,11 @@ describe('Validación Zod — coerción y rangos', () => {
     expect(t?.valueQuantity?.value).toBe(37.5);
   });
 
- it('no lanza y omite vitals no numéricos (hr:"oops")', () => {
-  const b = buildHandoverBundle({ patientId, vitals: { hr: "oops" as any } }, { now });
-  const hr = findBy(b, TEST_VITAL_CODES.HEART_RATE.code);
-  expect(hr).toBeUndefined();
-});
+  it('no lanza y omite vitals no numéricos (hr:"oops")', () => {
+    const b = buildHandoverBundle({ patientId, vitals: { hr: 'oops' as any } }, { now });
+    const hr = findBy(b, TEST_VITAL_CODES.HEART_RATE.code);
+    expect(hr).toBeUndefined();
+  });
 
   it('lanza si hay rangos absurdos (temp: 50°C)', () => {
     expect(() =>
