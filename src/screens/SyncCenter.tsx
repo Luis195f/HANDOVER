@@ -57,6 +57,7 @@ export default function SyncCenter() {
   const [items, setItems] = React.useState<QueueItemMeta[]>([]);
   const [refreshing, setRefreshing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [authRequired, setAuthRequired] = React.useState(false);
 
   // Auto-retry
   const [autoRetry, setAutoRetry] = React.useState(true);
@@ -99,6 +100,21 @@ export default function SyncCenter() {
       Alert.alert('Sync', 'Config FHIR_BASE o AuthService no disponible.');
       return { processed: 0, remaining: -1 };
     }
+    let token: string | null = null;
+    try {
+      token = await opts.getToken?.();
+    } catch {
+      token = null;
+    }
+    if (!token && process.env.EXPO_PUBLIC_AUTH_TOKEN) {
+      token = process.env.EXPO_PUBLIC_AUTH_TOKEN;
+    }
+    if (!token) {
+      setAuthRequired(true);
+      Alert.alert('Sync', 'Autenticación requerida.');
+      return { processed: 0, remaining: -1 };
+    }
+    setAuthRequired(false);
     setBusy(true);
     try {
       const res = await flushQueueNow(opts);
@@ -147,6 +163,7 @@ export default function SyncCenter() {
 
         <View style={styles.actionsRow}>
           <Pressable
+            testID="sync-flush"
             disabled={busy}
             onPress={doFlush}
             style={({ pressed }) => [
@@ -158,6 +175,9 @@ export default function SyncCenter() {
           </Pressable>
         </View>
       </View>
+      {authRequired && (
+        <Text style={[styles.authWarning, { color: C.stateError }]}>Autenticación requerida.</Text>
+      )}
 
       {/* Controles de Auto-retry */}
       <View style={[styles.card, { backgroundColor: C.card, borderColor: C.border }]}>
@@ -259,6 +279,7 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
 
   return (
     <RowWrapper
+      testID={`sync-item-${item.id}`}
       onPress={isError ? showErrorAlert : undefined}
       style={isError ? ({ pressed }: { pressed?: boolean }) => [...rowStyle, pressed && { opacity: 0.95 }] : rowStyle}
     >
@@ -373,4 +394,5 @@ const styles = StyleSheet.create({
   hashVal: { fontFamily: 'monospace', fontSize: 12 },
   state: { marginTop: 4, fontWeight: '700', fontSize: 12 },
   empty: { padding: 24, alignItems: 'center' },
+  authWarning: { marginBottom: 8, fontWeight: '600' },
 });
