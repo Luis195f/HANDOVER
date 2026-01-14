@@ -8,6 +8,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
+import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
 
@@ -140,8 +141,9 @@ export default function SyncCenter() {
       setLastRun(new Date().toLocaleTimeString());
       return res;
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      Alert.alert('Sync', `Error al reintentar: ${message}`);
+      const netError = normalizeNetError(e);
+      const ui = getUserFacingNetworkMessage(netError, { screen: 'SyncCenter', op: 'flush' });
+      Alert.alert(ui.title, ui.message);
       return { processed: 0, remaining: -1 };
     } finally {
       setBusy(false);
@@ -256,8 +258,7 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
   const issues = React.useMemo(() => parseErrorIssuesJson(item.errorIssuesJson), [item.errorIssuesJson]);
 
   const isError = item.syncStatus === 'error';
-  const isValidation422 = isError && item.errorStatus === 422;
-  const { subtitle, title } = resolveErrorCopy(item.errorStatus);
+  const { subtitle, title, message } = resolveErrorCopy(item.errorStatus);
   const statusLabel = isError ? subtitle : (item.syncStatus ?? 'pending').toUpperCase();
 
   const rowStyle = [
@@ -283,10 +284,10 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
 
     Alert.alert(
       title,
-      item.errorMessage || 'Se produjo un error al sincronizar.',
+      item.errorMessage || message,
       buttons,
     );
-  }, [isError, item.errorMessage, issues, title]);
+  }, [isError, item.errorMessage, issues, message, title]);
 
   const RowWrapper = isError ? Pressable : View;
 

@@ -1,6 +1,6 @@
 // src/screens/QRScan.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import {
   CameraView,
@@ -13,6 +13,7 @@ import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import { prefillFromFHIR, type PrefillOutput } from '@/src/lib/prefill';
 import { useAuth } from '@/src/security/auth';
 import { PatientBanner } from './components/PatientBanner';
+import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 
 // Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
@@ -103,6 +104,7 @@ export function QRScanScreen({ navigation, route }: Props) {
   const targetPatientId = patientMismatch ? undefined : parsedPayload?.patientId;
   const { loading, error, summary } = usePatientSummary(targetPatientId || undefined);
   const { session } = useAuth();
+  const hasLoggedPermissionRef = useRef(false);
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
   const clearTransientStates = useCallback(() => {
@@ -117,6 +119,17 @@ export function QRScanScreen({ navigation, route }: Props) {
       requestPermission();
     }
   }, [permission, requestPermission]);
+
+  useEffect(() => {
+    if (!permission || permission.granted) return;
+    if (hasLoggedPermissionRef.current) return;
+    hasLoggedPermissionRef.current = true;
+    console.warn('[HNDV][WARN][PERM_CAMERA_DENIED]', {
+      screen: 'QRScan',
+      status: permission.status,
+      canAskAgain: permission.canAskAgain,
+    });
+  }, [permission]);
 
   // Al salir de la pantalla, reseteamos el estado de escaneo
   useEffect(() => {
@@ -149,9 +162,9 @@ export function QRScanScreen({ navigation, route }: Props) {
         }
       } catch (err: any) {
         if (!cancelled) {
-          setPrefillError(
-            err?.message ?? 'No se pudieron precargar datos clínicos desde FHIR.',
-          );
+          const netError = normalizeNetError(err);
+          const ui = getUserFacingNetworkMessage(netError, { screen: 'QRScan', op: 'prefill' });
+          setPrefillError(ui.message);
         }
       } finally {
         if (!cancelled) {
@@ -275,15 +288,28 @@ export function QRScanScreen({ navigation, route }: Props) {
     );
   }
 
+  const handleOpenSettings = async () => {
+    try {
+      await Linking.openSettings();
+    } catch {
+      console.warn('[HNDV][WARN][PERM_OPEN_SETTINGS_FAILED]', { screen: 'QRScan' });
+    }
+  };
+
   if (!permission.granted) {
     return (
       <View style={styles.center}>
         <Text style={styles.text}>
-          Necesitamos acceso a la cámara para escanear el código QR del paciente.
+          Permiso de cámara denegado. Actívalo en Ajustes para escanear códigos QR.
         </Text>
-        <Text style={styles.link} onPress={requestPermission}>
-          Toca aquí para volver a solicitar permisos
-        </Text>
+        <Pressable accessibilityRole="button" onPress={handleOpenSettings} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Abrir Ajustes</Text>
+        </Pressable>
+        {permission.canAskAgain ? (
+          <Pressable accessibilityRole="button" onPress={requestPermission} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Reintentar</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -412,6 +438,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     backgroundColor: '#2563EB',
+  },
+  secondaryButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#E5E7EB',
+  },
+  secondaryButtonText: {
+    color: '#111827',
+    fontWeight: '600',
+    fontSize: 16,
   },
   primaryButtonDisabled: {
     opacity: 0.7,

@@ -57,7 +57,7 @@ describe('QRScan screen', () => {
       <QRScanScreen navigation={{ navigate } as any} route={{ key: 'qr', name: 'QRScan', params: {} } as any} />,
     );
 
-    expect(getByText('Necesitamos acceso a la cámara para escanear el código QR del paciente.')).toBeTruthy();
+    expect(getByText(/cámara/i)).toBeTruthy();
     expect(queryByText('camera-mock')).toBeNull();
   });
 
