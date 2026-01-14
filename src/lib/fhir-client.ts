@@ -541,7 +541,7 @@ export async function postBundle(
   bundle: unknown,
   opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string } | string
 ): Promise<PostBundleResult> {
-  const embeddedErrors = getValidationErrorsFromBundle(bundle);
+  const embeddedErrors = getValidationErrorsFromBundle(bundle) ?? [];
   if (embeddedErrors) {
     return {
       ok: false,
