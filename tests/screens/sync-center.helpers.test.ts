@@ -37,6 +37,6 @@ describe('SyncCenter helpers', () => {
       title: 'Datos inválidos',
       subtitle: 'Datos inválidos',
     });
-    expect(resolveErrorCopy(500).title).toBe('Error de sincronización');
+    expect(resolveErrorCopy(500).title).toBe('Error del servidor');
   });
 });
