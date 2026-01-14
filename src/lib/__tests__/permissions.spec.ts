@@ -34,22 +34,20 @@ describe('permissions helpers', () => {
   it('returns granted when audio permission already granted', async () => {
     audioState.current = { status: 'granted', granted: true, canAskAgain: true } as any;
     const result = await ensureAudioPermission();
-    expect(result).toEqual({ status: 'granted', canAskAgain: true });
+    expect(result).toMatchObject({ status: 'granted', canAskAgain: true, granted: true });
   });
 
   it('requests audio permission when denied but can ask again', async () => {
     audioState.current = { status: 'denied', granted: false, canAskAgain: true } as any;
     audioState.request = { status: 'granted', granted: true, canAskAgain: false } as any;
     const result = await ensureAudioPermission();
-    expect(result.status).toBe('granted');
-    expect(result.canAskAgain).toBe(false);
+    expect(result).toMatchObject({ status: 'granted', canAskAgain: false, granted: true });
   });
 
   it('marks audio permission as blocked when cannot ask again', async () => {
     audioState.current = { status: 'denied', granted: false, canAskAgain: false } as any;
     const result = await ensureAudioPermission();
-    expect(result.status).toBe('blocked');
-    expect(result.canAskAgain).toBe(false);
+    expect(result).toMatchObject({ status: 'blocked', canAskAgain: false, granted: false });
     expect(result.reason).toMatch(/bloqueado/i);
   });
 
@@ -57,7 +55,7 @@ describe('permissions helpers', () => {
     cameraState.current = { status: 'denied', granted: false, canAskAgain: true } as any;
     cameraState.request = { status: 'denied', granted: false, canAskAgain: false } as any;
     const result = await ensureCameraPermission();
-    expect(result.status).toBe('blocked');
+    expect(result).toMatchObject({ status: 'blocked', granted: false });
     expect(result.reason).toMatch(/cámara/i);
   });
 
@@ -66,7 +64,7 @@ describe('permissions helpers', () => {
     (audioModule.requestRecordingPermissionsAsync as any).mockRejectedValueOnce(new Error('boom'));
 
     const result = await ensureAudioPermission();
-    expect(result.status).toBe('blocked');
+    expect(result).toMatchObject({ status: 'blocked', granted: false });
     expect(result.reason).toMatch(/boom/);
   });
 });

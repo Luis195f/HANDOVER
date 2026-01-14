@@ -25,7 +25,11 @@ describe("fhir-client (401/5xx/abort) — esqueleto tolerante", () => {
     }) as any;
     globalThis.fetch = fetchMock;
 
-    const bundle = { resourceType: "Bundle", type: "transaction", entry: [] };
+    const bundle = {
+      resourceType: "Bundle",
+      type: "transaction",
+      entry: [{ request: { method: "POST", url: "Observation" } }],
+    };
     const res = await post("http://fhir.test", bundle, { headers: { Authorization: "Bearer T" } });
     expect((res as any).status ?? 200).toBeGreaterThanOrEqual(200);
   });
@@ -42,7 +46,11 @@ describe("fhir-client (401/5xx/abort) — esqueleto tolerante", () => {
     }) as any;
     globalThis.fetch = fetchMock;
 
-    const bundle = { resourceType: "Bundle", type: "transaction", entry: [] };
+    const bundle = {
+      resourceType: "Bundle",
+      type: "transaction",
+      entry: [{ request: { method: "POST", url: "Observation" } }],
+    };
     const res = await post("http://fhir.test", bundle, { headers: { Authorization: "Bearer T1" } });
 
     // Si tu cliente reintenta con refresh, habrá 2 llamadas; si no, al menos devuelve 401 sin romper
@@ -63,7 +71,11 @@ describe("fhir-client (401/5xx/abort) — esqueleto tolerante", () => {
     }) as any;
     globalThis.fetch = fetchMock;
 
-    const bundle = { resourceType: "Bundle", type: "transaction", entry: [] };
+    const bundle = {
+      resourceType: "Bundle",
+      type: "transaction",
+      entry: [{ request: { method: "POST", url: "Observation" } }],
+    };
     const res = await post("http://fhir.test", bundle, {
       headers: { Authorization: "Bearer T" },
       signal: ac.signal,

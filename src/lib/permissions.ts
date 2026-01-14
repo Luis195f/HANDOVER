@@ -12,6 +12,7 @@ type PermissionState = {
 type PermissionGuidance = {
   status: PermissionStatus;
   canAskAgain: boolean;
+  granted: boolean;
   reason?: string;
 };
 
@@ -44,6 +45,7 @@ const cameraFlow: PermissionFlow = {
 const toGuidance = (status: PermissionStatus, canAskAgain: boolean, reason?: string): PermissionGuidance => ({
   status,
   canAskAgain,
+  granted: status === 'granted',
   reason,
 });
 
