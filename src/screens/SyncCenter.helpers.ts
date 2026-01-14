@@ -1,4 +1,5 @@
 import type { OperationIssue } from '@/src/lib/fhir-outcome';
+import { getUserFacingNetworkMessage } from '@/src/lib/net-errors';
 
 export function parseErrorIssuesJson(raw?: string | null): OperationIssue[] {
   if (!raw) return [];
@@ -32,10 +33,16 @@ export function buildIssuesText(issues: OperationIssue[]): string {
 export function resolveErrorCopy(errorStatus?: number | null): {
   title: string;
   subtitle: string;
+  message: string;
 } {
-  const isValidation = errorStatus === 422;
+  const hasStatus = typeof errorStatus === 'number';
+  const ui = getUserFacingNetworkMessage(
+    hasStatus ? { kind: 'HTTP', status: errorStatus ?? undefined } : { kind: 'UNKNOWN' },
+    { log: false },
+  );
   return {
-    title: isValidation ? 'Error de validación FHIR' : 'Error de sincronización',
-    subtitle: isValidation ? 'Error de validación FHIR (422)' : 'Error de sincronización',
+    title: ui.title,
+    subtitle: ui.title,
+    message: ui.message,
   };
 }
