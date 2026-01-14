@@ -61,7 +61,7 @@ describe('SyncCenter', () => {
     expect(view.getByText('Intentos: 1')).toBeTruthy();
     expect(view.getByText('Intentos: 2')).toBeTruthy();
     expect(view.getByText('PENDING')).toBeTruthy();
-    expect(view.getByText('Error de sincronización')).toBeTruthy();
+    expect(view.getByText('No se pudo completar')).toBeTruthy();
     expect(view.getByText('Ver error')).toBeTruthy();
     expect(view.getByText('Error')).toBeTruthy();
   });

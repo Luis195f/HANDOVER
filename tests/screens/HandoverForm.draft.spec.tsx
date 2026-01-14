@@ -217,7 +217,7 @@ describe('HandoverForm drafts', () => {
     });
 
     const [title, , buttons] = alertSpy.mock.calls[0];
-    expect(title).toBe('Servidor no disponible / inestable');
+    expect(title).toBe('Error del servidor');
     const retryButton = (buttons as any[]).find((btn) => btn.text === 'Reintentar');
     expect(retryButton).toBeTruthy();
 

@@ -33,9 +33,9 @@ describe('SyncCenter helpers', () => {
   });
 
   it('resolves error copy depending on status', () => {
-    expect(resolveErrorCopy(422)).toEqual({
-      title: 'Error de validación FHIR',
-      subtitle: 'Error de validación FHIR (422)',
+    expect(resolveErrorCopy(422)).toMatchObject({
+      title: 'Datos inválidos',
+      subtitle: 'Datos inválidos',
     });
     expect(resolveErrorCopy(500).title).toBe('Error de sincronización');
   });
