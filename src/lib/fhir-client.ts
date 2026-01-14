@@ -1,5 +1,5 @@
 // src/lib/fhir-client.ts
-import { HTTPError, safeFetch } from './net';
+import { HTTPError, fetchWithRetry } from './net';
 import { getValidationErrorsFromBundle, validateBundle as validateFhirBundle } from './fhir-validation';
 import { formatIssuesForUser, isOperationOutcome, type OperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { GeneratedPdf } from './export/export-pdf';
@@ -385,27 +385,65 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
 
     const buildHeaders = (tokenOverride?: string): Record<string, string> => {
       const bearer = tokenOverride ?? authToken;
-      return {
+      const built = {
         Accept: 'application/fhir+json',
         ...(body ? { 'Content-Type': 'application/fhir+json' } : {}),
         ...(runtimeConfig.getDefaultHeaders?.() ?? {}),
         ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
         ...headers,
       };
+      if (idempotencyKey && !('Idempotency-Key' in built)) {
+        return { ...built, 'Idempotency-Key': idempotencyKey };
+      }
+      return built;
     };
 
-    const fetchOnce = async (tokenOverride?: string) =>
-      safeFetch<TResource>(url, {
-        method,
-        headers: buildHeaders(tokenOverride),
-        body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
-        signal,
-        timeoutMs: timeoutMs ?? runtimeConfig.getTimeout?.(),
-        idempotencyKey,
-      });
+    const fetchOnce = async (tokenOverride?: string) => {
+      const response = await fetchWithRetry(
+        url,
+        {
+          method,
+          headers: buildHeaders(tokenOverride),
+          body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+          signal,
+          timeoutMs: timeoutMs ?? runtimeConfig.getTimeout?.(),
+        },
+        { signal, retryOn: [] },
+      );
+      const hasClone = typeof (response as Response).clone === 'function';
+      let data: TResource | undefined = await parseResponseJson<TResource>(response);
+      if (!hasClone && data === undefined && typeof (response as Response).text === 'function') {
+        try {
+          const text = await response.text();
+          data = text ? (JSON.parse(text) as TResource) : undefined;
+        } catch {
+          data = undefined;
+        }
+      }
+      if (!response.ok) {
+        const HTTPErrorCtor: any = HTTPError;
+        if (typeof HTTPErrorCtor === 'function') {
+          throw new HTTPErrorCtor(response.status, response.statusText, false, response);
+        }
+        const fallbackError = new Error(response.statusText || `HTTP ${response.status}`);
+        (fallbackError as HTTPError).status = response.status;
+        (fallbackError as HTTPError).response = response;
+        throw fallbackError;
+      }
+      return { raw: response, data, status: response.status };
+    };
 
     const handleHttpError = async (httpError: HTTPError): Promise<FhirResponse<TResource>> => {
-      const data = await parseResponseJson<TResource>(httpError.response);
+      const hasClone = typeof httpError.response?.clone === 'function';
+      let data: TResource | undefined = await parseResponseJson<TResource>(httpError.response);
+      if (!hasClone && data === undefined && typeof httpError.response?.text === 'function') {
+        try {
+          const text = await httpError.response.text();
+          data = text ? (JSON.parse(text) as TResource) : undefined;
+        } catch {
+          data = undefined;
+        }
+      }
       const response =
         httpError.response ?? new Response('', { status: httpError.status ?? 0, statusText: httpError.message });
       const outcomeInfo = normalizeOutcome(data);
@@ -425,19 +463,30 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
         const res = await fetchOnce(tokenOverride);
         return { ok: true, response: res.raw, data: res.data, status: res.status };
       } catch (error) {
-        if (error instanceof HTTPError) {
-          if (error.status === 401 && !retried) {
+        const HTTPErrorCtor: any = HTTPError;
+        const maybeHttpError = error as HTTPError;
+        const isHTTPError = typeof HTTPErrorCtor === 'function' && error instanceof HTTPErrorCtor;
+        const isHttpErrorLike =
+          !isHTTPError && typeof error === 'object' && error !== null && 'status' in error;
+        if (isHTTPError || isHttpErrorLike) {
+          if (maybeHttpError.status === 401 && !retried) {
             const freshToken = hooks.ensureFreshToken ? await hooks.ensureFreshToken() : null;
             if (freshToken) {
               try {
                 return await attempt(freshToken, true);
               } catch (retryError) {
-                if (retryError instanceof HTTPError && retryError.status === 401) {
+                const retryHTTPErrorCtor: any = HTTPError;
+                const maybeRetryHttpError = retryError as HTTPError;
+                const isRetryHTTPError =
+                  typeof retryHTTPErrorCtor === 'function' && retryError instanceof retryHTTPErrorCtor;
+                const isRetryHttpErrorLike =
+                  !isRetryHTTPError && typeof retryError === 'object' && retryError !== null && 'status' in retryError;
+                if ((isRetryHTTPError || isRetryHttpErrorLike) && maybeRetryHttpError.status === 401) {
                   if (runtimeConfig.logout) await runtimeConfig.logout();
                   throw new Error('unauthorized');
                 }
-                if (retryError instanceof HTTPError) {
-                  return handleHttpError(retryError);
+                if (isRetryHTTPError || isRetryHttpErrorLike) {
+                  return handleHttpError(maybeRetryHttpError);
                 }
                 throw retryError;
               }
@@ -446,12 +495,12 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
             throw new Error('unauthorized');
           }
 
-          if (error.status === 401 || error.status === 403) {
+          if (maybeHttpError.status === 401 || maybeHttpError.status === 403) {
             if (runtimeConfig.logout) await runtimeConfig.logout();
             throw new Error('unauthorized');
           }
 
-          return handleHttpError(error);
+          return handleHttpError(maybeHttpError);
         }
         throw error;
       }
@@ -514,19 +563,21 @@ export async function postBundle(
     } as const;
   }
 
+  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
   const structuralErrors: Array<{ path: string; message: string }> = [];
-  if (bundleObj.resourceType !== 'Bundle') {
-    structuralErrors.push({ path: 'resourceType', message: 'Bundle.resourceType must be "Bundle"' });
-  }
-  if (bundleObj.type !== 'transaction') {
-    structuralErrors.push({ path: 'type', message: 'Bundle.type must be "transaction"' });
-  }
-  if (!Array.isArray(bundleObj.entry) || bundleObj.entry.length === 0) {
-    structuralErrors.push({ path: 'entry', message: 'Bundle.entry is required' });
+  if (shouldRunStrictValidation) {
+    if (bundleObj.resourceType !== 'Bundle') {
+      structuralErrors.push({ path: 'resourceType', message: 'Bundle.resourceType must be "Bundle"' });
+    }
+    if (bundleObj.type !== 'transaction') {
+      structuralErrors.push({ path: 'type', message: 'Bundle.type must be "transaction"' });
+    }
+    if (!Array.isArray(bundleObj.entry) || bundleObj.entry.length === 0) {
+      structuralErrors.push({ path: 'entry', message: 'Bundle.entry is required' });
+    }
   }
 
-  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const validation = shouldRunStrictValidation ? validateFhirBundle(bundle) : { isValid: true, errors: [] };
 
   const errors = structuralErrors.length > 0 ? structuralErrors : validation.isValid ? [] : validation.errors;
@@ -547,7 +598,14 @@ export async function postBundle(
   const headersFromOpts = typeof opts === 'string' ? { 'Idempotency-Key': opts } : opts?.headers;
   const idempotencyKey = typeof opts === 'string' ? opts : opts?.idempotencyKey;
 
-  const token = tokenFromOpts ?? (await getAuthToken() ?? undefined);
+  let token = tokenFromOpts;
+  if (!token) {
+    if (hooks.ensureFreshToken) {
+      token = (await hooks.ensureFreshToken()) ?? undefined;
+    } else {
+      token = (await getAuthToken()) ?? undefined;
+    }
+  }
   if (!token) {
     throw new Error('OAuth token is required');
   }

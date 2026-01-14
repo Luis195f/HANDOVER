@@ -1,25 +1,30 @@
-import { currentUser, hasUnitAccess, type AuthUser } from '@/src/security/acl';
+import { AclError, ensureUnitAccess, hasRole } from '@/src/security/acl';
+import type { AuthSession } from '@/src/security/auth-types';
 
 describe('security ACL', () => {
-  const baseUser: AuthUser = { id: 'user', role: 'nurse', allowedUnits: ['u1', 'u2'] };
+  const baseSession: AuthSession = {
+    userId: 'user',
+    accessToken: 'token',
+    roles: ['nurse'],
+    units: ['u1', 'u2'],
+  };
 
   test('denies when unit missing', () => {
-    expect(hasUnitAccess(undefined, baseUser)).toBe(true);
+    expect(() => ensureUnitAccess(baseSession, '')).toThrow(AclError);
   });
 
   test('allows admin to all units', () => {
-    const admin: AuthUser = { ...baseUser, role: 'admin' };
-    expect(hasUnitAccess('any', admin)).toBe(true);
+    const admin: AuthSession = { ...baseSession, roles: ['admin'] };
+    expect(() => ensureUnitAccess(admin, 'any')).not.toThrow();
   });
 
   test('checks membership for nurses', () => {
-    expect(hasUnitAccess('u1', baseUser)).toBe(true);
-    expect(hasUnitAccess('u9', baseUser)).toBe(true);
+    expect(() => ensureUnitAccess(baseSession, 'u1')).not.toThrow();
+    expect(() => ensureUnitAccess(baseSession, 'u9')).toThrow(AclError);
   });
 
-  test('currentUser exposes dev user', () => {
-    const user = currentUser();
-    expect(user.id).toBeDefined();
-    expect(user.role).toBeDefined();
+  test('hasRole validates session roles', () => {
+    expect(hasRole(baseSession, 'nurse')).toBe(true);
+    expect(hasRole(baseSession, 'admin')).toBe(false);
   });
 });
