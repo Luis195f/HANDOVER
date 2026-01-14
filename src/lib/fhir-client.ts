@@ -578,9 +578,28 @@ export async function postBundle(
     }
   }
 
+  const embeddedErrors = getValidationErrorsFromBundle(bundle);
+  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const validation = shouldRunStrictValidation ? validateFhirBundle(bundle) : { isValid: true, errors: [] };
+  const strictErrors: Array<{ path: string; message: string }> = [];
+  if (shouldRunStrictValidation && Array.isArray(bundleObj.entry)) {
+    bundleObj.entry.forEach((entry, index) => {
+      const request = (entry as { request?: { method?: unknown; url?: unknown } } | undefined)?.request;
+      if (typeof request?.method !== 'string' || typeof request?.url !== 'string') {
+        strictErrors.push({
+          path: `entry[${index}].request`,
+          message: 'Bundle.entry.request.method and url are required for transaction entries',
+        });
+      }
+    });
+  }
 
-  const errors = structuralErrors.length > 0 ? structuralErrors : validation.isValid ? [] : validation.errors;
+  const errors = [
+    ...(embeddedErrors ?? []),
+    ...structuralErrors,
+    ...(validation.isValid ? [] : validation.errors),
+    ...strictErrors,
+  ];
   if (errors.length > 0) {
     return {
       ok: false,
@@ -598,16 +617,19 @@ export async function postBundle(
   const headersFromOpts = typeof opts === 'string' ? { 'Idempotency-Key': opts } : opts?.headers;
   const idempotencyKey = typeof opts === 'string' ? opts : opts?.idempotencyKey;
 
-  let token = tokenFromOpts;
-  if (!token) {
-    if (hooks.ensureFreshToken) {
-      token = (await hooks.ensureFreshToken()) ?? undefined;
-    } else {
-      token = (await getAuthToken()) ?? undefined;
-    }
-  }
-  if (!token) {
-    throw new Error('OAuth token is required');
+  const authHeaderValue = headersFromOpts?.Authorization ?? headersFromOpts?.authorization;
+  const hasAuthHeader = typeof authHeaderValue === 'string' && authHeaderValue.trim().length > 0;
+
+  const token = hasAuthHeader ? '' : tokenFromOpts ?? (await getAuthToken() ?? undefined);
+  if (!token && !hasAuthHeader) {
+    return {
+      ok: false,
+      status: 401,
+      issues: [{ severity: 'error', code: 'login', diagnostics: 'OAuth token is required' }],
+      issue: [{ severity: 'error', code: 'login', diagnostics: 'OAuth token is required' }],
+      json: { error: 'OAuth token is required' },
+      body: { error: 'OAuth token is required' },
+    };
   }
 
   try {
@@ -615,7 +637,7 @@ export async function postBundle(
       path: '/Bundle',
       method: 'POST',
       body: bundle,
-      token,
+      token: hasAuthHeader ? '' : token,
       headers: headersFromOpts,
       idempotencyKey,
     });

@@ -13,6 +13,7 @@ type PermissionGuidance = {
   status: PermissionStatus;
   granted: boolean;
   canAskAgain: boolean;
+  granted: boolean;
   reason?: string;
 };
 
@@ -48,6 +49,7 @@ const toGuidance = (status: PermissionStatus, canAskAgain: boolean, reason?: str
   status,
   granted: status === 'granted',
   canAskAgain,
+  granted: status === 'granted',
   reason,
 });
 
