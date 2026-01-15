@@ -541,27 +541,26 @@ export async function postBundle(
   bundle: unknown,
   opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string } | string
 ): Promise<PostBundleResult> {
-  const embeddedErrors = getValidationErrorsFromBundle(bundle) ?? [];
-  if (embeddedErrors) {
-    return {
-      ok: false,
-      status: 400,
-      issues: embeddedErrors.map((err) => ({
-        severity: 'error',
-        code: 'invalid',
-        diagnostics: `${err.path}: ${err.message}`,
-      })),
-      issue: embeddedErrors.map((err) => ({
-        severity: 'error',
-        code: 'invalid',
-        diagnostics: `${err.path}: ${err.message}`,
-      })),
-      body: {
-        error: 'FHIR bundle failed validation',
-        details: embeddedErrors,
-      },
-    } as const;
-  }
+ if (embeddedErrors.length > 0) {
+  return {
+    ok: false,
+    status: 400,
+    issues: embeddedErrors.map((err) => ({
+      severity: 'error',
+      code: 'invalid',
+      diagnostics: `${err.path}: ${err.message}`,
+    })),
+    issue: embeddedErrors.map((err) => ({
+      severity: 'error',
+      code: 'invalid',
+      diagnostics: `${err.path}: ${err.message}`,
+    })),
+    body: {
+      error: 'FHIR bundle failed validation',
+      details: embeddedErrors,
+    },
+  } as const;
+}
 
   const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
