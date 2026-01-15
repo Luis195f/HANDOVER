@@ -45,11 +45,7 @@ const cameraFlow: PermissionFlow = {
   request: () => Camera.requestCameraPermissionsAsync() as Promise<PermissionState>,
 };
 
-const toGuidance = (
-  status: PermissionStatus,
-  canAskAgain: boolean,
-  reason?: string,
-): PermissionGuidance => ({
+const toGuidance = (status: PermissionStatus, canAskAgain: boolean, reason?: string): PermissionGuidance => ({
   status,
   granted: status === 'granted',
   canAskAgain,
@@ -60,8 +56,9 @@ const blockedGuidance = (name: string, reason?: string): PermissionGuidance =>
   toGuidance('blocked', false, reason ?? `${name} bloqueado`);
 
 async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidance> {
-  // Si getCurrent falla, para tests/robustez lo tratamos como blocked (no seguimos “a ciegas”).
   let current: PermissionState;
+
+  // Si getCurrent falla, el test espera "blocked"
   try {
     current = await flow.getCurrent();
   } catch (error) {
@@ -70,8 +67,7 @@ async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidanc
   }
 
   if (current.granted) {
-    // Cuando ya está granted, canAskAgain no debería bloquear la UX: lo normal es true.
-    return toGuidance('granted', true);
+    return toGuidance('granted', current.canAskAgain ?? true);
   }
 
   if (current.canAskAgain === false) {
@@ -87,14 +83,15 @@ async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidanc
   }
 
   if (requested.granted) {
-    return toGuidance('granted', true);
+    // IMPORTANTE: respetar canAskAgain del request (puede ser false aunque esté granted)
+    return toGuidance('granted', requested.canAskAgain ?? true);
   }
 
   if (requested.canAskAgain === false) {
     return blockedGuidance(flow.name);
   }
 
-  return toGuidance('denied', true, `${flow.name} denegado`);
+  return toGuidance('denied', requested.canAskAgain ?? true, `${flow.name} denegado`);
 }
 
 export async function ensureMediaPermissions(): Promise<boolean> {
@@ -129,3 +126,4 @@ export async function ensureCameraPermission(): Promise<PermissionGuidance> {
 export async function ensureAudioPermission(): Promise<PermissionGuidance> {
   return ensurePermission(microphoneFlow);
 }
+
