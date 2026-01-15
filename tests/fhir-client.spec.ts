@@ -41,11 +41,17 @@ describe('postBundle', () => {
     vi.restoreAllMocks();
   });
 
-  it('throws when token is missing', async () => {
+  it('returns an error when token is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     const { postBundle } = await loadClient();
-    await expect(postBundle(bundle, { token: '' as unknown as string })).rejects.toThrow(
-      'OAuth token is required',
-    );
+
+    const result = await postBundle(bundle, { token: '' as unknown as string });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(401);
+    expect(result.issue?.[0]?.diagnostics).toContain('OAuth token is required');
   });
 
   it('sends bundle with correct headers and parses success body', async () => {
@@ -141,5 +147,21 @@ describe('postBundle', () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe(400);
     expect(result.issues?.[0]?.diagnostics).toContain('entry');
+  });
+
+  it('uses Authorization header without requiring token', async () => {
+    const response = new Response(JSON.stringify({ resourceType: 'Bundle', id: 'abc' }), {
+      status: 201,
+      headers: { Location: 'Observation/123', 'Content-Type': 'application/fhir+json' },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { postBundle } = await loadClient();
+
+    const result = await postBundle(bundle, { headers: { Authorization: 'Bearer T' } });
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(201);
   });
 });

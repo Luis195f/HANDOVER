@@ -1474,6 +1474,8 @@ export default function HandoverForm({ navigation, route }: Props) {
             title="Signos vitales"
             isCollapsed={collapsedSections.signos}
             onToggle={() => toggleSection('signos')}
+            lazy
+            sectionKey="vitals"
           >
             <VitalsSection
               styles={styles}
@@ -1914,6 +1916,8 @@ export default function HandoverForm({ navigation, route }: Props) {
           title="Bedside Checklist"
           isCollapsed={collapsedSections.bedsideChecklist}
           onToggle={() => toggleSection('bedsideChecklist')}
+          lazy
+          sectionKey="bedsideChecklist"
         >
           <BedsideChecklistSection />
         </CollapsibleSection>

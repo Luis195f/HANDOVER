@@ -223,20 +223,17 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
   let lastError: unknown;
 
   while (attempt <= resolvedRetries) {
-    const attemptController = new AbortController();
-    const onAbort = () => attemptController.abort();
-    if (signal) {
-      if (signal.aborted) {
-        const abortedError = new NetworkError('Request aborted', { code: 'ABORTED', isTransient: false, url: urlToUse });
-        abortedError.name = 'AbortError';
-        throw abortedError;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
+    const attemptController = signal ? null : new AbortController();
+    const attemptSignal = signal ?? attemptController?.signal;
+    if (attemptSignal?.aborted) {
+      const abortedError = new NetworkError('Request aborted', { code: 'ABORTED', isTransient: false, url: urlToUse });
+      abortedError.name = 'AbortError';
+      throw abortedError;
     }
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let timeoutPromise: Promise<Response> | undefined;
-    if (timeoutMs) {
+    if (timeoutMs && attemptController) {
       timeoutPromise = new Promise<Response>((_, reject) => {
         timeoutId = setTimeout(() => {
           attemptController.abort();
@@ -247,13 +244,13 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
 
     try {
       const headers = buildHeaders(init.headers, idempotencyKey);
-      const fetchPromise = fetchImpl(input, { ...init, headers, signal: attemptController.signal });
+      const fetchPromise = fetchImpl(input, { ...init, headers, signal: attemptSignal });
       let abortHandler: (() => void) | undefined;
       const racePromises: Array<Promise<Response>> = [
         fetchPromise,
         new Promise<Response>((_, reject) => {
           abortHandler = () => reject(createAbortError());
-          attemptController.signal.addEventListener('abort', abortHandler!, { once: true });
+          attemptSignal?.addEventListener('abort', abortHandler!, { once: true });
         }),
       ];
       if (timeoutPromise) {
@@ -261,12 +258,11 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       }
       const response = await Promise.race(racePromises);
       if (abortHandler) {
-        attemptController.signal.removeEventListener('abort', abortHandler);
+        attemptSignal?.removeEventListener('abort', abortHandler);
       }
 
       if (response.ok) {
         if (timeoutId) clearTimeout(timeoutId);
-        if (signal) signal.removeEventListener('abort', onAbort);
         const data = await parseJsonIfPossible<T>(response, parseJson);
         return {
           ok: true,
@@ -281,7 +277,6 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       const shouldRetry = shouldRetryStatus(response.status, retryOn);
       if (!shouldRetry || attempt === resolvedRetries) {
         if (timeoutId) clearTimeout(timeoutId);
-        if (signal) signal.removeEventListener('abort', onAbort);
         const retryAfterMs = parseRetryAfter(response.headers) ?? undefined;
         throw new HTTPError(response.status, response.statusText, shouldRetry, response, retryAfterMs, urlToUse);
       }
@@ -291,11 +286,9 @@ export async function safeFetch<T = unknown>(input: RequestInfo | URL, options: 
       const jitter = Math.floor(random() * 100);
       const delay = Math.min(retryAfterMs ?? exponentialDelay + jitter, maxBackoffMs);
       if (timeoutId) clearTimeout(timeoutId);
-      if (signal) signal.removeEventListener('abort', onAbort);
       await sleep(delay);
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
-      if (signal) signal.removeEventListener('abort', onAbort);
 
       if (error instanceof HTTPError) {
         throw error;
