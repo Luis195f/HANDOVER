@@ -24,6 +24,8 @@ export default ({ config }) => ({
   // 📦 Plugins compatibles (SDK 54)
   // ────────────────────────────────────────────────
   plugins: [
+    'expo-router',
+    'expo-web-browser',
     'expo-system-ui',
     'expo-sqlite',
     'expo-secure-store',
