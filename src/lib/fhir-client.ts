@@ -541,6 +541,8 @@ export async function postBundle(
   bundle: unknown,
   opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string } | string
 ): Promise<PostBundleResult> {
+  const embeddedErrors = getValidationErrorsFromBundle(bundle) ?? [];
+
  if (embeddedErrors.length > 0) {
   return {
     ok: false,
@@ -561,7 +563,7 @@ export async function postBundle(
     },
   } as const;
 }
-
+  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
   const structuralErrors: Array<{ path: string; message: string }> = [];
   if (shouldRunStrictValidation) {
@@ -576,8 +578,6 @@ export async function postBundle(
     }
   }
 
-  const embeddedErrors = getValidationErrorsFromBundle(bundle);
-  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const validation = shouldRunStrictValidation ? validateFhirBundle(bundle) : { isValid: true, errors: [] };
   const strictErrors: Array<{ path: string; message: string }> = [];
   if (shouldRunStrictValidation && Array.isArray(bundleObj.entry)) {
