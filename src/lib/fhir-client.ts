@@ -562,7 +562,6 @@ export async function postBundle(
   } as const;
 }
 
-  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
   const structuralErrors: Array<{ path: string; message: string }> = [];
   if (shouldRunStrictValidation) {
