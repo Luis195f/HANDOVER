@@ -634,9 +634,30 @@ if (errors.length > 0) {
     } as const;
   }
 
-  const tokenFromOpts = typeof opts === 'string' ? undefined : opts?.token;
-  const headersFromOpts = typeof opts === 'string' ? { 'Idempotency-Key': opts } : opts?.headers;
-  const idempotencyKey = typeof opts === 'string' ? opts : opts?.idempotencyKey;
+  const normalizedOpts =
+  typeof opts === 'string' ? ({ idempotencyKey: opts } as const) : (opts ?? {});
+
+const externalSignal = (normalizedOpts as any).signal as AbortSignal | undefined;
+if (externalSignal?.aborted) {
+  return {
+    ok: false,
+    status: 499,
+    issues: [{ severity: 'error', code: 'aborted', diagnostics: 'Request aborted' }],
+    issue: [{ severity: 'error', code: 'aborted', diagnostics: 'Request aborted' }],
+    body: { error: 'aborted' },
+  } as const;
+}
+
+const tokenFromOpts =
+  typeof opts === 'string' ? undefined : (normalizedOpts as any).token;
+
+const headersFromOpts =
+  typeof opts === 'string'
+    ? ({ 'Idempotency-Key': opts } as const)
+    : (normalizedOpts as any).headers;
+
+const idempotencyKey =
+  typeof opts === 'string' ? opts : (normalizedOpts as any).idempotencyKey;
 
   const authHeaderValue = headersFromOpts?.Authorization ?? headersFromOpts?.authorization;
   const hasAuthHeader = typeof authHeaderValue === 'string' && authHeaderValue.trim().length > 0;
