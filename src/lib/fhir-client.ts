@@ -586,54 +586,6 @@ if (errors.length > 0) {
   } as const;
 }
 
-  const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
-  const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
-  const structuralErrors: Array<{ path: string; message: string }> = [];
-  if (shouldRunStrictValidation) {
-    if (bundleObj.resourceType !== 'Bundle') {
-      structuralErrors.push({ path: 'resourceType', message: 'Bundle.resourceType must be "Bundle"' });
-    }
-    if (bundleObj.type !== 'transaction') {
-      structuralErrors.push({ path: 'type', message: 'Bundle.type must be "transaction"' });
-    }
-    if (!Array.isArray(bundleObj.entry) || bundleObj.entry.length === 0) {
-      structuralErrors.push({ path: 'entry', message: 'Bundle.entry is required' });
-    }
-  }
-
-  const validation = shouldRunStrictValidation ? validateFhirBundle(bundle) : { isValid: true, errors: [] };
-  const strictErrors: Array<{ path: string; message: string }> = [];
-  if (shouldRunStrictValidation && Array.isArray(bundleObj.entry)) {
-    bundleObj.entry.forEach((entry, index) => {
-      const request = (entry as { request?: { method?: unknown; url?: unknown } } | undefined)?.request;
-      if (typeof request?.method !== 'string' || typeof request?.url !== 'string') {
-        strictErrors.push({
-          path: `entry[${index}].request`,
-          message: 'Bundle.entry.request.method and url are required for transaction entries',
-        });
-      }
-    });
-  }
-
-  const errors = [
-    ...(embeddedErrors ?? []),
-    ...structuralErrors,
-    ...(validation.isValid ? [] : validation.errors),
-    ...strictErrors,
-  ];
-  if (errors.length > 0) {
-    return {
-      ok: false,
-      status: 400,
-      issues: errors.map((err) => ({ severity: 'error', code: 'invalid', diagnostics: `${err.path}: ${err.message}` })),
-      issue: errors.map((err) => ({ severity: 'error', code: 'invalid', diagnostics: `${err.path}: ${err.message}` })),
-      body: {
-        error: 'FHIR bundle failed validation',
-        details: errors,
-      },
-    } as const;
-  }
-
   const normalizedOpts =
   typeof opts === 'string' ? ({ idempotencyKey: opts } as const) : (opts ?? {});
 
