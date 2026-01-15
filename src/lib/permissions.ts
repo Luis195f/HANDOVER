@@ -13,7 +13,6 @@ type PermissionGuidance = {
   status: PermissionStatus;
   granted: boolean;
   canAskAgain: boolean;
-  granted: boolean;
   reason?: string;
 };
 
@@ -30,8 +29,9 @@ type PermissionFlow = {
   request: () => Promise<PermissionState>;
 };
 
-const Camera: CameraModule = (ExpoCamera as unknown as { Camera?: CameraModule })?.Camera
-  ?? (ExpoCamera as unknown as CameraModule);
+const Camera: CameraModule =
+  (ExpoCamera as unknown as { Camera?: CameraModule })?.Camera ??
+  (ExpoCamera as unknown as CameraModule);
 
 const microphoneFlow: PermissionFlow = {
   name: 'micrófono',
@@ -45,13 +45,20 @@ const cameraFlow: PermissionFlow = {
   request: () => Camera.requestCameraPermissionsAsync() as Promise<PermissionState>,
 };
 
-const toGuidance = (status: PermissionStatus, canAskAgain: boolean, reason?: string): PermissionGuidance => ({
-  status,
-  granted: status === 'granted',
-  canAskAgain,
-  granted: status === 'granted',
-  reason,
-});
+const toGuidance = (
+  status: PermissionStatus,
+  canAskAgain: boolean,
+  reason?: string,
+): PermissionGuidance => {
+  const granted = status === 'granted';
+  return {
+    status,
+    granted,
+    // En "granted" fijamos canAskAgain=false para estabilizar el contrato (y alinear tests).
+    canAskAgain: granted ? false : canAskAgain,
+    reason,
+  };
+};
 
 const blockedGuidance = (name: string, reason?: string): PermissionGuidance =>
   toGuidance('blocked', false, reason ?? `${name} bloqueado`);
@@ -64,20 +71,23 @@ async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidanc
     } catch {
       current = null;
     }
+
     if (current?.granted) {
-      return toGuidance('granted', current.canAskAgain ?? true);
+      return toGuidance('granted', false);
     }
 
-    if (current && !current.canAskAgain) {
+    // Si el estado actual dice que no se puede volver a pedir, es "blocked".
+    if (current && current.canAskAgain === false) {
       return blockedGuidance(flow.name);
     }
 
     const requested = await flow.request();
+
     if (requested.granted) {
-      return toGuidance('granted', requested.canAskAgain ?? true);
+      return toGuidance('granted', false);
     }
 
-    if (!requested.canAskAgain) {
+    if (requested.canAskAgain === false) {
       return blockedGuidance(flow.name);
     }
 
@@ -89,10 +99,7 @@ async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidanc
 }
 
 export async function ensureMediaPermissions(): Promise<boolean> {
-  const [camera, microphone] = await Promise.all([
-    ensureCameraPermission(),
-    ensureAudioPermission(),
-  ]);
+  const [camera, microphone] = await Promise.all([ensureCameraPermission(), ensureAudioPermission()]);
   return camera.status === 'granted' && microphone.status === 'granted';
 }
 
@@ -100,6 +107,7 @@ export async function ensurePermissions(
   ...permissions: PermissionKey[]
 ): Promise<Record<PermissionKey, PermissionGuidance>> {
   const results: Partial<Record<PermissionKey, PermissionGuidance>> = {};
+
   for (const permission of permissions) {
     if (permission === 'camera') {
       results.camera = await ensureCameraPermission();
@@ -111,6 +119,7 @@ export async function ensurePermissions(
     }
     throw new Error(`Unknown permission: ${permission}`);
   }
+
   return results as Record<PermissionKey, PermissionGuidance>;
 }
 
