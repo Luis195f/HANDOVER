@@ -539,30 +539,53 @@ export function createFHIRClient(config: ScopedFHIRClientConfig) {
  */
 export async function postBundle(
   bundle: unknown,
-  opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string } | string
+  opts?: { token?: string; headers?: Record<string, string>; idempotencyKey?: string; signal?: AbortSignal } | string
 ): Promise<PostBundleResult> {
-  const embeddedErrors = getValidationErrorsFromBundle(bundle) ?? [];
+ const embeddedErrors = getValidationErrorsFromBundle(bundle) ?? [];
 
- if (embeddedErrors.length > 0) {
+// Validación mínima SIEMPRE (aunque strict esté off)
+const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
+const structuralErrors: Array<{ path: string; message: string }> = [];
+
+if (bundleObj.resourceType !== 'Bundle') {
+  structuralErrors.push({ path: 'resourceType', message: 'Bundle.resourceType must be "Bundle"' });
+}
+if (bundleObj.type !== 'transaction') {
+  structuralErrors.push({ path: 'type', message: 'Bundle.type must be "transaction"' });
+}
+if (!Array.isArray((bundleObj as any).entry) || (bundleObj as any).entry.length === 0) {
+  structuralErrors.push({ path: 'entry', message: 'Bundle.entry is required' });
+}
+
+const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
+const validation = shouldRunStrictValidation
+  ? validateFhirBundle(bundle)
+  : { isValid: true, errors: [] as Array<{ path: string; message: string }> };
+
+const errors = [
+  ...embeddedErrors,
+  ...structuralErrors,
+  ...(validation.isValid ? [] : validation.errors),
+];
+
+if (errors.length > 0) {
   return {
     ok: false,
     status: 400,
-    issues: embeddedErrors.map((err) => ({
+    issues: errors.map((e) => ({
       severity: 'error',
       code: 'invalid',
-      diagnostics: `${err.path}: ${err.message}`,
+      diagnostics: `${e.path}: ${e.message}`,
     })),
-    issue: embeddedErrors.map((err) => ({
+    issue: errors.map((e) => ({
       severity: 'error',
       code: 'invalid',
-      diagnostics: `${err.path}: ${err.message}`,
+      diagnostics: `${e.path}: ${e.message}`,
     })),
-    body: {
-      error: 'FHIR bundle failed validation',
-      details: embeddedErrors,
-    },
+    body: { error: 'FHIR bundle failed validation', details: errors },
   } as const;
 }
+
   const shouldRunStrictValidation = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION === 'true';
   const bundleObj = (bundle ?? {}) as { resourceType?: string; type?: string; entry?: unknown };
   const structuralErrors: Array<{ path: string; message: string }> = [];
