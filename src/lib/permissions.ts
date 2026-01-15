@@ -84,7 +84,7 @@ async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidanc
 
   if (requested.granted) {
     // IMPORTANTE: respetar canAskAgain del request (puede ser false aunque esté granted)
-    return toGuidance('granted', requested.canAskAgain ?? true);
+    return toGuidance('granted', requested.canAskAgain ?? false);
   }
 
   if (requested.canAskAgain === false) {
