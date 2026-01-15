@@ -1,3 +1,18 @@
+export const getCameraPermissionsAsync = jest.fn(async () => ({
+  status: 'granted',
+  granted: true,
+  canAskAgain: true,
+}));
+
+export const requestCameraPermissionsAsync = jest.fn(async () => ({
+  status: 'granted',
+  granted: true,
+  canAskAgain: true,
+}));
+
 export const Camera = {
-  requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true, canAskAgain: true })),
+  getCameraPermissionsAsync,
+  requestCameraPermissionsAsync,
 };
+
+export default Camera;
