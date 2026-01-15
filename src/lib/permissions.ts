@@ -1,5 +1,5 @@
 import * as ExpoCamera from 'expo-camera';
-import { Audio as ExpoAudio } from 'expo-av';
+import * as ExpoAudio from 'expo-audio';
 
 export type PermissionStatus = 'granted' | 'denied' | 'blocked';
 
@@ -29,14 +29,17 @@ type PermissionFlow = {
   request: () => Promise<PermissionState>;
 };
 
+// Soporta expo-camera que expone Camera.* o funciones en el módulo
 const Camera: CameraModule =
   ((ExpoCamera as unknown as { Camera?: CameraModule })?.Camera ??
     (ExpoCamera as unknown as CameraModule)) as CameraModule;
 
 const microphoneFlow: PermissionFlow = {
   name: 'micrófono',
-  getCurrent: () => ExpoAudio.getPermissionsAsync() as Promise<PermissionState>,
-  request: () => ExpoAudio.requestPermissionsAsync() as Promise<PermissionState>,
+  getCurrent: () =>
+    (ExpoAudio as any).getRecordingPermissionsAsync() as Promise<PermissionState>,
+  request: () =>
+    (ExpoAudio as any).requestRecordingPermissionsAsync() as Promise<PermissionState>,
 };
 
 const cameraFlow: PermissionFlow = {
@@ -48,12 +51,12 @@ const cameraFlow: PermissionFlow = {
 const toGuidance = (
   status: PermissionStatus,
   canAskAgain: boolean,
-  reason?: string
+  reason?: string,
 ): PermissionGuidance => ({
   status,
   granted: status === 'granted',
   canAskAgain,
-  ...(reason ? { reason } : {}),
+  reason,
 });
 
 const blockedGuidance = (name: string, reason?: string): PermissionGuidance =>
@@ -62,7 +65,7 @@ const blockedGuidance = (name: string, reason?: string): PermissionGuidance =>
 async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidance> {
   let current: PermissionState;
 
-  // Si el API falla, es "blocked" (tests lo esperan)
+  // Si getCurrent falla => blocked (el test lo espera)
   try {
     current = await flow.getCurrent();
   } catch (error) {
@@ -86,7 +89,7 @@ async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidanc
     return blockedGuidance(flow.name, message);
   }
 
-  // IMPORTANTÍSIMO: si se concede tras request, usa canAskAgain del REQUESTED (no del current)
+  // Si se concede tras request, el canAskAgain DEBE venir de requested
   if (requested.granted) {
     return toGuidance('granted', requested.canAskAgain ?? true);
   }
@@ -110,6 +113,7 @@ export async function ensurePermissions(
   ...permissions: PermissionKey[]
 ): Promise<Record<PermissionKey, PermissionGuidance>> {
   const results: Partial<Record<PermissionKey, PermissionGuidance>> = {};
+
   for (const permission of permissions) {
     if (permission === 'camera') {
       results.camera = await ensureCameraPermission();
@@ -119,8 +123,10 @@ export async function ensurePermissions(
       results.microphone = await ensureAudioPermission();
       continue;
     }
+    // Exhaustividad defensiva
     throw new Error(`Unknown permission: ${permission}`);
   }
+
   return results as Record<PermissionKey, PermissionGuidance>;
 }
 
