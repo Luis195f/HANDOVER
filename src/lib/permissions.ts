@@ -1,22 +1,22 @@
 import * as ExpoCamera from 'expo-camera';
 import { Audio as ExpoAudio } from 'expo-av';
 
-type PermissionStatus = 'granted' | 'denied' | 'blocked';
+export type PermissionStatus = 'granted' | 'denied' | 'blocked';
 
 type PermissionState = {
-  status?: PermissionStatus | string;
+  status?: string;
   granted: boolean;
   canAskAgain?: boolean;
 };
 
-type PermissionGuidance = {
+export type PermissionGuidance = {
   status: PermissionStatus;
   granted: boolean;
   canAskAgain: boolean;
   reason?: string;
 };
 
-type PermissionKey = 'camera' | 'microphone';
+export type PermissionKey = 'camera' | 'microphone';
 
 type CameraModule = {
   getCameraPermissionsAsync: () => Promise<PermissionState>;
@@ -49,53 +49,52 @@ const toGuidance = (
   status: PermissionStatus,
   canAskAgain: boolean,
   reason?: string,
-): PermissionGuidance => {
-  const granted = status === 'granted';
-  return {
-    status,
-    granted,
-    // En "granted" fijamos canAskAgain=false para estabilizar el contrato (y alinear tests).
-    canAskAgain: granted ? false : canAskAgain,
-    reason,
-  };
-};
+): PermissionGuidance => ({
+  status,
+  granted: status === 'granted',
+  canAskAgain,
+  reason,
+});
 
 const blockedGuidance = (name: string, reason?: string): PermissionGuidance =>
   toGuidance('blocked', false, reason ?? `${name} bloqueado`);
 
 async function ensurePermission(flow: PermissionFlow): Promise<PermissionGuidance> {
+  // Si getCurrent falla, para tests/robustez lo tratamos como blocked (no seguimos “a ciegas”).
+  let current: PermissionState;
   try {
-    let current: PermissionState | null = null;
-    try {
-      current = await flow.getCurrent();
-    } catch {
-      current = null;
-    }
-
-    if (current?.granted) {
-      return toGuidance('granted', false);
-    }
-
-    // Si el estado actual dice que no se puede volver a pedir, es "blocked".
-    if (current && current.canAskAgain === false) {
-      return blockedGuidance(flow.name);
-    }
-
-    const requested = await flow.request();
-
-    if (requested.granted) {
-      return toGuidance('granted', false);
-    }
-
-    if (requested.canAskAgain === false) {
-      return blockedGuidance(flow.name);
-    }
-
-    return toGuidance('denied', requested.canAskAgain ?? true, `${flow.name} denegado`);
+    current = await flow.getCurrent();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return blockedGuidance(flow.name, message);
   }
+
+  if (current.granted) {
+    // Cuando ya está granted, canAskAgain no debería bloquear la UX: lo normal es true.
+    return toGuidance('granted', true);
+  }
+
+  if (current.canAskAgain === false) {
+    return blockedGuidance(flow.name);
+  }
+
+  let requested: PermissionState;
+  try {
+    requested = await flow.request();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return blockedGuidance(flow.name, message);
+  }
+
+  if (requested.granted) {
+    return toGuidance('granted', true);
+  }
+
+  if (requested.canAskAgain === false) {
+    return blockedGuidance(flow.name);
+  }
+
+  return toGuidance('denied', true, `${flow.name} denegado`);
 }
 
 export async function ensureMediaPermissions(): Promise<boolean> {
