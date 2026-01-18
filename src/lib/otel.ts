@@ -17,7 +17,9 @@ const devFlag = typeof __DEV__ !== 'undefined' && !!__DEV__;
 const isCiOrTest =
   typeof process !== 'undefined' &&
   !!process.env &&
-  (process.env.CI === 'true' || process.env.NODE_ENV === 'test');
+  (process.env.CI === 'true' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.VITEST === 'true');
 
 function shouldLogWarn(): boolean {
   const level = process.env.EXPO_PUBLIC_LOG_LEVEL;
