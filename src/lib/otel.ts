@@ -8,33 +8,25 @@ const SENSITIVE_META_KEYS =
 const MAX_META_STRING_LENGTH = 32;
 const MAX_META_ARRAY_ITEMS = 5;
 
+// Mantén tipos conocidos para autocomplete, pero permite códigos adicionales (p. ej. HNDR_SIGN_110)
 export type WarnCode =
   | "AUTH_CLAIMS_MISSING_ROLES"
   | "AUTH_SESSION_SHAPE_UNEXPECTED"
   | "OFFLINE_QUEUE_ITEM_RETRYING"
   | "NET_REQUEST_RETRYING"
   | "APP_QUEUE_SYNC_UNAVAILABLE"
-  // Mantén tipado flexible para códigos de módulos (p.ej. crypto: HNDR_SIGN_110)
-  | "HNDR_SIGN_110";
+  | (string & {});
 
 function getEnv(name: string): string | undefined {
   // En RN puede no existir process/env; en tests/CI sí.
   try {
-    if (typeof process !== "undefined" && process.env && typeof process.env[name] === "string") {
-      return process.env[name] as string;
-    }
+    const p: any = typeof process !== "undefined" ? process : undefined;
+    const env = p && p.env ? p.env : undefined;
+    const v = env && typeof env[name] === "string" ? env[name] : undefined;
+    return v;
   } catch {
-    // ignore
+    return undefined;
   }
-  return undefined;
-}
-
-function isTruthyEnv(name: string): boolean {
-  const v = getEnv(name);
-  if (v == null) return false;
-  const normalized = v.trim().toLowerCase();
-  // Soporta CI=true, VITEST=true/1, etc.
-  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
 }
 
 function shouldLogWarn(): boolean {
@@ -48,35 +40,27 @@ function shouldLogWarn(): boolean {
       return normalized === "warn" || normalized === "debug";
     })();
 
-  // --- Robust test/CI detection (works even if process.env is stripped) ---
-  const isNodeRuntime =
+  // En Vitest/Jest/CI (Node) queremos SIEMPRE permitir warnings
+  // para que los tests puedan asertar `console.warn(...)`.
+  // Pero NO queremos encenderlos en React Native (dispositivo/build).
+  const isReactNative =
+    typeof navigator !== "undefined" && (navigator as any)?.product === "ReactNative";
+
+  const isNode =
+    !isReactNative &&
     typeof process !== "undefined" &&
     !!(process as any).versions &&
     typeof (process as any).versions.node === "string";
 
-  let looksLikeTestRunner = false;
-  if (isNodeRuntime && Array.isArray(process.argv)) {
-    const argv = process.argv.join(" ").toLowerCase();
-    // vitest/jest usually appear in argv in CI
-    looksLikeTestRunner = argv.includes("vitest") || argv.includes("jest");
-  }
+  if (isNode) return true;
 
-  const isCi = (() => {
-    const v = getEnv("CI");
-    return v === "true" || v === "1" || v === "yes" || v === "on";
-  })();
+  // Fallback extra por si algún entorno no-Node sí expone envs de test/CI.
+  const isCiOrTest =
+    getEnv("CI") === "true" ||
+    getEnv("NODE_ENV") === "test" ||
+    getEnv("VITEST") === "true" ||
+    typeof getEnv("JEST_WORKER_ID") === "string";
 
-  const isVitest = (() => {
-    const v = getEnv("VITEST");
-    return v === "true" || v === "1" || v === "yes" || v === "on";
-  })();
-
-  const hasJestWorker = typeof getEnv("JEST_WORKER_ID") === "string";
-  const isNodeTest = getEnv("NODE_ENV") === "test";
-
-  const isCiOrTest = isCi || isVitest || hasJestWorker || isNodeTest || looksLikeTestRunner;
-
-  // Mantén tu condición actual (LOG_LEVEL) pero OR con CI/test runner
   return devFlag || enabledByLevel || isCiOrTest;
 }
 
@@ -111,7 +95,7 @@ function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | u
       const sanitized = value
         .filter((item) => isPrimitive(item))
         .slice(0, MAX_META_ARRAY_ITEMS)
-        .map((item) => sanitizePrimitive(item as string | number | boolean | null | undefined));
+        .map((item) => sanitizePrimitive(item as any));
 
       if (sanitized.length > 0) safe[key] = sanitized;
       continue;
