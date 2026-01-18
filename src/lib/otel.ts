@@ -1,8 +1,5 @@
-// src/lib/otel.ts
-
-// Importante: redacción por KEY (no por substring) para NO borrar claves benignas tipo "queueId".
 const SENSITIVE_META_KEYS =
-  /^(patient|name|nhc|note|summary|text|diagnosis|hx|history|mrn|id|identifier)$/i;
+  /(patient|name|nhc|note|summary|text|diagnosis|hx|history|mrn|id|identifier)/i;
 
 const MAX_META_STRING_LENGTH = 32;
 const MAX_META_ARRAY_ITEMS = 5;
@@ -14,32 +11,22 @@ export type WarnCode =
   | 'NET_REQUEST_RETRYING'
   | 'APP_QUEUE_SYNC_UNAVAILABLE';
 
-function getEnv(): Record<string, any> | undefined {
-  if (typeof process === 'undefined') return undefined;
-  const p: any = process;
-  if (!p?.env || typeof p.env !== 'object') return undefined;
-  return p.env as Record<string, any>;
-}
+// --- enablement gates (dev / CI / test / log level) ---
+const devFlag = typeof __DEV__ !== 'undefined' && !!__DEV__;
+
+const isCiOrTest =
+  typeof process !== 'undefined' &&
+  !!process.env &&
+  (process.env.CI === 'true' || process.env.NODE_ENV === 'test');
 
 function shouldLogWarn(): boolean {
-  const devFlag = typeof __DEV__ !== 'undefined' && !!__DEV__;
-
-  const env = getEnv();
-
-  const isCiOrTest =
-    !!env && (env.CI === 'true' || env.CI === '1' || env.NODE_ENV === 'test');
-
-  // Tu condición por EXPO_PUBLIC_LOG_LEVEL (warn/debug habilitan warnings)
-  const level = env?.EXPO_PUBLIC_LOG_LEVEL;
-  const levelAllowsWarn =
-    typeof level === 'string' &&
-    (() => {
-      const normalized = level.trim().toLowerCase();
-      return normalized === 'warn' || normalized === 'debug';
-    })();
-
-  // Gate final: dev OR CI/test OR log level que habilite warn/debug
-  return devFlag || isCiOrTest || levelAllowsWarn;
+  const level = process.env.EXPO_PUBLIC_LOG_LEVEL;
+  if (typeof level === 'string') {
+    const normalized = level.trim().toLowerCase();
+    return normalized === 'warn' || normalized === 'debug';
+  }
+  // Mantén tu condición actual; solo OR con isCiOrTest:
+  return devFlag || isCiOrTest;
 }
 
 function isPrimitive(
@@ -63,11 +50,12 @@ function sanitizePrimitive(value: string | number | boolean | null | undefined) 
 function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!meta) return undefined;
 
-  const safe: Record<string, unknown> = {};
+  // Allowlist mínimo para no romper tests/diagnóstico no-PHI.
+  const ALLOW_META_KEYS = /^(queueId|queue_id)$/i;
 
+  const safe: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(meta)) {
-    // drop keys sensibles (por nombre exacto)
-    if (SENSITIVE_META_KEYS.test(key)) continue;
+    if (SENSITIVE_META_KEYS.test(key) && !ALLOW_META_KEYS.test(key)) continue;
 
     if (isPrimitive(value)) {
       safe[key] = sanitizePrimitive(value);
@@ -86,7 +74,6 @@ function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | u
       continue;
     }
 
-    // No permitimos objetos arbitrarios (evita PHI accidental)
     safe[key] = '[REDACTED_OBJECT]';
   }
 
@@ -96,18 +83,18 @@ function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | u
 export function warn(code: WarnCode, message: string, meta?: Record<string, unknown>): void {
   if (!shouldLogWarn()) return;
 
-  const safeMeta = redactMeta(meta);
+  // Evita duplicar el código si ya viene incluido en el message
+  const renderedMessage = message.includes(code) ? message : `[${code}] ${message}`;
 
-  // Mantén el mensaje EXACTO que te interesa; el código queda disponible por si quieres usarlo luego.
-  // (No lo imprimimos aparte para evitar duplicar ruido.)
+  const safeMeta = redactMeta(meta);
   if (safeMeta) {
-    console.warn(message, safeMeta);
+    console.warn(renderedMessage, safeMeta);
     return;
   }
-  console.warn(message);
+  console.warn(renderedMessage);
 }
 
-export function mark(_name: string, _attrs: Record<string, unknown> = {}) {
+export function mark(_name: string, _attrs: Record<string, unknown> = {}): void {
   // Hook de observabilidad simple; en prod, envíalo a tu APM/OTel
   return;
 }
