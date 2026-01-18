@@ -13,13 +13,15 @@ export type WarnCode =
   | "AUTH_SESSION_SHAPE_UNEXPECTED"
   | "OFFLINE_QUEUE_ITEM_RETRYING"
   | "NET_REQUEST_RETRYING"
-  | "APP_QUEUE_SYNC_UNAVAILABLE";
+  | "APP_QUEUE_SYNC_UNAVAILABLE"
+  // Mantén tipado flexible para códigos de módulos (p.ej. crypto: HNDR_SIGN_110)
+  | "HNDR_SIGN_110";
 
 function getEnv(name: string): string | undefined {
   // En RN puede no existir process/env; en tests/CI sí.
   try {
     if (typeof process !== "undefined" && process.env && typeof process.env[name] === "string") {
-      return process.env[name];
+      return process.env[name] as string;
     }
   } catch {
     // ignore
@@ -27,13 +29,28 @@ function getEnv(name: string): string | undefined {
   return undefined;
 }
 
+function isTruthyEnv(name: string): boolean {
+  const v = getEnv(name);
+  if (v == null) return false;
+  const normalized = v.trim().toLowerCase();
+  // Soporta CI=true, VITEST=true/1, etc.
+  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+}
+
 function shouldLogWarn(): boolean {
   const devFlag = typeof __DEV__ !== "undefined" && !!__DEV__;
 
-  const isCiOrTest =
-    typeof process !== "undefined" &&
-    !!process.env &&
-    (process.env.CI === "true" || process.env.NODE_ENV === "test");
+  // En GH Actions suele venir CI=true
+  const isCi = isTruthyEnv("CI");
+
+  // Vitest suele setear VITEST=true
+  const isVitest = isTruthyEnv("VITEST");
+
+  // Si alguna vez corréis Jest, esto lo cubre
+  const hasJestWorker = typeof getEnv("JEST_WORKER_ID") === "string";
+
+  const nodeEnv = getEnv("NODE_ENV");
+  const isNodeTest = nodeEnv === "test";
 
   const level = getEnv("EXPO_PUBLIC_LOG_LEVEL");
   const enabledByLevel =
@@ -43,8 +60,8 @@ function shouldLogWarn(): boolean {
       return normalized === "warn" || normalized === "debug";
     })();
 
-  // Mantén tu condición actual (LOG_LEVEL) pero OR con CI/test
-  return devFlag || isCiOrTest || enabledByLevel;
+  // Mantén tu condición actual (LOG_LEVEL) pero OR con CI/test/vitest
+  return devFlag || isCi || isVitest || hasJestWorker || isNodeTest || enabledByLevel;
 }
 
 function isPrimitive(value: unknown): value is string | number | boolean | null | undefined {
