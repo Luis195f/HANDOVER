@@ -40,18 +40,6 @@ function isTruthyEnv(name: string): boolean {
 function shouldLogWarn(): boolean {
   const devFlag = typeof __DEV__ !== "undefined" && !!__DEV__;
 
-  // En GH Actions suele venir CI=true
-  const isCi = isTruthyEnv("CI");
-
-  // Vitest suele setear VITEST=true
-  const isVitest = isTruthyEnv("VITEST");
-
-  // Si alguna vez corréis Jest, esto lo cubre
-  const hasJestWorker = typeof getEnv("JEST_WORKER_ID") === "string";
-
-  const nodeEnv = getEnv("NODE_ENV");
-  const isNodeTest = nodeEnv === "test";
-
   const level = getEnv("EXPO_PUBLIC_LOG_LEVEL");
   const enabledByLevel =
     typeof level === "string" &&
@@ -60,8 +48,36 @@ function shouldLogWarn(): boolean {
       return normalized === "warn" || normalized === "debug";
     })();
 
-  // Mantén tu condición actual (LOG_LEVEL) pero OR con CI/test/vitest
-  return devFlag || isCi || isVitest || hasJestWorker || isNodeTest || enabledByLevel;
+  // --- Robust test/CI detection (works even if process.env is stripped) ---
+  const isNodeRuntime =
+    typeof process !== "undefined" &&
+    !!(process as any).versions &&
+    typeof (process as any).versions.node === "string";
+
+  let looksLikeTestRunner = false;
+  if (isNodeRuntime && Array.isArray(process.argv)) {
+    const argv = process.argv.join(" ").toLowerCase();
+    // vitest/jest usually appear in argv in CI
+    looksLikeTestRunner = argv.includes("vitest") || argv.includes("jest");
+  }
+
+  const isCi = (() => {
+    const v = getEnv("CI");
+    return v === "true" || v === "1" || v === "yes" || v === "on";
+  })();
+
+  const isVitest = (() => {
+    const v = getEnv("VITEST");
+    return v === "true" || v === "1" || v === "yes" || v === "on";
+  })();
+
+  const hasJestWorker = typeof getEnv("JEST_WORKER_ID") === "string";
+  const isNodeTest = getEnv("NODE_ENV") === "test";
+
+  const isCiOrTest = isCi || isVitest || hasJestWorker || isNodeTest || looksLikeTestRunner;
+
+  // Mantén tu condición actual (LOG_LEVEL) pero OR con CI/test runner
+  return devFlag || enabledByLevel || isCiOrTest;
 }
 
 function isPrimitive(value: unknown): value is string | number | boolean | null | undefined {
