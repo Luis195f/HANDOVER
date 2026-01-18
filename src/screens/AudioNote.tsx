@@ -74,7 +74,6 @@ export default function AudioNote({ navigation }: Props) {
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(recorder.uri ?? null);
   const sttServiceRef = useRef<SttService>(createSttService());
-  const hasLoggedPermissionRef = useRef(false);
   const sttService = sttServiceRef.current;
   const [transcription, setTranscription] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -107,17 +106,6 @@ export default function AudioNote({ navigation }: Props) {
       return;
     }
     void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-  }, [permission]);
-
-  useEffect(() => {
-    if (!permission || permission.granted) return;
-    if (hasLoggedPermissionRef.current) return;
-    hasLoggedPermissionRef.current = true;
-    console.warn('[HNDV][WARN][PERM_MIC_DENIED]', {
-      screen: 'AudioAttach',
-      status: permission.status,
-      canAskAgain: permission.canAskAgain,
-    });
   }, [permission]);
 
   const ensurePermissionGranted = useCallback(async () => {
@@ -166,8 +154,7 @@ export default function AudioNote({ navigation }: Props) {
       try {
         setDictationStatus('processing');
         await sttService.stop();
-      } catch (error) {
-        console.warn('[audio-note] stt stop error', error);
+      } catch {
         setDictationError(sttService.getLastError() ?? 'UNKNOWN');
       } finally {
         setDictationStatus(sttService.getStatus());
@@ -178,8 +165,7 @@ export default function AudioNote({ navigation }: Props) {
     setDictationError(null);
     try {
       await sttService.start({ locale: 'es-ES', interimResults: true, maxSeconds: 120 });
-    } catch (error) {
-      console.warn('[audio-note] stt start error', error);
+    } catch {
       setDictationError(sttService.getLastError() ?? 'UNKNOWN');
     } finally {
       setDictationStatus(sttService.getStatus());
@@ -208,8 +194,7 @@ export default function AudioNote({ navigation }: Props) {
           ? result.error
           : 'No se pudo transcribir con IA. Puedes seguir escribiendo manualmente.';
       setTranscriptionError(message);
-    } catch (error) {
-      console.warn('[audio-note] ai transcription error', error);
+    } catch {
       setTranscriptionError('No se pudo transcribir con IA. Inténtalo más tarde.');
     } finally {
       setIsTranscribing(false);
@@ -223,8 +208,7 @@ export default function AudioNote({ navigation }: Props) {
         await recorder.prepareToRecordAsync();
       }
       recorder.record?.();
-    } catch (error) {
-      console.warn('[audio-note] start recording error', error);
+    } catch {
       setRecordingError('No se pudo iniciar la grabación. Revisa los permisos de micrófono.');
     }
   };
@@ -240,8 +224,7 @@ export default function AudioNote({ navigation }: Props) {
         setLastUri(uri);
       }
       return uri;
-    } catch (error) {
-      console.warn('[audio-note] stop recording error', error);
+    } catch {
       setRecordingError('No se pudo detener la grabación. Intenta nuevamente.');
       return null;
     }
@@ -276,7 +259,6 @@ export default function AudioNote({ navigation }: Props) {
     try {
       await Linking.openSettings();
     } catch {
-      console.warn('[HNDV][WARN][PERM_OPEN_SETTINGS_FAILED]', { screen: 'AudioAttach' });
     }
   };
 

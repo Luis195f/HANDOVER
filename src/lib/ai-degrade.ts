@@ -103,7 +103,6 @@ export async function getBestAvailableSummary(
     try {
       return generateSBARSummary(handover, sbarOptions);
     } catch (error) {
-      console.warn('[ai-degrade] local SBAR generation failed, using minimal fallback', error);
       return buildMinimalSummary(handover);
     }
   })();
@@ -115,7 +114,6 @@ export async function getBestAvailableSummary(
       if (refined) return refined;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn('[ai-degrade] AI provider failed, falling back to local summary', message);
     }
   }
 

@@ -18,7 +18,6 @@ export function DevicesSection({ styles }: Props) {
 
   const handleAdd = () => {
     if (!trimmedName) {
-      console.warn('[handover][devices-ui] add_blocked_empty_name');
       return;
     }
     append({ name: trimmedName, active: pendingActive });

@@ -57,10 +57,8 @@ function resolveUnitsConfig(): HandoverUnitConfig[] {
     if (Array.isArray(parsed)) {
       return parsed as HandoverUnitConfig[];
     }
-    console.warn('HANDOVER_UNITS_JSON no es un array; usando config estática');
     return [...STATIC_UNITS_CONFIG];
   } catch {
-    console.warn('Error al parsear HANDOVER_UNITS_JSON; usando config estática');
     return [...STATIC_UNITS_CONFIG];
   }
 }

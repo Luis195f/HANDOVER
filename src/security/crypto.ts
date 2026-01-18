@@ -45,7 +45,6 @@ async function persistKey(base64: string): Promise<void> {
       persisted += 1;
     } catch (error) {
       lastError = error;
-      console.warn(`No se pudo persistir la clave de cifrado (${storageKey}).`, error);
     }
   }
 
@@ -65,8 +64,7 @@ async function readStoredKey(): Promise<string | null> {
     try {
       const stored = await secureGetItem(storageKey);
       if (stored) return stored;
-    } catch (error) {
-      console.warn(`No se pudo leer la clave de cifrado (${storageKey}).`, error);
+    } catch {
     }
   }
   return null;
@@ -80,10 +78,6 @@ export async function getOrCreateEncryptionKey(): Promise<string> {
     const key = CryptoJS.enc.Base64.stringify(normalizedStored);
     cachedKey = key;
     return key;
-  }
-
-  if (stored) {
-    console.warn('Clave de cifrado inválida, regenerando un nuevo valor.');
   }
 
   const nextKey = getRandomKeyBase64();
@@ -197,23 +191,7 @@ function hasWebCrypto(): boolean {
   return typeof globalThis !== 'undefined' && !!globalThis.crypto?.subtle;
 }
 
-function logSigningWarning(code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130', message: string, meta: SigningWarningMeta = {}): void {
-  const allowedKeys: Array<keyof SigningWarningMeta> = [
-    'queueId',
-    'attempt',
-    'platform',
-    'appVersion',
-    'runtimeHasWebCrypto',
-    'errorName',
-  ];
-  const safeMeta: Record<string, unknown> = {};
-  for (const key of allowedKeys) {
-    const value = meta[key];
-    if (value !== undefined) {
-      safeMeta[key] = value;
-    }
-  }
-  console.warn(`[${code}] ${message}`, safeMeta);
+function logSigningWarning(_code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130', _message: string, _meta: SigningWarningMeta = {}): void {
 }
 
 export function isClientSigningEnabled(): boolean {

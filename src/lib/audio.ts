@@ -1,4 +1,3 @@
-// @ts-nocheck
 // src/lib/audio.ts
 import {
   AudioModule,
