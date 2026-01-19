@@ -91,7 +91,7 @@ export function SupervisorDashboardScreen() {
       return (
         <Pressable
           style={styles.patientCard as ViewStyle}
-          onPress={() => navigation.navigate('HandoverMain', { patientId: item.patientId })}
+          onPress={() => navigation.navigate('HandoverForm', { patientIdParam: item.patientId })}
           accessibilityRole="button"
           testID={`patient-card-${item.patientId}`}
         >

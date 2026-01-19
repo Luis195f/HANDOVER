@@ -40,7 +40,7 @@ type QRScanParams = {
 export type RootStackParamList = {
   PatientList: undefined;
   AudioNote: { onDoneRoute?: string } | undefined;
-  HandoverMain: { patientId: string };
+  HandoverMain: HandoverFormParams;
   HandoverForm: HandoverFormParams;
   ShiftDetails: ShiftDetailsParams | undefined;
   QRScan: QRScanParams | undefined;
