@@ -235,7 +235,7 @@ async function persistSigningKeypair(keypair: { privateJwk: JsonWebKey; publicJw
   await secureSetItem(CLIENT_SIGNING_KEY_STORAGE, serialized);
 }
 
-export async functionوڑ function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
+export async function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
   if (!hasWebCrypto()) return null;
 
   const stored = await secureGetItem(CLIENT_SIGNING_KEY_STORAGE);
