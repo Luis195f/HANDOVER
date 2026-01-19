@@ -41,6 +41,29 @@ describe('getUserFacingNetworkMessage + normalizeNetError', () => {
     expect(ui.cta).toEqual({ label: 'Reintentar', action: 'RETRY' });
   });
 
+  it('includes outcome diagnostics for 422 responses', () => {
+    const outcome = {
+      resourceType: 'OperationOutcome',
+      issue: [{ diagnostics: 'Falta el campo name. Revisar entrada.' }],
+    };
+    const ui = getUserFacingNetworkMessage(
+      { kind: 'HTTP', status: 422, details: JSON.stringify(outcome) },
+      { log: false },
+    );
+
+    expect(ui.message).toBe('Los datos requieren corrección: Falta el campo name.');
+  });
+
+  it('keeps generic copy when 422 has no diagnostics', () => {
+    const outcome = { resourceType: 'OperationOutcome', issue: [] };
+    const ui = getUserFacingNetworkMessage(
+      { kind: 'HTTP', status: 422, details: JSON.stringify(outcome) },
+      { log: false },
+    );
+
+    expect(ui.message).toBe('Los datos requieren corrección antes de enviarse.');
+  });
+
   it('maps unknown errors to default copy', () => {
     const normalized = normalizeNetError(new Error('Unexpected failure'));
     const ui = getUserFacingNetworkMessage(normalized, { log: false });
