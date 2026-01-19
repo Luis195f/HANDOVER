@@ -84,8 +84,25 @@ const styles = StyleSheet.create({
   deleteButtonText: { color: '#DC2626', fontWeight: '700' },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   helper: { color: '#6B7280', marginTop: 4 },
+  hintText: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 12,
+  },
   subsectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
 });
+
+const defaultExam: ExamItem = {
+  type: 'laboratory',
+  state: 'result',
+  description: '',
+};
+
+const defaultProcedure: ProcedureItem = {
+  description: '',
+  done: false,
+};
 
 export function ExamsProceduresSection() {
   const { control } = useFormContext<HandoverFormValues>();
@@ -102,12 +119,8 @@ export function ExamsProceduresSection() {
     name: 'procedures',
   });
 
-  const [nextExam, setNextExam] = useState<ExamItem>({
-    type: 'laboratory',
-    state: 'result',
-    description: '',
-  });
-  const [nextProcedure, setNextProcedure] = useState<ProcedureItem>({ description: '', done: false });
+  const [nextExam, setNextExam] = useState<ExamItem>(defaultExam);
+  const [nextProcedure, setNextProcedure] = useState<ProcedureItem>(defaultProcedure);
 
   const canAddExam = useMemo(() => nextExam.description.trim().length > 0, [nextExam.description]);
   const canAddProcedure = useMemo(
@@ -120,7 +133,7 @@ export function ExamsProceduresSection() {
       return;
     }
     appendExam({ ...nextExam, description: nextExam.description.trim() });
-    setNextExam((prev) => ({ ...prev, description: '' }));
+    setNextExam(defaultExam);
   };
 
   const handleAddProcedure = () => {
@@ -128,7 +141,7 @@ export function ExamsProceduresSection() {
       return;
     }
     appendProcedure({ ...nextProcedure, description: nextProcedure.description.trim() });
-    setNextProcedure((prev) => ({ ...prev, description: '' }));
+    setNextProcedure(defaultProcedure);
   };
 
   return (
@@ -226,6 +239,10 @@ export function ExamsProceduresSection() {
             })}
           </View>
         ) : null}
+        <Text style={styles.hintText}>
+          Puedes agregar resultados de laboratorio o estudios de imagen relevantes, y marcar
+          procedimientos realizados durante el turno.
+        </Text>
       </View>
 
       <View style={styles.card}>
@@ -284,6 +301,10 @@ export function ExamsProceduresSection() {
             })}
           </View>
         ) : null}
+        <Text style={styles.hintText}>
+          Puedes agregar resultados de laboratorio o estudios de imagen relevantes, y marcar
+          procedimientos realizados durante el turno.
+        </Text>
       </View>
     </View>
   );
