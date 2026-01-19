@@ -4,7 +4,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import AudioNote from '@/src/screens/AudioNote';
 import HandoverForm from '@/src/screens/HandoverForm';
-import HandoverMain from '@/src/screens/HandoverMain';
 import PatientDashboard from '@/src/screens/PatientDashboard';
 import PatientList from '@/src/screens/PatientList';
 import { DemoModeBanner } from '@/src/components/DemoModeBanner';
@@ -106,7 +105,7 @@ function AuthGate() {
           <>
             <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
             <Stack.Screen name="AudioNote" component={AudioNote} options={{ title: 'Nota de voz' }} />
-            <Stack.Screen name="HandoverMain" component={HandoverMain} options={{ title: 'Handover' }} />
+            <Stack.Screen name="HandoverMain" component={HandoverForm} options={{ title: 'Handover' }} />
             <Stack.Screen name="HandoverForm" component={HandoverForm} options={{ title: 'Handover' }} />
             <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} options={{ title: 'Turno' }} />
             <Stack.Screen name="QRScan" component={QRScan} options={{ title: 'Escanear QR' }} />

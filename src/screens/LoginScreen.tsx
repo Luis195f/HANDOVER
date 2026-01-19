@@ -9,19 +9,22 @@ export default function LoginScreen() {
   const { loginWithOAuth, loginDemo } = useAuth();
 
   const goToHome = useCallback(() => {
-    
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'PatientList' }],
+    });
   }, [navigation]);
 
   const handleDemo = useCallback(async () => {
-  await loginDemo();
-  // NO navigation.reset / NO navigate aquí
-}, [loginDemo]);
+    await loginDemo();
+    goToHome();
+  }, [goToHome, loginDemo]);
 
   const handleOAuth = useCallback(async () => {
-  try {
-    await loginWithOAuth();
-    // NO navigation.reset / NO navigate aquí
-  } catch (error) {
+    try {
+      await loginWithOAuth();
+      goToHome();
+    } catch (error) {
       if (isAuthCancelledError(error)) {
         return;
       }
