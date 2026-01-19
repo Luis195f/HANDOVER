@@ -4,7 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 import { Buffer } from 'buffer';
-
+import { Platform } from 'react-native';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/secure-storage';
@@ -53,18 +53,37 @@ const AUTH0_DOMAIN =
 const AUTH0_CLIENT_ID =
   process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? 'zJxhI0SK1J4hmzr1KNzEbWddgZWJDUlL';
 
-const REDIRECT_URI =
-  process.env.EXPO_PUBLIC_AUTH0_REDIRECT_URI ??
-  AuthSession.makeRedirectUri({
-    native: 'handover-pro://callback',
-    scheme: 'handover-pro',
-    path: 'callback',
-  });
+const REDIRECT_PATH_WEB = '--/redirect';
+const LOGOUT_PATH_WEB   = '--/logout';
 
-// EXPO_PUBLIC_AUTH0_LOGOUT_URI debe ser un deep link válido (ej: handover-pro://auth/logout) cuando se defina.
+const REDIRECT_PATH_NATIVE = 'redirect';
+const LOGOUT_PATH_NATIVE   = 'logout';
+
+// WEB: forzamos mismo ORIGIN real (evita localhost vs 127 vs 192.168.x.x)
+const WEB_ORIGIN =
+  typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'http://localhost:8081';
+
+const REDIRECT_URI =
+  Platform.OS === 'web'
+    ? `${WEB_ORIGIN}/${REDIRECT_PATH_WEB}`
+    : AuthSession.makeRedirectUri({
+        scheme: 'handover-pro',
+        path: REDIRECT_PATH_NATIVE,
+      });
+
 const LOGOUT_REDIRECT_URI =
-  process.env.EXPO_PUBLIC_AUTH0_LOGOUT_URI ??
-  AuthSession.makeRedirectUri({ path: 'auth/logout' });
+  Platform.OS === 'web'
+    ? `${WEB_ORIGIN}/${LOGOUT_PATH_WEB}`
+    : AuthSession.makeRedirectUri({
+        scheme: 'handover-pro',
+        path: LOGOUT_PATH_NATIVE,
+      });
+   
+console.log('[auth] Platform:', Platform.OS);
+console.log('[auth] REDIRECT_URI:', REDIRECT_URI);
+console.log('[auth] LOGOUT_REDIRECT_URI:', LOGOUT_REDIRECT_URI);      
 
 const DEFAULT_AUTH_CONFIG = {
   issuer: `https://${AUTH0_DOMAIN}`,

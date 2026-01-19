@@ -24,9 +24,16 @@ vi.mock('expo-web-browser', () => ({
   dismissBrowser: vi.fn(),
 }));
 
-vi.mock('react-native', () => ({
-  Alert: { alert: vi.fn() },
-}));
+vi.mock("react-native", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-native")>();
+  return {
+    ...actual,
+    Platform: {
+      OS: "web",
+      select: (spec: any) => spec?.web ?? spec?.default ?? spec?.ios ?? spec?.android,
+    },
+  };
+});
 
 vi.mock('@/src/navigation/navigation', () => ({
   default: { resetRoot: vi.fn() },

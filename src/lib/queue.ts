@@ -59,8 +59,14 @@ const sqliteModule = SQLite as unknown as {
   openDatabase?: (name: string) => SQLiteSyncDatabase;
 };
 
+const isWebRuntime = typeof window !== 'undefined' && typeof document !== 'undefined';
+
 const db: SQLiteSyncDatabase | null =
-  sqliteModule.openDatabaseSync?.("handover.db") ?? sqliteModule.openDatabase?.("handover.db") ?? null;
+  isWebRuntime
+    ? null
+    : sqliteModule.openDatabaseSync?.("handover.db") ??
+      sqliteModule.openDatabase?.("handover.db") ??
+      null;
 
 // In-memory fallback (web/test sin SQLite)
 type MemoryQueueRow = {
