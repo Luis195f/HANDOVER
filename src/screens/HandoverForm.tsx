@@ -166,7 +166,8 @@ const styles = StyleSheet.create({
   riskReason: { color: '#374151', marginTop: 2 },
 });
 
-type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
+type HandoverRouteName = "HandoverForm" | "HandoverMain";
+type Props = NativeStackScreenProps<RootStackParamList, HandoverRouteName>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
 export type DictationField =
