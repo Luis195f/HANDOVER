@@ -26,8 +26,7 @@ export function ExportPdfButton({ handover, onBeforeExport }: Props) {
       const pdf = await generateHandoverPdf(handover, session);
       Alert.alert('Exportación completada', `PDF generado en: ${pdf.uri}`);
       // En el futuro se podría llamar a uploadSignedHandoverPdf(pdf, { patientId: handover.patientId, handoverId: handover.id ?? '' })
-    } catch (error) {
-      console.warn('[handover] export pdf error', error);
+    } catch {
       Alert.alert('Error', 'No se pudo generar el PDF de la entrega.');
     } finally {
       setExporting(false);

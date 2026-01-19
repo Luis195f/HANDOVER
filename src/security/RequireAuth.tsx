@@ -1,15 +1,15 @@
-// @ts-nocheck
 // FILE: src/security/RequireAuth.tsx
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import type { Session } from '@/src/security/auth';
 import { getSession, onAuthChange } from '@/src/security/auth';
+import type { RootStackParamList } from '@/src/navigation/types';
 
 type Props = {
   children: React.ReactNode;
   /** Nombre de la ruta de Login en tu navigator */
-  redirectTo?: string;
+  redirectTo?: keyof RootStackParamList;
   /** Splash/loader personalizado mientras hidrata la sesión */
   splash?: React.ReactNode;
 };
@@ -21,7 +21,7 @@ type Props = {
  * - Revalida al recuperar foco y reacciona a cambios de sesión (onAuthChange).
  */
 export default function RequireAuth({ children, redirectTo = 'Login', splash }: Props) {
-  const nav = useNavigation<any>();
+  const nav = useNavigation<NavigationProp<RootStackParamList>>();
   const [loading, setLoading] = React.useState(true);
   const [session, setSession] = React.useState<Session | null>(null);
   const redirected = React.useRef(false);

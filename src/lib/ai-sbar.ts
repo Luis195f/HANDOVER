@@ -94,16 +94,13 @@ export async function refineSBARWithAI(
     });
 
     if (!response.ok) {
-      console.warn('[ai-sbar] refineSBARWithAI failed', `status ${response.status}`);
       return null;
     }
 
     const data = (await response.json()) as RefineSbarResponse;
     const refined = buildRefinedSbar(data?.sbar, draft);
     return refined;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn('[ai-sbar] refineSBARWithAI failed', message);
+  } catch {
     return null;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);

@@ -353,8 +353,7 @@ async function buildAudioAttachment(uri: string | undefined) {
       contentType: 'audio/m4a',
       title: 'Audio de entrega',
     } as const;
-  } catch (error) {
-    console.warn('[handover] audio attachment error', error);
+  } catch {
     return undefined;
   }
 }
@@ -685,8 +684,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       try {
         setSttStatus('processing');
         await service.stop();
-      } catch (error) {
-        console.warn('[handover] stt stop error', error);
+      } catch {
         setSttError(service.getLastError() ?? 'UNKNOWN');
       } finally {
         setSttStatus(service.getStatus());
@@ -700,8 +698,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     setSttError(null);
     try {
       await service.start(config);
-    } catch (error) {
-      console.warn('[handover] stt start error', error);
+    } catch {
       setSttError(service.getLastError() ?? 'UNKNOWN');
       setActiveDictationField(null);
     } finally {
@@ -815,8 +812,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     try {
       return generateSBARSummary(values, { maxCharsPerSection: 320 });
-    } catch (error) {
-      console.warn('[handover] draft sbar generation failed', error);
+    } catch {
       return manualDraft;
     }
   };
@@ -841,8 +837,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       } else {
         setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
       }
-    } catch (error) {
-      console.warn('[handover] ai sbar refine error', error);
+    } catch {
       setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
     } finally {
       setIsRefiningSbarWithAI(false);
@@ -861,8 +856,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         'SBAR generada automáticamente a partir del formulario. Revise y ajuste según criterio clínico.',
       );
       setSbarAiError(null);
-    } catch (error) {
-      console.warn('[handover] local sbar error', error);
+    } catch {
       Alert.alert(
         'No se pudo generar la SBAR automática',
         'Revise los datos o complete la SBAR de forma manual.',

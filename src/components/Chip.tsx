@@ -1,4 +1,3 @@
-// @ts-nocheck
 // src/components/Chip.tsx
 import React from "react";
 import {

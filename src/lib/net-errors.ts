@@ -19,10 +19,7 @@ type UserFacingNetworkMessageContext = {
   log?: boolean;
 };
 
-const warn = (code: string, ctx: Record<string, unknown>) => {
-  if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
-  console.warn(`[HNDV][WARN][${code}]`, ctx);
-};
+const warn = (_code: string, _ctx: Record<string, unknown>) => {};
 
 const buildWarnContext = (err: NetError, ctx?: UserFacingNetworkMessageContext) => {
   const payload: Record<string, unknown> = {};

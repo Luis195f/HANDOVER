@@ -126,22 +126,13 @@ async function encryptQueuePayload(payload: unknown, patientId?: string): Promis
   if (isEncryptionDisabled()) {
     return serialized;
   }
-  const warnMetadata = (error: unknown) => ({
-    code: (error as { code?: string | number })?.code,
-    name: error instanceof Error ? error.name : undefined,
-    message: error instanceof Error ? error.message : undefined,
-    payloadSize: serialized.length,
-    hasPatientId: typeof (wrapped as { patientId?: unknown })?.patientId === "string",
-  });
   try {
     return await encryptOfflinePayload(serialized);
-  } catch (error) {
-    console.warn("Fallo al cifrar payload offline", warnMetadata(error));
+  } catch {
   }
   try {
     return await encryptPayload(serialized);
-  } catch (error) {
-    console.warn("Fallo al cifrar payload offline v1", warnMetadata(error));
+  } catch {
   }
   const payloadHash = hashHex(serialized);
   return JSON.stringify({ __encryptionFailed: true, payloadHash, v: 1 });
@@ -196,8 +187,7 @@ async function decryptQueuePayload<TFallback = unknown>(payload: unknown, opts: 
       }
     }
     return parsed;
-  } catch (error) {
-    console.warn("Fallo al descifrar payload offline", error);
+  } catch {
     const fallback = parseAndReturn(payload);
     if (typeof fallback === "string" && queuePayloadIsEncrypted(fallback)) {
       try {
@@ -363,8 +353,7 @@ async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
   const item = rowToQueueItem(row);
   try {
     return { ...item, payload: await decryptQueuePayload(row.payload, { unwrap: false }) };
-  } catch (error) {
-    console.warn("Fallo al descifrar payload offline", error);
+  } catch {
     return { ...item, payload: row.payload };
   }
 }

@@ -117,10 +117,6 @@ export function ExamsProceduresSection() {
 
   const handleAddExam = () => {
     if (!canAddExam) {
-      console.warn(
-        { code: 'HANDOVER_UI_EXAMS_ADD_BLOCKED_EMPTY', field: 'exams.description', len: 0 },
-        'UI blocked adding exam: empty description.',
-      );
       return;
     }
     appendExam({ ...nextExam, description: nextExam.description.trim() });
@@ -129,10 +125,6 @@ export function ExamsProceduresSection() {
 
   const handleAddProcedure = () => {
     if (!canAddProcedure) {
-      console.warn(
-        { code: 'HANDOVER_UI_PROCEDURES_ADD_BLOCKED_EMPTY', field: 'procedures.description', len: 0 },
-        'UI blocked adding procedure: empty description.',
-      );
       return;
     }
     appendProcedure({ ...nextProcedure, description: nextProcedure.description.trim() });

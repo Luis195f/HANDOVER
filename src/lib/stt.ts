@@ -113,7 +113,6 @@ class NativeSttService implements SttService {
       this.recordingUri = this.recording.getURI();
     } catch (error) {
       this.setErrorState('ENGINE');
-      console.warn('[stt] stop error', error);
       throw error instanceof Error ? error : new Error('Failed to stop recording');
     } finally {
       this.recording = null;
@@ -141,8 +140,7 @@ class NativeSttService implements SttService {
     if (this.recording) {
       try {
         await this.recording.stopAndUnloadAsync();
-      } catch (error) {
-        console.warn('[stt] cancel stop error', error);
+      } catch {
       }
       this.recording = null;
     }
@@ -190,9 +188,7 @@ class NativeSttService implements SttService {
       return;
     }
     this.autoStopTimer = setTimeout(() => {
-      void this.stop().catch((error) => {
-        console.warn('[stt] auto stop error', error);
-      });
+      void this.stop().catch(() => {});
     }, maxSeconds * 1000);
   }
 
@@ -207,8 +203,7 @@ class NativeSttService implements SttService {
     if (this.recordingUri) {
       try {
         await FileSystem.deleteAsync(this.recordingUri, { idempotent: true });
-      } catch (error) {
-        console.warn('[stt] cleanup error', error);
+      } catch {
       }
       this.recordingUri = null;
     }

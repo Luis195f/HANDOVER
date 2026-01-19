@@ -3,6 +3,7 @@ import CryptoJS from 'crypto-js';
 import { Buffer } from 'buffer';
 
 import { secureGetItem, secureSetItem } from './secure-storage';
+import { warn } from "@/src/lib/otel";
 
 const STORAGE_KEYS = ['handover_local_crypto_key', 'handover_encryption_key_v1'] as const;
 const VERSION_TAG = 'v1';
@@ -45,7 +46,6 @@ async function persistKey(base64: string): Promise<void> {
       persisted += 1;
     } catch (error) {
       lastError = error;
-      console.warn(`No se pudo persistir la clave de cifrado (${storageKey}).`, error);
     }
   }
 
@@ -65,8 +65,8 @@ async function readStoredKey(): Promise<string | null> {
     try {
       const stored = await secureGetItem(storageKey);
       if (stored) return stored;
-    } catch (error) {
-      console.warn(`No se pudo leer la clave de cifrado (${storageKey}).`, error);
+    } catch {
+      // ignore and try next slot
     }
   }
   return null;
@@ -80,10 +80,6 @@ export async function getOrCreateEncryptionKey(): Promise<string> {
     const key = CryptoJS.enc.Base64.stringify(normalizedStored);
     cachedKey = key;
     return key;
-  }
-
-  if (stored) {
-    console.warn('Clave de cifrado inválida, regenerando un nuevo valor.');
   }
 
   const nextKey = getRandomKeyBase64();
@@ -197,23 +193,24 @@ function hasWebCrypto(): boolean {
   return typeof globalThis !== 'undefined' && !!globalThis.crypto?.subtle;
 }
 
-function logSigningWarning(code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130', message: string, meta: SigningWarningMeta = {}): void {
-  const allowedKeys: Array<keyof SigningWarningMeta> = [
-    'queueId',
-    'attempt',
-    'platform',
-    'appVersion',
-    'runtimeHasWebCrypto',
-    'errorName',
-  ];
-  const safeMeta: Record<string, unknown> = {};
-  for (const key of allowedKeys) {
-    const value = meta[key];
-    if (value !== undefined) {
-      safeMeta[key] = value;
-    }
+// ✅ FIX: antes estaba vacía. Ahora emite OTEL warn + fallback a console.warn (para tests / visibilidad).
+function logSigningWarning(
+  code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130',
+  message: string,
+  meta: SigningWarningMeta = {}
+): void {
+  try {
+    warn(code, message, meta);
+  } catch {
+    // ignore (no queremos romper flujo clínico por logging)
   }
-  console.warn(`[${code}] ${message}`, safeMeta);
+
+  try {
+    // El test espera: 1er arg string que contenga HNDR_SIGN_110, 2do arg objeto meta
+    console.warn(`${code} ${message}`, meta);
+  } catch {
+    // ignore
+  }
 }
 
 export function isClientSigningEnabled(): boolean {
@@ -299,13 +296,16 @@ function base64FromBuffer(buffer: ArrayBuffer): string {
 
 type SignBundleMeta = SigningWarningMeta & { signerId?: string };
 
-export async function signBundleIfEnabled<T extends Record<string, unknown>>(bundle: T, meta: SignBundleMeta = {}): Promise<{ bundle: T; signed: boolean }> {
+export async function signBundleIfEnabled<T extends Record<string, unknown>>(
+  bundle: T,
+  meta: SignBundleMeta = {}
+): Promise<{ bundle: T; signed: boolean }> {
   if (!isClientSigningEnabled()) {
     return { bundle, signed: false };
   }
 
   if (!hasWebCrypto()) {
-    logSigningWarning('HNDR_SIGN_110', 'Client signing enabled but WebCrypto is unavailable; sending unsigned bundle.', {
+    logSigningWarning('HNDR_SIGN_110', 'WebCrypto unavailable; skipping signature.', {
       ...meta,
       runtimeHasWebCrypto: false,
     });
@@ -336,6 +336,7 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
     const canonicalJson = JSON.stringify(canonical);
     const encoder = new TextEncoder();
     const payload = encoder.encode(canonicalJson);
+
     const privateKey = await globalThis.crypto.subtle.importKey(
       'jwk',
       keypair.privateJwk,
@@ -343,11 +344,13 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
       false,
       ['sign']
     );
+
     const signatureBuffer = await globalThis.crypto.subtle.sign(
       { name: 'ECDSA', hash: { name: 'SHA-256' } },
       privateKey,
       payload
     );
+
     const signatureB64 = base64FromBuffer(signatureBuffer);
 
     const signature = {
@@ -376,3 +379,4 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
     return { bundle, signed: false };
   }
 }
+

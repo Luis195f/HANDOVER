@@ -304,7 +304,6 @@ function notifySyncListeners() {
     try {
       listener(syncSnapshot);
     } catch (error) {
-      console.warn('Sync listener failed', error);
     }
   }
 }
@@ -544,7 +543,6 @@ export async function processQueueOnce(): Promise<void> {
       }
       preparedPayload = { ...extracted, patientId: extracted.patientId ?? item.patientId };
     } catch (error) {
-      console.warn('Error al preparar/analizar payload offline', error);
       await updateOfflineQueueItem(item.id, {
         syncStatus: 'error',
         attempts: item.attempts + 1,
@@ -559,7 +557,6 @@ export async function processQueueOnce(): Promise<void> {
       try {
         normalizedPayload.bundle = JSON.parse(preparedPayload.bundle) as Bundle;
       } catch (error) {
-        console.warn('Payload offline corrupto, no se pudo parsear JSON', error);
         await updateOfflineQueueItem(item.id, {
           syncStatus: 'error',
           attempts: item.attempts + 1,

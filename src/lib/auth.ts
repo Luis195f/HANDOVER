@@ -126,7 +126,6 @@ export async function loadSecureStore(): Promise<SecureStoreModule | null> {
   } catch (err) {
     // En tests, NO reventar; fallback a memoria
     if (process.env.VITEST || process.env.NODE_ENV === 'test') {
-      console.warn('expo-secure-store unavailable, falling back to in-memory storage for tests');
       secureStore = null;
       return null;
     }
@@ -313,13 +312,11 @@ async function hydrateFromStorage(): Promise<void> {
               unitIds: parsed.unitIds?.length ? parsed.unitIds : user.unitIds,
             };
           } catch (error) {
-            console.warn('Failed to parse stored user', error);
           }
         }
         setAuthState({ user: persistedUser, tokens });
       } catch (error) {
         if (error instanceof AuthError) {
-          console.warn('Clearing stored auth due to token validation', error.message);
         }
         clearAuthState();
       }
@@ -376,7 +373,6 @@ function decodeJwtClaims(idToken: string): JwtClaims {
     const payload = decodeBase64Url(parts[1]);
     return JSON.parse(payload) as JwtClaims;
   } catch (error) {
-    console.warn('Failed to decode id token', error);
     throw new AuthError('TOKEN_INVALID', 'Unable to decode id token');
   }
 }
@@ -567,7 +563,6 @@ async function revokeToken(refreshToken: string | null): Promise<void> {
       discovery
     );
   } catch (error) {
-    console.warn('Failed to revoke token', error);
   }
 }
 
@@ -600,7 +595,6 @@ async function fetchUserInfo(accessToken: string, discovery: DiscoveryDocument):
       unitIds,
     };
   } catch (error) {
-    console.warn('Failed to fetch user info', error);
     return null;
   }
 }
@@ -653,7 +647,6 @@ let pendingAuthRequest: AuthRequestLike | null = null;
 
 function createAuthRequest(): AuthRequestLike {
   const redirectUri = AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme, path: 'redirect' });
-   if (__DEV__) console.log("OIDC redirectUri =", redirectUri);
 
   const request = new AuthSession.AuthRequest({
     clientId: oidcConfig.clientId,
@@ -671,11 +664,9 @@ export async function loginWithOIDC(): Promise<AuthFlowResult> {
   const request = createAuthRequest();
   pendingAuthRequest = request;
    try {
-     if (__DEV__) console.log("[auth] promptAsync starting…", { redirectUri: request.redirectUri });
 
 const result = await request.promptAsync(discovery, { useProxy: false, preferEphemeralSession: true });
 
-if (__DEV__) console.log("[auth] promptAsync result =", result);
 
 
     if (result.type === "cancel" || result.type === "dismiss") {
@@ -804,7 +795,6 @@ export function resetAuthState(): void {
     storeSet(ID_TOKEN_KEY, null),
     storeSet(USER_KEY, null),
   ]).catch((error) => {
-    console.warn('Failed to reset secure storage', error);
   });
 }
 

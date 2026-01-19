@@ -79,8 +79,7 @@ async function persistOfflineKey(bytes: Uint8Array): Promise<void> {
   const base64 = toBase64(bytes);
   try {
     await secureSetItem(OFFLINE_KEY_STORAGE, base64);
-  } catch (error) {
-    console.warn('No se pudo persistir la clave de cifrado offline', error);
+  } catch {
   }
 }
 
@@ -95,10 +94,8 @@ async function deriveKeyBytes(): Promise<Uint8Array> {
         cachedOfflineKey = decoded;
         return decoded;
       }
-      console.warn('Clave de cifrado offline con longitud inválida, regenerando.');
     }
-  } catch (error) {
-    console.warn('No se pudo leer la clave de cifrado offline', error);
+  } catch {
   }
 
   const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
@@ -170,7 +167,7 @@ function tryParseEncryptedEnvelope(stored: string): EncryptedEnvelopeV1 | null {
     if (isEnvelopeV1(parsed)) {
       return parsed;
     }
-  } catch (error) {
+  } catch {
     return null;
   }
 
@@ -237,8 +234,7 @@ async function readLegacyKey(): Promise<string | null> {
       cachedLegacyKey = stored;
       return stored;
     }
-  } catch (error) {
-    console.warn('No se pudo leer la clave de cifrado offline legacy', error);
+  } catch {
   }
   return null;
 }
@@ -246,8 +242,7 @@ async function readLegacyKey(): Promise<string | null> {
 async function persistLegacyKey(key: string): Promise<void> {
   try {
     await secureSetItem(LEGACY_QUEUE_KEY, key);
-  } catch (error) {
-    console.warn('No se pudo persistir la clave de cifrado offline legacy', error);
+  } catch {
   }
 }
 

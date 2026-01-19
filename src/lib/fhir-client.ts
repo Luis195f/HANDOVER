@@ -96,7 +96,6 @@ export async function fetchPatientSummary(
       patient = data;
     }
   } catch (error) {
-    console.warn('fetchPatientSummary: error fetching Patient', error);
   }
 
   try {
@@ -132,7 +131,6 @@ export async function fetchPatientSummary(
       }
     }
   } catch (error) {
-    console.warn('fetchPatientSummary: error fetching Encounter/Location', error);
   }
 
   try {
@@ -151,7 +149,6 @@ export async function fetchPatientSummary(
         .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
     }
   } catch (error) {
-    console.warn('fetchPatientSummary: error fetching AllergyIntolerance', error);
   }
 
   const summary: PatientSummary = {
@@ -783,7 +780,6 @@ export async function fetchVitalTrends(
       return buildMockVitalTrendsData();
     }
     if (error) {
-      console.warn('[fhir] fetchVitalTrends fallback', error);
     }
     return createEmptyVitalTrends();
   };
