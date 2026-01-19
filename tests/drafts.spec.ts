@@ -28,7 +28,11 @@ describe("drafts.ts (get/set/clear)", () => {
     await drafts.setDraft(pid, data as any);
     const raw = await drafts.__test__.readRaw(drafts.__test__.keyNorm(pid));
 
-    expect(raw?.startsWith(crypto.ENCRYPTION_PREFIX)).toBe(true);
+    expect(raw).not.toBe(JSON.stringify(data));
+    expect(raw?.startsWith(crypto.ENCRYPTION_PREFIX)).toBe(false);
+
+    const decrypted = await crypto.decryptOfflinePayload(raw ?? "");
+    expect(JSON.parse(decrypted)).toEqual(data);
 
     const got = await drafts.getDraft(pid);
     expect(got).toEqual(data);
@@ -97,6 +101,9 @@ describe("drafts.ts (get/set/clear)", () => {
     expect(got).toEqual(data);
 
     const stored = await drafts.__test__.readRaw(normalizedKey);
-    expect(stored?.startsWith(crypto.ENCRYPTION_PREFIX)).toBe(true);
+    expect(stored).not.toBe(JSON.stringify(data));
+    expect(stored?.startsWith(crypto.ENCRYPTION_PREFIX)).toBe(false);
+    const decrypted = await crypto.decryptOfflinePayload(stored ?? "");
+    expect(JSON.parse(decrypted)).toEqual(data);
   });
 });
