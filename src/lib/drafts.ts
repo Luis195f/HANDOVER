@@ -1,7 +1,13 @@
 // FILE: src/lib/drafts.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { decryptDraft, encryptDraft, ENCRYPTION_PREFIX, isEncryptionDisabled } from './crypto';
+import {
+  decryptOfflinePayload,
+  decryptPayload,
+  encryptOfflinePayload,
+  isEncryptionDisabled,
+  payloadIsEncrypted,
+} from './crypto';
 
 /**
  * Almacenamiento de borradores por paciente, con prioridad:
@@ -97,16 +103,34 @@ function safeStringify(v: unknown): string {
 
 type ParsedDraft<T> = { value: T | null; shouldEncrypt: boolean };
 
+const DRAFT_ENCRYPTION_WARNING = '[HNDV][WARN][DRAFT_ENCRYPTION_FAILED]';
+const DRAFT_DECRYPTION_WARNING = '[HNDV][WARN][DRAFT_DECRYPTION_FAILED]';
+
 async function parseStoredDraft<T>(raw: string | null): Promise<ParsedDraft<T>> {
   if (!raw) return { value: null, shouldEncrypt: false };
 
-  if (raw.startsWith(ENCRYPTION_PREFIX)) {
-    const decrypted = await decryptDraft(raw);
-    return { value: safeParse<T>(decrypted), shouldEncrypt: false };
+  if (payloadIsEncrypted(raw)) {
+    try {
+      const decrypted = await decryptPayload(raw);
+      return { value: safeParse<T>(decrypted), shouldEncrypt: !isEncryptionDisabled() };
+    } catch (error) {
+      console.warn(DRAFT_DECRYPTION_WARNING, error);
+      return { value: null, shouldEncrypt: false };
+    }
+  }
+
+  try {
+    const decrypted = await decryptOfflinePayload(raw);
+    if (decrypted !== raw) {
+      return { value: safeParse<T>(decrypted), shouldEncrypt: false };
+    }
+  } catch (error) {
+    console.warn(DRAFT_DECRYPTION_WARNING, error);
+    return { value: null, shouldEncrypt: false };
   }
 
   const parsed = safeParse<T>(raw);
-  return { value: parsed, shouldEncrypt: parsed !== null };
+  return { value: parsed, shouldEncrypt: parsed !== null && !isEncryptionDisabled() };
 }
 
 // ----------------------------
@@ -123,8 +147,12 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
 
   if (parsed1.value != null) {
     if (parsed1.shouldEncrypt && !isEncryptionDisabled()) {
-      const encrypted = await encryptDraft(safeStringify(parsed1.value));
-      try { await storage.setItem(k1, encrypted); } catch {}
+      try {
+        const encrypted = await encryptOfflinePayload(safeStringify(parsed1.value));
+        try { await storage.setItem(k1, encrypted); } catch {}
+      } catch (error) {
+        console.warn(DRAFT_ENCRYPTION_WARNING, error);
+      }
     }
     return parsed1.value;
   }
@@ -136,8 +164,12 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
     const parsed2 = await parseStoredDraft<T>(raw2);
     if (parsed2.value != null) {
       if (parsed2.shouldEncrypt && !isEncryptionDisabled()) {
-        const encrypted = await encryptDraft(safeStringify(parsed2.value));
-        try { await storage.setItem(k1, encrypted); } catch {}
+        try {
+          const encrypted = await encryptOfflinePayload(safeStringify(parsed2.value));
+          try { await storage.setItem(k1, encrypted); } catch {}
+        } catch (error) {
+          console.warn(DRAFT_ENCRYPTION_WARNING, error);
+        }
       }
       return parsed2.value;
     }
@@ -148,7 +180,15 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
 export async function setDraft<T = any>(patientId: string, data: T): Promise<void> {
   const k1 = keyNorm(patientId);
   const serialized = safeStringify(data ?? {});
-  const payload = isEncryptionDisabled() ? serialized : await encryptDraft(serialized);
+  let payload = serialized;
+  if (!isEncryptionDisabled()) {
+    try {
+      payload = await encryptOfflinePayload(serialized);
+    } catch (error) {
+      console.warn(DRAFT_ENCRYPTION_WARNING, error);
+      return;
+    }
+  }
   await storage.setItem(k1, payload);
 }
 
