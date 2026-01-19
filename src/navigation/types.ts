@@ -25,7 +25,7 @@ type HandoverFormParams = {
 } & LegacyHandoverParams;
 
 type ShiftDetailsParams = {
-  returnTo?: "HandoverForm" | "HandoverMain" | "PatientList";
+  returnTo?: "HandoverForm" | "PatientList";
   administrativeData?: AdministrativeData;
 };
 

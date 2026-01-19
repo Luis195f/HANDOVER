@@ -491,7 +491,7 @@ export default function PatientList({ navigation }: Props) {
                 style={[styles.handoverButton, { backgroundColor: colors.info }]}
                 onPress={(event) => {
                   event.stopPropagation();
-                  navigation.navigate('HandoverForm', { patientIdParam: item.patientId });
+                  navigation.navigate('HandoverForm', { patientId: item.patientId });
                 }}
                 accessibilityRole="button"
               >

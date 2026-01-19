@@ -105,7 +105,7 @@ describe('SupervisorDashboardScreen', () => {
     act(() => {
       renderedItem?.props.onPress();
     });
-    expect(navigate).toHaveBeenCalledWith('HandoverForm', { patientIdParam: 'p-critical' });
+    expect(navigate).toHaveBeenCalledWith('HandoverForm', { patientId: 'p-critical' });
   });
 
   it('muestra un indicador de carga inicial', async () => {
