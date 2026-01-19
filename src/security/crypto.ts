@@ -3,6 +3,7 @@ import CryptoJS from 'crypto-js';
 import { Buffer } from 'buffer';
 
 import { secureGetItem, secureSetItem } from './secure-storage';
+import { warn } from "@/src/lib/otel";
 
 const STORAGE_KEYS = ['handover_local_crypto_key', 'handover_encryption_key_v1'] as const;
 const VERSION_TAG = 'v1';
@@ -65,6 +66,7 @@ async function readStoredKey(): Promise<string | null> {
       const stored = await secureGetItem(storageKey);
       if (stored) return stored;
     } catch {
+      // ignore and try next slot
     }
   }
   return null;
@@ -191,7 +193,24 @@ function hasWebCrypto(): boolean {
   return typeof globalThis !== 'undefined' && !!globalThis.crypto?.subtle;
 }
 
-function logSigningWarning(_code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130', _message: string, _meta: SigningWarningMeta = {}): void {
+// ✅ FIX: antes estaba vacía. Ahora emite OTEL warn + fallback a console.warn (para tests / visibilidad).
+function logSigningWarning(
+  code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130',
+  message: string,
+  meta: SigningWarningMeta = {}
+): void {
+  try {
+    warn(code, message, meta);
+  } catch {
+    // ignore (no queremos romper flujo clínico por logging)
+  }
+
+  try {
+    // El test espera: 1er arg string que contenga HNDR_SIGN_110, 2do arg objeto meta
+    console.warn(`${code} ${message}`, meta);
+  } catch {
+    // ignore
+  }
 }
 
 export function isClientSigningEnabled(): boolean {
@@ -216,7 +235,7 @@ async function persistSigningKeypair(keypair: { privateJwk: JsonWebKey; publicJw
   await secureSetItem(CLIENT_SIGNING_KEY_STORAGE, serialized);
 }
 
-export async function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
+export async functionوڑ function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
   if (!hasWebCrypto()) return null;
 
   const stored = await secureGetItem(CLIENT_SIGNING_KEY_STORAGE);
@@ -277,13 +296,16 @@ function base64FromBuffer(buffer: ArrayBuffer): string {
 
 type SignBundleMeta = SigningWarningMeta & { signerId?: string };
 
-export async function signBundleIfEnabled<T extends Record<string, unknown>>(bundle: T, meta: SignBundleMeta = {}): Promise<{ bundle: T; signed: boolean }> {
+export async function signBundleIfEnabled<T extends Record<string, unknown>>(
+  bundle: T,
+  meta: SignBundleMeta = {}
+): Promise<{ bundle: T; signed: boolean }> {
   if (!isClientSigningEnabled()) {
     return { bundle, signed: false };
   }
 
   if (!hasWebCrypto()) {
-    logSigningWarning('HNDR_SIGN_110', 'Client signing enabled but WebCrypto is unavailable; sending unsigned bundle.', {
+    logSigningWarning('HNDR_SIGN_110', 'WebCrypto unavailable; skipping signature.', {
       ...meta,
       runtimeHasWebCrypto: false,
     });
@@ -314,6 +336,7 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
     const canonicalJson = JSON.stringify(canonical);
     const encoder = new TextEncoder();
     const payload = encoder.encode(canonicalJson);
+
     const privateKey = await globalThis.crypto.subtle.importKey(
       'jwk',
       keypair.privateJwk,
@@ -321,11 +344,13 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
       false,
       ['sign']
     );
+
     const signatureBuffer = await globalThis.crypto.subtle.sign(
       { name: 'ECDSA', hash: { name: 'SHA-256' } },
       privateKey,
       payload
     );
+
     const signatureB64 = base64FromBuffer(signatureBuffer);
 
     const signature = {
@@ -354,3 +379,4 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(bun
     return { bundle, signed: false };
   }
 }
+
