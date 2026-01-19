@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Button, Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFormContext } from 'react-hook-form';
 
@@ -10,27 +10,44 @@ type Props = {
   visible: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  highlightMissing?: boolean;
 };
 
-export function BedsideChecklistModal({ visible, onCancel, onConfirm }: Props) {
+export function BedsideChecklistModal({
+  visible,
+  onCancel,
+  onConfirm,
+  highlightMissing = false,
+}: Props) {
   const form = useFormContext<HandoverValues>();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [attemptedConfirm, setAttemptedConfirm] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setErrorMessage(null);
+      setAttemptedConfirm(false);
+    }
+  }, [visible]);
 
   const handleConfirm = () => {
     const checklist = form.getValues('bedsideChecklist');
     if (!isBedsideChecklistComplete(checklist)) {
-      const message = 'Completa el checklist de cabecera de cama antes de finalizar.';
+      const message = 'Debes completar todos los elementos de seguridad antes de finalizar.';
       setErrorMessage(message);
-      Alert.alert('Checklist incompleto', message);
+      setAttemptedConfirm(true);
+      Alert.alert('Checklist incompleto', message, [{ text: 'Entendido' }]);
       return;
     }
 
     setErrorMessage(null);
+    setAttemptedConfirm(false);
     onConfirm();
   };
 
   const handleCancel = () => {
     setErrorMessage(null);
+    setAttemptedConfirm(false);
     onCancel();
   };
 
@@ -50,7 +67,7 @@ export function BedsideChecklistModal({ visible, onCancel, onConfirm }: Props) {
               Verifique visualmente pulsera/identidad y confirme con el paciente; no verbalice datos sensibles.
             </Text>
 
-            <BedsideChecklistSection highlightMissing />
+            <BedsideChecklistSection highlightMissing={highlightMissing || attemptedConfirm} />
 
             {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
