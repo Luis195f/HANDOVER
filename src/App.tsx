@@ -1,10 +1,10 @@
-// @ts-nocheck
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import RootNavigator from "@/src/navigation/RootNavigator";
 import { navigationRef } from "@/src/navigation/navigation";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
 import { AuthProvider } from "@/src/security/auth";
+import { warn } from "@/src/lib/otel";
 
 export default function App() {
   // Bootstrap de cola (opcional; no rompe si no existe)
@@ -17,8 +17,12 @@ export default function App() {
         maxTries: 5,
       });
       if (typeof ret === "function") stop = ret;
-    } catch (e) {
-      if (__DEV__) console.warn("[App] queue sync not available", e);
+    } catch {
+      warn(
+        "APP_QUEUE_SYNC_UNAVAILABLE",
+        "[APP_QUEUE_SYNC_UNAVAILABLE] Queue sync not available; continuing without background sync.",
+        { source: "installQueueSync" }
+      );
     }
     return () => { try { if (typeof stop === "function") stop(); } catch {} };
   }, []);

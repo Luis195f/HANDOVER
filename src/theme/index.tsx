@@ -54,10 +54,6 @@ export function useThemeTokens(): ThemeTokens {
   const ctx = useContext(Ctx);
   const system = (useColorScheme() ?? 'light') as Theme;
 
-  if (!ctx) {
-    console.warn('[handover-ui] UI_THEME_PROVIDER_MISSING', { module: 'src/theme/index.tsx' });
-  }
-
   const theme = ctx?.theme ?? system;
   const isDark = theme === 'dark';
 

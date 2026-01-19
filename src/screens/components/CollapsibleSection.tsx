@@ -12,12 +12,7 @@ type PerfObsCode =
   | 'PERF005_A11Y_WARN_GATED'
   | 'PERF006_ANDROID_ANIM_WARN_GATED';
 
-const perfWarn = (code: PerfObsCode, meta?: Record<string, string | number | boolean>) => {
-  const dev = typeof __DEV__ !== 'undefined' && __DEV__;
-  const flag = process.env.EXPO_PUBLIC_OBSERVABILITY_DEBUG === 'true';
-  if (!dev && !flag) return;
-  console.warn(`[OBS][PERF][${code}]`, meta ?? {});
-};
+const perfWarn = (_code: PerfObsCode, _meta?: Record<string, string | number | boolean>) => {};
 
 const isPerfObsEnabled = () => {
   const dev = typeof __DEV__ !== 'undefined' && __DEV__;
@@ -58,9 +53,6 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       } else {
         if (isPerfObsEnabled()) {
           perfWarn('PERF006_ANDROID_ANIM_WARN_GATED', { sectionKey: sectionKey ?? 'unknown' });
-          console.warn('[handover-ui] UI_COLLAPSIBLE_ANIMATION_DISABLED_ANDROID', {
-            component: 'CollapsibleSection',
-          });
         }
       }
     }
@@ -69,7 +61,6 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   if (!titleLabel) {
     if (isPerfObsEnabled()) {
       perfWarn('PERF005_A11Y_WARN_GATED', { sectionKey: sectionKey ?? 'unknown' });
-      console.warn('[handover-ui] UI_A11Y_MISSING_LABEL', { component: 'CollapsibleSection' });
     }
   }
 

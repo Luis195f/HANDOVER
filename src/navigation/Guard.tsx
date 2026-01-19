@@ -1,8 +1,8 @@
-// @ts-nocheck
 import React, { useEffect, useState } from "react";
 import { View, ActivityIndicator, Text } from "react-native";
 import { getSession } from "@/src/security/auth";
-import { ensureRole, ensureUnitAccess, type UserRole } from "@/src/security/acl";
+import { ensureRole, ensureUnitAccess } from "@/src/security/acl";
+import type { UserRole } from "@/src/security/auth-types";
 
 type Props = {
   children: React.ReactNode;

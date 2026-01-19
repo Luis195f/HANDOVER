@@ -1,4 +1,3 @@
-// @ts-nocheck
 // src/lib/patient-filters.ts
 // Filtros + orden PRO para PatientList.
 // - Texto: busca en name e id (case/acentos insensitive).
@@ -6,7 +5,8 @@
 // - Orden NEWS2 descendente: prioriza p.news2, luego p.latestNews2.score, luego calcula con vitals.
 // - Desempate estable por name/id asc.
 
-import { news2Score } from "@/src/lib/priority";
+import { computeNEWS2 } from "@/src/lib/news2";
+import type { VitalsSnapshot } from "@/src/types/handover";
 
 export type PatientLike = {
   id: string;
@@ -15,7 +15,7 @@ export type PatientLike = {
   specialtyId?: string;
   location?: string;
   bed?: string;
-  vitals?: Record<string, any>;
+  vitals?: VitalsSnapshot;
   news2?: number;
   latestNews2?: { score?: number };
 };
@@ -33,7 +33,7 @@ function scoreOf(p: PatientLike): number {
   if (typeof p.news2 === "number") return p.news2;
   const maybe = p.latestNews2?.score;
   if (typeof maybe === "number") return maybe;
-  return news2Score(p.vitals ?? {});
+  return computeNEWS2(p.vitals ?? {}).total;
 }
 
 export function applyPatientFilters<T extends PatientLike>(

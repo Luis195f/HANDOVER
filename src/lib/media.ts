@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Multimedia (PRO): utilidades para audio.
  * - 100% compatible con el stub previo (mismo contrato).
@@ -28,6 +27,12 @@ export type UploadOptions = {
   extraFields?: Record<string, string | number | boolean>;
   /** Para tests o entornos controlados */
   fetchImpl?: typeof fetch;
+};
+
+type FormDataFile = {
+  uri: string;
+  name: string;
+  type: string;
 };
 
 /* =========================
@@ -128,15 +133,16 @@ async function uploadMultipart(
   const form = new FormData();
   Object.entries(extraFields ?? {}).forEach(([k, v]) => form.append(k, String(v)));
   // Si es data URI, algunos backends no lo aceptan como uri. Intentamos pasarlo tal cual.
-  form.append(fieldName || "file", { uri, name, type } as any);
+  const filePart = { uri, name, type } satisfies FormDataFile;
+  form.append(fieldName || "file", filePart as unknown as Blob);
 
   const res = await f(directUploadUrl, {
     method: "POST",
     headers: {
       ...(headers ?? {}),
       // No pongas Content-Type manualmente: RN lo define con el boundary correcto
-    } as any,
-    body: form as any,
+    },
+    body: form,
   });
 
   // Éxito convencional: 200–299

@@ -6,10 +6,10 @@ declare module 'expo-modules-core' {
     expires?: string | number;
   }
 
-  export class NativeModule<TEvents = any> {
-    [key: string]: any;
-    constructor(options?: any);
-    addListener?(eventName: keyof TEvents, listener: (...args: any[]) => void): EventSubscription;
+  export class NativeModule<TEvents = Record<string, unknown>> {
+    [key: string]: unknown;
+    constructor(options?: Record<string, unknown>);
+    addListener?(eventName: keyof TEvents, listener: (...args: unknown[]) => void): EventSubscription;
     removeListeners?(count: number): void;
   }
 
@@ -19,7 +19,7 @@ declare module 'expo-modules-core' {
 
   export class UnavailabilityError extends Error {}
 
-  export function requireOptionalNativeModule<T = any>(moduleName: string): T | null;
+  export function requireOptionalNativeModule<T = unknown>(moduleName: string): T | null;
 
   export const uuid: { v4: () => string };
 }

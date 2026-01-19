@@ -719,9 +719,6 @@ const normalizeId = (value: string | undefined, fallback: string): string => {
 
 const normalizePatientId = (patientId: string): string => {
   const normalized = normalizeId(patientId, 'unknown');
-  if (normalized === 'unknown') {
-    console.warn('fhir-map: patientId is missing, using placeholder "unknown"');
-  }
   return normalized;
 };
 
@@ -1838,7 +1835,7 @@ const warnExamsItemSkipped = (payload: {
   examState?: string;
   len?: number;
 }) => {
-  console.warn(payload, 'Exams item skipped during mapping.');
+  void payload;
 };
 
 const warnProceduresItemSkipped = (payload: {
@@ -1847,14 +1844,11 @@ const warnProceduresItemSkipped = (payload: {
   done?: boolean;
   len?: number;
 }) => {
-  console.warn(payload, 'Procedures item skipped during mapping.');
+  void payload;
 };
 
 const warnCompositionSectionOmitted = (section: 'exams' | 'procedures') => {
-  console.warn(
-    { code: 'HANDOVER_COMPOSITION_SECTION_OMITTED_EMPTY', section },
-    'Composition section omitted: no references.',
-  );
+  void section;
 };
 
 const normalizeExamInputs = (values: { exams?: unknown; examsPending?: unknown }): NormalizedExamInput => {
@@ -1961,16 +1955,6 @@ export function mapExamObservations(
   normalizedInput?: NormalizedExamInput,
 ): Observation[] {
   const normalizedExams = normalizedInput ?? normalizeExamInputs(values);
-  if (normalizedExams.legacyFields.length > 0) {
-    console.warn(
-      {
-        code: 'HANDOVER_LEGACY_EXAMS_PARSE_APPLIED',
-        legacyFields: normalizedExams.legacyFields,
-        producedCount: normalizedExams.legacyCount,
-      },
-      'Legacy exams fields detected; parse+merge applied.',
-    );
-  }
 
   if (normalizedExams.inputCount === 0) return [];
   const optionsMerged = resolveOptions(options);

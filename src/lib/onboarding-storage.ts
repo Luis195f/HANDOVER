@@ -15,8 +15,7 @@ export async function getOnboardingCompleted(): Promise<boolean> {
     const value = await secureGetItem(ONBOARDING_KEY);
     if (value === "true") return true;
     if (value === "false") return false;
-  } catch (error) {
-    if (__DEV__) console.warn("[onboarding] Failed to read completion flag", error);
+  } catch {
   }
   return false;
 }
@@ -24,7 +23,6 @@ export async function getOnboardingCompleted(): Promise<boolean> {
 export async function setOnboardingCompleted(value: boolean): Promise<void> {
   try {
     await secureSetItem(ONBOARDING_KEY, value ? "true" : "false");
-  } catch (error) {
-    if (__DEV__) console.warn("[onboarding] Failed to persist completion flag", error);
+  } catch {
   }
 }

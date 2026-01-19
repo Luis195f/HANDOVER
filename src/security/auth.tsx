@@ -14,8 +14,6 @@ import { configureFHIRClient } from '@/src/lib/fhir-client';
 const AUTH_DISABLED =
   (process.env.EXPO_PUBLIC_AUTH_DISABLED ?? '').trim().toLowerCase() === 'true';
 
-const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
-
 type AuthWarnCode =
   | 'AUTH_RUNTIME_CONFIG'
   | 'AUTH_OIDC_MISCONFIG'
@@ -33,27 +31,11 @@ type AuthWarnCode =
   | 'AUTH_REFRESH_ERROR'
   | 'AUTH_REQUEST_NOT_READY';
 
-const AUTH_WARN_PREFIX = '[AUTH]';
-
 /**
  * Logger de eventos de autenticación (solo en DEV).
  * Importante: no loguear PHI ni secretos (tokens, auth headers, emails, etc.).
  */
-function warnAuth(code: AuthWarnCode, meta: Record<string, unknown> = {}): void {
-  if (!isDev) return;
-
-  const redacted: Record<string, unknown> = { ...meta };
-  const redactKeys = ['access', 'refresh', 'id_token', 'token', 'authorization', 'email'];
-  for (const k of Object.keys(redacted)) {
-    const key = k.toLowerCase();
-    if (redactKeys.some((rk) => key.includes(rk))) {
-      redacted[k] = '[REDACTED]';
-    }
-  }
-
-  // eslint-disable-next-line no-console
-  console.warn(AUTH_WARN_PREFIX, code, redacted);
-}
+function warnAuth(_code: AuthWarnCode, _meta: Record<string, unknown> = {}): void {}
 
 let refreshInFlight: Promise<string | null> | null = null;
 const REFRESH_SKEW_MS = 60_000;
@@ -61,8 +43,7 @@ const REFRESH_SKEW_MS = 60_000;
 
 try {
   WebBrowser.maybeCompleteAuthSession();
-} catch (error) {
-  if (isDev) console.warn('[auth] Failed to complete auth session', error);
+} catch {
 }
 
 // BEGIN HANDOVER: AUTH_CONFIG
@@ -249,8 +230,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
           currentSession = normalizeSession(parseSession(persisted));
           return currentSession;
         }
-      } catch (error) {
-        if (isDev) console.warn('[auth] Failed to read persisted session', error);
+      } catch {
       }
 
       try {
@@ -258,8 +238,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
         if (currentSession) {
           await persistSession(currentSession);
         }
-      } catch (error) {
-        if (isDev) console.warn('[auth] Failed to migrate session', error);
+      } catch {
         currentSession = null;
       }
 
@@ -506,12 +485,6 @@ async function performAuth0Login(options: {
     
   const authResult = await options.promptAsync();
 
-if (isDev) {
-  warnAuth('AUTH_LOGIN_RESULT', { type: authResult.type });
-  console.log('[auth] Auth result type:', authResult.type);
-  console.log('[auth] Using redirectUri:', config.redirectUri);
-}
-
   const tokens = await resolveTokensFromResult({
     request: options.request,
     result: authResult,
@@ -560,8 +533,7 @@ export async function loginDemo(): Promise<SessionModel> {
 
     await setSession(session);
     return session;
-  } catch (error) {
-    if (isDev) console.warn('[demo] Failed to start demo session', error);
+  } catch {
 
     const fallbackSession: SessionModel = {
       accessToken: 'demo-fallback-token',
@@ -595,8 +567,7 @@ export async function logout(): Promise<void> {
         config.logoutUri,
       )}`;
       await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
-    } catch (error) {
-      if (isDev) console.warn('[auth] Failed to complete logout', error);
+    } catch {
     }
 
     await setSession(null);
@@ -635,8 +606,7 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
   if (!hydrated) {
     try {
       await hydrateSession();
-    } catch (error) {
-      if (isDev) console.warn('[auth] Failed to hydrate current session', error);
+    } catch {
     }
   }
   return currentSession;
@@ -751,8 +721,7 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
       warnAuth('AUTH_REFRESH_SUCCESS');
 
       return nextSession.accessToken ?? accessToken;
-    } catch (error) {
-      warnAuth('AUTH_REFRESH_ERROR', { message: (error as any)?.message });
+    } catch {
       return accessToken;
     } finally {
       refreshInFlight = null;
@@ -843,8 +812,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const hydratedSession = await getCurrentSession();
         if (!mounted) return;
         setSessionState(hydratedSession);
-      } catch (error) {
-        if (isDev) console.warn('[auth] Failed to hydrate session', error);
+      } catch {
         if (!mounted) return;
         setSessionState(null);
       } finally {

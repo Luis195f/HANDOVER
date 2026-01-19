@@ -1,5 +1,5 @@
 // src/screens/QRScan.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import {
@@ -104,7 +104,6 @@ export function QRScanScreen({ navigation, route }: Props) {
   const targetPatientId = patientMismatch ? undefined : parsedPayload?.patientId;
   const { loading, error, summary } = usePatientSummary(targetPatientId || undefined);
   const { session } = useAuth();
-  const hasLoggedPermissionRef = useRef(false);
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
   const clearTransientStates = useCallback(() => {
@@ -119,17 +118,6 @@ export function QRScanScreen({ navigation, route }: Props) {
       requestPermission();
     }
   }, [permission, requestPermission]);
-
-  useEffect(() => {
-    if (!permission || permission.granted) return;
-    if (hasLoggedPermissionRef.current) return;
-    hasLoggedPermissionRef.current = true;
-    console.warn('[HNDV][WARN][PERM_CAMERA_DENIED]', {
-      screen: 'QRScan',
-      status: permission.status,
-      canAskAgain: permission.canAskAgain,
-    });
-  }, [permission]);
 
   // Al salir de la pantalla, reseteamos el estado de escaneo
   useEffect(() => {
@@ -208,10 +196,6 @@ export function QRScanScreen({ navigation, route }: Props) {
         && normalizedScannedId
         && normalizedCurrentId !== normalizedScannedId
       ) {
-        console.warn('[qr] patient mismatch', {
-          currentPatientId,
-          scannedId: parsed.patientId,
-        });
         setPatientMismatch({ currentId: currentPatientId ?? '', scannedId: parsed.patientId });
         return;
       }
@@ -292,7 +276,6 @@ export function QRScanScreen({ navigation, route }: Props) {
     try {
       await Linking.openSettings();
     } catch {
-      console.warn('[HNDV][WARN][PERM_OPEN_SETTINGS_FAILED]', { screen: 'QRScan' });
     }
   };
 

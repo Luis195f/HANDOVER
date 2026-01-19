@@ -37,7 +37,6 @@ function resolveAiBackendBaseUrl(): string | null {
   }
 
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.warn('[env] AI backend is not configured; disabling AI features');
   }
 
   return null;

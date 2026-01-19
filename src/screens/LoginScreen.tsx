@@ -25,7 +25,6 @@ export default function LoginScreen() {
       if (isAuthCancelledError(error)) {
         return;
       }
-      if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[login] Failed to authenticate', error);
       Alert.alert('No se pudo iniciar sesión', 'Vuelve a intentarlo en unos segundos.');
     }
   }, [goToHome, loginWithOAuth]);

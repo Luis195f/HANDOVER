@@ -11,8 +11,6 @@ type BotonPrimarioProps = {
   accessibilityLabel?: string;
 };
 
-const UI_LOG_TAG = '[handover-ui]';
-
 export default function BotonPrimario({
   label,
   onPress,
@@ -21,11 +19,6 @@ export default function BotonPrimario({
   accessibilityLabel,
 }: BotonPrimarioProps) {
   const { colors, fontSizes, radius } = useThemeTokens();
-  const isValidLabel = typeof label === 'string' && label.trim().length > 0;
-
-  if (!isValidLabel) {
-    console.warn(`${UI_LOG_TAG} UI_A11Y_MISSING_LABEL`, { component: 'BotonPrimario' });
-  }
 
   return (
     <Pressable

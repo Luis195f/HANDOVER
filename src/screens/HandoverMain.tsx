@@ -228,9 +228,9 @@ function Cierre({sb,v,meds,disps,ox}:{sb:{s:string;b:string;a:string;r:string}; 
         <Button title="Reproducir (TTS)" onPress={()=>Speech.speak(resumen,{language:'es'})} />
       </View>
       <Label>Adjuntos</Label>
-      <AudioAttach onRecorded={(uri)=>console.log('Audio:', uri)} />
+      <AudioAttach onRecorded={() => {}} />
       <View style={{height:12}} />
-      <Button title="Guardar y Enviar (solo UI)" onPress={()=>console.log('Enviar bundle (UI): listo para integrar FHIR')} />
+      <Button title="Guardar y Enviar (solo UI)" onPress={() => {}} />
       <Text style={{marginTop:8,color:'#64748b',fontSize:12}}>
         * Esta pantalla no envía aún a FHIR: integraremos con buildHandoverBundle y cola offline en el siguiente paso.
       </Text>
@@ -262,4 +262,3 @@ const s = StyleSheet.create({
   chipsWrap:{flexDirection:'row',flexWrap:'wrap',gap:4},
   divider:{height:1,backgroundColor:'#e5e7eb',borderRadius:4},
 });
-
