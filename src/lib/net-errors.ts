@@ -82,6 +82,69 @@ const offlineHints = [
   /EAI_AGAIN/i,
 ];
 
+type OperationOutcomeIssue = {
+  diagnostics?: unknown;
+  details?: { text?: unknown };
+};
+
+const parseMaybeJson = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
+};
+
+const getOutcomePayload = (err: NetError) => {
+  const extended = err as NetError & {
+    data?: unknown;
+    body?: unknown;
+    response?: { data?: unknown };
+  };
+  const candidates = [extended.details, extended.data, extended.body, extended.response?.data];
+  for (const candidate of candidates) {
+    if (candidate !== undefined) return parseMaybeJson(candidate);
+  }
+  return undefined;
+};
+
+const getOutcomeDetail = (err: NetError): { detail?: string; diagnostics?: string } => {
+  const payload = getOutcomePayload(err);
+  if (!payload || typeof payload !== 'object') return {};
+  const issue = (payload as { issue?: unknown }).issue;
+  if (!Array.isArray(issue) || issue.length === 0) return {};
+  const firstIssue = issue[0] as OperationOutcomeIssue;
+  const diagnostics = typeof firstIssue.diagnostics === 'string' ? firstIssue.diagnostics : undefined;
+  const detailsText = typeof firstIssue.details?.text === 'string' ? firstIssue.details.text : undefined;
+  return { detail: diagnostics ?? detailsText, diagnostics };
+};
+
+const splitFirstSentence = (text: string) => {
+  const parts = text.split(/[\n.;]/);
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+};
+
+const truncateText = (text: string, limit: number) => {
+  if (text.length <= limit) return text;
+  return text.slice(0, limit).trimEnd();
+};
+
+const formatOutcomeDetail = (detail: string) => {
+  const firstSentence = splitFirstSentence(detail);
+  if (!firstSentence) return undefined;
+  return truncateText(firstSentence, 160);
+};
+
+const redactQuotedText = (text: string) =>
+  text.replace(/'[^']*'/g, '‘…’').replace(/"[^"]*"/g, '“…”');
+
 export function normalizeNetError(error: unknown, ctx?: { url?: string; response?: Response }): NetError {
   const { response } = ctx || {};
   const url = ctx?.url ?? response?.url;
@@ -184,9 +247,19 @@ export function getUserFacingNetworkMessage(
   if (status === 422) {
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_HTTP_4XX_OTHER', err, nextCtx);
+    const outcome = getOutcomeDetail(err);
+    const detail = outcome.detail ? formatOutcomeDetail(outcome.detail) : undefined;
+    if (ctx?.log !== false && outcome.diagnostics) {
+      const redacted = truncateText(redactQuotedText(outcome.diagnostics), 100);
+      if (redacted) {
+        console.warn('[HNDV][WARN][NET_INVALID_422]', { issues: redacted });
+      }
+    }
     return {
       title: 'Datos inválidos',
-      message: 'Los datos requieren corrección antes de enviarse.',
+      message: detail
+        ? `Los datos requieren corrección: ${detail}${detail.endsWith('.') ? '' : '.'}`
+        : 'Los datos requieren corrección antes de enviarse.',
       cta: { label: 'Entendido', action: 'DISMISS' },
     };
   }
