@@ -2,19 +2,25 @@ import type { AdministrativeData } from "@/src/types/administrative";
 import type { PrefillOutput } from "@/src/lib/prefill";
 import type { PatientSummary } from "@/src/lib/fhir-client";
 
-type LegacyHandoverParams = {
+/**
+ * Nota de compatibilidad:
+ * - Mantiene los params legacy (patientId/unitId) por compatibilidad histórica.
+ * - Mantiene HandoverMain y HandoverForm apuntando a los mismos params.
+ */
+
+export type LegacyHandoverParams = {
   patientId?: string;
   unitId?: string;
 };
 
-type PrefillMeta = {
+export type PrefillMeta = {
   server?: string;
   unit?: string;
   bed?: string;
   visitId?: string;
 };
 
-type HandoverFormParams = {
+export type HandoverFormParams = {
   patientIdParam?: string;
   unitIdParam?: string;
   specialtyId?: string;
@@ -24,13 +30,25 @@ type HandoverFormParams = {
   prefillMeta?: PrefillMeta;
 } & LegacyHandoverParams;
 
-type ShiftDetailsParams = {
-  returnTo?: "HandoverForm" | "PatientList";
+type HandoverRouteName = "HandoverForm" | "HandoverMain";
+type MainReturnRoute = HandoverRouteName | "PatientList";
+
+export type ShiftDetailsParams = {
+  /**
+   * Ampliado de forma retrocompatible:
+   * antes: "HandoverForm" | "PatientList"
+   * ahora: incluye también "HandoverMain" (si tu flujo navega hacia esa ruta)
+   */
+  returnTo?: MainReturnRoute;
   administrativeData?: AdministrativeData;
 };
 
-type QRScanParams = {
-  returnTo?: 'HandoverForm' | 'PatientList' | 'AudioNote';
+export type QRScanParams = {
+  /**
+   * Ampliado de forma retrocompatible para incluir "HandoverMain".
+   * No rompe a nadie: solo permite un valor adicional.
+   */
+  returnTo?: MainReturnRoute | "AudioNote";
   unitIdParam?: string;
   specialtyId?: string;
   patientIdParam?: string;
@@ -39,16 +57,25 @@ type QRScanParams = {
 
 export type RootStackParamList = {
   PatientList: undefined;
+
   AudioNote: { onDoneRoute?: string } | undefined;
+
+  // Mantener ambas rutas (HandoverMain y HandoverForm) es válido y tipado.
   HandoverMain: HandoverFormParams;
   HandoverForm: HandoverFormParams;
+
   ShiftDetails: ShiftDetailsParams | undefined;
   QRScan: QRScanParams | undefined;
+
   SyncCenter: undefined;
+
   SupervisorDashboard: undefined;
   AdminDashboard: undefined;
+
   PatientDashboard: { patientId: string };
+
   Login: undefined;
   Unauthorized: undefined;
+
   Onboarding: undefined;
 };
