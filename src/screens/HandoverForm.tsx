@@ -166,7 +166,8 @@ const styles = StyleSheet.create({
   riskReason: { color: '#374151', marginTop: 2 },
 });
 
-type Props = NativeStackScreenProps<RootStackParamList, 'HandoverForm'>;
+type HandoverRouteName = "HandoverForm" | "HandoverMain";
+type Props = NativeStackScreenProps<RootStackParamList, HandoverRouteName>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
 export type DictationField =
@@ -394,6 +395,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   );
   const [activeSection, setActiveSection] = useState<SectionKey | null>(sectionsInfo[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
+  const [bedsideChecklistHighlightMissing, setBedsideChecklistHighlightMissing] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1318,6 +1320,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleFinalize = () => {
     const checklist = form.getValues('bedsideChecklist');
     if (!isBedsideChecklistComplete(checklist)) {
+      setBedsideChecklistHighlightMissing(true);
       setBedsideModalVisible(true);
       return;
     }
@@ -1957,9 +1960,14 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       <BedsideChecklistModal
         visible={bedsideModalVisible}
-        onCancel={() => setBedsideModalVisible(false)}
+        highlightMissing={bedsideChecklistHighlightMissing}
+        onCancel={() => {
+          setBedsideModalVisible(false);
+          setBedsideChecklistHighlightMissing(false);
+        }}
         onConfirm={() => {
           setBedsideModalVisible(false);
+          setBedsideChecklistHighlightMissing(false);
           form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
           onSubmit();
         }}
