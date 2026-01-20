@@ -1181,13 +1181,16 @@ export default function HandoverForm({ navigation, route }: Props) {
         }
       }
 
+      const activeSessionUser = getSessionUser(activeSession);
+      const signerId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
+
       await enqueueBundle(bundle, {
         patientId: values.patientId,
         unitId: administrativeData.unit,
         specialtyId,
+        signerId,
       });
 
-      const activeSessionUser = getSessionUser(activeSession);
       const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
       const auditUnitId =
         activeSessionUser?.activeUnitId ??
