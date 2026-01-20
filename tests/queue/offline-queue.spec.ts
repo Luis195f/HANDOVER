@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildHandoverBundle } from '@/src/lib/fhir-map';
 vi.mock('expo-sqlite', () => ({
   openDatabaseSync: vi.fn(() => null),
   openDatabase: vi.fn(() => null),
@@ -49,6 +50,57 @@ describe('offline queue end-to-end', () => {
     expect((sent as { bundle?: unknown; patientId?: string }).bundle).toEqual(payload);
     expect((sent as { patientId?: string }).patientId).toBe('pat-2');
     expect(await queue.listOfflineQueue()).toHaveLength(0);
+  });
+
+  it('encola bundles con DocumentReference adjunto y data base64', async () => {
+    const bundle = buildHandoverBundle(
+      {
+        patientId: 'pat-attach',
+        attachments: [
+          {
+            uri: 'file:///foto.png',
+            contentType: 'image/png',
+            name: 'foto.png',
+            data: 'SGVsbG8=',
+          },
+        ],
+      },
+      { now: '2025-10-21T19:22:00Z' },
+    );
+
+    await queue.createOfflineQueueItem({ payload: bundle, patientId: 'pat-attach' });
+
+    const [stored] = await queue.listOfflineQueue();
+    const payload = stored?.payload as { bundle?: any } | undefined;
+    const docRefs = (payload?.bundle?.entry ?? [])
+      .map((entry: any) => entry.resource)
+      .filter((resource: any) => resource?.resourceType === 'DocumentReference');
+    expect(docRefs[0]?.content?.[0]?.attachment?.data).toBe('SGVsbG8=');
+  });
+
+  it('mantiene el item en pendiente tras error 500 y lo limpia al reintentar', async () => {
+    vi.useFakeTimers();
+    const baseTime = new Date('2024-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(baseTime);
+
+    const payload = { resourceType: 'Bundle', marker: 'ERROR-500' };
+    await queue.createOfflineQueueItem({ payload, patientId: 'pat-500' });
+
+    sync.setQueueSendHandler(async () => ({ ok: false as const, status: 500, message: 'boom' }));
+    await sync.processQueueOnce();
+
+    const [pending] = await queue.listOfflineQueue();
+    expect(pending?.syncStatus).toBe('pending');
+    expect(pending?.errorMessage).toBe('boom');
+
+    const waitMs = sync.getNextDelayMs(pending?.attempts ?? 0);
+    vi.setSystemTime(baseTime + waitMs + 20);
+
+    sync.setQueueSendHandler(async () => ({ ok: true as const }));
+    await sync.processQueueOnce();
+    expect(await queue.listOfflineQueue()).toHaveLength(0);
+
+    vi.useRealTimers();
   });
 
   it('respeta el backoff exponencial entre intentos', async () => {

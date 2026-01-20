@@ -21,6 +21,7 @@ import * as Speech from 'expo-speech';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
+import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundle, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
@@ -491,6 +492,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         outgoing: undefined,
         incoming: undefined,
       },
+      attachments: [],
     };
     return { ...base, risksStructured: deriveInitialRisksStructured(base) };
   }, [
@@ -1164,6 +1166,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         },
         painAssessment: values.painAssessment,
         signatures: values.signatures,
+        attachments: values.attachments ?? [],
       };
 
       const bundle = buildHandoverBundle(handoverInput, { now: () => nowIso });
@@ -1703,6 +1706,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               onRecorded={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
               onAttach={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
             />
+            <FileAttach />
           </CollapsibleSection>
         </View>
       )}

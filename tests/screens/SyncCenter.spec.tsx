@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList } from 'react-native';
+import { Alert, FlatList } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -102,5 +102,25 @@ describe('SyncCenter', () => {
     });
 
     expect(listOfflineQueue.mock.calls.length).toBeGreaterThan(initialCalls);
+  });
+
+  it('muestra el detalle del error al pulsar el ítem', async () => {
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const view = render(<SyncCenter />);
+
+    await waitFor(() => {
+      expect(listOfflineQueue).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Ver error'));
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Error del servidor',
+      'Fallo de sincronización',
+      expect.any(Array),
+    );
+    alertSpy.mockRestore();
   });
 });
