@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button } from 'react-native';
+import { Alert, Button, Linking } from 'react-native';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -25,6 +25,25 @@ export default function AudioAttach({
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(null);
 
+  const openSettings = useCallback(async () => {
+    try {
+      await Linking.openSettings();
+    } catch {
+    }
+  }, []);
+
+  const showMicPermissionDenied = useCallback(() => {
+    console.warn('[HNDV][WARN][PERM_MIC_DENIED]', { component: 'AudioAttach' });
+    Alert.alert(
+      'Permiso de micrófono denegado',
+      'Activa el permiso en Ajustes para grabar audio.',
+      [
+        { text: 'Entendido', style: 'cancel' },
+        { text: 'Abrir Ajustes', onPress: openSettings },
+      ],
+    );
+  }, [openSettings]);
+
   const requestPermission = useCallback(async () => {
     const result = await requestRecordingPermissionsAsync();
     setPermission(result);
@@ -48,8 +67,11 @@ export default function AudioAttach({
       return true;
     }
     const result = await requestPermission();
+    if (!result.granted) {
+      showMicPermissionDenied();
+    }
     return result.granted;
-  }, [permission, requestPermission]);
+  }, [permission, requestPermission, showMicPermissionDenied]);
 
   useEffect(() => {
     if (!recorder.isRecording && recorder.uri && recorder.uri !== lastUri) {

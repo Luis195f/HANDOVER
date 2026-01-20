@@ -9,6 +9,7 @@ const Ctx = createContext<Ctx | null>(null);
 
 export const Colors = {
   primary: '#1E1B4B',
+  onPrimary: '#FFFFFF',
   danger: '#DC2626',
   background: '#FFFFFF',
   border: '#D1D5DB',
