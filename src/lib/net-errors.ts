@@ -1,5 +1,7 @@
 // src/lib/net-errors.ts
 
+import { t } from '@/src/i18n';
+
 export type NetErrorKind = 'HTTP' | 'TIMEOUT' | 'OFFLINE' | 'ABORT' | 'UNKNOWN';
 
 export type NetError = {
@@ -197,9 +199,9 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_UNAUTHORIZED_401', err, nextCtx);
     return {
-      title: 'Sesión expirada',
-      message: 'Tu sesión caducó. Inicia sesión nuevamente para continuar.',
-      cta: { label: 'Iniciar sesión', action: 'LOGIN' },
+      title: t('sessionExpiredTitle'),
+      message: t('sessionExpiredMessage'),
+      cta: { label: t('loginCta'), action: 'LOGIN' },
     };
   }
 
@@ -238,8 +240,7 @@ export function getUserFacingNetworkMessage(
     maybeWarn('NET_OFFLINE_ENQUEUE', err, nextCtx);
     return {
       title: 'Sin conexión',
-      message:
-        'No se pudo conectar. Revisa tu conexión a internet. Si estás sin red, el envío quedará en cola y se reintentará automáticamente.',
+      message: t('offlineMsg'),
       cta: { label: 'Ver cola', action: 'OPEN_SYNC' },
     };
   }

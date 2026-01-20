@@ -14,6 +14,7 @@ import { prefillFromFHIR, type PrefillOutput } from '@/src/lib/prefill';
 import { useAuth } from '@/src/security/auth';
 import { PatientBanner } from './components/PatientBanner';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
+import { t } from '@/src/i18n';
 
 // Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
@@ -125,16 +126,16 @@ export function QRScanScreen({ navigation, route }: Props) {
     permissionAlertedRef.current = true;
     console.warn('[HNDV][WARN][PERM_CAM_DENIED]', { screen: 'QRScan' });
     Alert.alert(
-      'Permiso de cámara denegado',
-      'Habilita el permiso de cámara en Ajustes para escanear códigos QR.',
+      t('cameraPermissionDeniedTitle'),
+      t('cameraPermissionDeniedMessage'),
       [
         {
-          text: 'Cancelar',
+          text: t('cancelLabel'),
           style: 'cancel',
           onPress: () => navigation.goBack(),
         },
         {
-          text: 'Abrir Ajustes',
+          text: t('openSettingsLabel'),
           onPress: () => {
             void Linking.openSettings();
           },

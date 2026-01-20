@@ -906,9 +906,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleCloseSbarPreview = () => setSbarPreview(null);
 
   const patientIdValue = form.watch('patientId');
+  const trimmedPatientId =
+    typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
   // BEGIN HANDOVER D6 – HandoverForm PatientBanner
   const { loading: loadingPatient, error: patientSummaryError, summary: patientSummary } =
-    usePatientSummary(typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined);
+    usePatientSummary(trimmedPatientId);
   const bannerSummary: PatientSummary | null = useMemo(
     () => patientSummary ?? patientSummaryParam ?? null,
     [patientSummary, patientSummaryParam],
@@ -917,11 +919,12 @@ export default function HandoverForm({ navigation, route }: Props) {
   // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
+  const shouldLoadVitalTrends = isOn('SHOW_VITALS') && !collapsedSections.signos;
   const {
     loading: loadingVitalTrends,
     error: vitalTrendsError,
     data: vitalTrends,
-  } = useVitalTrends(typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined);
+  } = useVitalTrends(shouldLoadVitalTrends ? trimmedPatientId : undefined);
   // END HANDOVER D2 – VitalTrends hook usage
 
   const deriveShiftCode = (shiftStartValue?: string | null) => {
@@ -1478,6 +1481,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.signos}
             onToggle={() => toggleSection('signos')}
             lazy
+            unmountOnCollapse
             sectionKey="vitals"
           >
             <VitalsSection
@@ -1609,6 +1613,9 @@ export default function HandoverForm({ navigation, route }: Props) {
           title="Escalas clínicas"
           isCollapsed={collapsedSections.escalas}
           onToggle={() => toggleSection('escalas')}
+          lazy
+          unmountOnCollapse
+          sectionKey="clinicalScales"
         >
           <ClinicalScalesSection />
           {features.enablePediatricScales && (
