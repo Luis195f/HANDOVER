@@ -4,6 +4,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 import { useThemeTokens } from '../../theme';
 
+// Enable performance logs by setting EXPO_PUBLIC_OBSERVABILITY_DEBUG=true (or in dev mode).
+const isPerfObsEnabled = () => {
+  const dev = typeof __DEV__ !== 'undefined' && __DEV__;
+  const flag = process.env.EXPO_PUBLIC_OBSERVABILITY_DEBUG === 'true';
+  return dev || flag;
+};
+
 type PerfObsCode =
   | 'PERF001_LAZY_FIRST_MOUNT'
   | 'PERF002_LAZY_SKIP_RENDER_COLLAPSED'
@@ -12,12 +19,9 @@ type PerfObsCode =
   | 'PERF005_A11Y_WARN_GATED'
   | 'PERF006_ANDROID_ANIM_WARN_GATED';
 
-const perfWarn = (_code: PerfObsCode, _meta?: Record<string, string | number | boolean>) => {};
-
-const isPerfObsEnabled = () => {
-  const dev = typeof __DEV__ !== 'undefined' && __DEV__;
-  const flag = process.env.EXPO_PUBLIC_OBSERVABILITY_DEBUG === 'true';
-  return dev || flag;
+const perfWarn = (code: PerfObsCode, meta?: Record<string, string | number | boolean>) => {
+  if (!isPerfObsEnabled()) return;
+  console.warn(`[HNDV][WARN][${code}]`, meta);
 };
 
 interface CollapsibleSectionProps {
