@@ -556,23 +556,6 @@ const AudioAttachmentSchema = z
     path: ['size'],
   });
 
-const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
-  mp3: 'audio/mpeg',
-  m4a: 'audio/mp4',
-  mp4: 'audio/mp4',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  opus: 'audio/opus',
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-};
-
-const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(
-  Object.values(ATTACHMENT_MIME_BY_EXTENSION).concat(['application/octet-stream']),
-);
-
 const AttesterSchema = z.object({
   mode: z.enum(['professional', 'legal', 'official', 'personal']),
   time: isoDateTime.optional(),
@@ -592,9 +575,10 @@ type OxygenTherapyInput = z.infer<typeof OxygenTherapySchema>;
 type AudioAttachmentInput = z.infer<typeof AudioAttachmentSchema>;
 type AttesterInput = z.infer<typeof AttesterSchema>;
 type AttachmentInput = {
-  url: string;
-  contentType?: string;
-  description?: string;
+  uri: string;
+  contentType: string;
+  name?: string;
+  data: string;
 };
 
 type MedicationValues = {
@@ -795,32 +779,16 @@ function ensureAuthorReference(values: { author?: AuthorInput }): Reference {
   };
 }
 
-function assertAttachmentUrl(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error('Attachment URL must be valid');
+function assertAttachmentData(input: AttachmentInput): void {
+  if (!input.data || typeof input.data !== 'string') {
+    throw new Error('Attachment data is required');
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Attachment URL must use http or https');
-  }
-}
-
-function inferAttachmentContentType(url: string): string {
-  const clean = url.split('?')[0]?.split('#')[0] ?? '';
-  const ext = clean.split('.').pop()?.toLowerCase() ?? '';
-  return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
 }
 
 function resolveAttachmentContentType(input: AttachmentInput): string {
-  if (input.contentType) {
-    if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(input.contentType)) {
-      throw new Error('Attachment contentType is not allowed');
-    }
-    return input.contentType;
-  }
-  return inferAttachmentContentType(input.url);
+  const contentType = input.contentType?.trim();
+  if (contentType) return contentType;
+  return 'application/octet-stream';
 }
 
 function mapAttesters(inputs?: CompositionInput['attesters']): CompositionAttester[] | undefined {
@@ -2478,12 +2446,12 @@ function mapDocumentReferenceAttachments(
   const authorRef = ensureAuthorReference(values);
 
   return attachments.map((input) => {
-    assertAttachmentUrl(input.url);
+    assertAttachmentData(input);
     const contentType = resolveAttachmentContentType(input);
     const attachment: Attachment = {
       contentType,
-      url: input.url,
-      title: input.description,
+      data: input.data,
+      title: input.name,
     };
 
     return {

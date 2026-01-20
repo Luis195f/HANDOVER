@@ -336,6 +336,8 @@ vi.mock('expo-sqlite/legacy', async () => {
 vi.mock('expo-file-system', () => {
   const documentDirectory = 'file:///mock-documents/';
 
+  const readAsStringAsync = vi.fn(async () => 'ZGF0YQ==');
+
   const writeAsStringAsync = vi.fn(
     async (_path: string, _data: string, _options?: any): Promise<void> => {
       return;
@@ -347,11 +349,13 @@ vi.mock('expo-file-system', () => {
       exists: boolean;
       isDirectory: boolean;
       uri: string;
+      size: number;
     }> => {
       return {
         exists: true,
         isDirectory: false,
         uri: 'file:///mock-file.pdf',
+        size: 1024,
       };
     },
   );
@@ -364,15 +368,45 @@ vi.mock('expo-file-system', () => {
 
   const mod = {
     documentDirectory,
+    readAsStringAsync,
     writeAsStringAsync,
     getInfoAsync,
     moveAsync,
+    EncodingType: {
+      Base64: 'base64',
+    },
   };
 
   return {
     __esModule: true,
     ...mod,
     default: mod,
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 🖼️ Mock de expo-image-picker
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-image-picker', () => {
+  return {
+    MediaTypeOptions: {
+      Images: 'Images',
+    },
+    requestMediaLibraryPermissionsAsync: vi.fn(async () => ({ granted: true })),
+    requestCameraPermissionsAsync: vi.fn(async () => ({ granted: true })),
+    launchImageLibraryAsync: vi.fn(async () => ({ canceled: true })),
+    launchCameraAsync: vi.fn(async () => ({ canceled: true })),
+  };
+});
+
+// -----------------------------------------------------------------------------
+// 📄 Mock de expo-document-picker
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-document-picker', () => {
+  return {
+    getDocumentAsync: vi.fn(async () => ({ canceled: true })),
   };
 });
 
