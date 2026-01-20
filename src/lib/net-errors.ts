@@ -1,5 +1,7 @@
 // src/lib/net-errors.ts
 
+import { t } from '@/src/i18n';
+
 export type NetErrorKind = 'HTTP' | 'TIMEOUT' | 'OFFLINE' | 'ABORT' | 'UNKNOWN';
 
 export type NetError = {
@@ -190,16 +192,21 @@ export function normalizeNetError(error: unknown, ctx?: { url?: string; response
 export function getUserFacingNetworkMessage(
   err: NetError,
   ctx?: UserFacingNetworkMessageContext,
-): { title: string; message: string; cta?: { label: string; action: 'RETRY' | 'LOGIN' | 'OPEN_SYNC' | 'DISMISS' } } {
+): {
+  title: string;
+  message: string;
+  cta?: { label: string; action: 'RETRY' | 'LOGIN' | 'OPEN_SYNC' | 'DISMISS' };
+} {
   const status = err.status;
 
   if (status === 401) {
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_UNAUTHORIZED_401', err, nextCtx);
     return {
-      title: 'Sesión expirada',
-      message: 'Tu sesión caducó. Inicia sesión nuevamente para continuar.',
-      cta: { label: 'Iniciar sesión', action: 'LOGIN' },
+      // Importante: NO pasar currentLang aquí; t() resuelve el idioma (y en tests queda ES).
+      title: t('sessionExpiredTitle'),
+      message: t('sessionExpiredMessage'),
+      cta: { label: t('loginCta'), action: 'LOGIN' },
     };
   }
 
@@ -208,7 +215,8 @@ export function getUserFacingNetworkMessage(
     maybeWarn('NET_FORBIDDEN_403', err, nextCtx);
     return {
       title: 'Permisos insuficientes',
-      message: 'Tu cuenta no tiene permisos para realizar esta acción. Si crees que es un error, contacta a soporte.',
+      message:
+        'Tu cuenta no tiene permisos para realizar esta acción. Si crees que es un error, contacta a soporte.',
       cta: { label: 'Entendido', action: 'DISMISS' },
     };
   }
@@ -238,8 +246,7 @@ export function getUserFacingNetworkMessage(
     maybeWarn('NET_OFFLINE_ENQUEUE', err, nextCtx);
     return {
       title: 'Sin conexión',
-      message:
-        'No se pudo conectar. Revisa tu conexión a internet. Si estás sin red, el envío quedará en cola y se reintentará automáticamente.',
+      message: t('offlineMsg'),
       cta: { label: 'Ver cola', action: 'OPEN_SYNC' },
     };
   }
