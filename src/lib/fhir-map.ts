@@ -19,6 +19,8 @@ import type {
   ProcedureItem,
   RiskFlags,
   RiskItem,
+  DeviceItem,
+  PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
@@ -191,10 +193,19 @@ type DeviceUseStatement = {
   status: 'active' | 'completed';
   subject: Reference;
   encounter?: Reference;
+  context?: Reference;
   device: Reference;
   timingPeriod?: Period;
   reasonCode?: CodeableConcept[];
   note?: Annotation[];
+};
+
+type Device = {
+  resourceType: 'Device';
+  id?: string;
+  status?: 'active' | 'inactive';
+  deviceName?: Array<{ name: string; type?: 'user-friendly' | 'udi-label-name' | 'patient-reported-name' }>;
+  patient?: Reference;
 };
 
 type Attachment = {
@@ -614,6 +625,7 @@ type CompositionValues = {
   closingSummary?: string | null;
   sbar?: SbarValues;
   administrativeData?: AdministrativeData;
+  psychosocial?: PsychosocialCare;
   signatures?: HandoverSignatures;
   sectionSources?: Partial<Record<'exams' | 'procedures', number>>;
 };
@@ -630,6 +642,7 @@ type BundleReferenceIndex = {
   medications: string[];
   treatments: string[];
   oxygen: string[];
+  devices: string[];
   attachments: string[];
   nutrition: string[];
   elimination: string[];
@@ -685,6 +698,8 @@ export type HandoverValues = {
   elimination?: EliminationInfo;
   mobility?: MobilityInfo;
   skin?: SkinInfo;
+  devices?: DeviceItem[];
+  psychosocial?: PsychosocialCare;
   fluidBalance?: FluidBalanceInfo;
   painAssessment?: PainAssessment;
   exams?: ExamItem[];
@@ -1510,6 +1525,65 @@ export function mapDeviceUse(
   return resources;
 }
 
+export function mapDevices(
+  values: { patientId: string; encounterId?: string; devices?: Array<DeviceItem | unknown> },
+  options?: BuildOptions,
+): Array<Device | DeviceUseStatement> {
+  const devices = Array.isArray(values.devices) ? values.devices : [];
+  if (devices.length === 0) return [];
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const context = encounterReference(values.encounterId);
+  const timestamp = optionsMerged.now();
+
+  return devices.flatMap((device, index) => {
+    if (!device || typeof device !== 'object') {
+      warnDevicesItemSkipped({
+        code: 'HANDOVER_DEVICES_ITEM_SKIPPED',
+        reason: 'invalid_shape',
+        item: device,
+      });
+      return [];
+    }
+
+    const nameRaw = (device as DeviceItem).name;
+    const name = typeof nameRaw === 'string' ? nameRaw.trim() : '';
+    if (!name) {
+      warnDevicesItemSkipped({
+        code: 'HANDOVER_DEVICES_ITEM_SKIPPED',
+        reason: 'missing_name',
+        item: device,
+      });
+      return [];
+    }
+
+    const isActive = (device as DeviceItem).active === true;
+    const baseKey = `${values.patientId}|${values.encounterId ?? ''}|${name}|${index}`;
+    const deviceId = fhirId('device-', baseKey);
+    const deviceUseId = fhirId('dus-', `${baseKey}|${isActive ? 'active' : 'inactive'}`);
+
+    const deviceResource: Device = {
+      resourceType: 'Device',
+      id: deviceId,
+      status: isActive ? 'active' : 'inactive',
+      deviceName: [{ name, type: 'user-friendly' }],
+      patient: subject,
+    };
+
+    const deviceUseStatement: DeviceUseStatement = {
+      resourceType: 'DeviceUseStatement',
+      id: deviceUseId,
+      status: isActive ? 'active' : 'completed',
+      subject,
+      context,
+      device: { reference: `Device/${deviceId}`, display: name },
+      timingPeriod: isActive ? { start: timestamp } : { start: timestamp, end: timestamp },
+    };
+
+    return [deviceResource, deviceUseStatement];
+  });
+}
+
 export function mapOxygenObservations(
   values: OxygenValues,
   options?: BuildOptions,
@@ -1845,6 +1919,14 @@ const warnProceduresItemSkipped = (payload: {
   len?: number;
 }) => {
   void payload;
+};
+
+const warnDevicesItemSkipped = (payload: {
+  code: 'HANDOVER_DEVICES_ITEM_SKIPPED';
+  reason: 'missing_name' | 'invalid_shape';
+  item?: unknown;
+}) => {
+  console.warn('[HNDV][WARN][DEVICES_ITEM_SKIPPED]', payload);
 };
 
 const warnCompositionSectionOmitted = (section: 'exams' | 'procedures') => {
@@ -2524,6 +2606,13 @@ export function buildComposition(
     });
   }
 
+  if (refs.devices.length > 0) {
+    sections.push({
+      title: 'Devices',
+      entry: refs.devices.map((reference) => ({ reference })),
+    });
+  }
+
   if (refs.nutrition.length > 0) {
     sections.push({
       title: 'Nutrition',
@@ -2590,6 +2679,15 @@ export function buildComposition(
       title: 'Attachments',
       entry: refs.attachments.map((reference) => ({ reference })),
     });
+  }
+
+  if (values.psychosocial) {
+    const emotionalStatus = values.psychosocial.emotionalStatus?.trim() || 'Sin novedad';
+    const familyVisits = values.psychosocial.familyVisits ? 'Sí' : 'No';
+    const familyNotes = values.psychosocial.familyNotes?.trim();
+    const notes = familyNotes ? ` (${familyNotes})` : '';
+    const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${notes}.`;
+    sections.push({ title: 'Psicosocial', text: narrativeFromText(narrative) });
   }
 
   const subject = patientReference(values.patientId);
@@ -2857,6 +2955,23 @@ export function buildHandoverBundle(
     sharedOptions,
   ).map((resource) => replaceSubjectReference(resource, patientSubjectReference));
 
+  const deviceResources = mapDevices(
+    {
+      patientId: values.patientId,
+      encounterId: values.encounterId,
+      devices: values.devices,
+    },
+    sharedOptions,
+  ).map((resource) => {
+    if (resource.resourceType === 'DeviceUseStatement') {
+      return replaceSubjectReference(resource, patientSubjectReference);
+    }
+    if (resource.resourceType === 'Device') {
+      return { ...resource, patient: patientSubjectReference };
+    }
+    return resource;
+  });
+
   const document = mapDocumentReferenceAudio(
     {
       patientId: values.patientId,
@@ -2888,6 +3003,7 @@ export function buildHandoverBundle(
   const medicationRefs: string[] = [];
   const treatmentRefs: string[] = [];
   const oxygenRefs: string[] = [];
+  const deviceRefs: string[] = [];
   const attachmentRefs: string[] = [];
   const nutritionRefs: string[] = [];
   const eliminationRefs: string[] = [];
@@ -3194,6 +3310,14 @@ export function buildHandoverBundle(
     oxygenRefs.push(fullUrl);
   });
 
+  deviceResources.forEach((resource) => {
+    const entry = createTransactionEntry(applyProfiles(resource), resource.id);
+    entries.push(entry);
+    if (resource.resourceType === 'DeviceUseStatement') {
+      deviceRefs.push(entry.fullUrl);
+    }
+  });
+
   if (documentWithPatientReference) {
     const { resource, fullUrl } = assignStableIds(
       applyProfiles(documentWithPatientReference),
@@ -3230,6 +3354,7 @@ export function buildHandoverBundle(
         closingSummary: values.closingSummary,
         administrativeData: values.administrativeData,
         sbar: values.sbar,
+        psychosocial: values.psychosocial,
         signatures: values.signatures,
         sectionSources: { exams: examInputCount, procedures: procedureInputCount },
       },
@@ -3238,6 +3363,7 @@ export function buildHandoverBundle(
         medications: medicationRefs,
         treatments: treatmentRefs,
         oxygen: oxygenRefs,
+        devices: deviceRefs,
         attachments: attachmentRefs,
         nutrition: nutritionRefs,
         elimination: eliminationRefs,
@@ -3460,6 +3586,10 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     { patientId: data.patientId, oxygenTherapy: oxygenTherapyInput },
     sharedOptions,
   );
+  const deviceResources = mapDevices(
+    { patientId: data.patientId, encounterId: undefined, devices: data.devices },
+    sharedOptions,
+  );
   const document = data.audioUri
     ? mapDocumentReferenceAudio(
         { patientId: data.patientId, audioAttachment: { url: data.audioUri, contentType: 'audio/mpeg' } },
@@ -3483,6 +3613,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     medications: [],
     treatments: [],
     oxygen: [],
+    devices: [],
     attachments: [],
     nutrition: [],
     elimination: [],
@@ -3582,6 +3713,13 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     pushEntry(procedure);
   });
   oxygenDevices.forEach(pushEntry);
+  deviceResources.forEach((resource) => {
+    const entry = createTransactionEntry(applyProfiles(resource), resource.id);
+    entries.push(entry);
+    if (resource.resourceType === 'DeviceUseStatement') {
+      refs.devices.push(entry.fullUrl);
+    }
+  });
   if (document) pushEntry(document);
 
   const composition = buildComposition(
@@ -3595,6 +3733,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         assessment: data.sbarAssessment,
         recommendation: data.sbarRecommendation,
       },
+      psychosocial: data.psychosocial,
       signatures: data.signatures,
       sectionSources: { exams: examInputCount, procedures: procedureInputCount },
     },
@@ -3637,6 +3776,7 @@ export type {
   MedicationStatement,
   Procedure,
   DeviceUseStatement,
+  Device,
   DocumentReference,
   Composition,
   Condition,
