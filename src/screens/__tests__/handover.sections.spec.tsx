@@ -17,6 +17,7 @@ const defaultValues: HandoverFormValues = {
     shiftEnd: '',
     incidents: [],
   },
+  attachments: [],
   patientId: 'pat-001',
   status: 'draft',
   bedsideChecklist: {
