@@ -1,5 +1,5 @@
 // src/screens/QRScan.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import {
@@ -104,6 +104,7 @@ export function QRScanScreen({ navigation, route }: Props) {
   const targetPatientId = patientMismatch ? undefined : parsedPayload?.patientId;
   const { loading, error, summary } = usePatientSummary(targetPatientId || undefined);
   const { session } = useAuth();
+  const permissionAlertedRef = useRef(false);
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
   const clearTransientStates = useCallback(() => {
@@ -118,6 +119,29 @@ export function QRScanScreen({ navigation, route }: Props) {
       requestPermission();
     }
   }, [permission, requestPermission]);
+
+  useEffect(() => {
+    if (!permission || permission.granted || permissionAlertedRef.current) return;
+    permissionAlertedRef.current = true;
+    console.warn('[HNDV][WARN][PERM_CAM_DENIED]', { screen: 'QRScan' });
+    Alert.alert(
+      'Permiso de cámara denegado',
+      'Habilita el permiso de cámara en Ajustes para escanear códigos QR.',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+          onPress: () => navigation.goBack(),
+        },
+        {
+          text: 'Abrir Ajustes',
+          onPress: () => {
+            void Linking.openSettings();
+          },
+        },
+      ],
+    );
+  }, [navigation, permission]);
 
   // Al salir de la pantalla, reseteamos el estado de escaneo
   useEffect(() => {
@@ -272,27 +296,11 @@ export function QRScanScreen({ navigation, route }: Props) {
     );
   }
 
-  const handleOpenSettings = async () => {
-    try {
-      await Linking.openSettings();
-    } catch {
-    }
-  };
-
   if (!permission.granted) {
     return (
       <View style={styles.center}>
-        <Text style={styles.text}>
-          Permiso de cámara denegado. Actívalo en Ajustes para escanear códigos QR.
-        </Text>
-        <Pressable accessibilityRole="button" onPress={handleOpenSettings} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Abrir Ajustes</Text>
-        </Pressable>
-        {permission.canAskAgain ? (
-          <Pressable accessibilityRole="button" onPress={requestPermission} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Reintentar</Text>
-          </Pressable>
-        ) : null}
+        <ActivityIndicator />
+        <Text style={styles.text}>Comprobando permisos de cámara…</Text>
       </View>
     );
   }
@@ -421,18 +429,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     backgroundColor: '#2563EB',
-  },
-  secondaryButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    backgroundColor: '#E5E7EB',
-  },
-  secondaryButtonText: {
-    color: '#111827',
-    fontWeight: '600',
-    fontSize: 16,
   },
   primaryButtonDisabled: {
     opacity: 0.7,
