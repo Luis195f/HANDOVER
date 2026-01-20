@@ -478,7 +478,8 @@ async function buildSessionFromTokens(tokens: AuthTokens, discovery: AuthSession
 export function isAuthCancelledError(error: unknown): boolean {
   if (!error) return false;
   const message = (error as { message?: string }).message ?? String(error);
-  return message.includes('OAUTH_CANCELLED') || (error as { type?: string }).type === 'dismiss';
+  const type = (error as { type?: string }).type;
+  return message.includes('OAUTH_CANCELLED') || type === 'dismiss' || type === 'cancel';
 }
 
 async function performAuth0Login(options: {
@@ -500,9 +501,41 @@ async function performAuth0Login(options: {
     });
   }
   const config = buildAuthConfig(options.config);
-  const discovery = options.discovery ?? (await AuthSession.fetchDiscoveryAsync(config.issuer));
-    
+  let discovery = options.discovery;
+  if (!discovery) {
+    try {
+      discovery = await AuthSession.fetchDiscoveryAsync(config.issuer);
+    } catch (error) {
+      console.warn('[AUTH][ERROR][LOGIN_FAILED]', { error: 'discovery_failed' });
+      throw error;
+    }
+  }
+
   const authResult = await options.promptAsync();
+  if (authResult.type === 'dismiss') {
+    console.warn('[AUTH][WARN][LOGIN_CANCELLED]', {
+      reason: (authResult as { error?: string }).error ?? 'user_cancelled',
+    });
+    const cancelledError = new Error('OAUTH_CANCELLED');
+    (cancelledError as Error & { type?: string }).type = 'dismiss';
+    throw cancelledError;
+  }
+  if (authResult.type === 'error') {
+    const errorCode =
+      (authResult as { errorCode?: string; error?: string }).errorCode ??
+      (authResult as { error?: string }).error ??
+      'unknown_error';
+    console.warn('[AUTH][ERROR][LOGIN_FAILED]', { error: errorCode });
+    const authError = new Error('OAUTH_FAILED');
+    (authError as Error & { type?: string }).type = 'error';
+    throw authError;
+  }
+  if (authResult.type !== 'success') {
+    console.warn('[AUTH][WARN][LOGIN_CANCELLED]', { reason: 'user_cancelled' });
+    const cancelledError = new Error('OAUTH_CANCELLED');
+    (cancelledError as Error & { type?: string }).type = authResult.type;
+    throw cancelledError;
+  }
 
   const tokens = await resolveTokensFromResult({
     request: options.request,
