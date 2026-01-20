@@ -192,13 +192,18 @@ export function normalizeNetError(error: unknown, ctx?: { url?: string; response
 export function getUserFacingNetworkMessage(
   err: NetError,
   ctx?: UserFacingNetworkMessageContext,
-): { title: string; message: string; cta?: { label: string; action: 'RETRY' | 'LOGIN' | 'OPEN_SYNC' | 'DISMISS' } } {
+): {
+  title: string;
+  message: string;
+  cta?: { label: string; action: 'RETRY' | 'LOGIN' | 'OPEN_SYNC' | 'DISMISS' };
+} {
   const status = err.status;
 
   if (status === 401) {
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_UNAUTHORIZED_401', err, nextCtx);
     return {
+      // Importante: NO pasar currentLang aquí; t() resuelve el idioma (y en tests queda ES).
       title: t('sessionExpiredTitle'),
       message: t('sessionExpiredMessage'),
       cta: { label: t('loginCta'), action: 'LOGIN' },
@@ -210,7 +215,8 @@ export function getUserFacingNetworkMessage(
     maybeWarn('NET_FORBIDDEN_403', err, nextCtx);
     return {
       title: 'Permisos insuficientes',
-      message: 'Tu cuenta no tiene permisos para realizar esta acción. Si crees que es un error, contacta a soporte.',
+      message:
+        'Tu cuenta no tiene permisos para realizar esta acción. Si crees que es un error, contacta a soporte.',
       cta: { label: 'Entendido', action: 'DISMISS' },
     };
   }
