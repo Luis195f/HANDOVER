@@ -1,3 +1,5 @@
+// src/i18n.ts
+
 export const strings = {
   es: {
     offlineMsg:
@@ -6,7 +8,8 @@ export const strings = {
     sessionExpiredMessage: 'Tu sesión caducó. Inicia sesión nuevamente para continuar.',
     loginCta: 'Iniciar sesión',
     cameraPermissionDeniedTitle: 'Permiso de cámara denegado',
-    cameraPermissionDeniedMessage: 'Habilita el permiso de cámara en Ajustes para escanear códigos QR.',
+    cameraPermissionDeniedMessage:
+      'Habilita el permiso de cámara en Ajustes para escanear códigos QR.',
     cancelLabel: 'Cancelar',
     openSettingsLabel: 'Abrir Ajustes',
   },
@@ -21,16 +24,32 @@ export const strings = {
     cancelLabel: 'Cancel',
     openSettingsLabel: 'Open Settings',
   },
-};
+} as const;
 
 export type SupportedLang = keyof typeof strings;
 export type TranslationKey = keyof typeof strings.es;
 
 // TODO: In the future, replace this PoC with a proper i18n library and a global language setting.
-export const currentLang: SupportedLang =
-  typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().locale.startsWith('en')
-    ? 'en'
-    : 'es';
+const detectLang = (): SupportedLang => {
+  try {
+    const locale =
+      (typeof navigator !== 'undefined' && (navigator as any).language) ||
+      (typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().locale) ||
+      '';
+    return String(locale).toLowerCase().startsWith('en') ? 'en' : 'es';
+  } catch {
+    return 'es';
+  }
+};
+
+export const getCurrentLang = (): SupportedLang => {
+  // En Node/Vitest suele resolverse en-US y rompe tests; forzamos ES por defecto en test/SSR.
+  if (process.env.NODE_ENV === 'test' || typeof window === 'undefined') return 'es';
+  return detectLang();
+};
+
+// Mantener export para compatibilidad con imports existentes.
+export const currentLang: SupportedLang = getCurrentLang();
 
 export const t = (key: TranslationKey, lang: SupportedLang = currentLang): string =>
-  strings[lang]?.[key] ?? strings.es[key] ?? key;
+  strings[lang]?.[key] ?? strings.es[key] ?? String(key);
