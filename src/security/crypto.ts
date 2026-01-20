@@ -181,8 +181,6 @@ type SigningWarningMeta = Partial<{
 
 const CLIENT_SIGNING_KEY_STORAGE = 'handover_client_signing_keypair_v1';
 
-const SIGNING_ENABLED_FLAG = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
-
 function isTruthyFlag(value: string | undefined): boolean {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
@@ -214,7 +212,7 @@ function logSigningWarning(
 }
 
 export function isClientSigningEnabled(): boolean {
-  return isTruthyFlag(SIGNING_ENABLED_FLAG);
+  return isTruthyFlag(process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED);
 }
 
 function parseStoredKeypair(raw: string | null): { privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null {
@@ -362,7 +360,9 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(
         },
       ],
       when: new Date().toISOString(),
-      who: meta.signerId ? { identifier: { value: meta.signerId } } : { identifier: { value: 'client' } },
+      who: meta.signerId
+        ? { identifier: { system: 'urn:handover:user-id', value: meta.signerId } }
+        : { identifier: { system: 'urn:handover:client-id', value: 'client' } },
       sigFormat: 'application/pkcs7-signature',
       data: signatureB64,
     };
@@ -379,4 +379,3 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(
     return { bundle, signed: false };
   }
 }
-

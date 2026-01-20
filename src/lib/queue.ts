@@ -772,6 +772,7 @@ type BundleMeta = {
   patientId?: string;
   unitId?: string;
   specialtyId?: string;
+  signerId?: string;
 };
 
 export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
@@ -779,6 +780,7 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
   const key = `handover:${hashHex(`${patientId}|${Date.now()}|${Math.random()}`, 32)}`;
   const { bundle: maybeSignedBundle } = await signBundleIfEnabled(bundle as Record<string, unknown>, {
     queueId: key,
+    signerId: meta.signerId,
   });
   const payload = {
     bundle: maybeSignedBundle,

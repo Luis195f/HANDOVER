@@ -1329,6 +1329,7 @@ type EnqueueBundleInput = {
   bundle: any;
   values?: HandoverValues & { administrativeData?: AdministrativeData };
   authorId?: string;
+  signerId?: string;
 };
 type EnqueueBundleOptions = ValidationOptions;
 
@@ -1387,6 +1388,7 @@ export async function enqueueBundle(
   const { txId, bundle } = ensureBundleTx(ensured, existingTxId);
   const { bundle: maybeSignedBundle } = await signBundleIfEnabled<TransactionBundle>(bundle as TransactionBundle, {
     queueId: txId,
+    signerId: normalized.signerId ?? normalized.authorId,
   });
   const updated: LegacyQueueItem = {
     patientId,

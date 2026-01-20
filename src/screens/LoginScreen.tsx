@@ -26,9 +26,18 @@ export default function LoginScreen() {
       goToHome();
     } catch (error) {
       if (isAuthCancelledError(error)) {
+        Alert.alert(
+          'Inicio de sesión cancelado',
+          'No ingresaste a tu cuenta. Intenta nuevamente cuando estés listo.',
+          [{ text: 'Entendido' }]
+        );
         return;
       }
-      Alert.alert('No se pudo iniciar sesión', 'Vuelve a intentarlo en unos segundos.');
+      Alert.alert(
+        'Error de inicio de sesión',
+        'No se pudo completar el inicio de sesión. Por favor intenta de nuevo.',
+        [{ text: 'Entendido' }]
+      );
     }
   }, [goToHome, loginWithOAuth]);
 

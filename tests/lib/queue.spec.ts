@@ -44,6 +44,7 @@ const resetEnv = () => {
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
+  delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
 };
 
 const loadQueue = async () => {
@@ -62,6 +63,7 @@ describe('tx queue (sqlite + fallback)', () => {
     const queue = await import('@/src/lib/queue');
     await queue.clearTxQueue();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     resetEnv();
   });
 
@@ -180,6 +182,45 @@ describe('tx queue (sqlite + fallback)', () => {
 
     const snapshot = await queue.getQueueSnapshot();
     expect(snapshot[0]?.payload).toEqual(bundle);
+  });
+
+  it('includes signerId in bundle signature when signing is enabled', async () => {
+    process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'true';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+
+    vi.stubGlobal('crypto', {
+      subtle: {
+        generateKey: vi.fn(async () => ({ privateKey: 'private', publicKey: 'public' })),
+        exportKey: vi.fn(async (_format: string, key: string) =>
+          key === 'private' ? { kty: 'EC', d: 'priv' } : { kty: 'EC', x: 'pub' }
+        ),
+        importKey: vi.fn(async () => ({})),
+        sign: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+      },
+    });
+
+    const queue = await loadQueue();
+    await queue.enqueueBundle({ resourceType: 'Bundle', type: 'transaction', entry: [] }, {
+      patientId: 'pat-sign',
+      signerId: 'nurse-123',
+    });
+
+    const snapshot = await queue.getQueueSnapshot();
+    const signedBundle = snapshot[0]?.payload as { signature?: any };
+    expect(signedBundle?.signature?.who?.identifier?.value).toBe('nurse-123');
+    expect(signedBundle?.signature?.who?.identifier?.system).toBe('urn:handover:user-id');
+  });
+
+  it('skips bundle signature when signing flag is disabled', async () => {
+    process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'false';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+
+    const queue = await loadQueue();
+    await queue.enqueueBundle({ resourceType: 'Bundle', type: 'transaction', entry: [] }, { patientId: 'pat-nosign' });
+
+    const snapshot = await queue.getQueueSnapshot();
+    const unsignedBundle = snapshot[0]?.payload as { signature?: any };
+    expect(unsignedBundle?.signature).toBeUndefined();
   });
 
   it('reads legacy plaintext entries without errors even when encryption is enabled', async () => {
