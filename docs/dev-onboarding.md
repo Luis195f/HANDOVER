@@ -16,6 +16,7 @@
 
 ## Instalación de dependencias
 - Cliente móvil: `pnpm -w install`.
+- Adjuntos (imágenes/documentos): `pnpm dlx expo install expo-image-picker expo-document-picker expo-file-system`.
 - Backend opcional (solo si necesitas API REST local):
   ```bash
   python -m venv .venv

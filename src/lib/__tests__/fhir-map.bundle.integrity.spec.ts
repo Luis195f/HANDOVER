@@ -43,7 +43,14 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
         acvpu: 'A', bgMgDl: 104, o2: true
       },
       meds: [{ text: 'Paracetamol 1 g v.o. c/8h' }],
-      attachments: [{ url: 'https://cdn.example.org/audio.mp3', contentType: 'audio/mpeg', description: 'SBAR' }],
+      attachments: [
+        {
+          uri: 'file:///audio.mp3',
+          contentType: 'audio/mpeg',
+          name: 'SBAR',
+          data: 'U0JBUg==',
+        },
+      ],
     }, { now, emitPanel: true, emitBpPanel: true, emitHasMember: true });
 
     // 1) Composition existe y tiene secciones esperadas
