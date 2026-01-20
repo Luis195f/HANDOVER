@@ -311,6 +311,7 @@ type FhirResource =
   | DeviceUseStatement
   | DocumentReference
   | Composition
+  | Device
   | Condition
   | Patient
   | DetectedIssue;
@@ -922,6 +923,7 @@ const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
   MedicationStatement: 'ms-',
   Procedure: 'proc-',
   DeviceUseStatement: 'dus-',
+  Device: 'device',
   DocumentReference: 'doc-',
   Composition: 'comp-',
   Condition: 'cond-',
