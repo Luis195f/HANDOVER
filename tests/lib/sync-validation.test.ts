@@ -110,4 +110,62 @@ describe('sync remote validation and 422 handling', () => {
     const storedIssues = items[0].errorIssuesJson ? JSON.parse(items[0].errorIssuesJson) : [];
     expect(storedIssues).toHaveLength(10);
   });
+
+  test('remote validation captures 422 OperationOutcome issues', async () => {
+    const outcome: OperationOutcome = {
+      resourceType: 'OperationOutcome',
+      issue: [
+        {
+          severity: 'error',
+          diagnostics: 'Missing required value',
+          expression: ['Observation.valueQuantity'],
+        },
+      ],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(outcome), {
+        status: 422,
+        headers: { 'content-type': 'application/fhir+json' },
+      }),
+    );
+    vi.stubGlobal('fetch', mockFetch as unknown as typeof fetch);
+
+    const bundle: any = {
+      resourceType: 'Bundle',
+      type: 'transaction',
+      entry: [
+        {
+          fullUrl: 'urn:uuid:obs-1',
+          resource: {
+            resourceType: 'Observation',
+            status: 'final',
+            code: { text: 'Heart rate' },
+            subject: { reference: 'Patient/pat-1' },
+            effectiveDateTime: '2025-04-05T10:15:00.000Z',
+            valueQuantity: { value: 80, unit: 'beats/min' },
+          },
+          request: { method: 'POST', url: 'Observation' },
+        },
+      ],
+    };
+
+    await expect(
+      enforceBundleValidationWithMode(bundle, 'test', {
+        mode: 'remote',
+        accessToken: 't',
+        fhirBaseUrl: 'https://fhir.test',
+      }),
+    ).rejects.toThrow(/Missing required value/);
+
+    expect(bundle._validationErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'Observation.valueQuantity', message: 'Missing required value' }),
+      ]),
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://fhir.test/Observation/$validate',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });
