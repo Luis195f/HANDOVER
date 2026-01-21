@@ -690,9 +690,8 @@ export async function uploadSignedHandoverPdf(
   pdf: GeneratedPdf,
   ctx: PdfUploadContext,
 ): Promise<void> {
-  // TODO: cuando el backend exponga endpoint /upload/pdf-to-fhir,
-  // implementar aquí la llamada POST usando el mismo cliente HTTP FHIR.
-  // Por ahora, no hacer nada (stub) para mantener idempotencia.
+  // Nota: cuando el backend exponga /upload/pdf-to-fhir, implementar aquí la llamada POST
+  // usando el mismo cliente HTTP FHIR. Por ahora, no hace nada (stub) para mantener idempotencia.
   void pdf;
   void ctx;
   return;

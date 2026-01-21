@@ -80,10 +80,7 @@ const LOGOUT_REDIRECT_URI =
         scheme: 'handover-pro',
         path: LOGOUT_PATH_NATIVE,
       });
-   
-console.log('[auth] Platform:', Platform.OS);
-console.log('[auth] REDIRECT_URI:', REDIRECT_URI);
-console.log('[auth] LOGOUT_REDIRECT_URI:', LOGOUT_REDIRECT_URI);      
+  
 
 const DEFAULT_AUTH_CONFIG = {
   issuer: `https://${AUTH0_DOMAIN}`,

@@ -18,7 +18,7 @@ export interface TurnMetrics {
 }
 
 export async function getTurnData(filter: TurnFilter): Promise<PriorityInput[]> {
-  // TODO: reemplazar por consulta a backend/analytics service.
+  // Nota: reemplazar por consulta a backend/servicio de analítica.
   const patientsForUnit = PATIENTS_MOCK.filter(patient => patient.unitId === filter.unitId);
 
   return patientsForUnit.map(patient => ({
@@ -65,7 +65,7 @@ export function computeTurnMetrics(patients: PrioritizedPatient[]): TurnMetrics 
     totalPatients,
     byPriority,
     averageNews2,
-    pendingCriticalTasks: 0, // TODO: mapear tareas críticas cuando estén disponibles en PrioritizedPatient
+    pendingCriticalTasks: 0, // Nota: mapear tareas críticas cuando estén disponibles en PrioritizedPatient.
     incidentsCount,
   };
 }

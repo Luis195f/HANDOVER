@@ -51,6 +51,16 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 - Puedes inspeccionar y vaciar la cola desde la pantalla `SyncCenter` (`src/screens/SyncCenter.tsx`). Los elementos con `syncStatus=error` muestran el estado específico (incluyendo `422 Error de validación FHIR`), un badge “Error” y detalle de issues FHIR cuando el servidor devolvió un `OperationOutcome`.
 - Los borradores se guardan en SecureStore; al reconectar se validan mediante esquemas Zod antes de sincronizar.
 
+## Adjuntos y módulos Expo
+
+- Los adjuntos (imágenes, documentos, audio) se capturan con `expo-image-picker`, `expo-document-picker` y `expo-file-system`. Mantén estos paquetes en `dependencies` para asegurar compatibilidad con el SDK de Expo.
+- El flujo de audio utiliza `expo-audio` y permisos de micrófono definidos en `app.json`.
+
+## Criptografía en cliente
+
+- Hashing y random bytes se resuelven vía `expo-crypto` sin añadir polyfills globales de `crypto`.
+- La firma de bundles FHIR depende de `globalThis.crypto.subtle`; si no está disponible, la firma se omite y el envío continúa sin bloquear la cola.
+
 ## Instalación y ejecución
 
 1. Instala dependencias JavaScript:
