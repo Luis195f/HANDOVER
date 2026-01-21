@@ -32,6 +32,11 @@
   - El cifrado offline refuerza la protección de datos en reposo (alineado con buenas prácticas RGPD/HIPAA, sin suponer cumplimiento legal automático).
   - La clave derivada de `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` es el secreto real y debe gestionarse como un secreto sensible.
 
+## WebCrypto y polyfills
+- El cliente usa `expo-crypto` para hashing y generación de bytes aleatorios; no se añade un polyfill global de `crypto` en tiempo de ejecución.
+- La firma ECDSA del bundle FHIR (si `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) depende de `globalThis.crypto.subtle` cuando está disponible.
+- Si WebCrypto no existe (por ejemplo, web/entornos restringidos), la firma cliente se omite y la cola continúa enviando sin firma, dejando registro en logs estructurados.
+
 ## Interfaz de usuario
 - `src/screens/SyncCenter.tsx` permite inspeccionar, reintentar o vaciar la cola manualmente. Los elementos con `syncStatus="error"` muestran un badge “Error”, diferencian `422 Error de validación FHIR` del resto de fallos, y ofrecen un botón “Ver error” que abre un alert con el mensaje y, si existe, un detalle de issues (`expression` + `diagnostics`) devuelto por el servidor.
 

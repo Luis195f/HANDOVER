@@ -246,9 +246,6 @@ export default function AudioNote({ navigation }: Props) {
   const accept = () => {
     const uri = lastUri ?? recorder.uri;
     if (uri) {
-      // mismo patrón que usabas antes para devolver el URI
-      (global as any).__lastAudioUri = uri;
-      (global as any).__lastAudioTranscription = transcription;
       navigation.goBack();
     }
   };
@@ -384,7 +381,7 @@ export default function AudioNote({ navigation }: Props) {
       <Text style={{ color: '#9fb3d9', marginTop: 8 }}>
         Puedes editar el texto antes de adjuntarlo.
       </Text>
-      {/* TODO: Integrar envío automático del audio grabado al backend Whisper para generar esta transcripción sin dictado manual. */}
+      {/* Nota: Integrar envío automático del audio al backend Whisper para transcripción en una iteración posterior. */}
 
       {hasUri && (
         <>

@@ -1619,12 +1619,10 @@ export default function HandoverForm({ navigation, route }: Props) {
         >
           <ClinicalScalesSection />
           {features.enablePediatricScales && (
-            // Renderiza escalas pediátricas específicas. Si no existe aún, deja un TODO.
-            <Text style={{ marginVertical: 8 }}>TODO: Escalas pediátricas aquí</Text>
+            <Text style={{ marginVertical: 8 }}>Escalas pediátricas próximamente.</Text>
           )}
           {features.enableOncoFields && (
-            // Renderiza campos oncológicos adicionales o deja un TODO.
-            <Text style={{ marginVertical: 8 }}>TODO: Campos oncológicos aquí</Text>
+            <Text style={{ marginVertical: 8 }}>Campos oncológicos adicionales próximamente.</Text>
           )}
         </CollapsibleSection>
       </View>

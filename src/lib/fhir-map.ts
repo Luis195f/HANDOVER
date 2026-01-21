@@ -1268,15 +1268,15 @@ function structuredDosageText(medication: MedicationItem): string | undefined {
   return parts || undefined;
 }
 
-// BEGIN HANDOVER D7 – TODO Medication FHIR mapping
-// TODO: mapear cada MedicationItem a un recurso FHIR:
+// BEGIN HANDOVER D7 – Medication FHIR mapping (pendiente)
+// Pendiente: mapear cada MedicationItem a un recurso FHIR:
 // - MedicationStatement o MedicationAdministration según isContinuous.
 // - name → medicationCodeableConcept
 // - dose, route, frequency → Dosage.elements
 // - startTime, endTime → effectiveDateTime o effectivePeriod
 // - isHighAlert → extensiones de riesgo.
 // - notes → note.text
-// END HANDOVER D7 – TODO Medication FHIR mapping
+// END HANDOVER D7 – Medication FHIR mapping (pendiente)
 
 function isStructuredMedication(
   input: MedicationStatementInput | MedicationItem,
@@ -1290,7 +1290,7 @@ function mapStructuredMedicationStatement(
   encounter: Reference | undefined,
   assertedAt: string,
 ): MedicationStatement {
-  // TODO HANDOVER D7 – MedicationModule: soportar isContinuous/startTime/endTime para elegir entre
+  // Pendiente HANDOVER D7 – soportar isContinuous/startTime/endTime para elegir entre
   // MedicationStatement y MedicationAdministration, agregar extensiones de alto riesgo y reflejar
   // firmas específicas de medicación si están presentes.
   const concept: CodeableConcept = medication.code

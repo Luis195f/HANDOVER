@@ -29,7 +29,7 @@ export const strings = {
 export type SupportedLang = keyof typeof strings;
 export type TranslationKey = keyof typeof strings.es;
 
-// TODO: In the future, replace this PoC with a proper i18n library and a global language setting.
+// Nota: en una iteración posterior, reemplazar este PoC por una librería i18n con selector global.
 const detectLang = (): SupportedLang => {
   try {
     const locale =
