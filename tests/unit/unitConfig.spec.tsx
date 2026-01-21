@@ -267,7 +267,7 @@ describe('HandoverForm unit config usage', () => {
     const pediatricBlocks = root.findAll(
       (node: any) =>
         typeof node.props?.children === 'string' &&
-        node.props.children.includes('TODO: Escalas pediátricas aquí'),
+        node.props.children.includes('Escalas pediátricas próximamente.'),
     );
     expect(pediatricBlocks.length).toBe(0);
   });
@@ -291,7 +291,7 @@ describe('HandoverForm unit config usage', () => {
     const pediatricBlocks = root.findAll(
       (node: any) =>
         typeof node.props?.children === 'string' &&
-        node.props.children.includes('TODO: Escalas pediátricas aquí'),
+        node.props.children.includes('Escalas pediátricas próximamente.'),
     );
 
     expect(pediatricBlocks.length).toBeGreaterThan(0);

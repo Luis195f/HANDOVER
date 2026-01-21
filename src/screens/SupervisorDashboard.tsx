@@ -106,7 +106,7 @@ export function SupervisorDashboardScreen() {
           </View>
           <Text style={styles.reasonText}>{item.reasonSummary}</Text>
           <Text style={styles.metaText}>NEWS2: {item.news2Score}</Text>
-          {/* TODO: añadir extracto SBAR compacto cuando esté disponible para esta vista */}
+          {/* Nota: añadir extracto SBAR compacto cuando esté disponible para esta vista. */}
         </Pressable>
       );
     },

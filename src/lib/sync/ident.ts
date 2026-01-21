@@ -50,7 +50,7 @@ export function deterministicIdentifier(resource: ResourceLike): string {
   return sha256Hex(base); // hex de 64 chars
 }
 
-// Idempotency-Key para TODO el Bundle (completo y ordenado)
-export function bundleIdempotencyKey(bundle: any): string {
+// Idempotency-Key para el bundle completo (ordenado)
+export function bundleIdempotencyKey(bundle: unknown): string {
   return sha256Hex(stableStringify(bundle));
 }
