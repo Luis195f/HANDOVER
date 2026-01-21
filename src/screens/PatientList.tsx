@@ -459,7 +459,7 @@ export default function PatientList({ navigation }: Props) {
                   style={[
                     styles.syncBadge,
                     syncState === "error"
-                      ? { backgroundColor: "#FEE2E2", color: colors.danger }
+                      ? { backgroundColor: `${colors.danger}22`, color: colors.danger }
                       : syncState === "pending"
                       ? { backgroundColor: colors.warning, color: colors.text }
                       : { backgroundColor: "#DCFCE7", color: colors.success },
