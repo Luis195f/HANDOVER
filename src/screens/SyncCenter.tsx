@@ -83,6 +83,7 @@ export default function SyncCenter() {
   const [intervalSec, setIntervalSec] = React.useState(10);
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [lastRun, setLastRun] = React.useState<string | null>(null);
+  const alertedErrorsRef = React.useRef<Set<string>>(new Set());
 
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -112,6 +113,20 @@ export default function SyncCenter() {
       void refresh();
     }
   }, [isFocused, refresh]);
+
+  React.useEffect(() => {
+    const candidate = items.find((item) => {
+      const status = item.errorStatus ?? null;
+      if (item.syncStatus !== 'error' || status == null) return false;
+      if (status < 400 || status >= 500) return false;
+      return !alertedErrorsRef.current.has(`${item.id}:${status}`);
+    });
+
+    if (!candidate) return;
+    const status = candidate.errorStatus ?? 'desconocido';
+    alertedErrorsRef.current.add(`${candidate.id}:${status}`);
+    Alert.alert('Error en sincronización', `Error en sincronización: ${status}`);
+  }, [items]);
 
   const doFlush = React.useCallback(async () => {
     const opts = resolveSyncOpts();
@@ -284,10 +299,12 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
 
     Alert.alert(
       title,
-      item.errorMessage || message,
+      item.errorStatus && item.errorStatus >= 400 && item.errorStatus < 500
+        ? `Error en sincronización: ${item.errorStatus}`
+        : item.errorMessage || message,
       buttons,
     );
-  }, [isError, item.errorMessage, issues, message, title]);
+  }, [isError, item.errorMessage, item.errorStatus, issues, message, title]);
 
   const RowWrapper = isError ? Pressable : View;
 
