@@ -16,6 +16,8 @@ const buildValidHandover = () => {
       staffOut: ['Luis Enfermero'],
       shiftStart: now.toISOString(),
       shiftEnd: fourHoursLater.toISOString(),
+      shiftType: 'Mañana',
+      generalNotes: 'Notas generales del turno.',
       incidents: ['Sin incidentes'],
     },
     status: 'draft' as const,

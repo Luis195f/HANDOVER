@@ -10,6 +10,8 @@ const baseValidData: HandoverFormData = {
     staffOut: ["Enfermera B"],
     shiftStart: "2024-01-01T08:00:00.000Z",
     shiftEnd: "2024-01-01T16:00:00.000Z",
+    shiftType: "Mañana",
+    generalNotes: "Notas generales del turno.",
     incidents: ["Cambio de turno sin novedades"],
   },
   patientId: "pat-001",
@@ -157,6 +159,7 @@ describe("zHandover", () => {
         staffOut: [],
         shiftStart: "2024-01-01T16:00:00.000Z",
         shiftEnd: "2024-01-01T08:00:00.000Z",
+        shiftType: "Mañana",
       },
       patientId: "",
       bedsideChecklist: {
@@ -172,8 +175,9 @@ describe("zHandover", () => {
     const result = zHandover.safeParse(invalid);
     expect(result.success).toBe(false);
     const messages = result.success ? [] : result.error.issues.map((i) => i.message);
-    expect(messages).toContain("La unidad es obligatoria");
+    expect(messages).toContain("Unidad requerida");
     expect(messages).toContain("El censo no puede ser negativo");
+    expect(messages).toContain("Al menos 1 persona");
     expect(messages).toContain("El fin del turno debe ser posterior al inicio");
     expect(messages).toContain("ID paciente requerido");
     expect(

@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
-import { Button, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Button, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Controller, useFieldArray, type Control, type FieldErrors } from 'react-hook-form';
 
 import type { RootStackParamList } from '@/src/navigation/types';
 import { useSelectedUnitId } from '@/src/state/filterStore';
-import type { AdministrativeData } from '@/src/types/administrative';
+import { SHIFT_TYPES, type AdministrativeData } from '@/src/types/administrative';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zAdministrativeData } from '@/src/validation/schemas';
 
@@ -53,7 +53,29 @@ const styles = StyleSheet.create({
   buttonRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
   error: { color: '#DC2626', marginTop: 4 },
   helper: { color: '#4B5563', marginTop: 4 },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#CBD5F5',
+    backgroundColor: '#fff',
+  },
+  optionButtonSelected: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  optionText: { color: '#1F2937', fontWeight: '500' },
+  optionTextSelected: { color: '#fff', fontWeight: '600' },
 });
+
+const deriveShiftType = (shiftStartValue?: string | null) => {
+  if (!shiftStartValue) return SHIFT_TYPES[0];
+  const date = new Date(shiftStartValue);
+  const hours = date.getHours();
+  if (Number.isNaN(hours)) return SHIFT_TYPES[0];
+  if (hours >= 6 && hours < 14) return 'Mañana';
+  if (hours >= 14 && hours < 22) return 'Tarde';
+  return 'Noche';
+};
 
 function StaffListInput({ control, name, label, placeholder, error }: StaffListInputProps) {
   const { fields, append, remove } = useFieldArray({ control: control as any, name: name as any });
@@ -132,13 +154,17 @@ function buildInitialAdministrativeData(
   selectedUnitId: string,
 ): AdministrativeData {
   const provided = params?.administrativeData;
+  const shiftStartDefault = provided?.shiftStart ?? new Date().toISOString();
+  const shiftEndDefault = provided?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
   return {
     unit: provided?.unit ?? selectedUnitId ?? '',
     census: provided?.census ?? 0,
     staffIn: provided?.staffIn ?? [],
     staffOut: provided?.staffOut ?? [],
-    shiftStart: provided?.shiftStart ?? new Date().toISOString(),
-    shiftEnd: provided?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+    shiftStart: shiftStartDefault,
+    shiftEnd: shiftEndDefault,
+    shiftType: provided?.shiftType ?? deriveShiftType(shiftStartDefault),
+    generalNotes: provided?.generalNotes ?? undefined,
     incidents: provided?.incidents ?? [],
   };
 }
@@ -160,6 +186,8 @@ export default function ShiftDetailsScreen({ navigation, route }: Props) {
   const endError = errors.shiftEnd?.message as string | undefined;
   const staffInError = errors.staffIn?.message as string | undefined;
   const staffOutError = errors.staffOut?.message as string | undefined;
+  const shiftTypeError = errors.shiftType?.message as string | undefined;
+  const generalNotesError = errors.generalNotes?.message as string | undefined;
   const incidentsError = errors.incidents?.message as string | undefined;
 
   const parseNumericInput = (value: string) => {
@@ -255,6 +283,31 @@ export default function ShiftDetailsScreen({ navigation, route }: Props) {
           />
           {endError ? <Text style={styles.error}>{endError}</Text> : null}
         </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Tipo de turno</Text>
+          <Controller
+            control={control}
+            name="shiftType"
+            render={({ field: { onChange, value } }) => (
+              <View style={styles.optionRow}>
+                {SHIFT_TYPES.map((option) => {
+                  const selected = value === option;
+                  return (
+                    <Pressable
+                      key={option}
+                      accessibilityRole="button"
+                      style={[styles.optionButton, selected && styles.optionButtonSelected]}
+                      onPress={() => onChange(option)}
+                    >
+                      <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          />
+          {shiftTypeError ? <Text style={styles.error}>{shiftTypeError}</Text> : null}
+        </View>
       </View>
 
       <View style={styles.section}>
@@ -277,6 +330,24 @@ export default function ShiftDetailsScreen({ navigation, route }: Props) {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Observaciones</Text>
+        <View style={styles.field}>
+          <Text style={styles.label}>Notas generales</Text>
+          <Controller
+            control={control}
+            name="generalNotes"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Notas generales del turno"
+                onBlur={onBlur}
+                multiline
+                value={value ?? ''}
+                onChangeText={onChange}
+              />
+            )}
+          />
+          {generalNotesError ? <Text style={styles.error}>{generalNotesError}</Text> : null}
+        </View>
         <IncidentListInput
           control={control}
           name="incidents"

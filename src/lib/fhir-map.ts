@@ -877,9 +877,13 @@ function administrativeNarrative(data: AdministrativeData): Narrative {
     `Unit: ${data.unit}`,
     `Census: ${data.census}`,
     `Shift: ${data.shiftStart} → ${data.shiftEnd}`,
+    `Shift type: ${data.shiftType}`,
     `Incoming staff: ${staffIn.length > 0 ? staffIn.join(', ') : 'N/D'}`,
     `Outgoing staff: ${staffOut.length > 0 ? staffOut.join(', ') : 'N/D'}`,
   ];
+  if (data.generalNotes) {
+    lines.push(`Notes: ${data.generalNotes}`);
+  }
   if (incidents.length > 0) {
     lines.push(`Incidents: ${incidents.join('; ')}`);
   }

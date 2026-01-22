@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { SHIFT_TYPES } from "../types/administrative";
 import { DIET_TYPES, MOBILITY_LEVELS, STOOL_PATTERNS } from "../types/handover-constants";
 
 const optionalTrimmedString = (maxLength: number) =>
@@ -27,7 +28,7 @@ const parseCensus = (value: unknown) => {
 
 export const zAdministrativeData = z
   .object({
-    unit: z.string().trim().min(1, "La unidad es obligatoria").max(80),
+    unit: z.string().trim().min(1, "Unidad requerida").max(80),
     census: z
       .preprocess(
         parseCensus,
@@ -38,10 +39,20 @@ export const zAdministrativeData = z
           .max(200, "El censo no puede superar 200 pacientes"),
       )
       .default(0),
-    staffIn: z.array(z.string().trim().min(1, "Nombre requerido").max(100)).default([]),
-    staffOut: z.array(z.string().trim().min(1, "Nombre requerido").max(100)).default([]),
-    shiftStart: z.string().min(1, "Inicio de turno requerido"),
-    shiftEnd: z.string().min(1, "Fin de turno requerido"),
+    staffIn: z
+      .array(z.string().trim().min(1, "Requerido").max(100))
+      .min(1, "Al menos 1 persona")
+      .default([]),
+    staffOut: z
+      .array(z.string().trim().min(1, "Requerido").max(100))
+      .min(1, "Al menos 1 persona")
+      .default([]),
+    shiftStart: z.string().min(1, "Inicio obligatorio"),
+    shiftEnd: z.string().min(1, "Fin obligatorio"),
+    shiftType: z.enum(SHIFT_TYPES, {
+      errorMap: () => ({ message: "Turno requerido" }),
+    }),
+    generalNotes: optionalTrimmedString(500),
     incidents: z.array(z.string().trim().min(1).max(500)).optional(),
   })
   .superRefine((data, ctx) => {

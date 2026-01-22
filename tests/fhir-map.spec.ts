@@ -401,6 +401,7 @@ describe('buildFhirBundleFromFormData', () => {
         staffOut: ['Nurse Out'],
         shiftStart: '2025-01-05T08:00:00Z',
         shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
         incidents: ['Sin incidentes'],
       },
       status: 'final',

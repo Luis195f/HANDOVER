@@ -1,9 +1,10 @@
 import React from 'react';
-import { Button, Text, TextInput, View } from 'react-native';
+import { Button, Pressable, Text, TextInput, View } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import type { SttConfig, SttStatus } from '@/src/lib/stt';
 import type { DictationField } from '@/src/screens/HandoverForm';
+import { SHIFT_TYPES } from '@/src/types/administrative';
 
 export type DictationMicButtonProps = {
   active: boolean;
@@ -87,6 +88,8 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
   const endError = administrativeErrors.shiftEnd?.message as string | undefined;
   const staffInError = administrativeErrors.staffIn?.message as string | undefined;
   const staffOutError = administrativeErrors.staffOut?.message as string | undefined;
+  const shiftTypeError = administrativeErrors.shiftType?.message as string | undefined;
+  const generalNotesError = administrativeErrors.generalNotes?.message as string | undefined;
   const incidentsError = administrativeErrors.incidents?.message as string | undefined;
   const { activeDictationField, sttStatus, dictationUnavailable, handleDictationPress, renderDictationStatus } =
     dictationState;
@@ -165,6 +168,31 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
         />
         {endError ? <Text style={styles.error}>{endError}</Text> : null}
       </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Tipo de turno</Text>
+        <Controller
+          control={control}
+          name="administrativeData.shiftType"
+          render={({ field: { onChange, value } }) => (
+            <View style={styles.optionRow}>
+              {SHIFT_TYPES.map((option) => {
+                const selected = value === option;
+                return (
+                  <Pressable
+                    key={option}
+                    accessibilityRole="button"
+                    style={[styles.optionButton, selected && styles.optionButtonSelected]}
+                    onPress={() => onChange(option)}
+                  >
+                    <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        />
+        {shiftTypeError ? <Text style={styles.error}>{shiftTypeError}</Text> : null}
+      </View>
       <StaffListInput
         name="staffIn"
         label="Personal entrante"
@@ -179,6 +207,24 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
         error={staffOutError}
         styles={styles}
       />
+      <View style={styles.field}>
+        <Text style={styles.label}>Notas generales</Text>
+        <Controller
+          control={control}
+          name="administrativeData.generalNotes"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              multiline
+              placeholder="Notas generales del turno"
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={onChange}
+            />
+          )}
+        />
+        {generalNotesError ? <Text style={styles.error}>{generalNotesError}</Text> : null}
+      </View>
       <View style={styles.field}>
         <Text style={styles.label}>Observaciones del turno</Text>
         <View style={styles.dictationRow}>

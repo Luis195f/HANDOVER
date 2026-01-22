@@ -35,6 +35,7 @@ const baseValues = {
     staffOut: [],
     shiftStart: '2024-01-01T08:00:00Z',
     shiftEnd: '2024-01-01T20:00:00Z',
+    shiftType: 'Mañana',
     incidents: [],
   },
   patientId: 'P-10',
