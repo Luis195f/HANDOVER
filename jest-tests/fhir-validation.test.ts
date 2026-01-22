@@ -4,13 +4,23 @@ describe('HandoverFormSchema', () => {
   const baseValues = {
     administrativeData: {
       unit: 'icu-1',
+
+      // ✅ ESTE ES EL CAMPO REAL QUE EXIGE EL SCHEMA (z.enum(SHIFT_TYPES))
+      shiftType: 'Noche',
+
+      // (Opcionales / legacy: no dañan, pero NO satisfacen el schema)
+      turno: 'Noche',
+      shift: 'Noche',
+
       census: 12,
       staffIn: ['Alice'],
       staffOut: ['Bob'],
       shiftStart: '2024-01-01T07:00:00Z',
       shiftEnd: '2024-01-01T15:00:00Z',
     },
+
     patientId: 'patient-1',
+
     bedsideChecklist: {
       patientIdentityConfirmed: true,
       allergiesReviewed: true,
@@ -19,11 +29,23 @@ describe('HandoverFormSchema', () => {
       safetyMeasuresApplied: false,
       questionsAnswered: false,
     },
-    vitals: { rr: 18, hr: 80, spo2: 98 },
+
+    vitals: {
+      rr: 18,
+      hr: 80,
+      spo2: 98,
+      avpu: 'A',
+    },
   } as const;
 
   test('accepts valid payload', () => {
     const result = zHandover.safeParse(baseValues);
+
+    if (!result.success) {
+      // eslint-disable-next-line no-console
+      console.error('zHandover validation error:', result.error.flatten());
+    }
+
     expect(result.success).toBe(true);
   });
 
@@ -44,7 +66,7 @@ describe('HandoverFormSchema', () => {
   });
 
   test('rejects invalid ACVPU values', () => {
-    const invalid = { ...baseValues, vitals: { ...baseValues.vitals, avpu: 'X' } };
+    const invalid = { ...baseValues, vitals: { ...baseValues.vitals, avpu: 'X' as any } };
     const result = zHandover.safeParse(invalid);
     expect(result.success).toBe(false);
   });
