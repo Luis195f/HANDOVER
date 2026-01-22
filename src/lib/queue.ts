@@ -24,6 +24,7 @@ import {
 } from "./crypto";
 import { mark } from "./otel";
 import { signBundleIfEnabled } from "../security/crypto";
+import { stableStringify } from "./sync/ident";
 
 // -------------------------------
 // Web polyfills (SharedArrayBuffer)
@@ -794,12 +795,69 @@ type BundleMeta = {
   unitId?: string;
   specialtyId?: string;
   signerId?: string;
+  bundleId?: string;
 };
+
+const BUNDLE_IDENTIFIER_SYSTEM = "urn:handover-pro:bundle-id";
+const BUNDLE_KEY_PREFIX = "handover:";
+
+type BundleIdentifier = { system?: unknown; value?: unknown };
+
+function getBundleIdentifier(bundle: unknown): { system?: string; value?: string } | null {
+  if (!bundle || typeof bundle !== "object") return null;
+  const identifier = (bundle as Record<string, unknown>).identifier as BundleIdentifier | undefined;
+  if (!identifier || typeof identifier !== "object") return null;
+  const system = typeof identifier.system === "string" ? identifier.system : undefined;
+  const value = typeof identifier.value === "string" ? identifier.value : undefined;
+  return system || value ? { system, value } : null;
+}
+
+function normalizeBundleId(value: string): string {
+  return value.startsWith(BUNDLE_KEY_PREFIX) ? value.slice(BUNDLE_KEY_PREFIX.length) : value;
+}
+
+function bundleIdToKey(value: string): string {
+  return value.startsWith(BUNDLE_KEY_PREFIX) ? value : `${BUNDLE_KEY_PREFIX}${value}`;
+}
+
+function sanitizeBundleForId(bundle: unknown): unknown {
+  if (!bundle || typeof bundle !== "object") return bundle;
+  const { identifier: _identifier, signature: _signature, ...rest } = bundle as Record<string, unknown>;
+  return rest;
+}
+
+function deriveStableBundleId(bundle: unknown, patientId: string, overrideId?: string): string {
+  const normalizedOverride = typeof overrideId === "string" ? overrideId.trim() : "";
+  if (normalizedOverride) {
+    return normalizeBundleId(normalizedOverride);
+  }
+  const existing = getBundleIdentifier(bundle);
+  if (existing?.system === BUNDLE_IDENTIFIER_SYSTEM && typeof existing.value === "string" && existing.value.trim()) {
+    return normalizeBundleId(existing.value);
+  }
+  const stablePayload = stableStringify(sanitizeBundleForId(bundle));
+  return hashHex(`${patientId}|${stablePayload}`, 32);
+}
+
+function attachBundleIdentifier(bundle: unknown, bundleId: string): unknown {
+  if (!bundle || typeof bundle !== "object") return bundle;
+  return {
+    ...(bundle as Record<string, unknown>),
+    identifier: {
+      system: BUNDLE_IDENTIFIER_SYSTEM,
+      value: bundleIdToKey(bundleId),
+    },
+  };
+}
 
 export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
   const patientId = meta.patientId ?? 'unknown';
-  const key = `handover:${hashHex(`${patientId}|${Date.now()}|${Math.random()}`, 32)}`;
-  const { bundle: maybeSignedBundle } = await signBundleIfEnabled(bundle as Record<string, unknown>, {
+  // Deterministic bundle identifier to prevent duplicate resources on retry.
+  // Uses a hashed, stable serialization to avoid PHI leakage while keeping IDs consistent.
+  const bundleId = deriveStableBundleId(bundle, patientId, meta.bundleId);
+  const key = bundleIdToKey(bundleId);
+  const bundleWithIdentifier = attachBundleIdentifier(bundle, bundleId);
+  const { bundle: maybeSignedBundle } = await signBundleIfEnabled(bundleWithIdentifier as Record<string, unknown>, {
     queueId: key,
     signerId: meta.signerId,
   });
