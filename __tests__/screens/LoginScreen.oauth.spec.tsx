@@ -17,57 +17,65 @@ vi.mock('@/src/security/auth', async () => {
   return { ...actual, useAuth: vi.fn() };
 });
 
-describe('LoginScreen OAuth handling', () => {
+describe('LoginScreen credentials handling', () => {
   beforeEach(() => {
     navigationResetMock.mockReset();
     vi.clearAllMocks();
   });
 
-  it('ignora cancelación de OAuth sin mostrar alerta', async () => {
+  it('muestra alerta cuando las credenciales son inválidas', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => {});
-    const loginWithOAuth = vi.fn().mockRejectedValue({ type: 'dismiss' });
+    const loginWithCredentials = vi.fn().mockRejectedValue(new Error('INVALID_CREDENTIALS'));
 
     vi.mocked(useAuth).mockReturnValue({
       loginDemo: vi.fn(),
-      loginWithOAuth,
+      loginWithCredentials,
       session: null,
       loading: false,
       logout: vi.fn(),
     } as any);
 
-    const { getByText } = render(<LoginScreen />);
+    const { getByPlaceholderText, getByText } = render(<LoginScreen />);
 
+    fireEvent.changeText(getByPlaceholderText('Usuario'), 'demo');
+    fireEvent.changeText(getByPlaceholderText('Contraseña'), 'bad');
     fireEvent.press(getByText('Iniciar sesión'));
 
     await waitFor(() => {
-      expect(loginWithOAuth).toHaveBeenCalled();
+      expect(loginWithCredentials).toHaveBeenCalled();
     });
 
-    expect(alertSpy).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalled();
     expect(navigationResetMock).not.toHaveBeenCalled();
     alertSpy.mockRestore();
   });
 
-  it('muestra alerta en errores de OAuth distintos a cancelación', async () => {
+  it('navega a la lista de pacientes cuando el login es exitoso', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => {});
-    const loginWithOAuth = vi.fn().mockRejectedValue(new Error('network'));
+    const loginWithCredentials = vi.fn().mockResolvedValue({});
 
     vi.mocked(useAuth).mockReturnValue({
       loginDemo: vi.fn(),
-      loginWithOAuth,
+      loginWithCredentials,
       session: null,
       loading: false,
       logout: vi.fn(),
     } as any);
 
-    const { getByText } = render(<LoginScreen />);
+    const { getByPlaceholderText, getByText } = render(<LoginScreen />);
+    fireEvent.changeText(getByPlaceholderText('Usuario'), 'demo');
+    fireEvent.changeText(getByPlaceholderText('Contraseña'), 'demo');
     fireEvent.press(getByText('Iniciar sesión'));
 
     await waitFor(() => {
-      expect(loginWithOAuth).toHaveBeenCalled();
+      expect(loginWithCredentials).toHaveBeenCalled();
     });
 
-    expect(alertSpy).toHaveBeenCalled();
+    expect(navigationResetMock).toHaveBeenCalledWith({
+      index: 0,
+      routes: [{ name: 'PatientList' }],
+    });
+    expect(alertSpy).not.toHaveBeenCalled();
     alertSpy.mockRestore();
   });
 });

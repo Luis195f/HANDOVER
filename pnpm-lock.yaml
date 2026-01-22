@@ -60,7 +60,7 @@ importers:
         specifier: ~18.0.13
         version: 18.0.13(expo@54.0.31)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))
       expo-crypto:
-        specifier: ^15.0.8
+        specifier: ~15.0.8
         version: 15.0.8(expo@54.0.31)
       expo-dev-client:
         specifier: ~6.0.20
@@ -81,7 +81,7 @@ importers:
         specifier: ~8.0.8
         version: 8.0.8(expo@54.0.31)(react@19.1.0)
       expo-notifications:
-        specifier: ^0.32.16
+        specifier: ~0.32.16
         version: 0.32.16(expo@54.0.31)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
       expo-print:
         specifier: ~15.0.8
@@ -90,7 +90,7 @@ importers:
         specifier: ~6.0.21
         version: 6.0.21(b5f0c2ad8bae2c4cc2220568401277d5)
       expo-secure-store:
-        specifier: ^15.0.8
+        specifier: ~15.0.8
         version: 15.0.8(expo@54.0.31)
       expo-speech:
         specifier: ~14.0.8

@@ -34,7 +34,13 @@ vi.mock('@/src/validation/form-hooks', () => ({
 vi.mock('@/src/config/flags', () => ({ isOn: () => false }));
 vi.mock('@/src/state/filterStore', () => ({ useSelectedUnitId: () => 'unit-1', ALL_UNITS_OPTION: '__all__' }));
 vi.mock('@/src/security/auth', () => ({
-  useAuth: () => ({ session: null, loading: false, loginWithOAuth: vi.fn(), logout: vi.fn() }),
+  useAuth: () => ({
+    session: null,
+    loading: false,
+    loginWithOAuth: vi.fn(),
+    loginWithCredentials: vi.fn(),
+    logout: vi.fn(),
+  }),
   getSession: vi.fn(async () => null),
 }));
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: vi.fn() }));
