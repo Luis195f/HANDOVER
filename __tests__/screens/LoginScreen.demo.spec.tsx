@@ -7,7 +7,7 @@ import { useAuth } from '@/src/security/auth';
 
 const navigationResetMock = vi.fn();
 const loginDemoMock = vi.fn().mockResolvedValue({});
-const loginWithOAuthMock = vi.fn().mockResolvedValue({});
+const loginWithCredentialsMock = vi.fn().mockResolvedValue({});
 
 vi.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ reset: navigationResetMock }),
@@ -21,7 +21,7 @@ describe('LoginScreen demo mode', () => {
   it('permite iniciar modo demo y navegar a la lista de pacientes', async () => {
     vi.mocked(useAuth).mockReturnValue({
       loginDemo: loginDemoMock,
-      loginWithOAuth: loginWithOAuthMock,
+      loginWithCredentials: loginWithCredentialsMock,
       session: null,
       loading: false,
       logout: vi.fn(),

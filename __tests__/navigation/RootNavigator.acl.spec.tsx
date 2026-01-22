@@ -49,6 +49,7 @@ describe('RootNavigator ACL', () => {
       session: null,
       loading: false,
       loginWithOAuth: vi.fn(),
+      loginWithCredentials: vi.fn(),
       loginDemo: vi.fn(),
       logout: vi.fn(),
     } as any);
@@ -79,6 +80,7 @@ describe('RootNavigator ACL', () => {
       },
       loading: false,
       loginWithOAuth: vi.fn(),
+      loginWithCredentials: vi.fn(),
       loginDemo: vi.fn(),
       logout: vi.fn(),
     } as any);
