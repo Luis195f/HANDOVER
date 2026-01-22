@@ -389,7 +389,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
         if (storedTokens && !isTokenExpired(storedTokens)) {
           currentSession = normalizeSession({
             accessToken: storedTokens.accessToken,
-            refreshToken: storedTokens.refreshToken,
+            refreshToken: storedTokens.refreshToken ?? undefined,
             expiresAt: storedTokens.expiresAt,
             userId: 'local-user',
             displayName: 'Usuario',
@@ -401,7 +401,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
             const refreshedTokens = await AuthService.refresh(storedTokens.refreshToken);
             currentSession = normalizeSession({
               accessToken: refreshedTokens.accessToken,
-              refreshToken: refreshedTokens.refreshToken,
+              refreshToken: storedTokens.refreshToken ?? undefined, 
               expiresAt: refreshedTokens.expiresAt,
               userId: 'local-user',
               displayName: 'Usuario',
