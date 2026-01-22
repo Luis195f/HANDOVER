@@ -24,10 +24,9 @@ import {
 } from './fhir-validation/zod';
 import {
   deleteOfflineQueueItem,
+  updateOfflineQueueStatus,
   listOfflineQueue,
-  updateOfflineQueueItem,
   type QueueItem as OfflineQueueItem,
-  type SyncStatus,
 } from './queue';
 import { signBundleIfEnabled } from '../security/crypto';
 
@@ -508,47 +507,54 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
 
 function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
   if (item.syncStatus !== 'pending') return false;
-  if (item.attempts === 0 && !item.lastAttemptAt) return true;
+  const attemptCount = item.attemptCount ?? item.attempts ?? 0;
+  if (attemptCount === 0 && !item.lastAttemptAt) return true;
   const reference = item.lastAttemptAt ?? item.firstEnqueuedAt ?? item.createdAt;
   const base = Date.parse(reference);
   const baseline = Number.isFinite(base) ? base : 0;
-  const nextAllowed = baseline + getNextDelayMs(item.attempts);
+  const nextAllowed = baseline + getNextDelayMs(attemptCount);
   return nextAllowed <= now;
 }
 
 function nextEligibleAt(item: OfflineQueueItem): number {
-  if (item.attempts === 0 && !item.lastAttemptAt) {
+  const attemptCount = item.attemptCount ?? item.attempts ?? 0;
+  if (attemptCount === 0 && !item.lastAttemptAt) {
     return Date.now();
   }
   const reference = item.lastAttemptAt ?? item.firstEnqueuedAt ?? item.createdAt;
   const base = Date.parse(reference);
   const baseline = Number.isFinite(base) ? base : Date.now();
-  return baseline + getNextDelayMs(item.attempts);
+  return baseline + getNextDelayMs(attemptCount);
 }
 
 export async function processQueueOnce(): Promise<void> {
   const now = Date.now();
   const items = await listOfflineQueue();
+  const normalizeAttemptCount = (item: OfflineQueueItem): number => item.attemptCount ?? item.attempts ?? 0;
   const pendingOverLimit = items.filter(
-    (item) => item.syncStatus === 'pending' && item.attempts >= OFFLINE_MAX_ATTEMPTS,
+    (item) => item.syncStatus === 'pending' && normalizeAttemptCount(item) >= OFFLINE_MAX_ATTEMPTS,
   );
   if (pendingOverLimit.length > 0) {
     await Promise.all(
       pendingOverLimit.map((item) =>
-        updateOfflineQueueItem(item.id, {
-          syncStatus: 'error',
+        updateOfflineQueueStatus(item.id, 'error', {
           errorMessage: item.errorMessage ?? 'Reintentos agotados',
+          attemptCount: normalizeAttemptCount(item),
         }),
       ),
     );
   }
   const eligible = items
-    .filter((item) => item.attempts < OFFLINE_MAX_ATTEMPTS && shouldAttempt(item, now))
+    .filter((item) => normalizeAttemptCount(item) < OFFLINE_MAX_ATTEMPTS && shouldAttempt(item, now))
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   for (const item of eligible) {
     const startedAt = new Date().toISOString();
-    await updateOfflineQueueItem(item.id, { syncStatus: 'inFlight', lastAttemptAt: startedAt });
+    const attemptCount = normalizeAttemptCount(item) + 1;
+    await updateOfflineQueueStatus(item.id, 'inFlight', {
+      lastAttemptAt: startedAt,
+      attemptCount,
+    });
 
     let preparedPayload: OfflineQueuePayload;
     try {
@@ -558,9 +564,8 @@ export async function processQueueOnce(): Promise<void> {
       }
       preparedPayload = { ...extracted, patientId: extracted.patientId ?? item.patientId };
     } catch (error) {
-      await updateOfflineQueueItem(item.id, {
-        syncStatus: 'error',
-        attempts: item.attempts + 1,
+      await updateOfflineQueueStatus(item.id, 'error', {
+        attemptCount,
         lastAttemptAt: startedAt,
         errorMessage: 'Error al analizar el payload offline',
       });
@@ -572,9 +577,8 @@ export async function processQueueOnce(): Promise<void> {
       try {
         normalizedPayload.bundle = JSON.parse(preparedPayload.bundle) as Bundle;
       } catch (error) {
-        await updateOfflineQueueItem(item.id, {
-          syncStatus: 'error',
-          attempts: item.attempts + 1,
+        await updateOfflineQueueStatus(item.id, 'error', {
+          attemptCount,
           lastAttemptAt: startedAt,
           errorMessage: 'Error al analizar el payload offline',
           errorStatus: 0,
@@ -583,7 +587,7 @@ export async function processQueueOnce(): Promise<void> {
       }
     }
 
-    const itemWithPayload = { ...item, payload: normalizedPayload } as OfflineQueueItem;
+    const itemWithPayload = { ...item, payload: normalizedPayload, attemptCount } as OfflineQueueItem;
 
     let result: QueueSendResult;
     try {
@@ -593,9 +597,8 @@ export async function processQueueOnce(): Promise<void> {
     }
 
     if (result.ok) {
-      await updateOfflineQueueItem(item.id, {
-        syncStatus: 'synced',
-        attempts: item.attempts + 1,
+      await updateOfflineQueueStatus(item.id, 'synced', {
+        attemptCount,
         lastAttemptAt: startedAt,
         errorMessage: undefined,
       });
@@ -611,14 +614,14 @@ export async function processQueueOnce(): Promise<void> {
     if (status && status >= 400 && status < 500 && !isAuthError) {
       const errorMessage = result.message ?? `Error en sincronización: ${status}`;
       const userFacingMessage = `Error en sincronización: ${status}`;
-      await updateOfflineQueueItem(item.id, {
-        syncStatus: 'error',
-        attempts: item.attempts + 1,
+      await updateOfflineQueueStatus(item.id, 'error', {
+        attemptCount,
         lastAttemptAt: startedAt,
         errorMessage,
         errorStatus: status,
         errorIssuesJson: cappedIssuesJson,
       });
+      await deleteOfflineQueueItem(item.id);
       updateSyncSnapshot({ lastError: userFacingMessage });
       console.warn(`Offline sync: item ${item.id} failed with HTTP ${status}. No se reintentará.`);
       continue;
@@ -629,11 +632,10 @@ export async function processQueueOnce(): Promise<void> {
         pauseSync('Autenticación requerida');
         syncOptions?.onAuthError?.(new Error('unauthorized'));
       }
-      const nextAttempts = item.attempts + 1;
+      const nextAttempts = attemptCount;
       if (nextAttempts >= OFFLINE_MAX_ATTEMPTS) {
-        await updateOfflineQueueItem(item.id, {
-          syncStatus: 'error',
-          attempts: nextAttempts,
+        await updateOfflineQueueStatus(item.id, 'error', {
+          attemptCount: nextAttempts,
           lastAttemptAt: startedAt,
           errorMessage: result.message ?? 'Reintentos agotados',
           errorStatus: result.status,
@@ -641,9 +643,8 @@ export async function processQueueOnce(): Promise<void> {
         });
         continue;
       }
-      await updateOfflineQueueItem(item.id, {
-        syncStatus: 'pending',
-        attempts: nextAttempts,
+      await updateOfflineQueueStatus(item.id, 'pending', {
+        attemptCount: nextAttempts,
         lastAttemptAt: startedAt,
         errorMessage: result.message ?? undefined,
         errorStatus: result.status,
@@ -656,9 +657,8 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
-    await updateOfflineQueueItem(item.id, {
-      syncStatus: 'error',
-      attempts: item.attempts + 1,
+    await updateOfflineQueueStatus(item.id, 'error', {
+      attemptCount,
       lastAttemptAt: startedAt,
       errorMessage: result.message ?? (result.status ? `HTTP ${result.status}` : undefined),
       errorStatus: result.status,
