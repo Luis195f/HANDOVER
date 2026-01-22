@@ -1,4 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
+import {
+  encryptedGetItem,
+  encryptedSetItem,
+  getAsyncStorageAdapter,
+  type AsyncStorageAdapter,
+} from './encryptedStorage';
 
 export type AuditEventType = 'patient_open' | 'patient_edit';
 
@@ -107,28 +113,13 @@ export function pruneOldEvents(events: AuditEvent[], options: PruneOptions): Aud
   });
 }
 
-type AsyncStorageAdapter = { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> };
-
-async function getAsyncStorage(): Promise<AsyncStorageAdapter | null> {
-  try {
-    const mod = await import('@react-native-async-storage/async-storage');
-    const storage =
-      (mod as unknown as { default?: AsyncStorageAdapter }).default ??
-      (mod as unknown as Partial<AsyncStorageAdapter>);
-    if (storage?.getItem && storage?.setItem) return storage as AsyncStorageAdapter;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export function createAsyncStorageAuditStorage(key = 'handover:audit:v1'): AuditStorage {
-  let memoizedStorage: Awaited<ReturnType<typeof getAsyncStorage>> | null = null;
+  let memoizedStorage: Awaited<ReturnType<typeof getAsyncStorageAdapter>> | null = null;
   let memoryCopy: AuditEvent[] | null = null;
 
   const getStorage = async () => {
     if (memoizedStorage) return memoizedStorage;
-    memoizedStorage = await getAsyncStorage();
+    memoizedStorage = await getAsyncStorageAdapter();
     return memoizedStorage;
   };
 
@@ -139,7 +130,7 @@ export function createAsyncStorageAuditStorage(key = 'handover:audit:v1'): Audit
         return memoryCopy ? [...memoryCopy] : [];
       }
       try {
-        const raw = await storage.getItem(key);
+        const raw = await encryptedGetItem(key, storage);
         if (!raw) return [];
         const parsed = JSON.parse(raw) as AuditEvent[];
         return Array.isArray(parsed) ? parsed : [];
@@ -154,7 +145,7 @@ export function createAsyncStorageAuditStorage(key = 'handover:audit:v1'): Audit
         memoryCopy = [...events];
         return;
       }
-      await storage.setItem(key, serialized);
+      await encryptedSetItem(key, serialized, storage);
       memoryCopy = null;
     },
   };
