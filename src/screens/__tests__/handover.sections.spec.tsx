@@ -15,6 +15,7 @@ const defaultValues: HandoverFormValues = {
     staffOut: [],
     shiftStart: '',
     shiftEnd: '',
+    shiftType: 'Mañana',
     incidents: [],
   },
   attachments: [],

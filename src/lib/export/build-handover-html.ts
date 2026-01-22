@@ -34,6 +34,7 @@ export function buildHandoverHtml(ctx: HandoverPdfContext): string {
     census: 0,
     staffIn: [],
     staffOut: [],
+    shiftType: 'Mañana',
   };
 
   return `
@@ -56,6 +57,8 @@ export function buildHandoverHtml(ctx: HandoverPdfContext): string {
         <div class="section meta">
           <p><strong>Unidad:</strong> ${safe(administrativeData.unit)}</p>
           <p><strong>Turno:</strong> ${safe(administrativeData.shiftStart)} – ${safe(administrativeData.shiftEnd)}</p>
+          <p><strong>Tipo de turno:</strong> ${safe(administrativeData.shiftType)}</p>
+          ${administrativeData.generalNotes ? `<p><strong>Notas:</strong> ${safe(administrativeData.generalNotes)}</p>` : ''}
           <p><strong>ID Paciente:</strong> ${safe(handover.patientId)}</p>
         </div>
 

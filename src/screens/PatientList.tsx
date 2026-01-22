@@ -299,6 +299,7 @@ export default function PatientList({ navigation }: Props) {
           staffOut: [],
           shiftStart: new Date().toISOString(),
           shiftEnd: new Date().toISOString(),
+          shiftType: 'Mañana',
           incidents: [],
         },
         patientId: patient.id,
