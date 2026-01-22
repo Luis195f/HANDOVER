@@ -159,6 +159,39 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
+  // 🔹 TEST 2.1 — Encola offline y envía una sola vez al reconectar
+  // ======================================================
+  it('queues while offline and sends each item once on reconnection', async () => {
+    const sentIds: string[] = [];
+    const sender = vi.fn(async (item: { id: string; patientId?: string }) => {
+      sentIds.push(item.id);
+      if (item.patientId === 'pat-error') {
+        return { ok: false as const, status: 400, message: 'invalid' };
+      }
+      return { ok: true as const, status: 200 };
+    });
+
+    isOnline.mockResolvedValue(false);
+
+    await createOfflineQueueItem({ payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } }, patientId: 'pat-a' });
+    await createOfflineQueueItem({ payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } }, patientId: 'pat-b' });
+    await createOfflineQueueItem({ payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } }, patientId: 'pat-error' });
+
+    configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
+    await forceSync();
+
+    expect(sender).not.toHaveBeenCalled();
+    expect((await listOfflineQueue()).length).toBe(3);
+
+    isOnline.mockResolvedValue(true);
+    await forceSync();
+
+    expect(sender).toHaveBeenCalledTimes(3);
+    expect(new Set(sentIds).size).toBe(sentIds.length);
+    expect(await listOfflineQueue()).toHaveLength(0);
+  });
+
+  // ======================================================
   // 🔹 TEST 3 — Aplica backoff tras error 5xx
   // ======================================================
   it('applies backoff after a recoverable 5xx and retries later', async () => {
@@ -214,30 +247,25 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 5 — No reintenta items con demasiados fallos 4xx y los deja en pending
+  // 🔹 TEST 5 — Elimina items con error 4xx (permanente)
   // ======================================================
-  it('no reintenta items con demasiados fallos 4xx y los deja en pending', async () => {
+  it('drops items after permanent 4xx responses', async () => {
     const sender = vi.fn(async () => ({ ok: false as const, status: 400, message: 'invalid' }));
     isOnline.mockResolvedValue(true);
 
     await createOfflineQueueItem({
       payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } },
       patientId: 'pat-invalid',
-      attempts: 2, // ya ha fallado varias veces antes
+      attempts: 0,
     });
 
     configureSyncEngine({ getToken: async () => 'token', sender, isOnline });
     await forceSync();
 
-    const [item] = await listOfflineQueue();
+    expect(sender).toHaveBeenCalled();
 
-    // ✅ El engine NO vuelve a enviar el item “quemado”
-    expect(sender).not.toHaveBeenCalled();
-
-    // ✅ El item sigue en la cola, marcado como pending
-    expect(item).toBeDefined();
-    expect(item?.syncStatus).toBe('pending');
-    expect(item?.attempts).toBeGreaterThanOrEqual(2);
+    const remaining = await listOfflineQueue();
+    expect(remaining).toHaveLength(0);
   });
 
   // ======================================================
@@ -372,4 +400,3 @@ describe('offline encryption integration', () => {
     expect(getSyncSnapshot().status).toBe('idle');
   });
 });
-

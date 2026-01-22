@@ -219,14 +219,22 @@ function parseEncryptionFailureSentinel(payload: string): { payloadHash: string 
 }
 
 // BEGIN HANDOVER_OFFLINE
-export type SyncStatus = "pending" | "inFlight" | "synced" | "error";
+/**
+ * Estado de cada item en la cola offline.
+ * - pending: en cola, esperando su turno o backoff.
+ * - inFlight: en envío activo (tentativa en curso).
+ * - synced: sincronizado exitosamente (se elimina de la cola).
+ * - error: error permanente, no se reintentará automáticamente.
+ */
+export type QueueStatus = "pending" | "inFlight" | "synced" | "error";
+export type SyncStatus = QueueStatus;
 
-export interface QueueItem {
+export interface QueuedBundle {
   id: string;
   createdAt: string;
   firstEnqueuedAt: string;
   lastAttemptAt?: string;
-  attempts: number;
+  attempts: number; // legacy: mantener compatibilidad con callers existentes
   attemptCount: number;
   syncStatus: SyncStatus;
   errorMessage?: string;
@@ -237,9 +245,11 @@ export interface QueueItem {
   patientId: string;
 }
 
+export type QueueItem = QueuedBundle;
+
 type QueueItemInput =
-  Omit<QueueItem, "id" | "createdAt" | "attempts" | "attemptCount" | "firstEnqueuedAt" | "syncStatus" | "payloadType" | "payload"> &
-    Partial<Pick<QueueItem, "id" | "createdAt" | "firstEnqueuedAt" | "attempts" | "attemptCount" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt">> & {
+  Omit<QueuedBundle, "id" | "createdAt" | "attempts" | "attemptCount" | "firstEnqueuedAt" | "syncStatus" | "payloadType" | "payload"> &
+    Partial<Pick<QueuedBundle, "id" | "createdAt" | "firstEnqueuedAt" | "attempts" | "attemptCount" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt" | "errorStatus" | "errorIssuesJson">> & {
       payload: unknown;
     };
 
@@ -260,7 +270,7 @@ type QueueItemRow = {
 };
 
 const OFFLINE_TABLE = "handover_offline_queue";
-let memOfflineQueue: QueueItem[] = [];
+let memOfflineQueue: QueuedBundle[] = [];
 
 if (db?.execSync) {
   db.execSync(`CREATE TABLE IF NOT EXISTS ${OFFLINE_TABLE} (
@@ -282,9 +292,10 @@ if (db?.execSync) {
   try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN error_issues_json TEXT;`); } catch {}
   try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN first_enqueued_at TEXT NOT NULL DEFAULT '';`); } catch {}
   try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;`); } catch {}
+  try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN last_attempt_at TEXT;`); } catch {}
 }
 
-function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueueItem {
+function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueuedBundle {
   const nowIso = input.createdAt ?? new Date().toISOString();
   const firstEnqueuedAt = input.firstEnqueuedAt ?? input.createdAt ?? nowIso;
   const attempts = input.attempts ?? input.attemptCount ?? 0;
@@ -319,7 +330,7 @@ function normalizeSyncStatus(row: QueueItemRow): SyncStatus {
   return "pending";
 }
 
-function rowToQueueItem(row: QueueItemRow): QueueItem {
+function rowToQueueItem(row: QueueItemRow): QueuedBundle {
   const syncStatus = normalizeSyncStatus(row);
   const attempts = Number.isFinite(row.attempts) ? Number(row.attempts) : 0;
   const attemptCount = Number.isFinite(row.attempt_count) ? Number(row.attempt_count) : attempts;
@@ -334,7 +345,7 @@ function rowToQueueItem(row: QueueItemRow): QueueItem {
     errorMessage: row.error_message ?? undefined,
     errorStatus: row.error_status ?? undefined,
     errorIssuesJson: row.error_issues_json ?? undefined,
-    payloadType: (row.payload_type as QueueItem["payloadType"]) ?? "handover-bundle",
+    payloadType: (row.payload_type as QueuedBundle["payloadType"]) ?? "handover-bundle",
     payload: row.payload,
     patientId: row.patient_id,
   };
@@ -344,7 +355,7 @@ function computeLegacyStatus(attempts: number): OfflineQueueStatus {
   return attempts >= DEFAULT_QUEUE_MAX_RETRIES ? "failed" : "pending";
 }
 
-function persistQueueItem(item: QueueItem): void {
+function persistQueueItem(item: QueuedBundle): void {
   if (db?.runSync) {
     db.runSync(
       `INSERT OR REPLACE INTO ${OFFLINE_TABLE}(id,created_at,first_enqueued_at,last_attempt_at,attempts,attempt_count,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -375,7 +386,7 @@ function persistQueueItem(item: QueueItem): void {
   }
 }
 
-async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
+async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueuedBundle> {
   const item = rowToQueueItem(row);
   try {
     return { ...item, payload: await decryptQueuePayload(row.payload, { unwrap: false }) };
@@ -384,7 +395,7 @@ async function decryptQueueItemPayload(row: QueueItemRow): Promise<QueueItem> {
   }
 }
 
-export async function createOfflineQueueItem(input: QueueItemInput): Promise<QueueItem> {
+export async function enqueueOfflineQueueItem(input: QueueItemInput): Promise<QueuedBundle> {
   const encryptedPayload = await encryptQueuePayload(input.payload, input.patientId);
   const encryptionFailed = parseEncryptionFailureSentinel(encryptedPayload);
   const item = normalizeQueueItem({
@@ -396,7 +407,7 @@ export async function createOfflineQueueItem(input: QueueItemInput): Promise<Que
   return item;
 }
 
-export async function listOfflineQueue(options?: { decrypt?: boolean }): Promise<QueueItem[]> {
+export async function getOfflineQueue(options?: { decrypt?: boolean }): Promise<QueuedBundle[]> {
   const decrypt = options?.decrypt ?? true;
   if (db?.getAllSync) {
     const rows = (db.getAllSync(
@@ -418,7 +429,7 @@ export async function listOfflineQueue(options?: { decrypt?: boolean }): Promise
   return Promise.all(rows.map(async (row) => ({ ...row, payload: await decryptQueuePayload(String(row.payload ?? ""), { unwrap: false }) })));
 }
 
-export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
+export async function getOfflineQueueItem(id: string): Promise<QueuedBundle | null> {
   if (db?.getFirstSync) {
     const row = db.getFirstSync(
       `SELECT id,created_at,first_enqueued_at,last_attempt_at,attempts,attempt_count,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
@@ -431,25 +442,36 @@ export async function getOfflineQueueItem(id: string): Promise<QueueItem | null>
   return { ...found, payload: await decryptQueuePayload(String(found.payload ?? ""), { unwrap: false }) };
 }
 
-export async function updateOfflineQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | null> {
+export async function updateOfflineQueueItem(id: string, updates: Partial<QueuedBundle>): Promise<QueuedBundle | null> {
   const current = await getOfflineQueueItem(id);
   if (!current) return null;
   const nextPayload = updates.payload !== undefined ? updates.payload : current.payload;
   const payload = await encryptQueuePayload(nextPayload, updates.patientId ?? current.patientId);
   const encryptionFailed = parseEncryptionFailureSentinel(payload);
   const attempts = updates.attempts ?? updates.attemptCount ?? current.attempts;
-  const next: QueueItem = {
+  const attemptCount = updates.attemptCount ?? updates.attempts ?? current.attemptCount ?? attempts;
+  const next: QueuedBundle = {
     ...current,
     ...updates,
-    attempts,
-    attemptCount: attempts,
+    attempts: attemptCount,
+    attemptCount,
     syncStatus: encryptionFailed ? "error" : updates.syncStatus ?? current.syncStatus,
     errorMessage: encryptionFailed ? "offline_encryption_failed" : updates.errorMessage ?? current.errorMessage,
+    errorStatus: updates.errorStatus ?? current.errorStatus,
+    errorIssuesJson: updates.errorIssuesJson ?? current.errorIssuesJson,
     payload,
     payloadType: "handover-bundle",
   };
   persistQueueItem(next);
   return next;
+}
+
+export async function updateOfflineQueueStatus(
+  id: string,
+  status: QueueStatus,
+  updates: Partial<QueuedBundle> = {}
+): Promise<QueuedBundle | null> {
+  return updateOfflineQueueItem(id, { ...updates, syncStatus: status });
 }
 
 export async function deleteOfflineQueueItem(id: string): Promise<void> {
@@ -467,7 +489,19 @@ export async function clearOfflineQueue(): Promise<void> {
   memOfflineQueue = [];
 }
 
-export function summarizePatientQueueState(items: QueueItem[]): SyncStatus {
+export const offlineQueue = {
+  enqueue: enqueueOfflineQueueItem,
+  getQueue: getOfflineQueue,
+  updateStatus: updateOfflineQueueStatus,
+  delete: deleteOfflineQueueItem,
+  clear: clearOfflineQueue,
+  getById: getOfflineQueueItem,
+};
+
+export const createOfflineQueueItem = enqueueOfflineQueueItem;
+export const listOfflineQueue = getOfflineQueue;
+
+export function summarizePatientQueueState(items: QueuedBundle[]): SyncStatus {
   if (items.some((item) => item.syncStatus === "error")) return "error";
   if (items.some((item) => item.syncStatus === "pending" || item.syncStatus === "inFlight")) return "pending";
   return "synced";
