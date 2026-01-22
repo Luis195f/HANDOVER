@@ -154,4 +154,34 @@ describe('offline queue end-to-end', () => {
     await sync.processQueueOnce();
     expect(retried).toBe(false);
   });
+
+  it('marca como error tras el máximo de reintentos y no vuelve a enviar', async () => {
+    vi.useFakeTimers();
+    const baseTime = new Date('2024-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(baseTime);
+
+    await queue.createOfflineQueueItem({
+      payload: { foo: 'fail-max' },
+      patientId: 'pat-max',
+      attempts: 2,
+      syncStatus: 'pending',
+      lastAttemptAt: new Date(baseTime - sync.getNextDelayMs(2)).toISOString(),
+    });
+
+    const sender = vi.fn(async () => ({ ok: false as const, status: 500, message: 'boom' }));
+    sync.setQueueSendHandler(sender);
+
+    await sync.processQueueOnce();
+
+    const [failed] = await queue.listOfflineQueue();
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(failed?.syncStatus).toBe('error');
+    expect(failed?.attempts).toBe(3);
+
+    sender.mockClear();
+    await sync.processQueueOnce();
+    expect(sender).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
 });
