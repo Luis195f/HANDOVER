@@ -5,8 +5,10 @@
 
 ## Cola y sincronización
 - `src/lib/queue.ts` genera bundles con UUID y los persiste en SQLite junto con metadatos de reintento.
-- `src/lib/sync.ts` detecta conectividad, reintenta envíos y elimina items exitosos; reutiliza el cliente FHIR para manejar `OperationOutcome`.
+- `src/lib/sync.ts` detecta conectividad, reintenta envíos con backoff exponencial (`getNextDelayMs`) y elimina items exitosos; reutiliza el cliente FHIR para manejar `OperationOutcome`.
 - El almacenamiento puede cifrarse; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` permite desactivar el cifrado en desarrollo.
+  - Cada item conserva `firstEnqueuedAt`, `lastAttemptAt` y `attemptCount`/`attempts` para calcular ventanas de reintento.
+  - Se respeta un máximo de reintentos (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Al superar el límite, el item queda con `syncStatus="error"`.
 
 ## Cifrado de la cola offline
 - Los bundles FHIR almacenados en la cola SQLite se guardan cifrados por defecto usando cifrado simétrico con AEAD (AES-256-GCM vía `@noble/ciphers` + `expo-crypto`).

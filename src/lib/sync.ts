@@ -266,6 +266,8 @@ type SyncEngineOptions = {
 // BEGIN HANDOVER_OFFLINE
 const OFFLINE_BACKOFF_SCHEDULE_MS = [60_000, 5 * 60_000, 15 * 60_000];
 const OFFLINE_MAX_BACKOFF_MS = 60 * 60_000;
+const envOfflineMaxAttempts = Number.parseInt(process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS || '', 10);
+const OFFLINE_MAX_ATTEMPTS = Number.isFinite(envOfflineMaxAttempts) ? envOfflineMaxAttempts : 3;
 
 export function getNextDelayMs(attempts = 0): number {
   const normalized = Number.isFinite(attempts) ? Math.max(0, Math.trunc(attempts)) : 0;
@@ -507,7 +509,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
 function shouldAttempt(item: OfflineQueueItem, now: number): boolean {
   if (item.syncStatus !== 'pending') return false;
   if (item.attempts === 0 && !item.lastAttemptAt) return true;
-  const reference = item.lastAttemptAt ?? item.createdAt;
+  const reference = item.lastAttemptAt ?? item.firstEnqueuedAt ?? item.createdAt;
   const base = Date.parse(reference);
   const baseline = Number.isFinite(base) ? base : 0;
   const nextAllowed = baseline + getNextDelayMs(item.attempts);
@@ -518,7 +520,7 @@ function nextEligibleAt(item: OfflineQueueItem): number {
   if (item.attempts === 0 && !item.lastAttemptAt) {
     return Date.now();
   }
-  const reference = item.lastAttemptAt ?? item.createdAt;
+  const reference = item.lastAttemptAt ?? item.firstEnqueuedAt ?? item.createdAt;
   const base = Date.parse(reference);
   const baseline = Number.isFinite(base) ? base : Date.now();
   return baseline + getNextDelayMs(item.attempts);
@@ -527,8 +529,21 @@ function nextEligibleAt(item: OfflineQueueItem): number {
 export async function processQueueOnce(): Promise<void> {
   const now = Date.now();
   const items = await listOfflineQueue();
+  const pendingOverLimit = items.filter(
+    (item) => item.syncStatus === 'pending' && item.attempts >= OFFLINE_MAX_ATTEMPTS,
+  );
+  if (pendingOverLimit.length > 0) {
+    await Promise.all(
+      pendingOverLimit.map((item) =>
+        updateOfflineQueueItem(item.id, {
+          syncStatus: 'error',
+          errorMessage: item.errorMessage ?? 'Reintentos agotados',
+        }),
+      ),
+    );
+  }
   const eligible = items
-    .filter((item) => shouldAttempt(item, now))
+    .filter((item) => item.attempts < OFFLINE_MAX_ATTEMPTS && shouldAttempt(item, now))
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   for (const item of eligible) {
@@ -614,14 +629,30 @@ export async function processQueueOnce(): Promise<void> {
         pauseSync('Autenticación requerida');
         syncOptions?.onAuthError?.(new Error('unauthorized'));
       }
+      const nextAttempts = item.attempts + 1;
+      if (nextAttempts >= OFFLINE_MAX_ATTEMPTS) {
+        await updateOfflineQueueItem(item.id, {
+          syncStatus: 'error',
+          attempts: nextAttempts,
+          lastAttemptAt: startedAt,
+          errorMessage: result.message ?? 'Reintentos agotados',
+          errorStatus: result.status,
+          errorIssuesJson: cappedIssuesJson,
+        });
+        continue;
+      }
       await updateOfflineQueueItem(item.id, {
         syncStatus: 'pending',
-        attempts: item.attempts + 1,
+        attempts: nextAttempts,
         lastAttemptAt: startedAt,
         errorMessage: result.message ?? undefined,
         errorStatus: result.status,
         errorIssuesJson: cappedIssuesJson,
       });
+      if (!isAuthError) {
+        const delay = getNextDelayMs(nextAttempts);
+        scheduleSync(delay);
+      }
       continue;
     }
 
