@@ -15,6 +15,7 @@ const mockHandover: HandoverValues & { id: string } = {
     staffOut: [],
     shiftStart: '2025-11-21T07:00:00Z',
     shiftEnd: '2025-11-21T15:00:00Z',
+    shiftType: 'Mañana',
     incidents: [],
   },
   patientId: 'patient-1',

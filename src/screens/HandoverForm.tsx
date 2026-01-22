@@ -48,7 +48,7 @@ import { ensureUnitAccess } from '@/src/security/acl';
 import { getSession, useAuth, type Session } from '@/src/security/auth';
 import type { HandoverUser } from '@/src/security/auth-types';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
-import type { AdministrativeData } from '@/src/types/administrative';
+import { SHIFT_TYPES, type AdministrativeData } from '@/src/types/administrative';
 import type { HandoverStructuredDiagnosis, RiskItem } from '@/src/types/handover';
 import type { SBARSummary } from '@/src/types/sbar';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
@@ -149,6 +149,18 @@ const styles = StyleSheet.create({
   sbarTitle: { fontWeight: '700', marginBottom: 8, fontSize: 16 },
   sbarText: { fontFamily: 'monospace' },
   helperText: { marginTop: 6, color: '#4B5563' },
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#CBD5F5',
+    backgroundColor: '#fff',
+  },
+  optionButtonSelected: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  optionText: { color: '#1F2937', fontWeight: '500' },
+  optionTextSelected: { color: '#fff', fontWeight: '600' },
   alertList: { gap: 8 },
   alertCard: {
     padding: 10,
@@ -170,6 +182,16 @@ const styles = StyleSheet.create({
 type HandoverRouteName = "HandoverForm" | "HandoverMain";
 type Props = NativeStackScreenProps<RootStackParamList, HandoverRouteName>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
+
+const deriveShiftType = (shiftStartValue?: string | null) => {
+  if (!shiftStartValue) return SHIFT_TYPES[0];
+  const date = new Date(shiftStartValue);
+  const hours = date.getHours();
+  if (Number.isNaN(hours)) return SHIFT_TYPES[0];
+  if (hours >= 6 && hours < 14) return 'Mañana';
+  if (hours >= 14 && hours < 22) return 'Tarde';
+  return 'Noche';
+};
 
 export type DictationField =
   | 'dxMedical'
@@ -430,6 +452,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [prefilledValuesParam?.vitals]);
 
   const defaultValues = useMemo<HandoverFormValues>(() => {
+    const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
+    const shiftEndDefault =
+      administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
     const administrativeDefaults: AdministrativeData = {
       unit:
         administrativeDataParam?.unit ??
@@ -441,8 +466,12 @@ export default function HandoverForm({ navigation, route }: Props) {
       census: administrativeDataParam?.census ?? 0,
       staffIn: administrativeDataParam?.staffIn ?? [],
       staffOut: administrativeDataParam?.staffOut ?? [],
-      shiftStart: administrativeDataParam?.shiftStart ?? new Date().toISOString(),
-      shiftEnd: administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+      shiftStart: shiftStartDefault,
+      shiftEnd: shiftEndDefault,
+      shiftType:
+        administrativeDataParam?.shiftType ??
+        deriveShiftType(shiftStartDefault),
+      generalNotes: administrativeDataParam?.generalNotes ?? undefined,
       incidents: administrativeDataParam?.incidents ?? [],
     };
 
@@ -781,6 +810,11 @@ export default function HandoverForm({ navigation, route }: Props) {
         staffIn: administrativeDataParam.staffIn ?? current?.staffIn ?? [],
         staffOut: administrativeDataParam.staffOut ?? current?.staffOut ?? [],
         incidents: administrativeDataParam.incidents ?? current?.incidents ?? [],
+        shiftType:
+          administrativeDataParam.shiftType ??
+          current?.shiftType ??
+          deriveShiftType(administrativeDataParam.shiftStart),
+        generalNotes: administrativeDataParam.generalNotes ?? current?.generalNotes,
       };
 
       form.setValue('administrativeData', next, { shouldDirty: true, shouldValidate: true });
@@ -1140,6 +1174,8 @@ export default function HandoverForm({ navigation, route }: Props) {
         staffOut: (values.administrativeData.staffOut ?? []).filter(Boolean),
         shiftStart: values.administrativeData.shiftStart,
         shiftEnd: values.administrativeData.shiftEnd,
+        shiftType: values.administrativeData.shiftType,
+        generalNotes: values.administrativeData.generalNotes,
         incidents: values.administrativeData.incidents?.filter(Boolean),
       };
 

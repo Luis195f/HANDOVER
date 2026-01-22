@@ -11,6 +11,7 @@ const mockHandover: HandoverPdfContext['handover'] = {
     census: 10,
     staffIn: [],
     staffOut: [],
+    shiftType: 'Mañana',
   },
   patientId: 'patient-1',
   sbar: {

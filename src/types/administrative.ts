@@ -1,10 +1,18 @@
-export interface AdministrativeData {
+export const SHIFT_TYPES = ['Mañana', 'Tarde', 'Noche'] as const;
+
+export type ShiftType = (typeof SHIFT_TYPES)[number];
+
+export interface ShiftAdminInfo {
   unit: string;
-  census: number;
   staffOut: string[];
   staffIn: string[];
   shiftStart: string; // ISO string
   shiftEnd: string; // ISO string
-  incidents?: string[]; // opcional
+  shiftType: ShiftType;
+  generalNotes?: string;
 }
 
+export interface AdministrativeData extends ShiftAdminInfo {
+  census: number;
+  incidents?: string[]; // opcional
+}

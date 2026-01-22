@@ -74,6 +74,7 @@ function buildFormMock(patientId: string) {
     staffOut: [],
     shiftStart: '2024-01-01T00:00:00Z',
     shiftEnd: '2024-01-01T04:00:00Z',
+    shiftType: 'Noche',
     incidents: [],
   };
 

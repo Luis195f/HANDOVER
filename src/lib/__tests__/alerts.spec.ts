@@ -11,6 +11,7 @@ const baseHandover: Handover = {
     staffOut: [],
     shiftStart: '2024-01-01T08:00:00.000Z',
     shiftEnd: '2024-01-01T16:00:00.000Z',
+    shiftType: 'Mañana',
     incidents: [],
   },
   patientId: 'pat-001',
