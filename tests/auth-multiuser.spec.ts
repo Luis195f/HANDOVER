@@ -38,7 +38,7 @@ describe('multiuser auth session', () => {
       units: ['UCI-A'],
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
-      expiresAt: '2024-01-01T00:00:00.000Z',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     };
 
     const { getCurrentSession, setCurrentSession } = await import('@/src/security/auth');

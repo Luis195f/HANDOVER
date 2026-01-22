@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/secure-storage';
+import AuthService, { isTokenExpired } from '@/src/security/AuthService';
 import navigation from '@/src/navigation/navigation';
 import { configureFHIRClient } from '@/src/lib/fhir-client';
 
@@ -189,6 +190,99 @@ function normalizeSession(session: StoredAuthSession | null): HandoverSession | 
   };
 }
 
+async function refreshSessionWithOidc(session: HandoverSession): Promise<HandoverSession | null> {
+  if (!session.refreshToken) return null;
+  try {
+    const config = buildAuthConfig();
+    const discovery = await AuthSession.fetchDiscoveryAsync(config.issuer);
+    const tokenEndpoint = discovery?.tokenEndpoint;
+    if (!tokenEndpoint) {
+      return null;
+    }
+
+    const body = new URLSearchParams();
+    body.set('grant_type', 'refresh_token');
+    body.set('client_id', config.clientId);
+    body.set('refresh_token', session.refreshToken);
+    if (config.scopes?.length) body.set('scope', config.scopes.join(' '));
+
+    const resp = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+
+    if (!resp.ok) return null;
+
+    const data = (await resp.json()) as Record<string, unknown>;
+    const newAccess =
+      (data['access_token'] as string | undefined) ??
+      (data['accessToken'] as string | undefined);
+    if (!newAccess) return null;
+
+    const newRefresh =
+      (data['refresh_token'] as string | undefined) ??
+      (data['refreshToken'] as string | undefined) ??
+      session.refreshToken;
+
+    const expiresInRaw = data['expires_in'] ?? data['expiresIn'];
+    const expiresIn = typeof expiresInRaw === 'number' ? expiresInRaw : Number(expiresInRaw);
+    const nextExpiresAt = Number.isFinite(expiresIn)
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : session.expiresAt;
+
+    return {
+      ...session,
+      accessToken: newAccess,
+      refreshToken: newRefresh,
+      expiresAt: nextExpiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function ensureSessionValid(session: HandoverSession | null): Promise<HandoverSession | null> {
+  if (!session) return null;
+  if (!session.expiresAt) return session;
+
+  const tokens = {
+    accessToken: session.accessToken,
+    refreshToken: session.refreshToken,
+    expiresAt: session.expiresAt,
+  };
+
+  if (!isTokenExpired(tokens)) return session;
+
+  if (session.refreshToken) {
+    if (isLocalSession(session)) {
+      try {
+        const refreshed = await AuthService.refresh(session.refreshToken);
+        const nextSession: HandoverSession = {
+          ...session,
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken ?? session.refreshToken,
+          expiresAt: refreshed.expiresAt,
+        };
+        await setSession(nextSession);
+        return nextSession;
+      } catch {
+        await setSession(null);
+        return null;
+      }
+    }
+
+    const refreshed = await refreshSessionWithOidc(session);
+    if (refreshed) {
+      await setSession(refreshed);
+      return refreshed;
+    }
+  }
+
+  await setSession(null);
+  return null;
+}
+
 async function migrateFromAsyncStorage(): Promise<HandoverSession | null> {
   if (migrationAttempted) return null;
   migrationAttempted = true;
@@ -218,6 +312,19 @@ function notify(session: SessionModel | null) {
   });
 }
 
+function toAuthTokens(session: HandoverSession): { accessToken: string; refreshToken?: string; expiresAt: string } | null {
+  if (!session.accessToken || !session.expiresAt) return null;
+  return {
+    accessToken: session.accessToken,
+    refreshToken: session.refreshToken,
+    expiresAt: session.expiresAt,
+  };
+}
+
+function isLocalSession(session: HandoverSession): boolean {
+  return Boolean(session.refreshToken?.startsWith('local-refresh-') || session.accessToken?.startsWith('local-'));
+}
+
 async function persistSession(session: HandoverSession | null): Promise<void> {
   if (!session) {
     await secureDeleteItem(SESSION_KEY);
@@ -234,6 +341,17 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
   await secureSetItem(SESSION_KEY, JSON.stringify(normalized));
 }
 
+async function persistTokens(session: HandoverSession | null): Promise<void> {
+  if (!session) {
+    await AuthService.clearTokens();
+    return;
+  }
+  const tokens = toAuthTokens(session);
+  if (tokens) {
+    await AuthService.storeTokens(tokens);
+  }
+}
+
 async function hydrateSession(): Promise<HandoverSession | null> {
   if (hydrated) return currentSession;
   if (hydrateInFlight) return hydrateInFlight;
@@ -244,6 +362,11 @@ async function hydrateSession(): Promise<HandoverSession | null> {
         const persisted = (await secureGetItem(SESSION_KEY)) ?? null;
         if (persisted) {
           currentSession = normalizeSession(parseSession(persisted));
+          if (currentSession) {
+            await persistTokens(currentSession);
+            const refreshed = await ensureSessionValid(currentSession);
+            currentSession = refreshed;
+          }
           return currentSession;
         }
       } catch {
@@ -253,9 +376,43 @@ async function hydrateSession(): Promise<HandoverSession | null> {
         currentSession = await migrateFromAsyncStorage();
         if (currentSession) {
           await persistSession(currentSession);
+          await persistTokens(currentSession);
+          const refreshed = await ensureSessionValid(currentSession);
+          currentSession = refreshed;
         }
       } catch {
         currentSession = null;
+      }
+
+      if (!currentSession) {
+        const storedTokens = await AuthService.loadTokens();
+        if (storedTokens && !isTokenExpired(storedTokens)) {
+          currentSession = normalizeSession({
+            accessToken: storedTokens.accessToken,
+            refreshToken: storedTokens.refreshToken,
+            expiresAt: storedTokens.expiresAt,
+            userId: 'local-user',
+            displayName: 'Usuario',
+            roles: ['nurse'],
+            units: [],
+          });
+        } else if (storedTokens?.refreshToken) {
+          try {
+            const refreshedTokens = await AuthService.refresh(storedTokens.refreshToken);
+            currentSession = normalizeSession({
+              accessToken: refreshedTokens.accessToken,
+              refreshToken: refreshedTokens.refreshToken,
+              expiresAt: refreshedTokens.expiresAt,
+              userId: 'local-user',
+              displayName: 'Usuario',
+              roles: ['nurse'],
+              units: [],
+            });
+          } catch {
+            await AuthService.clearTokens();
+            currentSession = null;
+          }
+        }
       }
 
       return currentSession;
@@ -271,6 +428,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
 async function setSession(session: HandoverSession | null): Promise<void> {
   currentSession = session ? normalizeSession({ ...session }) : null;
   await persistSession(currentSession);
+  await persistTokens(currentSession);
   notify(currentSession);
 }
 
@@ -832,6 +990,7 @@ interface AuthContextValue {
   session: SessionModel | null;
   loading: boolean;
   loginWithOAuth: (config?: Partial<typeof DEFAULT_AUTH_CONFIG>) => Promise<SessionModel>;
+  loginWithCredentials: (params: { username: string; password: string }) => Promise<SessionModel>;
   loginDemo: () => Promise<SessionModel>;
   logout: () => Promise<void>;
 }
@@ -853,6 +1012,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     discovery,
   );
+
+  const loginWithCredentials = useCallback(async (params: { username: string; password: string }) => {
+    const result = await AuthService.login(params.username, params.password);
+    const session: HandoverSession = {
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken ?? undefined,
+      expiresAt: result.tokens.expiresAt,
+      userId: result.user.id,
+      displayName: result.user.name ?? result.user.id,
+      roles: result.user.roles ?? ['nurse'],
+      units: result.user.units ?? [],
+      user: {
+        id: result.user.id,
+        name: result.user.name ?? result.user.id,
+        roles: result.user.roles ?? ['nurse'],
+        units: result.user.units ?? [],
+      },
+    };
+    await setSession(session);
+    return session;
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -904,9 +1084,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     loading,
     loginWithOAuth: loginWithAuth0,
+    loginWithCredentials,
     loginDemo,
     logout,
-  }), [session, loading, loginWithAuth0]);
+  }), [session, loading, loginWithAuth0, loginWithCredentials]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

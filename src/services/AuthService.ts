@@ -1,5 +1,7 @@
-export async function getToken(): Promise<string | null> {
-  return process.env.EXPO_PUBLIC_AUTH_TOKEN ?? null;
-}
+import AuthService from '@/src/security/AuthService';
 
-export default { getToken };
+export const getToken = AuthService.getAccessToken;
+
+export { AuthService } from '@/src/security/AuthService';
+
+export default { getToken, ...AuthService };

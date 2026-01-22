@@ -22,7 +22,13 @@ vi.mock('@/src/security/acl', () => ({
   hasUnitAccess: () => true,
 }));
 vi.mock('@/src/security/auth', () => ({
-  useAuth: () => ({ session: null, loading: false, loginWithOAuth: vi.fn(), logout: vi.fn() }),
+  useAuth: () => ({
+    session: null,
+    loading: false,
+    loginWithOAuth: vi.fn(),
+    loginWithCredentials: vi.fn(),
+    logout: vi.fn(),
+  }),
 }));
 
 vi.mock('@/src/lib/otel', () => ({

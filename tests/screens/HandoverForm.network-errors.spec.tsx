@@ -45,6 +45,7 @@ vi.mock('@/src/security/auth', () => ({
     },
     loading: false,
     loginWithOAuth: vi.fn(),
+    loginWithCredentials: vi.fn(),
     logout: vi.fn(async () => undefined),
   }),
   getSession: vi.fn(async () => ({ userId: 'nurse-1' })),
