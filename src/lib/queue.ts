@@ -223,8 +223,10 @@ export type SyncStatus = "pending" | "inFlight" | "synced" | "error";
 export interface QueueItem {
   id: string;
   createdAt: string;
+  firstEnqueuedAt: string;
   lastAttemptAt?: string;
   attempts: number;
+  attemptCount: number;
   syncStatus: SyncStatus;
   errorMessage?: string;
   errorStatus?: number;
@@ -235,16 +237,18 @@ export interface QueueItem {
 }
 
 type QueueItemInput =
-  Omit<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType" | "payload"> &
-    Partial<Pick<QueueItem, "id" | "createdAt" | "attempts" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt">> & {
+  Omit<QueueItem, "id" | "createdAt" | "attempts" | "attemptCount" | "firstEnqueuedAt" | "syncStatus" | "payloadType" | "payload"> &
+    Partial<Pick<QueueItem, "id" | "createdAt" | "firstEnqueuedAt" | "attempts" | "attemptCount" | "syncStatus" | "payloadType" | "errorMessage" | "lastAttemptAt">> & {
       payload: unknown;
     };
 
 type QueueItemRow = {
   id: string;
   created_at: string;
+  first_enqueued_at?: string | null;
   last_attempt_at?: string | null;
   attempts: number;
+  attempt_count?: number | null;
   sync_status: SyncStatus;
   error_message?: string | null;
   error_status?: number | null;
@@ -261,8 +265,10 @@ if (db?.execSync) {
   db.execSync(`CREATE TABLE IF NOT EXISTS ${OFFLINE_TABLE} (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
+    first_enqueued_at TEXT NOT NULL,
     last_attempt_at TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL,
     error_message TEXT,
     error_status INTEGER,
@@ -273,15 +279,22 @@ if (db?.execSync) {
   );`);
   try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN error_status INTEGER;`); } catch {}
   try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN error_issues_json TEXT;`); } catch {}
+  try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN first_enqueued_at TEXT NOT NULL DEFAULT '';`); } catch {}
+  try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;`); } catch {}
 }
 
 function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueueItem {
   const nowIso = input.createdAt ?? new Date().toISOString();
+  const firstEnqueuedAt = input.firstEnqueuedAt ?? input.createdAt ?? nowIso;
+  const attempts = input.attempts ?? input.attemptCount ?? 0;
+  const attemptCount = input.attemptCount ?? attempts;
   return {
     id: input.id ?? `handover:${hashHex(`${Date.now()}-${Math.random()}`, 16)}`,
     createdAt: nowIso,
+    firstEnqueuedAt,
     lastAttemptAt: input.lastAttemptAt,
-    attempts: input.attempts ?? 0,
+    attempts,
+    attemptCount,
     syncStatus: input.syncStatus ?? "pending",
     errorMessage: input.errorMessage,
     errorStatus: input.errorStatus,
@@ -307,11 +320,15 @@ function normalizeSyncStatus(row: QueueItemRow): SyncStatus {
 
 function rowToQueueItem(row: QueueItemRow): QueueItem {
   const syncStatus = normalizeSyncStatus(row);
+  const attempts = Number.isFinite(row.attempts) ? Number(row.attempts) : 0;
+  const attemptCount = Number.isFinite(row.attempt_count) ? Number(row.attempt_count) : attempts;
   return {
     id: String(row.id),
     createdAt: typeof row.created_at === "string" ? row.created_at : new Date().toISOString(),
+    firstEnqueuedAt: row.first_enqueued_at ?? row.created_at ?? new Date().toISOString(),
     lastAttemptAt: row.last_attempt_at ?? undefined,
-    attempts: Number.isFinite(row.attempts) ? Number(row.attempts) : 0,
+    attempts,
+    attemptCount,
     syncStatus,
     errorMessage: row.error_message ?? undefined,
     errorStatus: row.error_status ?? undefined,
@@ -329,12 +346,14 @@ function computeLegacyStatus(attempts: number): OfflineQueueStatus {
 function persistQueueItem(item: QueueItem): void {
   if (db?.runSync) {
     db.runSync(
-      `INSERT OR REPLACE INTO ${OFFLINE_TABLE}(id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT OR REPLACE INTO ${OFFLINE_TABLE}(id,created_at,first_enqueued_at,last_attempt_at,attempts,attempt_count,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         item.id,
         item.createdAt,
+        item.firstEnqueuedAt,
         item.lastAttemptAt ?? null,
         item.attempts,
+        item.attemptCount,
         item.syncStatus,
         item.errorMessage ?? null,
         item.errorStatus ?? null,
@@ -380,7 +399,7 @@ export async function listOfflineQueue(options?: { decrypt?: boolean }): Promise
   const decrypt = options?.decrypt ?? true;
   if (db?.getAllSync) {
     const rows = (db.getAllSync(
-      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
+      `SELECT id,created_at,first_enqueued_at,last_attempt_at,attempts,attempt_count,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
     ) ?? []) as QueueItemRow[];
     if (!decrypt) {
       return rows.map(rowToQueueItem);
@@ -401,7 +420,7 @@ export async function listOfflineQueue(options?: { decrypt?: boolean }): Promise
 export async function getOfflineQueueItem(id: string): Promise<QueueItem | null> {
   if (db?.getFirstSync) {
     const row = db.getFirstSync(
-      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
+      `SELECT id,created_at,first_enqueued_at,last_attempt_at,attempts,attempt_count,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} WHERE id=? LIMIT 1`,
       [id]
     ) as QueueItemRow | undefined;
     return row ? decryptQueueItemPayload(row) : null;
@@ -417,10 +436,12 @@ export async function updateOfflineQueueItem(id: string, updates: Partial<QueueI
   const nextPayload = updates.payload !== undefined ? updates.payload : current.payload;
   const payload = await encryptQueuePayload(nextPayload, updates.patientId ?? current.patientId);
   const encryptionFailed = parseEncryptionFailureSentinel(payload);
+  const attempts = updates.attempts ?? updates.attemptCount ?? current.attempts;
   const next: QueueItem = {
     ...current,
     ...updates,
-    attempts: updates.attempts ?? current.attempts,
+    attempts,
+    attemptCount: attempts,
     syncStatus: encryptionFailed ? "error" : updates.syncStatus ?? current.syncStatus,
     errorMessage: encryptionFailed ? "offline_encryption_failed" : updates.errorMessage ?? current.errorMessage,
     payload,
@@ -807,15 +828,17 @@ export async function __getRawTxQueueRows(): Promise<QueueRow[]> {
 export async function __getRawOfflineQueueRows(): Promise<QueueItemRow[]> {
   if (db?.getAllSync) {
     const rows = db.getAllSync(
-      `SELECT id,created_at,last_attempt_at,attempts,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
+      `SELECT id,created_at,first_enqueued_at,last_attempt_at,attempts,attempt_count,sync_status,error_message,error_status,error_issues_json,payload_type,payload,patient_id FROM ${OFFLINE_TABLE} ORDER BY datetime(created_at) ASC`
     ) as QueueItemRow[];
     return rows ?? [];
   }
   return memOfflineQueue.map((item) => ({
     id: item.id,
     created_at: item.createdAt,
+    first_enqueued_at: item.firstEnqueuedAt,
     last_attempt_at: item.lastAttemptAt ?? null,
     attempts: item.attempts,
+    attempt_count: item.attemptCount,
     sync_status: item.syncStatus,
     error_message: item.errorMessage ?? null,
     error_status: item.errorStatus ?? null,
