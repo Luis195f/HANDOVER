@@ -72,7 +72,11 @@ import { PatientBanner } from './components/PatientBanner';
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { BedsideChecklistModal } from './components/BedsideChecklistModal';
 import { BedsideChecklistSection } from './components/BedsideChecklistSection';
-import SpecificCareSection from './components/SpecificCareSection';
+import EliminationSection from './components/EliminationSection';
+import FluidBalanceSection from './components/FluidBalanceSection';
+import MobilitySkinSection from './components/MobilitySkinSection';
+import NutritionSection from './components/NutritionSection';
+import PsychosocialSection from './components/PsychosocialSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
 import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
 import MedicationSection from './components/MedicationSection';
@@ -210,7 +214,11 @@ const sectionsInfo = [
   { key: 'dispositivos', title: 'Dispositivos Médicos' },
   { key: 'seguridad', title: 'Seguridad y riesgos' },
   { key: 'alertas', title: 'Alertas' },
-  { key: 'cuidados', title: 'Cuidados específicos' },
+  { key: 'nutrition', title: 'Nutrición' },
+  { key: 'elimination', title: 'Eliminación' },
+  { key: 'fluidBalance', title: 'Balance hídrico' },
+  { key: 'mobilitySkin', title: 'Movilidad y piel' },
+  { key: 'psychosocial', title: 'Psicosocial' },
   { key: 'escalas', title: 'Escalas clínicas' },
   { key: 'examenes', title: 'Exámenes y procedimientos' },
   { key: 'medicacion', title: 'Medicación y tratamientos' },
@@ -1621,21 +1629,72 @@ export default function HandoverForm({ navigation, route }: Props) {
       )}
 
       <View
-        ref={sectionRefs.cuidados}
-        onLayout={handleSectionLayout('cuidados')}
+        ref={sectionRefs.nutrition}
+        onLayout={handleSectionLayout('nutrition')}
         style={styles.section}
       >
         <CollapsibleSection
-          title="Cuidados específicos"
-          isCollapsed={collapsedSections.cuidados}
-          onToggle={() => toggleSection('cuidados')}
+          title="Nutrición"
+          isCollapsed={collapsedSections.nutrition}
+          onToggle={() => toggleSection('nutrition')}
         >
-          <SpecificCareSection
-            control={control}
-            errors={errors}
-            parseNumber={parseNumericInput}
-            setValue={form.setValue}
-          />
+          <NutritionSection parseNumber={parseNumericInput} />
+        </CollapsibleSection>
+      </View>
+
+      <View
+        ref={sectionRefs.elimination}
+        onLayout={handleSectionLayout('elimination')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Eliminación"
+          isCollapsed={collapsedSections.elimination}
+          onToggle={() => toggleSection('elimination')}
+        >
+          <EliminationSection parseNumber={parseNumericInput} />
+        </CollapsibleSection>
+      </View>
+
+      <View
+        ref={sectionRefs.fluidBalance}
+        onLayout={handleSectionLayout('fluidBalance')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Balance hídrico"
+          isCollapsed={collapsedSections.fluidBalance}
+          onToggle={() => toggleSection('fluidBalance')}
+        >
+          <FluidBalanceSection parseNumber={parseNumericInput} />
+        </CollapsibleSection>
+      </View>
+
+      <View
+        ref={sectionRefs.mobilitySkin}
+        onLayout={handleSectionLayout('mobilitySkin')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Movilidad y piel"
+          isCollapsed={collapsedSections.mobilitySkin}
+          onToggle={() => toggleSection('mobilitySkin')}
+        >
+          <MobilitySkinSection />
+        </CollapsibleSection>
+      </View>
+
+      <View
+        ref={sectionRefs.psychosocial}
+        onLayout={handleSectionLayout('psychosocial')}
+        style={styles.section}
+      >
+        <CollapsibleSection
+          title="Psicosocial"
+          isCollapsed={collapsedSections.psychosocial}
+          onToggle={() => toggleSection('psychosocial')}
+        >
+          <PsychosocialSection />
         </CollapsibleSection>
       </View>
 

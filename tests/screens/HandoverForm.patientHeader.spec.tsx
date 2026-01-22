@@ -61,7 +61,11 @@ vi.mock('@/src/lib/stt', () => ({
     getLastError: () => null,
   }),
 }));
-vi.mock('@/src/screens/components/SpecificCareSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/EliminationSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/FluidBalanceSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/MobilitySkinSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/NutritionSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/PsychosocialSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
 vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ExportPdfButton', () => ({ ExportPdfButton: () => null }));
