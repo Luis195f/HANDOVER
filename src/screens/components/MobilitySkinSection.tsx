@@ -20,6 +20,7 @@ export function MobilitySkinSection() {
         name="mobility.mobilityLevel"
         render={({ field: { onChange, value } }) => (
           <PickerField
+            testID="mobility.mobilityLevel"
             label="Nivel de movilidad"
             placeholder="Seleccionar"
             value={value}
@@ -29,6 +30,7 @@ export function MobilitySkinSection() {
           />
         )}
       />
+
       <Controller
         control={control}
         name="mobility.repositioningPlan"
@@ -43,7 +45,9 @@ export function MobilitySkinSection() {
               onChangeText={onChange}
             />
             {mobilityErrors?.repositioningPlan?.message ? (
-              <Text style={nursingStyles.error}>{mobilityErrors.repositioningPlan.message as string}</Text>
+              <Text style={nursingStyles.error}>
+                {mobilityErrors.repositioningPlan.message as string}
+              </Text>
             ) : null}
           </View>
         )}
@@ -68,17 +72,14 @@ export function MobilitySkinSection() {
           </View>
         )}
       />
+
       <Controller
         control={control}
         name="skin.hasPressureInjury"
         render={({ field: { onChange, value } }) => (
           <View style={[nursingStyles.field, nursingStyles.switchRow]}>
             <Text style={nursingStyles.label}>Úlcera por presión</Text>
-            <Switch
-              accessibilityLabel="Úlcera por presión"
-              value={!!value}
-              onValueChange={onChange}
-            />
+            <Switch accessibilityLabel="Úlcera por presión" value={!!value} onValueChange={onChange} />
           </View>
         )}
       />
@@ -87,3 +88,4 @@ export function MobilitySkinSection() {
 }
 
 export default MobilitySkinSection;
+
