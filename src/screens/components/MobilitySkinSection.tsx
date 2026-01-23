@@ -10,6 +10,7 @@ export function MobilitySkinSection() {
     control,
     formState: { errors },
   } = useFormContext<HandoverValues>();
+
   const mobilityErrors = errors.mobility ?? {};
   const skinErrors = errors.skin ?? {};
 
@@ -79,7 +80,11 @@ export function MobilitySkinSection() {
         render={({ field: { onChange, value } }) => (
           <View style={[nursingStyles.field, nursingStyles.switchRow]}>
             <Text style={nursingStyles.label}>Úlcera por presión</Text>
-            <Switch accessibilityLabel="Úlcera por presión" value={!!value} onValueChange={onChange} />
+            <Switch
+              accessibilityLabel="Úlcera por presión"
+              value={!!value}
+              onValueChange={onChange}
+            />
           </View>
         )}
       />
