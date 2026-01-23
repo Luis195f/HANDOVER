@@ -14,6 +14,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
     control,
     formState: { errors },
   } = useFormContext<HandoverValues>();
+
   const nutritionErrors = errors.nutrition ?? {};
 
   return (
@@ -28,7 +29,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
             placeholder="Seleccionar"
             value={value}
             options={dietTypeOptions}
-            onValueChange={(next) => onChange(next)}
+            onValueChange={onChange}
             error={nutritionErrors?.dietType?.message as string | undefined}
           />
         )}
@@ -79,4 +80,5 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
 }
 
 export default NutritionSection;
+
 
