@@ -23,6 +23,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
         name="nutrition.dietType"
         render={({ field: { onChange, value } }) => (
           <PickerField
+            testID="nutrition.dietType"
             label="Tipo de dieta"
             placeholder="Seleccionar"
             value={value}
@@ -78,3 +79,4 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
 }
 
 export default NutritionSection;
+
