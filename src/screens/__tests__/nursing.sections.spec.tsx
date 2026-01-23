@@ -50,31 +50,39 @@ const parseNumber = (value: string) => {
 
 function renderWithForm(children: React.ReactNode) {
   let methodsReturn: UseFormReturn<HandoverFormValues> | undefined;
+
   function Wrapper() {
     const methods = useForm<HandoverFormValues>({ defaultValues });
     methodsReturn = methods;
     return <FormProvider {...methods}>{children}</FormProvider>;
   }
+
   const result = render(<Wrapper />);
   return { ...result, methods: methodsReturn! };
 }
 
 describe('Nursing sections', () => {
   it('registra nutrición y eliminación', async () => {
-    const { getByText, getByPlaceholderText, getByLabelText, methods } = renderWithForm(
+    const { getAllByText, getByText, getByPlaceholderText, getByLabelText, methods } = renderWithForm(
       <>
         <NutritionSection parseNumber={parseNumber} />
         <EliminationSection parseNumber={parseNumber} />
       </>,
     );
 
-    fireEvent.press(getByText('Seleccionar'));
+    // Hay 2 pickers con placeholder "Seleccionar": dieta y patrón deposiciones.
+    // Capturamos ambos antes de cambiar el texto del primero.
+    const selectButtons = getAllByText('Seleccionar');
+    const dietSelect = selectButtons[0];
+    const stoolSelect = selectButtons[1];
+
+    fireEvent.press(dietSelect);
     fireEvent.press(getByText('Oral'));
     fireEvent.changeText(getByPlaceholderText('Observaciones de tolerancia'), 'Buena tolerancia');
     fireEvent.changeText(getByPlaceholderText('500'), '650');
 
     fireEvent.changeText(getByPlaceholderText('800'), '900');
-    fireEvent.press(getByText('Seleccionar'));
+    fireEvent.press(stoolSelect);
     fireEvent.press(getByText('Diarrea'));
     fireEvent(getByLabelText('Sonda rectal'), 'valueChange', true);
 
@@ -93,19 +101,24 @@ describe('Nursing sections', () => {
   });
 
   it('calcula balance hídrico y registra movilidad, piel y psicosocial', async () => {
-    const { getByText, getByPlaceholderText, getByDisplayValue, getByLabelText, methods } = renderWithForm(
-      <>
-        <FluidBalanceSection parseNumber={parseNumber} />
-        <MobilitySkinSection />
-        <PsychosocialSection />
-      </>,
-    );
+    const { getAllByText, getByText, getByPlaceholderText, getByTestId, getByLabelText, methods } =
+      renderWithForm(
+        <>
+          <FluidBalanceSection parseNumber={parseNumber} />
+          <MobilitySkinSection />
+          <PsychosocialSection />
+        </>,
+      );
 
     fireEvent.changeText(getByPlaceholderText('1000'), '1500');
     fireEvent.changeText(getByPlaceholderText('900'), '1200');
 
-    fireEvent.press(getByText('Seleccionar'));
+    // Puede haber más de un "Seleccionar" en pantalla; aquí tomamos el primero visible
+    // (movilidad suele ser el primero en esta composición).
+    const selects = getAllByText('Seleccionar');
+    fireEvent.press(selects[0]);
     fireEvent.press(getByText('Con ayuda'));
+
     fireEvent.changeText(getByPlaceholderText('Ej: cada 2 horas'), 'Cada 2h');
     fireEvent.changeText(getByPlaceholderText('Ej: Íntegra'), 'Lesión sacra');
     fireEvent(getByLabelText('Úlcera por presión'), 'valueChange', true);
@@ -118,7 +131,8 @@ describe('Nursing sections', () => {
     fireEvent(getByLabelText('Visitas familiares'), 'valueChange', true);
 
     await waitFor(() => {
-      expect(getByDisplayValue('+300 mL')).toBeTruthy();
+      expect(getByTestId('fluidBalance.netBalanceDisplay').props.value).toBe('+300 mL');
+
       expect(methods.getValues('fluidBalance')).toMatchObject({
         intakeMl: 1500,
         outputMl: 1200,
