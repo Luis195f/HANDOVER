@@ -6,6 +6,7 @@ import { type DietType, type MobilityLevel, type StoolPattern } from '@/src/type
 type Option<TValue extends string> = { label: string; value: TValue };
 
 type PickerFieldProps<TValue extends string> = {
+  testID?: string;
   label: string;
   value?: TValue;
   options: Array<Option<TValue>>;
@@ -15,6 +16,7 @@ type PickerFieldProps<TValue extends string> = {
 };
 
 export function PickerField<TValue extends string>({
+  testID,
   label,
   value,
   options,
@@ -23,19 +25,26 @@ export function PickerField<TValue extends string>({
   error,
 }: PickerFieldProps<TValue>) {
   const [visible, setVisible] = useState(false);
-  const selectedLabel = useMemo(() => options.find((opt) => opt.value === value)?.label, [options, value]);
+  const selectedLabel = useMemo(
+    () => options.find((opt) => opt.value === value)?.label,
+    [options, value],
+  );
 
   return (
     <View style={nursingStyles.field}>
       <Text style={nursingStyles.label}>{label}</Text>
+
       <Pressable
+        testID={testID}
         accessibilityRole="button"
         style={nursingStyles.picker}
         onPress={() => setVisible(true)}
       >
         <Text style={nursingStyles.pickerText}>{selectedLabel ?? placeholder ?? 'Seleccionar'}</Text>
       </Pressable>
+
       {error ? <Text style={nursingStyles.error}>{error}</Text> : null}
+
       <Modal transparent animationType="fade" visible={visible} onRequestClose={() => setVisible(false)}>
         <Pressable style={nursingStyles.modalBackdrop} onPress={() => setVisible(false)}>
           <View style={nursingStyles.modalContent}>
