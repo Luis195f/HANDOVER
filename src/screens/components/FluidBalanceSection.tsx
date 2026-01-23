@@ -60,7 +60,9 @@ export function FluidBalanceSection({ parseNumber }: FluidBalanceSectionProps) {
             <Text style={nursingStyles.error}>{fluidBalanceErrors.intakeMl.message as string}</Text>
           ) : null}
         </View>
+
         <View style={nursingStyles.spacer} />
+
         <View style={nursingStyles.flex}>
           <Text style={nursingStyles.label}>Salida (mL)</Text>
           <Controller
@@ -86,6 +88,7 @@ export function FluidBalanceSection({ parseNumber }: FluidBalanceSectionProps) {
       <View style={nursingStyles.field}>
         <Text style={nursingStyles.label}>Balance neto (mL)</Text>
         <TextInput
+          testID="fluidBalance.netBalanceDisplay"
           style={[nursingStyles.input, nursingStyles.readOnlyInput]}
           value={netBalanceDisplay}
           editable={false}
