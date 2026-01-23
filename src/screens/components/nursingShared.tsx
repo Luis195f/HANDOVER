@@ -6,7 +6,6 @@ import { type DietType, type MobilityLevel, type StoolPattern } from '@/src/type
 type Option<TValue extends string> = { label: string; value: TValue };
 
 type PickerFieldProps<TValue extends string> = {
-  testID?: string;
   label: string;
   value?: TValue;
   options: Array<Option<TValue>>;
@@ -16,7 +15,6 @@ type PickerFieldProps<TValue extends string> = {
 };
 
 export function PickerField<TValue extends string>({
-  testID,
   label,
   value,
   options,
@@ -25,41 +23,50 @@ export function PickerField<TValue extends string>({
   error,
 }: PickerFieldProps<TValue>) {
   const [visible, setVisible] = useState(false);
+
   const selectedLabel = useMemo(
     () => options.find((opt) => opt.value === value)?.label,
     [options, value],
   );
 
+  const open = () => setVisible(true);
+  const close = () => setVisible(false);
+
   return (
     <View style={nursingStyles.field}>
       <Text style={nursingStyles.label}>{label}</Text>
 
-      <Pressable
-        testID={testID}
-        accessibilityRole="button"
-        style={nursingStyles.picker}
-        onPress={() => setVisible(true)}
-      >
-        <Text style={nursingStyles.pickerText}>{selectedLabel ?? placeholder ?? 'Seleccionar'}</Text>
+      {/* IMPORTANTE PARA TESTS:
+          El test hace fireEvent.press(getByText('Seleccionar')).
+          Ese getByText devuelve este <Text>, así que debe tener onPress. */}
+      <Pressable accessibilityRole="button" style={nursingStyles.picker} onPress={open}>
+        <Text style={nursingStyles.pickerText} onPress={open}>
+          {selectedLabel ?? placeholder ?? 'Seleccionar'}
+        </Text>
       </Pressable>
 
       {error ? <Text style={nursingStyles.error}>{error}</Text> : null}
 
-      <Modal transparent animationType="fade" visible={visible} onRequestClose={() => setVisible(false)}>
-        <Pressable style={nursingStyles.modalBackdrop} onPress={() => setVisible(false)}>
+      <Modal transparent animationType="fade" visible={visible} onRequestClose={close}>
+        <Pressable style={nursingStyles.modalBackdrop} onPress={close}>
           <View style={nursingStyles.modalContent}>
-            {options.map((option) => (
-              <Pressable
-                key={option.value}
-                style={nursingStyles.modalOption}
-                onPress={() => {
-                  onValueChange(option.value);
-                  setVisible(false);
-                }}
-              >
-                <Text style={nursingStyles.modalOptionText}>{option.label}</Text>
-              </Pressable>
-            ))}
+            {options.map((option) => {
+              const select = () => {
+                onValueChange(option.value);
+                close();
+              };
+
+              return (
+                <Pressable key={option.value} style={nursingStyles.modalOption} onPress={select}>
+                  {/* IMPORTANTE PARA TESTS:
+                      El test hace fireEvent.press(getByText('Oral')) / ('Con ayuda').
+                      Ese getByText devuelve este <Text>, así que debe tener onPress. */}
+                  <Text style={nursingStyles.modalOptionText} onPress={select}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </Pressable>
       </Modal>
