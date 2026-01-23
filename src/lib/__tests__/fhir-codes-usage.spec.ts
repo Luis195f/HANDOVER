@@ -61,6 +61,13 @@ describe('FHIR terminology consistency checks', () => {
           hasPain: true,
           evaScore: 6,
         },
+        glasgow: {
+          eye: 4,
+          verbal: 5,
+          motor: 6,
+          total: 15,
+          severity: 'leve',
+        },
         bedsideChecklist: {
           patientIdentityConfirmed: true,
           allergiesReviewed: true,
@@ -91,6 +98,13 @@ describe('FHIR terminology consistency checks', () => {
 
       const evaObservation = findResourceByCode(resources, 'Observation', FHIR_CODES.SCALES.EVA);
       expect(evaObservation?.code?.coding?.[0]).toEqual(FHIR_CODES.SCALES.EVA);
+
+      const glasgowObservation = findResourceByCode(
+        resources,
+        'Observation',
+        FHIR_CODES.SCALES.GLASGOW,
+      );
+      expect(glasgowObservation?.code?.coding?.[0]).toEqual(FHIR_CODES.SCALES.GLASGOW);
 
       const fallCondition = findResourceByCode(resources, 'Condition', FHIR_CODES.RISK.FALL);
       expect(fallCondition?.code?.coding?.[0]).toEqual(FHIR_CODES.RISK.FALL);

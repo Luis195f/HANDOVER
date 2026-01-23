@@ -1,6 +1,6 @@
 // src/lib/fhir-client.ts
 import { HTTPError, fetchWithRetry } from './net';
-import { getValidationErrorsFromBundle, validateBundle as validateFhirBundle } from './fhir-validation';
+import { getValidationErrorsFromBundle, validateBundleWithZod as validateFhirBundle } from './fhir-validation';
 import { formatIssuesForUser, isOperationOutcome, type OperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { GeneratedPdf } from './export/export-pdf';
 // BEGIN HANDOVER D2 – VitalTrends fhir-client
