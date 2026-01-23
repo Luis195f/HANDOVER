@@ -51,7 +51,11 @@ vi.mock('@/src/lib/scores/handoverRisk', () => ({
 vi.mock('@/src/hooks/usePatientSummary', () => ({
   usePatientSummary: () => ({ loading: false, error: null, summary: { id: 'pat-1', name: 'John' } }),
 }));
-vi.mock('@/src/screens/components/SpecificCareSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/EliminationSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/FluidBalanceSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/MobilitySkinSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/NutritionSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/PsychosocialSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
 vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ExportPdfButton', () => ({ ExportPdfButton: () => null }));
