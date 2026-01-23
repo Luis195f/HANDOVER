@@ -81,8 +81,8 @@ describe('Nursing sections', () => {
     fireEvent.changeText(getByPlaceholderText('800'), '900');
 
     // Patrón deposicional (si se vuelve ambiguo, se migra a testID igual que dieta)
-    fireEvent.press(getByText('Seleccionar'));
-    fireEvent.press(getByText('Diarrea'));
+    fireEvent.press(getByTestId('elimination.stoolPattern.trigger'));
+    fireEvent.press(getByTestId('elimination.stoolPattern.option.diarrhea'));
     fireEvent(getByLabelText('Sonda rectal'), 'valueChange', true);
 
     await waitFor(() => {
