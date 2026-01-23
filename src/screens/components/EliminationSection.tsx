@@ -39,19 +39,20 @@ export function EliminationSection({ parseNumber }: EliminationSectionProps) {
         )}
       />
       <Controller
-        control={control}
-        name="elimination.stoolPattern"
-        render={({ field: { onChange, value } }) => (
-          <PickerField
-            label="Patrón evacuatorio"
-            placeholder="Seleccionar"
-            value={value}
-            options={stoolPatternOptions}
-            onValueChange={onChange}
-            error={eliminationErrors?.stoolPattern?.message as string | undefined}
-          />
-        )}
-      />
+  control={control}
+  name="elimination.stoolPattern"
+  render={({ field: { onChange, value } }) => (
+    <PickerField
+      testID="elimination.stoolPattern"
+      label="Patrón deposicional"
+      placeholder="Seleccionar"
+      value={value}
+      options={stoolPatternOptions}
+      onValueChange={onChange}
+      error={eliminationErrors?.stoolPattern?.message as string | undefined}
+    />
+  )}
+/>
       <Controller
         control={control}
         name="elimination.hasRectalTube"
