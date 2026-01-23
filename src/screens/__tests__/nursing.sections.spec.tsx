@@ -70,16 +70,17 @@ describe('Nursing sections', () => {
       </>,
     );
 
-    // Picker dieta: usamos testID para evitar ambigüedad con otros "Seleccionar"
-    fireEvent.press(getByTestId('nutrition.dietType'));
-    fireEvent.press(getByText('Oral'));
+    // Dieta (estable por testID)
+    fireEvent.press(getByTestId('nutrition.dietType.trigger'));
+    fireEvent.press(getByTestId('nutrition.dietType.option.oral'));
 
     fireEvent.changeText(getByPlaceholderText('Observaciones de tolerancia'), 'Buena tolerancia');
     fireEvent.changeText(getByPlaceholderText('500'), '650');
 
+    // Urina
     fireEvent.changeText(getByPlaceholderText('800'), '900');
 
-    // Para eliminación, mantenemos el flujo existente (si también es ambiguo, añadimos testID allí).
+    // Patrón deposicional (si se vuelve ambiguo, se migra a testID igual que dieta)
     fireEvent.press(getByText('Seleccionar'));
     fireEvent.press(getByText('Diarrea'));
     fireEvent(getByLabelText('Sonda rectal'), 'valueChange', true);
@@ -90,6 +91,7 @@ describe('Nursing sections', () => {
         tolerance: 'Buena tolerancia',
         intakeMl: 650,
       });
+
       expect(methods.getValues('elimination')).toEqual({
         urineMl: 900,
         stoolPattern: 'diarrhea',
@@ -99,7 +101,7 @@ describe('Nursing sections', () => {
   });
 
   it('calcula balance hídrico y registra movilidad, piel y psicosocial', async () => {
-    const { getByText, getByPlaceholderText, getByTestId, getByLabelText, methods } = renderWithForm(
+    const { getByPlaceholderText, getByTestId, getByLabelText, methods } = renderWithForm(
       <>
         <FluidBalanceSection parseNumber={parseNumber} />
         <MobilitySkinSection />
@@ -110,8 +112,9 @@ describe('Nursing sections', () => {
     fireEvent.changeText(getByPlaceholderText('1000'), '1500');
     fireEvent.changeText(getByPlaceholderText('900'), '1200');
 
-    fireEvent.press(getByText('Seleccionar'));
-    fireEvent.press(getByText('Con ayuda'));
+    // Movilidad (estable por testID)
+    fireEvent.press(getByTestId('mobility.mobilityLevel.trigger'));
+    fireEvent.press(getByTestId('mobility.mobilityLevel.option.assisted'));
 
     fireEvent.changeText(getByPlaceholderText('Ej: cada 2 horas'), 'Cada 2h');
     fireEvent.changeText(getByPlaceholderText('Ej: Íntegra'), 'Lesión sacra');
@@ -125,6 +128,8 @@ describe('Nursing sections', () => {
     fireEvent(getByLabelText('Visitas familiares'), 'valueChange', true);
 
     await waitFor(() => {
+      // Si tu FluidBalanceSection tiene el input read-only con testID:
+      // <TextInput testID="fluidBalance.netBalanceDisplay" ... />
       expect(getByTestId('fluidBalance.netBalanceDisplay').props.value).toBe('+300 mL');
 
       expect(methods.getValues('fluidBalance')).toMatchObject({
@@ -132,14 +137,17 @@ describe('Nursing sections', () => {
         outputMl: 1200,
         netBalanceMl: 300,
       });
+
       expect(methods.getValues('mobility')).toEqual({
         mobilityLevel: 'assisted',
         repositioningPlan: 'Cada 2h',
       });
+
       expect(methods.getValues('skin')).toEqual({
         skinStatus: 'Lesión sacra',
         hasPressureInjury: true,
       });
+
       expect(methods.getValues('psychosocial')).toEqual({
         emotionalStatus: 'Ansioso',
         familyNotes: 'Hermano en visita',
@@ -161,3 +169,4 @@ describe('Nursing sections', () => {
     });
   });
 });
+
