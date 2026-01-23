@@ -27,11 +27,12 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
             placeholder="Seleccionar"
             value={value}
             options={dietTypeOptions}
-            onValueChange={onChange}
+            onValueChange={(next) => onChange(next)}
             error={nutritionErrors?.dietType?.message as string | undefined}
           />
         )}
       />
+
       <Controller
         control={control}
         name="nutrition.tolerance"
@@ -51,6 +52,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
           </View>
         )}
       />
+
       <Controller
         control={control}
         name="nutrition.intakeMl"
