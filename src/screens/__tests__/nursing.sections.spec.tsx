@@ -63,26 +63,24 @@ function renderWithForm(children: React.ReactNode) {
 
 describe('Nursing sections', () => {
   it('registra nutrición y eliminación', async () => {
-    const { getAllByText, getByText, getByPlaceholderText, getByLabelText, methods } = renderWithForm(
+    const { getByText, getByPlaceholderText, getByLabelText, getByTestId, methods } = renderWithForm(
       <>
         <NutritionSection parseNumber={parseNumber} />
         <EliminationSection parseNumber={parseNumber} />
       </>,
     );
 
-    // Hay 2 pickers con placeholder "Seleccionar": dieta y patrón deposiciones.
-    // Capturamos ambos antes de cambiar el texto del primero.
-    const selectButtons = getAllByText('Seleccionar');
-    const dietSelect = selectButtons[0];
-    const stoolSelect = selectButtons[1];
-
-    fireEvent.press(dietSelect);
+    // Picker dieta: usamos testID para evitar ambigüedad con otros "Seleccionar"
+    fireEvent.press(getByTestId('nutrition.dietType'));
     fireEvent.press(getByText('Oral'));
+
     fireEvent.changeText(getByPlaceholderText('Observaciones de tolerancia'), 'Buena tolerancia');
     fireEvent.changeText(getByPlaceholderText('500'), '650');
 
     fireEvent.changeText(getByPlaceholderText('800'), '900');
-    fireEvent.press(stoolSelect);
+
+    // Para eliminación, mantenemos el flujo existente (si también es ambiguo, añadimos testID allí).
+    fireEvent.press(getByText('Seleccionar'));
     fireEvent.press(getByText('Diarrea'));
     fireEvent(getByLabelText('Sonda rectal'), 'valueChange', true);
 
@@ -101,22 +99,18 @@ describe('Nursing sections', () => {
   });
 
   it('calcula balance hídrico y registra movilidad, piel y psicosocial', async () => {
-    const { getAllByText, getByText, getByPlaceholderText, getByTestId, getByLabelText, methods } =
-      renderWithForm(
-        <>
-          <FluidBalanceSection parseNumber={parseNumber} />
-          <MobilitySkinSection />
-          <PsychosocialSection />
-        </>,
-      );
+    const { getByText, getByPlaceholderText, getByTestId, getByLabelText, methods } = renderWithForm(
+      <>
+        <FluidBalanceSection parseNumber={parseNumber} />
+        <MobilitySkinSection />
+        <PsychosocialSection />
+      </>,
+    );
 
     fireEvent.changeText(getByPlaceholderText('1000'), '1500');
     fireEvent.changeText(getByPlaceholderText('900'), '1200');
 
-    // Puede haber más de un "Seleccionar" en pantalla; aquí tomamos el primero visible
-    // (movilidad suele ser el primero en esta composición).
-    const selects = getAllByText('Seleccionar');
-    fireEvent.press(selects[0]);
+    fireEvent.press(getByText('Seleccionar'));
     fireEvent.press(getByText('Con ayuda'));
 
     fireEvent.changeText(getByPlaceholderText('Ej: cada 2 horas'), 'Cada 2h');
