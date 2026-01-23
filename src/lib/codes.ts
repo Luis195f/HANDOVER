@@ -33,6 +33,7 @@ export const LOINC = {
   painEva: '38208-5',
   bradenScale: '38876-5',
   glasgowTotal: '9267-6',
+  dischargeSummary: '11503-0',
 } as const;
 
 export type LoincCode = (typeof LOINC)[keyof typeof LOINC];

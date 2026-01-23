@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest';
+
+import { validateBundle, validateResource } from '../fhir-validation/index';
+
+describe('FHIR AJV validation helpers', () => {
+  const observation = {
+    resourceType: 'Observation',
+    status: 'final',
+    code: {
+      coding: [
+        {
+          system: 'http://loinc.org',
+          code: '1234-5',
+          display: 'Test code',
+        },
+      ],
+    },
+    subject: { reference: 'Patient/123' },
+    effectiveDateTime: '2023-09-01T00:00:00Z',
+    valueQuantity: { value: 98, unit: 'bpm' },
+  } as const;
+
+  it('validates a resource with AJV', () => {
+    const result = validateResource(observation, 'Observation');
+
+    expect(result).toEqual({ isValid: true, errors: [] });
+  });
+
+  it('validates a bundle with AJV and surfaces errors', () => {
+    const validBundle = {
+      resourceType: 'Bundle',
+      type: 'transaction',
+      entry: [
+        {
+          fullUrl: 'urn:uuid:1',
+          resource: observation,
+          request: { method: 'POST', url: 'Observation' },
+        },
+      ],
+    };
+
+    expect(validateBundle(validBundle)).toEqual({ isValid: true, errors: [] });
+
+    const invalidBundle = {
+      resourceType: 'Bundle',
+      entry: [],
+    };
+
+    const invalidResult = validateBundle(invalidBundle);
+    expect(invalidResult.isValid).toBe(false);
+    expect(invalidResult.errors).toEqual(
+      expect.arrayContaining([expect.stringContaining('/type')]),
+    );
+  });
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  validateBundle,
+  validateBundleWithZod,
   validateResourceWithZod,
   type ValidationResult,
 } from '../fhir-validation';
@@ -176,7 +176,7 @@ describe('validateBundle', () => {
       ],
     };
 
-    const result = validateBundle(bundle);
+    const result = validateBundleWithZod(bundle);
 
     expect(result).toEqual({ isValid: true, errors: [] });
   });
@@ -198,7 +198,7 @@ describe('validateBundle', () => {
       ],
     };
 
-    const result = validateBundle(bundle);
+    const result = validateBundleWithZod(bundle);
 
     expect(result.isValid).toBe(false);
     expect(result.errors).toEqual(
