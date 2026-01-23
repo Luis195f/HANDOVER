@@ -84,6 +84,7 @@ export function validateResource(resource: unknown): ValidationResult {
 }
 
 export const validateResourceWithZod = validateResource;
+export const validateBundleWithZod = validateBundle;
 
 export function validateBundle(bundle: unknown): ValidationResult {
   const parsed = bundleSchema.safeParse(bundle);

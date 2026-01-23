@@ -25,7 +25,7 @@ import type {
 import { zHandover } from '../validation/schemas';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
-import { validateResource as validateFhirResource } from './fhir-validation';
+import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
 
 export type HandoverData = z.infer<typeof zHandover>;
 
@@ -354,8 +354,8 @@ const TEST_LOINC = {
   HR: LOINC.hr,
   GLUCOSE_MGDL: LOINC.glucoseMgDl,
   GLUCOSE_MMOLL: LOINC.glucoseMmolL,
-  FIO2: '3151-8',
-  O2_FLOW: '3150-0',
+  FIO2: LOINC.fio2,
+  O2_FLOW: LOINC.o2Flow,
 } as const;
 
 const PROFILE_VITAL_SIGNS = 'http://hl7.org/fhir/StructureDefinition/vitalsigns';
@@ -364,8 +364,8 @@ const PROFILE_OBSERVATION = 'http://hl7.org/fhir/StructureDefinition/Observation
 const DEFAULT_COMPOSITION_TYPE: CodeableConcept = {
   coding: [
     {
-      system: 'http://loinc.org',
-      code: '11503-0',
+      system: TERMINOLOGY_SYSTEMS.LOINC,
+      code: LOINC.dischargeSummary,
       display: 'Discharge summary',
     },
   ],
@@ -396,7 +396,7 @@ const laboratoryCategoryConcept: CodeableConcept = {
 const surveyCategoryConcept: CodeableConcept = {
   coding: [
     {
-      system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+      system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
       code: 'survey',
       display: 'Survey',
     },
@@ -1118,7 +1118,7 @@ export function mapObservationVitals(
       valueCodeableConcept: {
         coding: [
           {
-            system: 'http://snomed.info/sct',
+            system: TERMINOLOGY_SYSTEMS.SNOMED,
             code: details.code,
             display: details.display,
           },
@@ -1429,7 +1429,7 @@ export function mapDeviceUse(
     code: {
       coding: [
         {
-          system: 'http://snomed.info/sct',
+          system: TERMINOLOGY_SYSTEMS.SNOMED,
           code: SNOMED.oxygenTherapy,
           display: 'Administration of oxygen therapy',
         },
@@ -1451,7 +1451,7 @@ export function mapDeviceUse(
       {
         coding: [
           {
-            system: 'http://snomed.info/sct',
+            system: TERMINOLOGY_SYSTEMS.SNOMED,
             code: parsed.reason,
           },
         ],
@@ -1465,7 +1465,7 @@ export function mapDeviceUse(
       {
         coding: [
           {
-            system: 'http://snomed.info/sct',
+            system: TERMINOLOGY_SYSTEMS.SNOMED,
             code: parsed.bodySite,
             display: parsed.bodySite,
           },
