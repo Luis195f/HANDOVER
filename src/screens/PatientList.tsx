@@ -16,7 +16,7 @@ import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { PATIENTS_MOCK, type PatientListItem } from "@/src/data/mockPatients";
 import type { RootStackParamList } from "@/src/navigation/types";
-import { ensureUnitAccess } from "@/src/security/acl";
+import { ensureUnitAccess, hasRole } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
 import { listOfflineQueue, summarizePatientQueueState, type SyncStatus } from "@/src/lib/queue";
@@ -326,6 +326,7 @@ export default function PatientList({ navigation }: Props) {
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const { session } = useAuth();
+  const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
 
   const onOpenPatient = useCallback(
     (patientId: string) => {
@@ -418,16 +419,18 @@ export default function PatientList({ navigation }: Props) {
           </Text>
           <Switch value={sortByPriority} onValueChange={setSortByPriority} />
         </View>
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.supervisorButton, { backgroundColor: colors.primary }]}
-          onPress={() => navigation.navigate("SupervisorDashboard")}
-        >
-          <Text style={styles.supervisorButtonTitle}>Ver dashboard de turno</Text>
-          <Text style={styles.supervisorButtonSubtitle}>
-            Resumen para supervisores y jefaturas de unidad.
-          </Text>
-        </Pressable>
+        {canViewSupervisorDashboard ? (
+          <Pressable
+            accessibilityRole="button"
+            style={[styles.supervisorButton, { backgroundColor: colors.primary }]}
+            onPress={() => navigation.navigate("SupervisorDashboard")}
+          >
+            <Text style={styles.supervisorButtonTitle}>Ver dashboard de turno</Text>
+            <Text style={styles.supervisorButtonSubtitle}>
+              Resumen para supervisores y jefaturas de unidad.
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <FlatList
