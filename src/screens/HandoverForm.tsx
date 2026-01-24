@@ -96,7 +96,20 @@ import OxygenGroupSection from './components/OxygenGroupSection';
 import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
 import { SbarSection } from './handover/SbarSection';
+import * as SecureStore from 'expo-secure-store';
+import { useEffect, useMemo, useRef } from 'react';
 import { HandoverFormActions } from './handover/HandoverFormActions';
+
+const IS_TEST = process.env.NODE_ENV === 'test';
+
+function safeJsonParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -545,9 +558,14 @@ export default function HandoverForm({ navigation, route }: Props) {
   ]);
 
  const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
-
+  const { watch, reset, getValues } = form;
   const { control, formState } = form;
-  const patientIdValue = form.watch('patientId');
+  const draftKey = useMemo(() => {
+  return `handoverDraft:${patientId ?? 'unknown'}:${unitId ?? 'unknown'}`;
+}, [patientId, unitId]);
+
+const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const errors: HandoverFormErrors = formState.errors ?? {};
   const hasValidationErrors = Object.keys(errors).length > 0;
   const medsError = errors.meds?.message as string | undefined;
@@ -584,14 +602,53 @@ export default function HandoverForm({ navigation, route }: Props) {
     },
   });
 
-  useEffect(() => {
-    void loadDraftNow();
-  }, [loadDraftNow, patientIdValue]);
+ useEffect(() => {
+  if (IS_TEST) return;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const raw = await SecureStore.getItemAsync(draftKey);
+      if (cancelled) return;
+
+      const draft = safeJsonParse<any>(raw);
+      if (!draft) return;
+
+      // Importante: NO pisar si ya hay datos
+      const current = getValues();
+      const isEmpty = !current || Object.keys(current).length === 0;
+      if (isEmpty) reset(draft);
+    } catch {
+      // no-op
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [draftKey, reset, getValues]);
 
   useEffect(() => {
-    const subscription = form.watch(() => scheduleSave());
-    return () => (typeof subscription === 'function' ? subscription() : subscription?.unsubscribe?.());
-  }, [form, scheduleSave]);
+  if (IS_TEST) return;
+
+  const subscription = watch(values => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current = setTimeout(() => {
+      void SecureStore.setItemAsync(draftKey, JSON.stringify(values)).catch(() => {});
+    }, 300);
+  });
+
+  return () => {
+    subscription?.unsubscribe?.();
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  };
+}, [watch, draftKey]);
+
   const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
     () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
