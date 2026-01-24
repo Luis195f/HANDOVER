@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 
+import { encryptOfflinePayload, isEncryptionDisabled } from '@/src/lib/crypto';
 import { useThemeTokens } from '@/src/theme';
 import type { HandoverValues } from '@/src/validation/schemas';
 
@@ -143,7 +144,7 @@ export default function FileAttach() {
           uri: asset.uri,
           contentType,
           name,
-          data,
+          data: isEncryptionDisabled() ? data : await encryptOfflinePayload(data),
         };
 
         append(newAttachment);
