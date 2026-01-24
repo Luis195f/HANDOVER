@@ -18,6 +18,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Controller, FormProvider } from 'react-hook-form';
 import type { FieldErrors, UseFormReturn } from 'react-hook-form';
 import * as Speech from 'expo-speech';
+import { Audio } from 'expo-av';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -818,6 +819,16 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     setDictatedPartial('');
     setSttError(null);
     try {
+      const permission = await Audio.getPermissionsAsync();
+      if (!permission.granted) {
+        const res = await Audio.requestPermissionsAsync();
+        if (!res.granted) {
+          setSttError('PERMISSION_DENIED');
+          setActiveDictationField(null);
+          Alert.alert('Permiso denegado', 'Necesitas habilitar el micrófono para usar el dictado.');
+          return;
+        }
+      }
       await service.start(config);
     } catch {
       setSttError(service.getLastError() ?? 'UNKNOWN');

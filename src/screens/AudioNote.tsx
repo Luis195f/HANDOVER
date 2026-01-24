@@ -1,6 +1,6 @@
 // src/screens/AudioNote.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   useAudioRecorder,
   setAudioModeAsync,
@@ -164,6 +164,13 @@ export default function AudioNote({ navigation }: Props) {
     setDictatedPartial('');
     setDictationError(null);
     try {
+      const granted = await ensurePermissionGranted();
+      if (!granted) {
+        setDictationError('PERMISSION_DENIED');
+        Alert.alert('Permiso denegado', 'Necesitas habilitar el micrófono para dictar.');
+        return;
+      }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
       await sttService.start({ locale: 'es-ES', interimResults: true, maxSeconds: 120 });
     } catch {
       setDictationError(sttService.getLastError() ?? 'UNKNOWN');
@@ -238,8 +245,10 @@ export default function AudioNote({ navigation }: Props) {
     const granted = await ensurePermissionGranted();
     if (!granted) {
       setRecordingError('Activa los permisos de micrófono para grabar la nota.');
+      Alert.alert('Permiso denegado', 'Necesitas habilitar el micrófono para grabar la nota.');
       return;
     }
+    await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
     await startRecording();
   };
 
