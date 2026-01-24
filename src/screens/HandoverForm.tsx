@@ -29,6 +29,7 @@ import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { refineSBARWithAI } from '@/src/lib/ai-sbar';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
+import { openAIClient } from '@/src/lib/openai';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import useDraftAutosave from '@/src/lib/useDraftAutosave';
 import {
@@ -747,9 +748,11 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeFieldRef = useRef<DictationField | null>(null);
   const [sbarPreview, setSbarPreview] = useState<string | null>(null);
   const [isRefiningSbarWithAI, setIsRefiningSbarWithAI] = useState(false);
+  const [isGeneratingSbarWithAI, setIsGeneratingSbarWithAI] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
   const aiSbarAvailable = AI_SBAR_ENABLED;
+  const aiSbarGenerationAvailable = openAIClient.isConfigured;
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -954,6 +957,88 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     }
   };
 
+  const buildSBARPrompt = (values: HandoverFormValues) => {
+    const clinicalContext = {
+      patientId: values.patientId,
+      administrativeData: values.administrativeData,
+      dxMedical: values.dxMedical,
+      dxNursing: values.dxNursing,
+      vitals: values.vitals,
+      medications: values.medications,
+      medsFreeText: values.meds,
+      treatments: values.treatments,
+      exams: values.exams,
+      procedures: values.procedures,
+      evolution: values.evolution,
+      risks: values.risks,
+      risksStructured: values.risksStructured,
+      oxygenTherapy: values.oxygenTherapy,
+      devices: values.devices,
+      nutrition: values.nutrition,
+      elimination: values.elimination,
+      mobility: values.mobility,
+      skin: values.skin,
+      psychosocial: values.psychosocial,
+      fluidBalance: values.fluidBalance,
+      painAssessment: values.painAssessment,
+      braden: values.braden,
+      glasgow: values.glasgow,
+      bedsideChecklist: values.bedsideChecklist,
+    };
+
+    return [
+      'Genera un resumen clínico SBAR en español usando los datos proporcionados.',
+      'Responde SOLO con un JSON válido con las claves: situation, background, assessment, recommendation.',
+      'No inventes datos. Si un campo no tiene información suficiente, deja una cadena vacía.',
+      'Datos del paciente:',
+      JSON.stringify(clinicalContext, null, 2),
+    ].join('\n');
+  };
+
+  const parseSBARResponse = (response: string): SBARSummary => {
+    const cleaned = response.trim();
+    const jsonBlockMatch =
+      cleaned.match(/```json\s*([\s\S]*?)```/i) ?? cleaned.match(/({[\s\S]*})/);
+    const candidate = jsonBlockMatch ? jsonBlockMatch[1] ?? jsonBlockMatch[0] : cleaned;
+    const parsed = safeJsonParse<Record<string, unknown>>(candidate);
+
+    const normalize = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+    if (parsed && typeof parsed === 'object') {
+      return {
+        situation: normalize(parsed.situation),
+        background: normalize(parsed.background),
+        assessment: normalize(parsed.assessment),
+        recommendation: normalize(parsed.recommendation),
+      };
+    }
+
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const headings = [
+      { key: 'situation', labels: ['Situación', 'Situation'] },
+      { key: 'background', labels: ['Antecedentes', 'Background'] },
+      { key: 'assessment', labels: ['Evaluación', 'Assessment'] },
+      { key: 'recommendation', labels: ['Recomendaciones', 'Recommendation', 'Recommendations'] },
+    ];
+    const allLabels = headings.flatMap((item) => item.labels).map(escapeRegExp).join('|');
+
+    const extractSection = (labels: string[]) => {
+      const pattern = new RegExp(
+        `(?:^|\\n)\\s*(?:${labels.map(escapeRegExp).join('|')})\\s*[:\\-]\\s*([\\s\\S]*?)(?=\\n\\s*(?:${allLabels})\\s*[:\\-]|$)`,
+        'i',
+      );
+      const match = cleaned.match(pattern);
+      return match ? match[1].trim() : '';
+    };
+
+    return {
+      situation: extractSection(headings[0].labels),
+      background: extractSection(headings[1].labels),
+      assessment: extractSection(headings[2].labels),
+      recommendation: extractSection(headings[3].labels),
+    };
+  };
+
   const handleRefineSbarWithAi = async () => {
     const values = form.getValues();
 
@@ -978,6 +1063,33 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
     } finally {
       setIsRefiningSbarWithAI(false);
+    }
+  };
+
+  const handleGenerateSbarWithAi = async () => {
+    const values = form.getValues();
+    setIsGeneratingSbarWithAI(true);
+    setSbarAiError(null);
+    setSbarHelperMessage(null);
+
+    try {
+      const prompt = buildSBARPrompt(values);
+      const response = await openAIClient.complete(prompt);
+      const parsed = parseSBARResponse(response);
+      form.setValue('sbarSituation', parsed.situation, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarBackground', parsed.background, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarAssessment', parsed.assessment, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarRecommendation', parsed.recommendation, { shouldDirty: true, shouldValidate: true });
+      setSbarHelperMessage('SBAR generada con IA. Revise y ajuste según criterio clínico.');
+    } catch (error) {
+      console.error('[sbar] No se pudo generar SBAR con IA', error);
+      setSbarAiError('No se pudo generar la SBAR con IA. Verifique la conexión o la configuración.');
+      Alert.alert(
+        'No se pudo generar la SBAR con IA',
+        'Verifique la conexión o la configuración del proveedor de IA.',
+      );
+    } finally {
+      setIsGeneratingSbarWithAI(false);
     }
   };
 
@@ -1592,6 +1704,9 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
               styles={styles}
               aiSbarAvailable={aiSbarAvailable}
               isRefiningSbarWithAI={isRefiningSbarWithAI}
+              aiSbarGenerationAvailable={aiSbarGenerationAvailable}
+              isGeneratingSbarWithAI={isGeneratingSbarWithAI}
+              handleGenerateSbarWithAi={handleGenerateSbarWithAi}
               handleGenerateSbarSuggestion={handleGenerateSbarSuggestion}
               handleRefineSbarWithAi={handleRefineSbarWithAi}
               sbarHelperMessage={sbarHelperMessage}
