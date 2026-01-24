@@ -11,7 +11,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import { prefillFromFHIR, type PrefillOutput } from '@/src/lib/prefill';
-import { useAuth } from '@/src/security/auth';
+import { ensureFreshAccessToken, useAuth } from '@/src/security/auth';
 import { PatientBanner } from './components/PatientBanner';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { t } from '@/src/i18n';
@@ -166,9 +166,10 @@ export function QRScanScreen({ navigation, route }: Props) {
       setPrefillLoading(true);
       setPrefillError(null);
       try {
+        const freshToken = await ensureFreshAccessToken();
         const values = await prefillFromFHIR(parsedPayload.patientId, {
           fhirBase,
-          token: session?.accessToken,
+          token: freshToken ?? session?.accessToken,
         });
         if (!cancelled) {
           setPrefilledValues(values);
