@@ -455,18 +455,37 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
     }
 
     try {
+      // ✅ Validación LOCAL antes de enviar (lo que pide el prompt)
       await enforceLocalBundleValidation(parsed.bundle, 'offline drain');
-      await enforceRemoteBundleValidationIfNeeded(parsed.bundle, 'offline drain (remote)', options.validation);
-      const response = await postBundle(parsed.bundle, { token, idempotencyKey: parsed.txId ?? item.id });
+
+      // ✅ Remota sólo si aplica por modo/env
+      await enforceRemoteBundleValidationIfNeeded(
+        parsed.bundle,
+        'offline drain (remote)',
+        options.validation
+      );
+
+      const response = await postBundle(parsed.bundle, {
+        token,
+        idempotencyKey: parsed.txId ?? item.id,
+      });
 
       const issues = response.issue ?? response.issues;
       const fatal = hasFatalOutcome(issues);
-      const message = fatal?.diagnostics ?? (response.body as { error?: string } | undefined)?.error ?? response.message;
+      const message =
+        fatal?.diagnostics ??
+        (response.body as { error?: string } | undefined)?.error ??
+        response.message;
 
       if (response.status === 401 || response.status === 403) {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(new Error('unauthorized'));
-        return { ok: false, status: response.status, recoverable: false, message: message ?? 'Unauthorized' };
+        return {
+          ok: false,
+          status: response.status,
+          recoverable: false,
+          message: message ?? 'Unauthorized',
+        };
       }
 
       if (response.status === 422) {
@@ -497,6 +516,8 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         options.onAuthError?.(error);
         return { ok: false, status: 401, recoverable: false, message: error.message };
       }
+
+      // ✅ Si viene de Zod/local validation, lo tratamos como 422 no-recoverable
       if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
         const errs = (error as Error & { validationErrors?: ValidationResult['errors'] }).validationErrors;
         const issues = errs?.map((err) => ({ diagnostics: err.message, expression: [err.path] }));
@@ -509,6 +530,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
           errorIssuesJson: serializeIssuesForStorage(issues),
         };
       }
+
       return {
         ok: false,
         status: error instanceof HTTPError ? error.status : undefined,
@@ -1209,19 +1231,39 @@ export async function drain(
         const current = freshQueue[index];
         if (current.nextAt > Date.now()) continue;
 
-        let response: ResponseLike | undefined;
+               let response: ResponseLike | undefined;
         try {
           const token = await getToken();
           if (!token) throw new Error('OAuth token is required');
+
+          // ✅ Validación local antes de enviar (puede lanzar validationErrors)
           await enforceLocalBundleValidation(current.bundle, 'secure-queue drain');
-          await enforceRemoteBundleValidationIfNeeded(current.bundle, 'secure-queue drain (remote)', validation);
+          await enforceRemoteBundleValidationIfNeeded(
+            current.bundle,
+            'secure-queue drain (remote)',
+            validation,
+          );
+
           response = await postBundle(current.bundle, { token });
         } catch (error) {
+          // ✅ Si es error de validación local/Zod → NO reintentar. Remover y dead-letter.
+          if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
+            const [removed] = freshQueue.splice(index, 1);
+            await writeSecureQueue(freshQueue);
+            await pushDeadEntry(removed ?? current, {
+              error: error instanceof Error ? error.message : String(error),
+              // status 422 es coherente con el resto del archivo para validation errors
+              response: { ok: false, status: 422 } as any,
+            });
+            continue;
+          }
+
           if (handleNetworkFailure(error)) {
             freshQueue[index] = scheduleSecureOfflineRetry(current);
             await writeSecureQueue(freshQueue);
             break;
           }
+
           const attempts = current.attempts + 1;
           const delay = jitter(backoff(attempts));
           freshQueue[index] = {
