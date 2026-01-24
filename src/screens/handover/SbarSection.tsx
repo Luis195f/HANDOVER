@@ -7,6 +7,9 @@ export type SbarSectionProps = {
   styles: Record<string, any>;
   aiSbarAvailable: boolean;
   isRefiningSbarWithAI: boolean;
+  aiSbarGenerationAvailable: boolean;
+  isGeneratingSbarWithAI: boolean;
+  handleGenerateSbarWithAi: () => void;
   handleGenerateSbarSuggestion: () => void;
   handleRefineSbarWithAi: () => void;
   sbarHelperMessage: string | null;
@@ -21,6 +24,9 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   styles,
   aiSbarAvailable,
   isRefiningSbarWithAI,
+  aiSbarGenerationAvailable,
+  isGeneratingSbarWithAI,
+  handleGenerateSbarWithAi,
   handleGenerateSbarSuggestion,
   handleRefineSbarWithAi,
   sbarHelperMessage,
@@ -35,7 +41,20 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   return (
     <>
       <View style={styles.inlineActions}>
-        <Button title="Generar SBAR sugerida" onPress={handleGenerateSbarSuggestion} />
+        <Button
+          title={
+            aiSbarGenerationAvailable
+              ? isGeneratingSbarWithAI
+                ? 'Generando SBAR…'
+                : 'Generar SBAR'
+              : 'IA no disponible'
+          }
+          onPress={handleGenerateSbarWithAi}
+          disabled={!aiSbarGenerationAvailable || isGeneratingSbarWithAI}
+        />
+        <View style={styles.secondaryButton}>
+          <Button title="Generar SBAR sugerida" onPress={handleGenerateSbarSuggestion} />
+        </View>
         <View style={styles.secondaryButton}>
           <Button
             title={
@@ -49,7 +68,9 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             disabled={!aiSbarAvailable || isRefiningSbarWithAI}
           />
         </View>
-        {isRefiningSbarWithAI ? <ActivityIndicator style={{ marginLeft: 12 }} /> : null}
+        {isGeneratingSbarWithAI || isRefiningSbarWithAI ? (
+          <ActivityIndicator style={{ marginLeft: 12 }} />
+        ) : null}
       </View>
       {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
       {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}

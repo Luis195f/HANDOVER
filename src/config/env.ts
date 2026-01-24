@@ -77,6 +77,45 @@ export const AI_SBAR_BASE_URL: string | null = resolveAiSbarBaseUrl();
 export const AI_SBAR_API_KEY: string | undefined = resolveAiSbarApiKey();
 export const AI_SBAR_ENABLED = Boolean(AI_SBAR_BASE_URL);
 
+function resolveOpenAiBaseUrl(): string | null {
+  const openAiEnv =
+    process.env.EXPO_PUBLIC_OPENAI_BASE_URL ??
+    process.env.OPENAI_BASE_URL ??
+    Constants.expoConfig?.extra?.OPENAI_BASE_URL ??
+    null;
+
+  if (typeof openAiEnv === 'string' && openAiEnv.trim()) {
+    return sanitizeBaseUrl(openAiEnv.trim());
+  }
+
+  return null;
+}
+
+function resolveOpenAiApiKey(): string | undefined {
+  const raw =
+    process.env.EXPO_PUBLIC_OPENAI_API_KEY ??
+    process.env.OPENAI_API_KEY ??
+    Constants.expoConfig?.extra?.OPENAI_API_KEY ??
+    '';
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  return trimmed || undefined;
+}
+
+function resolveOpenAiModel(): string {
+  const raw =
+    process.env.EXPO_PUBLIC_OPENAI_MODEL ??
+    process.env.OPENAI_MODEL ??
+    Constants.expoConfig?.extra?.OPENAI_MODEL ??
+    '';
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  return trimmed || 'gpt-4o-mini';
+}
+
+export const OPENAI_BASE_URL: string | null = resolveOpenAiBaseUrl();
+export const OPENAI_API_KEY: string | undefined = resolveOpenAiApiKey();
+export const OPENAI_MODEL: string = resolveOpenAiModel();
+export const OPENAI_ENABLED = Boolean(OPENAI_API_KEY || OPENAI_BASE_URL);
+
 export const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? process.env.API_BASE ?? '';
 export const API_TOKEN = process.env.EXPO_PUBLIC_API_TOKEN ?? process.env.API_TOKEN ?? '';
 
@@ -90,6 +129,10 @@ export const ENV = {
   AI_SBAR_BASE_URL,
   AI_SBAR_API_KEY,
   AI_SBAR_ENABLED,
+  OPENAI_BASE_URL,
+  OPENAI_API_KEY,
+  OPENAI_MODEL,
+  OPENAI_ENABLED,
 } as const;
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
