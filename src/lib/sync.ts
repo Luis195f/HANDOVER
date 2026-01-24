@@ -615,7 +615,7 @@ export async function processQueueOnce(): Promise<void> {
     const normalizedPayload = { ...preparedPayload };
     if (typeof preparedPayload.bundle === 'string') {
   try {
-    const decrypted = decryptOfflinePayloadIfNeeded(preparedPayload.bundle); // <-- tu función real
+   const decrypted = preparedPayload.bundle; // <-- tu función real
     normalizedPayload.bundle = JSON.parse(decrypted) as Bundle;
       } catch (error) {
         await updateOfflineQueueStatus(item.id, 'error', {
