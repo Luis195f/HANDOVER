@@ -5,6 +5,9 @@ import { navigationRef } from "@/src/navigation/navigation";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
 import { AuthProvider } from "@/src/security/auth";
 import { warn } from "@/src/lib/otel";
+import NetInfo from "@react-native-community/netinfo";
+import { setOnline, onReconnect } from "@/src/lib/queue";
+import { flushQueue } from "@/src/lib/sync";
 
 export default function App() {
   // Bootstrap de cola (opcional; no rompe si no existe)
@@ -25,6 +28,19 @@ export default function App() {
       );
     }
     return () => { try { if (typeof stop === "function") stop(); } catch {} };
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setOnline(!!state.isConnected);
+    });
+    const off = onReconnect(() => {
+      void flushQueue();
+    });
+    return () => {
+      unsubscribe();
+      off();
+    };
   }, []);
 
   return (
