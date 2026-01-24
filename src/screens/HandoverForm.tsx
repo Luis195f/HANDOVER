@@ -47,7 +47,7 @@ import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-er
 import { AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
-import { getSession, useAuth, type Session } from '@/src/security/auth';
+import { ensureFreshAccessToken, getSession, useAuth, type Session } from '@/src/security/auth';
 import type { HandoverUser } from '@/src/security/auth-types';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import { SHIFT_TYPES, type AdministrativeData } from '@/src/types/administrative';
@@ -1311,8 +1311,9 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       if (isFastValidateEnabled()) {
         const netState = await NetInfo.fetch();
         if (hasNetwork(netState)) {
+          const freshToken = await ensureFreshAccessToken();
           const validation = await fastValidateBundleRemotely(bundle, {
-            token: activeSession?.accessToken ?? null,
+            token: freshToken ?? activeSession?.accessToken ?? null,
           });
           if (!validation.ok) {
             Alert.alert('Error de validación FHIR', validation.message ?? 'El servidor rechazó el Bundle.');

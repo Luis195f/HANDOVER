@@ -38,7 +38,7 @@ type AuthWarnCode =
  */
 function warnAuth(_code: AuthWarnCode, _meta: Record<string, unknown> = {}): void {}
 
-let refreshInFlight: Promise<string | null> | null = null;
+let refreshInFlight: Promise<HandoverSession | null> | null = null;
 const REFRESH_SKEW_MS = 60_000;
 
 
@@ -809,13 +809,20 @@ export async function logoutAndClear(options: LogoutOptions = {}): Promise<void>
 }
 // END HANDOVER: AUTH_LOGOUT
 
-export async function getCurrentSession(): Promise<SessionModel | null> {
+async function getHydratedSession(): Promise<SessionModel | null> {
   if (!hydrated) {
     try {
       await hydrateSession();
     } catch {
     }
   }
+  return currentSession;
+}
+
+export async function getCurrentSession(): Promise<SessionModel | null> {
+  const session = await getHydratedSession();
+  if (!session) return null;
+  await ensureFreshToken();
   return currentSession;
 }
 
@@ -837,7 +844,7 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
  * - Si audience === '401', fuerza refresh (útil tras un 401 real).
  */
 export async function ensureFreshToken(audience?: string): Promise<string | null> {
-  const session = await getCurrentSession();
+  const session = await getHydratedSession();
 
   if (!session?.accessToken) {
     warnAuth('AUTH_REFRESH_SKIP', { reason: 'no-session' });
@@ -865,7 +872,10 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   }
 
   // Single-flight
-  if (refreshInFlight) return refreshInFlight;
+  if (refreshInFlight) {
+    const inFlightSession = await refreshInFlight;
+    return inFlightSession?.accessToken ?? accessToken;
+  }
 
   refreshInFlight = (async () => {
     try {
@@ -877,7 +887,7 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
       const tokenEndpoint = discovery?.tokenEndpoint;
       if (!tokenEndpoint) {
         warnAuth('AUTH_REFRESH_NO_TOKEN_ENDPOINT');
-        return accessToken;
+        return session;
       }
 
       const body = new URLSearchParams();
@@ -896,7 +906,7 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
 
       if (!resp.ok) {
         warnAuth('AUTH_REFRESH_FAILED', { status: resp.status });
-        return accessToken;
+        return session;
       }
 
       const data = (await resp.json()) as Record<string, unknown>;
@@ -927,15 +937,16 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
       await setSession(nextSession);
       warnAuth('AUTH_REFRESH_SUCCESS');
 
-      return nextSession.accessToken ?? accessToken;
+      return nextSession;
     } catch {
-      return accessToken;
+      return session;
     } finally {
       refreshInFlight = null;
     }
   })();
 
-  return refreshInFlight;
+  const refreshedSession = await refreshInFlight;
+  return refreshedSession?.accessToken ?? accessToken;
 }
 
 // Alias usado por algunos tests / consumers
