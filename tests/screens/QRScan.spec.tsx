@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert, Text } from 'react-native';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -35,8 +35,13 @@ vi.mock('@/src/lib/prefill', () => ({
   prefillFromFHIR: vi.fn(async () => ({ vitals: { tempC: 36 } })),
 }));
 
+// IMPORTANTE:
+// Ahora existe lógica que puede invocar ensureFreshAccessToken en flujos de red.
+// Este mock debe exponer ese export para evitar fallos y para que el flujo no se corte.
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({ session: { accessToken: 'token' } }),
+  ensureFreshAccessToken: vi.fn(async () => 'test-access-token'),
+  ensureFreshToken: vi.fn(async () => 'test-access-token'),
 }));
 
 vi.mock('@/src/screens/components/PatientBanner', () => ({
@@ -81,12 +86,19 @@ describe('QRScan screen', () => {
       fireEvent.press(getByText('Continuar con entrega'));
     });
 
-    expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
-      patientId: '123',
-      unitId: 'U1',
-      specialtyId: 'cardio',
-    }));
-    expect(prefillFromFHIR).toHaveBeenCalledWith('123', expect.any(Object));
+    expect(navigate).toHaveBeenCalledWith(
+      'HandoverForm',
+      expect.objectContaining({
+        patientId: '123',
+        unitId: 'U1',
+        specialtyId: 'cardio',
+      }),
+    );
+
+    // prefillFromFHIR puede ejecutarse async después del click (y ahora hay más awaits en el camino).
+    await waitFor(() => {
+      expect(prefillFromFHIR).toHaveBeenCalledWith('123', expect.any(Object));
+    });
   });
 
   it('no marca desajuste si el mismo paciente llega en distintos formatos', async () => {
@@ -107,6 +119,7 @@ describe('QRScan screen', () => {
     await act(async () => {
       fireEvent.press(getByText('camera-mock'));
     });
+
     expect(getByText('Continuar con entrega')).toBeTruthy();
     expect(queryByText('El paciente escaneado no coincide')).toBeNull();
 
@@ -114,10 +127,13 @@ describe('QRScan screen', () => {
       fireEvent.press(getByText('Continuar con entrega'));
     });
 
-    expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
-      patientId: '123',
-      unitId: 'U1',
-    }));
+    expect(navigate).toHaveBeenCalledWith(
+      'HandoverForm',
+      expect.objectContaining({
+        patientId: '123',
+        unitId: 'U1',
+      }),
+    );
   });
 
   it('bloquea el avance cuando el paciente escaneado no coincide con el activo', async () => {
@@ -157,10 +173,13 @@ describe('QRScan screen', () => {
       fireEvent.press(getByText('Continuar con entrega'));
     });
 
-    expect(navigate).toHaveBeenCalledWith('HandoverForm', expect.objectContaining({
-      patientId: '999',
-      unitId: 'U1',
-    }));
+    expect(navigate).toHaveBeenCalledWith(
+      'HandoverForm',
+      expect.objectContaining({
+        patientId: '999',
+        unitId: 'U1',
+      }),
+    );
   });
 
   it('avisa cuando el QR es vacío o inválido', async () => {
@@ -175,6 +194,7 @@ describe('QRScan screen', () => {
     await act(async () => {
       fireEvent.press(getByText('camera-mock'));
     });
+
     expect(alertSpy).toHaveBeenCalledWith('Código no válido', 'No se pudo leer el código QR.');
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -191,7 +211,6 @@ describe('QRScan screen', () => {
     });
 
     expect(getByText('Continuar con entrega')).toBeTruthy();
-
     expect(queryByText('El paciente escaneado no coincide')).toBeNull();
   });
 });
