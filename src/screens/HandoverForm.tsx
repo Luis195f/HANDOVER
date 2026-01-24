@@ -97,7 +97,6 @@ import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
 import { SbarSection } from './handover/SbarSection';
 import * as SecureStore from 'expo-secure-store';
-import { useEffect, useMemo, useRef } from 'react';
 import { HandoverFormActions } from './handover/HandoverFormActions';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
