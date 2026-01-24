@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, Switch, Text } from 'react-native';
+import { FlatList, Switch } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -8,22 +8,32 @@ import PatientList from '@/src/screens/PatientList';
 vi.mock('expo', () => ({
   requireNativeModule: () => ({}),
 }));
+
 vi.mock('expo-sqlite', () => ({
   openDatabaseSync: () => ({
     getAllSync: vi.fn(() => []),
     runSync: vi.fn(),
     withTransactionSync: (fn: any) =>
-      fn({ getAllSync: vi.fn(() => []), runSync: vi.fn(), withTransactionSync: (cb: any) => cb({}) }),
+      fn({
+        getAllSync: vi.fn(() => []),
+        runSync: vi.fn(),
+        withTransactionSync: (cb: any) => cb({}),
+      }),
   }),
   SQLiteProvider: ({ children }: any) => children,
 }));
+
 vi.mock('@/src/security/acl', () => ({
   currentUser: () => ({ id: 'tester' }),
   hasUnitAccess: () => true,
+  // IMPORTANTE: agregado para evitar fallo por navegación/visibilidad del botón supervisor
+  hasRole: (_session: any, _roles: string[]) => false,
 }));
+
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({
-    session: null,
+    // Recomendado: entregar una sesión con roles para evitar null-edge-cases
+    session: { user: { id: 'tester' }, roles: ['nurse'] },
     loading: false,
     loginWithOAuth: vi.fn(),
     loginWithCredentials: vi.fn(),
@@ -36,11 +46,11 @@ vi.mock('@/src/lib/otel', () => ({
 }));
 
 describe('PatientList – prioridad clínica', () => {
-  type NavigationMock = { navigate: (...args: unknown[]) => void };
   const navigation: any = { navigate: vi.fn(), setOptions: vi.fn() };
 
   it('ordena por prioridad clínica y muestra el resumen', () => {
     let renderer: ReturnType<typeof create>;
+
     act(() => {
       renderer = create(<PatientList navigation={navigation} />);
     });
@@ -68,7 +78,11 @@ describe('PatientList – prioridad clínica', () => {
       toggle.props.onValueChange(true);
     });
 
-    const sorted = renderer!.root.findByType(FlatList).props.data as Array<{ patientId: string; reasonSummary: string }>;
+    const sorted = renderer!.root.findByType(FlatList).props.data as Array<{
+      patientId: string;
+      reasonSummary: string;
+    }>;
+
     expect(sorted[0].patientId).toBe('pat-001');
     expect(sorted[0].reasonSummary).toContain('NEWS2');
   });
