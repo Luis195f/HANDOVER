@@ -560,9 +560,11 @@ export default function HandoverForm({ navigation, route }: Props) {
  const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
   const { watch, reset, getValues } = form;
   const { control, formState } = form;
+  const patientIdValue = form.watch('patientId');
+  const administrativeUnitValue = form.watch('administrativeData.unit');
   const draftKey = useMemo(() => {
-  return `handoverDraft:${patientId ?? 'unknown'}:${unitId ?? 'unknown'}`;
-}, [patientId, unitId]);
+  return `handoverDraft:${patientIdValue ?? 'unknown'}:${administrativeUnitValue ?? 'unknown'}`;
+}, [patientIdValue, administrativeUnitValue]);
 
 const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -573,7 +575,7 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
-  const administrativeUnitValue = form.watch('administrativeData.unit');
+  
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
   const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
