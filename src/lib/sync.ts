@@ -136,6 +136,19 @@ function resolveValidationMode(input?: ValidationMode): ValidationMode {
   return 'off';
 }
 
+async function enforceLocalBundleValidation(bundle: unknown, context: string): Promise<void> {
+  await enforceBundleValidationWithMode(bundle, context, { mode: 'local' });
+}
+
+async function enforceRemoteBundleValidationIfNeeded(
+  bundle: unknown,
+  context: string,
+  opts?: ValidationOptions
+): Promise<void> {
+  if (resolveValidationMode(opts?.mode) !== 'remote') return;
+  await enforceBundleValidationWithMode(bundle, context, { ...opts, mode: 'remote' });
+}
+
 function enforceBundleValidation(bundle: any, context: string) {
   const result = validateFHIRBundle(bundle);
   if (!result.isValid) {
@@ -442,7 +455,8 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
     }
 
     try {
-      await enforceBundleValidationWithMode(parsed.bundle, 'offline drain', options.validation);
+      await enforceLocalBundleValidation(parsed.bundle, 'offline drain');
+      await enforceRemoteBundleValidationIfNeeded(parsed.bundle, 'offline drain (remote)', options.validation);
       const response = await postBundle(parsed.bundle, { token, idempotencyKey: parsed.txId ?? item.id });
 
       const issues = response.issue ?? response.issues;
@@ -1199,7 +1213,8 @@ export async function drain(
         try {
           const token = await getToken();
           if (!token) throw new Error('OAuth token is required');
-          await enforceBundleValidationWithMode(current.bundle, 'secure-queue drain', validation);
+          await enforceLocalBundleValidation(current.bundle, 'secure-queue drain');
+          await enforceRemoteBundleValidationIfNeeded(current.bundle, 'secure-queue drain (remote)', validation);
           response = await postBundle(current.bundle, { token });
         } catch (error) {
           if (handleNetworkFailure(error)) {
@@ -1504,7 +1519,12 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     });
   const sender: SendFn = async (tx) => {
     if (tx?.bundle) {
-      await enforceBundleValidationWithMode(tx.bundle, 'legacy flushQueue sender', opts?.validation);
+      await enforceLocalBundleValidation(tx.bundle, 'legacy flushQueue sender');
+      await enforceRemoteBundleValidationIfNeeded(
+        tx.bundle,
+        'legacy flushQueue sender (remote)',
+        opts?.validation,
+      );
     }
     return baseSender(tx);
   };
