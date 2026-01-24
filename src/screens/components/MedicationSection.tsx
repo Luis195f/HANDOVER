@@ -230,6 +230,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.code` as const}
+                defaultValue={currentMedication?.code}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Código</Text>
@@ -256,6 +257,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.name` as const}
+                defaultValue={currentMedication?.name ?? ''}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Nombre</Text>
@@ -275,6 +277,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.route` as const}
+                defaultValue={currentMedication?.route}
                 render={({ field: { value, onChange } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Vía</Text>
@@ -300,6 +303,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.dose` as const}
+                defaultValue={currentMedication?.dose ?? ''}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Dosis</Text>
@@ -316,6 +320,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.isContinuous` as const}
+                defaultValue={currentMedication?.isContinuous ?? false}
                 render={({ field: { value, onChange } }) => (
                   <View style={[styles.field, styles.switchRow]}>
                     <Text style={styles.label}>Infusión continua</Text>
@@ -328,6 +333,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                   <Controller
                     control={control}
                     name={`${name}.${index}.startTime` as const}
+                    defaultValue={currentMedication?.startTime ?? ''}
                     render={({ field: { onChange, onBlur, value } }) => (
                       <View style={styles.field}>
                         <Text style={styles.label}>Hora de inicio</Text>
@@ -347,6 +353,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                   <Controller
                     control={control}
                     name={`${name}.${index}.endTime` as const}
+                    defaultValue={currentMedication?.endTime ?? ''}
                     render={({ field: { onChange, onBlur, value } }) => (
                       <View style={styles.field}>
                         <Text style={styles.label}>Hora de fin</Text>
@@ -368,6 +375,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.frequency` as const}
+                defaultValue={currentMedication?.frequency ?? ''}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Frecuencia</Text>
@@ -384,6 +392,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.notes` as const}
+                defaultValue={currentMedication?.notes ?? ''}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={styles.field}>
                     <Text style={styles.label}>Notas</Text>
@@ -401,6 +410,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
               <Controller
                 control={control}
                 name={`${name}.${index}.isHighAlert` as const}
+                defaultValue={currentMedication?.isHighAlert ?? false}
                 render={({ field: { value, onChange } }) => (
                   <View style={[styles.field, styles.switchRow]}>
                     <Text style={styles.label}>Medicamento de alto riesgo</Text>

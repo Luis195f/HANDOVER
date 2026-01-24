@@ -68,6 +68,7 @@ export function DevicesSection({ styles }: Props) {
               <Controller
                 control={control}
                 name={`devices.${index}.name`}
+                defaultValue={field.name ?? ''}
                 render={({ field: { value, onChange, onBlur } }) => (
                   <TextInput
                     style={[
@@ -89,6 +90,7 @@ export function DevicesSection({ styles }: Props) {
                 <Controller
                   control={control}
                   name={`devices.${index}.active`}
+                  defaultValue={field.active ?? true}
                   render={({ field: { value, onChange } }) => (
                     <View style={styles.row}>
                       <Switch value={value ?? true} onValueChange={onChange} />

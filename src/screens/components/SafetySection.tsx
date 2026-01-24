@@ -45,6 +45,7 @@ export default function SafetySection({ control, watch }: SafetySectionProps) {
     <Controller
       control={control}
       name="risksStructured"
+      defaultValue={[]}
       render={({ field: { value, onChange } }) => {
         const currentRisks = normalizeRisks(watchedRisks ?? value);
 

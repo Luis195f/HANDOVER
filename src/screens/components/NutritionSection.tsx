@@ -22,6 +22,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
       <Controller
         control={control}
         name="nutrition.dietType"
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <PickerField
             testID="nutrition.dietType"
@@ -38,6 +39,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
       <Controller
         control={control}
         name="nutrition.tolerance"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Tolerancia</Text>
@@ -58,6 +60,7 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
       <Controller
         control={control}
         name="nutrition.intakeMl"
+        defaultValue={undefined}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Ingesta (mL)</Text>
@@ -80,5 +83,3 @@ export function NutritionSection({ parseNumber }: NutritionSectionProps) {
 }
 
 export default NutritionSection;
-
-

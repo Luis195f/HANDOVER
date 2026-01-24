@@ -30,6 +30,7 @@ export function BedsideChecklistSection({
       key={name}
       control={control}
       name={`bedsideChecklist.${name}` as const}
+      defaultValue={false}
       render={({ field: { onChange, value } }) => (
         <View style={styles.switchRow}>
           <Text
@@ -63,6 +64,7 @@ export function BedsideChecklistSection({
       <Controller
         control={control}
         name="bedsideChecklist.bedsideNotes"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Notas de cabecera de cama (opcional)</Text>
