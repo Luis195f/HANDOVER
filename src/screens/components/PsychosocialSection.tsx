@@ -13,6 +13,7 @@ export function PsychosocialSection() {
       <Controller
         control={control}
         name="psychosocial.emotionalStatus"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Estado emocional</Text>
@@ -29,6 +30,7 @@ export function PsychosocialSection() {
       <Controller
         control={control}
         name="psychosocial.familyNotes"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Notas familiares</Text>
@@ -46,6 +48,7 @@ export function PsychosocialSection() {
       <Controller
         control={control}
         name="psychosocial.familyVisits"
+        defaultValue={false}
         render={({ field: { onChange, value } }) => (
           <View style={[nursingStyles.field, nursingStyles.switchRow]}>
             <Text style={nursingStyles.label}>Visitas familiares</Text>

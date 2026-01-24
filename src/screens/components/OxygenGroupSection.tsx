@@ -33,6 +33,7 @@ export function OxygenGroupSection({ styles, parseNumericInput }: OxygenGroupSec
         <Controller
           control={control}
           name="oxygenTherapy.device"
+          defaultValue=""
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
@@ -50,6 +51,7 @@ export function OxygenGroupSection({ styles, parseNumericInput }: OxygenGroupSec
         <Controller
           control={control}
           name="oxygenTherapy.flowLMin"
+          defaultValue={undefined}
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
@@ -68,6 +70,7 @@ export function OxygenGroupSection({ styles, parseNumericInput }: OxygenGroupSec
         <Controller
           control={control}
           name="oxygenTherapy.fio2"
+          defaultValue={undefined}
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}

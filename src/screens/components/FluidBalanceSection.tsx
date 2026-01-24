@@ -45,6 +45,7 @@ export function FluidBalanceSection({ parseNumber }: FluidBalanceSectionProps) {
           <Controller
             control={control}
             name="fluidBalance.intakeMl"
+            defaultValue={undefined}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={nursingStyles.input}
@@ -68,6 +69,7 @@ export function FluidBalanceSection({ parseNumber }: FluidBalanceSectionProps) {
           <Controller
             control={control}
             name="fluidBalance.outputMl"
+            defaultValue={undefined}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={nursingStyles.input}
@@ -101,6 +103,7 @@ export function FluidBalanceSection({ parseNumber }: FluidBalanceSectionProps) {
       <Controller
         control={control}
         name="fluidBalance.notes"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Observaciones</Text>

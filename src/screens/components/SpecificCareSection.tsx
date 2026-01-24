@@ -138,6 +138,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="nutrition.dietType"
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <PickerField
             label="Tipo de dieta"
@@ -152,6 +153,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="nutrition.tolerance"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Tolerancia</Text>
@@ -171,6 +173,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="nutrition.intakeMl"
+        defaultValue={undefined}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Ingesta (mL)</Text>
@@ -193,6 +196,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="elimination.urineMl"
+        defaultValue={undefined}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Diuresis (mL)</Text>
@@ -213,6 +217,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="elimination.stoolPattern"
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <PickerField
             label="Patrón evacuatorio"
@@ -227,6 +232,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="elimination.hasRectalTube"
+        defaultValue={false}
         render={({ field: { onChange, value } }) => (
           <View style={[styles.field, styles.switchRow]}>
             <Text style={styles.label}>Sonda rectal</Text>
@@ -242,6 +248,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
           <Controller
             control={control}
             name="fluidBalance.intakeMl"
+            defaultValue={undefined}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
@@ -263,6 +270,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
           <Controller
             control={control}
             name="fluidBalance.outputMl"
+            defaultValue={undefined}
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
@@ -291,6 +299,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="fluidBalance.notes"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Observaciones</Text>
@@ -310,6 +319,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="mobility.mobilityLevel"
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <PickerField
             label="Nivel de movilidad"
@@ -324,6 +334,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="mobility.repositioningPlan"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Plan de cambios de posición</Text>
@@ -345,6 +356,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="skin.skinStatus"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Estado de piel</Text>
@@ -364,6 +376,7 @@ export function SpecificCareSection({ control, errors, parseNumber, setValue }: 
       <Controller
         control={control}
         name="skin.hasPressureInjury"
+        defaultValue={false}
         render={({ field: { onChange, value } }) => (
           <View style={[styles.field, styles.switchRow]}>
             <Text style={styles.label}>Úlcera por presión</Text>

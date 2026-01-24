@@ -73,6 +73,7 @@ function BradenSubscaleField({
       <Controller
         control={control}
         name={name}
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <View style={styles.optionRow}>
             {options.map((option) => {
@@ -115,6 +116,7 @@ function GlasgowField({
       <Controller
         control={control}
         name={name}
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <View style={styles.optionRow}>
             {options.map((option) => {
@@ -316,6 +318,7 @@ export default function ClinicalScalesSection() {
       <Controller
         control={control}
         name="painAssessment.hasPain"
+        defaultValue={false}
         render={({ field: { onChange, value } }) => (
           <View style={[styles.field, styles.switchRow]}>
             <Text style={styles.label}>Paciente con dolor</Text>
@@ -327,6 +330,7 @@ export default function ClinicalScalesSection() {
       <Controller
         control={control}
         name="painAssessment.evaScore"
+        defaultValue={null}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Dolor: {value ?? '—'}/10</Text>
@@ -347,6 +351,7 @@ export default function ClinicalScalesSection() {
       <Controller
         control={control}
         name="painAssessment.location"
+        defaultValue={null}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Localización del dolor</Text>
@@ -366,6 +371,7 @@ export default function ClinicalScalesSection() {
       <Controller
         control={control}
         name="painAssessment.actionsTaken"
+        defaultValue={null}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={styles.field}>
             <Text style={styles.label}>Medidas / analgesia administrada</Text>

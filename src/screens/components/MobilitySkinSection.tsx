@@ -19,6 +19,7 @@ export function MobilitySkinSection() {
       <Controller
         control={control}
         name="mobility.mobilityLevel"
+        defaultValue={undefined}
         render={({ field: { onChange, value } }) => (
           <PickerField
             testID="mobility.mobilityLevel"
@@ -35,6 +36,7 @@ export function MobilitySkinSection() {
       <Controller
         control={control}
         name="mobility.repositioningPlan"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Plan de cambios de posición</Text>
@@ -57,6 +59,7 @@ export function MobilitySkinSection() {
       <Controller
         control={control}
         name="skin.skinStatus"
+        defaultValue=""
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Estado de piel</Text>
@@ -77,6 +80,7 @@ export function MobilitySkinSection() {
       <Controller
         control={control}
         name="skin.hasPressureInjury"
+        defaultValue={false}
         render={({ field: { onChange, value } }) => (
           <View style={[nursingStyles.field, nursingStyles.switchRow]}>
             <Text style={nursingStyles.label}>Úlcera por presión</Text>
@@ -93,4 +97,3 @@ export function MobilitySkinSection() {
 }
 
 export default MobilitySkinSection;
-

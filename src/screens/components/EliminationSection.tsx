@@ -21,6 +21,7 @@ export function EliminationSection({ parseNumber }: EliminationSectionProps) {
       <Controller
         control={control}
         name="elimination.urineMl"
+        defaultValue={undefined}
         render={({ field: { onChange, onBlur, value } }) => (
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Diuresis (mL)</Text>
@@ -39,23 +40,25 @@ export function EliminationSection({ parseNumber }: EliminationSectionProps) {
         )}
       />
       <Controller
-  control={control}
-  name="elimination.stoolPattern"
-  render={({ field: { onChange, value } }) => (
-    <PickerField
-      testID="elimination.stoolPattern"
-      label="Patrón deposicional"
-      placeholder="Seleccionar"
-      value={value}
-      options={stoolPatternOptions}
-      onValueChange={onChange}
-      error={eliminationErrors?.stoolPattern?.message as string | undefined}
-    />
-  )}
-/>
+        control={control}
+        name="elimination.stoolPattern"
+        defaultValue={undefined}
+        render={({ field: { onChange, value } }) => (
+          <PickerField
+            testID="elimination.stoolPattern"
+            label="Patrón deposicional"
+            placeholder="Seleccionar"
+            value={value}
+            options={stoolPatternOptions}
+            onValueChange={onChange}
+            error={eliminationErrors?.stoolPattern?.message as string | undefined}
+          />
+        )}
+      />
       <Controller
         control={control}
         name="elimination.hasRectalTube"
+        defaultValue={false}
         render={({ field: { onChange, value } }) => (
           <View style={[nursingStyles.field, nursingStyles.switchRow]}>
             <Text style={nursingStyles.label}>Sonda rectal</Text>

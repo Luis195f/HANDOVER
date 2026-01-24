@@ -29,6 +29,7 @@ import { computeNEWS2 } from '@/src/lib/news2';
 import { refineSBARWithAI } from '@/src/lib/ai-sbar';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
+import useDraftAutosave from '@/src/lib/useDraftAutosave';
 import {
   createSttService,
   type SttConfig,
@@ -95,7 +96,20 @@ import OxygenGroupSection from './components/OxygenGroupSection';
 import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
 import { SbarSection } from './handover/SbarSection';
+import * as SecureStore from 'expo-secure-store';
+import { useEffect, useMemo, useRef } from 'react';
 import { HandoverFormActions } from './handover/HandoverFormActions';
+
+const IS_TEST = process.env.NODE_ENV === 'test';
+
+function safeJsonParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -544,8 +558,16 @@ export default function HandoverForm({ navigation, route }: Props) {
   ]);
 
  const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
-
+  const { watch, reset, getValues } = form;
   const { control, formState } = form;
+  const patientIdValue = form.watch('patientId');
+  const administrativeUnitValue = form.watch('administrativeData.unit');
+  const draftKey = useMemo(() => {
+  return `handoverDraft:${patientIdValue ?? 'unknown'}:${administrativeUnitValue ?? 'unknown'}`;
+}, [patientIdValue, administrativeUnitValue]);
+
+const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const errors: HandoverFormErrors = formState.errors ?? {};
   const hasValidationErrors = Object.keys(errors).length > 0;
   const medsError = errors.meds?.message as string | undefined;
@@ -553,7 +575,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
-  const administrativeUnitValue = form.watch('administrativeData.unit');
+  
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
   const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
@@ -570,6 +592,65 @@ export default function HandoverForm({ navigation, route }: Props) {
     'oxygenTherapy',
   ]);
   const watchedValues = form.watch();
+
+  const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
+    patientId: patientIdValue,
+    enabled: true,
+    delay: 800,
+    getSnapshot: () => form.getValues(),
+    onLoad: (data) => {
+      if (!data) return;
+      form.reset({ ...form.getValues(), ...data });
+    },
+  });
+
+ useEffect(() => {
+  if (IS_TEST) return;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const raw = await SecureStore.getItemAsync(draftKey);
+      if (cancelled) return;
+
+      const draft = safeJsonParse<any>(raw);
+      if (!draft) return;
+
+      // Importante: NO pisar si ya hay datos
+      const current = getValues();
+      const isEmpty = !current || Object.keys(current).length === 0;
+      if (isEmpty) reset(draft);
+    } catch {
+      // no-op
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [draftKey, reset, getValues]);
+
+  useEffect(() => {
+  if (IS_TEST) return;
+
+  const subscription = watch(values => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current = setTimeout(() => {
+      void SecureStore.setItemAsync(draftKey, JSON.stringify(values)).catch(() => {});
+    }, 300);
+  });
+
+  return () => {
+    subscription?.unsubscribe?.();
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  };
+}, [watch, draftKey]);
+
   const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
     () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
@@ -947,7 +1028,6 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleCloseSbarPreview = () => setSbarPreview(null);
 
-  const patientIdValue = form.watch('patientId');
   const trimmedPatientId =
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
   // BEGIN HANDOVER D6 – HandoverForm PatientBanner
