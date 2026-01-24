@@ -180,6 +180,7 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
             <Controller
               control={control}
               name={`${name}.${index}.freeTextNote`}
+              defaultValue={(field as { freeTextNote?: string }).freeTextNote ?? ''}
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
                   style={styles.noteInput}

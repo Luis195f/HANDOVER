@@ -29,6 +29,7 @@ import { computeNEWS2 } from '@/src/lib/news2';
 import { refineSBARWithAI } from '@/src/lib/ai-sbar';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
+import useDraftAutosave from '@/src/lib/useDraftAutosave';
 import {
   createSttService,
   type SttConfig,
@@ -546,6 +547,7 @@ export default function HandoverForm({ navigation, route }: Props) {
  const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
 
   const { control, formState } = form;
+  const patientIdValue = form.watch('patientId');
   const errors: HandoverFormErrors = formState.errors ?? {};
   const hasValidationErrors = Object.keys(errors).length > 0;
   const medsError = errors.meds?.message as string | undefined;
@@ -570,6 +572,26 @@ export default function HandoverForm({ navigation, route }: Props) {
     'oxygenTherapy',
   ]);
   const watchedValues = form.watch();
+
+  const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
+    patientId: patientIdValue,
+    enabled: true,
+    delay: 800,
+    getSnapshot: () => form.getValues(),
+    onLoad: (data) => {
+      if (!data) return;
+      form.reset({ ...form.getValues(), ...data });
+    },
+  });
+
+  useEffect(() => {
+    void loadDraftNow();
+  }, [loadDraftNow, patientIdValue]);
+
+  useEffect(() => {
+    const subscription = form.watch(() => scheduleSave());
+    return () => (typeof subscription === 'function' ? subscription() : subscription?.unsubscribe?.());
+  }, [form, scheduleSave]);
   const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
     () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
@@ -947,7 +969,6 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleCloseSbarPreview = () => setSbarPreview(null);
 
-  const patientIdValue = form.watch('patientId');
   const trimmedPatientId =
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
   // BEGIN HANDOVER D6 – HandoverForm PatientBanner

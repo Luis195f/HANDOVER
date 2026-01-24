@@ -123,6 +123,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
   const renderModal = () => {
     if (editing == null) return null;
     const index = editing.index;
+    const currentTreatment = treatments?.[index];
     return (
       <Modal transparent animationType="fade" visible onRequestClose={handleCancel}>
         <Pressable style={styles.modalBackdrop} onPress={handleCancel}>
@@ -131,6 +132,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
             <Controller
               control={control}
               name={`${name}.${index}.type` as const}
+              defaultValue={currentTreatment?.type ?? 'other'}
               render={({ field: { onChange, value } }) => (
                 <View style={styles.field}>
                   <Text style={styles.label}>Tipo</Text>
@@ -163,6 +165,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
             <Controller
               control={control}
               name={`${name}.${index}.description` as const}
+              defaultValue={currentTreatment?.description ?? ''}
               render={({ field: { onChange, onBlur, value } }) => (
                 <View style={styles.field}>
                   <Text style={styles.label}>Descripción</Text>
@@ -183,6 +186,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
             <Controller
               control={control}
               name={`${name}.${index}.scheduledAt` as const}
+              defaultValue={currentTreatment?.scheduledAt ?? ''}
               render={({ field: { onChange, onBlur, value } }) => (
                 <View style={styles.field}>
                   <Text style={styles.label}>Programado para</Text>
@@ -199,6 +203,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
             <Controller
               control={control}
               name={`${name}.${index}.done` as const}
+              defaultValue={currentTreatment?.done ?? false}
               render={({ field: { value, onChange } }) => (
                 <View style={[styles.field, styles.switchRow]}>
                   <Text style={styles.label}>Completado</Text>
