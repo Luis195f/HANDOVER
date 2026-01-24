@@ -2251,6 +2251,7 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
             }
             currentUser={signatureUser}
             administrativeUnitId={administrativeUnitValue}
+            getSignaturePayload={() => form.getValues()}
           />
           {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
           {incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Alert, Button, StyleSheet, Text, View } from 'react-native';
 
+import { hashHex } from '@/src/lib/crypto';
 import type { HandoverSignature } from '@/src/types/handover';
 import type { HandoverValues } from '@/src/validation/schemas';
 
@@ -23,6 +24,7 @@ type Props = {
   onChange: (next: SignatureInfo) => void;
   currentUser?: SignatureUser | null;
   administrativeUnitId?: string;
+  getSignaturePayload?: () => unknown;
 };
 
 type SignatureKind = 'outgoing' | 'incoming';
@@ -57,19 +59,31 @@ function canUserSign(user?: SignatureUser | null) {
   return roles.includes('nurse');
 }
 
-function buildSignatureFromUser(user: SignatureUser, unitId: string): HandoverSignature {
+function buildSignatureFromUser(
+  user: SignatureUser,
+  unitId: string,
+  signatureHash?: string,
+  signedAt?: string,
+): HandoverSignature {
   return {
     userId: user.id ?? user.userId ?? user.displayName ?? 'unknown-user',
     fullName: user.fullName ?? user.name ?? user.displayName ?? user.userId ?? 'Usuario',
     role: (user.roles?.[0] as HandoverSignature['role']) ?? (user.role as HandoverSignature['role']),
     unitId,
-    signedAt: new Date().toISOString(),
+    signedAt: signedAt ?? new Date().toISOString(),
+    signatureHash,
     deviceInfo: undefined,
     method: 'session',
   };
 }
 
-export function SignaturesSection({ value, onChange, currentUser, administrativeUnitId }: Props) {
+export function SignaturesSection({
+  value,
+  onChange,
+  currentUser,
+  administrativeUnitId,
+  getSignaturePayload,
+}: Props) {
   const outgoing = value?.outgoing;
   const incoming = value?.incoming;
   const allowedToSign = canUserSign(currentUser);
@@ -94,7 +108,15 @@ export function SignaturesSection({ value, onChange, currentUser, administrative
         text: 'Confirmar',
         style: 'default',
         onPress: () => {
-          const nextSignature = buildSignatureFromUser(currentUser, activeUnitId);
+          const timestamp = new Date().toISOString();
+          const contentToSign = JSON.stringify(getSignaturePayload?.() ?? {});
+          const signatureHash = hashHex(`${contentToSign}${timestamp}`);
+          const nextSignature = buildSignatureFromUser(
+            currentUser,
+            activeUnitId,
+            signatureHash,
+            timestamp,
+          );
           onChange({
             ...value,
             [kind]: nextSignature,

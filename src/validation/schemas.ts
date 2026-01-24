@@ -471,6 +471,7 @@ const zHandoverSignatureBase = z.object({
   role: z.enum(["nurse", "admin", "supervisor"]).optional(),
   unitId: z.string().trim().min(1, "Falta unidad clínica en la firma").max(80),
   signedAt: z.string().datetime().or(z.string()).describe("ISO timestamp de firma"),
+  signatureHash: z.string().min(1).optional(),
   deviceInfo: z.string().optional(),
   method: z.enum(["session", "pin", "biometric"]).default("session"),
 });
