@@ -1564,7 +1564,7 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     if (tx?.bundle) {
       await enforceLocalBundleValidation(tx.bundle, 'legacy flushQueue sender', opts?.validation);
       await enforceRemoteBundleValidationIfNeeded(tx.bundle, 'legacy flushQueue sender (remote)', opts?.validation);
-
+  }
     return baseSender(tx);
   };
 
