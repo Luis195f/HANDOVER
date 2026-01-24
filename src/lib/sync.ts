@@ -136,6 +136,28 @@ function resolveValidationMode(input?: ValidationMode): ValidationMode {
   return 'off';
 }
 
+async function enforceLocalBundleValidation(
+  bundle: unknown,
+  context: string,
+  opts?: ValidationOptions
+): Promise<void> {
+  // Si el modo está OFF, no validar (esto evita romper tests)
+  const mode = resolveValidationMode(opts?.mode);
+  if (mode === 'off') return;
+
+  // Validación local (estructura + zod), sin remote aquí
+  enforceBundleValidation(bundle, context);
+}
+
+async function enforceRemoteBundleValidationIfNeeded(
+  bundle: unknown,
+  context: string,
+  opts?: ValidationOptions
+): Promise<void> {
+  if (resolveValidationMode(opts?.mode) !== 'remote') return;
+  await enforceBundleValidationWithMode(bundle, context, { ...opts, mode: 'remote' });
+}
+
 function enforceBundleValidation(bundle: any, context: string) {
   const result = validateFHIRBundle(bundle);
   if (!result.isValid) {
@@ -442,17 +464,32 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
     }
 
     try {
-      await enforceBundleValidationWithMode(parsed.bundle, 'offline drain', options.validation);
-      const response = await postBundle(parsed.bundle, { token, idempotencyKey: parsed.txId ?? item.id });
+      // ✅ Validación LOCAL antes de enviar (lo que pide el prompt)
+    await enforceLocalBundleValidation(parsed.bundle, 'offline drain', options.validation);
+    await enforceRemoteBundleValidationIfNeeded(parsed.bundle, 'offline drain (remote)', options.validation);
+
+
+      const response = await postBundle(parsed.bundle, {
+        token,
+        idempotencyKey: parsed.txId ?? item.id,
+      });
 
       const issues = response.issue ?? response.issues;
       const fatal = hasFatalOutcome(issues);
-      const message = fatal?.diagnostics ?? (response.body as { error?: string } | undefined)?.error ?? response.message;
+      const message =
+        fatal?.diagnostics ??
+        (response.body as { error?: string } | undefined)?.error ??
+        response.message;
 
       if (response.status === 401 || response.status === 403) {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(new Error('unauthorized'));
-        return { ok: false, status: response.status, recoverable: false, message: message ?? 'Unauthorized' };
+        return {
+          ok: false,
+          status: response.status,
+          recoverable: false,
+          message: message ?? 'Unauthorized',
+        };
       }
 
       if (response.status === 422) {
@@ -483,6 +520,8 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         options.onAuthError?.(error);
         return { ok: false, status: 401, recoverable: false, message: error.message };
       }
+
+      // ✅ Si viene de Zod/local validation, lo tratamos como 422 no-recoverable
       if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
         const errs = (error as Error & { validationErrors?: ValidationResult['errors'] }).validationErrors;
         const issues = errs?.map((err) => ({ diagnostics: err.message, expression: [err.path] }));
@@ -495,6 +534,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
           errorIssuesJson: serializeIssuesForStorage(issues),
         };
       }
+
       return {
         ok: false,
         status: error instanceof HTTPError ? error.status : undefined,
@@ -574,8 +614,9 @@ export async function processQueueOnce(): Promise<void> {
 
     const normalizedPayload = { ...preparedPayload };
     if (typeof preparedPayload.bundle === 'string') {
-      try {
-        normalizedPayload.bundle = JSON.parse(preparedPayload.bundle) as Bundle;
+  try {
+    const decrypted = decryptOfflinePayloadIfNeeded(preparedPayload.bundle); // <-- tu función real
+    normalizedPayload.bundle = JSON.parse(decrypted) as Bundle;
       } catch (error) {
         await updateOfflineQueueStatus(item.id, 'error', {
           attemptCount,
@@ -1195,18 +1236,35 @@ export async function drain(
         const current = freshQueue[index];
         if (current.nextAt > Date.now()) continue;
 
-        let response: ResponseLike | undefined;
+               let response: ResponseLike | undefined;
         try {
           const token = await getToken();
           if (!token) throw new Error('OAuth token is required');
-          await enforceBundleValidationWithMode(current.bundle, 'secure-queue drain', validation);
+
+          // ✅ Validación local antes de enviar (puede lanzar validationErrors)
+          await enforceLocalBundleValidation(current.bundle, 'secure-queue drain', validation);
+          await enforceRemoteBundleValidationIfNeeded(current.bundle, 'secure-queue drain (remote)', validation);
+
           response = await postBundle(current.bundle, { token });
         } catch (error) {
+          // ✅ Si es error de validación local/Zod → NO reintentar. Remover y dead-letter.
+          if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
+            const [removed] = freshQueue.splice(index, 1);
+            await writeSecureQueue(freshQueue);
+            await pushDeadEntry(removed ?? current, {
+              error: error instanceof Error ? error.message : String(error),
+              // status 422 es coherente con el resto del archivo para validation errors
+              response: { ok: false, status: 422 } as any,
+            });
+            continue;
+          }
+
           if (handleNetworkFailure(error)) {
             freshQueue[index] = scheduleSecureOfflineRetry(current);
             await writeSecureQueue(freshQueue);
             break;
           }
+
           const attempts = current.attempts + 1;
           const delay = jitter(backoff(attempts));
           freshQueue[index] = {
@@ -1504,8 +1562,9 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     });
   const sender: SendFn = async (tx) => {
     if (tx?.bundle) {
-      await enforceBundleValidationWithMode(tx.bundle, 'legacy flushQueue sender', opts?.validation);
-    }
+      await enforceLocalBundleValidation(tx.bundle, 'legacy flushQueue sender', opts?.validation);
+      await enforceRemoteBundleValidationIfNeeded(tx.bundle, 'legacy flushQueue sender (remote)', opts?.validation);
+  }
     return baseSender(tx);
   };
 
