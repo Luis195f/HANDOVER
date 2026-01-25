@@ -60,8 +60,7 @@ export default defineConfig({
 
     /**
      * IMPORTANTE:
-     * - NO inlines react-native-svg (eso dispara el parse de Flow/TS interno).
-     * - Sólo inline lo que realmente necesites transformar para tests.
+     * - NO inline react-native-svg (eso dispara parse interno con Flow/TS).
      */
     deps: {
       inline: [
@@ -136,12 +135,26 @@ export default defineConfig({
 
       /**
        * CLAVE:
-       * Mockea react-native-svg y cualquier deep import (react-native-svg/...).
-       * Esto evita que Vitest llegue a node_modules/react-native-svg/src/...
+       * - Mockea react-native-svg y cualquier deep import (react-native-svg/...).
+       * - Y además “mata” explícitamente el archivo conflictivo SvgTouchableMixin.
        */
       {
         find: /^react-native-svg(\/.*)?$/,
         replacement: fromRoot("./tests/__mocks__/react-native-svg.ts"),
+      },
+      {
+        // el que te está rompiendo en CI
+        find: "react-native-svg/src/lib/SvgTouchableMixin",
+        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
+      },
+      {
+        // por si el resolver agrega extensión
+        find: "react-native-svg/src/lib/SvgTouchableMixin.ts",
+        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
+      },
+      {
+        find: "react-native-svg/src/lib/SvgTouchableMixin.js",
+        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
       },
 
       // Stub de expo-av
@@ -193,11 +206,16 @@ export default defineConfig({
   },
 
   ssr: {
-    // Mantén external como lo tenías (tu alias resolverá al mock igualmente).
+    /**
+     * MUY IMPORTANTE:
+     * Si dejas react-native-svg como "external", existe el riesgo de que Vitest
+     * lo requiera directo desde node_modules y se salte el alias.
+     *
+     * Por eso: NO incluir react-native-svg aquí.
+     */
     external: [
       "react-native",
       "@testing-library/react-native",
-      "react-native-svg",
       "@expo/vector-icons",
       "expo-av",
       "expo-modules-core",
