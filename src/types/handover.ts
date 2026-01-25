@@ -74,15 +74,16 @@ export type RiskFlags = {
 };
 
 // BEGIN HANDOVER D1 – BedsideChecklist types
-export interface HandoverBedsideChecklist {
-  patientIdentityConfirmed: boolean;
-  allergiesReviewed: boolean;
-  linesAndDevicesChecked: boolean;
-  medicationPlanReviewed: boolean;
-  safetyMeasuresApplied: boolean;
-  questionsAnswered: boolean;
+export type HandoverBedsideChecklist = {
+  patientIdentityConfirmed?: boolean;
+  allergiesReviewed?: boolean;
+  linesAndDevicesChecked?: boolean;
+  medicationPlanReviewed?: boolean;
+  safetyMeasuresApplied?: boolean;
+  questionsAnswered?: boolean;
   bedsideNotes?: string;
-}
+  [key: string]: boolean | string | undefined;
+};
 // END HANDOVER D1 – BedsideChecklist types
 
 export type FluidBalanceInfo = {

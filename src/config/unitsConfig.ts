@@ -2,10 +2,13 @@
 
 import Constants from 'expo-constants';
 
+import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS, type BedsideChecklistItem } from './bedsideChecklist';
+
 export interface UnitFeatureFlags {
   enablePediatricScales?: boolean;
   enableOncoFields?: boolean;
   enablePsychosocialExtra?: boolean;
+  checklistItems?: BedsideChecklistItem[];
   // Puedes añadir más banderas en el futuro
 }
 
@@ -17,6 +20,10 @@ export interface HandoverUnitConfig {
   features?: UnitFeatureFlags;
 }
 
+const BASE_FEATURES: UnitFeatureFlags = {
+  checklistItems: DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
+};
+
 /** Configuración estática por defecto. */
 const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
   {
@@ -24,19 +31,19 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     name: 'UCI Adulto',
     specialty: 'icu',
     default: true,
-    features: {},
+    features: BASE_FEATURES,
   },
   {
     id: 'oncologia',
     name: 'Oncología',
     specialty: 'onc',
-    features: { enableOncoFields: true },
+    features: { ...BASE_FEATURES, enableOncoFields: true },
   },
   {
     id: 'pediatria',
     name: 'Pediatría',
     specialty: 'ped',
-    features: { enablePediatricScales: true },
+    features: { ...BASE_FEATURES, enablePediatricScales: true },
   },
 ] as const;
 

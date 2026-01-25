@@ -3,6 +3,7 @@ import { Alert, Button, Modal, ScrollView, StyleSheet, Text, View } from 'react-
 import { useFormContext } from 'react-hook-form';
 
 import type { HandoverValues } from '@/src/validation/schemas';
+import type { BedsideChecklistItem } from '@/src/config/bedsideChecklist';
 import { BedsideChecklistSection } from './BedsideChecklistSection';
 import { isBedsideChecklistComplete } from './bedsideChecklist.constants';
 
@@ -11,6 +12,7 @@ type Props = {
   onConfirm: () => void;
   onCancel: () => void;
   highlightMissing?: boolean;
+  items: BedsideChecklistItem[];
 };
 
 export function BedsideChecklistModal({
@@ -18,6 +20,7 @@ export function BedsideChecklistModal({
   onCancel,
   onConfirm,
   highlightMissing = false,
+  items,
 }: Props) {
   const form = useFormContext<HandoverValues>();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -32,7 +35,7 @@ export function BedsideChecklistModal({
 
   const handleConfirm = () => {
     const checklist = form.getValues('bedsideChecklist');
-    if (!isBedsideChecklistComplete(checklist)) {
+    if (!isBedsideChecklistComplete(checklist, items)) {
       const message = 'Debes completar todos los elementos de seguridad antes de finalizar.';
       setErrorMessage(message);
       setAttemptedConfirm(true);
@@ -67,7 +70,10 @@ export function BedsideChecklistModal({
               Verifique visualmente pulsera/identidad y confirme con el paciente; no verbalice datos sensibles.
             </Text>
 
-            <BedsideChecklistSection highlightMissing={highlightMissing || attemptedConfirm} />
+            <BedsideChecklistSection
+              items={items}
+              highlightMissing={highlightMissing || attemptedConfirm}
+            />
 
             {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 

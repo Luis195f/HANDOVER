@@ -2,12 +2,15 @@ import React from 'react';
 import { Controller, useFormContext } from 'react-hook-form';
 import { StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
+import type { BedsideChecklistItem } from '@/src/config/bedsideChecklist';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { isBedsideChecklistComplete } from './bedsideChecklist.constants';
 
 // BEGIN HANDOVER D1 – BedsideChecklist
 export function BedsideChecklistSection({
+  items,
   highlightMissing = false,
-}: { highlightMissing?: boolean } = {}) {
+}: { items: BedsideChecklistItem[]; highlightMissing?: boolean }) {
   const {
     control,
     watch,
@@ -18,34 +21,50 @@ export function BedsideChecklistSection({
   const checklistMessage =
     typeof checklistErrors?.message === 'string'
       ? checklistErrors.message
-      : submitCount > 0 && (!checklist?.patientIdentityConfirmed || !checklist?.allergiesReviewed)
-        ? 'Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.'
+      : submitCount > 0 && !isBedsideChecklistComplete(checklist, items)
+        ? 'Completa el checklist de cabecera de cama antes de cerrar el pase de turno.'
         : undefined;
 
-  const renderSwitch = (
-    name: keyof HandoverValues['bedsideChecklist'],
-    label: string,
-  ) => (
+  const formatChecklistTimestamp = (timestamp?: string | boolean) => {
+    if (!timestamp || typeof timestamp !== 'string') return null;
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const renderSwitch = (item: BedsideChecklistItem) => (
     <Controller
-      key={name}
+      key={item.key}
       control={control}
-      name={`bedsideChecklist.${name}` as const}
+      name={`bedsideChecklist.${item.key}` as const}
       defaultValue={false}
       render={({ field: { onChange, value } }) => (
-        <View style={styles.switchRow}>
-          <Text
-            style={[
-              styles.switchLabel,
-              highlightMissing && !value ? styles.missingLabel : null,
-            ]}
-          >
-            {label}
-          </Text>
-          <Switch
-            accessibilityLabel={label}
-            value={Boolean(value)}
-            onValueChange={(next) => onChange(Boolean(next))}
-          />
+        <View style={styles.switchBlock}>
+          <View style={styles.switchRow}>
+            <Text
+              style={[
+                styles.switchLabel,
+                highlightMissing && !value ? styles.missingLabel : null,
+              ]}
+            >
+              {item.label}
+            </Text>
+            <Switch
+              accessibilityLabel={item.label}
+              value={Boolean(value)}
+              onValueChange={(next) => onChange(Boolean(next))}
+            />
+          </View>
+          {value ? (
+            <Text style={styles.timestamp}>
+              {(() => {
+                const timestamp = formatChecklistTimestamp(
+                  checklist?.[`${item.key}_timestamp`],
+                );
+                return timestamp ? `Marcado ${timestamp}` : 'Marcado';
+              })()}
+            </Text>
+          ) : null}
         </View>
       )}
     />
@@ -54,12 +73,7 @@ export function BedsideChecklistSection({
   return (
     <View>
       <Text style={styles.sectionTitle}>Checklist de cabecera de cama</Text>
-      {renderSwitch('patientIdentityConfirmed', 'Paciente identificado (nombre + pulsera)')}
-      {renderSwitch('allergiesReviewed', 'Alergias y alertas revisadas')}
-      {renderSwitch('linesAndDevicesChecked', 'Líneas, catéteres y dispositivos verificados')}
-      {renderSwitch('medicationPlanReviewed', 'Plan de medicación y tratamientos verificado')}
-      {renderSwitch('safetyMeasuresApplied', 'Medidas de seguridad aplicadas (barandillas, cama baja, etc.)')}
-      {renderSwitch('questionsAnswered', 'Preguntas del equipo entrante resueltas')}
+      {items.map((item) => renderSwitch(item))}
 
       <Controller
         control={control}
@@ -91,13 +105,15 @@ export function BedsideChecklistSection({
 
 const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
+  switchBlock: { marginBottom: 12 },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    gap: 12,
   },
   switchLabel: { flex: 1, fontSize: 16, marginRight: 12 },
+  timestamp: { color: '#4B5563', fontSize: 12, marginTop: 4 },
   field: { marginTop: 8 },
   label: { fontSize: 16, fontWeight: '500', marginBottom: 6 },
   input: {
