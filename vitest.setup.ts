@@ -1,4 +1,3 @@
-(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 // vitest.setup.ts
 // -----------------------------------------------------------------------------
 // Setup global para Vitest en HANDOVER-LIMPIO
@@ -10,6 +9,9 @@ import { vi, beforeEach, afterEach } from 'vitest';
 import * as SecureStoreMock from './tests/__mocks__/expo-secure-store';
 import crypto from 'node:crypto';
 
+// React 18/19: evita warnings/errores de act() en algunos entornos
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
 // -----------------------------------------------------------------------------
 // 🌍 Fallbacks básicos de entorno
 // -----------------------------------------------------------------------------
@@ -19,6 +21,7 @@ const g = globalThis as any;
 // Globals típicos de RN/Expo
 g.window = g.window ?? {};
 
+// navigator puede ser readonly en algunos entornos, lo definimos con cuidado
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(g, 'navigator');
 if (!navigatorDescriptor) {
   Object.defineProperty(g, 'navigator', {
@@ -40,7 +43,7 @@ g.__DEV__ = false;
 // Hacer que librerías que esperan `jest` funcionen en Vitest
 g.jest = g.jest ?? vi;
 
-// Polyfill de setImmediate / clearImmediate (por si la versión de Node no lo trae)
+// Polyfill de setImmediate / clearImmediate
 if (!g.setImmediate) {
   g.setImmediate = (cb: (...args: any[]) => void, ...args: any[]) =>
     setTimeout(cb, 0, ...args);
@@ -107,18 +110,6 @@ vi.mock('expo-crypto', () => {
 });
 
 // -----------------------------------------------------------------------------
-// 🧪 @testing-library/react-native
-// -----------------------------------------------------------------------------
-// NO se mockea aquí. Se resuelve mediante alias en vitest.config.ts:
-//
-// {
-//   find: '@testing-library/react-native',
-//   replacement: './tests/__mocks__/@testing-library-react-native.ts'
-// }
-//
-// Así evitamos paths relativos rotos desde este setup.
-
-// -----------------------------------------------------------------------------
 // 🌐 Mock de expo-linking
 // -----------------------------------------------------------------------------
 
@@ -161,7 +152,6 @@ vi.mock('expo-web-browser', () => {
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-modules-core', () => {
-  // EventEmitter muy simple, suficiente para que los módulos de Expo no fallen
   class EventEmitter<T = any> {
     addListener(_eventName: string, _listener: (event: T) => void) {
       return { remove: () => {} };
@@ -175,7 +165,6 @@ vi.mock('expo-modules-core', () => {
 
   const NativeModulesProxy: Record<string, any> = {};
 
-  // 🔴 Platform: utilizado por varios módulos (incluido expo-av)
   const Platform = {
     OS: 'web' as const,
     select<T>(spec: {
@@ -204,7 +193,6 @@ vi.mock('expo-modules-core', () => {
   const requireNativeModule = vi.fn(() => createNativeModule());
   const requireOptionalNativeModule = vi.fn(() => null);
 
-  // 🔴 NUEVO: createPermissionHook – expo-av lo importa desde expo-modules-core
   type PermissionStatus = {
     granted: boolean;
     canAskAgain?: boolean;
@@ -221,7 +209,6 @@ vi.mock('expo-modules-core', () => {
     },
     _permissionType?: string,
   ) => {
-    // Hook que siempre devuelve permisos concedidos.
     const usePermission = (): [
       TPermission,
       () => Promise<TPermission>,
@@ -262,21 +249,7 @@ vi.mock('expo-modules-core', () => {
 });
 
 // -----------------------------------------------------------------------------
-// 🌐 Mock de expo-constants
-// -----------------------------------------------------------------------------
-//
-// La implementación real para tests está en __mocks__/expo-constants.ts
-// y se resuelve vía alias en vitest.config.ts:
-//
-// {
-//   find: 'expo-constants',
-//   replacement: './__mocks__/expo-constants.ts'
-// }
-//
-// No necesitamos mock adicional aquí, dejamos que el alias haga su trabajo.
-
-// -----------------------------------------------------------------------------
-// 🌐 Mock mínimo de 'expo' (winter/runtime / ImportMetaRegistry)
+// 🌐 Mock mínimo de 'expo'
 // -----------------------------------------------------------------------------
 
 vi.mock('expo', () => {
@@ -298,39 +271,27 @@ vi.mock('expo', () => {
 });
 
 // -----------------------------------------------------------------------------
-// 🧱 Mock de expo-sqlite (para evitar parseo de node_modules)
+// 🧱 Mock de expo-sqlite
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-sqlite', async () => {
   const mod = await import('./tests/__mocks__/expo-sqlite');
   const defaultExport = (mod as any).default ?? mod;
-  return {
-    __esModule: true,
-    ...(mod as any),
-    default: defaultExport,
-  };
+  return { __esModule: true, ...(mod as any), default: defaultExport };
 });
 vi.mock('expo-sqlite/next', async () => {
   const mod = await import('./tests/__mocks__/expo-sqlite');
   const defaultExport = (mod as any).default ?? mod;
-  return {
-    __esModule: true,
-    ...(mod as any),
-    default: defaultExport,
-  };
+  return { __esModule: true, ...(mod as any), default: defaultExport };
 });
 vi.mock('expo-sqlite/legacy', async () => {
   const mod = await import('./tests/__mocks__/expo-sqlite');
   const defaultExport = (mod as any).default ?? mod;
-  return {
-    __esModule: true,
-    ...(mod as any),
-    default: defaultExport,
-  };
+  return { __esModule: true, ...(mod as any), default: defaultExport };
 });
 
 // -----------------------------------------------------------------------------
-// 📁 Mock de expo-file-system (para export-pdf y otros)
+// 📁 Mock de expo-file-system
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-file-system', () => {
@@ -339,9 +300,7 @@ vi.mock('expo-file-system', () => {
   const readAsStringAsync = vi.fn(async () => 'ZGF0YQ==');
 
   const writeAsStringAsync = vi.fn(
-    async (_path: string, _data: string, _options?: any): Promise<void> => {
-      return;
-    },
+    async (_path: string, _data: string, _options?: any): Promise<void> => {},
   );
 
   const getInfoAsync = vi.fn(
@@ -350,21 +309,15 @@ vi.mock('expo-file-system', () => {
       isDirectory: boolean;
       uri: string;
       size: number;
-    }> => {
-      return {
-        exists: true,
-        isDirectory: false,
-        uri: 'file:///mock-file.pdf',
-        size: 1024,
-      };
-    },
+    }> => ({
+      exists: true,
+      isDirectory: false,
+      uri: 'file:///mock-file.pdf',
+      size: 1024,
+    }),
   );
 
-  const moveAsync = vi.fn(
-    async (_options: { from: string; to: string }): Promise<void> => {
-      return;
-    },
-  );
+  const moveAsync = vi.fn(async (_options: { from: string; to: string }) => {});
 
   const mod = {
     documentDirectory,
@@ -372,60 +325,41 @@ vi.mock('expo-file-system', () => {
     writeAsStringAsync,
     getInfoAsync,
     moveAsync,
-    EncodingType: {
-      Base64: 'base64',
-    },
+    EncodingType: { Base64: 'base64' },
   };
 
-  return {
-    __esModule: true,
-    ...mod,
-    default: mod,
-  };
+  return { __esModule: true, ...mod, default: mod };
 });
 
 // -----------------------------------------------------------------------------
 // 🖼️ Mock de expo-image-picker
 // -----------------------------------------------------------------------------
 
-vi.mock('expo-image-picker', () => {
-  return {
-    MediaTypeOptions: {
-      Images: 'Images',
-    },
-    requestMediaLibraryPermissionsAsync: vi.fn(async () => ({ granted: true })),
-    requestCameraPermissionsAsync: vi.fn(async () => ({ granted: true })),
-    launchImageLibraryAsync: vi.fn(async () => ({ canceled: true })),
-    launchCameraAsync: vi.fn(async () => ({ canceled: true })),
-  };
-});
+vi.mock('expo-image-picker', () => ({
+  MediaTypeOptions: { Images: 'Images' },
+  requestMediaLibraryPermissionsAsync: vi.fn(async () => ({ granted: true })),
+  requestCameraPermissionsAsync: vi.fn(async () => ({ granted: true })),
+  launchImageLibraryAsync: vi.fn(async () => ({ canceled: true })),
+  launchCameraAsync: vi.fn(async () => ({ canceled: true })),
+}));
 
 // -----------------------------------------------------------------------------
 // 📄 Mock de expo-document-picker
 // -----------------------------------------------------------------------------
 
-vi.mock('expo-document-picker', () => {
-  return {
-    getDocumentAsync: vi.fn(async () => ({ canceled: true })),
-  };
-});
+vi.mock('expo-document-picker', () => ({
+  getDocumentAsync: vi.fn(async () => ({ canceled: true })),
+}));
 
 // -----------------------------------------------------------------------------
 // 🔊 Mock de expo-speech
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-speech', () => {
-  const ExponentSpeech = {
-    maxSpeechInputLength: 10000,
-  };
+  const ExponentSpeech = { maxSpeechInputLength: 10000 };
 
-  async function speak(_text: string, _options?: any): Promise<void> {
-    return;
-  }
-
-  async function stop(): Promise<void> {
-    return;
-  }
+  async function speak(_text: string, _options?: any): Promise<void> {}
+  async function stop(): Promise<void> {}
 
   return {
     defaultOptions: {},
@@ -436,7 +370,7 @@ vi.mock('expo-speech', () => {
 });
 
 // -----------------------------------------------------------------------------
-// 🖨️ Mock de expo-print (para export-pdf)
+// 🖨️ Mock de expo-print
 // -----------------------------------------------------------------------------
 
 vi.mock('expo-print', () => {
@@ -445,33 +379,18 @@ vi.mock('expo-print', () => {
     LANDSCAPE: 'landscape',
   } as const;
 
-  const printAsync = vi.fn(async (_options?: any) => {
-    return {};
-  });
+  const printAsync = vi.fn(async (_options?: any) => ({}));
+  const printToFileAsync = vi.fn(async (_options?: any) => ({
+    uri: 'file:///mock-output.pdf',
+    base64: undefined,
+  }) as any);
+  const selectPrinterAsync = vi.fn(async () => ({
+    name: 'Mock Printer',
+    url: 'mock://printer',
+  }));
 
-  const printToFileAsync = vi.fn(async (_options?: any) => {
-    return {
-      uri: 'file:///mock-output.pdf',
-      base64: undefined,
-    } as any;
-  });
-
-  const selectPrinterAsync = vi.fn(async () => {
-    return { name: 'Mock Printer', url: 'mock://printer' };
-  });
-
-  const mod = {
-    Orientation,
-    printAsync,
-    printToFileAsync,
-    selectPrinterAsync,
-  };
-
-  return {
-    __esModule: true,
-    ...mod,
-    default: mod,
-  };
+  const mod = { Orientation, printAsync, printToFileAsync, selectPrinterAsync };
+  return { __esModule: true, ...mod, default: mod };
 });
 
 // -----------------------------------------------------------------------------
@@ -487,34 +406,24 @@ vi.mock('expo-auth-session', () => {
 
   class AuthRequest {
     config: any;
-
     constructor(config: any) {
       this.config = config;
     }
-
     async makeAuthUrlAsync(): Promise<string> {
       return 'https://example.com/auth';
     }
-
-    async promptAsync(
-      _options?: any,
-    ): Promise<{ type: string; params?: Record<string, string> }> {
-      return {
-        type: 'success',
-        params: { code: 'mock-auth-code' },
-      };
+    async promptAsync(): Promise<{ type: string; params?: Record<string, string> }> {
+      return { type: 'success', params: { code: 'mock-auth-code' } };
     }
   }
 
-  const makeRedirectUri = vi.fn((_options?: any) => 'https://example.com/callback');
-
-  const fetchDiscoveryAsync = vi.fn(async (_issuer: string) => ({
+  const makeRedirectUri = vi.fn(() => 'https://example.com/callback');
+  const fetchDiscoveryAsync = vi.fn(async () => ({
     authorizationEndpoint: 'https://example.com/authorize',
     tokenEndpoint: 'https://example.com/token',
     revocationEndpoint: 'https://example.com/revoke',
   }));
-
-  const exchangeCodeAsync = vi.fn(async (_params: any, _config: any) => ({
+  const exchangeCodeAsync = vi.fn(async () => ({
     accessToken: 'mock-access-token',
     refreshToken: 'mock-refresh-token',
     idToken: 'mock-id-token',
@@ -522,10 +431,8 @@ vi.mock('expo-auth-session', () => {
     issuedAt: Math.floor(Date.now() / 1000),
     expiresIn: 3600,
   }));
-
-  const revokeAsync = vi.fn(async (_options: any, _config: any) => ({}));
-
-  const refreshAsync = vi.fn(async (_input: any, _config: any) => ({
+  const revokeAsync = vi.fn(async () => ({}));
+  const refreshAsync = vi.fn(async () => ({
     accessToken: 'refreshed-access-token',
     refreshToken: 'refreshed-refresh-token',
     idToken: 'refreshed-id-token',
@@ -544,54 +451,40 @@ vi.mock('expo-auth-session', () => {
     refreshAsync,
   };
 
-  return {
-    ...exported,
-    default: exported,
-  };
+  return { ...exported, default: exported };
 });
 
 // -----------------------------------------------------------------------------
-// 🧭 Mock de @react-navigation/native (con CommonActions)
+// 🧭 Mock de @react-navigation/native
 // -----------------------------------------------------------------------------
 
 vi.mock('@react-navigation/native', () => {
   const NavigationContainer = ({ children }: any) => children;
 
-  const createNavigationContainerRef = vi.fn(() => {
-    return {
-      isReady: () => true,
-      navigate: vi.fn(),
-      reset: vi.fn(),
-      goBack: vi.fn(),
-      getRootState: vi.fn(),
-      dispatch: vi.fn(),
-    } as any;
-  });
+  const createNavigationContainerRef = vi.fn(() => ({
+    isReady: () => true,
+    navigate: vi.fn(),
+    reset: vi.fn(),
+    goBack: vi.fn(),
+    getRootState: vi.fn(),
+    dispatch: vi.fn(),
+  }));
 
   const CommonActions = {
-    reset: vi.fn((config: any) => ({
-      type: 'RESET',
-      ...config,
-    })),
+    reset: vi.fn((config: any) => ({ type: 'RESET', ...config })),
   };
 
   const api = {
     NavigationContainer,
     createNavigationContainerRef,
     CommonActions,
-    useNavigation: () => ({
-      navigate: vi.fn(),
-      goBack: vi.fn(),
-    }),
+    useNavigation: () => ({ navigate: vi.fn(), goBack: vi.fn() }),
     useRoute: () => ({ params: {} }),
     useFocusEffect: () => {},
     useIsFocused: () => false,
   };
 
-  return {
-    ...api,
-    default: NavigationContainer,
-  };
+  return { ...api, default: NavigationContainer };
 });
 
 // -----------------------------------------------------------------------------
@@ -600,7 +493,6 @@ vi.mock('@react-navigation/native', () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Si el mock de SecureStore implementa __reset, úsalo para empezar limpio
   (SecureStoreMock as any).__reset?.();
 });
 
