@@ -599,10 +599,7 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     'braden',
     'oxygenTherapy',
   ]);
-  const watchedBedsideChecklist = useWatch({
-    control,
-    name: 'bedsideChecklist',
-  });
+  
   const bedsideChecklistRef = useRef<HandoverFormValues['bedsideChecklist'] | null>(null);
   const watchedValues = form.watch();
 
@@ -644,6 +641,39 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   };
 }, [draftKey, reset, getValues]);
 
+  const prevChecklistRef = useRef<Record<string, any> | undefined>(undefined);
+
+useEffect(() => {
+  const sub = form.watch((values, meta) => {
+    if (!meta?.name?.startsWith('bedsideChecklist')) return;
+
+    const current = (values as any)?.bedsideChecklist ?? {};
+    const prev = prevChecklistRef.current ?? {};
+
+    for (const [key, value] of Object.entries(current)) {
+      if (key.endsWith('_timestamp')) continue;
+
+      const prevVal = (prev as any)[key];
+      if (prevVal !== true && value === true) {
+        const tsKey = `bedsideChecklist.${key}_timestamp` as const;
+        const existing = form.getValues(tsKey as any);
+
+        if (!existing) {
+          form.setValue(tsKey as any, new Date().toISOString(), {
+            shouldDirty: true,
+            shouldTouch: false,
+            shouldValidate: false,
+          });
+        }
+      }
+    }
+
+    prevChecklistRef.current = current;
+  });
+
+  return () => sub.unsubscribe();
+}, [form]);
+
   useEffect(() => {
   if (IS_TEST) return;
 
@@ -663,25 +693,6 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     }
   };
 }, [watch, draftKey]);
-
-  useEffect(() => {
-  if (!watchedBedsideChecklist) return;
-
-  const previous = bedsideChecklistRef.current ?? {};
-  const now = new Date().toISOString();
-
-  checklistItems.forEach((item) => {
-    const currentValue = Boolean(watchedBedsideChecklist[item.key]);
-    const previousValue = Boolean(previous[item.key]);
-    if (currentValue && !previousValue) {
-      form.setValue(`bedsideChecklist.${item.key}_timestamp` as const, now, {
-        shouldDirty: true,
-      });
-    }
-  });
-
-  bedsideChecklistRef.current = watchedBedsideChecklist;
-}, [watchedBedsideChecklist, checklistItems, form]);
 
   const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
