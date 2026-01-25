@@ -27,7 +27,7 @@ export type AdministrativeSectionProps = {
   DictationMicButton: React.ComponentType<DictationMicButtonProps>;
 };
 
-type StaffListField = keyof HandoverFormValues['administrativeData'];
+type StaffListField = Extract<keyof HandoverFormValues['administrativeData'], string>;
 
 const StaffListInput = ({
   name,
@@ -43,12 +43,13 @@ const StaffListInput = ({
   styles: Record<string, any>;
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
+  const fieldKey = name;
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <Controller
         control={control}
-        name={`administrativeData.${name}` as const}
+        name={`administrativeData.${fieldKey}` as const}
         render={({ field: { onChange, value } }) => (
           <TextInput
             style={[styles.input, styles.textArea]}

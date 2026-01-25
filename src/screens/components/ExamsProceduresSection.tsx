@@ -106,18 +106,15 @@ const defaultProcedure: ProcedureItem = {
 
 export function ExamsProceduresSection() {
   const { control } = useFormContext<HandoverFormValues>();
-  const { fields: examFields, append: appendExam, remove: removeExam } = useFieldArray({
-    control,
-    name: 'exams',
-  });
+  const { fields: examFields, append: appendExam, remove: removeExam } = useFieldArray<
+    HandoverFormValues,
+    'exams'
+  >({ control, name: 'exams' });
   const {
     fields: procedureFields,
     append: appendProcedure,
     remove: removeProcedure,
-  } = useFieldArray({
-    control,
-    name: 'procedures',
-  });
+  } = useFieldArray<HandoverFormValues, 'procedures'>({ control, name: 'procedures' });
 
   const [nextExam, setNextExam] = useState<ExamItem>(defaultExam);
   const [nextProcedure, setNextProcedure] = useState<ProcedureItem>(defaultProcedure);
@@ -217,7 +214,11 @@ export function ExamsProceduresSection() {
         {examFields.length > 0 ? (
           <View style={[styles.list, { marginTop: 12 }]}>
             {examFields.map((field, index) => {
-              const item = field as ExamItem;
+              const item: ExamItem = {
+                type: field.type ?? 'laboratory',
+                state: field.state ?? 'result',
+                description: field.description ?? '',
+              };
               return (
                 <View key={field.id} style={styles.listItem}>
                   <View style={styles.listHeader}>
@@ -280,7 +281,10 @@ export function ExamsProceduresSection() {
         {procedureFields.length > 0 ? (
           <View style={[styles.list, { marginTop: 12 }]}>
             {procedureFields.map((field, index) => {
-              const item = field as ProcedureItem;
+              const item: ProcedureItem = {
+                description: field.description ?? '',
+                done: field.done ?? false,
+              };
               return (
                 <View key={field.id} style={styles.listItem}>
                   <View style={styles.listHeader}>
