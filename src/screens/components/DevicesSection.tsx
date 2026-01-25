@@ -10,7 +10,10 @@ type Props = {
 
 export function DevicesSection({ styles }: Props) {
   const { control } = useFormContext<HandoverValues>();
-  const { fields, append, remove } = useFieldArray({ control, name: 'devices' });
+  const { fields, append, remove } = useFieldArray<HandoverValues, 'devices'>({
+    control,
+    name: 'devices',
+  });
   const [pendingName, setPendingName] = useState('');
   const [pendingActive, setPendingActive] = useState(true);
 

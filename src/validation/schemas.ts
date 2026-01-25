@@ -626,3 +626,5 @@ export const zHandover = z
     }
   });
 
+export type HandoverValues = z.infer<typeof zHandover>;
+export type HandoverFormData = HandoverValues;

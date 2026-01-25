@@ -24,10 +24,10 @@ describe('HandoverFormSchema', () => {
     bedsideChecklist: {
       patientIdentityConfirmed: true,
       allergiesReviewed: true,
-      linesAndDevicesChecked: false,
-      medicationPlanReviewed: false,
-      safetyMeasuresApplied: false,
-      questionsAnswered: false,
+      linesAndDevicesChecked: true,
+      medicationPlanReviewed: true,
+      safetyMeasuresApplied: true,
+      questionsAnswered: true,
     },
 
     vitals: {
