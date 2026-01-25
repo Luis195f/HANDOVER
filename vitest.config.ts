@@ -60,8 +60,8 @@ export default defineConfig({
 
     /**
      * IMPORTANTE:
-     * - NO inlines react-native-svg (para no disparar parseo del paquete real).
-     * - Alias + noExternal (abajo) se encargan de que Vitest use los mocks.
+     * - NO inline react-native-svg.
+     * - Mockeamos victory-native para que NO arrastre react-native-svg en tests.
      */
     deps: {
       inline: [
@@ -90,10 +90,7 @@ export default defineConfig({
       { find: "@", replacement: path.resolve(__dirname, "src") },
 
       // Stub de react-native para tests en Node
-      {
-        find: "react-native",
-        replacement: fromRoot("./tests/__mocks__/react-native.ts"),
-      },
+      { find: "react-native", replacement: fromRoot("./tests/__mocks__/react-native.ts") },
 
       // Stub explícito de @testing-library/react-native
       {
@@ -138,23 +135,18 @@ export default defineConfig({
       },
 
       /**
-       * CLAVE (definitivo):
-       * Bloquea el deep import que está fallando en CI.
-       * Si algún paquete llega a importarlo, le devolvemos un módulo vacío.
+       * CLAVE 1:
+       * Mock total de victory-native (evita que importe react-native-svg)
        */
       {
-        find: "react-native-svg/src/lib/SvgTouchableMixin",
-        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
-      },
-      {
-        find: "react-native-svg/src/lib/SvgTouchableMixin.ts",
-        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
+        find: "victory-native",
+        replacement: fromRoot("./tests/__mocks__/victory-native.ts"),
       },
 
       /**
-       * CLAVE:
+       * CLAVE 2:
        * Mockea react-native-svg y cualquier deep import (react-native-svg/...).
-       * Esto evita que Vitest llegue a node_modules/react-native-svg/src/...
+       * (Aun así, si victory-native se carga real, te puede arrastrar svg real. Por eso CLAVE 1.)
        */
       {
         find: /^react-native-svg(\/.*)?$/,
@@ -190,16 +182,22 @@ export default defineConfig({
         find: "expo-sqlite/legacy",
         replacement: fromRoot("./tests/__mocks__/expo-sqlite.ts"),
       },
+
+      // (Opcional) módulo vacío útil para aislar imports raros
+      {
+        find: "tests/__mocks__/empty-module",
+        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
+      },
     ],
   },
 
   optimizeDeps: {
-    // Que Vite NO intente pre-bundlear libs nativas reales
     exclude: [
       "react-native",
       "@testing-library/react-native",
       "@expo/vector-icons",
       "react-native-svg",
+      "victory-native",
       "expo-av",
       "expo-modules-core",
       "expo-file-system",
@@ -209,17 +207,13 @@ export default defineConfig({
     ],
   },
 
-  /**
-   * ✅ DIFERENCIA CLAVE:
-   * NO uses `ssr.external` para módulos que estás mockeando por alias.
-   * Si los externalizas, Node los carga desde node_modules y vuelves a romper.
-   */
   ssr: {
-    noExternal: [
+    external: [
       "react-native",
       "@testing-library/react-native",
-      "@expo/vector-icons",
       "react-native-svg",
+      "victory-native",
+      "@expo/vector-icons",
       "expo-av",
       "expo-modules-core",
       "expo-file-system",
