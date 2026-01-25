@@ -73,3 +73,8 @@ pytest-cache/
 # Project local tools
 scripts/
 
+
+# Local Python env / DB
+.venv/
+db.sqlite3
+
