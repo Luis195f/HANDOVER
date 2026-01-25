@@ -1,12 +1,13 @@
 import React from 'react';
 import { ActivityIndicator, Button, Text, TextInput, View } from 'react-native';
-import { Controller, useFormContext, type FieldPath } from 'react-hook-form';
+import { Controller, useFormContext, useWatch, type FieldPath } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { VitalTrendsChart } from '@/src/screens/components/VitalTrendsChart';
 import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
 import type { SuggestionsResult } from '@/src/lib/ai-suggestions';
 import type { deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import type { VitalTrendsData } from '../../../types/vitals';
+import VitalSignsChart from '@/src/components/VitalSignsChart';
 
 export type VitalsSectionProps = {
   styles: Record<string, any>;
@@ -149,9 +150,15 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
   suggestionsError,
   requestSuggestions,
 }) => {
+  const { control } = useFormContext<HandoverFormValues>();
+  const watchedVitals = useWatch({ control, name: 'vitals' });
+
   return (
     <>
       <VitalsGroup styles={styles} parseNumericInput={parseNumericInput} />
+      <View style={styles.vitalTrendsBlock}>
+        <VitalSignsChart vitals={watchedVitals} />
+      </View>
       <View style={styles.vitalTrendsBlock}>
         {loadingVitalTrends ? <ActivityIndicator size="small" /> : null}
         {vitalTrendsError ? (
