@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { VictoryAxis, VictoryChart, VictoryLegend, VictoryLine, VictoryScatter } from 'victory-native';
+import { VictoryAxis, VictoryChart, VictoryGroup, VictoryLegend, VictoryLine, VictoryScatter } from 'victory-native';
 import { useThemeTokens } from '@/src/theme';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { normalizeVitalValue } from '@/src/lib/vitals/normalize';
 
 type VitalValues = NonNullable<HandoverValues['vitals']>;
 
@@ -49,8 +50,32 @@ const formatTimeLabel = (value: string | number | Date) => {
   return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 };
 
-export type VitalSignsChartProps = {
-  vitals?: HandoverValues['vitals'];
+const normalizeHistory = (history: VitalSnapshot[]) => {
+  const sorted = [...history].sort((a, b) => a.timestamp - b.timestamp);
+  const deduped: VitalSnapshot[] = [];
+
+  for (const entry of sorted) {
+    const last = deduped.at(-1);
+    if (last && last.timestamp === entry.timestamp) {
+      deduped[deduped.length - 1] = entry;
+    } else {
+      deduped.push(entry);
+    }
+  }
+
+  return deduped
+    .map((entry) => {
+      const values = Object.entries(entry.values).reduce<Partial<Record<VitalKey, number>>>((acc, [key, value]) => {
+        const normalized = normalizeVitalValue(key as VitalKey, value);
+        if (normalized != null) {
+          acc[key as VitalKey] = normalized;
+        }
+        return acc;
+      }, {});
+      return { ...entry, values };
+    })
+    .filter((entry) => Object.keys(entry.values).length > 0)
+    .slice(-MAX_POINTS);
 };
 
 const buildSeriesData = (history: VitalSnapshot[], key: VitalKey) => {
@@ -70,6 +95,20 @@ const buildSeriesData = (history: VitalSnapshot[], key: VitalKey) => {
   return data;
 };
 
+const buildChartDomain = (seriesData: Array<{ data: Array<{ y: number }> }>) => {
+  const values = seriesData.flatMap((series) => series.data.map((point) => point.y));
+  if (values.length === 0) return undefined;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const padding = Math.max(1, range * 0.1);
+  return { y: [min - padding, max + padding] as [number, number] };
+};
+
+export type VitalSignsChartProps = {
+  vitals?: HandoverValues['vitals'];
+};
+
 export default function VitalSignsChart({ vitals }: VitalSignsChartProps) {
   const { colors, spacing } = useThemeTokens();
   const { width } = useWindowDimensions();
@@ -83,7 +122,7 @@ export default function VitalSignsChart({ vitals }: VitalSignsChartProps) {
     let hasUpdates = false;
 
     VITAL_SERIES.forEach(({ key }) => {
-      const nextValue = vitals[key];
+      const nextValue = normalizeVitalValue(key, (vitals as VitalValues)[key]);
       if (typeof nextValue === 'number' && nextValue !== lastValuesRef.current[key]) {
         updatedValues[key] = nextValue;
         hasUpdates = true;
@@ -97,12 +136,15 @@ export default function VitalSignsChart({ vitals }: VitalSignsChartProps) {
     setHistory((prev) => [...prev, { timestamp, values: updatedValues }].slice(-MAX_POINTS));
   }, [vitals?.hr, vitals?.sbp, vitals?.spo2, vitals?.rr, vitals?.tempC]);
 
-  const seriesData = useMemo(() => {
-    return VITAL_SERIES.map((series) => ({
-      ...series,
-      data: buildSeriesData(history, series.key),
-    }));
-  }, [history]);
+  const normalizedHistory = useMemo(() => normalizeHistory(history), [history]);
+  const seriesData = useMemo(
+    () =>
+      VITAL_SERIES.map((series) => ({
+        ...series,
+        data: buildSeriesData(normalizedHistory, series.key),
+      })),
+    [normalizedHistory],
+  );
 
   const legendData = seriesData
     .filter((series) => series.data.length > 0)
@@ -110,6 +152,7 @@ export default function VitalSignsChart({ vitals }: VitalSignsChartProps) {
 
   const hasEnoughData = seriesData.some((series) => series.data.length >= 2);
   const chartWidth = Math.max(280, width - spacing.lg * 2);
+  const chartDomain = useMemo(() => buildChartDomain(seriesData), [seriesData]);
 
   return (
     <View style={styles.container} testID="vitals-signs-chart">
@@ -125,6 +168,7 @@ export default function VitalSignsChart({ vitals }: VitalSignsChartProps) {
             padding={{ top: 24, bottom: 48, left: 56, right: 24 }}
             domainPadding={{ y: 12 }}
             scale={{ x: 'time' }}
+            domain={chartDomain}
           >
             <VictoryLegend
               x={spacing.md}
@@ -155,18 +199,14 @@ export default function VitalSignsChart({ vitals }: VitalSignsChartProps) {
             />
             {seriesData.map((series) =>
               series.data.length > 0 ? (
-                <React.Fragment key={series.key}>
+                <VictoryGroup key={series.key}>
                   <VictoryLine
                     data={series.data}
                     interpolation="natural"
                     style={{ data: { stroke: series.color, strokeWidth: 2 } }}
                   />
-                  <VictoryScatter
-                    data={series.data}
-                    size={3}
-                    style={{ data: { fill: series.color } }}
-                  />
-                </React.Fragment>
+                  <VictoryScatter data={series.data} size={3} style={{ data: { fill: series.color } }} />
+                </VictoryGroup>
               ) : null,
             )}
           </VictoryChart>
