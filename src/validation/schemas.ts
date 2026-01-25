@@ -331,15 +331,11 @@ export const zRiskType = z.enum([
 export type RiskType = z.infer<typeof zRiskType>;
 
 // BEGIN HANDOVER D1 – BedsideChecklist
-export const zHandoverBedsideChecklist = z.object({
-  patientIdentityConfirmed: z.boolean().default(false),
-  allergiesReviewed: z.boolean().default(false),
-  linesAndDevicesChecked: z.boolean().default(false),
-  medicationPlanReviewed: z.boolean().default(false),
-  safetyMeasuresApplied: z.boolean().default(false),
-  questionsAnswered: z.boolean().default(false),
-  bedsideNotes: z.string().max(500).optional(),
-});
+export const zHandoverBedsideChecklist = z
+  .object({
+    bedsideNotes: z.string().max(500).optional(),
+  })
+  .catchall(z.union([z.boolean(), z.string()]));
 // END HANDOVER D1 – BedsideChecklist
 
 export const zRiskItem = z.object({
@@ -567,12 +563,15 @@ export const zHandover = z.object({
 }).superRefine((value, ctx) => {
   // BEGIN HANDOVER D1 – BedsideChecklist rules
   const checklist = value.bedsideChecklist;
-  if (!checklist.patientIdentityConfirmed || !checklist.allergiesReviewed) {
+  const checklistKeys = Object.keys(checklist ?? {}).filter(
+    (key) => typeof (checklist as Record<string, unknown>)[key] === "boolean",
+  );
+  if (checklistKeys.length > 0 && checklistKeys.some((key) => checklist[key] !== true)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["bedsideChecklist"],
       message:
-        "Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.",
+        "Completa el checklist de cabecera de cama antes de cerrar el pase de turno.",
     });
   }
   // END HANDOVER D1 – BedsideChecklist rules

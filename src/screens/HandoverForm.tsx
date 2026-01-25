@@ -15,7 +15,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider } from 'react-hook-form';
+import { Controller, FormProvider, useWatch } from 'react-hook-form';
 import type { FieldErrors, UseFormReturn } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
@@ -60,6 +60,7 @@ import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues as BaseHandoverFormValues } from '@/src/validation/schemas';
 import type { PsychosocialCare } from '@/src/types/handover';
+import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
 type HandoverFormValues = BaseHandoverFormValues & {
@@ -475,6 +476,16 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [prefilledValuesParam?.vitals]);
 
   const defaultValues = useMemo<HandoverFormValues>(() => {
+    const initialUnitConfig = getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
+    const checklistItems = initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
+    const bedsideChecklistDefaults = checklistItems.reduce<Record<string, boolean | string | undefined>>(
+      (acc, item) => {
+        acc[item.key] = false;
+        acc[`${item.key}_timestamp`] = undefined;
+        return acc;
+      },
+      { bedsideNotes: '' },
+    );
     const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
     const shiftEndDefault =
       administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
@@ -528,15 +539,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         actionsTaken: null,
       },
       // BEGIN HANDOVER D1 – BedsideChecklist
-      bedsideChecklist: {
-        patientIdentityConfirmed: false,
-        allergiesReviewed: false,
-        linesAndDevicesChecked: false,
-        medicationPlanReviewed: false,
-        safetyMeasuresApplied: false,
-        questionsAnswered: false,
-        bedsideNotes: '',
-      },
+      bedsideChecklist: bedsideChecklistDefaults,
       // END HANDOVER D1 – BedsideChecklist
       risks: {},
       risksStructured: [],
@@ -581,6 +584,10 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const adminUnitId = administrativeUnitValue || '';
   const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
   const features = unitConfig.features ?? {};
+  const checklistItems = useMemo(
+    () => features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
+    [features.checklistItems],
+  );
   // END HANDOVER D4 – Get active unit
   const signaturesValue = form.watch('signatures');
   const outgoingSignature = signaturesValue?.outgoing;
@@ -592,6 +599,11 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     'braden',
     'oxygenTherapy',
   ]);
+  const watchedBedsideChecklist = useWatch({
+    control,
+    name: 'bedsideChecklist',
+  });
+  const bedsideChecklistRef = useRef<HandoverFormValues['bedsideChecklist'] | null>(null);
   const watchedValues = form.watch();
 
   const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
@@ -651,6 +663,25 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     }
   };
 }, [watch, draftKey]);
+
+  useEffect(() => {
+  if (!watchedBedsideChecklist) return;
+
+  const previous = bedsideChecklistRef.current ?? {};
+  const now = new Date().toISOString();
+
+  checklistItems.forEach((item) => {
+    const currentValue = Boolean(watchedBedsideChecklist[item.key]);
+    const previousValue = Boolean(previous[item.key]);
+    if (currentValue && !previousValue) {
+      form.setValue(`bedsideChecklist.${item.key}_timestamp` as const, now, {
+        shouldDirty: true,
+      });
+    }
+  });
+
+  bedsideChecklistRef.current = watchedBedsideChecklist;
+}, [watchedBedsideChecklist, checklistItems, form]);
 
   const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
@@ -1575,7 +1606,7 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleFinalize = () => {
     const checklist = form.getValues('bedsideChecklist');
-    if (!isBedsideChecklistComplete(checklist)) {
+    if (!isBedsideChecklistComplete(checklist, checklistItems)) {
       setBedsideChecklistHighlightMissing(true);
       setBedsideModalVisible(true);
       return;
@@ -2229,7 +2260,7 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
           lazy
           sectionKey="bedsideChecklist"
         >
-          <BedsideChecklistSection />
+          <BedsideChecklistSection items={checklistItems} />
         </CollapsibleSection>
       </View>
 
@@ -2275,6 +2306,7 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       <BedsideChecklistModal
         visible={bedsideModalVisible}
         highlightMissing={bedsideChecklistHighlightMissing}
+        items={checklistItems}
         onCancel={() => {
           setBedsideModalVisible(false);
           setBedsideChecklistHighlightMissing(false);
