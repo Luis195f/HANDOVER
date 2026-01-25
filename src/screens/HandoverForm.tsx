@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Controller, FormProvider, useWatch } from 'react-hook-form';
-import type { FieldErrors, UseFormReturn } from 'react-hook-form';
+import type { FieldErrors } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 
@@ -58,14 +58,12 @@ import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
-import { zHandover, type HandoverValues as BaseHandoverFormValues } from '@/src/validation/schemas';
-import type { PsychosocialCare } from '@/src/types/handover';
+import { zHandover, type HandoverValues } from '@/src/validation/schemas';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
-type HandoverFormValues = BaseHandoverFormValues & {
-  psychosocial?: PsychosocialCare;
-};
+
+type HandoverFormValues = HandoverValues;
 
 // BEGIN HANDOVER D4 – Form imports
 import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
@@ -138,6 +136,15 @@ const styles = StyleSheet.create({
   buttonRow: { marginTop: 16 },
   inlineActions: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
   secondaryButton: { marginLeft: 12 },
+  ttsButton: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#E0F2FE',
+  },
+  ttsButtonText: { fontWeight: '600', color: '#0C4A6E' },
   vitalsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
   vitalsCell: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
   // BEGIN HANDOVER D2 – VitalTrends styles
@@ -478,14 +485,21 @@ export default function HandoverForm({ navigation, route }: Props) {
   const defaultValues = useMemo<HandoverFormValues>(() => {
     const initialUnitConfig = getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
     const checklistItems = initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
-    const bedsideChecklistDefaults = checklistItems.reduce<Record<string, boolean | string | undefined>>(
-      (acc, item) => {
-        acc[item.key] = false;
-        acc[`${item.key}_timestamp`] = undefined;
-        return acc;
-      },
-      { bedsideNotes: '' },
-    );
+    const baseChecklistDefaults: HandoverFormValues['bedsideChecklist'] = {
+      patientIdentityConfirmed: false,
+      allergiesReviewed: false,
+      linesAndDevicesChecked: false,
+      medicationPlanReviewed: false,
+      safetyMeasuresApplied: false,
+      questionsAnswered: false,
+      bedsideNotes: '',
+    };
+    const bedsideChecklistDefaults = checklistItems.reduce<
+      HandoverFormValues['bedsideChecklist'] & Record<string, boolean | string | undefined>
+    >((acc, item) => {
+      acc[item.key] = false;
+      return acc;
+    }, baseChecklistDefaults);
     const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
     const shiftEndDefault =
       administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
@@ -561,16 +575,17 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefillMeta,
   ]);
 
- const form = useZodForm(zHandover, defaultValues) as unknown as UseFormReturn<HandoverFormValues>;
+  const form = useZodForm(zHandover, defaultValues);
   const { watch, reset, getValues } = form;
   const { control, formState } = form;
   const patientIdValue = form.watch('patientId');
   const administrativeUnitValue = form.watch('administrativeData.unit');
-  const draftKey = useMemo(() => {
-  return `handoverDraft:${patientIdValue ?? 'unknown'}:${administrativeUnitValue ?? 'unknown'}`;
-}, [patientIdValue, administrativeUnitValue]);
+  const draftKey = useMemo(
+    () => `handoverDraft:${patientIdValue ?? 'unknown'}:${administrativeUnitValue ?? 'unknown'}`,
+    [patientIdValue, administrativeUnitValue],
+  );
 
-const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const errors: HandoverFormErrors = formState.errors ?? {};
   const hasValidationErrors = Object.keys(errors).length > 0;
@@ -614,92 +629,87 @@ const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     },
   });
 
- useEffect(() => {
-  if (IS_TEST) return;
+  useEffect(() => {
+    if (IS_TEST) return;
 
-  let cancelled = false;
+    let cancelled = false;
 
-  (async () => {
-    try {
-      const raw = await SecureStore.getItemAsync(draftKey);
-      if (cancelled) return;
+    (async () => {
+      try {
+        const raw = await SecureStore.getItemAsync(draftKey);
+        if (cancelled) return;
 
-      const draft = safeJsonParse<any>(raw);
-      if (!draft) return;
+        const draft = safeJsonParse<any>(raw);
+        if (!draft) return;
 
-      // Importante: NO pisar si ya hay datos
-      const current = getValues();
-      const isEmpty = !current || Object.keys(current).length === 0;
-      if (isEmpty) reset(draft);
-    } catch {
-      // no-op
-    }
-  })();
+        // Importante: NO pisar si ya hay datos
+        const current = getValues();
+        const isEmpty = !current || Object.keys(current).length === 0;
+        if (isEmpty) reset(draft);
+      } catch {
+        // no-op
+      }
+    })();
 
-  return () => {
-    cancelled = true;
-  };
-}, [draftKey, reset, getValues]);
+    return () => {
+      cancelled = true;
+    };
+  }, [draftKey, reset, getValues]);
 
   const prevChecklistRef = useRef<Record<string, any> | undefined>(undefined);
 
-useEffect(() => {
-  const sub = form.watch((values, meta) => {
-    if (!meta?.name?.startsWith('bedsideChecklist')) return;
+  useEffect(() => {
+    const sub = form.watch((values, meta) => {
+      if (!meta?.name?.startsWith('bedsideChecklist')) return;
 
-    const current = (values as any)?.bedsideChecklist ?? {};
-    const prev = prevChecklistRef.current ?? {};
+      const current = (values as any)?.bedsideChecklist ?? {};
+      const prev = prevChecklistRef.current ?? {};
 
-    for (const [key, value] of Object.entries(current)) {
-      if (key.endsWith('_timestamp')) continue;
+      for (const [key, value] of Object.entries(current)) {
+        if (key.endsWith('_timestamp')) continue;
 
-      const prevVal = (prev as any)[key];
-      if (prevVal !== true && value === true) {
-        const tsKey = `bedsideChecklist.${key}_timestamp` as const;
-        const existing = form.getValues(tsKey as any);
+        const prevVal = (prev as any)[key];
+        if (prevVal !== true && value === true) {
+          const tsKey = `bedsideChecklist.${key}_timestamp` as const;
+          const existing = form.getValues(tsKey as any);
 
-        if (!existing) {
-          form.setValue(tsKey as any, new Date().toISOString(), {
-            shouldDirty: true,
-            shouldTouch: false,
-            shouldValidate: false,
-          });
+          if (!existing) {
+            form.setValue(tsKey as any, new Date().toISOString(), {
+              shouldDirty: true,
+              shouldTouch: false,
+              shouldValidate: false,
+            });
+          }
         }
       }
-    }
 
-    prevChecklistRef.current = current;
-  });
+      prevChecklistRef.current = current;
+    });
 
-  return () => {
-    // Soporta: {unsubscribe()}, function, o undefined
-    if (typeof sub === 'function') {
-      sub();
-      return;
-    }
-    sub?.unsubscribe?.();
-  };
-}, [form]);
+    return () => {
+      sub?.unsubscribe?.();
+    };
+  }, [form]);
 
   useEffect(() => {
-  if (IS_TEST) return;
+    if (IS_TEST) return;
 
-  const subscription = watch(values => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const subscription = watch((values) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
-    saveTimerRef.current = setTimeout(() => {
-      void SecureStore.setItemAsync(draftKey, JSON.stringify(values)).catch(() => {});
-    }, 300);
-  });
+      saveTimerRef.current = setTimeout(() => {
+        void SecureStore.setItemAsync(draftKey, JSON.stringify(values)).catch(() => {});
+      }, 300);
+    });
 
-  return () => {
-    subscription?.unsubscribe?.();
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-  };
-}, [watch, draftKey]);
+    return () => {
+      subscription?.unsubscribe?.();
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [watch, draftKey]);
 
   const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
   const riskEvaluation = useMemo(
@@ -840,6 +850,20 @@ useEffect(() => {
   }, [dictationAdapters]);
 
   const dictationUnavailable = sttError === 'UNSUPPORTED' || sttServiceRef.current?.getLastError() === 'UNSUPPORTED';
+
+  const handleSpeak = (text?: string) => {
+    Speech.stop();
+    const safeText = (text ?? '').trim();
+    if (!safeText) return;
+    Speech.speak(safeText, { language: 'es-ES', pitch: 1.0, rate: 1.0 });
+  };
+
+  const handleSpeakNotes = () => {
+    const evolutionNotes = form.getValues('evolution') ?? '';
+    const closingNotes = form.getValues('closingSummary') ?? '';
+    const combinedNotes = [evolutionNotes, closingNotes].map((note) => note.trim()).filter(Boolean);
+    handleSpeak(combinedNotes.join('\n\n'));
+  };
 
   const handleDictationPress = async (field: DictationField, config: SttConfig) => {
     Speech.stop();
@@ -2199,42 +2223,49 @@ useEffect(() => {
         >
           <View style={styles.field}>
             <Text style={styles.label}>Evolución</Text>
-          <View style={styles.dictationRow}>
-            <View style={styles.flex}>
-              <Controller
-                control={control}
-                name="evolution"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={[styles.input, styles.textArea, tokenInputStyle]}
-                    multiline
-                    placeholder="Notas de evolución"
-                    placeholderTextColor={colors.muted}
-                    onBlur={onBlur}
-                    value={value ?? ''}
-                    onChangeText={onChange}
-                  />
-                )}
+            <Pressable
+              accessibilityRole="button"
+              onPress={handleSpeakNotes}
+              style={styles.ttsButton}
+            >
+              <Text style={styles.ttsButtonText}>🔊 Leer notas del turno</Text>
+            </Pressable>
+            <View style={styles.dictationRow}>
+              <View style={styles.flex}>
+                <Controller
+                  control={control}
+                  name="evolution"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={[styles.input, styles.textArea, tokenInputStyle]}
+                      multiline
+                      placeholder="Notas de evolución"
+                      placeholderTextColor={colors.muted}
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  )}
+                />
+              </View>
+              <DictationMicButton
+                active={activeDictationField === 'evolution' && sttStatus === 'listening'}
+                disabled={dictationUnavailable}
+                label="Dictar evolución"
+                onPress={() =>
+                  handleDictationPress('evolution', {
+                    locale: 'es-ES',
+                    interimResults: true,
+                    maxSeconds: 90,
+                  })
+                }
               />
             </View>
-            <DictationMicButton
-              active={activeDictationField === 'evolution' && sttStatus === 'listening'}
-              disabled={dictationUnavailable}
-              label="Dictar evolución"
-              onPress={() =>
-                handleDictationPress('evolution', {
-                  locale: 'es-ES',
-                  interimResults: true,
-                  maxSeconds: 90,
-                })
-              }
-            />
+            {renderDictationStatus('evolution')}
+            {evolutionError ? (
+              <Text style={[styles.error, tokenErrorTextStyle]}>{evolutionError}</Text>
+            ) : null}
           </View>
-          {renderDictationStatus('evolution')}
-          {evolutionError ? (
-            <Text style={[styles.error, tokenErrorTextStyle]}>{evolutionError}</Text>
-          ) : null}
-        </View>
         </CollapsibleSection>
       </View>
 
