@@ -60,7 +60,8 @@ export default defineConfig({
 
     /**
      * IMPORTANTE:
-     * - NO inline react-native-svg (eso dispara parse interno con Flow/TS).
+     * - NO inlines react-native-svg (para no disparar parseo del paquete real).
+     * - Alias + noExternal (abajo) se encargan de que Vitest use los mocks.
      */
     deps: {
       inline: [
@@ -89,7 +90,10 @@ export default defineConfig({
       { find: "@", replacement: path.resolve(__dirname, "src") },
 
       // Stub de react-native para tests en Node
-      { find: "react-native", replacement: fromRoot("./tests/__mocks__/react-native.ts") },
+      {
+        find: "react-native",
+        replacement: fromRoot("./tests/__mocks__/react-native.ts"),
+      },
 
       // Stub explícito de @testing-library/react-native
       {
@@ -134,27 +138,27 @@ export default defineConfig({
       },
 
       /**
-       * CLAVE:
-       * - Mockea react-native-svg y cualquier deep import (react-native-svg/...).
-       * - Y además “mata” explícitamente el archivo conflictivo SvgTouchableMixin.
+       * CLAVE (definitivo):
+       * Bloquea el deep import que está fallando en CI.
+       * Si algún paquete llega a importarlo, le devolvemos un módulo vacío.
        */
       {
-        find: /^react-native-svg(\/.*)?$/,
-        replacement: fromRoot("./tests/__mocks__/react-native-svg.ts"),
-      },
-      {
-        // el que te está rompiendo en CI
         find: "react-native-svg/src/lib/SvgTouchableMixin",
         replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
       },
       {
-        // por si el resolver agrega extensión
         find: "react-native-svg/src/lib/SvgTouchableMixin.ts",
         replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
       },
+
+      /**
+       * CLAVE:
+       * Mockea react-native-svg y cualquier deep import (react-native-svg/...).
+       * Esto evita que Vitest llegue a node_modules/react-native-svg/src/...
+       */
       {
-        find: "react-native-svg/src/lib/SvgTouchableMixin.js",
-        replacement: fromRoot("./tests/__mocks__/empty-module.ts"),
+        find: /^react-native-svg(\/.*)?$/,
+        replacement: fromRoot("./tests/__mocks__/react-native-svg.ts"),
       },
 
       // Stub de expo-av
@@ -205,18 +209,17 @@ export default defineConfig({
     ],
   },
 
+  /**
+   * ✅ DIFERENCIA CLAVE:
+   * NO uses `ssr.external` para módulos que estás mockeando por alias.
+   * Si los externalizas, Node los carga desde node_modules y vuelves a romper.
+   */
   ssr: {
-    /**
-     * MUY IMPORTANTE:
-     * Si dejas react-native-svg como "external", existe el riesgo de que Vitest
-     * lo requiera directo desde node_modules y se salte el alias.
-     *
-     * Por eso: NO incluir react-native-svg aquí.
-     */
-    external: [
+    noExternal: [
       "react-native",
       "@testing-library/react-native",
       "@expo/vector-icons",
+      "react-native-svg",
       "expo-av",
       "expo-modules-core",
       "expo-file-system",
