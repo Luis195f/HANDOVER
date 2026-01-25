@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { formatSbar, generateSBARSummary } from '@/src/lib/summary';
+import { SNOMED_SYSTEM, type SnomedCoding } from '@/src/data/snomed-dict';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
@@ -24,10 +25,18 @@ const bedsideChecklist = {
   questionsAnswered: false,
 };
 
+const makeCoding = (code: string, display: string): SnomedCoding => ({
+  system: SNOMED_SYSTEM,
+  code,
+  display,
+});
+
 const buildData = (overrides: Partial<HandoverFormData> = {}): HandoverFormData => ({
   administrativeData,
   status: 'draft',
   patientId: 'P-001',
+  dxMedical: makeCoding('195967001', 'Neumonía'),
+  dxNursing: makeCoding('386661006', 'Fiebre'),
   dxMedicalStructured: [],
   dxNursingStructured: [],
   closingSummary: '',
@@ -50,7 +59,7 @@ describe('generateSBARSummary', () => {
   it('describe a un paciente estable sin lenguaje de alarma', () => {
     const summary = generateSBARSummary(
       buildData({
-        dxMedical: 'Bronquitis leve',
+        dxMedical: makeCoding('233917008', 'Bronquitis aguda'),
         vitals: { rr: 16, spo2: 98, tempC: 36.7, sbp: 120, hr: 78, avpu: 'A' },
         oxygenTherapy: { device: 'Aire ambiente' },
         evolution: 'Paciente estable, sin incidencias.',
@@ -58,7 +67,7 @@ describe('generateSBARSummary', () => {
       }),
     );
 
-    expect(summary.situation).toContain('Bronquitis leve');
+    expect(summary.situation).toContain('Bronquitis aguda');
     expect(summary.situation.toLowerCase()).toContain('bajo riesgo');
     expect(summary.assessment.toLowerCase()).not.toMatch(/crític|inestabl|deterioro/);
 
@@ -70,8 +79,8 @@ describe('generateSBARSummary', () => {
   it('destaca inestabilidad y riesgos en paciente crítico', () => {
     const summary = generateSBARSummary(
       buildData({
-        dxMedical: 'Sepsis de origen urinario',
-        dxNursing: 'Riesgo de shock séptico',
+        dxMedical: makeCoding('128045006', 'Sepsis'),
+        dxNursing: makeCoding('299709002', 'Shock séptico'),
         vitals: { rr: 32, spo2: 84, tempC: 39.1, sbp: 82, hr: 132, avpu: 'C' },
         oxygenTherapy: { device: 'VMNI', flowLMin: 12, fio2: 70 },
         risks: { fall: true, pressureUlcer: true },
@@ -94,7 +103,7 @@ describe('generateSBARSummary', () => {
   it('lista múltiples riesgos sin duplicados ni artefactos', () => {
     const summary = generateSBARSummary(
       buildData({
-        dxMedical: 'Postoperatorio inmediato',
+        dxMedical: makeCoding('274100004', 'Estado postoperatorio'),
         risks: { fall: true, pressureUlcer: true, isolation: true },
         painAssessment: { hasPain: true, evaScore: 5, location: 'incisión', actionsTaken: null },
       }),
@@ -108,8 +117,8 @@ describe('generateSBARSummary', () => {
   it('devuelve textos seguros aunque falten la mayoría de datos', () => {
     const summary = generateSBARSummary(
       buildData({
-        dxMedical: undefined,
-        dxNursing: undefined,
+        dxMedical: null,
+        dxNursing: null,
         vitals: undefined,
         oxygenTherapy: undefined,
         evolution: undefined,
@@ -124,7 +133,7 @@ describe('generateSBARSummary', () => {
   it('incorpora riesgos estructurados y notas de cabecera', () => {
     const summary = generateSBARSummary(
       buildData({
-        dxMedical: 'IAM anterior',
+        dxMedical: makeCoding('28926001', 'Infarto agudo de miocardio'),
         risksStructured: [
           { type: 'seizure', present: true, actions: [], notes: 'Monitorizar' },
           { type: 'other', present: true, actions: [], notes: 'Riesgo personalizado' },
@@ -141,7 +150,7 @@ describe('generateSBARSummary', () => {
   it('trunca secciones largas respetando límites seguros', () => {
     const summary = generateSBARSummary(
       buildData({
-        dxMedical: 'Historia clínica extensa',
+        dxMedical: makeCoding('386661006', 'Dolor de cabeza'),
         evolution: 'Texto muy largo y detallado que debe ser truncado para evitar desbordes en UI',
       }),
       { maxCharsPerSection: 60 },

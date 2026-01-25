@@ -9,9 +9,16 @@ import {
   type HandoverValues,
   validateBundle,
 } from '@/src/lib/fhir-map';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { zHandover } from '@/src/validation/schemas';
 
 const NOW = '2025-01-05T10:30:00.000Z';
+
+const makeCoding = (code: string, display: string) => ({
+  system: SNOMED_SYSTEM,
+  code,
+  display,
+});
 
 const baseValues: HandoverValues = {
   patientId: 'patient-001',
@@ -407,8 +414,8 @@ describe('buildFhirBundleFromFormData', () => {
       status: 'final',
       patientId: 'patient-zod-1',
       vitals: { hr: 80, rr: 18, tempC: 37.1, spo2: 97, sbp: 120, dbp: 78 },
-      dxMedical: 'Neumonía adquirida en la comunidad',
-      dxNursing: 'Riesgo de caídas',
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      dxNursing: makeCoding('370143000', 'Caída accidental'),
       evolution: 'Paciente estable, responde bien a la oxigenoterapia',
       closingSummary: 'Turno sin novedades relevantes',
       sbarSituation: 'Paciente ingresó por neumonía',

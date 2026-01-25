@@ -3404,10 +3404,18 @@ function mapDiagnoses(
   context: MappingContext,
 ): Condition[] {
   const conditions: Condition[] = [];
-  const addCondition = (text: string | undefined, categoryCode?: TerminologyCode<string>) => {
-    const trimmed = text?.trim();
+  const addCondition = (diagnosis: HandoverData['dxMedical'], categoryCode?: TerminologyCode<string>) => {
+    const trimmed = diagnosis?.display?.trim();
     if (!trimmed) return;
-    const coding = categoryCode ? [categoryCode] : [];
+    const coding = diagnosis?.code
+      ? [
+          {
+            system: diagnosis.system,
+            code: diagnosis.code,
+            display: diagnosis.display,
+          },
+        ]
+      : [];
     conditions.push({
       resourceType: 'Condition',
       clinicalStatus: conditionClinicalStatusActive,

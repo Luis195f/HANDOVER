@@ -6,6 +6,7 @@ import { View, Text } from 'react-native';
 import SafetySection from '../SafetySection';
 import { computeAlerts } from '@/src/lib/alerts';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 const defaultValues: HandoverValues = {
   administrativeData: {
@@ -21,6 +22,8 @@ const defaultValues: HandoverValues = {
   attachments: [],
   patientId: 'pat-001',
   status: 'draft',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
   medications: [],
   treatments: [],
   bedsideChecklist: {

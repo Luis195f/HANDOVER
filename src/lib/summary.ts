@@ -54,6 +54,12 @@ const BRADEN_LABELS: Record<NonNullable<HandoverValues["braden"]>["riskLevel"], 
 const isNonEmptyString = (value: string | undefined | null): value is string =>
   typeof value === "string" && value.length > 0;
 
+const getCodingDisplay = (coding: HandoverValues["dxMedical"] | HandoverValues["dxNursing"]): string | undefined => {
+  if (!coding) return undefined;
+  const display = coding.display?.trim();
+  return display ? display : undefined;
+};
+
 function truncateText(value: string, limit?: number): string {
   if (!limit || value.length <= limit) return value;
   const slice = value.slice(0, limit);
@@ -136,7 +142,7 @@ function describeMobility(mobilityLevel?: string, repositioningPlan?: string): s
 }
 
 function buildSituation(data: HandoverValues): string {
-  const diagnosis = data.dxMedical || data.dxNursing;
+  const diagnosis = getCodingDisplay(data.dxMedical) ?? getCodingDisplay(data.dxNursing);
   const admission = diagnosis ? `Paciente con ${diagnosis}` : "Paciente con información parcial disponible";
   const location = data.administrativeData?.unit ? `Ubicación: ${data.administrativeData.unit}` : undefined;
   const vitals = data.vitals;
@@ -161,7 +167,9 @@ function buildSituation(data: HandoverValues): string {
 
 function buildBackground(data: HandoverValues): string {
   const antecedentes: string[] = [];
-  if (data.dxNursing && data.dxMedical) antecedentes.push(`Cuadro mixto: ${data.dxMedical}; ${data.dxNursing}`);
+  const medical = getCodingDisplay(data.dxMedical);
+  const nursing = getCodingDisplay(data.dxNursing);
+  if (medical && nursing) antecedentes.push(`Cuadro mixto: ${medical}; ${nursing}`);
   const diet = data.nutrition?.dietType ? `Dieta ${data.nutrition.dietType}` : undefined;
   const mobility = describeMobility(data.mobility?.mobilityLevel, data.mobility?.repositioningPlan);
   const skin = data.skin?.skinStatus ? `Piel: ${data.skin.skinStatus}` : undefined;

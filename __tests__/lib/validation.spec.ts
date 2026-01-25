@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { zGlasgowScale, zHandover, zVitals, zOxygen } from '@/src/validation/schemas';
+
+const baseDx = {
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
+};
 
 describe('Validation schemas', () => {
   it('acepta valores mínimos requeridos para handover', () => {
     const result = zHandover.safeParse({
+      ...baseDx,
       administrativeData: {
         unit: 'icu',
         census: 0,
@@ -29,6 +36,7 @@ describe('Validation schemas', () => {
 
   it('rechaza handover sin unidad o paciente', () => {
     const result = zHandover.safeParse({
+      ...baseDx,
       administrativeData: {
         unit: '',
         census: 0,
@@ -59,6 +67,7 @@ describe('Validation schemas', () => {
 
   it('valida censo no negativo y orden de turno', () => {
     const result = zHandover.safeParse({
+      ...baseDx,
       administrativeData: {
         unit: 'icu',
         census: -2,
@@ -124,6 +133,7 @@ describe('Validation schemas', () => {
   // BEGIN HANDOVER D1 – BedsideChecklist tests
   it('requiere confirmar identidad del paciente y revisar alergias', () => {
     const result = zHandover.safeParse({
+      ...baseDx,
       administrativeData: {
         unit: 'icu',
         census: 0,
@@ -154,6 +164,7 @@ describe('Validation schemas', () => {
 
   it('acepta bedside checklist cuando los ítems críticos están confirmados', () => {
     const result = zHandover.safeParse({
+      ...baseDx,
       administrativeData: {
         unit: 'icu',
         census: 0,

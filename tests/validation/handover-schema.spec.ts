@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
 import { zHandover, type HandoverFormData } from "@/src/validation/schemas";
 
 const baseValidData: HandoverFormData = {
@@ -27,8 +28,8 @@ const baseValidData: HandoverFormData = {
     glucoseMmolL: 6,
     avpu: "A",
   },
-  dxMedical: "Neumonía adquirida en comunidad",
-  dxNursing: "Riesgo de deterioro de ventilación espontánea",
+  dxMedical: { system: SNOMED_SYSTEM, code: "195967001", display: "Neumonía" },
+  dxNursing: { system: SNOMED_SYSTEM, code: "386661006", display: "Fiebre" },
   dxMedicalStructured: [
     { system: "SNOMED", code: "233604007", display: "Neumonía" },
   ],
@@ -152,6 +153,8 @@ describe("zHandover", () => {
 
   it("rechaza campos obligatorios vacíos", () => {
     const invalid: Partial<HandoverFormData> = {
+      dxMedical: baseValidData.dxMedical,
+      dxNursing: baseValidData.dxNursing,
       administrativeData: {
         unit: "",
         census: -1,
@@ -200,6 +203,40 @@ describe("zHandover", () => {
     const messages = result.success ? [] : result.error.issues.map((i) => i.message);
     expect(messages).toContain("Frecuencia cardiaca fuera de rango");
     expect(messages).toContain("SpO₂ fuera de rango");
+  });
+
+  it("acepta diagnósticos SNOMED válidos", () => {
+    const valid: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: { system: SNOMED_SYSTEM, code: "25064002", display: "Dolor torácico" },
+    };
+
+    const result = zHandover.safeParse(valid);
+    expect(result.success).toBe(true);
+  });
+
+  it("rechaza términos SNOMED no reconocidos", () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: { system: SNOMED_SYSTEM, code: "25064002", display: "dolor de pecho" },
+    };
+
+    const result = zHandover.safeParse(invalid);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+    expect(messages).toContain("Término no reconocido (SNOMED)");
+  });
+
+  it("rechaza códigos SNOMED inconsistentes con el término", () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: { system: SNOMED_SYSTEM, code: "386661006", display: "Dolor torácico" },
+    };
+
+    const result = zHandover.safeParse(invalid);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+    expect(messages).toContain("Código SNOMED no corresponde al término");
   });
 
   it("detecta inconsistencias entre mg/dL y mmol/L", () => {

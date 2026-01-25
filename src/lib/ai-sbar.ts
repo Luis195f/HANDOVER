@@ -67,8 +67,8 @@ export async function refineSBARWithAI(
 
   const payload = {
     handover: {
-      dxMedical: handover.dxMedical,
-      dxNursing: handover.dxNursing,
+      dxMedical: handover.dxMedical?.display ?? '',
+      dxNursing: handover.dxNursing?.display ?? '',
       vitals: handover.vitals,
       oxygenTherapy: handover.oxygenTherapy,
       risks: handover.risks,
