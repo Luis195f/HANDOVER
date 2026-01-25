@@ -671,7 +671,13 @@ useEffect(() => {
     prevChecklistRef.current = current;
   });
 
-  return () => sub.unsubscribe();
+  return () => {
+    if (typeof sub === 'function') {
+      sub();
+      return;
+    }
+    sub?.unsubscribe?.();
+  };
 }, [form]);
 
   useEffect(() => {
