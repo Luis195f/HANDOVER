@@ -16,11 +16,10 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
 
     include: [
-  'src/**/*.{spec,test}.{ts,tsx}',
-  'src/**/__tests__/**/*.{spec,test}.{ts,tsx}',
-  'tests/**/*.{spec,test}.{ts,tsx}',
-],
-
+      'src/**/*.{spec,test}.{ts,tsx}',
+      'src/**/__tests__/**/*.{spec,test}.{ts,tsx}',
+      'tests/**/*.{spec,test}.{ts,tsx}',
+    ],
 
     exclude: [
       '**/node_modules/**',
@@ -60,13 +59,13 @@ export default defineConfig({
     },
 
     // 👇 Workaround: indicar qué deps queremos que Vitest trate explícitamente
+    // Nota: NO incluimos react-native-svg aquí porque está stubeado por alias
     server: {
       deps: {
         inline: [
           'react-native',
           '@testing-library/react-native',
           '@expo/vector-icons',
-          'react-native-svg',
           'expo-av',
           'expo-modules-core',
           'expo-file-system',
@@ -141,13 +140,19 @@ export default defineConfig({
         replacement: fromRoot('./tests/__mocks__/@expo-vector-icons.ts'),
       },
 
-      // Stub de react-native-svg
+      // ✅ Stub de react-native-svg (cubre root import)
       {
         find: 'react-native-svg',
         replacement: fromRoot('./tests/__mocks__/react-native-svg.ts'),
       },
+      // ✅ NUEVO: Stub para cualquier deep import react-native-svg/...
+      // Evita que Vitest llegue a node_modules/react-native-svg/src/... (Flow: "import typeof")
+      {
+        find: /^react-native-svg\/.+$/,
+        replacement: fromRoot('./tests/__mocks__/react-native-svg.ts'),
+      },
 
-      // ⭐ NUEVO: stub de expo-av -> evita entrar a build/Video.js con JSX
+      // ⭐ stub de expo-av -> evita entrar a build/Video.js con JSX
       {
         find: 'expo-av',
         replacement: fromRoot('./tests/__mocks__/expo-av.ts'),
@@ -174,7 +179,6 @@ export default defineConfig({
         find: 'expo-sqlite/legacy',
         replacement: fromRoot('./tests/__mocks__/expo-sqlite.ts'),
       },
-
     ],
   },
 
