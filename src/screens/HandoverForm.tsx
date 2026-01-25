@@ -672,6 +672,7 @@ useEffect(() => {
   });
 
   return () => {
+    // Soporta: {unsubscribe()}, function, o undefined
     if (typeof sub === 'function') {
       sub();
       return;
