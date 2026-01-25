@@ -335,43 +335,42 @@ export const zHandoverBedsideChecklist = z
   .object({
     bedsideNotes: z.string().max(500).optional(),
   })
-  .catchall(z.union([z.boolean(), z.string()]));
-.superRefine((obj, ctx) => {
-  for (const [key, value] of Object.entries(obj ?? {})) {
-    if (key === 'bedsideNotes') continue;
+  .catchall(z.union([z.boolean(), z.string()]))
+  .superRefine((obj, ctx) => {
+    for (const [key, value] of Object.entries(obj ?? {})) {
+      if (key === 'bedsideNotes') continue;
 
-    const isTimestamp = key.endsWith('_timestamp');
+      const isTimestamp = key.endsWith('_timestamp');
 
-    if (isTimestamp) {
-      if (typeof value !== 'string') {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [key],
-          message: 'Timestamp inválido',
-        });
-        continue;
-      }
+      if (isTimestamp) {
+        if (typeof value !== 'string') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'Timestamp inválido',
+          });
+          continue;
+        }
 
-      // valida ISO datetime
-      const parsed = z.string().datetime().safeParse(value);
-      if (!parsed.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [key],
-          message: 'Timestamp debe ser ISO datetime',
-        });
-      }
-    } else {
-      if (typeof value !== 'boolean') {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [key],
-          message: 'Checklist debe ser boolean',
-        });
+        const parsed = z.string().datetime().safeParse(value);
+        if (!parsed.success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'Timestamp debe ser ISO datetime',
+          });
+        }
+      } else {
+        if (typeof value !== 'boolean') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'Checklist debe ser boolean',
+          });
+        }
       }
     }
-  }
-});
+  });
 
 // END HANDOVER D1 – BedsideChecklist
 
