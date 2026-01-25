@@ -77,4 +77,4 @@ scripts/
 # Local Python env / DB
 .venv/
 db.sqlite3
-
+*.sqlite3

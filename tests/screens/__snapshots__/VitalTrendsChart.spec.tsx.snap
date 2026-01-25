@@ -22,6 +22,7 @@ exports[`VitalTrendsChart > coincide con el snapshot de estructura básica 1`] =
   <ScrollView
     contentContainerStyle={
       {
+        "paddingHorizontal": 12,
         "paddingVertical": 4,
       }
     }

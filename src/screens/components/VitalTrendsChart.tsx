@@ -1,9 +1,10 @@
 // BEGIN HANDOVER D2 – VitalTrends chart component
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 
 import type { VitalPoint, VitalTrendsData } from '../../../types/vitals';
+import { normalizeVitalPoints, type NormalizedVitalPoint } from '@/src/lib/vitals/normalize';
 
 interface VitalTrendsChartProps {
   trends: VitalTrendsData | null;
@@ -11,11 +12,12 @@ interface VitalTrendsChartProps {
 
 const CHART_WIDTH = 140;
 const CHART_HEIGHT = 48;
+const MAX_TREND_POINTS = 50;
 
 const styles = StyleSheet.create({
   container: { gap: 8 },
   title: { fontWeight: '700', fontSize: 15, marginBottom: 4 },
-  scrollContent: { paddingVertical: 4 },
+  scrollContent: { paddingVertical: 4, paddingHorizontal: 12 },
   seriesWrapper: { gap: 12 },
   seriesRow: { marginBottom: 12 },
   seriesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -34,7 +36,7 @@ const styles = StyleSheet.create({
   placeholder: { fontSize: 12, color: '#6B7280', marginTop: 6 },
 });
 
-const normalizePoints = (points: VitalPoint[]) => {
+const normalizePoints = (points: NormalizedVitalPoint[]) => {
   if (points.length < 2) return null;
   const values = points.map((p) => p.value);
   const min = Math.min(...values);
@@ -47,31 +49,54 @@ const normalizePoints = (points: VitalPoint[]) => {
   });
 };
 
+type SeriesConfig = {
+  key: 'hr' | 'sbp' | 'rr' | 'spo2' | 'temp';
+  label: string;
+  points: VitalPoint[];
+};
+
 export const VitalTrendsChart: React.FC<VitalTrendsChartProps> = ({ trends }) => {
+  const series = useMemo<SeriesConfig[]>(() => {
+    if (!trends) return [];
+    return [
+      { key: 'hr', label: 'Frecuencia cardíaca (lpm)', points: trends.hr },
+      { key: 'sbp', label: 'PA sistólica (mmHg)', points: trends.sbp },
+      { key: 'rr', label: 'FR (rpm)', points: trends.rr },
+      { key: 'spo2', label: 'SpO₂ (%)', points: trends.spo2 },
+      { key: 'temp', label: 'Temperatura (°C)', points: trends.temp },
+    ];
+  }, [trends]);
+
   if (!trends) {
     return null;
   }
 
-  const renderSeries = (label: string, points: VitalPoint[], key: string) => {
-    const latestValue = points.at(-1)?.value;
-    const normalized = normalizePoints(points);
+  const renderSeries = (seriesConfig: SeriesConfig) => {
+    const normalized = normalizeVitalPoints(seriesConfig.points, seriesConfig.key, MAX_TREND_POINTS);
+    const latestValue = normalized.at(-1)?.value;
+    const normalizedPoints = normalizePoints(normalized);
     return (
-      <View key={key} style={styles.seriesRow} testID={`vital-series-${key}`}>
+      <View key={seriesConfig.key} style={styles.seriesRow} testID={`vital-series-${seriesConfig.key}`}>
         <View style={styles.seriesHeader}>
-          <Text style={styles.seriesLabel}>{label}</Text>
+          <Text style={styles.seriesLabel}>{seriesConfig.label}</Text>
           {latestValue != null ? <Text style={styles.seriesValue}>{latestValue}</Text> : null}
         </View>
-        {normalized ? (
+        {normalizedPoints ? (
           <View style={styles.chartBox}>
             <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
               <Polyline
-                points={normalized.map((p) => `${p.x},${p.y}`).join(' ')}
+                points={normalizedPoints.map((point) => `${point.x},${point.y}`).join(' ')}
                 fill="none"
                 stroke="#2563EB"
                 strokeWidth={2}
               />
-              {normalized.length > 0 ? (
-                <Circle cx={normalized.at(-1)!.x} cy={normalized.at(-1)!.y} r={3} fill="#1D4ED8" />
+              {normalizedPoints.length > 0 ? (
+                <Circle
+                  cx={normalizedPoints.at(-1)!.x}
+                  cy={normalizedPoints.at(-1)!.y}
+                  r={3}
+                  fill="#1D4ED8"
+                />
               ) : null}
             </Svg>
           </View>
@@ -86,13 +111,7 @@ export const VitalTrendsChart: React.FC<VitalTrendsChartProps> = ({ trends }) =>
     <View style={styles.container}>
       <Text style={styles.title}>Gráficos de tendencia (24h)</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.seriesWrapper}>
-          {renderSeries('Frecuencia cardíaca (lpm)', trends.hr, 'hr')}
-          {renderSeries('PA sistólica (mmHg)', trends.sbp, 'sbp')}
-          {renderSeries('FR (rpm)', trends.rr, 'rr')}
-          {renderSeries('SpO₂ (%)', trends.spo2, 'spo2')}
-          {renderSeries('Temperatura (°C)', trends.temp, 'temp')}
-        </View>
+        <View style={styles.seriesWrapper}>{series.map((seriesConfig) => renderSeries(seriesConfig))}</View>
       </ScrollView>
     </View>
   );
