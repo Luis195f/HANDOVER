@@ -31,8 +31,8 @@ function safeString(value: unknown, fallback: string): string {
 }
 
 function resolveDiagnosis(handover: HandoverFormData): string {
-  if (handover.dxMedical) return handover.dxMedical;
-  if (handover.dxNursing) return handover.dxNursing;
+  if (handover.dxMedical?.display) return handover.dxMedical.display;
+  if (handover.dxNursing?.display) return handover.dxNursing.display;
   const fromStructured = handover.dxMedicalStructured?.[0]?.display || handover.dxNursingStructured?.[0]?.display;
   return safeString(fromStructured, 'Diagnóstico no disponible');
 }

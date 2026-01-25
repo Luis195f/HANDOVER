@@ -15,6 +15,7 @@ import Chip from "@/src/components/Chip";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { PATIENTS_MOCK, type PatientListItem } from "@/src/data/mockPatients";
+import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { ensureUnitAccess, hasRole } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
@@ -304,6 +305,8 @@ export default function PatientList({ navigation }: Props) {
         },
         patientId: patient.id,
         status: 'draft',
+        dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
+        dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
         medications: [],
         treatments: [],
         bedsideChecklist: {

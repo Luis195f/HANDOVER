@@ -3,6 +3,7 @@ import { render } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HandoverForm from '@/src/screens/HandoverForm';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 const mockUsePatientSummary = vi.fn();
 const mockUseZodForm = vi.fn();
@@ -20,6 +21,19 @@ vi.mock('react-hook-form', async () => {
     Controller: ({ render, defaultValue }: any) =>
       render({ field: { onChange: vi.fn(), onBlur: vi.fn(), value: defaultValue }, fieldState: { error: undefined } }),
     useFieldArray: () => ({ fields: [], append: vi.fn(), remove: vi.fn() }),
+    useController: ({ defaultValue }: { defaultValue?: unknown }) => ({
+      field: {
+        onChange: vi.fn(),
+        onBlur: vi.fn(),
+        value:
+          defaultValue ?? {
+            system: SNOMED_SYSTEM,
+            code: '',
+            display: '',
+          },
+      },
+      fieldState: { error: undefined },
+    }),
   };
 });
 
@@ -88,7 +102,15 @@ function buildFormMock(patientId: string) {
     handleSubmit: (fn: any) => fn,
     trigger: vi.fn(async () => true),
     getValues: (field?: string) => {
-      if (!field) return { administrativeData: baseAdministrative, patientId, status: 'draft', signatures: {} };
+      if (!field)
+        return {
+          administrativeData: baseAdministrative,
+          patientId,
+          status: 'draft',
+          signatures: {},
+          dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
+          dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
+        };
       if (field === 'patientId') return patientId;
       if (field === 'administrativeData.unit') return baseAdministrative.unit;
       if (field === 'closingSummary') return '';
@@ -113,6 +135,8 @@ function buildFormMock(patientId: string) {
           patientId,
           status: 'draft',
           signatures: {},
+          dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
+          dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
           risksStructured: [],
           vitals: {},
           braden: null,
