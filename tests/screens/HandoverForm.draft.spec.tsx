@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
 const enqueueBundle = vi.fn();
@@ -26,6 +27,19 @@ vi.mock('react-hook-form', async () => {
     },
     useFormContext: () => currentContext,
     useFieldArray: () => ({ fields: [], append: vi.fn(), remove: vi.fn() }),
+    useController: ({ defaultValue }: { defaultValue?: unknown }) => ({
+      field: {
+        onChange: vi.fn(),
+        onBlur: vi.fn(),
+        value:
+          defaultValue ?? {
+            system: SNOMED_SYSTEM,
+            code: '',
+            display: '',
+          },
+      },
+      fieldState: { error: undefined },
+    }),
   };
 });
 
@@ -104,6 +118,10 @@ const baseValues: HandoverFormData = {
     incidents: [],
   },
   vitals: { tempC: 36 },
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
+  dxMedicalStructured: [],
+  dxNursingStructured: [],
   oxygenTherapy: null,
   meds: 'Paracetamol',
   medications: [],
@@ -115,7 +133,16 @@ const baseValues: HandoverFormData = {
   sbarRecommendation: 'recomendación',
   status: 'draft',
   closingSummary: '',
-  signatures: [],
+  bedsideChecklist: {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+  },
+  risksStructured: [],
+  signatures: {},
   painAssessment: null,
   audioUri: null,
 };

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { SHIFT_TYPES } from "../types/administrative";
+import { normalizeTerm, SNOMED_SYSTEM, snomedTerms } from "../data/snomed-dict";
 import {
   DIET_TYPES,
   MOBILITY_LEVELS,
@@ -19,6 +20,15 @@ const optionalTrimmedString = (maxLength: number) =>
     .refine((value) => value === undefined || value.length <= maxLength, {
       message: `Debe tener máximo ${maxLength} caracteres`,
     });
+
+const snomedDisplayToCodeMap = new Map<string, string>();
+const snomedCodeToDisplayMap = new Map<string, string>();
+
+snomedTerms.forEach((term) => {
+  const normalized = normalizeTerm(term.display);
+  snomedDisplayToCodeMap.set(normalized, term.code);
+  snomedCodeToDisplayMap.set(term.code, term.display);
+});
 
 const parseCensus = (value: unknown) => {
   if (typeof value === "string") {
@@ -187,6 +197,43 @@ export const zPainAssessment = z
   });
 
 const zBradenSubscale = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+
+const zSnomedCoding = z
+  .object({
+    system: z.literal(SNOMED_SYSTEM),
+    code: z.string().min(1, "Código SNOMED requerido"),
+    display: z.string().min(2, "Término SNOMED requerido"),
+  })
+  .superRefine((value, ctx) => {
+    const normalizedDisplay = normalizeTerm(value.display);
+    const expectedCode = snomedDisplayToCodeMap.get(normalizedDisplay);
+    if (!expectedCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Término no reconocido (SNOMED)",
+        path: ["display"],
+      });
+      return;
+    }
+    if (String(value.code) !== String(expectedCode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Código SNOMED no corresponde al término",
+        path: ["code"],
+      });
+    }
+  });
+
+const zRequiredSnomedCoding = zSnomedCoding
+  .nullable()
+  .superRefine((value, ctx) => {
+    if (!value) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Diagnóstico SNOMED requerido",
+      });
+    }
+  });
 
 export const zBradenScale = z
   .object({
@@ -541,8 +588,8 @@ export const zHandover = z
 
     vitals: zVitals.optional(),
 
-    dxMedical: optionalTrimmedString(500).optional(),
-    dxNursing: optionalTrimmedString(500).optional(),
+    dxMedical: zRequiredSnomedCoding,
+    dxNursing: zRequiredSnomedCoding,
     dxMedicalStructured: zHandoverStructuredDiagnosisArray,
     dxNursingStructured: zHandoverStructuredDiagnosisArray,
     evolution: optionalTrimmedString(1200).optional(),

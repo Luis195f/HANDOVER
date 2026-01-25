@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
@@ -59,8 +60,8 @@ const handover: HandoverFormData = {
   },
   status: 'draft',
   patientId: 'P-10',
-  dxMedical: 'Neumonía',
-  dxNursing: 'Riesgo respiratorio',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '422587007', display: 'Disnea' },
   dxMedicalStructured: [],
   dxNursingStructured: [],
   evolution: 'Estable',

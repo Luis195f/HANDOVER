@@ -4,6 +4,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HandoverForm from '@/src/screens/HandoverForm';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 vi.mock('react-hook-form', async () => {
   const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
@@ -14,6 +15,19 @@ vi.mock('react-hook-form', async () => {
       fields: [],
       append: vi.fn(),
       remove: vi.fn(),
+    }),
+    useController: ({ defaultValue }: { defaultValue?: unknown }) => ({
+      field: {
+        onChange: vi.fn(),
+        onBlur: vi.fn(),
+        value:
+          defaultValue ?? {
+            system: SNOMED_SYSTEM,
+            code: '',
+            display: '',
+          },
+      },
+      fieldState: { error: undefined },
     }),
     useFormContext: () => ({
       control: {},
@@ -102,6 +116,8 @@ describe('HandoverForm signatures', () => {
     formValues = {
       patientId: 'P1',
       'administrativeData.unit': 'unit-1',
+      dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
+      dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
       signatures: {},
       risksStructured: [],
     };

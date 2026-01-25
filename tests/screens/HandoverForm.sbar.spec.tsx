@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 const mockUseZodForm = vi.fn();
 vi.mock('@/src/validation/form-hooks', () => ({
@@ -52,7 +53,8 @@ const baseValues = {
   treatments: [],
   risksStructured: [],
   meds: '',
-  dxMedical: 'Neumonía bilateral',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
   evolution: 'Estable con oxígeno nasal',
   closingSummary: '',
 };

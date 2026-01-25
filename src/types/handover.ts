@@ -9,6 +9,7 @@ import type {
   zRiskType,
   zTreatmentItem,
 } from '../validation/schemas';
+import type { SnomedCoding } from '../data/snomed-dict';
 // BEGIN HANDOVER D3 – StructuredDiagnosis types
 import type { DiagnosisSystem } from '../catalogs/diagnosisCodes';
 // END HANDOVER D3 – StructuredDiagnosis types
@@ -196,8 +197,8 @@ export type HandoverValues = {
   patientId: string;
   status?: 'draft' | 'final';
   vitals?: Vitals;
-  dxMedical?: string;
-  dxNursing?: string;
+  dxMedical: SnomedCoding | null;
+  dxNursing: SnomedCoding | null;
   // BEGIN HANDOVER D3 – StructuredDiagnosis types
   dxMedicalStructured?: HandoverStructuredDiagnosis[];
   dxNursingStructured?: HandoverStructuredDiagnosis[];

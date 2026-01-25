@@ -1,3 +1,4 @@
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { zHandover } from '@/src/validation/schemas';
 
 describe('HandoverFormSchema', () => {
@@ -20,6 +21,8 @@ describe('HandoverFormSchema', () => {
     },
 
     patientId: 'patient-1',
+    dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+    dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
 
     bedsideChecklist: {
       patientIdentityConfirmed: true,

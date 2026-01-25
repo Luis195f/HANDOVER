@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildMinimalSbarSummary, getBestAvailableSummary } from '@/src/lib/ai-degrade';
+import { SNOMED_SYSTEM, type SnomedCoding } from '@/src/data/snomed-dict';
 import * as SummaryModule from '@/src/lib/summary';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
@@ -20,6 +21,8 @@ const buildData = (overrides: Partial<HandoverFormData> = {}): HandoverFormData 
   administrativeData,
   status: 'draft',
   patientId: 'P-001',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
   dxMedicalStructured: [],
   dxNursingStructured: [],
   closingSummary: '',
@@ -37,9 +40,15 @@ const buildData = (overrides: Partial<HandoverFormData> = {}): HandoverFormData 
   ...overrides,
 });
 
+const makeCoding = (code: string, display: string): SnomedCoding => ({
+  system: SNOMED_SYSTEM,
+  code,
+  display,
+});
+
 describe('ai-degrade summary selection', () => {
   it('usa el proveedor de IA cuando responde con éxito', async () => {
-    const handover = buildData({ dxMedical: 'Neumonía' });
+    const handover = buildData({ dxMedical: makeCoding('195967001', 'Neumonía') });
     const aiSummary: SBARSummary = {
       situation: 'IA: situación',
       background: 'IA: antecedentes',
@@ -55,7 +64,10 @@ describe('ai-degrade summary selection', () => {
   });
 
   it('degrada a reglas locales cuando el proveedor de IA falla', async () => {
-    const handover = buildData({ dxMedical: 'Sepsis', vitals: { rr: 30, spo2: 88, tempC: 39, sbp: 90, hr: 120, avpu: 'V' } });
+    const handover = buildData({
+      dxMedical: makeCoding('128045006', 'Sepsis'),
+      vitals: { rr: 30, spo2: 88, tempC: 39, sbp: 90, hr: 120, avpu: 'V' },
+    });
     const aiProvider = vi.fn(async () => {
       throw new Error('AI offline');
     });
@@ -68,7 +80,10 @@ describe('ai-degrade summary selection', () => {
   });
 
   it('rellena campos vacíos cuando el proveedor IA devuelve datos parciales', async () => {
-    const handover = buildData({ dxMedical: 'Hipotensión', vitals: { rr: 10, spo2: 90, tempC: 36, sbp: 95, hr: 60, avpu: 'A' } });
+    const handover = buildData({
+      dxMedical: makeCoding('230572002', 'Hipotensión'),
+      vitals: { rr: 10, spo2: 90, tempC: 36, sbp: 95, hr: 60, avpu: 'A' },
+    });
     const aiProvider = vi.fn(async () => ({
       situation: 'IA custom',
       background: '',
@@ -86,7 +101,7 @@ describe('ai-degrade summary selection', () => {
   });
 
   it('usa resumen local cuando el proveedor IA devuelve null', async () => {
-    const handover = buildData({ dxMedical: 'Fiebre de origen desconocido' });
+    const handover = buildData({ dxMedical: makeCoding('87041000119103', 'Síndrome febril') });
     const aiProvider = vi.fn(async () => null);
 
     const result = await getBestAvailableSummary(handover, { aiProvider });
@@ -97,7 +112,7 @@ describe('ai-degrade summary selection', () => {
   });
 
   it('cuando no se permiten reglas locales usa el resumen mínimo', async () => {
-    const handover = buildData({ dxMedical: undefined, vitals: undefined, risks: {} });
+    const handover = buildData({ dxMedical: null, dxNursing: null, vitals: undefined, risks: {} });
 
     const result = await getBestAvailableSummary(handover, { useLocalRules: false });
 
@@ -107,7 +122,7 @@ describe('ai-degrade summary selection', () => {
 
   it('usa el resumen mínimo cuando fallan las reglas locales', async () => {
     const handover = buildData({
-      dxMedical: 'Paciente crítico',
+      dxMedical: makeCoding('299709002', 'Shock séptico'),
       vitals: { rr: 30, spo2: 85, tempC: 39.2, sbp: 88, hr: 126, avpu: 'P' },
     });
     const draftMinimal = buildMinimalSbarSummary(handover);
@@ -126,8 +141,8 @@ describe('ai-degrade summary selection', () => {
 
   it('utiliza diagnósticos estructurados cuando faltan los textos libres', async () => {
     const handover = buildData({
-      dxMedical: '',
-      dxNursing: undefined,
+      dxMedical: null,
+      dxNursing: null,
       dxMedicalStructured: [{ system: 'icd-10', code: 'A00', display: 'Cólera' } as any],
       vitals: undefined,
       risksStructured: [],
@@ -140,7 +155,10 @@ describe('ai-degrade summary selection', () => {
   });
 
   it('rellena con fallback cuando el proveedor IA devuelve cadenas en blanco', async () => {
-    const handover = buildData({ dxMedical: 'Neumonía', vitals: { rr: 16, spo2: 98, tempC: 36.8, sbp: 120, hr: 80, avpu: 'A' } });
+    const handover = buildData({
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      vitals: { rr: 16, spo2: 98, tempC: 36.8, sbp: 120, hr: 80, avpu: 'A' },
+    });
     const aiProvider = vi.fn(async () => ({
       situation: '   ',
       background: '\n',
@@ -158,7 +176,7 @@ describe('ai-degrade summary selection', () => {
 describe('buildMinimalSbarSummary', () => {
   it('prioriza signos críticos y riesgos activos', () => {
     const handover = buildData({
-      dxMedical: 'Shock séptico',
+      dxMedical: makeCoding('299709002', 'Shock séptico'),
       vitals: { rr: 32, spo2: 84, tempC: 39.5, sbp: 82, hr: 130, avpu: 'C' },
       risks: { fall: true, pressureUlcer: true },
       risksStructured: [{ type: 'seizure', present: true, actions: [], notes: 'previo' }] as any,

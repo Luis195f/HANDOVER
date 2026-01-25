@@ -5,6 +5,7 @@ import { act } from 'react-test-renderer';
 
 import ExamsProceduresSection from '../../src/screens/components/ExamsProceduresSection';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 const defaultValues: HandoverFormValues = {
   administrativeData: {
@@ -18,6 +19,8 @@ const defaultValues: HandoverFormValues = {
   },
   patientId: 'pat-001',
   status: 'draft',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,

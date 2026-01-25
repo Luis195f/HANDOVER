@@ -54,12 +54,18 @@ import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import { SHIFT_TYPES, type AdministrativeData } from '@/src/types/administrative';
 import type { HandoverStructuredDiagnosis, RiskItem } from '@/src/types/handover';
 import type { SBARSummary } from '@/src/types/sbar';
+import {
+  normalizeLegacySnomedCoding,
+  SNOMED_SYSTEM,
+  type SnomedCoding,
+} from '@/src/data/snomed-dict';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues } from '@/src/validation/schemas';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
+import AutocompleteSnomedCoding from '@/src/components/AutocompleteSnomedCoding';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
 
@@ -482,6 +488,12 @@ export default function HandoverForm({ navigation, route }: Props) {
     return Object.keys(mapped).length ? mapped : undefined;
   }, [prefilledValuesParam?.vitals]);
 
+  const emptySnomedCoding: SnomedCoding = {
+    system: SNOMED_SYSTEM,
+    code: '',
+    display: '',
+  };
+
   const defaultValues = useMemo<HandoverFormValues>(() => {
     const initialUnitConfig = getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
     const checklistItems = initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
@@ -523,12 +535,17 @@ export default function HandoverForm({ navigation, route }: Props) {
       incidents: administrativeDataParam?.incidents ?? [],
     };
 
+    const dxMedicalPrefill = prefilledValuesParam?.dxText;
+    const normalizedDxMedical = dxMedicalPrefill
+      ? normalizeLegacySnomedCoding(dxMedicalPrefill)
+      : null;
+
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
-      dxMedical: prefilledValuesParam?.dxText ?? '',
-      dxNursing: '',
+      dxMedical: dxMedicalPrefill ? normalizedDxMedical : emptySnomedCoding,
+      dxNursing: emptySnomedCoding,
       dxMedicalStructured: [],
       dxNursingStructured: [],
       evolution: '',
@@ -625,7 +642,18 @@ export default function HandoverForm({ navigation, route }: Props) {
     getSnapshot: () => form.getValues(),
     onLoad: (data) => {
       if (!data) return;
-      form.reset({ ...form.getValues(), ...data });
+      const normalizedDxMedical =
+        data.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(data.dxMedical);
+      const normalizedDxNursing =
+        data.dxNursing === undefined ? undefined : normalizeLegacySnomedCoding(data.dxNursing);
+
+      const normalizedData: Partial<HandoverFormValues> = {
+        ...data,
+        ...(data.dxMedical !== undefined ? { dxMedical: normalizedDxMedical } : {}),
+        ...(data.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
+      };
+
+      form.reset({ ...form.getValues(), ...normalizedData });
     },
   });
 
@@ -645,7 +673,18 @@ export default function HandoverForm({ navigation, route }: Props) {
         // Importante: NO pisar si ya hay datos
         const current = getValues();
         const isEmpty = !current || Object.keys(current).length === 0;
-        if (isEmpty) reset(draft);
+        if (isEmpty) {
+          const normalizedDxMedical =
+            draft?.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxMedical);
+          const normalizedDxNursing =
+            draft?.dxNursing === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxNursing);
+          const normalizedDraft: Partial<HandoverFormValues> = {
+            ...draft,
+            ...(draft?.dxMedical !== undefined ? { dxMedical: normalizedDxMedical } : {}),
+            ...(draft?.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
+          };
+          reset(normalizedDraft);
+        }
       } catch {
         // no-op
       }
@@ -754,15 +793,28 @@ export default function HandoverForm({ navigation, route }: Props) {
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
   const aiSuggestionsEnabled = isOn('AI_SUGGESTIONS_ENABLED');
+  const buildDraftSnomedCoding = (display: string): SnomedCoding => ({
+    system: SNOMED_SYSTEM,
+    code: '',
+    display,
+  });
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
-        get: () => form.getValues('dxMedical') ?? '',
-        set: (text: string) => form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
+        get: () => form.getValues('dxMedical')?.display ?? '',
+        set: (text: string) =>
+          form.setValue('dxMedical', buildDraftSnomedCoding(text), {
+            shouldDirty: true,
+            shouldValidate: true,
+          }),
       },
       dxNursing: {
-        get: () => form.getValues('dxNursing') ?? '',
-        set: (text: string) => form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
+        get: () => form.getValues('dxNursing')?.display ?? '',
+        set: (text: string) =>
+          form.setValue('dxNursing', buildDraftSnomedCoding(text), {
+            shouldDirty: true,
+            shouldValidate: true,
+          }),
       },
       meds: {
         get: () => form.getValues('meds') ?? '',
@@ -1034,8 +1086,8 @@ export default function HandoverForm({ navigation, route }: Props) {
     const clinicalContext = {
       patientId: values.patientId,
       administrativeData: values.administrativeData,
-      dxMedical: values.dxMedical,
-      dxNursing: values.dxNursing,
+      dxMedical: values.dxMedical?.display ?? '',
+      dxNursing: values.dxNursing?.display ?? '',
       vitals: values.vitals,
       medications: values.medications,
       medsFreeText: values.meds,
@@ -1346,11 +1398,11 @@ export default function HandoverForm({ navigation, route }: Props) {
     (watchedValues.dxNursingStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
-    if (watchedValues.dxMedical) {
-      diagnoses.push(watchedValues.dxMedical);
+    if (watchedValues.dxMedical?.display) {
+      diagnoses.push(watchedValues.dxMedical.display);
     }
-    if (watchedValues.dxNursing) {
-      diagnoses.push(watchedValues.dxNursing);
+    if (watchedValues.dxNursing?.display) {
+      diagnoses.push(watchedValues.dxNursing.display);
     }
 
     const notes = truncateNote(watchedValues.evolution) ?? truncateNote(watchedValues.closingSummary);
@@ -2110,22 +2162,13 @@ export default function HandoverForm({ navigation, route }: Props) {
             {/* END HANDOVER D3 – dxMedicalStructured */}
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Notas libres de diagnósticos médicos</Text>
             <View style={styles.dictationRow}>
               <View style={styles.flex}>
-                <Controller
+                <AutocompleteSnomedCoding
                   control={control}
                   name="dxMedical"
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      style={[styles.input, styles.textArea]}
-                      multiline
-                      placeholder="Diagnósticos médicos en texto libre (legado)"
-                      onBlur={onBlur}
-                      value={value ?? ''}
-                      onChangeText={onChange}
-                    />
-                  )}
+                  label="Diagnóstico médico (SNOMED)"
+                  placeholder="Buscar diagnóstico médico"
                 />
               </View>
               <DictationMicButton
@@ -2154,23 +2197,13 @@ export default function HandoverForm({ navigation, route }: Props) {
             {/* END HANDOVER D3 – dxNursingStructured */}
           </View>
           <View style={styles.field}>
-            <Text style={styles.label}>Notas libres de diagnósticos de enfermería</Text>
             <View style={styles.dictationRow}>
               <View style={styles.flex}>
-                <Controller
+                <AutocompleteSnomedCoding
                   control={control}
                   name="dxNursing"
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      style={[styles.input, styles.textArea, tokenInputStyle]}
-                      multiline
-                      placeholder="Diagnósticos de enfermería en texto libre (legado)"
-                      placeholderTextColor={colors.muted}
-                      onBlur={onBlur}
-                      value={value ?? ''}
-                      onChangeText={onChange}
-                    />
-                  )}
+                  label="Diagnóstico de enfermería (SNOMED)"
+                  placeholder="Buscar diagnóstico de enfermería"
                 />
               </View>
               <DictationMicButton

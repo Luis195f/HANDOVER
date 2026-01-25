@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BedsideChecklistSection } from '../../src/screens/components/BedsideChecklistSection';
 import { zHandover } from '@/src/validation/schemas';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 const defaultValues = {
   administrativeData: {
@@ -20,6 +21,10 @@ const defaultValues = {
   },
   patientId: 'pat-001',
   status: 'draft',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
+  dxMedicalStructured: [],
+  dxNursingStructured: [],
   bedsideChecklist: {
     patientIdentityConfirmed: false,
     allergiesReviewed: false,

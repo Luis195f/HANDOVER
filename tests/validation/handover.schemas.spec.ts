@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { DIET_TYPES, MOBILITY_LEVELS } from '@/src/types/handover';
 import { zHandover } from '@/src/validation/schemas';
 
@@ -30,8 +31,8 @@ const buildValidHandover = () => {
       sbp: 120,
       dbp: 70,
     },
-    dxMedical: 'Neumonía adquirida en la comunidad',
-    dxNursing: 'Deterioro del intercambio gaseoso',
+    dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+    dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
     dxMedicalStructured: [],
     dxNursingStructured: [],
     evolution: 'Paciente estable, sin cambios agudos.',
