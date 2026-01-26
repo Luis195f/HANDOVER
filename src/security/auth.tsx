@@ -713,6 +713,9 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
     scopes: merged.scopes,
     usePKCE: true,
     responseType: AuthSession.ResponseType.Code,
+    extraParams: {
+    audience: process.env.EXPO_PUBLIC_AUTH0_AUDIENCE!,
+  },
   });
 
   const session = await performAuth0Login({

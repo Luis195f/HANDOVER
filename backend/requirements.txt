@@ -1,2 +1,6 @@
 fhir.resources>=7.1.0
 cryptography>=42.0.8
+python-dotenv
+python-jose
+httpx
+
