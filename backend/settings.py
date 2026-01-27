@@ -6,26 +6,44 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carga .env (tu ruta actual está OK)
 ENV_PATH = BASE_DIR / "backend" / ".env"
 if ENV_PATH.exists():
     load_dotenv(ENV_PATH)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-placeholder")
-DEBUG = True
+
+# DEBUG controlable por env (default True para dev)
+DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 
 HANDOVER_PRIVATE_KEY_PATH = os.getenv("HANDOVER_PRIVATE_KEY_PATH")
 HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
-HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false")
+HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").lower() == "true"
 
-RAW_ALLOWED_ORIGINS = os.getenv("HANDOVER_ALLOWED_ORIGINS", "")
-ALLOWED_HOSTS: list[str] = [
-    urlparse(origin).hostname or origin
-    for origin in RAW_ALLOWED_ORIGINS.split(",")
-    if origin
-]
+# ---- Hosts / CORS ----
+RAW_ALLOWED_ORIGINS = os.getenv("HANDOVER_ALLOWED_ORIGINS", "").strip()
+
+# Fallback dev-friendly (no te rompe nada)
+DEFAULT_DEV_ORIGINS = "http://localhost:19006,http://localhost:3000,http://127.0.0.1:19006,http://127.0.0.1:3000"
+if not RAW_ALLOWED_ORIGINS and DEBUG:
+    RAW_ALLOWED_ORIGINS = DEFAULT_DEV_ORIGINS
+
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS.split(",") if RAW_ALLOWED_ORIGINS else []
+CORS_ALLOWED_ORIGINS = [o.strip() for o in RAW_ALLOWED_ORIGINS.split(",") if o.strip()]
 CORS_ALLOWED_ORIGIN_REGEXES = [r"^https?:\/\/localhost(:\d+)?$"]
+
+# ALLOWED_HOSTS: usa hosts de los origins + fallback
+hosts_from_origins = []
+for origin in CORS_ALLOWED_ORIGINS:
+    try:
+        h = urlparse(origin).hostname
+        if h:
+            hosts_from_origins.append(h)
+    except Exception:
+        pass
+
+ALLOWED_HOSTS = sorted(set(hosts_from_origins + ["localhost", "127.0.0.1"]))
 
 LOCAL_IP = environ.get("LOCAL_IP")
 CSRF_TRUSTED_ORIGINS = [
@@ -83,7 +101,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
             ],
         },
-    },
+    }
 ]
 
 WSGI_APPLICATION = "backend.wsgi.application"
@@ -109,19 +127,33 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-SECURE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "true") == "true"
-SECURE_HSTS_SECONDS = 31536000
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_CONTENT_TYPE_NOSNIFF = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
-X_FRAME_OPTIONS = "DENY"
-SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+# ---- Seguridad: solo fuerte en prod ----
+ENABLE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "false").lower() == "true"
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = ENABLE_SSL_REDIRECT
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+else:
+    SECURE_SSL_REDIRECT = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+    SECURE_PROXY_SSL_HEADER = None
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
