@@ -33,6 +33,8 @@ ios/
 .env.local
 .env.production
 .env.development
+!.env.example
+!backend/.env.example
 
 # React Native / Mobile artifacts
 *.apk

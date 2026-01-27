@@ -1,9 +1,14 @@
-from pathlib import Path
 import os
 from os import environ
+from pathlib import Path
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH = BASE_DIR / "backend" / ".env"
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-placeholder")
 DEBUG = True
@@ -41,6 +46,15 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "backend.security.auth.Auth0JWTAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+}
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

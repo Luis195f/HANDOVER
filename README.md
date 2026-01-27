@@ -77,6 +77,26 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    ```
    - Define `HANDOVER_ALLOWED_ORIGINS` (p. ej. `https://app.handover-pro.es,https://app.handover-pro.lat`) para restringir CORS/ALLOWED_HOSTS y mantener CSP/Referrer-Policy alineadas en Django/FastAPI.
    - En producción mantén `ENABLE_SSL_REDIRECT=true` y despliega detrás de un proxy TLS 1.3 con HSTS (ya habilitado en `backend/settings.py`).
+
+### Autenticación JWT (Auth0) en el backend Django
+
+1. Crea `backend/.env` a partir del ejemplo `backend/.env.example` y define:
+   - `AUTH0_ISSUER_BASE_URL`
+   - `AUTH0_AUDIENCE`
+2. En una terminal inicia el servidor:
+   ```bash
+   python manage.py runserver 0.0.0.0:8000
+   ```
+3. En otra terminal valida que los endpoints FHIR estén protegidos:
+   ```bash
+   curl http://localhost:8000/api/fhir/transaction
+   ```
+   Debe responder `401`.
+4. Con un JWT válido de Auth0 (reemplaza `<TOKEN>`):
+   ```bash
+   curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/api/fhir/transaction
+   ```
+   Debe pasar autenticación (por ejemplo responder `422` si el payload no es válido), pero no `401`.
 3. Arranca el cliente Expo:
    ```bash
    pnpm expo start

@@ -5,8 +5,12 @@ from typing import Any, Dict, Optional
 
 import httpx
 from django.http import HttpRequest
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from backend.security.auth import Auth0JWTAuthentication
+
 try:
     from fhir.resources.bundle import Bundle
     from fhir.resources.fhirabstractmodel import FHIRValidationError
@@ -58,7 +62,11 @@ def _validate_remotely(resource: Dict[str, Any], resource_type: str) -> Optional
     if not isinstance(issues, list):
         return None
 
-    has_errors = any((issue.get("severity") in ("error", "fatal")) for issue in issues if isinstance(issue, dict))
+    has_errors = any(
+        (issue.get("severity") in ("error", "fatal"))
+        for issue in issues
+        if isinstance(issue, dict)
+    )
     if has_errors:
         return Response(data, status=422)
 
@@ -86,10 +94,22 @@ def _post_to_fhir(resource: Dict[str, Any], resource_type: str) -> Response:
         return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
 
 
-class PatientView(APIView):
+class AuthenticatedAPIView(APIView):
+    """
+    Base para endpoints protegidos con JWT (Auth0).
+    """
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class PatientView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request: HttpRequest) -> Response:
         if Patient is None or FHIRValidationError is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
+
         try:
             patient_obj = Patient.parse_obj(request.data)
         except FHIRValidationError as exc:
@@ -103,10 +123,14 @@ class PatientView(APIView):
         return _post_to_fhir(patient, "Patient")
 
 
-class MedicationStatementView(APIView):
+class MedicationStatementView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request: HttpRequest) -> Response:
         if MedicationStatement is None or FHIRValidationError is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
+
         try:
             medication_statement_obj = MedicationStatement.parse_obj(request.data)
         except FHIRValidationError as exc:
@@ -120,7 +144,10 @@ class MedicationStatementView(APIView):
         return _post_to_fhir(medication_statement, "MedicationStatement")
 
 
-class BundleView(APIView):
+class BundleView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request: HttpRequest) -> Response:
         if Bundle is None or FHIRValidationError is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
