@@ -103,6 +103,9 @@ class AuthenticatedAPIView(APIView):
 
 
 class PatientView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request: HttpRequest) -> Response:
         if Patient is None or FHIRValidationError is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -121,6 +124,9 @@ class PatientView(AuthenticatedAPIView):
 
 
 class MedicationStatementView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request: HttpRequest) -> Response:
         if MedicationStatement is None or FHIRValidationError is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -139,6 +145,9 @@ class MedicationStatementView(AuthenticatedAPIView):
 
 
 class BundleView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def post(self, request: HttpRequest) -> Response:
         if Bundle is None or FHIRValidationError is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
