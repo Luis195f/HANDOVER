@@ -52,7 +52,9 @@ jobs:
         run: pnpm -w typecheck || true
 
       - name: Validate FHIR Bundles
-        run: pnpm -w exec ts-node-esm scripts/validate-fhir.ts || true
+        run: |
+          pnpm -w validate:fhir tests/fixtures/fhir-bundles/valid-bundle.json
+          ! pnpm -w validate:fhir tests/fixtures/fhir-bundles/invalid-bundle.json
 
 
       - name: Lint

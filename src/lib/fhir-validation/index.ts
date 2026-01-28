@@ -47,7 +47,7 @@ export function validateResource(resource: unknown, type: FhirResourceType): Ajv
   return { isValid: false, errors: result.errors };
 }
 
-export function validateBundle(bundle: unknown): AjvValidationSummary {
+export function validateBundleWithAjv(bundle: unknown): AjvValidationSummary {
   return validateResource(bundle, 'Bundle');
 }
 
@@ -60,6 +60,7 @@ function formatAjvError(err: ErrorObject): string {
 
 export {
   getValidationErrorsFromBundle,
+  validateBundle,
   validateBundle as validateBundleWithZod,
   validateResourceWithZod,
   type ValidationResult,
