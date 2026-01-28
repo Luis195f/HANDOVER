@@ -74,6 +74,9 @@ pytest-cache/
 
 # Project local tools
 scripts/
+!scripts/
+!scripts/backup-db.sh
+!scripts/backup-media.sh
 
 
 # Local Python env / DB
