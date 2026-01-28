@@ -8,6 +8,7 @@ import PatientDashboard from '@/src/screens/PatientDashboard';
 import PatientList from '@/src/screens/PatientList';
 import { DemoModeBanner } from '@/src/components/DemoModeBanner';
 import OnboardingScreen from '@/src/screens/OnboardingScreen';
+import PrivacyPolicy from '@/src/screens/PrivacyPolicy';
 import QRScan from '@/src/screens/QRScan';
 import ShiftDetailsScreen from '@/src/screens/ShiftDetailsScreen';
 import SyncCenter from '@/src/screens/SyncCenter';
@@ -119,6 +120,7 @@ function AuthGate() {
         ) : (
           <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
         )}
+        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
         {canAdminister ? (
           <Stack.Screen
             name="SupervisorDashboard"
