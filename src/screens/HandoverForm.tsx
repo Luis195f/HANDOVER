@@ -44,6 +44,7 @@ import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/
 import { enqueueBundle } from '@/src/lib/queue';
 import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
+import { validateBundle } from '@/src/lib/fhir-validation';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -1544,6 +1545,14 @@ export default function HandoverForm({ navigation, route }: Props) {
       };
 
       const bundle = buildHandoverBundle(handoverInput, { now: () => nowIso });
+      const localValidation = validateBundle(bundle);
+      if (!localValidation.isValid) {
+        Alert.alert(
+          'Error de validación FHIR',
+          'Faltan campos obligatorios o la estructura es inválida. Revisa los datos antes de reintentar.'
+        );
+        return;
+      }
 
       if (isFastValidateEnabled()) {
         const netState = await NetInfo.fetch();

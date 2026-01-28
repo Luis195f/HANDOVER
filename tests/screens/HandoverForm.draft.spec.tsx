@@ -8,6 +8,7 @@ import type { HandoverFormData } from '@/src/validation/schemas';
 
 const enqueueBundle = vi.fn();
 const buildHandoverBundle = vi.fn(() => ({ bundle: true }));
+const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
 const mockUseZodForm = vi.fn();
@@ -66,6 +67,7 @@ vi.mock('@/src/security/auth', () => ({
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
 vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
+vi.mock('@/src/lib/fhir-validation', () => ({ validateBundle: (...args: unknown[]) => validateBundle(...args) }));
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(),

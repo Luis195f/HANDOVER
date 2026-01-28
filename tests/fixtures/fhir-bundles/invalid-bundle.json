@@ -1,0 +1,12 @@
+{
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:obs-1",
+      "resource": {
+        "resourceType": "Observation",
+        "code": {}
+      }
+    }
+  ]
+}
