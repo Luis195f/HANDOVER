@@ -443,21 +443,22 @@ export default function ClinicalScalesSection() {
         <Text style={styles.error}>{bradenErrors.riskLevel.message as string}</Text>
       ) : null}
 
-      <Text style={styles.sectionSubtitle}>Glasgow – Estado neurológico</Text>
+      <Text style={styles.sectionSubtitle}>Glasgow – Estado neurológico (3-15)</Text>
+      <Text style={styles.helperText}>Selecciona Ojo (1-4), Verbal (1-5) y Motora (1-6).</Text>
       <GlasgowField
-        label="Apertura ocular"
+        label="Apertura ocular (1-4)"
         name="glasgow.eye"
         options={glasgowOptions['glasgow.eye']}
         error={eyeError}
       />
       <GlasgowField
-        label="Respuesta verbal"
+        label="Respuesta verbal (1-5)"
         name="glasgow.verbal"
         options={glasgowOptions['glasgow.verbal']}
         error={verbalError}
       />
       <GlasgowField
-        label="Respuesta motora"
+        label="Respuesta motora (1-6)"
         name="glasgow.motor"
         options={glasgowOptions['glasgow.motor']}
         error={motorError}
@@ -484,6 +485,7 @@ export default function ClinicalScalesSection() {
 
 const styles = StyleSheet.create({
   sectionSubtitle: { fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  helperText: { marginBottom: 12, color: '#4B5563' },
   field: { marginBottom: 16 },
   label: { fontSize: 16, fontWeight: '500', marginBottom: 6 },
   input: {
