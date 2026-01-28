@@ -104,8 +104,8 @@ export function createLocalAuthProvider(): AuthProvider {
       const user: AuthUser = {
         id: normalizedUser,
         name: normalizedUser,
-        roles: ['nurse'],
-        units: ['UCI'],
+        roles: [],
+        units: [],
       };
       return { tokens, user };
     },

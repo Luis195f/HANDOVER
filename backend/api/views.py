@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from backend.security.auth import Auth0JWTAuthentication
-from backend.security.permissions import RequireRolesPermission
+from backend.security.permissions import NurseOrAdminPermission
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ class AuthenticatedAPIView(APIView):
     Además: soporta application/fhir+json (parser+renderer).
     """
     authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated, RequireRolesPermission("nurse", "admin")]
+    permission_classes = [IsAuthenticated, NurseOrAdminPermission]
 
     # ✅ Esto arregla 415 y 406 para FHIR JSON
     parser_classes = [FHIRJSONParser, JSONParser]
