@@ -19,6 +19,7 @@ import type { RootStackParamList } from '@/src/navigation/types';
 import { hasRole } from '@/src/security/acl';
 import { useAuth } from '@/src/security/auth';
 import { getOnboardingCompleted } from '@/src/lib/onboarding-storage';
+import { hasPrivacyConsent } from '@/src/lib/privacy-consent';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -37,6 +38,7 @@ function UnauthorizedScreen() {
 function AuthGate() {
   const { session, loading, logout } = useAuth();
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
+  const [privacyConsent, setPrivacyConsentState] = React.useState<boolean | null>(null);
 
   // BEGIN HANDOVER: ONBOARDING
   React.useEffect(() => {
@@ -61,7 +63,28 @@ function AuthGate() {
   }, [session]);
   // END HANDOVER: ONBOARDING
 
-  if (loading || (session && onboardingCompleted === null)) {
+  React.useEffect(() => {
+    let alive = true;
+    async function loadConsent() {
+      if (!session) {
+        setPrivacyConsentState(null);
+        return;
+      }
+      setPrivacyConsentState(null);
+      try {
+        const consented = await hasPrivacyConsent();
+        if (alive) setPrivacyConsentState(consented);
+      } catch {
+        if (alive) setPrivacyConsentState(false);
+      }
+    }
+    void loadConsent();
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+
+  if (loading || (session && (onboardingCompleted === null || privacyConsent === null))) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator size="large" />
@@ -88,6 +111,7 @@ function AuthGate() {
           {...props}
           onComplete={async () => {
             setOnboardingCompletedState(true);
+            setPrivacyConsentState(true);
           }}
           nextRoute={postOnboardingRoute}
         />
@@ -95,7 +119,9 @@ function AuthGate() {
     </Stack.Screen>
   );
 
-  const initialRouteName = onboardingCompleted === false ? 'Onboarding' : postOnboardingRoute;
+  const requiresConsent = privacyConsent !== true;
+  const initialRouteName =
+    requiresConsent || onboardingCompleted === false ? 'Onboarding' : postOnboardingRoute;
 
   return (
     <View style={{ flex: 1 }}>
