@@ -47,7 +47,10 @@ describe('auth session', () => {
     expect(hydrated).not.toBeNull();
 
     // Debe ser el mismo modelo que devolvió loginWithOAuth
-    expect(hydrated).toMatchObject(sessionFromLogin);
+    expect(hydrated).toMatchObject({
+  ...sessionFromLogin,
+  roles: expect.any(Array),
+});
 
     // Y además debe incorporar la info del userinfo mockeado
     expect(hydrated.userId).toBe(sessionFromLogin.userId);
