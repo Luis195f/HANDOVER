@@ -1,17 +1,23 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Text } from 'react-native';
+import { Alert, Text } from 'react-native';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import OnboardingScreen from '@/src/screens/OnboardingScreen';
 import RootNavigator from '@/src/navigation/RootNavigator';
 import { getOnboardingCompleted, setOnboardingCompleted } from '@/src/lib/onboarding-storage';
+import { hasPrivacyConsent, setPrivacyConsent } from '@/src/lib/privacy-consent';
 import { useAuth } from '@/src/security/auth';
 
 vi.mock('@/src/lib/onboarding-storage', () => ({
   setOnboardingCompleted: vi.fn(),
   getOnboardingCompleted: vi.fn(),
+}));
+
+vi.mock('@/src/lib/privacy-consent', () => ({
+  hasPrivacyConsent: vi.fn(),
+  setPrivacyConsent: vi.fn(),
 }));
 
 vi.mock('@/src/security/auth', () => ({
@@ -34,6 +40,7 @@ vi.mock('@/src/screens/admin/AdminDashboardScreen', () => ({
   AdminDashboardScreen: () => <Text>AdminDashboardMock</Text>,
 }));
 vi.mock('@/src/screens/LoginScreen', () => ({ default: () => <Text>LoginMock</Text> }));
+vi.mock('@/src/screens/PrivacyPolicy', () => ({ default: () => <Text>PrivacyPolicyMock</Text> }));
 
 const navigationMock = {
   reset: vi.fn(),
@@ -46,6 +53,7 @@ afterEach(() => {
 
 describe('OnboardingScreen', () => {
   it('muestra el primer paso al renderizar', () => {
+    vi.mocked(hasPrivacyConsent).mockResolvedValue(false);
     const { getByText } = render(
       <OnboardingScreen navigation={navigationMock} route={{ key: 'onboarding', name: 'Onboarding' }} />,
     );
@@ -54,6 +62,7 @@ describe('OnboardingScreen', () => {
   });
 
   it('avanza al siguiente paso al pulsar Siguiente', () => {
+    vi.mocked(hasPrivacyConsent).mockResolvedValue(false);
     const { getByText } = render(
       <OnboardingScreen navigation={navigationMock} route={{ key: 'onboarding', name: 'Onboarding' }} />,
     );
@@ -65,6 +74,7 @@ describe('OnboardingScreen', () => {
 
   it('marca onboarding como completado al pulsar Entendido', async () => {
     const setCompletedMock = vi.mocked(setOnboardingCompleted);
+    vi.mocked(hasPrivacyConsent).mockResolvedValue(true);
     const { getByText } = render(
       <OnboardingScreen navigation={navigationMock} route={{ key: 'onboarding', name: 'Onboarding' }} />,
     );
@@ -77,12 +87,14 @@ describe('OnboardingScreen', () => {
 
     await waitFor(() => {
       expect(setCompletedMock).toHaveBeenCalledWith(true);
+      expect(vi.mocked(setPrivacyConsent)).toHaveBeenCalledWith(true);
       expect(navigationMock.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'PatientList' }] });
     });
   });
 
   it('permite saltar el onboarding desde el primer paso', async () => {
     const setCompletedMock = vi.mocked(setOnboardingCompleted);
+    vi.mocked(hasPrivacyConsent).mockResolvedValue(true);
     const { getByText } = render(
       <OnboardingScreen navigation={navigationMock} route={{ key: 'onboarding', name: 'Onboarding' }} />,
     );
@@ -91,7 +103,48 @@ describe('OnboardingScreen', () => {
 
     await waitFor(() => {
       expect(setCompletedMock).toHaveBeenCalledWith(true);
+      expect(vi.mocked(setPrivacyConsent)).toHaveBeenCalledWith(true);
       expect(navigationMock.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'PatientList' }] });
+    });
+  });
+
+  it('bloquea completar sin consentimiento', async () => {
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const setCompletedMock = vi.mocked(setOnboardingCompleted);
+    vi.mocked(hasPrivacyConsent).mockResolvedValue(false);
+
+    const { getByText } = render(
+      <OnboardingScreen navigation={navigationMock} route={{ key: 'onboarding', name: 'Onboarding' }} />,
+    );
+
+    for (let i = 0; i < 4; i += 1) {
+      fireEvent.press(getByText(/Siguiente|Entendido/));
+    }
+
+    fireEvent.press(getByText('Entendido'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith('Consentimiento requerido', 'Debe aceptar la política de privacidad');
+      expect(setCompletedMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it('permite completar con consentimiento', async () => {
+    const setCompletedMock = vi.mocked(setOnboardingCompleted);
+    vi.mocked(hasPrivacyConsent).mockResolvedValue(true);
+
+    const { getByText } = render(
+      <OnboardingScreen navigation={navigationMock} route={{ key: 'onboarding', name: 'Onboarding' }} />,
+    );
+
+    for (let i = 0; i < 4; i += 1) {
+      fireEvent.press(getByText(/Siguiente|Entendido/));
+    }
+
+    fireEvent.press(getByText('Entendido'));
+
+    await waitFor(() => {
+      expect(setCompletedMock).toHaveBeenCalledWith(true);
     });
   });
 });

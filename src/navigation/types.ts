@@ -78,4 +78,5 @@ export type RootStackParamList = {
   Unauthorized: undefined;
 
   Onboarding: undefined;
+  PrivacyPolicy: undefined;
 };

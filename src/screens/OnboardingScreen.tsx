@@ -1,17 +1,20 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   FlatList,
   ListRenderItem,
   Pressable,
   SafeAreaView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
+import { hasPrivacyConsent, setPrivacyConsent } from "@/src/lib/privacy-consent";
 import type { RootStackParamList } from "@/src/navigation/types";
 
 type OnboardingStep = {
@@ -60,11 +63,36 @@ const STEPS: OnboardingStep[] = [
 export default function OnboardingScreen({ navigation, onComplete, nextRoute = "PatientList" }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const listRef = useRef<FlatList<OnboardingStep> | null>(null);
+  const [consent, setConsent] = useState(false);
 
   const isLastStep = currentIndex >= STEPS.length - 1;
 
+  useEffect(() => {
+    let alive = true;
+    async function loadConsent() {
+      try {
+        const storedConsent = await hasPrivacyConsent();
+        if (alive) setConsent(storedConsent);
+      } catch {
+        if (alive) setConsent(false);
+      }
+    }
+    void loadConsent();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const requireConsent = (): boolean => {
+    if (consent) return true;
+    Alert.alert("Consentimiento requerido", "Debe aceptar la política de privacidad");
+    return false;
+  };
+
   const handleComplete = async () => {
+    if (!requireConsent()) return;
     await setOnboardingCompleted(true);
+    await setPrivacyConsent(true);
     if (onComplete) await onComplete();
     navigation.reset({ index: 0, routes: [{ name: nextRoute }] });
   };
@@ -124,6 +152,31 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
       />
       <View style={styles.footer}>
         <View style={styles.indicatorRow}>{indicators}</View>
+        <View style={styles.consentContainer}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => navigation.navigate("PrivacyPolicy")}
+            style={styles.policyButton}
+          >
+            <Text style={styles.policyButtonText}>Ver política de privacidad</Text>
+          </Pressable>
+          <View style={styles.consentRow}>
+            <Switch
+              accessibilityLabel="Consentimiento de privacidad"
+              value={consent}
+              onValueChange={(value) => {
+                setConsent(value);
+                void setPrivacyConsent(value);
+              }}
+            />
+            <View style={styles.consentTextContainer}>
+              <Text style={styles.consentText}>He leído y acepto la política de privacidad.</Text>
+              <Text style={styles.consentSubtext}>
+                Al registrarse, acepto la política de privacidad de la aplicación.
+              </Text>
+            </View>
+          </View>
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={isLastStep ? "Entendido" : "Siguiente"}
@@ -192,6 +245,38 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 16,
   },
+  consentContainer: {
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  policyButton: {
+    alignSelf: "flex-start",
+    marginBottom: 8,
+  },
+  policyButtonText: {
+    color: "#38BDF8",
+    fontWeight: "600",
+  },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  consentTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  consentText: {
+    color: "#E2E8F0",
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  consentSubtext: {
+    color: "#CBD5E1",
+    fontSize: 12,
+    lineHeight: 16,
+  },
   indicator: {
     width: 10,
     height: 10,
@@ -214,4 +299,3 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
-
