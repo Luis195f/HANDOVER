@@ -54,6 +54,7 @@ vi.mock('@/src/screens/ShiftDetailsScreen', () => ({ default: () => <></> }));
 vi.mock('@/src/screens/SyncCenter', () => ({ default: () => <></> }));
 vi.mock('@/src/screens/SupervisorDashboard', () => ({ default: () => <></> }));
 vi.mock('@/src/screens/admin/AdminDashboardScreen', () => ({ AdminDashboardScreen: () => <></> }));
+vi.mock('@/src/screens/PrivacyPolicy', () => ({ default: () => <></> }));
 
 vi.mock('@/src/security/acl', () => ({ hasRole: () => true }));
 
