@@ -130,10 +130,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---- Seguridad: solo fuerte en prod ----
-ENABLE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "false").lower() == "true"
+ENABLE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "true").lower() == "true"
 
 if not DEBUG:
-    SECURE_SSL_REDIRECT = ENABLE_SSL_REDIRECT
+    SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
@@ -162,6 +162,9 @@ CONTENT_SECURITY_POLICY = {
         "style-src": ("'self'", "https://fonts.googleapis.com"),
         "img-src": ("'self'", "data:"),
         "font-src": ("'self'", "https://fonts.gstatic.com"),
-        "connect-src": ("'self'",),
+        "connect-src": (
+            "'self'",
+            *tuple(origin for origin in CORS_ALLOWED_ORIGINS if origin.startswith("https://")),
+        ),
     }
 }

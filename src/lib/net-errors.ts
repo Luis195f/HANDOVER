@@ -2,7 +2,7 @@
 
 import { t } from '@/src/i18n';
 
-export type NetErrorKind = 'HTTP' | 'TIMEOUT' | 'OFFLINE' | 'ABORT' | 'UNKNOWN';
+export type NetErrorKind = 'HTTP' | 'TIMEOUT' | 'OFFLINE' | 'ABORT' | 'TLS' | 'UNKNOWN';
 
 export type NetError = {
   kind: NetErrorKind;
@@ -82,6 +82,15 @@ const offlineHints = [
   /ECONNRESET/i,
   /ENOTFOUND/i,
   /EAI_AGAIN/i,
+];
+
+const tlsHints = [
+  /SSL/i,
+  /certificate/i,
+  /CERT/i,
+  /TLS/i,
+  /handshake/i,
+  /SEC_ERROR/i,
 ];
 
 type OperationOutcomeIssue = {
@@ -182,6 +191,10 @@ export function normalizeNetError(error: unknown, ctx?: { url?: string; response
     return { kind: 'ABORT', url, details: message || undefined, cause: error };
   }
 
+  if (tlsHints.some((pattern) => pattern.test(message))) {
+    return { kind: 'TLS', url, details: message || undefined, cause: error };
+  }
+
   if (offlineHints.some((pattern) => pattern.test(message))) {
     return { kind: 'OFFLINE', url, details: message || undefined, cause: error };
   }
@@ -248,6 +261,16 @@ export function getUserFacingNetworkMessage(
       title: 'Sin conexión',
       message: t('offlineMsg'),
       cta: { label: 'Ver cola', action: 'OPEN_SYNC' },
+    };
+  }
+
+  if (err.kind === 'TLS') {
+    const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
+    maybeWarn('NET_TLS_ERROR', err, nextCtx);
+    return {
+      title: 'Error de red',
+      message: 'Error al establecer conexión segura. Verifica el certificado SSL del servidor.',
+      cta: { label: 'Entendido', action: 'DISMISS' },
     };
   }
 
