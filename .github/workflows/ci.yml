@@ -46,10 +46,10 @@ jobs:
           pnpm config set network-timeout 600000 || true
 
       - name: Install
-        run: pnpm -w install --no-frozen-lockfile || true
+        run: pnpm -w install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm -w typecheck || true
+        run: pnpm -w typecheck
 
       - name: Validate FHIR Bundles
         run: |
@@ -58,7 +58,10 @@ jobs:
 
 
       - name: Lint
-        run: pnpm -w lint --fix || true
+        run: pnpm -w lint
 
       - name: Vitest
-        run: pnpm -w exec vitest run --reporter=verbose
+        run: pnpm -w vitest run --reporter=verbose
+
+      - name: Docker build
+        run: docker build . --file Dockerfile --tag handover-app
