@@ -40,6 +40,7 @@ function warnAuth(_code: AuthWarnCode, _meta: Record<string, unknown> = {}): voi
 
 let refreshInFlight: Promise<HandoverSession | null> | null = null;
 const REFRESH_SKEW_MS = 60_000;
+const NO_ROLE = 'NO_ROLE';
 
 
 try {
@@ -60,11 +61,13 @@ const OIDC_ISSUER =
 const OIDC_CLIENT_ID =
   process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? process.env.OIDC_CLIENT_ID ?? AUTH0_CLIENT_ID;
 
-const OIDC_AUDIENCE =
+const RAW_OIDC_AUDIENCE =
   process.env.EXPO_PUBLIC_OIDC_AUDIENCE ??
   process.env.OIDC_AUDIENCE ??
   process.env.EXPO_PUBLIC_AUTH0_AUDIENCE ??
   '';
+
+const OIDC_AUDIENCE = RAW_OIDC_AUDIENCE.trim() ? RAW_OIDC_AUDIENCE : undefined;
 
 const OIDC_SCOPE =
   process.env.EXPO_PUBLIC_OIDC_SCOPE ?? process.env.OIDC_SCOPE ?? 'openid profile email';
@@ -101,10 +104,10 @@ const LOGOUT_REDIRECT_URI =
 const DEFAULT_AUTH_CONFIG = {
   issuer: OIDC_ISSUER,
   clientId: OIDC_CLIENT_ID,
-  audience: OIDC_AUDIENCE,
   redirectUri: REDIRECT_URI,
   logoutUri: LOGOUT_REDIRECT_URI,
   scopes: OIDC_SCOPE.split(/\s+/).filter(Boolean),
+  ...(OIDC_AUDIENCE ? { audience: OIDC_AUDIENCE } : {}),
 };
 // END HANDOVER: AUTH_CONFIG
 
@@ -174,10 +177,10 @@ function normalizeExpiresAt(expiresAt: string | number | undefined): string | un
 
 function normalizeSession(session: StoredAuthSession | null): HandoverSession | null {
   if (!session) return null;
-  const roles =
-  Array.isArray(session.roles) && session.roles.length > 0
+  const normalizedRoles = Array.isArray(session.roles)
     ? session.roles.filter((role): role is string => typeof role === 'string')
-    : ['nurse']; // fallback defensivo para tests / offline
+    : [];
+  const roles = normalizedRoles.length > 0 ? normalizedRoles : [NO_ROLE];
   const units = Array.isArray(session.units)
     ? session.units.filter((unit): unit is string => typeof unit === 'string')
     : [];
@@ -410,7 +413,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
             expiresAt: storedTokens.expiresAt,
             userId: 'local-user',
             displayName: 'Usuario',
-            roles: ['nurse'],
+            roles: [NO_ROLE],
             units: [],
           });
         } else if (storedTokens?.refreshToken) {
@@ -422,7 +425,7 @@ async function hydrateSession(): Promise<HandoverSession | null> {
               expiresAt: refreshedTokens.expiresAt,
               userId: 'local-user',
               displayName: 'Usuario',
-              roles: ['nurse'],
+              roles: [NO_ROLE],
               units: [],
             });
           } catch {
@@ -533,13 +536,16 @@ function extractUnits(profile: Record<string, unknown>): string[] {
 }
 
 function buildAuthConfig(config?: Partial<typeof DEFAULT_AUTH_CONFIG>) {
+  const audience =
+    config?.audience?.trim() ||
+    (DEFAULT_AUTH_CONFIG as { audience?: string }).audience;
   return {
     issuer: config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer,
     clientId: config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId,
-    audience: config?.audience ?? DEFAULT_AUTH_CONFIG.audience,
     redirectUri: config?.redirectUri ?? DEFAULT_AUTH_CONFIG.redirectUri,
     logoutUri: config?.logoutUri ?? DEFAULT_AUTH_CONFIG.logoutUri,
     scopes: config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes,
+    ...(audience ? { audience } : {}),
   };
 }
 
@@ -680,7 +686,7 @@ async function performAuth0Login(options: {
       user: {
         id: 'nurse001',
         name: 'Luis Enfermero',
-        roles: ['nurse'],
+        roles: [NO_ROLE],
         units: ['UCI'],
       },
       accessToken: 'local-dev-token',
@@ -765,7 +771,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: ['nurse'],
+      roles: [NO_ROLE],
       units: ['UCI', 'Pediatría'],
       mode: 'demo',
     };
@@ -780,7 +786,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: ['nurse'],
+      roles: [NO_ROLE],
       units: [],
       mode: 'demo',
     };
@@ -1028,7 +1034,7 @@ export async function login(params: {
     expiresAt: normalizeExpiresAt(params.expiresAt ?? Math.floor(Date.now() / 1000) + 3600),
     userId: params.user.id,
     displayName: params.user.name ?? 'Demo User',
-    roles: params.user.roles ?? ['nurse'],
+    roles: params.user.roles ?? [NO_ROLE],
     units: params.user.units ?? [],
   };
   await setSession(session);
@@ -1071,12 +1077,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       expiresAt: result.tokens.expiresAt,
       userId: result.user.id,
       displayName: result.user.name ?? result.user.id,
-      roles: result.user.roles ?? ['nurse'],
+      roles: result.user.roles ?? [NO_ROLE],
       units: result.user.units ?? [],
       user: {
         id: result.user.id,
         name: result.user.name ?? result.user.id,
-        roles: result.user.roles ?? ['nurse'],
+        roles: result.user.roles ?? [NO_ROLE],
         units: result.user.units ?? [],
       },
     };

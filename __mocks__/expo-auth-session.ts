@@ -32,6 +32,7 @@ export const fetchDiscoveryAsync = vi.fn(async (_issuer: string) => ({
   authorizationEndpoint: 'https://example.org/auth',
   tokenEndpoint: 'https://example.org/token',
   revocationEndpoint: 'https://example.org/revoke',
+  userInfoEndpoint: 'https://example.org/userinfo',
 }));
 
 export const exchangeCodeAsync = vi.fn(async (_params: any, _discovery: any) => ({
@@ -49,4 +50,3 @@ export const useAuthRequest = vi.fn((config: any, discovery: any) => {
   const promptAsync = vi.fn(async () => ({ type: 'success', params: { code: 'auth-code-123' } }));
   return [req, result, promptAsync] as const;
 });
-

@@ -40,28 +40,27 @@ def _extract_roles(claims: dict) -> Set[str]:
     return collected
 
 
-def RequireRolesPermission(*required_roles: str):
+class RequireRolesPermission(BasePermission):
     """
-    Factory DRF-safe.
-    Uso:
-        permission_classes = [IsAuthenticated, RequireRolesPermission("nurse", "admin")]
+    Permiso base DRF-safe para comprobar roles.
     """
-    required = _normalize_roles(required_roles)
+    message = "No tienes permisos suficientes."
+    allowed_roles: tuple[str, ...] = ()
 
-    class _RequireRolesPermission(BasePermission):
-        message = "No tienes permisos suficientes."
+    def has_permission(self, request, view) -> bool:
+        required = _normalize_roles(self.allowed_roles)
+        if not required:
+            return True
 
-        def has_permission(self, request, view) -> bool:
-            if not required:
-                return True
+        user = getattr(request, "user", None)
+        claims = getattr(user, "claims", None) or getattr(request, "auth", None)
 
-            user = getattr(request, "user", None)
-            claims = getattr(user, "claims", None) or getattr(request, "auth", None)
+        if not isinstance(claims, dict):
+            return False
 
-            if not isinstance(claims, dict):
-                return False
+        user_roles = _extract_roles(claims)
+        return bool(user_roles & required)
 
-            user_roles = _extract_roles(claims)
-            return bool(user_roles & required)
 
-    return _RequireRolesPermission
+class NurseOrAdminPermission(RequireRolesPermission):
+    allowed_roles = ("nurse", "admin")

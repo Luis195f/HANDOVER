@@ -422,6 +422,7 @@ vi.mock('expo-auth-session', () => {
     authorizationEndpoint: 'https://example.com/authorize',
     tokenEndpoint: 'https://example.com/token',
     revocationEndpoint: 'https://example.com/revoke',
+    userInfoEndpoint: 'https://example.com/userinfo',
   }));
   const exchangeCodeAsync = vi.fn(async () => ({
     accessToken: 'mock-access-token',
