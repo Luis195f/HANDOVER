@@ -174,9 +174,10 @@ function normalizeExpiresAt(expiresAt: string | number | undefined): string | un
 
 function normalizeSession(session: StoredAuthSession | null): HandoverSession | null {
   if (!session) return null;
-  const roles = Array.isArray(session.roles)
+  const roles =
+  Array.isArray(session.roles) && session.roles.length > 0
     ? session.roles.filter((role): role is string => typeof role === 'string')
-    : [];
+    : ['nurse']; // fallback defensivo para tests / offline
   const units = Array.isArray(session.units)
     ? session.units.filter((unit): unit is string => typeof unit === 'string')
     : [];
@@ -349,7 +350,7 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
   const normalized: StoredAuthSession = {
     ...session,
     displayName: session.displayName ?? session.userId,
-    roles: session.roles ?? [],
+    roles: Array.isArray(session.roles) ? session.roles : [],
     units: session.units ?? [],
     expiresAt: normalizeExpiresAt(session.expiresAt),
     mode: session.mode === 'demo' ? 'demo' : undefined,
