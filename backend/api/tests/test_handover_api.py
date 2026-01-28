@@ -1,6 +1,7 @@
+# backend/api/tests/test_handover_api.py
 from django.test import TestCase
 from django.urls import reverse
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 # Si usas DRF, es más cómodo:
 try:
@@ -13,12 +14,11 @@ class HandoverApiTests(TestCase):
     def setUp(self):
         self.client = APIClient() if APIClient else None
 
-        # Endpoint (ajusta si tu ruta real es distinta)
-        # Opción A: hardcode directo
-        self.url = "/api/fhir/transaction"
-        # Opción B (si tienes named-url):
-        # self.url = reverse("fhir-transaction")
+        # Usa el named-url real que existe en backend/api/urls.py
+        # path("fhir/transaction", BundleView.as_view(), name="fhir-transaction")
+        self.url = reverse("fhir-transaction")
 
+        # Bundle mínimo válido (sin PHI real)
         self.valid_bundle = {
             "resourceType": "Bundle",
             "type": "transaction",
@@ -45,38 +45,49 @@ class HandoverApiTests(TestCase):
                 content_type="application/fhir+json",
             )
         else:
-            # Django Client estándar requiere JSON serializado; pero simplificamos:
             import json
             from django.test import Client
             c = Client()
             return c.post(self.url, data=json.dumps(payload), content_type="application/fhir+json")
 
-    @patch("backend.api.services.fhir_validation.validate_bundle", autospec=True)
-    def test_post_bundle_success(self, mock_validate):
-        """
-        Esperado: 201 cuando el bundle es válido.
-        El mock evita llamadas reales a servidores/servicios externos.
-        """
-        mock_validate.return_value = (True, None)
-
-        resp = self._post(self.valid_bundle)
-
-        self.assertIn(resp.status_code, (200, 201), msg=f"Unexpected status: {resp.status_code}, body={getattr(resp,'data',resp.content)}")
-
-    @patch("backend.api.services.fhir_validation.validate_bundle", autospec=True)
-    def test_post_bundle_invalid(self, mock_validate):
+    def test_post_bundle_invalid(self):
         """
         Esperado: 422 cuando el bundle es inválido.
+        Según backend/api/views.py: retorna 422 si bundle.type != "transaction".
         """
-        mock_validate.return_value = (False, {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "invalid"}]})
-
         bad_bundle = {
             "resourceType": "Bundle",
-            "type": "transaction",
+            "type": "collection",  # <-- fuerza el 422 por la validación real del backend
             "entry": [{"resource": {}}],
         }
 
         resp = self._post(bad_bundle)
 
-        self.assertEqual(resp.status_code, 422, msg=f"Unexpected status: {resp.status_code}, body={getattr(resp,'data',resp.content)}")
+        self.assertEqual(
+            resp.status_code,
+            422,
+            msg=f"Unexpected status: {resp.status_code}, body={getattr(resp,'data',resp.content)}",
+        )
 
+    @patch("backend.api.views.httpx.post", autospec=True)
+    def test_post_bundle_success(self, mock_httpx_post):
+        """
+        Esperado: 201 (o 200) cuando el bundle es válido.
+        IMPORTANTE: el backend hace POST al servidor FHIR usando httpx.post(...),
+        por lo que mockeamos backend.api.views.httpx.post para correr offline.
+        """
+
+        # Simula respuesta del servidor FHIR (ajusta status si tu view devuelve 200/201)
+        mock_resp = Mock()
+        mock_resp.status_code = 201
+        mock_resp.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
+        mock_resp.text = '{"resourceType":"Bundle","type":"transaction-response"}'
+        mock_httpx_post.return_value = mock_resp
+
+        resp = self._post(self.valid_bundle)
+
+        self.assertIn(
+            resp.status_code,
+            (200, 201),
+            msg=f"Unexpected status: {resp.status_code}, body={getattr(resp,'data',resp.content)}",
+        )
