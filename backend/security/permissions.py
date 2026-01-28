@@ -8,6 +8,7 @@ from rest_framework.permissions import BasePermission
 ROLE_CLAIM_KEYS: tuple[str, ...] = (
     "roles",
     "role",
+    "permissions",
     "https://handover/roles",
     "https://handover/role",
     "https://handoverpro/roles",
@@ -18,6 +19,8 @@ ROLE_CLAIM_KEYS: tuple[str, ...] = (
 def _normalize_roles(values: Iterable[str]) -> Set[str]:
     sanitized: Set[str] = set()
     for value in values:
+        if not isinstance(value, str):
+            continue
         normalized = value.strip().lower()
         if normalized:
             sanitized.add(normalized)
@@ -32,29 +35,33 @@ def _extract_roles(claims: dict) -> Set[str]:
             continue
         if isinstance(raw, str):
             collected.update(_normalize_roles(raw.split(",")))
-        elif isinstance(raw, (list, tuple)):
+        elif isinstance(raw, (list, tuple, set)):
             collected.update(_normalize_roles([str(item) for item in raw]))
     return collected
 
 
-class RequireRolesPermission(BasePermission):
+def RequireRolesPermission(*required_roles: str):
     """
-    Permite el acceso si el JWT contiene alguno de los roles requeridos.
+    Factory DRF-safe.
+    Uso:
+        permission_classes = [IsAuthenticated, RequireRolesPermission("nurse", "admin")]
     """
+    required = _normalize_roles(required_roles)
 
-    message = "Forbidden"
+    class _RequireRolesPermission(BasePermission):
+        message = "No tienes permisos suficientes."
 
-    def __init__(self, *required_roles: str) -> None:
-        self.required_roles = _normalize_roles(required_roles)
+        def has_permission(self, request, view) -> bool:
+            if not required:
+                return True
 
-    def has_permission(self, request, view) -> bool:
-        if not self.required_roles:
-            return True
+            user = getattr(request, "user", None)
+            claims = getattr(user, "claims", None) or getattr(request, "auth", None)
 
-        user = getattr(request, "user", None)
-        claims = getattr(user, "claims", None)
-        if not isinstance(claims, dict):
-            return False
+            if not isinstance(claims, dict):
+                return False
 
-        user_roles = _extract_roles(claims)
-        return bool(user_roles & self.required_roles)
+            user_roles = _extract_roles(claims)
+            return bool(user_roles & required)
+
+    return _RequireRolesPermission
