@@ -2356,7 +2356,10 @@ function mapGlasgowObservation(
     subject: context.subject,
     encounter: context.encounter,
     effectiveDateTime: context.effectiveDateTime,
-    valueInteger: glasgow.total,
+    valueQuantity: {
+      value: glasgow.total,
+      unit: 'score',
+    },
     component: components,
     note: [{ text: `Severidad: ${glasgow.severity}` }],
   };
