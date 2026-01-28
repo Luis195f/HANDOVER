@@ -70,7 +70,7 @@ describe('clinical scales mapping', () => {
     expect(bradenEntry?.resource.component).toHaveLength(6);
     expect(bradenEntry?.resource.note?.[0]?.text).toContain('bajo');
 
-    expect(glasgowEntry?.resource.valueInteger).toBe(12);
+    expect(glasgowEntry?.resource.valueQuantity?.value).toBe(12);
     expect(glasgowEntry?.resource.component).toHaveLength(3);
     expect(glasgowEntry?.resource.note?.[0]?.text).toContain('moderado');
     expect(glasgowEntry?.resource.effectiveDateTime).toBe(NOW);
