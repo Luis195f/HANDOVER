@@ -54,6 +54,21 @@ const AUTH0_DOMAIN =
 const AUTH0_CLIENT_ID =
   process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? 'zJxhI0SK1J4hmzr1KNzEbWddgZWJDUlL';
 
+const OIDC_ISSUER =
+  (process.env.EXPO_PUBLIC_OIDC_ISSUER ?? process.env.OIDC_ISSUER ?? `https://${AUTH0_DOMAIN}`).replace(/\/$/, '');
+
+const OIDC_CLIENT_ID =
+  process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? process.env.OIDC_CLIENT_ID ?? AUTH0_CLIENT_ID;
+
+const OIDC_AUDIENCE =
+  process.env.EXPO_PUBLIC_OIDC_AUDIENCE ??
+  process.env.OIDC_AUDIENCE ??
+  process.env.EXPO_PUBLIC_AUTH0_AUDIENCE ??
+  '';
+
+const OIDC_SCOPE =
+  process.env.EXPO_PUBLIC_OIDC_SCOPE ?? process.env.OIDC_SCOPE ?? 'openid profile email';
+
 const REDIRECT_PATH_WEB = '--/redirect';
 const LOGOUT_PATH_WEB   = '--/logout';
 
@@ -84,11 +99,12 @@ const LOGOUT_REDIRECT_URI =
   
 
 const DEFAULT_AUTH_CONFIG = {
-  issuer: `https://${AUTH0_DOMAIN}`,
-  clientId: AUTH0_CLIENT_ID,
+  issuer: OIDC_ISSUER,
+  clientId: OIDC_CLIENT_ID,
+  audience: OIDC_AUDIENCE,
   redirectUri: REDIRECT_URI,
   logoutUri: LOGOUT_REDIRECT_URI,
-  scopes: ['openid', 'profile', 'email'],
+  scopes: OIDC_SCOPE.split(/\s+/).filter(Boolean),
 };
 // END HANDOVER: AUTH_CONFIG
 
@@ -158,9 +174,10 @@ function normalizeExpiresAt(expiresAt: string | number | undefined): string | un
 
 function normalizeSession(session: StoredAuthSession | null): HandoverSession | null {
   if (!session) return null;
-  const roles = Array.isArray(session.roles)
+  const roles =
+  Array.isArray(session.roles) && session.roles.length > 0
     ? session.roles.filter((role): role is string => typeof role === 'string')
-    : [];
+    : ['nurse']; // fallback defensivo para tests / offline
   const units = Array.isArray(session.units)
     ? session.units.filter((unit): unit is string => typeof unit === 'string')
     : [];
@@ -333,7 +350,7 @@ async function persistSession(session: HandoverSession | null): Promise<void> {
   const normalized: StoredAuthSession = {
     ...session,
     displayName: session.displayName ?? session.userId,
-    roles: session.roles ?? [],
+    roles: Array.isArray(session.roles) ? session.roles : [],
     units: session.units ?? [],
     expiresAt: normalizeExpiresAt(session.expiresAt),
     mode: session.mode === 'demo' ? 'demo' : undefined,
@@ -482,17 +499,25 @@ function extractAuthParams(result: unknown): Record<string, string> | null {
 }
 
 function extractRoles(profile: Record<string, unknown>): UserRole[] {
-  const rawRoles = (profile['roles'] ?? profile['app_metadata']) as unknown;
+  const rawRoles = (
+    profile['roles'] ??
+    profile['role'] ??
+    profile['app_metadata'] ??
+    profile['https://handover/roles'] ??
+    profile['https://handoverpro/roles']
+  ) as unknown;
   const roles: string[] = Array.isArray(rawRoles)
     ? rawRoles.filter((r): r is string => typeof r === 'string')
-    : [];
+    : typeof rawRoles === 'string'
+      ? rawRoles.split(/[,\s]+/).filter(Boolean)
+      : [];
   const allowed: UserRole[] = [];
   roles.forEach((role) => {
-    if (role === 'nurse' || role === 'supervisor' || role === 'admin') {
+    if (role === 'nurse' || role === 'supervisor' || role === 'admin' || role === 'viewer') {
       allowed.push(role as UserRole);
     }
   });
-  return allowed.length ? allowed : ['nurse'];
+  return allowed;
 }
 
 function extractUnits(profile: Record<string, unknown>): string[] {
@@ -511,10 +536,16 @@ function buildAuthConfig(config?: Partial<typeof DEFAULT_AUTH_CONFIG>) {
   return {
     issuer: config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer,
     clientId: config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId,
+    audience: config?.audience ?? DEFAULT_AUTH_CONFIG.audience,
     redirectUri: config?.redirectUri ?? DEFAULT_AUTH_CONFIG.redirectUri,
     logoutUri: config?.logoutUri ?? DEFAULT_AUTH_CONFIG.logoutUri,
     scopes: config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes,
   };
+}
+
+function buildExtraParams(audience?: string) {
+  const trimmed = audience?.trim();
+  return trimmed ? { audience: trimmed } : undefined;
 }
 
 type AuthTokens = {
@@ -713,9 +744,7 @@ export async function loginWithOAuth(config?: Partial<typeof DEFAULT_AUTH_CONFIG
     scopes: merged.scopes,
     usePKCE: true,
     responseType: AuthSession.ResponseType.Code,
-    extraParams: {
-    audience: process.env.EXPO_PUBLIC_AUTH0_AUDIENCE!,
-  },
+    extraParams: buildExtraParams(merged.audience),
   });
 
   const session = await performAuth0Login({
@@ -770,10 +799,16 @@ export async function logout(): Promise<void> {
   const runner = async () => {
     await hydrateSession();
     const config = buildAuthConfig();
-    const domain = AUTH0_DOMAIN;
+    const issuerOrigin = (() => {
+      try {
+        return new URL(config.issuer).origin;
+      } catch {
+        return `https://${AUTH0_DOMAIN}`;
+      }
+    })();
 
     try {
-      const authUrl = `https://${domain}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
+      const authUrl = `${issuerOrigin}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
         config.logoutUri,
       )}`;
       await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
@@ -1023,6 +1058,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       scopes: authConfig.scopes,
       usePKCE: true,
       responseType: AuthSession.ResponseType.Code,
+      extraParams: buildExtraParams(authConfig.audience),
     },
     discovery,
   );
@@ -1082,17 +1118,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-    const loginWithAuth0 = useCallback(async () => {
-      if (!authRequest) {
-        throw new Error('AUTH_REQUEST_NOT_READY');
-      }
-      return performAuth0Login({
+  const loginWithAuth0 = useCallback(async () => {
+    if (!authRequest) {
+      throw new Error('AUTH_REQUEST_NOT_READY');
+    }
+    try {
+      return await performAuth0Login({
         config: authConfig,
         discovery,
         promptAsync: (options) => promptAsync(options),
         request: authRequest,
       });
-    }, [authConfig, authRequest, discovery, promptAsync]);
+    } catch (error) {
+      if (!isAuthCancelledError(error)) {
+        Alert.alert('Error de autenticación', 'Credenciales incorrectas');
+      }
+      throw error;
+    }
+  }, [authConfig, authRequest, discovery, promptAsync]);
 
   const value = useMemo<AuthContextValue>(() => ({
     session,
