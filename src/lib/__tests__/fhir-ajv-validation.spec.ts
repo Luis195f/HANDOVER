@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateBundle, validateResource } from '../fhir-validation/index';
+import { validateBundleWithAjv, validateResource } from '../fhir-validation/index';
 
 describe('FHIR AJV validation helpers', () => {
   const observation = {
@@ -39,14 +39,14 @@ describe('FHIR AJV validation helpers', () => {
       ],
     };
 
-    expect(validateBundle(validBundle)).toEqual({ isValid: true, errors: [] });
+    expect(validateBundleWithAjv(validBundle)).toEqual({ isValid: true, errors: [] });
 
     const invalidBundle = {
       resourceType: 'Bundle',
       entry: [],
     };
 
-    const invalidResult = validateBundle(invalidBundle);
+    const invalidResult = validateBundleWithAjv(invalidBundle);
     expect(invalidResult.isValid).toBe(false);
     expect(invalidResult.errors).toEqual(
       expect.arrayContaining([expect.stringContaining('/type')]),
