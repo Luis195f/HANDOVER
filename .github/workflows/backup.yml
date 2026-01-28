@@ -1,0 +1,48 @@
+name: Nightly Backups
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: Configure rclone
+        env:
+          RCLONE_CONFIG_BASE64: ${{ secrets.RCLONE_CONFIG_BASE64 }}
+        run: |
+          if [ -z "$RCLONE_CONFIG_BASE64" ]; then
+            echo "Missing RCLONE_CONFIG_BASE64 secret" >&2
+            exit 1
+          fi
+          mkdir -p ~/.config/rclone
+          echo "$RCLONE_CONFIG_BASE64" | base64 -d > ~/.config/rclone/rclone.conf
+
+      - name: Backup database
+        env:
+          BACKUP_REMOTE: ${{ secrets.BACKUP_REMOTE }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+          BACKUP_RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS }}
+          DJANGO_DB_ENGINE: ${{ secrets.DJANGO_DB_ENGINE }}
+          DJANGO_DB_NAME: ${{ secrets.DJANGO_DB_NAME }}
+          DJANGO_DB_USER: ${{ secrets.DJANGO_DB_USER }}
+          DJANGO_DB_PASSWORD: ${{ secrets.DJANGO_DB_PASSWORD }}
+          DJANGO_DB_HOST: ${{ secrets.DJANGO_DB_HOST }}
+          DJANGO_DB_PORT: ${{ secrets.DJANGO_DB_PORT }}
+        run: scripts/backup-db.sh
+
+      - name: Backup media
+        env:
+          BACKUP_REMOTE: ${{ secrets.BACKUP_REMOTE }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+          BACKUP_RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS }}
+          MEDIA_DIR: ${{ secrets.MEDIA_DIR }}
+        run: scripts/backup-media.sh
