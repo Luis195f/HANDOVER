@@ -822,6 +822,9 @@ export function onAuthStateChange(callback: (user: User | null) => void): () => 
 }
 
 export async function loginWithMockUser(overrides: Partial<User> = {}): Promise<void> {
+  if (!__DEV__ && process.env.NODE_ENV !== 'test') {
+    throw new AuthError('UNAUTHENTICATED', 'Mock login disabled');
+  }
   const now = Math.floor(Date.now() / 1000);
   const user: User = {
     sub: overrides.sub ?? 'mock-user',
