@@ -160,8 +160,14 @@ export async function appendAuditEvent(storage: AuditStorage, event: AuditEvent)
 
 export async function sendAuditEvent(event: AuditEvent): Promise<void> {
   try {
-    await apiPost('/api/audit/', { body: JSON.stringify(event) });
-  } catch {
-    // best-effort: no bloquear la app si falla el envío
+    await apiPost("/api/audit/", { body: JSON.stringify(event) });
+  } catch (e: any) {
+    const status = e?.status ?? e?.response?.status;
+
+    // Auditoría nunca debe bloquear UX (best-effort)
+    if (status === 401 || status === 403) return;
+
+    // No propagamos errores de auditoría (offline/network/etc.)
+    return;
   }
 }
