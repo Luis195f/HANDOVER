@@ -19,3 +19,24 @@ export async function apiGet(path: string, init?: RequestInit) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
+
+export async function apiPost(path: string, init?: RequestInit) {
+  const url = `${API_BASE_URL}${path}`;
+  const freshToken = await ensureFreshAccessToken();
+  const headers = new Headers(init?.headers ?? {});
+  if (freshToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${freshToken}`);
+  }
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const demoResponse = await maybeUseDemoResponse(url, { ...init, method: "POST", headers });
+  if (demoResponse) {
+    if (!demoResponse.ok) throw new Error(`${demoResponse.status} ${demoResponse.statusText}`);
+    return demoResponse.json();
+  }
+
+  const res = await fetch(url, { ...init, method: "POST", headers });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}

@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { apiPost } from '@/src/lib/api';
 import {
   encryptedGetItem,
   encryptedSetItem,
@@ -155,4 +156,12 @@ export async function appendAuditEvent(storage: AuditStorage, event: AuditEvent)
   const events = await storage.load();
   events.push(event);
   await storage.save(events);
+}
+
+export async function sendAuditEvent(event: AuditEvent): Promise<void> {
+  try {
+    await apiPost('/api/audit/', { body: JSON.stringify(event) });
+  } catch {
+    // best-effort: no bloquear la app si falla el envío
+  }
 }

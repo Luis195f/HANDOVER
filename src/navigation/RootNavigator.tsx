@@ -12,6 +12,7 @@ import PrivacyPolicy from '@/src/screens/PrivacyPolicy';
 import QRScan from '@/src/screens/QRScan';
 import ShiftDetailsScreen from '@/src/screens/ShiftDetailsScreen';
 import SyncCenter from '@/src/screens/SyncCenter';
+import AuditLogScreen from '@/src/screens/AuditLogScreen';
 import SupervisorDashboardScreen from '@/src/screens/SupervisorDashboard';
 import { AdminDashboardScreen } from '@/src/screens/admin/AdminDashboardScreen';
 import LoginScreen from '@/src/screens/LoginScreen';
@@ -146,6 +147,9 @@ function AuthGate() {
         ) : (
           <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
         )}
+        {canSubmitHandover || canAdminister ? (
+          <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Auditoría' }} />
+        ) : null}
         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
         {canAdminister ? (
           <Stack.Screen
