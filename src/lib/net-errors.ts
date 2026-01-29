@@ -217,9 +217,9 @@ export function getUserFacingNetworkMessage(
     maybeWarn('NET_UNAUTHORIZED_401', err, nextCtx);
     return {
       // Importante: NO pasar currentLang aquí; t() resuelve el idioma (y en tests queda ES).
-      title: t('sessionExpiredTitle'),
-      message: t('sessionExpiredMessage'),
-      cta: { label: t('loginCta'), action: 'LOGIN' },
+      title: t('net.sessionExpiredTitle'),
+      message: t('net.sessionExpiredMessage'),
+      cta: { label: t('net.loginCta'), action: 'LOGIN' },
     };
   }
 
@@ -227,10 +227,9 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_FORBIDDEN_403', err, nextCtx);
     return {
-      title: 'Permisos insuficientes',
-      message:
-        'Tu cuenta no tiene permisos para realizar esta acción. Si crees que es un error, contacta a soporte.',
-      cta: { label: 'Entendido', action: 'DISMISS' },
+      title: t('net.permissionsTitle'),
+      message: t('net.permissionsMessage'),
+      cta: { label: t('common.understood'), action: 'DISMISS' },
     };
   }
 
@@ -238,9 +237,9 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? true };
     maybeWarn('NET_TIMEOUT', err, nextCtx);
     return {
-      title: 'Tiempo de espera',
-      message: 'El servidor no respondió a tiempo. Intenta nuevamente.',
-      cta: { label: 'Reintentar', action: 'RETRY' },
+      title: t('net.timeoutTitle'),
+      message: t('net.timeoutMessage'),
+      cta: { label: t('common.retry'), action: 'RETRY' },
     };
   }
 
@@ -248,9 +247,9 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? true };
     maybeWarn('NET_HTTP_5XX', err, nextCtx);
     return {
-      title: 'Error del servidor',
-      message: 'El servidor tuvo un problema. Intenta más tarde.',
-      cta: { label: 'Reintentar', action: 'RETRY' },
+      title: t('net.serverErrorTitle'),
+      message: t('net.serverErrorMessage'),
+      cta: { label: t('common.retry'), action: 'RETRY' },
     };
   }
 
@@ -258,9 +257,9 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? true };
     maybeWarn('NET_OFFLINE_ENQUEUE', err, nextCtx);
     return {
-      title: 'Sin conexión',
-      message: t('offlineMsg'),
-      cta: { label: 'Ver cola', action: 'OPEN_SYNC' },
+      title: t('net.offlineTitle'),
+      message: t('net.offlineMessage'),
+      cta: { label: t('common.viewQueue'), action: 'OPEN_SYNC' },
     };
   }
 
@@ -268,9 +267,9 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_TLS_ERROR', err, nextCtx);
     return {
-      title: 'Error de red',
-      message: 'Error al establecer conexión segura. Verifica el certificado SSL del servidor.',
-      cta: { label: 'Entendido', action: 'DISMISS' },
+      title: t('net.tlsTitle'),
+      message: t('net.tlsMessage'),
+      cta: { label: t('common.understood'), action: 'DISMISS' },
     };
   }
 
@@ -286,11 +285,11 @@ export function getUserFacingNetworkMessage(
       }
     }
     return {
-      title: 'Datos inválidos',
+      title: t('net.invalidDataTitle'),
       message: detail
-        ? `Los datos requieren corrección: ${detail}${detail.endsWith('.') ? '' : '.'}`
-        : 'Los datos requieren corrección antes de enviarse.',
-      cta: { label: 'Entendido', action: 'DISMISS' },
+        ? t('net.invalidDataMessageDetail', { detail: detail.endsWith('.') ? detail.slice(0, -1) : detail })
+        : t('net.invalidDataMessage'),
+      cta: { label: t('common.understood'), action: 'DISMISS' },
     };
   }
 
@@ -298,17 +297,17 @@ export function getUserFacingNetworkMessage(
     const nextCtx = { ...ctx, retryable: ctx?.retryable ?? false };
     maybeWarn('NET_HTTP_4XX_OTHER', err, nextCtx);
     return {
-      title: 'No se pudo completar',
-      message: 'Ocurrió un error inesperado. Intenta nuevamente.',
-      cta: { label: 'Entendido', action: 'DISMISS' },
+      title: t('net.requestFailedTitle'),
+      message: t('net.requestFailedMessage'),
+      cta: { label: t('common.understood'), action: 'DISMISS' },
     };
   }
 
   maybeWarn('NET_UNKNOWN', err, ctx);
   return {
-    title: 'No se pudo completar',
-    message: 'Ocurrió un error inesperado. Intenta nuevamente.',
-    cta: { label: 'Entendido', action: 'DISMISS' },
+    title: t('net.requestFailedTitle'),
+    message: t('net.requestFailedMessage'),
+    cta: { label: t('common.understood'), action: 'DISMISS' },
   };
 }
 

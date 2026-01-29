@@ -15,6 +15,7 @@ import { ensureFreshAccessToken, useAuth } from '@/src/security/auth';
 import { PatientBanner } from './components/PatientBanner';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { t } from '@/src/i18n';
+import { useThemeTokens } from '@/src/theme';
 
 // Ajusta este nombre de ruta si en tu RootNavigator usas otro (por ejemplo "QRScan")
 type Props = NativeStackScreenProps<RootStackParamList, 'QRScan'>;
@@ -105,6 +106,7 @@ export function QRScanScreen({ navigation, route }: Props) {
   const targetPatientId = patientMismatch ? undefined : parsedPayload?.patientId;
   const { loading, error, summary } = usePatientSummary(targetPatientId || undefined);
   const { session } = useAuth();
+  const { colors } = useThemeTokens();
   const permissionAlertedRef = useRef(false);
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
@@ -126,16 +128,16 @@ export function QRScanScreen({ navigation, route }: Props) {
     permissionAlertedRef.current = true;
     console.warn('[HNDV][WARN][PERM_CAM_DENIED]', { screen: 'QRScan' });
     Alert.alert(
-      t('cameraPermissionDeniedTitle'),
-      t('cameraPermissionDeniedMessage'),
+      t('permissions.cameraDeniedTitle'),
+      t('permissions.cameraDeniedQrMessage'),
       [
         {
-          text: t('cancelLabel'),
+          text: t('common.cancel'),
           style: 'cancel',
           onPress: () => navigation.goBack(),
         },
         {
-          text: t('openSettingsLabel'),
+          text: t('common.openSettings'),
           onPress: () => {
             void Linking.openSettings();
           },
@@ -202,14 +204,14 @@ export function QRScanScreen({ navigation, route }: Props) {
 
       const data = result.data?.trim();
       if (!data) {
-        Alert.alert('Código no válido', 'No se pudo leer el código QR.');
+        Alert.alert(t('qr.invalidCodeTitle'), t('qr.invalidCodeMessage'));
         setScanned(false);
         return;
       }
 
       const parsed = parseQRCodePayload(data);
       if (!parsed) {
-        Alert.alert('QR inválido', 'El código no contiene datos de paciente');
+        Alert.alert(t('qr.invalidDataTitle'), t('qr.invalidDataMessage'));
         setScanned(false);
         return;
       }
@@ -293,7 +295,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
-        <Text style={styles.text}>Solicitando permisos de cámara…</Text>
+        <Text style={styles.text}>{t('qr.requestingCameraPermission')}</Text>
       </View>
     );
   }
@@ -302,7 +304,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
-        <Text style={styles.text}>Comprobando permisos de cámara…</Text>
+        <Text style={styles.text}>{t('qr.checkingCameraPermission')}</Text>
       </View>
     );
   }
@@ -328,22 +330,22 @@ export function QRScanScreen({ navigation, route }: Props) {
             <PatientBanner summary={summary} loading={loading} error={error} />
             {patientMismatch ? (
               <View style={styles.warningBox}>
-                <Text style={styles.warningTitle}>El paciente escaneado no coincide</Text>
+                <Text style={styles.warningTitle}>{t('qr.mismatchTitle')}</Text>
                 <Text style={styles.warningText}>
-                  Seleccionado: {patientMismatch.currentId || 'N/D'}
+                  {t('qr.mismatchSelectedLabel', { id: patientMismatch.currentId || t('common.notAvailable') })}
                 </Text>
                 <Text style={styles.warningText}>
-                  QR: {patientMismatch.scannedId}
+                  {t('qr.mismatchQrLabel', { id: patientMismatch.scannedId })}
                 </Text>
                 <View style={styles.warningActions}>
                   <Pressable accessibilityRole="button" onPress={handleKeepCurrentPatient}>
                     <Text style={styles.link} onPress={handleKeepCurrentPatient}>
-                      Mantener paciente actual
+                      {t('qr.keepCurrentPatient')}
                     </Text>
                   </Pressable>
                   <Pressable accessibilityRole="button" onPress={handleSwitchToScannedPatient}>
                     <Text style={styles.link} onPress={handleSwitchToScannedPatient}>
-                      Cambiar al paciente escaneado
+                      {t('qr.switchToScannedPatient')}
                     </Text>
                   </Pressable>
                 </View>
@@ -352,11 +354,11 @@ export function QRScanScreen({ navigation, route }: Props) {
             {prefillLoading ? (
               <View style={styles.inlineStatus}>
                 <ActivityIndicator color="#BFDBFE" />
-                <Text style={styles.statusText}>Precargando datos FHIR…</Text>
+                <Text style={styles.statusText}>{t('qr.prefillLoading')}</Text>
               </View>
             ) : null}
             {prefillError ? (
-              <Text style={styles.errorText}>{prefillError}</Text>
+              <Text style={[styles.errorText, { color: colors.danger }]}>{prefillError}</Text>
             ) : null}
             <Pressable
               accessibilityRole="button"
@@ -365,25 +367,25 @@ export function QRScanScreen({ navigation, route }: Props) {
               disabled={continueDisabled}
             >
               <Text style={styles.primaryButtonText} onPress={handleContinue}>
-                Continuar con entrega
+                {t('qr.continueHandover')}
               </Text>
             </Pressable>
             {prefillError ? (
               <Pressable accessibilityRole="button" onPress={handleRetryPrefill}>
-                <Text style={styles.link} onPress={handleRetryPrefill}>Reintentar precarga</Text>
+                <Text style={styles.link} onPress={handleRetryPrefill}>{t('qr.retryPrefill')}</Text>
               </Pressable>
             ) : null}
             <Pressable accessibilityRole="button" onPress={handleRescan}>
               <Text style={styles.link} onPress={handleRescan}>
-                Escanear nuevamente
+                {t('qr.rescan')}
               </Text>
             </Pressable>
           </>
         ) : (
           <>
-            <Text style={styles.title}>Escanea el código QR del paciente</Text>
+            <Text style={styles.title}>{t('qr.scanPromptTitle')}</Text>
             <Text style={styles.subtitle}>
-              Centra el código dentro del recuadro. Se detectará automáticamente.
+              {t('qr.scanPromptSubtitle')}
             </Text>
           </>
         )}
@@ -451,7 +453,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   errorText: {
-    color: '#FCA5A5',
     marginTop: 8,
   },
   title: {

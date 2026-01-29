@@ -7,6 +7,7 @@ import {
   requestRecordingPermissionsAsync,
   type PermissionResponse,
 } from 'expo-audio';
+import { t } from '@/src/i18n';
 
 type Props = {
   onRecorded?: (uri: string) => void;
@@ -18,8 +19,8 @@ type Props = {
 export default function AudioAttach({
   onRecorded,
   onAttach,
-  startLabel = 'Grabar audio',
-  stopLabel = 'Detener y adjuntar',
+  startLabel = t('audioAttach.start'),
+  stopLabel = t('audioAttach.stop'),
 }: Props) {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY as any);
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
@@ -35,11 +36,11 @@ export default function AudioAttach({
   const showMicPermissionDenied = useCallback(() => {
     console.warn('[HNDV][WARN][PERM_MIC_DENIED]', { component: 'AudioAttach' });
     Alert.alert(
-      'Permiso de micrófono denegado',
-      'Activa el permiso en Ajustes para grabar audio.',
+      t('permissions.microphoneDeniedTitle'),
+      t('permissions.microphoneDeniedRecordMessage'),
       [
-        { text: 'Entendido', style: 'cancel' },
-        { text: 'Abrir Ajustes', onPress: openSettings },
+        { text: t('common.understood'), style: 'cancel' },
+        { text: t('common.openSettings'), onPress: openSettings },
       ],
     );
   }, [openSettings]);

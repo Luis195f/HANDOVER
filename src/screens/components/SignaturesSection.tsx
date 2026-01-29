@@ -4,6 +4,7 @@ import { Alert, Button, StyleSheet, Text, View } from 'react-native';
 import { hashHex } from '@/src/lib/crypto';
 import type { HandoverSignature } from '@/src/types/handover';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { t } from '@/src/i18n';
 
 export type SignatureUser = {
   id?: string;
@@ -67,7 +68,7 @@ function buildSignatureFromUser(
 ): HandoverSignature {
   return {
     userId: user.id ?? user.userId ?? user.displayName ?? 'unknown-user',
-    fullName: user.fullName ?? user.name ?? user.displayName ?? user.userId ?? 'Usuario',
+    fullName: user.fullName ?? user.name ?? user.displayName ?? user.userId ?? t('signatures.unknownUser'),
     role: (user.roles?.[0] as HandoverSignature['role']) ?? (user.role as HandoverSignature['role']),
     unitId,
     signedAt: signedAt ?? new Date().toISOString(),
@@ -100,12 +101,12 @@ export function SignaturesSection({
     if (!currentUser || !activeUnitId) return;
     const message =
       kind === 'outgoing'
-        ? 'Confirmar firma de entrega como enfermera saliente'
-        : 'Confirmar firma de entrega como enfermera entrante';
-    Alert.alert('Confirmar firma', message, [
-      { text: 'Cancelar', style: 'cancel' },
+        ? t('signatures.confirmOutgoingMessage')
+        : t('signatures.confirmIncomingMessage');
+    Alert.alert(t('signatures.confirmTitle'), message, [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Confirmar',
+        text: t('signatures.confirm'),
         style: 'default',
         onPress: () => {
           const timestamp = new Date().toISOString();
@@ -131,22 +132,30 @@ export function SignaturesSection({
     return (
       <View style={styles.block}>
         <Text style={styles.label}>
-          {isOutgoing ? 'Firma enfermera saliente' : 'Firma enfermera entrante'}
+          {isOutgoing ? t('signatures.outgoingLabel') : t('signatures.incomingLabel')}
         </Text>
         {signature ? (
           <View>
-            <Text style={styles.valueText}>Nombre: {signature.fullName}</Text>
-            <Text style={styles.valueText}>Rol: {signature.role ?? 'N/D'}</Text>
-            <Text style={styles.valueText}>Unidad: {signature.unitId}</Text>
-            <Text style={styles.valueText}>Fecha: {formatSignedAt(signature.signedAt)}</Text>
+            <Text style={styles.valueText}>
+              {t('signatures.nameLabel')}: {signature.fullName}
+            </Text>
+            <Text style={styles.valueText}>
+              {t('signatures.roleLabel')}: {signature.role ?? t('common.notAvailable')}
+            </Text>
+            <Text style={styles.valueText}>
+              {t('signatures.unitLabel')}: {signature.unitId}
+            </Text>
+            <Text style={styles.valueText}>
+              {t('signatures.dateLabel')}: {formatSignedAt(signature.signedAt)}
+            </Text>
           </View>
         ) : (
           <View>
-            <Text style={styles.emptyText}>Sin firma registrada.</Text>
+            <Text style={styles.emptyText}>{t('signatures.noSignature')}</Text>
             {canSignWithUnit ? (
               <View style={styles.action}>
                 <Button
-                  title={isOutgoing ? 'Firmar como enfermera saliente' : 'Firmar como enfermera entrante'}
+                  title={isOutgoing ? t('signatures.signOutgoing') : t('signatures.signIncoming')}
                   onPress={() => confirmSignature(kind)}
                 />
               </View>
@@ -160,13 +169,15 @@ export function SignaturesSection({
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        <Text style={styles.title}>Firmas</Text>
-        {signingUserLabel ? <Text>Usuario actual: {signingUserLabel}</Text> : null}
+        <Text style={styles.title}>{t('signatures.sectionTitle')}</Text>
+        {signingUserLabel ? (
+          <Text>{t('signatures.currentUserLabel', { name: signingUserLabel })}</Text>
+        ) : null}
       </View>
       {renderBlock('outgoing', outgoing)}
       {renderBlock('incoming', incoming)}
       {!hasUnit && allowedToSign ? (
-        <Text style={styles.emptyText}>Selecciona una unidad para habilitar la firma.</Text>
+        <Text style={styles.emptyText}>{t('signatures.selectUnitHint')}</Text>
       ) : null}
     </View>
   );
