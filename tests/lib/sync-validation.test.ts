@@ -71,7 +71,7 @@ describe('sync remote validation and 422 handling', () => {
     expect(mockFetch).toHaveBeenCalled();
   });
 
-  test('postBundle 422 drops the queue item as non recoverable', async () => {
+  test('postBundle 422 marks the queue item as non recoverable', async () => {
     const outcome: OperationOutcome = {
       resourceType: 'OperationOutcome',
       issue: Array.from({ length: 12 }).map((_, idx) => ({
@@ -104,7 +104,8 @@ describe('sync remote validation and 422 handling', () => {
     await sync.processQueueOnce();
 
     const items = await queue.listOfflineQueue();
-    expect(items).toHaveLength(0);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.syncStatus).toBe('error');
   });
 
   test('remote validation captures 422 OperationOutcome issues', async () => {

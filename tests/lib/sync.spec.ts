@@ -188,7 +188,10 @@ describe('sync engine state machine', () => {
 
     expect(sender).toHaveBeenCalledTimes(3);
     expect(new Set(sentIds).size).toBe(sentIds.length);
-    expect(await listOfflineQueue()).toHaveLength(0);
+
+    const remaining = await listOfflineQueue();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.syncStatus).toBe('error');
   });
 
   // ======================================================
@@ -247,9 +250,9 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 5 — Elimina items con error 4xx (permanente)
+  // 🔹 TEST 5 — Marca items con error 4xx (permanente)
   // ======================================================
-  it('drops items after permanent 4xx responses', async () => {
+  it('marks items after permanent 4xx responses', async () => {
     const sender = vi.fn(async () => ({ ok: false as const, status: 400, message: 'invalid' }));
     isOnline.mockResolvedValue(true);
 
@@ -265,7 +268,8 @@ describe('sync engine state machine', () => {
     expect(sender).toHaveBeenCalled();
 
     const remaining = await listOfflineQueue();
-    expect(remaining).toHaveLength(0);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.syncStatus).toBe('error');
   });
 
   // ======================================================
