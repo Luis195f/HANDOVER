@@ -8,20 +8,24 @@ import SyncCenter from '@/src/screens/SyncCenter';
 const listOfflineQueue = vi.fn();
 const flushQueueNow = vi.fn();
 
-// ✅ Mock parcial: mantiene exports reales y agrega useNavigation (evita el crash)
-vi.mock('@react-navigation/native', async () => {
-  const actual = await vi.importActual<any>('@react-navigation/native');
-  return {
-    ...actual,
-    useIsFocused: () => true,
-    useNavigation: () => ({
-      navigate: vi.fn(),
-      goBack: vi.fn(),
-      replace: vi.fn(),
-      push: vi.fn(),
-    }),
-  };
-});
+// ✅ DECLARAR ANTES del vi.mock (por el hoisting)
+const navigationMock = {
+  navigate: vi.fn(),
+  goBack: vi.fn(),
+  addListener: vi.fn(() => vi.fn()),
+  dispatch: vi.fn(),
+  replace: vi.fn(),
+  push: vi.fn(),
+};
+
+// ✅ Mock “total” (NO importActual) para evitar NavigationContainer real y useBackButton
+vi.mock('@react-navigation/native', () => ({
+  useIsFocused: () => true,
+  useNavigation: () => navigationMock,
+  useRoute: () => ({ params: {} }),
+  NavigationContainer: ({ children }: any) => children,
+  useFocusEffect: (cb: any) => cb(),
+}));
 
 vi.mock('@/src/lib/queue', () => ({
   listOfflineQueue: (...args: unknown[]) => listOfflineQueue(...args),
@@ -63,6 +67,7 @@ describe('SyncCenter', () => {
     listOfflineQueue.mockReset();
     flushQueueNow.mockReset();
 
+    // opcional, pero no estorba
     process.env.EXPO_PUBLIC_FHIR_BASE = 'https://example.test';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
