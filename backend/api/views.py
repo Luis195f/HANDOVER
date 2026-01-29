@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional, Tuple, Type
 
 import httpx
 from django.http import HttpRequest
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
@@ -12,7 +14,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from backend.security.auth import Auth0JWTAuthentication
-from backend.security.permissions import NurseOrAdminPermission
+from backend.api.models import AuditEvent
+from backend.security.permissions import ClinicianAuditPermission, NurseOrAdminPermission
 
 logger = logging.getLogger(__name__)
 
@@ -299,3 +302,60 @@ class BundleView(AuthenticatedAPIView):
             return Response(resp.json(), status=resp.status_code)
         except Exception:
             return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
+
+
+class AuditLogView(AuthenticatedAPIView):
+    permission_classes = [IsAuthenticated, ClinicianAuditPermission]
+    allowed_types = {"patient_open", "patient_edit"}
+
+    def get(self, request: HttpRequest) -> Response:
+        try:
+            limit = int(request.query_params.get("limit", "200"))
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(1, min(limit, 500))
+
+        logs = AuditEvent.objects.all()[:limit]
+        payload = [self._serialize_event(event) for event in logs]
+        return Response(payload, status=200)
+
+    def post(self, request: HttpRequest) -> Response:
+        data = request.data if isinstance(request.data, dict) else {}
+        event_type = data.get("type")
+        if event_type not in self.allowed_types:
+            return Response({"errors": ["Tipo de auditoría inválido."]}, status=400)
+
+        user_id = data.get("userId")
+        if not user_id:
+            return Response({"errors": ["userId es requerido."]}, status=400)
+
+        raw_at = data.get("at")
+        occurred_at = parse_datetime(raw_at) if isinstance(raw_at, str) else None
+        if occurred_at is None:
+            occurred_at = timezone.now()
+        if timezone.is_naive(occurred_at):
+            occurred_at = timezone.make_aware(occurred_at, timezone.get_current_timezone())
+
+        event = AuditEvent.objects.create(
+            type=str(event_type),
+            user_id=str(user_id),
+            patient_id=str(data.get("patientId") or ""),
+            unit_id=str(data.get("unitId") or ""),
+            shift_code=str(data.get("shiftCode") or ""),
+            meta=data.get("meta") if isinstance(data.get("meta"), dict) else None,
+            occurred_at=occurred_at,
+        )
+
+        return Response(self._serialize_event(event), status=201)
+
+    @staticmethod
+    def _serialize_event(event: AuditEvent) -> Dict[str, Any]:
+        return {
+            "id": event.id,
+            "type": event.type,
+            "userId": event.user_id,
+            "patientId": event.patient_id or None,
+            "unitId": event.unit_id or None,
+            "shiftCode": event.shift_code or None,
+            "at": event.occurred_at.isoformat(),
+        }

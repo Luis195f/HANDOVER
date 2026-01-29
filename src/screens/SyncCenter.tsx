@@ -4,13 +4,15 @@ import {
   View, Text, FlatList, RefreshControl,
   Pressable, StyleSheet, Alert, useColorScheme, Switch
 } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
+import type { RootStackParamList } from '@/src/navigation/types';
 
 type QueueItemMeta = {
   id: string;
@@ -56,6 +58,7 @@ export default function SyncCenter() {
   const scheme = useColorScheme();
   const C = scheme === 'dark' ? D_COLORS : L_COLORS;
   const { colors } = useThemeTokens();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const palette: Colors = {
     ...C,
     bg: colors.background,
@@ -202,6 +205,11 @@ export default function SyncCenter() {
             disabled={busy}
             onPress={doFlush}
             label={busy ? 'Reintentando…' : 'Reintentar ahora'}
+          />
+          <BotonPrimario
+            testID="audit-log"
+            onPress={() => navigation.navigate('AuditLog')}
+            label="Ver auditoría"
           />
         </View>
       </View>

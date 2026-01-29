@@ -39,7 +39,13 @@ import {
   type SttService,
   type SttStatus,
 } from '@/src/lib/stt';
-import { appendAuditEvent, createAsyncStorageAuditStorage, makeAuditEvent, type AuditStorage } from '@/src/lib/audit';
+import {
+  appendAuditEvent,
+  createAsyncStorageAuditStorage,
+  makeAuditEvent,
+  sendAuditEvent,
+  type AuditStorage,
+} from '@/src/lib/audit';
 import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import NetInfo from '@/src/lib/netinfo';
@@ -1329,6 +1335,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         shiftCode,
       });
       await appendAuditEvent(auditStorageRef.current, event);
+      void sendAuditEvent(event);
       auditedPatientsRef.current.add(targetPatientId);
     })();
   }, [form, patientIdValue, session]);
@@ -1594,6 +1601,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           shiftCode,
         });
         await appendAuditEvent(auditStorageRef.current, auditEvent);
+        void sendAuditEvent(auditEvent);
       }
 
       let successMessage = 'Entrega encolada para envío.';

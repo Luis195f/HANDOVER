@@ -8,17 +8,43 @@ import SyncCenter from '@/src/screens/SyncCenter';
 const listOfflineQueue = vi.fn();
 const flushQueueNow = vi.fn();
 
-vi.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
-vi.mock('@/src/lib/queue', () => ({ listOfflineQueue: (...args: unknown[]) => listOfflineQueue(...args) }));
-vi.mock('@/src/lib/sync/index', () => ({ flushQueueNow: (...args: unknown[]) => flushQueueNow(...args) }));
+// ✅ DECLARAR ANTES del vi.mock (por el hoisting)
+const navigationMock = {
+  navigate: vi.fn(),
+  goBack: vi.fn(),
+  addListener: vi.fn(() => vi.fn()),
+  dispatch: vi.fn(),
+  replace: vi.fn(),
+  push: vi.fn(),
+};
+
+// ✅ Mock “total” (NO importActual) para evitar NavigationContainer real y useBackButton
+vi.mock('@react-navigation/native', () => ({
+  useIsFocused: () => true,
+  useNavigation: () => navigationMock,
+  useRoute: () => ({ params: {} }),
+  NavigationContainer: ({ children }: any) => children,
+  useFocusEffect: (cb: any) => cb(),
+}));
+
+vi.mock('@/src/lib/queue', () => ({
+  listOfflineQueue: (...args: unknown[]) => listOfflineQueue(...args),
+}));
+
+vi.mock('@/src/lib/sync/index', () => ({
+  flushQueueNow: (...args: unknown[]) => flushQueueNow(...args),
+}));
+
 vi.mock('@/src/services/AuthService', () => ({
   getToken: vi.fn(async () => 'token'),
   default: { getToken: vi.fn(async () => 'token') },
 }));
+
 vi.mock('@/src/config/env', () => ({
   ENV: { FHIR_BASE: 'https://example.test' },
   FHIR_BASE: 'https://example.test',
 }));
+
 const queueItems = [
   {
     id: 'pending-1',
@@ -40,9 +66,12 @@ describe('SyncCenter', () => {
   beforeEach(() => {
     listOfflineQueue.mockReset();
     flushQueueNow.mockReset();
+
+    // opcional, pero no estorba
     process.env.EXPO_PUBLIC_FHIR_BASE = 'https://example.test';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
+
     listOfflineQueue.mockResolvedValue(queueItems);
     flushQueueNow.mockResolvedValue({ processed: 2, remaining: 0 });
   });
@@ -121,6 +150,7 @@ describe('SyncCenter', () => {
       'Fallo de sincronización',
       expect.any(Array),
     );
+
     alertSpy.mockRestore();
   });
 });
