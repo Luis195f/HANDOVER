@@ -452,14 +452,16 @@ function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
         ? (candidate as { ifNoneMatch: string }).ifNoneMatch
         : undefined,
     headers:
-      typeof (candidate as { headers?: unknown }).headers === 'object' &&
-      (candidate as { headers?: Record<string, unknown> }).headers !== null
-        ? Object.fromEntries(
-            Object.entries((candidate as { headers?: Record<string, unknown> }).headers ?? {}).filter(
-              ([, value]) => typeof value === 'string',
-            ),
-          )
-        : undefined,
+  typeof (candidate as { headers?: unknown }).headers === 'object' &&
+  (candidate as { headers?: Record<string, unknown> }).headers != null
+    ? Object.entries((candidate as { headers?: Record<string, unknown> }).headers ?? {}).reduce(
+        (acc, [key, value]) => {
+          if (typeof value === 'string') acc[key] = value;
+          return acc;
+        },
+        {} as Record<string, string>,
+      )
+    : undefined,
   };
 }
 
