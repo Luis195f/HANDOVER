@@ -21,7 +21,10 @@ vi.mock('react-hook-form', async () => {
   return {
     ...actual,
     Controller: ({ render, defaultValue }: any) =>
-      render({ field: { onChange: vi.fn(), onBlur: vi.fn(), value: defaultValue }, fieldState: { error: undefined } }),
+      render({
+        field: { onChange: vi.fn(), onBlur: vi.fn(), value: defaultValue },
+        fieldState: { error: undefined },
+      }),
     FormProvider: ({ children, ...ctx }: any) => {
       currentContext = ctx;
       return <>{children}</>;
@@ -47,6 +50,7 @@ vi.mock('react-hook-form', async () => {
 vi.mock('@/src/config/flags', () => ({ isOn: () => false }));
 const useSelectedUnitId = vi.fn(() => 'unit-1');
 vi.mock('@/src/state/filterStore', () => ({ useSelectedUnitId, ALL_UNITS_OPTION: '__all__' }));
+
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({
     session: {
@@ -64,15 +68,26 @@ vi.mock('@/src/security/auth', () => ({
   }),
   getSession: vi.fn(async () => ({ userId: 'nurse-1', accessToken: 'token', units: ['unit-1'] })),
 }));
+
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
 vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
 vi.mock('@/src/lib/fhir-validation', () => ({ validateBundle: (...args: unknown[]) => validateBundle(...args) }));
+
+// ✅ FIX: agregar sendAuditEvent y hacer appendAuditEvent async + makeAuditEvent consistente
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
-  appendAuditEvent: vi.fn(),
-  makeAuditEvent: vi.fn(),
+  appendAuditEvent: vi.fn(async () => undefined),
+  makeAuditEvent: vi.fn(() => ({
+    id: 'evt-1',
+    type: 'handover_draft',
+    userId: 'nurse-1',
+    patientId: 'pat-1',
+    at: '2024-01-01T00:00:00Z',
+  })),
+  sendAuditEvent: vi.fn(async () => undefined),
 }));
+
 vi.mock('@/src/lib/stt', () => ({
   createSttService: () => ({
     start: vi.fn(),
@@ -83,17 +98,22 @@ vi.mock('@/src/lib/stt', () => ({
     getLastError: () => null,
   }),
 }));
+
 vi.mock('@/src/lib/ai-suggestions', () => ({ fetchInterventionsSuggestions: vi.fn() }));
+
 vi.mock('@/src/lib/scores/handoverRisk', () => ({
   confirmHighRiskSubmission: (...args: unknown[]) => confirmHighRiskSubmission(...args),
   deriveRiskEvaluationFromValues: () => ({ total: 0 }),
 }));
+
 vi.mock('@/src/hooks/usePatientSummary', () => ({
   usePatientSummary: () => ({ loading: false, error: null, summary: { id: 'pat-1', name: 'Paciente' } }),
 }));
+
 vi.mock('@/src/lib/hooks/useVitalTrends', () => ({
   useVitalTrends: () => ({ loading: false, error: null, data: [] }),
 }));
+
 vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/EliminationSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/FluidBalanceSection', () => ({ default: () => null }));
@@ -103,6 +123,7 @@ vi.mock('@/src/screens/components/PsychosocialSection', () => ({ default: () => 
 vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ExportPdfButton', () => ({ ExportPdfButton: () => null }));
 vi.mock('@/src/screens/components/PatientBanner', () => ({ PatientBanner: () => null }));
+
 vi.mock('@/src/validation/form-hooks', () => ({
   useZodForm: (...args: unknown[]) => mockUseZodForm(...args),
 }));
@@ -206,14 +227,13 @@ describe('HandoverForm drafts', () => {
     ensureUnitAccess.mockReset();
     confirmHighRiskSubmission.mockClear();
     mockUseZodForm.mockReset();
-    mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) =>
-      buildFormMock(defaultValues),
-    );
+    mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
   });
 
   it('guarda borrador y encola con status draft', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+
     const view = render(
       <HandoverForm
         navigation={navigation}
@@ -230,14 +250,18 @@ describe('HandoverForm drafts', () => {
     expect(buildHandoverBundle).toHaveBeenCalled();
     const [handoverInput] = buildHandoverBundle.mock.calls[0];
     expect(handoverInput.status).toBe('draft');
+
+    // ✅ Ahora vuelve a ser el OK (ya no cae en el catch por el audit)
     expect(alertSpy).toHaveBeenCalledWith('OK', expect.stringContaining('Entrega encolada'));
   });
 
   it('muestra error y permite reintentar al fallar el encolado', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+
     enqueueBundle.mockRejectedValueOnce({ name: 'HTTPError', status: 504 });
     enqueueBundle.mockResolvedValueOnce(undefined);
+
     const view = render(
       <HandoverForm
         navigation={navigation}
@@ -253,6 +277,7 @@ describe('HandoverForm drafts', () => {
 
     const [title, , buttons] = alertSpy.mock.calls[0];
     expect(title).toBe('Error del servidor');
+
     const retryButton = (buttons as any[]).find((btn) => btn.text === 'Reintentar');
     expect(retryButton).toBeTruthy();
 
@@ -266,6 +291,7 @@ describe('HandoverForm drafts', () => {
   it('aplica prefill de unidad desde los params', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
     useSelectedUnitId.mockReturnValueOnce(undefined);
+
     await act(async () => {
       render(
         <HandoverForm
@@ -282,6 +308,7 @@ describe('HandoverForm drafts', () => {
     await waitFor(() => {
       expect(mockUseZodForm).toHaveBeenCalled();
     });
+
     const [, defaultValues] = mockUseZodForm.mock.calls[0];
     expect(defaultValues.administrativeData.unit).toBe('unit-prefill');
   });
