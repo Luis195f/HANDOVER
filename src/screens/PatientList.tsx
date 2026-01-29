@@ -31,6 +31,7 @@ import type { Handover } from "@/src/types/handover";
 import { computeAlerts } from "@/src/lib/alerts";
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { useThemeTokens } from "../theme";
+import { t, useTranslation } from "@/src/i18n";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
@@ -118,7 +119,7 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
         disabled={disabled}
       >
         <Text style={[styles.pickerButtonText, { color: colors.text }]}>
-          {selectedOption?.label ?? "Seleccionar"}
+          {selectedOption?.label ?? t("patientList.selectPlaceholder")}
         </Text>
       </Pressable>
       <Modal transparent visible={visible} animationType="fade" onRequestClose={handleClose}>
@@ -143,6 +144,7 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 
 export default function PatientList({ navigation }: Props) {
   const { colors } = useThemeTokens();
+  const { i18n } = useTranslation();
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriority, setSortByPriority] = useState(false);
@@ -184,10 +186,10 @@ export default function PatientList({ navigation }: Props) {
       headerRight: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Ver tutorial de inicio"
+          accessibilityLabel={t("patientList.viewOnboardingAccessibility")}
           onPress={handleShowOnboarding}
         >
-          <Text style={[styles.headerLink, { color: colors.info }]}>Ver tutorial</Text>
+          <Text style={[styles.headerLink, { color: colors.info }]}>{t("patientList.viewOnboarding")}</Text>
         </Pressable>
       ),
     });
@@ -209,7 +211,7 @@ export default function PatientList({ navigation }: Props) {
 
   const specialtyOptions = useMemo<PickerOption[]>(() => {
     const base: PickerOption[] = [
-      { label: "Todas las especialidades", value: ALL_SPECIALTIES_OPTION },
+      { label: t("patientList.allSpecialties"), value: ALL_SPECIALTIES_OPTION },
       ...SPECIALTIES.map((specialty: Specialty) => ({
         label: specialty.name,
         value: specialty.id,
@@ -227,17 +229,17 @@ export default function PatientList({ navigation }: Props) {
 
   const unitOptions = useMemo<PickerOption[]>(() => {
     const options: PickerOption[] = [
-      { label: "Todas las unidades", value: ALL_UNITS_OPTION },
+      { label: t("patientList.allUnits"), value: ALL_UNITS_OPTION },
       ...availableUnits.map((unit) => ({ label: unit.name, value: unit.id })),
     ];
     return options;
-  }, [availableUnits]);
+  }, [availableUnits, i18n.language]);
 
   const specialtyChips = useMemo<ChipItem[]>(() => {
     return [
       {
         id: ALL_SPECIALTIES_OPTION,
-        label: "Todas las especialidades",
+        label: t("patientList.allSpecialties"),
         selected: selectedSpecialtyId === ALL_SPECIALTIES_OPTION,
         onPress: () => onSpecialtyChange(ALL_SPECIALTIES_OPTION),
       },
@@ -248,13 +250,13 @@ export default function PatientList({ navigation }: Props) {
         onPress: () => onSpecialtyChange(specialty.id),
       })),
     ];
-  }, [onSpecialtyChange, selectedSpecialtyId]);
+  }, [i18n.language, onSpecialtyChange, selectedSpecialtyId]);
 
   const unitChips = useMemo<ChipItem[]>(() => {
     return [
       {
         id: ALL_UNITS_OPTION,
-        label: "Todas las unidades",
+        label: t("patientList.allUnits"),
         selected: selectedUnitId === ALL_UNITS_OPTION,
         onPress: () => onUnitChange(ALL_UNITS_OPTION),
       },
@@ -265,7 +267,7 @@ export default function PatientList({ navigation }: Props) {
         onPress: () => onUnitChange(unit.id),
       })),
     ];
-  }, [availableUnits, onUnitChange, selectedUnitId]);
+  }, [availableUnits, i18n.language, onUnitChange, selectedUnitId]);
 
   const patients = useMemo(
     () => filterPatients(PATIENTS_MOCK, UNITS_BY_ID, selectedSpecialtyId, selectedUnitId),
@@ -335,20 +337,20 @@ export default function PatientList({ navigation }: Props) {
     (patientId: string) => {
       const basePatient = patientById.get(patientId);
       if (!basePatient) {
-        Alert.alert("Paciente no encontrado", "No se pudo abrir el registro del paciente.");
+        Alert.alert(t("patientList.notFoundTitle"), t("patientList.notFoundMessage"));
         return;
       }
 
       const unit = UNITS_BY_ID[basePatient.unitId];
       if (!unit) {
-        Alert.alert("Unidad desconocida", "No se encontró la unidad del paciente.");
+        Alert.alert(t("patientList.unknownUnitTitle"), t("patientList.unknownUnitMessage"));
         return;
       }
 
       try {
         ensureUnitAccess(session, unit.id);
       } catch {
-        Alert.alert("Sin acceso", "No tienes acceso a esta unidad.");
+        Alert.alert(t("patientList.noAccessTitle"), t("patientList.noAccessMessage"));
         return;
       }
 
@@ -366,10 +368,10 @@ export default function PatientList({ navigation }: Props) {
 
   const renderPriorityBadge = useCallback((level: PrioritizedPatient['level']) => {
     const labelMap: Record<PrioritizedPatient['level'], string> = {
-      critical: "CRÍTICO",
-      high: "ALTO",
-      medium: "MEDIO",
-      low: "BAJO",
+      critical: t("patientList.priorityCritical"),
+      high: t("patientList.priorityHigh"),
+      medium: t("patientList.priorityMedium"),
+      low: t("patientList.priorityLow"),
     };
     const colorMap: Record<PrioritizedPatient['level'], string> = {
       critical: colors.danger,
@@ -382,26 +384,26 @@ export default function PatientList({ navigation }: Props) {
         <Text style={styles.priorityBadgeText}>{labelMap[level]}</Text>
       </View>
     );
-  }, [colors.danger, colors.success, colors.warning]);
+  }, [colors.danger, colors.success, colors.warning, i18n.language]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}>
       <View style={styles.filters}>
         <PickerSelect
-          label="Especialidad"
+          label={t("patientList.specialtyLabel")}
           value={selectedSpecialtyId}
           options={specialtyOptions}
           onValueChange={onSpecialtyChange}
         />
         <PickerSelect
-          label="Unidad"
+          label={t("patientList.unitLabel")}
           value={selectedUnitId}
           options={unitOptions}
           onValueChange={onUnitChange}
           disabled={availableUnits.length === 0 && selectedSpecialtyId !== ALL_SPECIALTIES_OPTION}
         />
         <View style={styles.chipSection}>
-          <Text style={[styles.chipLabel, { color: colors.text }]}>Especialidades</Text>
+          <Text style={[styles.chipLabel, { color: colors.text }]}>{t("patientList.specialtiesLabel")}</Text>
           <View style={styles.chipGroup}>
             {specialtyChips.map((chip) => (
               <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
@@ -409,7 +411,7 @@ export default function PatientList({ navigation }: Props) {
           </View>
         </View>
         <View style={styles.chipSection}>
-          <Text style={[styles.chipLabel, { color: colors.text }]}>Unidades</Text>
+          <Text style={[styles.chipLabel, { color: colors.text }]}>{t("patientList.unitsLabel")}</Text>
           <View style={styles.chipGroup}>
             {unitChips.map((chip) => (
               <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
@@ -418,7 +420,7 @@ export default function PatientList({ navigation }: Props) {
         </View>
         <View style={styles.priorityToggle}>
           <Text style={[styles.priorityToggleLabel, { color: colors.text }]}>
-            Ordenar por prioridad clínica
+            {t("patientList.sortByPriority")}
           </Text>
           <Switch value={sortByPriority} onValueChange={setSortByPriority} />
         </View>
@@ -428,9 +430,9 @@ export default function PatientList({ navigation }: Props) {
             style={[styles.supervisorButton, { backgroundColor: colors.primary }]}
             onPress={() => navigation.navigate("SupervisorDashboard")}
           >
-            <Text style={styles.supervisorButtonTitle}>Ver dashboard de turno</Text>
+            <Text style={styles.supervisorButtonTitle}>{t("patientList.supervisorDashboardTitle")}</Text>
             <Text style={styles.supervisorButtonSubtitle}>
-              Resumen para supervisores y jefaturas de unidad.
+              {t("patientList.supervisorDashboardSubtitle")}
             </Text>
           </Pressable>
         ) : null}
@@ -440,7 +442,7 @@ export default function PatientList({ navigation }: Props) {
         data={patientsForList}
         keyExtractor={(item) => item.patientId}
         contentContainerStyle={patients.length === 0 ? styles.emptyContainer : undefined}
-        ListEmptyComponent={<Text style={styles.emptyText}>No hay pacientes para la selección.</Text>}
+        ListEmptyComponent={<Text style={styles.emptyText}>{t("patientList.emptyList")}</Text>}
         renderItem={({ item }) => {
           const basePatient = patientById.get(item.patientId);
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
@@ -458,7 +460,7 @@ export default function PatientList({ navigation }: Props) {
             >
               <Text style={[styles.patientName, { color: colors.text }]}>{item.displayName}</Text>
               <Text style={[styles.patientMeta, { color: colors.muted }]}>
-                {unit?.name ?? basePatient?.unitId ?? "Unidad desconocida"}
+                {unit?.name ?? basePatient?.unitId ?? t("patientList.unknownUnitFallback")}
               </Text>
               {/* BEGIN HANDOVER_OFFLINE */}
               <View style={styles.syncRow}>
@@ -472,7 +474,11 @@ export default function PatientList({ navigation }: Props) {
                       : { backgroundColor: "#DCFCE7", color: colors.success },
                   ]}
                 >
-                  {syncState === "error" ? "Error de envío" : syncState === "pending" ? "En cola" : "Sincronizado"}
+                  {syncState === "error"
+                    ? t("patientList.syncError")
+                    : syncState === "pending"
+                    ? t("patientList.syncQueued")
+                    : t("patientList.syncSynced")}
                 </Text>
               </View>
               {/* END HANDOVER_OFFLINE */}
@@ -484,12 +490,12 @@ export default function PatientList({ navigation }: Props) {
                 <View style={styles.alertChipRow}>
                   {hasCriticalAlert ? (
                     <View style={[styles.alertChip, { backgroundColor: "#FEE2E2", borderColor: colors.danger }]}>
-                      <Text style={[styles.alertChipText, { color: colors.danger }]}>Alerta crítica</Text>
+                      <Text style={[styles.alertChipText, { color: colors.danger }]}>{t("patientList.alertCritical")}</Text>
                     </View>
                   ) : null}
                   {hasWarningAlert ? (
                     <View style={[styles.alertChip, { backgroundColor: colors.surface, borderColor: colors.warning }]}>
-                      <Text style={[styles.alertChipText, { color: colors.warning }]}>Riesgo activo</Text>
+                      <Text style={[styles.alertChipText, { color: colors.warning }]}>{t("patientList.alertWarning")}</Text>
                     </View>
                   ) : null}
                 </View>
@@ -502,7 +508,7 @@ export default function PatientList({ navigation }: Props) {
                 }}
                 accessibilityRole="button"
               >
-                <Text style={styles.handoverButtonText}>Dashboard clínico</Text>
+                <Text style={styles.handoverButtonText}>{t("patientList.clinicalDashboard")}</Text>
               </Pressable>
             </Pressable>
           );

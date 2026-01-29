@@ -13,6 +13,7 @@ import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-er
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
 import type { RootStackParamList } from '@/src/navigation/types';
+import { t } from '@/src/i18n';
 
 type QueueItemMeta = {
   id: string;
@@ -128,13 +129,16 @@ export default function SyncCenter() {
     if (!candidate) return;
     const status = candidate.errorStatus ?? 'desconocido';
     alertedErrorsRef.current.add(`${candidate.id}:${status}`);
-    Alert.alert('Error en sincronización', `Error en sincronización: ${status}`);
+    Alert.alert(
+      t('sync.syncErrorTitle'),
+      t('sync.syncErrorStatusMessage', { status }),
+    );
   }, [items]);
 
   const doFlush = React.useCallback(async () => {
     const opts = resolveSyncOpts();
     if (!opts) {
-      Alert.alert('Sync', 'Config FHIR_BASE o AuthService no disponible.');
+      Alert.alert(t('sync.syncTitle'), t('sync.configMissingMessage'));
       return { processed: 0, remaining: -1 };
     }
     let token: string | null = null;
@@ -148,7 +152,7 @@ export default function SyncCenter() {
     }
     if (!token) {
       setAuthRequired(true);
-      Alert.alert('Sync', 'Autenticación requerida.');
+      Alert.alert(t('sync.syncTitle'), t('sync.authRequiredMessage'));
       return { processed: 0, remaining: -1 };
     }
     setAuthRequired(false);
@@ -197,34 +201,34 @@ export default function SyncCenter() {
   return (
     <View style={[styles.container, { backgroundColor: palette.bg }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: palette.textPrimary }]}>Sync Center</Text>
+        <Text style={[styles.title, { color: palette.textPrimary }]}>{t('sync.title')}</Text>
 
         <View style={styles.actionsRow}>
           <BotonPrimario
             testID="sync-flush"
             disabled={busy}
             onPress={doFlush}
-            label={busy ? 'Reintentando…' : 'Reintentar ahora'}
+            label={busy ? t('sync.retrying') : t('sync.retryNow')}
           />
           <BotonPrimario
             testID="audit-log"
             onPress={() => navigation.navigate('AuditLog')}
-            label="Ver auditoría"
+            label={t('sync.viewAudit')}
           />
         </View>
       </View>
       {authRequired && (
-        <Text style={[styles.authWarning, { color: palette.stateError }]}>Autenticación requerida.</Text>
+        <Text style={[styles.authWarning, { color: palette.stateError }]}>{t('sync.authRequiredMessage')}</Text>
       )}
 
       {/* Controles de Auto-retry */}
       <View style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>Auto-retry</Text>
+          <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>{t('sync.autoRetryTitle')}</Text>
           <Switch value={autoRetry} onValueChange={setAutoRetry} />
         </View>
         <View style={[styles.rowBetween, { marginTop: 10 }]}>
-          <Text style={{ color: palette.textSecondary }}>Intervalo</Text>
+          <Text style={{ color: palette.textSecondary }}>{t('sync.intervalLabel')}</Text>
           <View style={styles.intervalRow}>
             <Pressable
               onPress={decInterval}
@@ -242,7 +246,9 @@ export default function SyncCenter() {
           </View>
         </View>
         {lastRun && (
-          <Text style={{ marginTop: 8, color: palette.textHint }}>Última ejecución: {lastRun}</Text>
+          <Text style={{ marginTop: 8, color: palette.textHint }}>
+            {t('sync.lastRunLabel', { time: lastRun })}
+          </Text>
         )}
       </View>
 
@@ -261,7 +267,7 @@ export default function SyncCenter() {
         renderItem={({ item }) => <ItemRow item={item} C={palette} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ color: palette.textSecondary }}>No hay elementos en cola 🎉</Text>
+            <Text style={{ color: palette.textSecondary }}>{t('sync.emptyQueue')}</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: 24 }}
@@ -298,17 +304,17 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
 
     if (issuesText) {
       buttons.push({
-        text: 'Ver detalle',
-        onPress: () => Alert.alert('Detalle de error', issuesText),
+        text: t('sync.viewDetails'),
+        onPress: () => Alert.alert(t('sync.errorDetailsTitle'), issuesText),
       });
     }
 
-    buttons.push({ text: 'Cerrar', style: 'cancel' });
+    buttons.push({ text: t('common.close'), style: 'cancel' });
 
     Alert.alert(
       title,
       item.errorStatus && item.errorStatus >= 400 && item.errorStatus < 500
-        ? `Error en sincronización: ${item.errorStatus}`
+        ? t('sync.syncErrorStatusMessage', { status: item.errorStatus })
         : item.errorMessage || message,
       buttons,
     );
@@ -327,26 +333,30 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
           <Text style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
           {isError && (
             <View style={[styles.errorBadge, { backgroundColor: `${C.stateError}22`, borderColor: C.stateError }]}>
-              <Text style={[styles.errorBadgeText, { color: C.stateError }]}>Error</Text>
+              <Text style={[styles.errorBadgeText, { color: C.stateError }]}>{t('common.error')}</Text>
             </View>
           )}
         </View>
-        <Text style={[styles.sub, { color: C.textSecondary }]}>Fecha: {when}</Text>
-        <Text style={[styles.sub, { color: C.textSecondary }]}>Intentos: {item.attempts}</Text>
+        <Text style={[styles.sub, { color: C.textSecondary }]}>
+          {t('sync.dateLabel', { date: when })}
+        </Text>
+        <Text style={[styles.sub, { color: C.textSecondary }]}>
+          {t('sync.attemptsLabel', { count: item.attempts })}
+        </Text>
         {isError && (
           <>
             <Text style={[styles.sub, { color: C.stateError, marginTop: 4 }]} numberOfLines={2}>
               {subtitle}
             </Text>
             <Pressable onPress={showErrorAlert} style={({ pressed }) => pressed && { opacity: 0.85 }}>
-              <Text style={[styles.errorAction, { color: C.stateError }]}>Ver error</Text>
+              <Text style={[styles.errorAction, { color: C.stateError }]}>{t('sync.viewError')}</Text>
             </Pressable>
           </>
         )}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.hash, { color: C.textHint }]}>hash</Text>
-        <Text style={[styles.hashVal, { color: C.textPrimary }]}>{short(item.hash, 24) || '—'}</Text>
+        <Text style={[styles.hash, { color: C.textHint }]}>{t('sync.hashLabel')}</Text>
+        <Text style={[styles.hashVal, { color: C.textPrimary }]}>{short(item.hash, 24) || t('common.notAvailable')}</Text>
         <Text
           style={[styles.state, { color: isError ? C.stateError : C.statePending }]}
           numberOfLines={2}

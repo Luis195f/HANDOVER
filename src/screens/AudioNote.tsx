@@ -18,6 +18,8 @@ import {
   type SttService,
   type SttStatus,
 } from "@/src/lib/stt";
+import { t } from "@/src/i18n";
+import { useThemeTokens } from "@/src/theme";
 
 type AudioNoteStackParamList = { AudioNote: { onDoneRoute?: string } | undefined };
 
@@ -70,6 +72,7 @@ const appendDictationText = (current: string, addition: string) => {
 };
 
 export default function AudioNote({ navigation }: Props) {
+  const { colors } = useThemeTokens();
   const recorder = useAudioRecorder(REC_OPTS);
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(recorder.uri ?? null);
@@ -167,7 +170,7 @@ export default function AudioNote({ navigation }: Props) {
       const granted = await ensurePermissionGranted();
       if (!granted) {
         setDictationError('PERMISSION_DENIED');
-        Alert.alert('Permiso denegado', 'Necesitas habilitar el micrófono para dictar.');
+        Alert.alert(t('permissions.microphoneDeniedTitle'), t('permissions.microphoneRequiredDictation'));
         return;
       }
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
@@ -182,7 +185,7 @@ export default function AudioNote({ navigation }: Props) {
   const handleAiTranscription = async () => {
     const uri = lastUri ?? recorder.uri;
     if (!uri) {
-      setTranscriptionError('Graba una nota antes de transcribir.');
+      setTranscriptionError(t('audioNote.noteRequired'));
       return;
     }
 
@@ -199,10 +202,10 @@ export default function AudioNote({ navigation }: Props) {
       const message =
         result.error && result.error !== 'network'
           ? result.error
-          : 'No se pudo transcribir con IA. Puedes seguir escribiendo manualmente.';
+          : t('audioNote.aiTranscriptionFailed');
       setTranscriptionError(message);
     } catch {
-      setTranscriptionError('No se pudo transcribir con IA. Inténtalo más tarde.');
+      setTranscriptionError(t('audioNote.aiTranscriptionFailedLater'));
     } finally {
       setIsTranscribing(false);
     }
@@ -216,7 +219,7 @@ export default function AudioNote({ navigation }: Props) {
       }
       recorder.record?.();
     } catch {
-      setRecordingError('No se pudo iniciar la grabación. Revisa los permisos de micrófono.');
+      setRecordingError(t('audioNote.recordStartFailed'));
     }
   };
 
@@ -232,7 +235,7 @@ export default function AudioNote({ navigation }: Props) {
       }
       return uri;
     } catch {
-      setRecordingError('No se pudo detener la grabación. Intenta nuevamente.');
+      setRecordingError(t('audioNote.recordStopFailed'));
       return null;
     }
   };
@@ -244,8 +247,8 @@ export default function AudioNote({ navigation }: Props) {
     }
     const granted = await ensurePermissionGranted();
     if (!granted) {
-      setRecordingError('Activa los permisos de micrófono para grabar la nota.');
-      Alert.alert('Permiso denegado', 'Necesitas habilitar el micrófono para grabar la nota.');
+      setRecordingError(t('audioNote.recordPermissionHint'));
+      Alert.alert(t('permissions.microphoneDeniedTitle'), t('permissions.microphoneRequiredRecord'));
       return;
     }
     await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
@@ -272,7 +275,7 @@ export default function AudioNote({ navigation }: Props) {
     return (
       <View style={{ flex: 1, backgroundColor: "#0b1220", padding: 16, justifyContent: "center" }}>
         <Text style={{ color: "#eaf2ff", fontSize: 16, textAlign: "center" }}>
-          Permiso de micrófono denegado. Actívalo en Ajustes para grabar audio.
+          {t('permissions.microphoneDeniedScreenMessage')}
         </Text>
         <Pressable
           onPress={handleOpenSettings}
@@ -285,7 +288,7 @@ export default function AudioNote({ navigation }: Props) {
             alignItems: "center",
           })}
         >
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Abrir Ajustes</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{t('common.openSettings')}</Text>
         </Pressable>
         {permission.canAskAgain ? (
           <Pressable
@@ -299,7 +302,7 @@ export default function AudioNote({ navigation }: Props) {
               alignItems: "center",
             })}
           >
-            <Text style={{ color: "#111827", fontWeight: "700" }}>Reintentar</Text>
+            <Text style={{ color: "#111827", fontWeight: "700" }}>{t('common.retry')}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -309,7 +312,7 @@ export default function AudioNote({ navigation }: Props) {
   return (
     <View style={{ flex: 1, backgroundColor: "#0b1220", padding: 16 }}>
       <Text style={{ color: "#eaf2ff", fontSize: 18, fontWeight: "700", marginBottom: 12 }}>
-        Nota de audio
+        {t('audioNote.title')}
       </Text>
 
       <Pressable
@@ -323,10 +326,12 @@ export default function AudioNote({ navigation }: Props) {
         })}
       >
         <Text style={{ color: "#fff", fontWeight: "700" }}>
-          {recorder.isRecording ? "Detener" : "Grabar"}
+          {recorder.isRecording ? t('audioNote.recordStop') : t('audioNote.recordStart')}
         </Text>
       </Pressable>
-      {recordingError ? <Text style={sttStyles.dictationError}>{recordingError}</Text> : null}
+      {recordingError ? (
+        <Text style={[sttStyles.dictationError, { color: colors.danger }]}>{recordingError}</Text>
+      ) : null}
 
       <Pressable
         onPress={toggleDictation}
@@ -339,27 +344,29 @@ export default function AudioNote({ navigation }: Props) {
         })}
       >
         <Text style={{ color: '#eaf2ff', fontWeight: '700' }}>
-          {dictationStatus === 'listening' ? 'Detener dictado' : 'Dictar nota (transcripción)'}
+          {dictationStatus === 'listening'
+            ? t('audioNote.dictationStop')
+            : t('audioNote.dictationStart')}
         </Text>
       </Pressable>
       {dictationStatus === 'listening' && (
         <Text style={sttStyles.dictationHint}>
-          Escuchando… {dictatedPartial ? `“${dictatedPartial}”` : ''}
+          {t('audioNote.dictationListening')} {dictatedPartial ? `“${dictatedPartial}”` : ''}
         </Text>
       )}
       {dictationStatus === 'processing' && (
-        <Text style={sttStyles.dictationHint}>Procesando transcripción…</Text>
+        <Text style={sttStyles.dictationHint}>{t('audioNote.dictationProcessing')}</Text>
       )}
       {dictationError && dictationError !== 'UNSUPPORTED' && (
-        <Text style={sttStyles.dictationError}>
+        <Text style={[sttStyles.dictationError, { color: colors.danger }]}>
           {dictationError === 'PERMISSION_DENIED'
-            ? 'Activa los permisos de micrófono para dictar la nota.'
-            : 'No pudimos transcribir en este momento. Puedes seguir editando el texto manualmente.'}
+            ? t('audioNote.dictationPermissionError')
+            : t('audioNote.dictationGenericError')}
         </Text>
       )}
       {dictationUnavailable && (
-        <Text style={sttStyles.dictationError}>
-          La transcripción por voz no está disponible en este dispositivo.
+        <Text style={[sttStyles.dictationError, { color: colors.danger }]}>
+          {t('audioNote.dictationUnavailable')}
         </Text>
       )}
       <Pressable
@@ -373,29 +380,31 @@ export default function AudioNote({ navigation }: Props) {
         })}
       >
         <Text style={{ color: '#eaf2ff', fontWeight: '700' }}>
-          {isTranscribing ? 'Transcribiendo…' : 'Transcribir nota con IA'}
+          {isTranscribing ? t('audioNote.aiTranscriptionInProgress') : t('audioNote.aiTranscriptionAction')}
         </Text>
       </Pressable>
-      {isTranscribing ? <Text style={sttStyles.dictationHint}>Procesando audio…</Text> : null}
-      {transcriptionError ? <Text style={sttStyles.dictationError}>{transcriptionError}</Text> : null}
+      {isTranscribing ? <Text style={sttStyles.dictationHint}>{t('audioNote.aiProcessingAudio')}</Text> : null}
+      {transcriptionError ? (
+        <Text style={[sttStyles.dictationError, { color: colors.danger }]}>{transcriptionError}</Text>
+      ) : null}
       <TextInput
         style={sttStyles.transcriptionInput}
         multiline
-        placeholder="Transcripción editable de la nota"
+        placeholder={t('audioNote.transcriptionPlaceholder')}
         placeholderTextColor="#7081a7"
         value={transcription}
         onChangeText={setTranscription}
         testID="audio-transcription-input"
       />
       <Text style={{ color: '#9fb3d9', marginTop: 8 }}>
-        Puedes editar el texto antes de adjuntarlo.
+        {t('audioNote.transcriptionEditHint')}
       </Text>
       {/* Nota: Integrar envío automático del audio al backend Whisper para transcripción en una iteración posterior. */}
 
       {hasUri && (
         <>
           <Text style={{ color: "#9fb3d9", marginTop: 12 }}>
-            Archivo: {(lastUri ?? recorder.uri)?.split("/").pop()}
+            {t('audioNote.fileLabel', { fileName: (lastUri ?? recorder.uri)?.split('/').pop() ?? '' })}
           </Text>
           <Pressable
             onPress={accept}
@@ -407,7 +416,7 @@ export default function AudioNote({ navigation }: Props) {
               marginTop: 12,
             })}
           >
-            <Text style={{ color: "#fff", fontWeight: "700" }}>Adjuntar al handover</Text>
+            <Text style={{ color: "#fff", fontWeight: "700" }}>{t('audioNote.attachToHandover')}</Text>
           </Pressable>
         </>
       )}

@@ -3,6 +3,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
+import { t } from '@/src/i18n';
 import { Buffer } from 'buffer';
 import { Platform } from 'react-native';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
@@ -823,7 +824,7 @@ export async function logout(): Promise<void> {
 
     await setSession(null);
     if (message) {
-      Alert.alert('Sesión expirada', message);
+      Alert.alert(t('auth.sessionExpiredTitle'), message);
     }
     navigation.resetTo('Login');
   };
@@ -841,7 +842,7 @@ export async function logoutAndClear(options: LogoutOptions = {}): Promise<void>
     if (logoutInFlight) return logoutInFlight;
     logoutInFlight = (async () => {
       await setSession(null);
-      if (options.message) Alert.alert('Sesión expirada', options.message);
+      if (options.message) Alert.alert(t('auth.sessionExpiredTitle'), options.message);
       navigation.resetTo('Login');
     })().finally(() => {
       logoutInFlight = null;
@@ -1119,7 +1120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout: async () =>
         logoutAndClear({
           skipRemote: true,
-          message: 'Sesión expirada, inicia sesión de nuevo',
+          message: t('auth.sessionExpiredMessage'),
         }),
     });
   }, []);
@@ -1137,7 +1138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (error) {
       if (!isAuthCancelledError(error)) {
-        Alert.alert('Error de autenticación', 'Credenciales incorrectas');
+        Alert.alert(t('auth.invalidCredentialsTitle'), t('auth.invalidCredentialsMessage'));
       }
       throw error;
     }

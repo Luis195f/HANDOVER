@@ -1,35 +1,22 @@
-// src/i18n.ts
+import { useEffect, useState } from 'react';
 
-export const strings = {
-  es: {
-    offlineMsg:
-      'No se pudo conectar. Revisa tu conexión a internet. Si estás sin red, el envío quedará en cola y se reintentará automáticamente.',
-    sessionExpiredTitle: 'Sesión expirada',
-    sessionExpiredMessage: 'Tu sesión caducó. Inicia sesión nuevamente para continuar.',
-    loginCta: 'Iniciar sesión',
-    cameraPermissionDeniedTitle: 'Permiso de cámara denegado',
-    cameraPermissionDeniedMessage:
-      'Habilita el permiso de cámara en Ajustes para escanear códigos QR.',
-    cancelLabel: 'Cancelar',
-    openSettingsLabel: 'Abrir Ajustes',
-  },
-  en: {
-    offlineMsg:
-      'Could not connect. Check your internet connection. If you are offline, the submission will be queued and retried automatically.',
-    sessionExpiredTitle: 'Session expired',
-    sessionExpiredMessage: 'Your session expired. Please sign in again to continue.',
-    loginCta: 'Sign in',
-    cameraPermissionDeniedTitle: 'Camera permission denied',
-    cameraPermissionDeniedMessage: 'Enable camera permission in Settings to scan QR codes.',
-    cancelLabel: 'Cancel',
-    openSettingsLabel: 'Open Settings',
-  },
+const esTranslations = require('./locales/es.json') as Record<string, unknown>;
+const enTranslations = require('./locales/en.json') as Record<string, unknown>;
+
+const resources = {
+  es: esTranslations,
+  en: enTranslations,
 } as const;
 
-export type SupportedLang = keyof typeof strings;
-export type TranslationKey = keyof typeof strings.es;
+export type SupportedLang = keyof typeof resources;
+export type TranslationKey = string;
 
-// Nota: en una iteración posterior, reemplazar este PoC por una librería i18n con selector global.
+type TranslationParams = Record<string, string | number | undefined>;
+
+type Listener = (lang: SupportedLang) => void;
+
+const listeners = new Set<Listener>();
+
 const detectLang = (): SupportedLang => {
   try {
     const locale =
@@ -42,14 +29,55 @@ const detectLang = (): SupportedLang => {
   }
 };
 
-export const getCurrentLang = (): SupportedLang => {
-  // En Node/Vitest suele resolverse en-US y rompe tests; forzamos ES por defecto en test/SSR.
-  if (process.env.NODE_ENV === 'test' || typeof window === 'undefined') return 'es';
-  return detectLang();
+let currentLang: SupportedLang =
+  process.env.NODE_ENV === 'test' || typeof window === 'undefined' ? 'es' : detectLang();
+
+export const getCurrentLang = (): SupportedLang => currentLang;
+
+export const setLanguage = (lang: SupportedLang) => {
+  if (currentLang === lang) return;
+  currentLang = lang;
+  listeners.forEach((listener) => listener(lang));
 };
 
-// Mantener export para compatibilidad con imports existentes.
-export const currentLang: SupportedLang = getCurrentLang();
+const resolveNestedValue = (source: Record<string, unknown>, key: string): unknown =>
+  key.split('.').reduce<unknown>((acc, part) => {
+    if (!acc || typeof acc !== 'object') return undefined;
+    return (acc as Record<string, unknown>)[part];
+  }, source);
 
-export const t = (key: TranslationKey, lang: SupportedLang = currentLang): string =>
-  strings[lang]?.[key] ?? strings.es[key] ?? String(key);
+const interpolate = (template: string, params?: TranslationParams) => {
+  if (!params) return template;
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, token: string) => {
+    const value = params[token];
+    return value == null ? '' : String(value);
+  });
+};
+
+export const t = (key: TranslationKey, params?: TranslationParams): string => {
+  const bundle = resources[currentLang] ?? resources.es;
+  const fallback = resources.es;
+  const raw = resolveNestedValue(bundle, key) ?? resolveNestedValue(fallback, key);
+  if (typeof raw !== 'string') return key;
+  return interpolate(raw, params);
+};
+
+export const useTranslation = () => {
+  const [lang, setLang] = useState(currentLang);
+
+  useEffect(() => {
+    const listener: Listener = (nextLang) => setLang(nextLang);
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
+  return {
+    t,
+    i18n: {
+      language: lang,
+      changeLanguage: setLanguage,
+    },
+  } as const;
+};

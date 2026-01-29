@@ -6,10 +6,13 @@ import { navigationRef } from "@/src/navigation/navigation";
 import { AppThemeProvider } from "@/src/theme";
 import { AuthProvider } from "@/src/security/auth";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
+import "@/src/i18n";
+import { useTranslation } from "@/src/i18n";
 import * as WebBrowser from "expo-web-browser";
 WebBrowser.maybeCompleteAuthSession();
 
 export default function App() {
+  useTranslation();
   React.useEffect(() => {
     let stop: (() => void) | undefined;
     try {

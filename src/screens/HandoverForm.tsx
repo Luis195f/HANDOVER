@@ -75,6 +75,7 @@ import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import AutocompleteSnomedCoding from '@/src/components/AutocompleteSnomedCoding';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
+import { t } from '@/src/i18n';
 
 type HandoverFormValues = HandoverValues;
 
@@ -960,7 +961,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         if (!res.granted) {
           setSttError('PERMISSION_DENIED');
           setActiveDictationField(null);
-          Alert.alert('Permiso denegado', 'Necesitas habilitar el micrófono para usar el dictado.');
+          Alert.alert(t('permissions.microphoneDeniedTitle'), t('permissions.microphoneRequiredDictation'));
           return;
         }
       }
@@ -980,27 +981,27 @@ export default function HandoverForm({ navigation, route }: Props) {
   const renderDictationStatus = (field: DictationField) => {
     if (dictationUnavailable) {
       return (
-        <Text style={styles.dictationError}>
-          La transcripción por voz no está disponible en este dispositivo.
+        <Text style={[styles.dictationError, { color: colors.danger }]}>
+          {t('audioNote.dictationUnavailable')}
         </Text>
       );
     }
     if (activeDictationField === field && sttStatus === 'listening') {
       return (
         <Text style={styles.dictationStatus}>
-          Escuchando… {dictatedPartial ? `“${dictatedPartial}”` : ''}
+          {t('audioNote.dictationListening')} {dictatedPartial ? `“${dictatedPartial}”` : ''}
         </Text>
       );
     }
     if (activeDictationField === field && sttStatus === 'processing') {
-      return <Text style={styles.dictationStatus}>Procesando dictado…</Text>;
+      return <Text style={styles.dictationStatus}>{t('handover.dictationProcessing')}</Text>;
     }
     if (lastDictationField === field && sttError && !dictationUnavailable) {
       const message =
         sttError === 'PERMISSION_DENIED'
-          ? 'Activa los permisos de micrófono para dictar las notas.'
-          : 'No pudimos transcribir en este momento. Puedes escribir manualmente y volver a intentar.';
-      return <Text style={styles.dictationError}>{message}</Text>;
+          ? t('audioNote.dictationPermissionError')
+          : t('audioNote.dictationGenericError');
+      return <Text style={[styles.dictationError, { color: colors.danger }]}>{message}</Text>;
     }
     return null;
   };
@@ -1187,12 +1188,12 @@ export default function HandoverForm({ navigation, route }: Props) {
         form.setValue('sbarBackground', refined.background, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarAssessment', refined.assessment, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarRecommendation', refined.recommendation, { shouldDirty: true, shouldValidate: true });
-        setSbarHelperMessage('SBAR refinada por IA. Revise y ajuste según criterio clínico.');
+        setSbarHelperMessage(t('handover.sbarRefinedHelper'));
       } else {
-        setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
+        setSbarAiError(t('handover.sbarAiUnavailable'));
       }
     } catch {
-      setSbarAiError('No se pudo contactar con la IA. Se mantiene el resumen generado por reglas.');
+      setSbarAiError(t('handover.sbarAiUnavailable'));
     } finally {
       setIsRefiningSbarWithAI(false);
     }
@@ -1212,13 +1213,13 @@ export default function HandoverForm({ navigation, route }: Props) {
       form.setValue('sbarBackground', parsed.background, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarAssessment', parsed.assessment, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarRecommendation', parsed.recommendation, { shouldDirty: true, shouldValidate: true });
-      setSbarHelperMessage('SBAR generada con IA. Revise y ajuste según criterio clínico.');
+      setSbarHelperMessage(t('handover.sbarGeneratedAiHelper'));
     } catch (error) {
       console.error('[sbar] No se pudo generar SBAR con IA', error);
-      setSbarAiError('No se pudo generar la SBAR con IA. Verifique la conexión o la configuración.');
+      setSbarAiError(t('handover.sbarAiGenerateError'));
       Alert.alert(
-        'No se pudo generar la SBAR con IA',
-        'Verifique la conexión o la configuración del proveedor de IA.',
+        t('handover.sbarAiGenerateAlertTitle'),
+        t('handover.sbarAiGenerateAlertMessage'),
       );
     } finally {
       setIsGeneratingSbarWithAI(false);
@@ -1233,14 +1234,12 @@ export default function HandoverForm({ navigation, route }: Props) {
       form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
-      setSbarHelperMessage(
-        'SBAR generada automáticamente a partir del formulario. Revise y ajuste según criterio clínico.',
-      );
+      setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
       setSbarAiError(null);
     } catch {
       Alert.alert(
-        'No se pudo generar la SBAR automática',
-        'Revise los datos o complete la SBAR de forma manual.',
+        t('handover.sbarAutoGenerateAlertTitle'),
+        t('handover.sbarAutoGenerateAlertMessage'),
       );
     }
   };
@@ -1248,7 +1247,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleGenerateSbar = async () => {
     const isValid = await form.trigger();
     if (!isValid) {
-      Alert.alert('Revisa el formulario', 'Completa los campos obligatorios para generar el SBAR.');
+      Alert.alert(t('handover.formReviewTitle'), t('handover.formReviewSbarMessage'));
       return;
     }
     const values = form.getValues();
@@ -1267,11 +1266,11 @@ export default function HandoverForm({ navigation, route }: Props) {
     const current = form.getValues('closingSummary') ?? '';
     if (current.trim()) {
       Alert.alert(
-        'Reemplazar resumen',
-        'Ya existe un resumen escrito. ¿Quieres reemplazarlo por el SBAR sugerido?',
+        t('handover.replaceSummaryTitle'),
+        t('handover.replaceSummaryMessage'),
         [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Reemplazar', style: 'destructive', onPress: () => applySbarToClosingSummary(sbarPreview) },
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('handover.replaceLabel'), style: 'destructive', onPress: () => applySbarToClosingSummary(sbarPreview) },
         ],
         { cancelable: true },
       );
@@ -1353,7 +1352,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         patientIdParam: trimmedPatientId,
       });
     } else {
-      Alert.alert('Escáner no disponible', 'Esta build no incluye la pantalla de QR (opcional para demo).');
+      Alert.alert(t('handover.scannerUnavailableTitle'), t('handover.scannerUnavailableMessage'));
     }
   };
 
@@ -1361,12 +1360,12 @@ export default function HandoverForm({ navigation, route }: Props) {
     const currentStatus = form.getValues('status');
     const hasOutgoing = form.getValues('signatures')?.outgoing;
     if (currentStatus === 'final' && !hasOutgoing) {
-      Alert.alert('Falta firma', 'Para finalizar la entrega falta la firma de enfermera saliente.');
+      Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
       return;
     }
     const message =
-      typeof formErrors?.root?.message === 'string' ? formErrors.root.message : 'No se pudo guardar';
-    Alert.alert('Error', message);
+      typeof formErrors?.root?.message === 'string' ? formErrors.root.message : t('handover.saveErrorMessageFallback');
+    Alert.alert(t('common.error'), message);
   };
 
   const truncateNote = (value?: string | null, maxLength = 400) => {
@@ -1484,7 +1483,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       try {
         ensureUnitAccess(activeSession, unitEffective ?? '');
       } catch {
-        Alert.alert('Sin acceso a la unidad');
+        Alert.alert(t('handover.unitAccessDeniedTitle'));
         return;
       }
 
@@ -1555,8 +1554,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       const localValidation = validateBundle(bundle);
       if (!localValidation.isValid) {
         Alert.alert(
-          'Error de validación FHIR',
-          'Faltan campos obligatorios o la estructura es inválida. Revisa los datos antes de reintentar.'
+          t('handover.fhirValidationTitle'),
+          t('handover.fhirValidationMessage'),
         );
         return;
       }
@@ -1569,7 +1568,10 @@ export default function HandoverForm({ navigation, route }: Props) {
             token: freshToken ?? activeSession?.accessToken ?? null,
           });
           if (!validation.ok) {
-            Alert.alert('Error de validación FHIR', validation.message ?? 'El servidor rechazó el Bundle.');
+            Alert.alert(
+              t('handover.fhirValidationTitle'),
+              validation.message ?? t('handover.fhirValidationServerRejectedMessage'),
+            );
             return;
           }
         }
@@ -1604,7 +1606,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         void sendAuditEvent(auditEvent);
       }
 
-      let successMessage = 'Entrega encolada para envío.';
+      let successMessage = t('handover.submitQueuedMessage');
       if (isOn('ENABLE_ALERTS')) {
         const alerts: string[] = [];
         const vitals = values.vitals ?? {};
@@ -1619,17 +1621,17 @@ export default function HandoverForm({ navigation, route }: Props) {
         };
         const breakdown = computeNEWS2(newsInput);
         if (breakdown.total >= 5 || breakdown.anyThree) {
-          alerts.push(`NEWS2 ${breakdown.total} (${breakdown.band})`);
+          alerts.push(t('handover.news2AlertLine', { total: breakdown.total, band: breakdown.band }));
         }
         if (typeof vitals.spo2 === 'number' && vitals.spo2 < 90) {
-          alerts.push('SpO₂ menor a 90%');
+          alerts.push(t('handover.spo2LowAlertLine'));
         }
         if (alerts.length > 0) {
-          successMessage = `${successMessage}\n\nAlertas:\n- ${alerts.join('\n- ')}`;
+          successMessage = `${successMessage}\n\n${t('handover.alertsSectionTitle')}:\n- ${alerts.join('\n- ')}`;
         }
       }
 
-      Alert.alert('OK', successMessage);
+      Alert.alert(t('common.ok'), successMessage);
       navigation.goBack();
     } catch (error: unknown) {
       const netError = normalizeNetError(error);
@@ -1643,11 +1645,11 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       switch (ui.cta?.action) {
         case 'RETRY':
-          buttons.push({ text: 'Cancelar', style: 'cancel' });
+          buttons.push({ text: t('common.cancel'), style: 'cancel' });
           buttons.push({ text: ui.cta.label, onPress: handleRetry });
           break;
         case 'LOGIN':
-          buttons.push({ text: 'Cancelar', style: 'cancel' });
+          buttons.push({ text: t('common.cancel'), style: 'cancel' });
           buttons.push({
             text: ui.cta.label,
             onPress: async () => {
@@ -1661,7 +1663,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           });
           break;
         case 'OPEN_SYNC':
-          buttons.push({ text: 'Cerrar', style: 'cancel' });
+          buttons.push({ text: t('common.close'), style: 'cancel' });
           buttons.push({
             text: ui.cta.label,
             onPress: () => navigation.navigate('SyncCenter'),
@@ -1671,7 +1673,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           buttons.push({ text: ui.cta.label, style: 'cancel' });
           break;
         default:
-          buttons.push({ text: ui.cta?.label ?? 'Entendido', style: 'cancel' });
+          buttons.push({ text: ui.cta?.label ?? t('common.understood'), style: 'cancel' });
           break;
       }
 
@@ -1705,7 +1707,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleValidateForExport = async () => {
     const isValid = await form.trigger();
     if (!isValid) {
-      Alert.alert('Revisa el formulario', 'Completa los campos obligatorios antes de exportar el PDF.');
+      Alert.alert(t('handover.formReviewTitle'), t('handover.formReviewPdfMessage'));
     }
     return isValid;
   };

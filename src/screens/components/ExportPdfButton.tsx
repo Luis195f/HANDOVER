@@ -4,6 +4,7 @@ import { Alert, Button } from 'react-native';
 import { generateHandoverPdf } from '@/src/lib/export/export-pdf';
 import { useAuth } from '@/src/security/auth';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { t } from '@/src/i18n';
 
 interface Props {
   handover: HandoverValues;
@@ -24,14 +25,23 @@ export function ExportPdfButton({ handover, onBeforeExport }: Props) {
     try {
       setExporting(true);
       const pdf = await generateHandoverPdf(handover, session);
-      Alert.alert('Exportación completada', `PDF generado en: ${pdf.uri}`);
+      Alert.alert(
+        t('export.pdfSuccessTitle'),
+        t('export.pdfSuccessMessage', { uri: pdf.uri }),
+      );
       // En el futuro se podría llamar a uploadSignedHandoverPdf(pdf, { patientId: handover.patientId, handoverId: handover.id ?? '' })
     } catch {
-      Alert.alert('Error', 'No se pudo generar el PDF de la entrega.');
+      Alert.alert(t('common.error'), t('export.pdfErrorMessage'));
     } finally {
       setExporting(false);
     }
   };
 
-  return <Button title={exporting ? 'Exportando…' : 'Exportar PDF'} onPress={handleExport} disabled={exporting} />;
+  return (
+    <Button
+      title={exporting ? t('export.exporting') : t('export.exportButton')}
+      onPress={handleExport}
+      disabled={exporting}
+    />
+  );
 }

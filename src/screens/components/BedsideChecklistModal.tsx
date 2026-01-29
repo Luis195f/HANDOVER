@@ -6,6 +6,8 @@ import type { HandoverValues } from '@/src/validation/schemas';
 import type { BedsideChecklistItem } from '@/src/config/bedsideChecklist';
 import { BedsideChecklistSection } from './BedsideChecklistSection';
 import { isBedsideChecklistComplete } from './bedsideChecklist.constants';
+import { t } from '@/src/i18n';
+import { useThemeTokens } from '@/src/theme';
 
 type Props = {
   visible: boolean;
@@ -23,6 +25,7 @@ export function BedsideChecklistModal({
   items,
 }: Props) {
   const form = useFormContext<HandoverValues>();
+  const { colors } = useThemeTokens();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [attemptedConfirm, setAttemptedConfirm] = useState(false);
 
@@ -36,10 +39,12 @@ export function BedsideChecklistModal({
   const handleConfirm = () => {
     const checklist = form.getValues('bedsideChecklist');
     if (!isBedsideChecklistComplete(checklist, items)) {
-      const message = 'Debes completar todos los elementos de seguridad antes de finalizar.';
+      const message = t('bedsideChecklist.incompleteMessage');
       setErrorMessage(message);
       setAttemptedConfirm(true);
-      Alert.alert('Checklist incompleto', message, [{ text: 'Entendido' }]);
+      Alert.alert(t('bedsideChecklist.incompleteTitle'), message, [
+        { text: t('common.understood') },
+      ]);
       return;
     }
 
@@ -64,10 +69,10 @@ export function BedsideChecklistModal({
       <View style={styles.overlay}>
         <View style={styles.card} testID="bedsideChecklistModal">
           <ScrollView contentContainerStyle={styles.content}>
-            <Text style={styles.title}>Verificación al pie de cama</Text>
-            <Text style={styles.helperText}>Confirme los siguientes puntos con el paciente presente.</Text>
+            <Text style={styles.title}>{t('bedsideChecklist.title')}</Text>
+            <Text style={styles.helperText}>{t('bedsideChecklist.helperPrimary')}</Text>
             <Text style={styles.helperText}>
-              Verifique visualmente pulsera/identidad y confirme con el paciente; no verbalice datos sensibles.
+              {t('bedsideChecklist.helperSecondary')}
             </Text>
 
             <BedsideChecklistSection
@@ -75,14 +80,16 @@ export function BedsideChecklistModal({
               highlightMissing={highlightMissing || attemptedConfirm}
             />
 
-            {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+            {errorMessage ? (
+              <Text style={[styles.error, { color: colors.danger }]}>{errorMessage}</Text>
+            ) : null}
 
             <View style={styles.actions}>
               <View style={styles.actionButton}>
-                <Button title="Volver al formulario" onPress={handleCancel} />
+                <Button title={t('bedsideChecklist.backToForm')} onPress={handleCancel} />
               </View>
               <View style={styles.actionButton}>
-                <Button title="Confirmar y finalizar" onPress={handleConfirm} />
+                <Button title={t('bedsideChecklist.confirmFinish')} onPress={handleConfirm} />
               </View>
             </View>
           </ScrollView>
@@ -117,5 +124,5 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionButton: {},
-  error: { color: '#DC2626', fontWeight: '600' },
+  error: { fontWeight: '600' },
 });

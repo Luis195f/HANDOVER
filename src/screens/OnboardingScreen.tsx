@@ -16,6 +16,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { hasPrivacyConsent, setPrivacyConsent } from "@/src/lib/privacy-consent";
 import type { RootStackParamList } from "@/src/navigation/types";
+import { t, useTranslation } from "@/src/i18n";
 
 type OnboardingStep = {
   title: string;
@@ -31,32 +32,12 @@ type Props = NativeStackScreenProps<RootStackParamList, "Onboarding"> & {
 const { width } = Dimensions.get("window");
 
 // BEGIN HANDOVER: ONBOARDING
-const STEPS: OnboardingStep[] = [
-  {
-    title: "Bienvenida a HANDOVER-Pro",
-    description: "Organiza el pase de turno con seguridad y toda la información clave a mano.",
-    icon: "👋",
-  },
-  {
-    title: "Formulario estructurado",
-    description: "Registra signos vitales, escalas NEWS2/Braden/Glasgow, dispositivos y tareas pendientes.",
-    icon: "📋",
-  },
-  {
-    title: "Borradores y modo offline",
-    description: "Tus borradores se guardan cifrados y se sincronizan cuando vuelve la conexión.",
-    icon: "📶",
-  },
-  {
-    title: "Escaneo de QR del paciente",
-    description: "Identifica al paciente rápidamente con la pulsera QR cuando la función esté disponible.",
-    icon: "🎯",
-  },
-  {
-    title: "Centro de sincronización",
-    description: "Consulta la cola en SyncCenter. Enviamos datos con estándares FHIR para mayor seguridad.",
-    icon: "🔒",
-  },
+const STEP_DEFS = [
+  { titleKey: "onboarding.steps.welcome.title", descriptionKey: "onboarding.steps.welcome.description", icon: "👋" },
+  { titleKey: "onboarding.steps.form.title", descriptionKey: "onboarding.steps.form.description", icon: "📋" },
+  { titleKey: "onboarding.steps.offline.title", descriptionKey: "onboarding.steps.offline.description", icon: "📶" },
+  { titleKey: "onboarding.steps.qr.title", descriptionKey: "onboarding.steps.qr.description", icon: "🎯" },
+  { titleKey: "onboarding.steps.sync.title", descriptionKey: "onboarding.steps.sync.description", icon: "🔒" },
 ];
 // END HANDOVER: ONBOARDING
 
@@ -64,8 +45,18 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
   const [currentIndex, setCurrentIndex] = useState(0);
   const listRef = useRef<FlatList<OnboardingStep> | null>(null);
   const [consent, setConsent] = useState(false);
+  const { i18n } = useTranslation();
+  const steps = useMemo<OnboardingStep[]>(
+    () =>
+      STEP_DEFS.map((step) => ({
+        title: t(step.titleKey),
+        description: t(step.descriptionKey),
+        icon: step.icon,
+      })),
+    [i18n.language],
+  );
 
-  const isLastStep = currentIndex >= STEPS.length - 1;
+  const isLastStep = currentIndex >= steps.length - 1;
 
   useEffect(() => {
     let alive = true;
@@ -85,7 +76,7 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
 
   const requireConsent = (): boolean => {
     if (consent) return true;
-    Alert.alert("Consentimiento requerido", "Debe aceptar la política de privacidad");
+    Alert.alert(t("onboarding.consentRequiredTitle"), t("onboarding.consentRequiredMessage"));
     return false;
   };
 
@@ -113,10 +104,10 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
 
   const indicators = useMemo(
     () =>
-      STEPS.map((_, index) => (
+      steps.map((_, index) => (
         <View key={index} style={[styles.indicator, index === currentIndex && styles.indicatorActive]} />
       )),
-    [currentIndex]
+    [currentIndex, steps]
   );
 
   const renderItem: ListRenderItem<OnboardingStep> = ({ item }) => (
@@ -133,15 +124,15 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
     <SafeAreaView style={styles.container}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Saltar tutorial"
+        accessibilityLabel={t("onboarding.skipAccessibility")}
         onPress={handleSkip}
         style={styles.skipButton}
       >
-        <Text style={styles.skipText}>Saltar</Text>
+        <Text style={styles.skipText}>{t("onboarding.skip")}</Text>
       </Pressable>
       <FlatList
         ref={listRef}
-        data={STEPS}
+        data={steps}
         keyExtractor={(item) => item.title}
         horizontal
         pagingEnabled
@@ -158,11 +149,11 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
             onPress={() => navigation.navigate("PrivacyPolicy")}
             style={styles.policyButton}
           >
-            <Text style={styles.policyButtonText}>Ver política de privacidad</Text>
+            <Text style={styles.policyButtonText}>{t("onboarding.viewPolicy")}</Text>
           </Pressable>
           <View style={styles.consentRow}>
             <Switch
-              accessibilityLabel="Consentimiento de privacidad"
+              accessibilityLabel={t("onboarding.consentAccessibility")}
               value={consent}
               onValueChange={(value) => {
                 setConsent(value);
@@ -170,20 +161,22 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
               }}
             />
             <View style={styles.consentTextContainer}>
-              <Text style={styles.consentText}>He leído y acepto la política de privacidad.</Text>
+              <Text style={styles.consentText}>{t("onboarding.consentText")}</Text>
               <Text style={styles.consentSubtext}>
-                Al registrarse, acepto la política de privacidad de la aplicación.
+                {t("onboarding.consentSubtext")}
               </Text>
             </View>
           </View>
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isLastStep ? "Entendido" : "Siguiente"}
+          accessibilityLabel={isLastStep ? t("onboarding.done") : t("onboarding.next")}
           onPress={handleNext}
           style={styles.primaryButton}
         >
-          <Text style={styles.primaryButtonText}>{isLastStep ? "Entendido" : "Siguiente"}</Text>
+          <Text style={styles.primaryButtonText}>
+            {isLastStep ? t("onboarding.done") : t("onboarding.next")}
+          </Text>
         </Pressable>
       </View>
     </SafeAreaView>
