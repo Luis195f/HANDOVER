@@ -40,7 +40,7 @@ describe('offline queue processing', () => {
     expect(items).toHaveLength(0);
   });
 
-  it('drops permanent 4xx failures from the queue', async () => {
+  it('marks permanent 4xx failures in the queue', async () => {
     setQueueSendHandler(async () => ({ ok: false, status: 400, message: 'invalid bundle' }));
     await createOfflineQueueItem({
       payload: '{}',
@@ -51,7 +51,8 @@ describe('offline queue processing', () => {
     await processQueueOnce();
 
     const items = await listOfflineQueue();
-    expect(items).toHaveLength(0);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.syncStatus).toBe('error');
   });
 
   it('tracks first enqueued timestamp and attempt count in raw rows', async () => {

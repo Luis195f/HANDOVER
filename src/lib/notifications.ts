@@ -45,3 +45,20 @@ export async function notifyNews2Alert(
     trigger: null, // inmediato
   });
 }
+
+export async function notifySyncStopped(status: number): Promise<void> {
+  const message =
+    status === 422
+      ? "Sincronización detenida: error 422 en validación FHIR"
+      : `Sincronización detenida: error ${status} al sincronizar`;
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Sincronización detenida",
+      body: message,
+      sound: "default",
+      priority: "max",
+    },
+    trigger: null,
+  });
+}
