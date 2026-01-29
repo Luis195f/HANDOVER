@@ -70,11 +70,15 @@ vi.mock('@/src/security/auth', () => ({
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
 vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
+
+// ✅ FIX: agregar sendAuditEvent para evitar unhandled rejections
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(),
   makeAuditEvent: vi.fn(),
+  sendAuditEvent: vi.fn(), // 👈 necesario
 }));
+
 vi.mock('@/src/lib/stt', () => ({
   createSttService: () => ({
     start: vi.fn(),
@@ -157,7 +161,10 @@ describe('HandoverForm signatures', () => {
     });
 
     const { getByText } = render(
-      <HandoverForm navigation={{ navigate: vi.fn() } as any} route={{ key: '1', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any} />,
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '1', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
     );
 
     await waitFor(() => {
@@ -176,7 +183,10 @@ describe('HandoverForm signatures', () => {
     mockSession.roles = ['admin'];
     mockSession.user.roles = ['admin'];
     const { queryByText } = render(
-      <HandoverForm navigation={{ navigate: vi.fn() } as any} route={{ key: '2', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any} />,
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '2', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
     );
 
     expect(queryByText('Firmar como enfermera saliente')).toBeNull();
@@ -186,7 +196,10 @@ describe('HandoverForm signatures', () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => 0);
 
     const { getByText } = render(
-      <HandoverForm navigation={{ navigate: vi.fn() } as any} route={{ key: '3', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any} />,
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '3', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
     );
 
     formValues.bedsideChecklist = {
