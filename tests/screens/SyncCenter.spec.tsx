@@ -8,17 +8,39 @@ import SyncCenter from '@/src/screens/SyncCenter';
 const listOfflineQueue = vi.fn();
 const flushQueueNow = vi.fn();
 
-vi.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
-vi.mock('@/src/lib/queue', () => ({ listOfflineQueue: (...args: unknown[]) => listOfflineQueue(...args) }));
-vi.mock('@/src/lib/sync/index', () => ({ flushQueueNow: (...args: unknown[]) => flushQueueNow(...args) }));
+// ✅ Mock parcial: mantiene exports reales y agrega useNavigation (evita el crash)
+vi.mock('@react-navigation/native', async () => {
+  const actual = await vi.importActual<any>('@react-navigation/native');
+  return {
+    ...actual,
+    useIsFocused: () => true,
+    useNavigation: () => ({
+      navigate: vi.fn(),
+      goBack: vi.fn(),
+      replace: vi.fn(),
+      push: vi.fn(),
+    }),
+  };
+});
+
+vi.mock('@/src/lib/queue', () => ({
+  listOfflineQueue: (...args: unknown[]) => listOfflineQueue(...args),
+}));
+
+vi.mock('@/src/lib/sync/index', () => ({
+  flushQueueNow: (...args: unknown[]) => flushQueueNow(...args),
+}));
+
 vi.mock('@/src/services/AuthService', () => ({
   getToken: vi.fn(async () => 'token'),
   default: { getToken: vi.fn(async () => 'token') },
 }));
+
 vi.mock('@/src/config/env', () => ({
   ENV: { FHIR_BASE: 'https://example.test' },
   FHIR_BASE: 'https://example.test',
 }));
+
 const queueItems = [
   {
     id: 'pending-1',
@@ -40,9 +62,11 @@ describe('SyncCenter', () => {
   beforeEach(() => {
     listOfflineQueue.mockReset();
     flushQueueNow.mockReset();
+
     process.env.EXPO_PUBLIC_FHIR_BASE = 'https://example.test';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
+
     listOfflineQueue.mockResolvedValue(queueItems);
     flushQueueNow.mockResolvedValue({ processed: 2, remaining: 0 });
   });
@@ -121,6 +145,7 @@ describe('SyncCenter', () => {
       'Fallo de sincronización',
       expect.any(Array),
     );
+
     alertSpy.mockRestore();
   });
 });
