@@ -64,3 +64,7 @@ class RequireRolesPermission(BasePermission):
 
 class NurseOrAdminPermission(RequireRolesPermission):
     allowed_roles = ("nurse", "admin")
+
+
+class ClinicianAuditPermission(RequireRolesPermission):
+    allowed_roles = ("nurse", "supervisor", "admin")

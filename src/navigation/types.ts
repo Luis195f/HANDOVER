@@ -68,6 +68,7 @@ export type RootStackParamList = {
   QRScan: QRScanParams | undefined;
 
   SyncCenter: undefined;
+  AuditLog: undefined;
 
   SupervisorDashboard: undefined;
   AdminDashboard: undefined;
