@@ -7,6 +7,7 @@ import { useAuth } from '@/src/security/auth';
 import { useNetInfo } from '@/src/lib/netinfo';
 import { hasNetwork } from '@/src/lib/fast-validate';
 import { useThemeTokens } from '@/src/theme';
+import { t } from '@/src/i18n';
 
 type LoginFormValues = {
   username: string;
@@ -43,7 +44,7 @@ export default function LoginScreen() {
   const handleCredentials = useCallback(
     async (values: LoginFormValues) => {
       if (!isOnline) {
-        Alert.alert('Sin conexión a Internet', 'Conéctate para iniciar sesión.');
+        Alert.alert(t('login.offlineAlertTitle'), t('login.offlineAlertMessage'));
         return;
       }
       setSubmitting(true);
@@ -53,10 +54,10 @@ export default function LoginScreen() {
       } catch (error) {
         const message = (error as { message?: string }).message ?? '';
         if (message.includes('INVALID_CREDENTIALS')) {
-          Alert.alert('Credenciales inválidas', 'Usuario o contraseña incorrectos.');
+          Alert.alert(t('login.invalidCredentialsTitle'), t('login.invalidCredentialsMessage'));
           return;
         }
-        Alert.alert('Error de inicio de sesión', 'No se pudo iniciar sesión. Intenta de nuevo.');
+        Alert.alert(t('login.loginErrorTitle'), t('login.loginErrorMessage'));
       } finally {
         setSubmitting(false);
       }
@@ -115,19 +116,19 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Handover Pro</Text>
-      <Text style={styles.subtitle}>Inicia sesión con tu cuenta.</Text>
+      <Text style={styles.title}>{t('login.title')}</Text>
+      <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Usuario</Text>
+        <Text style={styles.label}>{t('login.usernameLabel')}</Text>
         <Controller
           control={control}
           name="username"
-          rules={{ required: 'El usuario es obligatorio' }}
+          rules={{ required: t('login.usernameRequired') }}
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
-              accessibilityLabel="Usuario"
-              placeholder="Usuario"
+              accessibilityLabel={t('login.usernameLabel')}
+              placeholder={t('login.usernamePlaceholder')}
               placeholderTextColor={colors.muted}
               autoCapitalize="none"
               autoCorrect={false}
@@ -142,15 +143,15 @@ export default function LoginScreen() {
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Contraseña</Text>
+        <Text style={styles.label}>{t('login.passwordLabel')}</Text>
         <Controller
           control={control}
           name="password"
-          rules={{ required: 'La contraseña es obligatoria' }}
+          rules={{ required: t('login.passwordRequired') }}
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
-              accessibilityLabel="Contraseña"
-              placeholder="Contraseña"
+              accessibilityLabel={t('login.passwordLabel')}
+              placeholder={t('login.passwordPlaceholder')}
               placeholderTextColor={colors.muted}
               secureTextEntry
               onBlur={onBlur}
@@ -171,27 +172,27 @@ export default function LoginScreen() {
           (!isOnline || submitting) ? { opacity: 0.6 } : null,
         ]}
         accessibilityRole="button"
-        accessibilityLabel="Iniciar sesión con credenciales"
+        accessibilityLabel={t('login.signInAccessibility')}
         disabled={!isOnline || submitting}
       >
         {submitting ? <ActivityIndicator color={colors.onPrimary} /> : null}
         <Text style={[styles.buttonText, styles.primaryText]}>
-          {submitting ? 'Cargando…' : 'Iniciar sesión'}
+          {submitting ? t('login.loading') : t('login.signIn')}
         </Text>
       </Pressable>
 
-      {!isOnline ? <Text style={styles.offlineText}>Sin conexión a Internet</Text> : null}
+      {!isOnline ? <Text style={styles.offlineText}>{t('login.offlineIndicator')}</Text> : null}
 
       <Pressable
         onPress={handleDemo}
         style={[styles.button, styles.demoButton]}
         accessibilityRole="button"
-        accessibilityLabel="Iniciar demo con datos ficticios"
+        accessibilityLabel={t('login.demoAccessibility')}
       >
-        <Text style={[styles.buttonText, styles.demoText]}>Iniciar demo</Text>
+        <Text style={[styles.buttonText, styles.demoText]}>{t('login.demoButton')}</Text>
       </Pressable>
 
-      <Text style={styles.helper}>Modo demo – datos ficticios, no usar con pacientes reales.</Text>
+      <Text style={styles.helper}>{t('login.demoHelper')}</Text>
     </View>
   );
 }

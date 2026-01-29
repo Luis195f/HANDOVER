@@ -18,6 +18,7 @@ import * as FileSystem from 'expo-file-system';
 import { encryptOfflinePayload, isEncryptionDisabled } from '@/src/lib/crypto';
 import { useThemeTokens } from '@/src/theme';
 import type { HandoverValues } from '@/src/validation/schemas';
+import { t } from '@/src/i18n';
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const IMAGE_QUALITY = 0.6;
@@ -120,8 +121,8 @@ export default function FileAttach() {
         const size = await checkFileSize(asset);
         if (size && size > MAX_ATTACHMENT_BYTES) {
           Alert.alert(
-            'Archivo muy grande',
-            'El archivo supera el tamaño máximo permitido de 5MB. No se adjuntó.',
+            t('attachments.fileTooLargeTitle'),
+            t('attachments.fileTooLargeMessage'),
           );
           console.warn('[HNDV][WARN][ATTACH_OVERSIZE_SKIPPED]', {
             fileName: asset.name ?? fallbackName,
@@ -155,7 +156,7 @@ export default function FileAttach() {
           size: newAttachment.data.length,
         });
       } catch {
-        Alert.alert('Adjuntos', 'No se pudo adjuntar el archivo seleccionado.');
+        Alert.alert(t('attachments.attachmentsTitle'), t('attachments.attachFailedMessage'));
       } finally {
         setLoading(false);
       }
@@ -174,8 +175,8 @@ export default function FileAttach() {
     (title: string, message: string, warnCode: string) => {
       console.warn(warnCode, { component: 'FileAttach' });
       Alert.alert(title, message, [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Abrir Ajustes', onPress: openSettings },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.openSettings'), onPress: openSettings },
       ]);
     },
     [openSettings],
@@ -186,8 +187,8 @@ export default function FileAttach() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       showPermissionAlert(
-        'Permiso de fotos denegado',
-        'Habilita el permiso de fotos en Ajustes para adjuntar imágenes.',
+        t('permissions.photoDeniedTitle'),
+        t('permissions.photoDeniedMessage'),
         '[HNDV][WARN][PERM_PHOTO_DENIED]',
       );
       return;
@@ -206,8 +207,8 @@ export default function FileAttach() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       showPermissionAlert(
-        'Permiso de cámara denegado',
-        'Habilita el permiso de cámara en Ajustes para tomar una foto.',
+        t('permissions.cameraDeniedTitle'),
+        t('permissions.cameraDeniedPhotoMessage'),
         '[HNDV][WARN][PERM_CAM_DENIED]',
       );
       return;
@@ -238,8 +239,8 @@ export default function FileAttach() {
         <Pressable
           accessible
           accessibilityRole="button"
-          accessibilityLabel="Adjuntar archivo, botón. Abre opciones para agregar imagen o documento."
-          accessibilityHint="Se abrirá un menú con opciones para adjuntar."
+          accessibilityLabel={t('attachments.accessibility.attachButtonLabel')}
+          accessibilityHint={t('attachments.accessibility.attachButtonHint')}
           onPress={() => setSheetVisible(true)}
           style={({ pressed }) => [
             styles.attachButton,
@@ -253,14 +254,14 @@ export default function FileAttach() {
           ]}
         >
           <Text style={[styles.attachButtonText, { color: colors.onPrimary, fontSize: fontSizes.base }]}>
-            Adjuntar archivo
+            {t('attachments.attachButton')}
           </Text>
         </Pressable>
         {loading && (
           <View style={[styles.loadingRow, { gap: spacing.sm }]}>
             <ActivityIndicator size="small" color={colors.primary} />
             <Text style={[styles.loadingText, { color: colors.muted, fontSize: fontSizes.sm }]}>
-              Procesando…
+              {t('attachments.processing')}
             </Text>
           </View>
         )}
@@ -269,15 +270,15 @@ export default function FileAttach() {
       {attachments.length > 0 && (
         <View style={[styles.list, { marginTop: spacing.md, gap: spacing.sm }]}>
           {attachments.map((attachment, index) => {
-            const name = attachment.name ?? 'Adjunto sin nombre';
+            const name = attachment.name ?? t('attachments.unnamed');
             const isImage = attachment.contentType?.startsWith('image/');
             const icon = isImage ? 'insert-photo' : 'insert-drive-file';
-            const typeLabel = isImage ? 'imagen' : 'documento';
+            const typeLabel = isImage ? t('attachments.imageLabel') : t('attachments.documentLabel');
             return (
               <View
                 key={attachment.id}
                 accessible
-                accessibilityLabel={`Archivo adjunto: ${name}, tipo: ${typeLabel}`}
+                accessibilityLabel={t('attachments.accessibility.attachmentLabel', { name, type: typeLabel })}
                 style={[
                   styles.item,
                   {
@@ -299,8 +300,8 @@ export default function FileAttach() {
                 <Pressable
                   accessible
                   accessibilityRole="button"
-                  accessibilityLabel={`Quitar archivo adjunto ${name}`}
-                  accessibilityHint={`Elimina ${name} de la lista de adjuntos.`}
+                  accessibilityLabel={t('attachments.accessibility.removeAttachmentLabel', { name })}
+                  accessibilityHint={t('attachments.accessibility.removeAttachmentHint', { name })}
                   onPress={() => remove(index)}
                   style={({ pressed }) => [
                     styles.removeButton,
@@ -337,11 +338,11 @@ export default function FileAttach() {
                 { color: colors.text, fontSize: fontSizes.lg, marginBottom: spacing.md },
               ]}
             >
-              Adjuntar archivo
+              {t('attachments.sheetTitle')}
             </Text>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Seleccionar imagen de galería"
+              accessibilityLabel={t('attachments.accessibility.selectGalleryLabel')}
               onPress={pickFromLibrary}
               style={({ pressed }) => [
                 styles.sheetOption,
@@ -350,12 +351,12 @@ export default function FileAttach() {
               ]}
             >
               <Text style={[styles.sheetOptionText, { color: colors.text, fontSize: fontSizes.base }]}>
-                Seleccionar imagen de galería
+                {t('attachments.sheetGallery')}
               </Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Tomar foto"
+              accessibilityLabel={t('attachments.accessibility.takePhotoLabel')}
               onPress={takePhoto}
               style={({ pressed }) => [
                 styles.sheetOption,
@@ -364,12 +365,12 @@ export default function FileAttach() {
               ]}
             >
               <Text style={[styles.sheetOptionText, { color: colors.text, fontSize: fontSizes.base }]}>
-                Tomar foto
+                {t('attachments.sheetTakePhoto')}
               </Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Seleccionar documento"
+              accessibilityLabel={t('attachments.accessibility.selectDocumentLabel')}
               onPress={pickDocument}
               style={({ pressed }) => [
                 styles.sheetOption,
@@ -378,12 +379,12 @@ export default function FileAttach() {
               ]}
             >
               <Text style={[styles.sheetOptionText, { color: colors.text, fontSize: fontSizes.base }]}>
-                Seleccionar documento
+                {t('attachments.sheetSelectDocument')}
               </Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Cancelar"
+              accessibilityLabel={t('attachments.accessibility.cancelLabel')}
               onPress={() => setSheetVisible(false)}
               style={({ pressed }) => [
                 styles.sheetOption,
@@ -392,7 +393,7 @@ export default function FileAttach() {
               ]}
             >
               <Text style={[styles.sheetCancelText, { color: colors.muted, fontSize: fontSizes.base }]}>
-                Cancelar
+                {t('attachments.sheetCancel')}
               </Text>
             </Pressable>
           </View>
