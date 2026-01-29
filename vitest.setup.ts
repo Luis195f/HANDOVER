@@ -148,6 +148,40 @@ vi.mock('expo-web-browser', () => {
 });
 
 // -----------------------------------------------------------------------------
+// 🔔 Mock de expo-notifications
+// -----------------------------------------------------------------------------
+
+vi.mock('expo-notifications', () => {
+  return {
+    __esModule: true,
+    setNotificationHandler: vi.fn(),
+    getPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
+    requestPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
+    setNotificationChannelAsync: vi.fn(),
+    scheduleNotificationAsync: vi.fn(async () => 'mock-notification-id'),
+    AndroidImportance: {
+      HIGH: 'high',
+    },
+    AndroidNotificationVisibility: {
+      PUBLIC: 'public',
+    },
+    default: {
+      setNotificationHandler: vi.fn(),
+      getPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
+      requestPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
+      setNotificationChannelAsync: vi.fn(),
+      scheduleNotificationAsync: vi.fn(async () => 'mock-notification-id'),
+      AndroidImportance: {
+        HIGH: 'high',
+      },
+      AndroidNotificationVisibility: {
+        PUBLIC: 'public',
+      },
+    },
+  };
+});
+
+// -----------------------------------------------------------------------------
 // 🧩 Mock de expo-modules-core (inline, sin require externo)
 // -----------------------------------------------------------------------------
 

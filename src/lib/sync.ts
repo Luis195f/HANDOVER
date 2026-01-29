@@ -29,6 +29,7 @@ import {
   type QueueItem as OfflineQueueItem,
 } from './queue';
 import { signBundleIfEnabled } from '../security/crypto';
+import { notifySyncStopped } from './notifications';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -302,7 +303,13 @@ type QueueSendResult =
   | { ok: true }
   | { ok: false; status?: number; message?: string; recoverable?: boolean; errorIssuesJson?: string };
 type QueueSendHandler = (item: OfflineQueueItem) => Promise<QueueSendResult>;
-type OfflineQueuePayload = { bundle?: Bundle; txId?: string; patientId?: string };
+type OfflineQueuePayload = {
+  bundle?: Bundle;
+  txId?: string;
+  patientId?: string;
+  ifNoneMatch?: string;
+  headers?: Record<string, string>;
+};
 
 let queueSendHandler: QueueSendHandler = async () => ({ ok: true });
 
@@ -440,6 +447,21 @@ function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
       typeof (candidate as { patientId?: unknown }).patientId === 'string'
         ? (candidate as { patientId: string }).patientId
         : undefined,
+    ifNoneMatch:
+      typeof (candidate as { ifNoneMatch?: unknown }).ifNoneMatch === 'string'
+        ? (candidate as { ifNoneMatch: string }).ifNoneMatch
+        : undefined,
+    headers:
+  typeof (candidate as { headers?: unknown }).headers === 'object' &&
+  (candidate as { headers?: Record<string, unknown> }).headers != null
+    ? Object.entries((candidate as { headers?: Record<string, unknown> }).headers ?? {}).reduce(
+        (acc, [key, value]) => {
+          if (typeof value === 'string') acc[key] = value;
+          return acc;
+        },
+        {} as Record<string, string>,
+      )
+    : undefined,
   };
 }
 
@@ -469,9 +491,21 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
     await enforceRemoteBundleValidationIfNeeded(parsed.bundle, 'offline drain (remote)', options.validation);
 
 
+      const headers = {
+        ...(parsed.headers ?? {}),
+      } as Record<string, string>;
+
+      if (!('Prefer' in headers) && !('prefer' in headers)) {
+        headers.Prefer = 'return=representation';
+      }
+      if (parsed.ifNoneMatch && !('If-None-Match' in headers) && !('if-none-match' in headers)) {
+        headers['If-None-Match'] = parsed.ifNoneMatch;
+      }
+
       const response = await postBundle(parsed.bundle, {
         token,
         idempotencyKey: parsed.txId ?? item.id,
+        headers,
       });
 
       const issues = response.issue ?? response.issues;
@@ -647,14 +681,17 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
-    const isAuthError = result.status === 401;
+    const isAuthError = result.status === 401 || result.status === 403;
     const status = result.status;
     const recoverable = result.recoverable ?? isRecoverableStatus(status);
     const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
 
     if (status && status >= 400 && status < 500 && !isAuthError) {
-      const errorMessage = result.message ?? `Error en sincronización: ${status}`;
-      const userFacingMessage = `Error en sincronización: ${status}`;
+      const userFacingMessage =
+        status === 422
+          ? 'Sincronización detenida: error 422 en validación FHIR'
+          : `Error en sincronización: ${status}`;
+      const errorMessage = userFacingMessage;
       await updateOfflineQueueStatus(item.id, 'error', {
         attemptCount,
         lastAttemptAt: startedAt,
@@ -662,8 +699,10 @@ export async function processQueueOnce(): Promise<void> {
         errorStatus: status,
         errorIssuesJson: cappedIssuesJson,
       });
-      await deleteOfflineQueueItem(item.id);
       updateSyncSnapshot({ lastError: userFacingMessage });
+      if (status === 422) {
+        void notifySyncStopped(status);
+      }
       console.warn(`Offline sync: item ${item.id} failed with HTTP ${status}. No se reintentará.`);
       continue;
     }

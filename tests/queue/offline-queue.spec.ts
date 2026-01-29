@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 vi.mock('expo-sqlite', () => ({
@@ -101,6 +102,31 @@ describe('offline queue end-to-end', () => {
     expect(await queue.listOfflineQueue()).toHaveLength(0);
 
     vi.useRealTimers();
+  });
+
+  it('marca error permanente para 422 y notifica sin reintentos', async () => {
+    await queue.createOfflineQueueItem({ payload: { foo: 'invalid' }, patientId: 'pat-422' });
+
+    sync.setQueueSendHandler(async () => ({ ok: false as const, status: 422, message: 'FHIR invalid' }));
+    await sync.processQueueOnce();
+
+    const items = await queue.listOfflineQueue();
+    const pending = items.filter((item) => item.syncStatus === 'pending' || item.syncStatus === 'inFlight');
+    expect(pending).toHaveLength(0);
+    expect(items[0]?.syncStatus).toBe('error');
+    expect(items[0]?.errorMessage).toBe('Sincronización detenida: error 422 en validación FHIR');
+
+    const scheduleSpy = vi.mocked(Notifications.scheduleNotificationAsync);
+    expect(scheduleSpy).toHaveBeenCalled();
+
+    let retried = false;
+    sync.setQueueSendHandler(async () => {
+      retried = true;
+      return { ok: true } as const;
+    });
+
+    await sync.processQueueOnce();
+    expect(retried).toBe(false);
   });
 
   it('respeta el backoff exponencial entre intentos', async () => {
