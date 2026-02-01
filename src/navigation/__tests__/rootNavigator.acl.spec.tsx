@@ -1,73 +1,42 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { render, act } from '@testing-library/react-native';
-
-import RootNavigator from '@/src/navigation/RootNavigator';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // =====================================================
 // ✅ Hard mocks para React Navigation Native Stack (CI-safe)
+// IMPORTANT: estos mocks deben definirse ANTES de importar RootNavigator.
 // =====================================================
 
-// 1) Mock del NativeStackView (ESM internal path que está rompiendo en CI)
-jest.mock('@react-navigation/native-stack/lib/module/views/NativeStackView', () => {
+// 1) Mock del NativeStackView (path interno ESM que rompe en CI)
+vi.mock('@react-navigation/native-stack/lib/module/views/NativeStackView', () => {
   return {
-    __esModule: true,
     default: () => null,
   };
 });
 
-// 2) Mock del index module path (por si Vitest resuelve el import así)
-jest.mock('@react-navigation/native-stack/lib/module/index.js', () => {
-  return {
-    __esModule: true,
-    createNativeStackNavigator: () => {
-      const React = require('react');
-
-      const Screen = (_props: any) => null;
-
-      const Navigator = ({ initialRouteName, children, __TEST_ROUTE }: any) => {
-        const routeName = __TEST_ROUTE ?? initialRouteName;
-        const screens = React.Children.toArray(children).filter(Boolean);
-
-        const match = screens.find((child: any) => child?.props?.name === routeName) as any;
-        if (!match) return null;
-
-        if (match.props.component) {
-          const Comp = match.props.component;
-          return React.createElement(Comp, { navigation: {}, route: {} });
-        }
-
-        if (typeof match.props.children === 'function') {
-          return match.props.children({ navigation: {}, route: {} });
-        }
-
-        return null;
-      };
-
-      return { Screen, Navigator };
-    },
-  };
-});
-
-// 3) Mock principal del paquete
-jest.mock('@react-navigation/native-stack', () => {
+// 2) Mock del paquete principal native-stack
+vi.mock('@react-navigation/native-stack', () => {
   const React = require('react');
 
   function createNativeStackNavigator() {
     const Screen = (_props: any) => null;
 
-    const Navigator = ({ initialRouteName, children, __TEST_ROUTE }: any) => {
-      const routeName = __TEST_ROUTE ?? initialRouteName;
-      const screens = React.Children.toArray(children).filter(Boolean);
+    const Navigator = ({ initialRouteName, children }: any) => {
+      const forced = (globalThis as any).__TEST_ROUTE;
+      const routeName = forced ?? initialRouteName;
 
+      const screens = React.Children.toArray(children).filter(Boolean);
       const match = screens.find((child: any) => child?.props?.name === routeName) as any;
       if (!match) return null;
 
+      // component={Comp}
       if (match.props.component) {
         const Comp = match.props.component;
         return React.createElement(Comp, { navigation: {}, route: {} });
       }
 
+      // children render fn
       if (typeof match.props.children === 'function') {
         return match.props.children({ navigation: {}, route: {} });
       }
@@ -81,8 +50,8 @@ jest.mock('@react-navigation/native-stack', () => {
   return { createNativeStackNavigator };
 });
 
-// 4) Mock mínimo de @react-navigation/native para no necesitar NavigationContainer real
-jest.mock('@react-navigation/native', () => {
+// 3) Mock mínimo de @react-navigation/native
+vi.mock('@react-navigation/native', () => {
   const React = require('react');
 
   return {
@@ -97,117 +66,132 @@ jest.mock('@react-navigation/native', () => {
 // =====================================================
 // ✅ Mocks: screens (texto estable para asserts)
 // =====================================================
-jest.mock('@/src/screens/PatientList', () => {
-  return function PatientListMock() {
-    return <Text testID="PATIENT_LIST">PATIENT_LIST</Text>;
+vi.mock('@/src/screens/PatientList', () => {
+  return {
+    default: function PatientListMock() {
+      return <Text testID="PATIENT_LIST">PATIENT_LIST</Text>;
+    },
   };
 });
 
-jest.mock('@/src/screens/SupervisorDashboard', () => {
-  return function SupervisorDashboardMock() {
-    return <Text testID="SUPERVISOR_DASHBOARD">SUPERVISOR_DASHBOARD</Text>;
+vi.mock('@/src/screens/SupervisorDashboard', () => {
+  return {
+    default: function SupervisorDashboardMock() {
+      return <Text testID="SUPERVISOR_DASHBOARD">SUPERVISOR_DASHBOARD</Text>;
+    },
   };
 });
 
 // Mock del resto para evitar imports laterales
-jest.mock('@/src/screens/AudioNote', () => () => <View />);
-jest.mock('@/src/screens/HandoverForm', () => () => <View />);
-jest.mock('@/src/screens/PatientDashboard', () => () => <View />);
-jest.mock('@/src/screens/OnboardingScreen', () => () => <View />);
-jest.mock('@/src/screens/PrivacyPolicy', () => () => <View />);
-jest.mock('@/src/screens/QRScan', () => () => <View />);
-jest.mock('@/src/screens/ShiftDetailsScreen', () => () => <View />);
-jest.mock('@/src/screens/SyncCenter', () => () => <View />);
-jest.mock('@/src/screens/AuditLogScreen', () => () => <View />);
-jest.mock('@/src/screens/LoginScreen', () => () => <View />);
-jest.mock('@/src/screens/PrivacyConsentScreen', () => () => <View />);
-jest.mock('@/src/screens/admin/AdminDashboardScreen', () => ({
+vi.mock('@/src/screens/AudioNote', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/HandoverForm', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/PatientDashboard', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/OnboardingScreen', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/PrivacyPolicy', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/QRScan', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/ShiftDetailsScreen', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/SyncCenter', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/AuditLogScreen', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/LoginScreen', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/PrivacyConsentScreen', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/admin/AdminDashboardScreen', () => ({
   AdminDashboardScreen: () => <View />,
 }));
 
-jest.mock('@/src/components/DemoModeBanner', () => ({
+vi.mock('@/src/components/DemoModeBanner', () => ({
   DemoModeBanner: () => null,
 }));
 
 // =====================================================
 // ✅ Mocks: onboarding/consent
 // =====================================================
-jest.mock('@/src/lib/onboarding-storage', () => ({
-  getOnboardingCompleted: jest.fn(),
+vi.mock('@/src/lib/onboarding-storage', () => ({
+  getOnboardingCompleted: vi.fn(),
 }));
 
-jest.mock('@/src/lib/privacy-consent', () => ({
-  hasPrivacyConsent: jest.fn(),
+vi.mock('@/src/lib/privacy-consent', () => ({
+  hasPrivacyConsent: vi.fn(),
 }));
 
 // =====================================================
 // ✅ Mock: auth hook
 // =====================================================
-jest.mock('@/src/security/auth', () => ({
-  useAuth: jest.fn(),
+vi.mock('@/src/security/auth', () => ({
+  useAuth: vi.fn(),
 }));
 
+// Imports de mocks (tipados) — OK después de vi.mock
 import { useAuth } from '@/src/security/auth';
 import { getOnboardingCompleted } from '@/src/lib/onboarding-storage';
 import { hasPrivacyConsent } from '@/src/lib/privacy-consent';
 
+// Helper: importar RootNavigator DESPUÉS de mocks
+async function loadRootNavigator() {
+  const mod = await import('@/src/navigation/RootNavigator');
+  return mod.default;
+}
+
 describe('RootNavigator ACL (role enforcement)', () => {
   beforeEach(() => {
-    jest.resetAllMocks();
-    (getOnboardingCompleted as jest.Mock).mockResolvedValue(true);
-    (hasPrivacyConsent as jest.Mock).mockResolvedValue(true);
+    vi.resetAllMocks();
+    (globalThis as any).__TEST_ROUTE = undefined;
+
+    (getOnboardingCompleted as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (hasPrivacyConsent as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
   });
 
   test('admin → puede ver SupervisorDashboard', async () => {
-    (useAuth as jest.Mock).mockReturnValue({
+    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       loading: false,
-      logout: jest.fn(),
+      logout: vi.fn(),
       session: {
         mode: 'prod',
         roles: ['admin'],
       },
     });
 
+    // Forzamos la ruta en el mock del Stack.Navigator (sin tocar RootNavigator)
+    (globalThis as any).__TEST_ROUTE = 'SupervisorDashboard';
+
+    const RootNavigator = await loadRootNavigator();
     const ui = render(<RootNavigator />);
+
     await act(async () => {});
 
-    // Remount forzando ruta (prop solo para nuestro mock de Stack.Navigator)
-    ui.unmount();
-    const ui2 = render(
-      // @ts-expect-error test-only prop usado por el mock del Navigator
-      <RootNavigator __TEST_ROUTE="SupervisorDashboard" />
-    );
-
-    expect(ui2.getByTestId('SUPERVISOR_DASHBOARD')).toBeTruthy();
+    expect(ui.getByTestId('SUPERVISOR_DASHBOARD')).toBeTruthy();
   });
 
   test('nurse → puede ver PatientList', async () => {
-    (useAuth as jest.Mock).mockReturnValue({
+    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       loading: false,
-      logout: jest.fn(),
+      logout: vi.fn(),
       session: {
         mode: 'prod',
         roles: ['nurse'],
       },
     });
 
+    const RootNavigator = await loadRootNavigator();
     const ui = render(<RootNavigator />);
+
     await act(async () => {});
 
     expect(ui.getByTestId('PATIENT_LIST')).toBeTruthy();
   });
 
   test('sin roles → Unauthorized', async () => {
-    (useAuth as jest.Mock).mockReturnValue({
+    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       loading: false,
-      logout: jest.fn(),
+      logout: vi.fn(),
       session: {
         mode: 'prod',
-        roles: [],
+        roles: [], // sin roles válidos
       },
     });
 
+    const RootNavigator = await loadRootNavigator();
     const ui = render(<RootNavigator />);
+
     await act(async () => {});
 
     expect(ui.getByText('Acceso restringido')).toBeTruthy();
