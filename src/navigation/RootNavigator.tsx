@@ -37,6 +37,45 @@ function UnauthorizedScreen() {
   );
 }
 
+/**
+ * Guard “real” por pantalla:
+ * - Si no hay sesión: no renderiza aquí (AuthGate ya maneja Login), pero por seguridad devolvemos Unauthorized.
+ * - Si no tiene rol: Unauthorized.
+ * - Si es demo: pasa.
+ */
+function RoleGuard(props: {
+  session: any; // session viene del hook; mantenemos esto “blando” para no romper tipados existentes.
+  isDemo: boolean;
+  allowedRoles: Array<'admin' | 'nurse' | 'supervisor' | 'viewer'>;
+  children: React.ReactNode;
+}) {
+  const { session, isDemo, allowedRoles, children } = props;
+
+  if (!session) return <UnauthorizedScreen />;
+  if (isDemo) return <>{children}</>;
+
+  const ok = hasRole(session, allowedRoles);
+  return ok ? <>{children}</> : <UnauthorizedScreen />;
+}
+
+/**
+ * Crea un Screen “guarded” que conserva EXACTAMENTE los props de navegación del Screen original,
+ * evitando TS2559 y TS2739.
+ */
+function withRoleGuard<P extends object>(
+  Screen: React.ComponentType<P>,
+  getGuard: () => { session: any; isDemo: boolean; allowedRoles: Array<'admin' | 'nurse' | 'supervisor' | 'viewer'> }
+) {
+  return function GuardedScreen(props: P) {
+    const { session, isDemo, allowedRoles } = getGuard();
+    return (
+      <RoleGuard session={session} isDemo={isDemo} allowedRoles={allowedRoles}>
+        <Screen {...props} />
+      </RoleGuard>
+    );
+  };
+}
+
 function AuthGate() {
   const { session, loading, logout } = useAuth();
 
@@ -118,20 +157,80 @@ function AuthGate() {
   // ✅ Demo override
   const isDemo = session?.mode === 'demo';
 
-  // 2) ✅ Role guard temprano (incluye supervisor para no bloquear canAdminister)
-  const allowed = isDemo || hasRole(session, ['admin', 'nurse', 'supervisor']);
-  if (!allowed) {
+  // 2) ✅ Guard global temprano (mantiene tu intención original)
+  const allowedAppEntry = isDemo || hasRole(session, ['admin', 'nurse', 'supervisor']);
+  if (!allowedAppEntry) {
     return <UnauthorizedScreen />;
   }
 
-  // ✅ guards de features (sin romper)
-  const canSubmitHandover = isDemo || hasRole(session, ['nurse', 'supervisor']);
+  // ✅ flags de features (sin romper tu lógica)
+  // 🔧 Incluimos admin para que no quede bloqueado post-onboarding.
+  const canSubmitHandover = isDemo || hasRole(session, ['nurse', 'supervisor', 'admin']);
   const canAdminister = isDemo || hasRole(session, ['supervisor', 'admin']);
 
   const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover ? 'PatientList' : 'Unauthorized';
 
   const initialRouteName: keyof RootStackParamList =
     onboardingCompleted ? (privacyConsent ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
+
+  // ✅ Guard factory (cerramos sobre session/isDemo una sola vez)
+  const guardBase = () => ({ session, isDemo });
+
+  // ✅ Screens protegidas (wrappers tipados)
+  const GuardedPatientList = withRoleGuard(PatientList as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedAudioNote = withRoleGuard(AudioNote as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedHandoverMain = withRoleGuard(HandoverForm as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedHandoverForm = withRoleGuard(HandoverForm as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedShiftDetails = withRoleGuard(ShiftDetailsScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedQRScan = withRoleGuard(QRScan as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedSyncCenter = withRoleGuard(SyncCenter as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedPatientDashboard = withRoleGuard(PatientDashboard as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedAuditLog = withRoleGuard(AuditLogScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedSupervisorDashboard = withRoleGuard(SupervisorDashboardScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['supervisor', 'admin'],
+  }));
+
+  const GuardedAdminDashboard = withRoleGuard(AdminDashboardScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['admin'],
+  }));
 
   return (
     <View style={{ flex: 1 }}>
@@ -153,42 +252,32 @@ function AuthGate() {
 
         <Stack.Screen name="PrivacyConsent" component={PrivacyConsentScreen} options={{ title: 'Consentimiento' }} />
 
-        {canSubmitHandover ? (
-          <>
-            <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
-            <Stack.Screen name="AudioNote" component={AudioNote} options={{ title: 'Nota de voz' }} />
-            <Stack.Screen name="HandoverMain" component={HandoverForm} options={{ title: 'Handover' }} />
-            <Stack.Screen name="HandoverForm" component={HandoverForm} options={{ title: 'Handover' }} />
-            <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} options={{ title: 'Turno' }} />
-            <Stack.Screen name="QRScan" component={QRScan} options={{ title: 'Escanear QR' }} />
-            <Stack.Screen name="SyncCenter" component={SyncCenter} options={{ title: 'Centro de sincronización' }} />
-            <Stack.Screen
-              name="PatientDashboard"
-              component={PatientDashboard}
-              options={{ title: 'Dashboard del paciente' }}
-            />
-          </>
-        ) : (
-          <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
-        )}
+        {/* Siempre registrada: route estable */}
+        <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
 
-        {canSubmitHandover || canAdminister ? (
-          <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Auditoría' }} />
-        ) : null}
+        {/* ✅ Protegidas por role guard (enforcement real) */}
+        <Stack.Screen name="PatientList" component={GuardedPatientList} options={{ title: 'Pacientes' }} />
+        <Stack.Screen name="AudioNote" component={GuardedAudioNote} options={{ title: 'Nota de voz' }} />
+        <Stack.Screen name="HandoverMain" component={GuardedHandoverMain} options={{ title: 'Handover' }} />
+        <Stack.Screen name="HandoverForm" component={GuardedHandoverForm} options={{ title: 'Handover' }} />
+        <Stack.Screen name="ShiftDetails" component={GuardedShiftDetails} options={{ title: 'Turno' }} />
+        <Stack.Screen name="QRScan" component={GuardedQRScan} options={{ title: 'Escanear QR' }} />
+        <Stack.Screen name="SyncCenter" component={GuardedSyncCenter} options={{ title: 'Centro de sincronización' }} />
+        <Stack.Screen
+          name="PatientDashboard"
+          component={GuardedPatientDashboard}
+          options={{ title: 'Dashboard del paciente' }}
+        />
+        <Stack.Screen name="AuditLog" component={GuardedAuditLog} options={{ title: 'Auditoría' }} />
 
         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
 
-        {canAdminister ? (
-          <Stack.Screen
-            name="SupervisorDashboard"
-            component={SupervisorDashboardScreen}
-            options={{ title: 'Dashboard de turno' }}
-          />
-        ) : null}
-
-        {canAdminister ? (
-          <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: 'Dashboard admin' }} />
-        ) : null}
+        <Stack.Screen
+          name="SupervisorDashboard"
+          component={GuardedSupervisorDashboard}
+          options={{ title: 'Dashboard de turno' }}
+        />
+        <Stack.Screen name="AdminDashboard" component={GuardedAdminDashboard} options={{ title: 'Dashboard admin' }} />
       </Stack.Navigator>
     </View>
   );
@@ -197,3 +286,4 @@ function AuthGate() {
 export default function RootNavigator() {
   return <AuthGate />;
 }
+
