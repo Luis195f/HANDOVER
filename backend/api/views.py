@@ -28,6 +28,7 @@ Patient = None
 MedicationStatement = None
 FHIRValidationError = Exception  # fallback genérico
 
+
 def _try_import_fhir_resources() -> Tuple[Any, Any, Any, Type[Exception]]:
     """
     Intenta importar clases FHIR desde:
@@ -41,9 +42,15 @@ def _try_import_fhir_resources() -> Tuple[Any, Any, Any, Type[Exception]]:
     try:
         from fhir.resources.bundle import Bundle as _Bundle  # type: ignore
         from fhir.resources.patient import Patient as _Patient  # type: ignore
-        from fhir.resources.medicationstatement import MedicationStatement as _MedicationStatement  # type: ignore
+        from fhir.resources.medicationstatement import (  # type: ignore
+            MedicationStatement as _MedicationStatement,
+        )
+
         try:
-            from fhir.resources.fhirabstractmodel import FHIRValidationError as _FHIRValidationError  # type: ignore
+            from fhir.resources.fhirabstractmodel import (  # type: ignore
+                FHIRValidationError as _FHIRValidationError,
+            )
+
             _ValErr = _FHIRValidationError
         except Exception:
             # En algunas versiones la validación es pydantic_core.ValidationError
@@ -60,9 +67,15 @@ def _try_import_fhir_resources() -> Tuple[Any, Any, Any, Type[Exception]]:
     try:
         from fhir.resources.R4B.bundle import Bundle as _Bundle  # type: ignore
         from fhir.resources.R4B.patient import Patient as _Patient  # type: ignore
-        from fhir.resources.R4B.medicationstatement import MedicationStatement as _MedicationStatement  # type: ignore
+        from fhir.resources.R4B.medicationstatement import (  # type: ignore
+            MedicationStatement as _MedicationStatement,
+        )
+
         try:
-            from fhir.resources.R4B.fhirabstractmodel import FHIRValidationError as _FHIRValidationError  # type: ignore
+            from fhir.resources.R4B.fhirabstractmodel import (  # type: ignore
+                FHIRValidationError as _FHIRValidationError,
+            )
+
             _ValErr = _FHIRValidationError
         except Exception:
             try:
@@ -78,9 +91,15 @@ def _try_import_fhir_resources() -> Tuple[Any, Any, Any, Type[Exception]]:
     try:
         from fhir.resources.R5.bundle import Bundle as _Bundle  # type: ignore
         from fhir.resources.R5.patient import Patient as _Patient  # type: ignore
-        from fhir.resources.R5.medicationstatement import MedicationStatement as _MedicationStatement  # type: ignore
+        from fhir.resources.R5.medicationstatement import (  # type: ignore
+            MedicationStatement as _MedicationStatement,
+        )
+
         try:
-            from fhir.resources.R5.fhirabstractmodel import FHIRValidationError as _FHIRValidationError  # type: ignore
+            from fhir.resources.R5.fhirabstractmodel import (  # type: ignore
+                FHIRValidationError as _FHIRValidationError,
+            )
+
             _ValErr = _FHIRValidationError
         except Exception:
             try:
@@ -93,6 +112,7 @@ def _try_import_fhir_resources() -> Tuple[Any, Any, Any, Type[Exception]]:
         pass
 
     raise ImportError("No se pudo importar fhir.resources (Bundle/Patient/MedicationStatement).")
+
 
 try:
     Bundle, Patient, MedicationStatement, FHIRValidationError = _try_import_fhir_resources()
@@ -228,7 +248,6 @@ class PatientView(AuthenticatedAPIView):
         try:
             patient_obj = Patient.parse_obj(request.data)
         except Exception as exc:
-            # No dependemos de una clase exacta de error: pydantic / fhir.resources varía por versión
             return Response({"errors": [str(exc)]}, status=422)
 
         patient = patient_obj.dict(exclude_none=True)
@@ -305,6 +324,7 @@ class BundleView(AuthenticatedAPIView):
 
 
 class AuditLogView(AuthenticatedAPIView):
+    # OJO: sobrescribe el permiso base (NurseOrAdminPermission) por el de auditoría
     permission_classes = [IsAuthenticated, ClinicianAuditPermission]
     allowed_types = {"patient_open", "patient_edit"}
 
@@ -313,7 +333,7 @@ class AuditLogView(AuthenticatedAPIView):
             limit = int(request.query_params.get("limit", "200"))
         except (TypeError, ValueError):
             limit = 200
-        limit = max(1, min(limit, 500))
+        limit = max(10, min(limit, 500))
 
         logs = AuditEvent.objects.all()[:limit]
         payload = [self._serialize_event(event) for event in logs]
@@ -359,3 +379,4 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+

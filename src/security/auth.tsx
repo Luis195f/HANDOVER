@@ -10,7 +10,7 @@ import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/secure-storage';
 import AuthService, { isTokenExpired } from '@/src/security/AuthService';
-import navigation from '@/src/navigation/navigation';
+import { resetTo } from "@/src/navigation/navigation"; 
 import { configureFHIRClient } from '@/src/lib/fhir-client';
 
 const AUTH_DISABLED =
@@ -504,24 +504,40 @@ function extractAuthParams(result: unknown): Record<string, string> | null {
 
 function extractRoles(profile: Record<string, unknown>): UserRole[] {
   const rawRoles = (
-    profile['roles'] ??
-    profile['role'] ??
-    profile['app_metadata'] ??
-    profile['https://handover/roles'] ??
-    profile['https://handoverpro/roles']
+    profile["roles"] ??
+    profile["role"] ??
+    profile["app_metadata"] ??
+    // ✅ TU namespace real (con y sin slash)
+    profile["https://api.luis-soto.info/roles"] ??
+    profile["https://api.luis-soto.info//roles"] ??
+    // ✅ por si algún día cambias a "/roles" explícito
+    profile["https://api.luis-soto.info/roles".replace(/\/+roles$/, "/roles")] ??
+    // ✅ tus antiguos (si los quieres mantener)
+    profile["https://handover/roles"] ??
+    profile["https://handoverpro/roles"]
   ) as unknown;
+
   const roles: string[] = Array.isArray(rawRoles)
-    ? rawRoles.filter((r): r is string => typeof r === 'string')
-    : typeof rawRoles === 'string'
+    ? rawRoles.filter((r): r is string => typeof r === "string")
+    : typeof rawRoles === "string"
       ? rawRoles.split(/[,\s]+/).filter(Boolean)
       : [];
+
   const allowed: UserRole[] = [];
-  roles.forEach((role) => {
-    if (role === 'nurse' || role === 'supervisor' || role === 'admin' || role === 'viewer') {
-      allowed.push(role as UserRole);
-    }
-  });
-  return allowed;
+for (const role of roles) {
+  const normalized = role.trim().toLowerCase();
+
+  if (
+    normalized === "nurse" ||
+    normalized === "supervisor" ||
+    normalized === "admin" ||
+    normalized === "viewer"
+  ) {
+    allowed.push(normalized as UserRole);
+  }
+}
+
+return allowed.length ? allowed : [NO_ROLE];
 }
 
 function extractUnits(profile: Record<string, unknown>): string[] {
@@ -641,7 +657,35 @@ async function buildSessionFromTokens(tokens: AuthTokens, discovery: AuthSession
   const decodedIdToken = decodeIdToken(tokens.idToken);
   const profile = { ...(decodedIdToken ?? {}), ...(userInfo ?? {}) } as Record<string, unknown>;
 
-  const roles = extractRoles(profile);
+  if (__DEV__) {
+    console.log('[AUTH] profile keys:', Object.keys(profile));
+    console.log('[AUTH] roles claim:', (profile as any)['https://api.luis-soto.info/roles']);
+  }
+
+  const ROLE_CLAIMS = [
+  "https://handover.luis-soto.info/roles",
+  "https://api.luis-soto.info/roles",
+  "https://handover/roles",
+] as const;
+
+function extractRoles(profile: Record<string, unknown>, decodedIdToken?: Record<string, unknown>): string[] {
+  for (const claim of ROLE_CLAIMS) {
+    const fromProfile = profile?.[claim] as unknown;
+    if (Array.isArray(fromProfile)) return fromProfile.filter((x): x is string => typeof x === "string");
+
+    const fromId = decodedIdToken?.[claim] as unknown;
+    if (Array.isArray(fromId)) return fromId.filter((x): x is string => typeof x === "string");
+  }
+  return [];
+}
+
+const roles = extractRoles(profile, decodedIdToken ?? undefined);
+
+if (__DEV__) {
+  console.log("[AUTH] profile keys:", Object.keys(profile));
+  console.log("[AUTH] extracted roles:", roles);
+}
+
   const units = extractUnits(profile);
   const userId = (profile['sub'] as string | undefined) ?? 'unknown-user';
   const displayName =
@@ -685,49 +729,59 @@ async function performAuth0Login(options: {
     // Creamos una sesión real local, sin modo demo
     return login({
       user: {
-        id: 'nurse001',
-        name: 'Luis Enfermero',
-        roles: [NO_ROLE],
-        units: ['UCI'],
+        id: "nurse001",
+        name: "Luis Enfermero",
+        roles: ["admin"],
+        units: ["UCI"],
       },
-      accessToken: 'local-dev-token',
+      accessToken: "local-dev-token",
     });
   }
+
   const config = buildAuthConfig(options.config);
   let discovery = options.discovery;
+
   if (!discovery) {
     try {
       discovery = await AuthSession.fetchDiscoveryAsync(config.issuer);
     } catch (error) {
-      console.warn('[AUTH][ERROR][LOGIN_FAILED]', { error: 'discovery_failed' });
+      console.warn("[AUTH][ERROR][LOGIN_FAILED]", { error: "discovery_failed" });
       throw error;
     }
   }
 
   const authResult = await options.promptAsync();
-  if (authResult.type === 'dismiss') {
-    console.warn('[AUTH][WARN][LOGIN_CANCELLED]', {
-      reason: (authResult as { error?: string }).error ?? 'user_cancelled',
+
+  if (authResult.type === "dismiss") {
+    console.warn("[AUTH][WARN][LOGIN_CANCELLED]", {
+      reason: (authResult as { error?: string }).error ?? "user_cancelled",
     });
-    const cancelledError = new Error('OAUTH_CANCELLED');
-    (cancelledError as Error & { type?: string }).type = 'dismiss';
+    const cancelledError = new Error("OAUTH_CANCELLED");
+    (cancelledError as Error & { type?: string }).type = "dismiss";
     throw cancelledError;
   }
-  if (authResult.type === 'error') {
+
+  if (authResult.type === "error") {
     const errorCode =
       (authResult as { errorCode?: string; error?: string }).errorCode ??
       (authResult as { error?: string }).error ??
-      'unknown_error';
-    console.warn('[AUTH][ERROR][LOGIN_FAILED]', { error: errorCode });
-    const authError = new Error('OAUTH_FAILED');
-    (authError as Error & { type?: string }).type = 'error';
+      "unknown_error";
+    console.warn("[AUTH][ERROR][LOGIN_FAILED]", { error: errorCode });
+    const authError = new Error("OAUTH_FAILED");
+    (authError as Error & { type?: string }).type = "error";
     throw authError;
   }
-  if (authResult.type !== 'success') {
-    console.warn('[AUTH][WARN][LOGIN_CANCELLED]', { reason: 'user_cancelled' });
-    const cancelledError = new Error('OAUTH_CANCELLED');
+
+  if (authResult.type !== "success") {
+    console.warn("[AUTH][WARN][LOGIN_CANCELLED]", { reason: "user_cancelled" });
+    const cancelledError = new Error("OAUTH_CANCELLED");
     (cancelledError as Error & { type?: string }).type = authResult.type;
     throw cancelledError;
+  }
+
+  // OJO: en PKCE, aquí muchas veces NO hay accessToken aún
+  if (__DEV__) {
+    console.log("[AUTH][DEV] full auth result:", authResult);
   }
 
   const tokens = await resolveTokensFromResult({
@@ -737,7 +791,29 @@ async function performAuth0Login(options: {
     clientId: config.clientId,
     redirectUri: config.redirectUri,
   });
+
+  if (__DEV__) {
+  console.log("[AUTH][DEV] tokens keys:", Object.keys(tokens ?? {}));
+  console.log("[AUTH][DEV] has access_token:", !!tokens?.accessToken);
+
+  // Segments (lo que necesitamos ahora)
+  console.log("[AUTH][DEV] idToken segments:", tokens?.idToken?.split(".").length);
+  console.log("[AUTH][DEV] accessToken segments:", tokens?.accessToken?.split(".").length);
+
+  // FULL (solo 1 vez para copiar en jwt.io; luego bórralo)
+  console.log("[AUTH][DEV] idToken FULL:", tokens?.idToken);
+  console.log("[AUTH][DEV] accessToken FULL:", tokens?.accessToken);
+}
+
+
   const session = await buildSessionFromTokens(tokens, discovery);
+
+  // ✅ ESTE es el lugar correcto
+  if (__DEV__) {
+  console.log("[AUTH] accessToken present:", !!session.accessToken);
+  console.log("[AUTH] accessToken preview:", session.accessToken?.slice(0, 12));
+}
+
   await setSession(session);
   return session;
 }
@@ -772,7 +848,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: [NO_ROLE],
+      roles: ["admin"],
       units: ['UCI', 'Pediatría'],
       mode: 'demo',
     };
@@ -787,7 +863,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: [NO_ROLE],
+      roles: ["admin"],
       units: [],
       mode: 'demo',
     };
@@ -826,7 +902,7 @@ export async function logout(): Promise<void> {
     if (message) {
       Alert.alert(t('auth.sessionExpiredTitle'), message);
     }
-    navigation.resetTo('Login');
+    resetTo("Login");
   };
 
   logoutInFlight = runner().finally(() => {
@@ -843,7 +919,7 @@ export async function logoutAndClear(options: LogoutOptions = {}): Promise<void>
     logoutInFlight = (async () => {
       await setSession(null);
       if (options.message) Alert.alert(t('auth.sessionExpiredTitle'), options.message);
-      navigation.resetTo('Login');
+      resetTo('Login');
     })().finally(() => {
       logoutInFlight = null;
       pendingLogoutMessage = undefined;
@@ -871,13 +947,6 @@ export async function getCurrentSession(): Promise<SessionModel | null> {
   return currentSession;
 }
 
-/**
- * Retorna un access token vigente. Si el access token está expirado (o por expirar),
- * intenta refrescarlo mediante refresh_token (OIDC).
- *
- * - Implementa "single-flight": múltiples llamadas concurrentes comparten 1 solo refresh.
- * - Nunca loguea tokens.
- */
 // (refreshInFlight se declara una sola vez a nivel de módulo, cerca del inicio)
 
 /**

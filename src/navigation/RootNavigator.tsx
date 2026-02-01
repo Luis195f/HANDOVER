@@ -16,6 +16,8 @@ import AuditLogScreen from '@/src/screens/AuditLogScreen';
 import SupervisorDashboardScreen from '@/src/screens/SupervisorDashboard';
 import { AdminDashboardScreen } from '@/src/screens/admin/AdminDashboardScreen';
 import LoginScreen from '@/src/screens/LoginScreen';
+import PrivacyConsentScreen from '@/src/screens/PrivacyConsentScreen';
+
 import type { RootStackParamList } from '@/src/navigation/types';
 import { hasRole } from '@/src/security/acl';
 import { useAuth } from '@/src/security/auth';
@@ -35,20 +37,27 @@ function UnauthorizedScreen() {
   );
 }
 
-// BEGIN HANDOVER_AUTH
 function AuthGate() {
   const { session, loading, logout } = useAuth();
+
+  if (__DEV__) {
+    // OJO: esto loguea roles y modo; no loguees tokens aquí.
+    // eslint-disable-next-line no-console
+    console.log('[NAV] session.roles:', session?.roles, 'mode:', session?.mode);
+  }
+
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
   const [privacyConsent, setPrivacyConsentState] = React.useState<boolean | null>(null);
 
-  // BEGIN HANDOVER: ONBOARDING
   React.useEffect(() => {
     let alive = true;
+
     async function loadOnboarding() {
       if (!session) {
         setOnboardingCompletedState(null);
         return;
       }
+
       setOnboardingCompletedState(null);
       try {
         const completed = await getOnboardingCompleted();
@@ -57,20 +66,22 @@ function AuthGate() {
         if (alive) setOnboardingCompletedState(false);
       }
     }
+
     void loadOnboarding();
     return () => {
       alive = false;
     };
   }, [session]);
-  // END HANDOVER: ONBOARDING
 
   React.useEffect(() => {
     let alive = true;
+
     async function loadConsent() {
       if (!session) {
         setPrivacyConsentState(null);
         return;
       }
+
       setPrivacyConsentState(null);
       try {
         const consented = await hasPrivacyConsent();
@@ -79,12 +90,14 @@ function AuthGate() {
         if (alive) setPrivacyConsentState(false);
       }
     }
+
     void loadConsent();
     return () => {
       alive = false;
     };
   }, [session]);
 
+  // Splash mientras hidrata auth + flags (si hay sesión)
   if (loading || (session && (onboardingCompleted === null || privacyConsent === null))) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -93,6 +106,7 @@ function AuthGate() {
     );
   }
 
+  // 1) Sin sesión => Login stack
   if (!session) {
     return (
       <Stack.Navigator>
@@ -101,34 +115,44 @@ function AuthGate() {
     );
   }
 
-  const canSubmitHandover = hasRole(session, ['nurse', 'supervisor']);
-  const canAdminister = hasRole(session, ['supervisor', 'admin']);
+  // ✅ Demo override
+  const isDemo = session?.mode === 'demo';
+
+  // 2) ✅ Role guard temprano (incluye supervisor para no bloquear canAdminister)
+  const allowed = isDemo || hasRole(session, ['admin', 'nurse', 'supervisor']);
+  if (!allowed) {
+    return <UnauthorizedScreen />;
+  }
+
+  // ✅ guards de features (sin romper)
+  const canSubmitHandover = isDemo || hasRole(session, ['nurse', 'supervisor']);
+  const canAdminister = isDemo || hasRole(session, ['supervisor', 'admin']);
+
   const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover ? 'PatientList' : 'Unauthorized';
 
-  const onboardingScreen = (
-    <Stack.Screen name="Onboarding" options={{ headerShown: false }}>
-      {(props) => (
-        <OnboardingScreen
-          {...props}
-          onComplete={async () => {
-            setOnboardingCompletedState(true);
-            setPrivacyConsentState(true);
-          }}
-          nextRoute={postOnboardingRoute}
-        />
-      )}
-    </Stack.Screen>
-  );
-
-  const requiresConsent = privacyConsent !== true;
-  const initialRouteName =
-    requiresConsent || onboardingCompleted === false ? 'Onboarding' : postOnboardingRoute;
+  const initialRouteName: keyof RootStackParamList =
+    onboardingCompleted ? (privacyConsent ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
 
   return (
     <View style={{ flex: 1 }}>
-      <DemoModeBanner visible={session?.mode === 'demo'} onExit={logout} />
+      <DemoModeBanner visible={!!isDemo} onExit={logout} />
+
       <Stack.Navigator key={initialRouteName} initialRouteName={initialRouteName}>
-        {onboardingScreen}
+        <Stack.Screen name="Onboarding" options={{ headerShown: false }}>
+          {(props) => (
+            <OnboardingScreen
+              {...props}
+              onComplete={async () => {
+                // ✅ solo onboarding; el consentimiento se maneja en PrivacyConsentScreen
+                setOnboardingCompletedState(true);
+              }}
+              nextRoute={postOnboardingRoute}
+            />
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="PrivacyConsent" component={PrivacyConsentScreen} options={{ title: 'Consentimiento' }} />
+
         {canSubmitHandover ? (
           <>
             <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
@@ -147,10 +171,13 @@ function AuthGate() {
         ) : (
           <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
         )}
+
         {canSubmitHandover || canAdminister ? (
           <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Auditoría' }} />
         ) : null}
+
         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
+
         {canAdminister ? (
           <Stack.Screen
             name="SupervisorDashboard"
@@ -158,18 +185,14 @@ function AuthGate() {
             options={{ title: 'Dashboard de turno' }}
           />
         ) : null}
+
         {canAdminister ? (
-          <Stack.Screen
-            name="AdminDashboard"
-            component={AdminDashboardScreen}
-            options={{ title: 'Dashboard admin' }}
-          />
+          <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: 'Dashboard admin' }} />
         ) : null}
       </Stack.Navigator>
     </View>
   );
 }
-// END HANDOVER_AUTH
 
 export default function RootNavigator() {
   return <AuthGate />;
