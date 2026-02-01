@@ -79,5 +79,9 @@ export type RootStackParamList = {
   Unauthorized: undefined;
 
   Onboarding: undefined;
+
+  // ✅ Nuevo: pantalla específica para el consentimiento (coherente con RootNavigator)
+  PrivacyConsent: undefined;
+
   PrivacyPolicy: undefined;
 };

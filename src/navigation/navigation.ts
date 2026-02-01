@@ -1,151 +1,33 @@
-import { createNavigationContainerRef, CommonActions, StackActions } from "@react-navigation/native";
+import { CommonActions, createNavigationContainerRef } from "@react-navigation/native";
 import type { RootStackParamList } from "@/src/navigation/types";
 
-// Ref tipado al root navigator
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-// Cola interna para llamadas hechas antes de que el contenedor esté listo.
-const pending: Array<() => void> = [];
+let _isReady = false;
+const _queue: Array<() => void> = [];
 
-function flush() {
-  if (!navigationRef.isReady()) return;
-  while (pending.length) {
+export function onReady() {
+  _isReady = true;
+  while (_queue.length) {
+    const fn = _queue.shift();
     try {
-      const fn = pending.shift()!;
-      fn();
-    } catch {
-      // evitamos que un error bloquee el resto de la cola
-    }
+      fn?.();
+    } catch {}
   }
 }
 
 function runOrQueue(fn: () => void) {
-  if (navigationRef.isReady()) fn();
-  else pending.push(fn);
+  if (_isReady && navigationRef.isReady()) fn();
+  else _queue.push(fn);
 }
 
-// Exponer hook simple para el onReady del NavigationContainer (opcional)
-export function onReady() {
-  flush();
-}
-
-// Estado/consulta básica
-export function isReady() {
-  return navigationRef.isReady();
-}
-
-/** Navega a una ruta tipada. Si el contenedor no está listo, se encola. */
-export function navigate<T extends keyof RootStackParamList>(
-  name: T,
-  params?: RootStackParamList[T]
-): void {
-  runOrQueue(() => {
-    navigationRef.dispatch(
-      CommonActions.navigate({ name: name as never, params: params as never })
-    );
-  });
-}
-
-/** Empuja una pantalla en el stack (Native Stack compatible). */
-export function push<T extends keyof RootStackParamList>(
-  name: T,
-  params?: RootStackParamList[T]
-): void {
-  runOrQueue(() => {
-    navigationRef.dispatch(
-      typeof params === 'undefined'
-        ? StackActions.push(name as never)
-        : StackActions.push(name as never, params as never)
-    );
-  });
-}
-
-/** Reemplaza la pantalla actual por otra. */
-export function replace<T extends keyof RootStackParamList>(
-  name: T,
-  params?: RootStackParamList[T]
-): void {
-  runOrQueue(() => {
-    navigationRef.dispatch(
-      typeof params === 'undefined'
-        ? StackActions.replace(name as never)
-        : StackActions.replace(name as never, params as never)
-    );
-  });
-}
-
-/** Vuelve atrás si es posible. Silencioso si no hay a dónde volver. */
-export function goBack(): void {
-  runOrQueue(() => {
-    if (navigationRef.canGoBack()) navigationRef.goBack();
-  });
-}
-
-/** Resetea el stack a una sola ruta. Útil tras login/logout. */
-export function resetTo<T extends keyof RootStackParamList>(
-  name: T,
-  params?: RootStackParamList[T]
-): void {
+export function resetTo(name: keyof RootStackParamList) {
   runOrQueue(() => {
     navigationRef.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: name as never, params: params as never }],
-      })
+        routes: [{ name }],
+      }),
     );
   });
 }
-
-/** Nombre de la ruta actual (si existe). */
-export function getCurrentRouteName(): keyof RootStackParamList | undefined {
-  return navigationRef.getCurrentRoute()?.name as keyof RootStackParamList | undefined;
-}
-
-/** Parámetros actuales (tipados). */
-export function getCurrentParams<T extends keyof RootStackParamList>():
-  | RootStackParamList[T]
-  | undefined {
-  return navigationRef.getCurrentRoute()?.params as RootStackParamList[T] | undefined;
-}
-
-/**
- * Espera hasta que el contenedor esté listo (polling ligero) o vence por timeout.
- * Devuelve true si quedó listo, false si expiró.
- */
-export async function waitForReady(timeoutMs = 2000): Promise<boolean> {
-  if (navigationRef.isReady()) {
-    flush();
-    return true;
-  }
-  return new Promise<boolean>((resolve) => {
-    const start = Date.now();
-    const id = setInterval(() => {
-      if (navigationRef.isReady()) {
-        clearInterval(id);
-        flush();
-        resolve(true);
-      } else if (Date.now() - start > timeoutMs) {
-        clearInterval(id);
-        resolve(false);
-      }
-    }, 50);
-  });
-}
-
-// API por defecto (cómodo para import default)
-const api = {
-  navigationRef,
-  onReady,
-  isReady,
-  navigate,
-  push,
-  replace,
-  goBack,
-  resetTo,
-  getCurrentRouteName,
-  getCurrentParams,
-  waitForReady,
-};
-
-export default api;
-

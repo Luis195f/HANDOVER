@@ -29,11 +29,15 @@ function normalizeRoles(roles: RoleInput): GuardRole[] {
 function sanitizeSessionRoles(session: AuthSession | null): GuardRole[] {
   if (!session) return [];
   const unique = new Set<GuardRole>();
+
   for (const role of session.roles ?? []) {
-    if (ALLOWED_ROLES.has(role as GuardRole)) {
-      unique.add(role as GuardRole);
+    const normalized = String(role).trim().toLowerCase() as GuardRole;
+
+    if (ALLOWED_ROLES.has(normalized)) {
+      unique.add(normalized);
     }
   }
+
   return Array.from(unique);
 }
 

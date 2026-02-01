@@ -2,7 +2,7 @@ import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 
 import RootNavigator from "@/src/navigation/RootNavigator";
-import { navigationRef } from "@/src/navigation/navigation";
+import { navigationRef, onReady } from "@/src/navigation/navigation";
 import { AppThemeProvider } from "@/src/theme";
 import { AuthProvider } from "@/src/security/auth";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
@@ -13,6 +13,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function App() {
   useTranslation();
+
   React.useEffect(() => {
     let stop: (() => void) | undefined;
     try {
@@ -31,7 +32,11 @@ export default function App() {
   return (
     <AuthProvider>
       <AppThemeProvider>
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer
+          ref={navigationRef}
+          onReady={onReady}
+          onUnhandledAction={__DEV__ ? (action) => console.warn("[NAV][unhandled]", action) : undefined}
+        >
           <RootNavigator />
         </NavigationContainer>
       </AppThemeProvider>
