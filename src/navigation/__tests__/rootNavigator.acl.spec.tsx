@@ -4,18 +4,24 @@ import { render, act } from '@testing-library/react-native';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // =====================================================
-// ✅ Hard mocks para React Navigation Native Stack (CI-safe)
-// IMPORTANT: estos mocks deben definirse ANTES de importar RootNavigator.
+// ✅ Hard mocks React Navigation (CI-safe)
+// IMPORTANT: mocks ANTES de importar RootNavigator
 // =====================================================
 
-// 1) Mock del NativeStackView (path interno ESM que rompe en CI)
-vi.mock('@react-navigation/native-stack/lib/module/views/NativeStackView', () => {
-  return {
-    default: () => null,
-  };
-});
+// ✅ Virtual mocks: EVITAN que Vite intente “resolver” paths internos bloqueados por "exports"
+vi.mock(
+  '@react-navigation/native-stack/lib/module/views/NativeStackView',
+  () => ({ default: () => null }),
+  { virtual: true }
+);
 
-// 2) Mock del paquete principal native-stack
+vi.mock(
+  '@react-navigation/native-stack/lib/commonjs/views/NativeStackView',
+  () => ({ default: () => null }),
+  { virtual: true }
+);
+
+// ✅ Mock del paquete público (lo que realmente usa RootNavigator)
 vi.mock('@react-navigation/native-stack', () => {
   const React = require('react');
 
@@ -50,7 +56,7 @@ vi.mock('@react-navigation/native-stack', () => {
   return { createNativeStackNavigator };
 });
 
-// 3) Mock mínimo de @react-navigation/native
+// Mock mínimo de @react-navigation/native (no necesitamos NavigationContainer real)
 vi.mock('@react-navigation/native', () => {
   const React = require('react');
 
@@ -120,12 +126,11 @@ vi.mock('@/src/security/auth', () => ({
   useAuth: vi.fn(),
 }));
 
-// Imports de mocks (tipados) — OK después de vi.mock
 import { useAuth } from '@/src/security/auth';
 import { getOnboardingCompleted } from '@/src/lib/onboarding-storage';
 import { hasPrivacyConsent } from '@/src/lib/privacy-consent';
 
-// Helper: importar RootNavigator DESPUÉS de mocks
+// Import dinámico DESPUÉS de mocks
 async function loadRootNavigator() {
   const mod = await import('@/src/navigation/RootNavigator');
   return mod.default;
@@ -136,12 +141,12 @@ describe('RootNavigator ACL (role enforcement)', () => {
     vi.resetAllMocks();
     (globalThis as any).__TEST_ROUTE = undefined;
 
-    (getOnboardingCompleted as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-    (hasPrivacyConsent as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (getOnboardingCompleted as any).mockResolvedValue(true);
+    (hasPrivacyConsent as any).mockResolvedValue(true);
   });
 
   test('admin → puede ver SupervisorDashboard', async () => {
-    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+    (useAuth as any).mockReturnValue({
       loading: false,
       logout: vi.fn(),
       session: {
@@ -150,7 +155,7 @@ describe('RootNavigator ACL (role enforcement)', () => {
       },
     });
 
-    // Forzamos la ruta en el mock del Stack.Navigator (sin tocar RootNavigator)
+    // Forzamos la ruta en el mock del Navigator (sin tocar RootNavigator)
     (globalThis as any).__TEST_ROUTE = 'SupervisorDashboard';
 
     const RootNavigator = await loadRootNavigator();
@@ -162,7 +167,7 @@ describe('RootNavigator ACL (role enforcement)', () => {
   });
 
   test('nurse → puede ver PatientList', async () => {
-    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+    (useAuth as any).mockReturnValue({
       loading: false,
       logout: vi.fn(),
       session: {
@@ -180,12 +185,12 @@ describe('RootNavigator ACL (role enforcement)', () => {
   });
 
   test('sin roles → Unauthorized', async () => {
-    (useAuth as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+    (useAuth as any).mockReturnValue({
       loading: false,
       logout: vi.fn(),
       session: {
         mode: 'prod',
-        roles: [], // sin roles válidos
+        roles: [],
       },
     });
 
