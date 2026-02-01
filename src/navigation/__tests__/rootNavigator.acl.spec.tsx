@@ -4,34 +4,55 @@ import { render, act } from '@testing-library/react-native';
 
 import RootNavigator from '@/src/navigation/RootNavigator';
 
-// --------------------
-// Mock: react-navigation (evita dependencias nativas en CI)
-// --------------------
-jest.mock('@react-navigation/native', () => {
-  const React = require('react');
+// =====================================================
+// ✅ Hard mocks para React Navigation Native Stack (CI-safe)
+// =====================================================
 
-  // navRef simple para navegar sin native stack real
-  const refObj: any = {
-    current: null,
-    isReady: () => true,
-    navigate: (_name: string) => {
-      /* no-op: lo manejamos con estado mock del Stack */
-    },
-  };
-
+// 1) Mock del NativeStackView (ESM internal path que está rompiendo en CI)
+jest.mock('@react-navigation/native-stack/lib/module/views/NativeStackView', () => {
   return {
-    NavigationContainer: ({ children }: any) => React.createElement(React.Fragment, null, children),
-    createNavigationContainerRef: () => refObj,
+    __esModule: true,
+    default: () => null,
   };
 });
 
+// 2) Mock del index module path (por si Vitest resuelve el import así)
+jest.mock('@react-navigation/native-stack/lib/module/index.js', () => {
+  return {
+    __esModule: true,
+    createNativeStackNavigator: () => {
+      const React = require('react');
+
+      const Screen = (_props: any) => null;
+
+      const Navigator = ({ initialRouteName, children, __TEST_ROUTE }: any) => {
+        const routeName = __TEST_ROUTE ?? initialRouteName;
+        const screens = React.Children.toArray(children).filter(Boolean);
+
+        const match = screens.find((child: any) => child?.props?.name === routeName) as any;
+        if (!match) return null;
+
+        if (match.props.component) {
+          const Comp = match.props.component;
+          return React.createElement(Comp, { navigation: {}, route: {} });
+        }
+
+        if (typeof match.props.children === 'function') {
+          return match.props.children({ navigation: {}, route: {} });
+        }
+
+        return null;
+      };
+
+      return { Screen, Navigator };
+    },
+  };
+});
+
+// 3) Mock principal del paquete
 jest.mock('@react-navigation/native-stack', () => {
   const React = require('react');
 
-  // Stack minimalista:
-  // - Guarda "name" + "component" o "children render function"
-  // - Renderiza SOLO initialRouteName (suficiente para nuestros tests)
-  // - Expone un modo simple de "cambiar" de screen vía prop __TEST_ROUTE (solo para tests)
   function createNativeStackNavigator() {
     const Screen = (_props: any) => null;
 
@@ -42,13 +63,11 @@ jest.mock('@react-navigation/native-stack', () => {
       const match = screens.find((child: any) => child?.props?.name === routeName) as any;
       if (!match) return null;
 
-      // Caso 1: component={Comp}
       if (match.props.component) {
         const Comp = match.props.component;
         return React.createElement(Comp, { navigation: {}, route: {} });
       }
 
-      // Caso 2: children render function
       if (typeof match.props.children === 'function') {
         return match.props.children({ navigation: {}, route: {} });
       }
@@ -62,9 +81,22 @@ jest.mock('@react-navigation/native-stack', () => {
   return { createNativeStackNavigator };
 });
 
-// --------------------
-// Mocks: screens (texto estable para asserts)
-// --------------------
+// 4) Mock mínimo de @react-navigation/native para no necesitar NavigationContainer real
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+
+  return {
+    NavigationContainer: ({ children }: any) => React.createElement(React.Fragment, null, children),
+    createNavigationContainerRef: () => ({
+      isReady: () => true,
+      navigate: () => undefined,
+    }),
+  };
+});
+
+// =====================================================
+// ✅ Mocks: screens (texto estable para asserts)
+// =====================================================
 jest.mock('@/src/screens/PatientList', () => {
   return function PatientListMock() {
     return <Text testID="PATIENT_LIST">PATIENT_LIST</Text>;
@@ -77,8 +109,7 @@ jest.mock('@/src/screens/SupervisorDashboard', () => {
   };
 });
 
-// ⚠️ RootNavigator registra muchas screens.
-// Para que NO fallen imports innecesarios, mockeamos el resto con placeholders.
+// Mock del resto para evitar imports laterales
 jest.mock('@/src/screens/AudioNote', () => () => <View />);
 jest.mock('@/src/screens/HandoverForm', () => () => <View />);
 jest.mock('@/src/screens/PatientDashboard', () => () => <View />);
@@ -98,9 +129,9 @@ jest.mock('@/src/components/DemoModeBanner', () => ({
   DemoModeBanner: () => null,
 }));
 
-// --------------------
-// Mocks: onboarding/consent
-// --------------------
+// =====================================================
+// ✅ Mocks: onboarding/consent
+// =====================================================
 jest.mock('@/src/lib/onboarding-storage', () => ({
   getOnboardingCompleted: jest.fn(),
 }));
@@ -109,9 +140,9 @@ jest.mock('@/src/lib/privacy-consent', () => ({
   hasPrivacyConsent: jest.fn(),
 }));
 
-// --------------------
-// Mock: auth hook
-// --------------------
+// =====================================================
+// ✅ Mock: auth hook
+// =====================================================
 jest.mock('@/src/security/auth', () => ({
   useAuth: jest.fn(),
 }));
@@ -138,14 +169,12 @@ describe('RootNavigator ACL (role enforcement)', () => {
     });
 
     const ui = render(<RootNavigator />);
-
     await act(async () => {});
 
-    // Como nuestro mock Navigator renderiza initialRouteName, forzamos la ruta con remount:
-    // (esto sustituye el "navigate" real, evitando dependencias nativas).
+    // Remount forzando ruta (prop solo para nuestro mock de Stack.Navigator)
     ui.unmount();
     const ui2 = render(
-      // @ts-expect-error prop solo en mock de tests
+      // @ts-expect-error test-only prop usado por el mock del Navigator
       <RootNavigator __TEST_ROUTE="SupervisorDashboard" />
     );
 
@@ -165,7 +194,6 @@ describe('RootNavigator ACL (role enforcement)', () => {
     const ui = render(<RootNavigator />);
     await act(async () => {});
 
-    // Post-onboarding route debería llevar a PatientList
     expect(ui.getByTestId('PATIENT_LIST')).toBeTruthy();
   });
 
@@ -175,14 +203,13 @@ describe('RootNavigator ACL (role enforcement)', () => {
       logout: jest.fn(),
       session: {
         mode: 'prod',
-        roles: [], // sin roles válidos
+        roles: [],
       },
     });
 
     const ui = render(<RootNavigator />);
     await act(async () => {});
 
-    // Tu UnauthorizedScreen muestra este título
     expect(ui.getByText('Acceso restringido')).toBeTruthy();
   });
 });
