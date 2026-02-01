@@ -4,24 +4,10 @@ import { render, act } from '@testing-library/react-native';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // =====================================================
-// ✅ Hard mocks React Navigation (CI-safe)
-// IMPORTANT: mocks ANTES de importar RootNavigator
+// ✅ Mocks (ANTES de importar RootNavigator)
 // =====================================================
 
-// ✅ Virtual mocks: EVITAN que Vite intente “resolver” paths internos bloqueados por "exports"
-vi.mock(
-  '@react-navigation/native-stack/lib/module/views/NativeStackView',
-  () => ({ default: () => null }),
-  { virtual: true }
-);
-
-vi.mock(
-  '@react-navigation/native-stack/lib/commonjs/views/NativeStackView',
-  () => ({ default: () => null }),
-  { virtual: true }
-);
-
-// ✅ Mock del paquete público (lo que realmente usa RootNavigator)
+// Mock del paquete público native-stack (evita NativeStackView en CI)
 vi.mock('@react-navigation/native-stack', () => {
   const React = require('react');
 
@@ -36,13 +22,11 @@ vi.mock('@react-navigation/native-stack', () => {
       const match = screens.find((child: any) => child?.props?.name === routeName) as any;
       if (!match) return null;
 
-      // component={Comp}
       if (match.props.component) {
         const Comp = match.props.component;
         return React.createElement(Comp, { navigation: {}, route: {} });
       }
 
-      // children render fn
       if (typeof match.props.children === 'function') {
         return match.props.children({ navigation: {}, route: {} });
       }
@@ -56,7 +40,7 @@ vi.mock('@react-navigation/native-stack', () => {
   return { createNativeStackNavigator };
 });
 
-// Mock mínimo de @react-navigation/native (no necesitamos NavigationContainer real)
+// Mock mínimo de @react-navigation/native
 vi.mock('@react-navigation/native', () => {
   const React = require('react');
 
@@ -72,21 +56,17 @@ vi.mock('@react-navigation/native', () => {
 // =====================================================
 // ✅ Mocks: screens (texto estable para asserts)
 // =====================================================
-vi.mock('@/src/screens/PatientList', () => {
-  return {
-    default: function PatientListMock() {
-      return <Text testID="PATIENT_LIST">PATIENT_LIST</Text>;
-    },
-  };
-});
+vi.mock('@/src/screens/PatientList', () => ({
+  default: function PatientListMock() {
+    return <Text testID="PATIENT_LIST">PATIENT_LIST</Text>;
+  },
+}));
 
-vi.mock('@/src/screens/SupervisorDashboard', () => {
-  return {
-    default: function SupervisorDashboardMock() {
-      return <Text testID="SUPERVISOR_DASHBOARD">SUPERVISOR_DASHBOARD</Text>;
-    },
-  };
-});
+vi.mock('@/src/screens/SupervisorDashboard', () => ({
+  default: function SupervisorDashboardMock() {
+    return <Text testID="SUPERVISOR_DASHBOARD">SUPERVISOR_DASHBOARD</Text>;
+  },
+}));
 
 // Mock del resto para evitar imports laterales
 vi.mock('@/src/screens/AudioNote', () => ({ default: () => <View /> }));
@@ -155,7 +135,7 @@ describe('RootNavigator ACL (role enforcement)', () => {
       },
     });
 
-    // Forzamos la ruta en el mock del Navigator (sin tocar RootNavigator)
+    // Forzamos ruta solo para el mock del Navigator
     (globalThis as any).__TEST_ROUTE = 'SupervisorDashboard';
 
     const RootNavigator = await loadRootNavigator();
