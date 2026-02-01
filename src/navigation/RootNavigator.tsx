@@ -180,73 +180,73 @@ function AuthGate() {
 
         {/* ⛔️ Enforcer real: aunque intenten navegar directo, el componente está guardado */}
         <Stack.Screen name="PatientList" options={{ title: 'Pacientes' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <PatientList {...props} />
+              <PatientList />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="AudioNote" options={{ title: 'Nota de voz' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <AudioNote {...props} />
+              <AudioNote />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="HandoverMain" options={{ title: 'Handover' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <HandoverForm {...props} />
+              <HandoverForm />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="HandoverForm" options={{ title: 'Handover' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <HandoverForm {...props} />
+              <HandoverForm />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="ShiftDetails" options={{ title: 'Turno' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <ShiftDetailsScreen {...props} />
+              <ShiftDetailsScreen />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="QRScan" options={{ title: 'Escanear QR' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <QRScan {...props} />
+              <QRScan />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="SyncCenter" options={{ title: 'Centro de sincronización' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <SyncCenter {...props} />
+              <SyncCenter />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="PatientDashboard" options={{ title: 'Dashboard del paciente' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <PatientDashboard {...props} />
+              <PatientDashboard />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="AuditLog" options={{ title: 'Auditoría' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <AuditLogScreen {...props} />
+              <AuditLogScreen />
             </RoleGuard>
           )}
         </Stack.Screen>
@@ -254,17 +254,17 @@ function AuthGate() {
         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
 
         <Stack.Screen name="SupervisorDashboard" options={{ title: 'Dashboard de turno' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['supervisor', 'admin']}>
-              <SupervisorDashboardScreen {...props} />
+              <SupervisorDashboardScreen />
             </RoleGuard>
           )}
         </Stack.Screen>
 
         <Stack.Screen name="AdminDashboard" options={{ title: 'Dashboard admin' }}>
-          {(props) => (
+          {() => (
             <RoleGuard session={session} isDemo={isDemo} allowedRoles={['admin']}>
-              <AdminDashboardScreen {...props} />
+              <AdminDashboardScreen />
             </RoleGuard>
           )}
         </Stack.Screen>
@@ -276,3 +276,4 @@ function AuthGate() {
 export default function RootNavigator() {
   return <AuthGate />;
 }
+
