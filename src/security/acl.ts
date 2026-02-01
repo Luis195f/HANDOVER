@@ -41,6 +41,14 @@ function sanitizeSessionRoles(session: AuthSession | null): GuardRole[] {
   return Array.from(unique);
 }
 
+/**
+ * Export “seguro” para inspección y tests (sin exponer nada sensible).
+ * No devuelve tokens; solo roles normalizados y filtrados.
+ */
+export function getSessionRoles(session: AuthSession | null): GuardRole[] {
+  return sanitizeSessionRoles(session);
+}
+
 function hasPrivilegedRole(roles: GuardRole[]): boolean {
   return roles.some((role) => PRIVILEGED_ROLES.has(role));
 }
@@ -96,6 +104,14 @@ function evaluateRole(session: AuthSession | null, roles: RoleInput): AccessResu
 
 export function hasRole(session: AuthSession | null, roles: RoleInput): boolean {
   return evaluateRole(session, roles).ok;
+}
+
+/**
+ * Alias semántico (útil cuando piensas en “cualquiera de estos roles”).
+ * No cambia comportamiento.
+ */
+export function hasAnyRole(session: AuthSession | null, roles: RoleInput): boolean {
+  return hasRole(session, roles);
 }
 
 export function ensureRole(session: AuthSession | null, roles: RoleInput): void {

@@ -37,6 +37,27 @@ function UnauthorizedScreen() {
   );
 }
 
+/**
+ * Guard “real” por pantalla:
+ * - Si no hay sesión: no renderiza aquí (AuthGate ya maneja Login), pero por seguridad devolvemos Unauthorized.
+ * - Si no tiene rol: Unauthorized.
+ * - Si es demo: pasa.
+ */
+function RoleGuard(props: {
+  session: any; // session viene del hook; mantenemos esto “blando” para no romper tipados existentes.
+  isDemo: boolean;
+  allowedRoles: Array<'admin' | 'nurse' | 'supervisor' | 'viewer'>;
+  children: React.ReactNode;
+}) {
+  const { session, isDemo, allowedRoles, children } = props;
+
+  if (!session) return <UnauthorizedScreen />;
+  if (isDemo) return <>{children}</>;
+
+  const ok = hasRole(session, allowedRoles);
+  return ok ? <>{children}</> : <UnauthorizedScreen />;
+}
+
 function AuthGate() {
   const { session, loading, logout } = useAuth();
 
@@ -118,14 +139,15 @@ function AuthGate() {
   // ✅ Demo override
   const isDemo = session?.mode === 'demo';
 
-  // 2) ✅ Role guard temprano (incluye supervisor para no bloquear canAdminister)
-  const allowed = isDemo || hasRole(session, ['admin', 'nurse', 'supervisor']);
-  if (!allowed) {
+  // 2) ✅ Guard global temprano (mantiene tu intención original)
+  const allowedAppEntry = isDemo || hasRole(session, ['admin', 'nurse', 'supervisor']);
+  if (!allowedAppEntry) {
     return <UnauthorizedScreen />;
   }
 
-  // ✅ guards de features (sin romper)
-  const canSubmitHandover = isDemo || hasRole(session, ['nurse', 'supervisor']);
+  // ✅ flags de features (sin romper tu lógica)
+  // 🔧 Incluimos admin para que no quede bloqueado post-onboarding.
+  const canSubmitHandover = isDemo || hasRole(session, ['nurse', 'supervisor', 'admin']);
   const canAdminister = isDemo || hasRole(session, ['supervisor', 'admin']);
 
   const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover ? 'PatientList' : 'Unauthorized';
@@ -153,42 +175,99 @@ function AuthGate() {
 
         <Stack.Screen name="PrivacyConsent" component={PrivacyConsentScreen} options={{ title: 'Consentimiento' }} />
 
-        {canSubmitHandover ? (
-          <>
-            <Stack.Screen name="PatientList" component={PatientList} options={{ title: 'Pacientes' }} />
-            <Stack.Screen name="AudioNote" component={AudioNote} options={{ title: 'Nota de voz' }} />
-            <Stack.Screen name="HandoverMain" component={HandoverForm} options={{ title: 'Handover' }} />
-            <Stack.Screen name="HandoverForm" component={HandoverForm} options={{ title: 'Handover' }} />
-            <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} options={{ title: 'Turno' }} />
-            <Stack.Screen name="QRScan" component={QRScan} options={{ title: 'Escanear QR' }} />
-            <Stack.Screen name="SyncCenter" component={SyncCenter} options={{ title: 'Centro de sincronización' }} />
-            <Stack.Screen
-              name="PatientDashboard"
-              component={PatientDashboard}
-              options={{ title: 'Dashboard del paciente' }}
-            />
-          </>
-        ) : (
-          <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
-        )}
+        {/* Siempre registrada: route estable */}
+        <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
 
-        {canSubmitHandover || canAdminister ? (
-          <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Auditoría' }} />
-        ) : null}
+        {/* ⛔️ Enforcer real: aunque intenten navegar directo, el componente está guardado */}
+        <Stack.Screen name="PatientList" options={{ title: 'Pacientes' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <PatientList {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="AudioNote" options={{ title: 'Nota de voz' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <AudioNote {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="HandoverMain" options={{ title: 'Handover' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <HandoverForm {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="HandoverForm" options={{ title: 'Handover' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <HandoverForm {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="ShiftDetails" options={{ title: 'Turno' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <ShiftDetailsScreen {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="QRScan" options={{ title: 'Escanear QR' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <QRScan {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="SyncCenter" options={{ title: 'Centro de sincronización' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <SyncCenter {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="PatientDashboard" options={{ title: 'Dashboard del paciente' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <PatientDashboard {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
+
+        <Stack.Screen name="AuditLog" options={{ title: 'Auditoría' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
+              <AuditLogScreen {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
 
         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
 
-        {canAdminister ? (
-          <Stack.Screen
-            name="SupervisorDashboard"
-            component={SupervisorDashboardScreen}
-            options={{ title: 'Dashboard de turno' }}
-          />
-        ) : null}
+        <Stack.Screen name="SupervisorDashboard" options={{ title: 'Dashboard de turno' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['supervisor', 'admin']}>
+              <SupervisorDashboardScreen {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
 
-        {canAdminister ? (
-          <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: 'Dashboard admin' }} />
-        ) : null}
+        <Stack.Screen name="AdminDashboard" options={{ title: 'Dashboard admin' }}>
+          {(props) => (
+            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['admin']}>
+              <AdminDashboardScreen {...props} />
+            </RoleGuard>
+          )}
+        </Stack.Screen>
       </Stack.Navigator>
     </View>
   );
