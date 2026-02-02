@@ -4,31 +4,52 @@ from django.urls import reverse
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, Mock
 
-try:
-    from rest_framework.test import APIClient
-except Exception:
-    APIClient = None
-
 
 class HandoverApiTests(TestCase):
     def setUp(self):
+        # Import lazy para no romper pytest collection
+        try:
+            from rest_framework.test import APIClient  # type: ignore
+        except Exception:
+            APIClient = None  # noqa: N806
+
         self.client = APIClient() if APIClient else None
         self.url = reverse("fhir-transaction")
 
         User = get_user_model()
         self.user = User.objects.create_user(username="testuser", password="testpass")
+
         if self.client:
             self.client.force_authenticate(user=self.user)
 
-        # ✅ Bypass roles permission (RequireRolesPermission) en este test
+        # ✅ BYPASS auth/permissions SOLO para estos tests del endpoint fhir-transaction
         from backend.api import views as api_views
+
+        try:
+            from rest_framework.permissions import AllowAny  # type: ignore
+        except Exception:
+            AllowAny = None  # noqa: N806
+
+        # Si existe BundleView, la parchamos; si no, parchamos base AuthenticatedAPIView
+        target_cls = getattr(api_views, "BundleView", None) or getattr(api_views, "AuthenticatedAPIView", None)
+        if target_cls is None:
+            raise RuntimeError("No se encontró BundleView ni AuthenticatedAPIView en backend.api.views")
+
         self._perm_patcher = patch.object(
-            api_views.AuthenticatedAPIView,
+            target_cls,
             "permission_classes",
-            [api_views.IsAuthenticated],  # o [api_views.AllowAny]
+            [AllowAny] if AllowAny else [],
         )
+        self._auth_patcher = patch.object(
+            target_cls,
+            "authentication_classes",
+            [],  # importantísimo: evita authenticators reales (Auth0/scopes) en estos tests
+        )
+
         self._perm_patcher.start()
+        self._auth_patcher.start()
         self.addCleanup(self._perm_patcher.stop)
+        self.addCleanup(self._auth_patcher.stop)
 
         self.valid_bundle = {
             "resourceType": "Bundle",
@@ -47,13 +68,20 @@ class HandoverApiTests(TestCase):
         }
 
     def _post(self, payload):
+        # DRF APIClient: NO mezclar format con content_type
         if self.client:
             return self.client.post(self.url, data=payload, format="json")
 
+        # Django Client fallback
         import json
         from django.test import Client
+
         c = Client()
-        return c.post(self.url, data=json.dumps(payload), content_type="application/fhir+json")
+        return c.post(
+            self.url,
+            data=json.dumps(payload),
+            content_type="application/fhir+json",
+        )
 
     def test_post_bundle_invalid(self):
         bad_bundle = {

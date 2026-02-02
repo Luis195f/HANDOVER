@@ -3,6 +3,12 @@ import { AuthSession, UserRole } from './auth-types';
 
 export type GuardRole = UserRole | 'viewer';
 
+/**
+ * Permisos finos (scopes/permissions).
+ * Ej: "handover:read", "handover:write", "patients:read", "patients:write"
+ */
+export type GuardPermission = string;
+
 const ALLOWED_ROLES: ReadonlySet<GuardRole> = new Set(['nurse', 'supervisor', 'admin', 'viewer']);
 const PRIVILEGED_ROLES: ReadonlySet<GuardRole> = new Set(['admin', 'supervisor']);
 
@@ -21,9 +27,14 @@ export class AclError extends Error {
 type AccessResult = { ok: true } | { ok: false; reason: AclErrorReason };
 
 type RoleInput = GuardRole | GuardRole[];
+type PermissionInput = GuardPermission | GuardPermission[];
 
 function normalizeRoles(roles: RoleInput): GuardRole[] {
   return Array.isArray(roles) ? roles : [roles];
+}
+
+function normalizePermissions(perms: PermissionInput): GuardPermission[] {
+  return Array.isArray(perms) ? perms : [perms];
 }
 
 function sanitizeSessionRoles(session: AuthSession | null): GuardRole[] {
@@ -88,6 +99,56 @@ function normalizeUnits(units: string[] | undefined): string[] {
   return Array.from(unique);
 }
 
+/**
+ * Extrae permisos desde una sesión, soportando múltiples formas típicas:
+ * - session.permissions: string[] (Auth0 RBAC "Add Permissions in Access Token")
+ * - session.scope: "a b c" (OAuth scope clásico)
+ * - session.scopes: string[] (si existiese en tu modelo)
+ *
+ * Importante: NO toca tokens, solo lee strings ya presentes en session.
+ */
+function sanitizeSessionPermissions(session: AuthSession | null): GuardPermission[] {
+  if (!session) return [];
+  const unique = new Set<string>();
+
+  // 1) permissions: []
+  const permissionsArray = (session as any).permissions;
+  if (Array.isArray(permissionsArray)) {
+    for (const perm of permissionsArray) {
+      const normalized = String(perm).trim();
+      if (normalized) unique.add(normalized);
+    }
+  }
+
+  // 2) scope: "a b c"
+  const scopeString = (session as any).scope;
+  if (typeof scopeString === 'string' && scopeString.trim().length > 0) {
+    for (const perm of scopeString.split(/\s+/g)) {
+      const normalized = String(perm).trim();
+      if (normalized) unique.add(normalized);
+    }
+  }
+
+  // 3) scopes: []
+  const scopesArray = (session as any).scopes;
+  if (Array.isArray(scopesArray)) {
+    for (const perm of scopesArray) {
+      const normalized = String(perm).trim();
+      if (normalized) unique.add(normalized);
+    }
+  }
+
+  return Array.from(unique);
+}
+
+/**
+ * Export “seguro” para inspección y tests.
+ * No devuelve tokens; solo permissions/scopes normalizados.
+ */
+export function getSessionPermissions(session: AuthSession | null): GuardPermission[] {
+  return sanitizeSessionPermissions(session);
+}
+
 function evaluateRole(session: AuthSession | null, roles: RoleInput): AccessResult {
   if (!session) {
     return { ok: false, reason: 'NO_SESSION' };
@@ -118,6 +179,37 @@ export function ensureRole(session: AuthSession | null, roles: RoleInput): void 
   const result = evaluateRole(session, roles);
   if (!result.ok) {
     throw new AclError(result.reason);
+  }
+}
+
+/**
+ * ✅ Permisos finos (scopes/permissions)
+ * can(session, "handover:write")
+ */
+export function can(session: AuthSession | null, perms: PermissionInput): boolean {
+  if (!session) return false;
+  if (isBypassEnabled()) return true;
+
+  const required = normalizePermissions(perms);
+  if (required.length === 0) return true;
+
+  const userPerms = new Set<string>(sanitizeSessionPermissions(session));
+  return required.some((p) => userPerms.has(p));
+}
+
+/**
+ * Lanza AclError si no hay permiso.
+ * Nota: no ampliamos AclErrorReason para no romper checks existentes;
+ * usamos reason FORBIDDEN_ROLE y message explícito.
+ */
+export function ensurePermission(session: AuthSession | null, perms: PermissionInput): void {
+  if (!session) {
+    throw new AclError('NO_SESSION');
+  }
+  if (isBypassEnabled()) return;
+
+  if (!can(session, perms)) {
+    throw new AclError('FORBIDDEN_ROLE', 'FORBIDDEN_PERMISSION');
   }
 }
 

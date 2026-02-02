@@ -1,4 +1,4 @@
-import os
+import os, sys
 from os import environ
 from pathlib import Path
 from urllib.parse import urlparse
@@ -44,7 +44,13 @@ for origin in CORS_ALLOWED_ORIGINS:
         pass
 
 ALLOWED_HOSTS = sorted(set(hosts_from_origins + ["localhost", "127.0.0.1"]))
+RUNNING_TESTS = (
+    "test" in sys.argv
+    or os.environ.get("PYTEST_CURRENT_TEST") is not None
+)
 
+if RUNNING_TESTS and "testserver" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS += ["testserver"]
 LOCAL_IP = environ.get("LOCAL_IP")
 CSRF_TRUSTED_ORIGINS = [
     *CORS_ALLOWED_ORIGINS,

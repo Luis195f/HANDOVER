@@ -58,6 +58,24 @@ function RoleGuard(props: {
   return ok ? <>{children}</> : <UnauthorizedScreen />;
 }
 
+/**
+ * Crea un Screen “guarded” que conserva EXACTAMENTE los props de navegación del Screen original,
+ * evitando TS2559 y TS2739.
+ */
+function withRoleGuard<P extends object>(
+  Screen: React.ComponentType<P>,
+  getGuard: () => { session: any; isDemo: boolean; allowedRoles: Array<'admin' | 'nurse' | 'supervisor' | 'viewer'> }
+) {
+  return function GuardedScreen(props: P) {
+    const { session, isDemo, allowedRoles } = getGuard();
+    return (
+      <RoleGuard session={session} isDemo={isDemo} allowedRoles={allowedRoles}>
+        <Screen {...props} />
+      </RoleGuard>
+    );
+  };
+}
+
 function AuthGate() {
   const { session, loading, logout } = useAuth();
 
@@ -155,6 +173,65 @@ function AuthGate() {
   const initialRouteName: keyof RootStackParamList =
     onboardingCompleted ? (privacyConsent ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
 
+  // ✅ Guard factory (cerramos sobre session/isDemo una sola vez)
+  const guardBase = () => ({ session, isDemo });
+
+  // ✅ Screens protegidas (wrappers tipados)
+  const GuardedPatientList = withRoleGuard(PatientList as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedAudioNote = withRoleGuard(AudioNote as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedHandoverMain = withRoleGuard(HandoverForm as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedHandoverForm = withRoleGuard(HandoverForm as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedShiftDetails = withRoleGuard(ShiftDetailsScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedQRScan = withRoleGuard(QRScan as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedSyncCenter = withRoleGuard(SyncCenter as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedPatientDashboard = withRoleGuard(PatientDashboard as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedAuditLog = withRoleGuard(AuditLogScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['nurse', 'supervisor', 'admin'],
+  }));
+
+  const GuardedSupervisorDashboard = withRoleGuard(SupervisorDashboardScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['supervisor', 'admin'],
+  }));
+
+  const GuardedAdminDashboard = withRoleGuard(AdminDashboardScreen as any, () => ({
+    ...guardBase(),
+    allowedRoles: ['admin'],
+  }));
+
   return (
     <View style={{ flex: 1 }}>
       <DemoModeBanner visible={!!isDemo} onExit={logout} />
@@ -178,96 +255,29 @@ function AuthGate() {
         {/* Siempre registrada: route estable */}
         <Stack.Screen name="Unauthorized" component={UnauthorizedScreen} options={{ title: 'Acceso restringido' }} />
 
-        {/* ⛔️ Enforcer real: aunque intenten navegar directo, el componente está guardado */}
-        <Stack.Screen name="PatientList" options={{ title: 'Pacientes' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <PatientList {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="AudioNote" options={{ title: 'Nota de voz' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <AudioNote {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="HandoverMain" options={{ title: 'Handover' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <HandoverForm {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="HandoverForm" options={{ title: 'Handover' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <HandoverForm {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="ShiftDetails" options={{ title: 'Turno' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <ShiftDetailsScreen {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="QRScan" options={{ title: 'Escanear QR' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <QRScan {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="SyncCenter" options={{ title: 'Centro de sincronización' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <SyncCenter {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="PatientDashboard" options={{ title: 'Dashboard del paciente' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <PatientDashboard {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="AuditLog" options={{ title: 'Auditoría' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['nurse', 'supervisor', 'admin']}>
-              <AuditLogScreen {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
+        {/* ✅ Protegidas por role guard (enforcement real) */}
+        <Stack.Screen name="PatientList" component={GuardedPatientList} options={{ title: 'Pacientes' }} />
+        <Stack.Screen name="AudioNote" component={GuardedAudioNote} options={{ title: 'Nota de voz' }} />
+        <Stack.Screen name="HandoverMain" component={GuardedHandoverMain} options={{ title: 'Handover' }} />
+        <Stack.Screen name="HandoverForm" component={GuardedHandoverForm} options={{ title: 'Handover' }} />
+        <Stack.Screen name="ShiftDetails" component={GuardedShiftDetails} options={{ title: 'Turno' }} />
+        <Stack.Screen name="QRScan" component={GuardedQRScan} options={{ title: 'Escanear QR' }} />
+        <Stack.Screen name="SyncCenter" component={GuardedSyncCenter} options={{ title: 'Centro de sincronización' }} />
+        <Stack.Screen
+          name="PatientDashboard"
+          component={GuardedPatientDashboard}
+          options={{ title: 'Dashboard del paciente' }}
+        />
+        <Stack.Screen name="AuditLog" component={GuardedAuditLog} options={{ title: 'Auditoría' }} />
 
         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} options={{ title: 'Política de privacidad' }} />
 
-        <Stack.Screen name="SupervisorDashboard" options={{ title: 'Dashboard de turno' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['supervisor', 'admin']}>
-              <SupervisorDashboardScreen {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
-
-        <Stack.Screen name="AdminDashboard" options={{ title: 'Dashboard admin' }}>
-          {(props) => (
-            <RoleGuard session={session} isDemo={isDemo} allowedRoles={['admin']}>
-              <AdminDashboardScreen {...props} />
-            </RoleGuard>
-          )}
-        </Stack.Screen>
+        <Stack.Screen
+          name="SupervisorDashboard"
+          component={GuardedSupervisorDashboard}
+          options={{ title: 'Dashboard de turno' }}
+        />
+        <Stack.Screen name="AdminDashboard" component={GuardedAdminDashboard} options={{ title: 'Dashboard admin' }} />
       </Stack.Navigator>
     </View>
   );

@@ -16,6 +16,8 @@ from rest_framework.views import APIView
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, NurseOrAdminPermission
+from backend.security.scope_permissions import HasAnyScope
+
 
 logger = logging.getLogger(__name__)
 
@@ -233,14 +235,23 @@ class AuthenticatedAPIView(APIView):
     Además: soporta application/fhir+json (parser+renderer).
     """
     authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated, NurseOrAdminPermission]
+    permission_classes = [IsAuthenticated, NurseOrAdminPermission, HasAnyScope.required("handover:write")]
 
     # ✅ Esto arregla 415 y 406 para FHIR JSON
     parser_classes = [FHIRJSONParser, JSONParser]
     renderer_classes = [FHIRJSONRenderer, JSONRenderer]
 
+    def get_authenticators(self):
+        # ✅ Evita explotar si hay None accidental en authentication_classes
+        classes = [a for a in self.authentication_classes if a is not None]
+        return [auth() for auth in classes]
 
 class PatientView(AuthenticatedAPIView):
+    permission_classes = [
+        IsAuthenticated,
+        NurseOrAdminPermission,
+        HasAnyScope.required("patients:write"),
+    ]
     def post(self, request: HttpRequest) -> Response:
         if Patient is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -259,6 +270,7 @@ class PatientView(AuthenticatedAPIView):
 
 
 class MedicationStatementView(AuthenticatedAPIView):
+    permission_classes = [IsAuthenticated, HasAnyScope.required("patients:write")]
     def post(self, request: HttpRequest) -> Response:
         if MedicationStatement is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -277,6 +289,11 @@ class MedicationStatementView(AuthenticatedAPIView):
 
 
 class BundleView(AuthenticatedAPIView):
+    permission_classes = [
+        IsAuthenticated,
+        NurseOrAdminPermission,
+        HasAnyScope.required("handover:write"),
+    ]
     def post(self, request: HttpRequest) -> Response:
         if Bundle is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -325,7 +342,11 @@ class BundleView(AuthenticatedAPIView):
 
 class AuditLogView(AuthenticatedAPIView):
     # OJO: sobrescribe el permiso base (NurseOrAdminPermission) por el de auditoría
-    permission_classes = [IsAuthenticated, ClinicianAuditPermission]
+    permission_classes = [
+        IsAuthenticated,
+        ClinicianAuditPermission,
+        HasAnyScope.required("handover:audit"),
+    ]
     allowed_types = {"patient_open", "patient_edit"}
 
     def get(self, request: HttpRequest) -> Response:
