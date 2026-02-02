@@ -1,4 +1,6 @@
 from django.urls import path
+
+from backend.audit.views import AuditEventsIngestView
 from .views import AuditLogView, BundleView, MedicationStatementView, PatientView
 
 urlpatterns = [
@@ -12,4 +14,6 @@ urlpatterns = [
 
     path("audit", AuditLogView.as_view(), name="audit-log"),
     path("audit/", AuditLogView.as_view(), name="audit-log-slash"),
+    path("audit/events", AuditEventsIngestView.as_view(), name="audit-events"),
+    path("audit/events/", AuditEventsIngestView.as_view(), name="audit-events-slash"),
 ]

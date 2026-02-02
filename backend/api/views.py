@@ -13,6 +13,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from backend.audit.service import emit_audit_event
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, NurseOrAdminPermission
@@ -225,6 +226,37 @@ def _post_to_fhir(resource: Dict[str, Any], resource_type: str) -> Response:
         return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
 
 
+def _get_bundle_identifier_value(bundle: Dict[str, Any]) -> str:
+    identifier = bundle.get("identifier")
+    if isinstance(identifier, dict):
+        value = identifier.get("value")
+        if value:
+            return str(value)
+    return ""
+
+
+def _emit_bundle_audit(
+    *,
+    request: HttpRequest,
+    payload_obj: Any,
+    status: str,
+    http_status: int,
+    resource_id: str,
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    emit_audit_event(
+        event_type="fhir_transaction",
+        action="create",
+        status=status,
+        http_status=http_status,
+        request=request,
+        resource_type="Bundle",
+        resource_id=resource_id,
+        payload_obj=payload_obj,
+        meta=meta,
+    )
+
+
 # =========================
 # Views
 # =========================
@@ -298,12 +330,29 @@ class BundleView(AuthenticatedAPIView):
         if Bundle is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
 
+        payload_obj = request.data
         try:
             bundle_obj = Bundle.parse_obj(request.data)
         except Exception as exc:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=422,
+                resource_id=getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return Response({"errors": [str(exc)]}, status=422)
 
         if getattr(bundle_obj, "type", None) != "transaction":
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=422,
+                resource_id=getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return Response({"errors": ["Solo se permiten bundles de tipo transaction."]}, status=422)
 
         bundle = bundle_obj.dict(exclude_none=True)
@@ -318,6 +367,14 @@ class BundleView(AuthenticatedAPIView):
 
         validation_response = _validate_remotely(bundle, "Bundle")
         if validation_response:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=bundle,
+                status="fail",
+                http_status=validation_response.status_code,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return validation_response
 
         # POST transaction: se envía al "base endpoint" del servidor FHIR
@@ -329,15 +386,51 @@ class BundleView(AuthenticatedAPIView):
             resp = httpx.post(fhir_tx_url, json=bundle, headers=headers, timeout=60)
         except httpx.HTTPError as exc:
             logger.error("No se pudo contactar FHIR server (tx) (%s): %s", fhir_tx_url, exc)
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=bundle,
+                status="fail",
+                http_status=503,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
 
         if resp.status_code >= 400:
+            meta = None
+            if resp.status_code == 422 or resp.status_code >= 500:
+                meta = {"errorCode": "FHIR_VALIDATION_ERROR"}
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=bundle,
+                status="fail",
+                http_status=resp.status_code,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+                meta=meta,
+            )
             return Response({"errors": [resp.text]}, status=resp.status_code)
 
         try:
-            return Response(resp.json(), status=resp.status_code)
+            payload = resp.json()
         except Exception:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=bundle,
+                status="fail",
+                http_status=502,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
+
+        _emit_bundle_audit(
+            request=request,
+            payload_obj=bundle,
+            status="success",
+            http_status=resp.status_code,
+            resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+        )
+        return Response(payload, status=resp.status_code)
 
 
 class AuditLogView(AuthenticatedAPIView):
@@ -400,4 +493,3 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-
