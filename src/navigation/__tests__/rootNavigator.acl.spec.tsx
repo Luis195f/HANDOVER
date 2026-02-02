@@ -133,6 +133,18 @@ describe('RootNavigator ACL (role enforcement)', () => {
         mode: 'prod',
         roles: ['admin'],
       },
+      capabilities: {
+        userSub: 'auth0|admin',
+        roles: ['admin'],
+        scopes: ['handover:write', 'handover:audit'],
+        permissions: {
+          canWriteHandover: true,
+          canSignHandover: true,
+          canViewAudit: true,
+          canSendAuditEvents: true,
+          isAdmin: true,
+        },
+      },
     });
 
     // Forzamos ruta solo para el mock del Navigator
@@ -154,6 +166,18 @@ describe('RootNavigator ACL (role enforcement)', () => {
         mode: 'prod',
         roles: ['nurse'],
       },
+      capabilities: {
+        userSub: 'auth0|nurse',
+        roles: ['nurse'],
+        scopes: ['handover:write'],
+        permissions: {
+          canWriteHandover: true,
+          canSignHandover: false,
+          canViewAudit: false,
+          canSendAuditEvents: true,
+          isAdmin: false,
+        },
+      },
     });
 
     const RootNavigator = await loadRootNavigator();
@@ -171,6 +195,18 @@ describe('RootNavigator ACL (role enforcement)', () => {
       session: {
         mode: 'prod',
         roles: [],
+      },
+      capabilities: {
+        userSub: 'auth0|none',
+        roles: [],
+        scopes: [],
+        permissions: {
+          canWriteHandover: false,
+          canSignHandover: false,
+          canViewAudit: false,
+          canSendAuditEvents: false,
+          isAdmin: false,
+        },
       },
     });
 

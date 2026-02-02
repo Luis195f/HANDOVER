@@ -10,12 +10,17 @@ from rest_framework.views import APIView
 from backend.audit.serializers import AuditEventIngestSerializer
 from backend.audit.service import emit_audit_event
 from backend.security.auth import Auth0JWTAuthentication
+from backend.security.permissions_roles import HasAnyRole
 from backend.security.scope_permissions import HasAnyScope
 
 
 class AuditEventsIngestView(APIView):
     authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated, HasAnyScope.required("handover:write")]
+    permission_classes = [
+        IsAuthenticated,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
+        HasAnyScope.required("handover:write"),
+    ]
     parser_classes = [JSONParser]
     renderer_classes = [JSONRenderer]
 

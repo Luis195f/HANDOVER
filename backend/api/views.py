@@ -17,7 +17,9 @@ from backend.audit.service import emit_audit_event
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, NurseOrAdminPermission
-from backend.security.scope_permissions import HasAnyScope
+from backend.security.permissions_roles import HasAnyRole
+from backend.security.roles import extract_roles
+from backend.security.scope_permissions import HasAnyScope, _extract_permissions_from_request, _get_claims_from_request
 
 
 logger = logging.getLogger(__name__)
@@ -278,6 +280,39 @@ class AuthenticatedAPIView(APIView):
         classes = [a for a in self.authentication_classes if a is not None]
         return [auth() for auth in classes]
 
+
+class CapabilitiesView(APIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: HttpRequest) -> Response:
+        claims = _get_claims_from_request(request) or {}
+        roles = sorted(extract_roles(claims))
+        scopes = sorted(_extract_permissions_from_request(request))
+
+        user_sub = ""
+        if isinstance(claims, dict):
+            user_sub = str(claims.get("sub") or "")
+        if not user_sub:
+            user = getattr(request, "user", None)
+            user_sub = str(getattr(user, "sub", "") or getattr(user, "username", "") or "")
+
+        permissions = {
+            "canWriteHandover": "handover:write" in scopes,
+            "canSignHandover": any(role in {"supervisor", "admin"} for role in roles),
+            "canViewAudit": "handover:audit" in scopes,
+            "canSendAuditEvents": "handover:write" in scopes,
+            "isAdmin": "admin" in roles,
+        }
+
+        payload = {
+            "userSub": user_sub,
+            "roles": roles,
+            "scopes": scopes,
+            "permissions": permissions,
+        }
+        return Response(payload, status=200)
+
 class PatientView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,
@@ -323,7 +358,7 @@ class MedicationStatementView(AuthenticatedAPIView):
 class BundleView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,
-        NurseOrAdminPermission,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
         HasAnyScope.required("handover:write"),
     ]
     def post(self, request: HttpRequest) -> Response:
