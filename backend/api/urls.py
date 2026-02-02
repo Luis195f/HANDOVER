@@ -1,7 +1,7 @@
 from django.urls import path
 
 from backend.audit.views import AuditEventsIngestView
-from .views import AuditLogView, BundleView, MedicationStatementView, PatientView
+from .views import AuditLogView, BundleView, CapabilitiesView, MedicationStatementView, PatientView
 
 urlpatterns = [
     path("fhir/patient", PatientView.as_view(), name="patient"),
@@ -16,4 +16,6 @@ urlpatterns = [
     path("audit/", AuditLogView.as_view(), name="audit-log-slash"),
     path("audit/events", AuditEventsIngestView.as_view(), name="audit-events"),
     path("audit/events/", AuditEventsIngestView.as_view(), name="audit-events-slash"),
+    path("me/capabilities", CapabilitiesView.as_view(), name="me-capabilities"),
+    path("me/capabilities/", CapabilitiesView.as_view(), name="me-capabilities-slash"),
 ]
