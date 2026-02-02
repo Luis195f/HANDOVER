@@ -1,11 +1,20 @@
 import json
 import base64
 import httpx
-import respx
+import pytest
 from fastapi.testclient import TestClient
 from main import app, FHIR_BASE
 
+try:
+    import respx  # type: ignore
+except Exception:  # pragma: no cover - dependency guard
+    respx = None
+
 client = TestClient(app)
+
+
+if respx is None:  # pragma: no cover - dependency guard
+    pytest.skip("respx is required for these tests", allow_module_level=True)
 
 # Bundle de ejemplo "válido" a nivel contrato, sin imponer codificaciones concretas
 # (asumimos que tu front ya mapea Encounter/Observations/DocumentReference).

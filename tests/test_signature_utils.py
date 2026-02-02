@@ -10,6 +10,11 @@ import pytest
 from django.core.management import call_command
 from django.utils import timezone
 
+try:
+    import pytest_django  # type: ignore  # noqa: F401
+except Exception:  # pragma: no cover - dependency guard
+    pytest.skip("pytest-django is required for signature utils tests", allow_module_level=True)
+
 # Configura entorno Django antes de importar módulos internos
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
