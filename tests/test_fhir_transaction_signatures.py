@@ -1,12 +1,21 @@
 import json
 
 import httpx
-import respx
+import pytest
+
+try:
+    import respx  # type: ignore
+except Exception:  # pragma: no cover - dependency guard
+    respx = None
 from fastapi.testclient import TestClient
 
 from main import FHIR_BASE, app
 
 client = TestClient(app)
+
+
+if respx is None:  # pragma: no cover - dependency guard
+    pytest.skip("respx is required for these tests", allow_module_level=True)
 
 
 def build_bundle_with_attesters(attesters):

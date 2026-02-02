@@ -46,6 +46,7 @@ for origin in CORS_ALLOWED_ORIGINS:
 ALLOWED_HOSTS = sorted(set(hosts_from_origins + ["localhost", "127.0.0.1"]))
 RUNNING_TESTS = (
     "test" in sys.argv
+    or "pytest" in sys.argv
     or os.environ.get("PYTEST_CURRENT_TEST") is not None
 )
 
@@ -63,6 +64,7 @@ INSTALLED_APPS = [
     "csp",
     "rest_framework",
     "backend.api",
+    "backend.audit",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -86,6 +88,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "backend.audit.middleware.AuditRequestMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -173,4 +176,28 @@ CONTENT_SECURITY_POLICY = {
             *tuple(origin for origin in CORS_ALLOWED_ORIGINS if origin.startswith("https://")),
         ),
     }
+}
+
+AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
+AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET", "dev-secret")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {"format": "%(message)s"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+        },
+    },
+    "loggers": {
+        "audit": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
 }
