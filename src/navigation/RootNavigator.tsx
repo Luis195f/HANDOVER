@@ -19,7 +19,7 @@ import LoginScreen from '@/src/screens/LoginScreen';
 import PrivacyConsentScreen from '@/src/screens/PrivacyConsentScreen';
 
 import type { RootStackParamList } from '@/src/navigation/types';
-import { hasRole } from '@/src/security/acl';
+import { canAccess, type Capabilities, type RouteName } from '@/src/security/capabilities';
 import { useAuth } from '@/src/security/auth';
 import { getOnboardingCompleted } from '@/src/lib/onboarding-storage';
 import { hasPrivacyConsent } from '@/src/lib/privacy-consent';
@@ -43,18 +43,18 @@ function UnauthorizedScreen() {
  * - Si no tiene rol: Unauthorized.
  * - Si es demo: pasa.
  */
-function RoleGuard(props: {
-  session: any; // session viene del hook; mantenemos esto “blando” para no romper tipados existentes.
+function CapabilityGuard(props: {
+  capabilities: Capabilities | null;
   isDemo: boolean;
-  allowedRoles: Array<'admin' | 'nurse' | 'supervisor' | 'viewer'>;
+  routeName: RouteName;
   children: React.ReactNode;
 }) {
-  const { session, isDemo, allowedRoles, children } = props;
+  const { capabilities, isDemo, routeName, children } = props;
 
-  if (!session) return <UnauthorizedScreen />;
   if (isDemo) return <>{children}</>;
+  if (!capabilities) return <UnauthorizedScreen />;
 
-  const ok = hasRole(session, allowedRoles);
+  const ok = canAccess(routeName, capabilities);
   return ok ? <>{children}</> : <UnauthorizedScreen />;
 }
 
@@ -62,22 +62,23 @@ function RoleGuard(props: {
  * Crea un Screen “guarded” que conserva EXACTAMENTE los props de navegación del Screen original,
  * evitando TS2559 y TS2739.
  */
-function withRoleGuard<P extends object>(
+function withCapabilityGuard<P extends object>(
   Screen: React.ComponentType<P>,
-  getGuard: () => { session: any; isDemo: boolean; allowedRoles: Array<'admin' | 'nurse' | 'supervisor' | 'viewer'> }
+  routeName: RouteName,
+  getGuard: () => { capabilities: Capabilities | null; isDemo: boolean }
 ) {
   return function GuardedScreen(props: P) {
-    const { session, isDemo, allowedRoles } = getGuard();
+    const { capabilities, isDemo } = getGuard();
     return (
-      <RoleGuard session={session} isDemo={isDemo} allowedRoles={allowedRoles}>
+      <CapabilityGuard capabilities={capabilities} isDemo={isDemo} routeName={routeName}>
         <Screen {...props} />
-      </RoleGuard>
+      </CapabilityGuard>
     );
   };
 }
 
 function AuthGate() {
-  const { session, loading, logout } = useAuth();
+  const { session, capabilities, loading, logout } = useAuth();
 
   if (__DEV__) {
     // OJO: esto loguea roles y modo; no loguees tokens aquí.
@@ -158,78 +159,73 @@ function AuthGate() {
   const isDemo = session?.mode === 'demo';
 
   // 2) ✅ Guard global temprano (mantiene tu intención original)
-  const allowedAppEntry = isDemo || hasRole(session, ['admin', 'nurse', 'supervisor']);
+  const allowedAppEntry = isDemo || Boolean(
+    capabilities && Object.values(capabilities.permissions).some((value) => value),
+  );
   if (!allowedAppEntry) {
     return <UnauthorizedScreen />;
   }
 
   // ✅ flags de features (sin romper tu lógica)
   // 🔧 Incluimos admin para que no quede bloqueado post-onboarding.
-  const canSubmitHandover = isDemo || hasRole(session, ['nurse', 'supervisor', 'admin']);
-  const canAdminister = isDemo || hasRole(session, ['supervisor', 'admin']);
-
-  const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover ? 'PatientList' : 'Unauthorized';
+  const canSubmitHandover = isDemo || Boolean(capabilities?.permissions.canWriteHandover);
+  const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover
+    ? 'PatientList'
+    : (capabilities?.permissions.canViewAudit ? 'AuditLog' : 'Unauthorized');
 
   const initialRouteName: keyof RootStackParamList =
     onboardingCompleted ? (privacyConsent ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
 
   // ✅ Guard factory (cerramos sobre session/isDemo una sola vez)
-  const guardBase = () => ({ session, isDemo });
+  const guardBase = () => ({ capabilities, isDemo });
 
   // ✅ Screens protegidas (wrappers tipados)
-  const GuardedPatientList = withRoleGuard(PatientList as any, () => ({
+  const GuardedPatientList = withCapabilityGuard(PatientList as any, 'PatientList', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedAudioNote = withRoleGuard(AudioNote as any, () => ({
+  const GuardedAudioNote = withCapabilityGuard(AudioNote as any, 'AudioNote', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedHandoverMain = withRoleGuard(HandoverForm as any, () => ({
+  const GuardedHandoverMain = withCapabilityGuard(HandoverForm as any, 'HandoverMain', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedHandoverForm = withRoleGuard(HandoverForm as any, () => ({
+  const GuardedHandoverForm = withCapabilityGuard(HandoverForm as any, 'HandoverForm', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedShiftDetails = withRoleGuard(ShiftDetailsScreen as any, () => ({
+  const GuardedShiftDetails = withCapabilityGuard(ShiftDetailsScreen as any, 'ShiftDetails', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedQRScan = withRoleGuard(QRScan as any, () => ({
+  const GuardedQRScan = withCapabilityGuard(QRScan as any, 'QRScan', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedSyncCenter = withRoleGuard(SyncCenter as any, () => ({
+  const GuardedSyncCenter = withCapabilityGuard(SyncCenter as any, 'SyncCenter', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedPatientDashboard = withRoleGuard(PatientDashboard as any, () => ({
+  const GuardedPatientDashboard = withCapabilityGuard(PatientDashboard as any, 'PatientDashboard', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedAuditLog = withRoleGuard(AuditLogScreen as any, () => ({
+  const GuardedAuditLog = withCapabilityGuard(AuditLogScreen as any, 'AuditLog', () => ({
     ...guardBase(),
-    allowedRoles: ['nurse', 'supervisor', 'admin'],
   }));
 
-  const GuardedSupervisorDashboard = withRoleGuard(SupervisorDashboardScreen as any, () => ({
-    ...guardBase(),
-    allowedRoles: ['supervisor', 'admin'],
-  }));
+  const GuardedSupervisorDashboard = withCapabilityGuard(
+    SupervisorDashboardScreen as any,
+    'SupervisorDashboard',
+    () => ({
+      ...guardBase(),
+    }),
+  );
 
-  const GuardedAdminDashboard = withRoleGuard(AdminDashboardScreen as any, () => ({
+  const GuardedAdminDashboard = withCapabilityGuard(AdminDashboardScreen as any, 'AdminDashboard', () => ({
     ...guardBase(),
-    allowedRoles: ['admin'],
   }));
 
   return (
@@ -286,4 +282,3 @@ function AuthGate() {
 export default function RootNavigator() {
   return <AuthGate />;
 }
-

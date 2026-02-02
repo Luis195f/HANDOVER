@@ -8,6 +8,8 @@ import { Buffer } from 'buffer';
 import { Platform } from 'react-native';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
+import type { Capabilities } from '@/src/security/capabilities';
+import { clearCapabilitiesCache, fetchCapabilities, getDemoCapabilities } from '@/src/security/capabilities';
 import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/secure-storage';
 import AuthService, { isTokenExpired } from '@/src/security/AuthService';
 import { resetTo } from "@/src/navigation/navigation"; 
@@ -1113,17 +1115,20 @@ export async function login(params: {
 
 interface AuthContextValue {
   session: SessionModel | null;
+  capabilities: Capabilities | null;
   loading: boolean;
   loginWithOAuth: (config?: Partial<typeof DEFAULT_AUTH_CONFIG>) => Promise<SessionModel>;
   loginWithCredentials: (params: { username: string; password: string }) => Promise<SessionModel>;
   loginDemo: () => Promise<SessionModel>;
   logout: () => Promise<void>;
+  refreshCapabilities: () => Promise<Capabilities | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSessionState] = useState<SessionModel | null>(null);
+  const [capabilities, setCapabilitiesState] = useState<Capabilities | null>(null);
   const [loading, setLoading] = useState(true);
   const authConfig = useMemo(() => buildAuthConfig(), []);
   const discovery = AuthSession.useAutoDiscovery(authConfig.issuer);
@@ -1184,6 +1189,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let alive = true;
+
+    if (!session) {
+      setCapabilitiesState(null);
+      void clearCapabilitiesCache();
+      return () => {
+        alive = false;
+      };
+    }
+
+    if (session?.mode === 'demo') {
+      setCapabilitiesState(getDemoCapabilities(session.userId));
+      return () => {
+        alive = false;
+      };
+    }
+
+    (async () => {
+      const caps = await fetchCapabilities();
+      if (alive) setCapabilitiesState(caps);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
     configureFHIRClient({
         ensureFreshToken: () => ensureFreshToken('fhir'),
       logout: async () =>
@@ -1213,14 +1246,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [authConfig, authRequest, discovery, promptAsync]);
 
+  const refreshCapabilities = useCallback(async () => {
+    if (!session) {
+      setCapabilitiesState(null);
+      return null;
+    }
+    if (session.mode === 'demo') {
+      const demoCaps = getDemoCapabilities(session.userId);
+      setCapabilitiesState(demoCaps);
+      return demoCaps;
+    }
+    const caps = await fetchCapabilities({ forceRefresh: true });
+    setCapabilitiesState(caps);
+    return caps;
+  }, [session]);
+
   const value = useMemo<AuthContextValue>(() => ({
     session,
+    capabilities,
     loading,
     loginWithOAuth: loginWithAuth0,
     loginWithCredentials,
     loginDemo,
     logout,
-  }), [session, loading, loginWithAuth0, loginWithCredentials]);
+    refreshCapabilities,
+  }), [session, capabilities, loading, loginWithAuth0, loginWithCredentials, refreshCapabilities]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
