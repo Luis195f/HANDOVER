@@ -5,6 +5,28 @@
 
 Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend Django opcional para pruebas locales y una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
 
+## Identificación comercial y posicionamiento regulatorio
+
+**Nombre comercial oficial:** HANDOVER – Relevo Seguro de Enfermería  
+**Subtítulo técnico (MDR / QMS):** Sistema Clínico Digital para la Entrega y Continuidad del Turno de Enfermería  
+**Referencia normativa (uso obligatorio):** HANDOVER – Relevo Seguro de Enfermería, Sistema Clínico Digital para la Entrega y Continuidad del Turno de Enfermería (hereinafter, HANDOVER).
+
+**Posicionamiento regulatorio:** Software as a Medical Device (SaMD) orientado a soporte clínico. La documentación MDR (Annex II) y QMS está disponible en [`/docs`](docs). Este software apoya la continuidad del turno de enfermería y no sustituye el juicio clínico.
+
+**Seguridad y control de acceso (resumen):**
+- Autenticación JWT con Auth0 (OIDC) en el backend Django.
+- Autorización por roles (`nurse`, `supervisor`, `admin`) y scopes clínicos (`handover:write`, `handover:audit`).
+- Endpoint `/api/me/capabilities` expone capacidades derivadas de roles y scopes.
+
+**Auditoría y trazabilidad (resumen):**
+- Eventos de auditoría estructurados sin PHI, con hash de payload y request IDs.
+- Retención configurable y comando de limpieza de eventos.
+
+**Documentación regulatoria adicional:**
+- [Annex II (MDR)](docs/MDR_Anexo_II_HANDOVER.md)
+- [QMS](docs/QMS_HANDOVER.md)
+- [Matriz de trazabilidad MDR](docs/MDR_traceability_matrix.md)
+
 ## Requisitos
 
 - Node.js 20
