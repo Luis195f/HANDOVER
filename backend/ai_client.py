@@ -1,3 +1,4 @@
+# backend/ai_client.py
 import io
 import json
 import logging
@@ -5,8 +6,8 @@ import os
 from typing import Any, Dict, Optional
 
 from fastapi import UploadFile
-from pydantic import BaseModel
 from openai import OpenAI
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +15,27 @@ OPENAI_MODEL_SBAR = os.getenv("OPENAI_MODEL_SBAR", "gpt-4.1-mini")
 OPENAI_MODEL_WHISPER = os.getenv("OPENAI_MODEL_WHISPER", "whisper-1")
 OPENAI_MODEL_SUGGESTIONS = os.getenv("OPENAI_MODEL_SUGGESTIONS", OPENAI_MODEL_SBAR)
 
-client = OpenAI()
-
 ASYNC_TRANSCRIPTION_TIMEOUT = 60
 ASYNC_SBAR_TIMEOUT = 120
 ASYNC_SUGGESTIONS_TIMEOUT = 90
+
+_client: Optional[OpenAI] = None
+
+
+def get_client() -> OpenAI:
+    """
+    Lazy init: evita crear el cliente OpenAI al importar el módulo (rompe tests si no hay OPENAI_API_KEY).
+    """
+    global _client
+    if _client is not None:
+        return _client
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set")
+
+    _client = OpenAI(api_key=api_key)
+    return _client
 
 
 class ClinicalContext(BaseModel):
@@ -58,6 +75,7 @@ async def transcribe_audio(file: UploadFile, language: Optional[str]) -> str:
         audio_buffer.name = file.filename or "audio.m4a"
 
         logger.info("[ai] transcribe start size_bytes=%s", size_bytes)
+        client = get_client()
         response = client.audio.transcriptions.create(
             model=OPENAI_MODEL_WHISPER,
             file=audio_buffer,
@@ -95,6 +113,7 @@ def _build_sbar_prompt(text: str, language: str) -> str:
 async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
     try:
         logger.info("[ai] sbar start length=%s language=%s", len(text), language)
+        client = get_client()
         completion = client.chat.completions.create(
             model=OPENAI_MODEL_SBAR,
             messages=[
@@ -147,6 +166,7 @@ def _build_suggestions_prompt(ctx: ClinicalContext) -> str:
 async def generate_intervention_suggestions(ctx: ClinicalContext) -> SuggestionsResponse:
     try:
         logger.info("[ai] suggestions start section=%s", ctx.section)
+        client = get_client()
         completion = client.chat.completions.create(
             model=OPENAI_MODEL_SUGGESTIONS,
             messages=[

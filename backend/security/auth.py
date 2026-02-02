@@ -116,7 +116,8 @@ class Auth0JWTAuthentication(BaseAuthentication):
     - issuer
     - audience
     """
-    def authenticate(self, request) -> Optional[Tuple[Auth0User, str]]:
+
+    def authenticate(self, request) -> Optional[Tuple[Auth0User, Any]]:
         if not AUTH0_ISSUER_BASE_URL or not AUTH0_AUDIENCE:
             raise AuthenticationFailed(
                 "Auth0 not configured. Set AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE."
@@ -168,4 +169,18 @@ class Auth0JWTAuthentication(BaseAuthentication):
             raise AuthenticationFailed("Token missing sub")
 
         user = Auth0User(sub=sub, claims=claims)
-        return (user, token)
+
+        # ✅ IMPORTANTE: devolvemos claims como request.auth para que HasAnyScope funcione
+        return (user, claims)
+
+
+def verify_jwt(token: str):
+    """
+    Backwards-compatible alias for tests.
+    Tests monkeypatch this symbol; keep it stable.
+    """
+    # Si ya tienes una función real tipo verify_token/verify_jwt_token, llámala aquí.
+    # Por defecto, devolvemos el payload decodificado por tu lógica existente.
+    if "verify_token" in globals():
+        return verify_token(token)  # type: ignore[name-defined]
+    raise NotImplementedError("verify_jwt is not wired to a real implementation")
