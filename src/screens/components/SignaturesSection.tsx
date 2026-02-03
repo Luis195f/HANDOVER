@@ -26,6 +26,7 @@ type Props = {
   currentUser?: SignatureUser | null;
   administrativeUnitId?: string;
   getSignaturePayload?: () => unknown;
+  disableOutgoingAction?: boolean;
 };
 
 type SignatureKind = 'outgoing' | 'incoming';
@@ -84,6 +85,7 @@ export function SignaturesSection({
   currentUser,
   administrativeUnitId,
   getSignaturePayload,
+  disableOutgoingAction,
 }: Props) {
   const outgoing = value?.outgoing;
   const incoming = value?.incoming;
@@ -152,7 +154,7 @@ export function SignaturesSection({
         ) : (
           <View>
             <Text style={styles.emptyText}>{t('signatures.noSignature')}</Text>
-            {canSignWithUnit ? (
+            {canSignWithUnit && !(isOutgoing && disableOutgoingAction) ? (
               <View style={styles.action}>
                 <Button
                   title={isOutgoing ? t('signatures.signOutgoing') : t('signatures.signIncoming')}

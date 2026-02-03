@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Button } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -103,6 +103,25 @@ vi.mock('@/src/screens/components/ExportPdfButton', () => ({
     return null;
   },
 }));
+vi.mock('@/src/components/SignaturePad', () => ({
+  SignaturePad: ({
+    onChange,
+    disabled,
+  }: {
+    onChange: (value: { imageBase64: string; signedAt: string }) => void;
+    disabled?: boolean;
+  }) => {
+    if (disabled) return null;
+    return (
+      <Button
+        title="Capturar firma"
+        onPress={() =>
+          onChange({ imageBase64: 'mock-signature', signedAt: '2025-01-05T10:30:00.000Z' })
+        }
+      />
+    );
+  },
+}));
 
 const mockUseZodForm = vi.fn();
 let formValues: Record<string, any> = {};
@@ -154,11 +173,7 @@ describe('HandoverForm signatures', () => {
   });
 
   it('permite que una enfermera saliente firme', async () => {
-    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation((_, __, buttons) => {
-      const confirm = Array.isArray(buttons) ? buttons.find((b) => b.text === 'Confirmar') : null;
-      confirm?.onPress?.();
-      return 0;
-    });
+    formValues.status = 'final';
 
     const { getByText } = render(
       <HandoverForm
@@ -168,15 +183,13 @@ describe('HandoverForm signatures', () => {
     );
 
     await waitFor(() => {
-      expect(getByText('Firmar como enfermera saliente')).toBeTruthy();
+      expect(getByText('Capturar firma')).toBeTruthy();
     });
-    fireEvent.press(getByText('Firmar como enfermera saliente'));
+    fireEvent.press(getByText('Capturar firma'));
 
     await waitFor(() => {
-      expect(formValues.signatures?.outgoing?.fullName).toBe('Nurse One');
+      expect(formValues.signatures?.outgoing?.imageBase64).toBe('mock-signature');
     });
-
-    alertSpy.mockRestore();
   });
 
   it('no muestra botón de firma para roles no autorizados', () => {
@@ -189,7 +202,7 @@ describe('HandoverForm signatures', () => {
       />,
     );
 
-    expect(queryByText('Firmar como enfermera saliente')).toBeNull();
+    expect(queryByText('Capturar firma')).toBeNull();
   });
 
   it('bloquea finalización sin firma saliente', async () => {

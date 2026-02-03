@@ -14,6 +14,7 @@ import { useThemeTokens } from '@/src/theme';
 const ACTION_LABELS: Record<string, string> = {
   patient_open: 'Apertura de paciente',
   patient_edit: 'Edición de paciente',
+  handover_signed: 'Cierre legal de entrega',
 };
 
 type AuditLogItem = {

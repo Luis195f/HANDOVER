@@ -22,6 +22,7 @@ export type HandoverSignature = {
   role?: 'nurse' | 'admin' | 'supervisor';
   unitId: string;
   signedAt: string;
+  imageBase64?: string;
   signatureHash?: string;
   deviceInfo?: string;
   method?: 'session' | 'pin' | 'biometric';

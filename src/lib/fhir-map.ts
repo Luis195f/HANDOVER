@@ -121,6 +121,15 @@ type Annotation = {
   text: string;
 };
 
+type Signature = {
+  type: Coding[];
+  when: string;
+  who: Reference;
+  onBehalfOf?: Reference;
+  sigFormat?: string;
+  data?: string;
+};
+
 type MedicationDosage = {
   text?: string;
 };
@@ -329,6 +338,7 @@ type Bundle = {
   resourceType: 'Bundle';
   type: 'transaction';
   entry: BundleEntry[];
+  signature?: Signature[];
 };
 
 type ResourceWithMeta = FhirResource & { meta?: Meta };
@@ -341,6 +351,7 @@ export interface FhirBundleTransaction {
     resource: FhirResource;
     request: { method: 'POST'; url: string };
   }>;
+  signature?: Signature[];
 }
 
 const TEST_LOINC = {
@@ -829,6 +840,37 @@ function attestersFromSignatures(signatures?: HandoverSignatures): AttesterInput
   return [mapSingle(signatures.outgoing), mapSingle(signatures.incoming)].filter(
     (value): value is AttesterInput => value != null,
   );
+}
+
+function buildSignatureResource(signature?: HandoverSignature | null): Signature | undefined {
+  if (!signature?.imageBase64) return undefined;
+
+  // El tipo Reference del proyecto exige `reference` (además de identifier/display/type).
+  // Usamos un reference estable y "local" (no depende de que exista un Practitioner real en servidor).
+  const who: Reference = {
+    reference: `Practitioner/${encodeURIComponent(signature.userId)}`,
+    identifier: { system: 'urn:handover:user-id', value: signature.userId },
+    display: signature.fullName,
+    type: 'Practitioner',
+  };
+
+  const onBehalfOf: Reference | undefined = signature.unitId
+    ? {
+        reference: `Organization/${encodeURIComponent(signature.unitId)}`,
+        identifier: { system: 'urn:handover:unit-id', value: signature.unitId },
+        display: signature.unitId,
+        type: 'Organization',
+      }
+    : undefined;
+
+  return {
+    type: [{ system: 'urn:handover:signature-type', code: 'signature', display: 'Signature' }],
+    when: signature.signedAt,
+    who,
+    onBehalfOf,
+    sigFormat: 'image/png',
+    data: signature.imageBase64,
+  };
 }
 
 function stableHash(...parts: string[]): string {
@@ -3371,10 +3413,13 @@ export function buildHandoverBundle(
     request: { method: 'POST', url: 'Composition' },
   });
 
+  const bundleSignature = buildSignatureResource(values.signatures?.outgoing);
+
   const bundle: Bundle = {
     resourceType: 'Bundle',
     type: 'transaction',
     entry: entries,
+    signature: bundleSignature ? [bundleSignature] : undefined,
   };
 
   // BEGIN HANDOVER_FHIR_VALIDATION
@@ -3728,7 +3773,14 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
 
   entries.push(createTransactionEntry(applyProfiles(composition)));
 
-  return { resourceType: 'Bundle', type: 'transaction', entry: entries } satisfies FhirBundleTransaction;
+  const bundleSignature = buildSignatureResource(data.signatures?.outgoing);
+
+  return {
+    resourceType: 'Bundle',
+    type: 'transaction',
+    entry: entries,
+    signature: bundleSignature ? [bundleSignature] : undefined,
+  } satisfies FhirBundleTransaction;
 }
 
   const transactionBundleSchema = z.object({
