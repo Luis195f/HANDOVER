@@ -2472,28 +2472,38 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           {statusValue === 'final' ? (
             <View style={styles.signaturePadSection}>
               <SignaturePad
-                value={
-                  outgoingSignature?.imageBase64
-                    ? { imageBase64: outgoingSignature.imageBase64, signedAt: outgoingSignature.signedAt }
-                    : undefined
-                }
-                onChange={(payload) => {
-                  const nextSignature = buildOutgoingSignature(payload);
-                  if (!nextSignature) return;
-                  form.setValue(
-                    'signatures',
-                    {
-                      ...signaturesValue,
-                      outgoing: nextSignature,
-                    },
-                    { shouldDirty: true, shouldValidate: true },
-                  );
-                }}
-                disabled={!canSignOutgoing}
-              />
-              {!canSignOutgoing ? (
-                <Text style={styles.signaturePadHint}>{t('signatures.signaturePadDisabledHint')}</Text>
-              ) : null}
+  value={
+    outgoingSignature?.imageBase64
+      ? { imageBase64: outgoingSignature.imageBase64, signedAt: outgoingSignature.signedAt }
+      : undefined
+  }
+  onChange={(payload) => {
+    const built = buildOutgoingSignature(payload);
+    if (!built) return;
+
+    // CI exige method obligatorio: "session" | "pin" | "biometric"
+    // No cambiamos la semántica: firma manuscrita + sesión autenticada => "session".
+    const nextSignature = {
+      ...built,
+      method: built.method ?? 'session',
+    } as typeof built;
+
+    form.setValue(
+      'signatures',
+      {
+        ...(signaturesValue ?? {}),
+        outgoing: nextSignature,
+      },
+      { shouldDirty: true, shouldValidate: true },
+    );
+  }}
+  disabled={!canSignOutgoing}
+/>
+
+{!canSignOutgoing ? (
+  <Text style={styles.signaturePadHint}>{t('signatures.signaturePadDisabledHint')}</Text>
+) : null}
+
             </View>
           ) : null}
           <SignaturesSection
