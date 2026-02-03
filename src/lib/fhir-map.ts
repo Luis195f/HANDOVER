@@ -95,12 +95,19 @@ const applyProfileUrls = <T extends FhirResource>(
   if (defaultProfiles.length === 0) {
     return mergeProfileUrls(resource, options);
   }
+
   const existingProfiles = Array.isArray((resource as ResourceWithMeta).meta?.profile)
     ? Array.from((resource as ResourceWithMeta).meta?.profile ?? [])
     : [];
+
   const mergedProfiles = Array.from(new Set([...existingProfiles, ...defaultProfiles]));
   const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
-  return mergeProfileUrls({ ...(resource as ResourceWithMeta), meta } as T, options);
+
+  // TS2352 fix: hacemos el cast vía unknown para dejar claro que es intencional
+  return mergeProfileUrls(
+    { ...(resource as ResourceWithMeta), meta } as unknown as T,
+    options,
+  );
 };
 
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
@@ -455,24 +462,28 @@ const COMPOSITION_SECTION_CODES = {
   },
 } as const;
 
+const HANDOVER_OBSERVATION_SYSTEM = 'urn:handover-pro:observation' as unknown as TerminologySystem;
+const HANDOVER_COMPOSITION_SECTION_SYSTEM =
+  'urn:handover-pro:composition-section' as unknown as TerminologySystem;
+
 const HANDOVER_OBSERVATION_CODES = {
   administrative: {
-    system: 'urn:handover-pro:observation',
+    system: HANDOVER_OBSERVATION_SYSTEM,
     code: 'administrative',
     display: 'Administrative overview',
   },
   sbar: {
-    system: 'urn:handover-pro:observation',
+    system: HANDOVER_OBSERVATION_SYSTEM,
     code: 'sbar',
     display: 'SBAR summary',
   },
   bedsideChecklist: {
-    system: 'urn:handover-pro:observation',
+    system: HANDOVER_OBSERVATION_SYSTEM,
     code: 'bedside-checklist',
     display: 'Bedside checklist',
   },
   notes: {
-    system: 'urn:handover-pro:observation',
+    system: HANDOVER_OBSERVATION_SYSTEM,
     code: 'handover-notes',
     display: 'Handover notes',
   },
@@ -481,7 +492,7 @@ const HANDOVER_OBSERVATION_CODES = {
 const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
   codeableConceptFromCode(
     {
-      system: 'urn:handover-pro:composition-section',
+      system: HANDOVER_COMPOSITION_SECTION_SYSTEM,
       code,
       display,
     },
@@ -2710,18 +2721,26 @@ function mapSbarObservations(
 ): Observation[] {
   const sbar = values.sbar;
   if (!sbar) return [];
+
   const components: ObservationComponent[] = [];
   const addComponent = (code: string, display: string, value?: string | null) => {
     const trimmed = value?.trim();
     if (!trimmed) return;
     components.push({
       code: {
-        coding: [{ system: 'urn:handover-pro:sbar', code, display }],
+        coding: [
+          {
+            system: 'urn:handover-pro:sbar' as unknown as TerminologySystem,
+            code,
+            display,
+          },
+        ],
         text: display,
       },
       valueString: trimmed,
     });
   };
+
   addComponent('situation', 'Situation', sbar.situation);
   addComponent('background', 'Background', sbar.background);
   addComponent('assessment', 'Assessment', sbar.assessment);
@@ -2749,19 +2768,22 @@ function mapBedsideChecklistObservation(
   context: MappingContext,
 ): Observation | null {
   if (!checklist) return null;
+
   const components: ObservationComponent[] = [];
   const notes: Annotation[] = [];
+
   Object.entries(checklist).forEach(([key, value]) => {
     if (key === 'bedsideNotes' && typeof value === 'string' && value.trim()) {
       notes.push({ text: value.trim() });
       return;
     }
+
     if (typeof value === 'boolean') {
       components.push({
         code: {
           coding: [
             {
-              system: 'urn:handover-pro:bedside-checklist',
+              system: 'urn:handover-pro:bedside-checklist' as unknown as TerminologySystem,
               code: key,
               display: key,
             },
@@ -2771,7 +2793,7 @@ function mapBedsideChecklistObservation(
         valueCodeableConcept: {
           coding: [
             {
-              system: 'urn:handover-pro:boolean',
+              system: 'urn:handover-pro:boolean' as unknown as TerminologySystem,
               code: value ? 'yes' : 'no',
               display: value ? 'Yes' : 'No',
             },
@@ -2822,11 +2844,13 @@ function mapPsychosocialObservation(
   context: MappingContext,
 ): Observation | null {
   if (!psychosocial) return null;
+
   const emotionalStatus = psychosocial.emotionalStatus?.trim() || 'Sin novedad';
   const familyVisits = psychosocial.familyVisits ? 'Sí' : 'No';
   const familyNotes = psychosocial.familyNotes?.trim();
   const notes = familyNotes ? ` (${familyNotes})` : '';
   const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${notes}.`;
+
   return {
     resourceType: 'Observation',
     status: 'final',
@@ -2850,6 +2874,7 @@ export function buildComposition(
   const type = values.composition?.type ?? DEFAULT_COMPOSITION_TYPE;
   const status = values.composition?.status ?? 'final';
   const title = values.composition?.title ?? 'Clinical handover summary';
+
   const sections: CompositionSection[] = [];
   const attesters = [
     ...(values.composition?.attesters ?? []),
