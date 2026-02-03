@@ -182,7 +182,13 @@
     "sectionTitle": "Signatures",
     "currentUserLabel": "Current user: {{name}}",
     "selectUnitHint": "Select a unit to enable signing.",
-    "unknownUser": "User"
+    "unknownUser": "User",
+    "signaturePadTitle": "Handwritten signature required",
+    "signaturePadHelper": "Draw your signature to legally close the shift.",
+    "signaturePadClear": "Clear",
+    "signaturePadSave": "Save signature",
+    "signaturePadSignedAt": "Signature recorded: {{date}}",
+    "signaturePadDisabledHint": "Signing requires an active unit and nursing role."
   },
   "onboarding": {
     "steps": {
@@ -259,6 +265,9 @@
     "scannerUnavailableMessage": "This build does not include the QR screen (optional for demo).",
     "signatureMissingTitle": "Missing signature",
     "signatureMissingMessage": "To finalize the handover, the outgoing nurse signature is required.",
+    "legalConfirmTitle": "Legal handover closure",
+    "legalConfirmMessage": "I confirm the information is correct and sign the shift handover",
+    "legalConfirmAction": "Confirm legal closure",
     "saveErrorMessageFallback": "Could not save",
     "unitAccessDeniedTitle": "No access to unit",
     "fhirValidationTitle": "FHIR validation error",

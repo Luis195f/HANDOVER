@@ -139,6 +139,7 @@ const baseValidData: HandoverFormData = {
       fullName: "Enfermera Saliente",
       unitId: "UCI-1",
       signedAt: "2024-01-01T16:05:00.000Z",
+      imageBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
       method: "session",
     },
   },
