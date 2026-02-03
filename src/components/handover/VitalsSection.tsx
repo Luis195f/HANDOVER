@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Button, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Button, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Controller, useFormContext, useWatch, type FieldPath } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { VitalTrendsChart } from '@/src/screens/components/VitalTrendsChart';
@@ -10,7 +10,7 @@ import type { VitalTrendsData } from '../../../types/vitals';
 import VitalSignsChart from '@/src/components/VitalSignsChart';
 
 export type VitalsSectionProps = {
-  styles: Record<string, any>;
+  styles: Record<string, TextStyle | ViewStyle>;
   parseNumericInput: (value: string) => number | undefined;
   riskEvaluation: ReturnType<typeof deriveRiskEvaluationFromValues>;
   loadingVitalTrends: boolean;
@@ -67,7 +67,7 @@ const VitalsGroup = ({
   styles,
   parseNumericInput,
 }: {
-  styles: Record<string, any>;
+  styles: Record<string, TextStyle | ViewStyle>;
   parseNumericInput: (value: string) => number | undefined;
 }) => {
   const {

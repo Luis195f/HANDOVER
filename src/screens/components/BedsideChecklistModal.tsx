@@ -5,7 +5,7 @@ import { useFormContext } from 'react-hook-form';
 import type { HandoverValues } from '@/src/validation/schemas';
 import type { BedsideChecklistItem } from '@/src/config/bedsideChecklist';
 import { BedsideChecklistSection } from './BedsideChecklistSection';
-import { isBedsideChecklistComplete } from './bedsideChecklist.constants';
+import { isBedsideChecklistComplete } from '@/src/lib/bedsideChecklist';
 import { t } from '@/src/i18n';
 import { useThemeTokens } from '@/src/theme';
 

@@ -15,7 +15,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, useWatch } from 'react-hook-form';
+import { Controller, FormProvider, useWatch, type Path } from 'react-hook-form';
 import type { FieldErrors } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
@@ -109,7 +109,7 @@ import { VitalsSection } from '@/src/components/handover/VitalsSection';
 import { SummarySection } from '@/src/components/handover/SummarySection';
 import OxygenGroupSection from './components/OxygenGroupSection';
 import DevicesSection from './components/DevicesSection';
-import { isBedsideChecklistComplete } from './components/bedsideChecklist.constants';
+import { isBedsideChecklistComplete } from '@/src/lib/bedsideChecklist';
 import { SbarSection } from './handover/SbarSection';
 import * as SecureStore from 'expo-secure-store';
 import { HandoverFormActions } from './handover/HandoverFormActions';
@@ -675,7 +675,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         const raw = await SecureStore.getItemAsync(draftKey);
         if (cancelled) return;
 
-        const draft = safeJsonParse<any>(raw);
+        const draft = safeJsonParse<Partial<HandoverFormValues>>(raw);
         if (!draft) return;
 
         // Importante: NO pisar si ya hay datos
@@ -703,25 +703,27 @@ export default function HandoverForm({ navigation, route }: Props) {
     };
   }, [draftKey, reset, getValues]);
 
-  const prevChecklistRef = useRef<Record<string, any> | undefined>(undefined);
+  type BedsideChecklistSnapshot = HandoverFormValues['bedsideChecklist'] &
+    Record<string, boolean | string | undefined>;
+  const prevChecklistRef = useRef<BedsideChecklistSnapshot | undefined>(undefined);
 
   useEffect(() => {
     const sub = form.watch((values, meta) => {
       if (!meta?.name?.startsWith('bedsideChecklist')) return;
 
-      const current = (values as any)?.bedsideChecklist ?? {};
-      const prev = prevChecklistRef.current ?? {};
+      const current = (values?.bedsideChecklist ?? {}) as BedsideChecklistSnapshot;
+      const prev = prevChecklistRef.current ?? ({} as BedsideChecklistSnapshot);
 
       for (const [key, value] of Object.entries(current)) {
         if (key.endsWith('_timestamp')) continue;
 
-        const prevVal = (prev as any)[key];
+        const prevVal = prev[key];
         if (prevVal !== true && value === true) {
-          const tsKey = `bedsideChecklist.${key}_timestamp` as const;
-          const existing = form.getValues(tsKey as any);
+          const tsKey = `bedsideChecklist.${key}_timestamp` as Path<HandoverFormValues>;
+          const existing = form.getValues(tsKey);
 
           if (!existing) {
-            form.setValue(tsKey as any, new Date().toISOString(), {
+            form.setValue(tsKey, new Date().toISOString(), {
               shouldDirty: true,
               shouldTouch: false,
               shouldValidate: false,
@@ -1340,14 +1342,13 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [form, patientIdValue, session]);
 
   const onScanPress = () => {
-    const routeNames = (navigation as { getState?: () => { routeNames?: string[] } }).getState?.()
-      ?.routeNames ?? [];
+    const routeNames = navigation.getState?.().routeNames ?? [];
     if (routeNames.includes('QRScan')) {
       const trimmedPatientId =
         typeof patientIdValue === 'string' && patientIdValue.trim()
           ? patientIdValue.trim()
           : undefined;
-      (navigation as any).navigate('QRScan', {
+      navigation.navigate('QRScan', {
         returnTo: 'HandoverForm',
         patientIdParam: trimmedPatientId,
       });
@@ -1375,7 +1376,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     return trimmed.slice(0, maxLength);
   };
 
-  const compactObject = (input: Record<string, any>) =>
+  const compactObject = (input: Record<string, unknown>) =>
     Object.fromEntries(
       Object.entries(input).filter(([, value]) => value !== undefined && value !== null),
     );
@@ -1682,27 +1683,25 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const onSubmit = form.handleSubmit(
-  (values) => {
-    // Tri-estado real: si el usuario NO tocó el switch, no registramos "false"
-    const visitsTouched = Boolean(
-  (form.formState as any)?.dirtyFields?.psychosocial?.familyVisits
-);
+    (values) => {
+      // Tri-estado real: si el usuario NO tocó el switch, no registramos "false"
+      const visitsTouched = Boolean(form.formState.dirtyFields?.psychosocial?.familyVisits);
 
-    // Copia mínima para no mutar el objeto del form
-    const normalized: HandoverFormValues = {
-      ...values,
-      psychosocial: values.psychosocial ? { ...values.psychosocial } : undefined,
-    };
+      // Copia mínima para no mutar el objeto del form
+      const normalized: HandoverFormValues = {
+        ...values,
+        psychosocial: values.psychosocial ? { ...values.psychosocial } : undefined,
+      };
 
-    // Si no fue tocado, dejamos familyVisits como undefined (no registrado)
-    if (!visitsTouched && normalized.psychosocial) {
-      delete normalized.psychosocial.familyVisits;
-    }
+      // Si no fue tocado, dejamos familyVisits como undefined (no registrado)
+      if (!visitsTouched && normalized.psychosocial) {
+        delete normalized.psychosocial.familyVisits;
+      }
 
-    return submitHandover(normalized);
-  },
-  handleInvalidSubmit
-);
+      return submitHandover(normalized);
+    },
+    handleInvalidSubmit,
+  );
 
   const handleValidateForExport = async () => {
     const isValid = await form.trigger();

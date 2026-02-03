@@ -4,7 +4,7 @@ import { StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import type { BedsideChecklistItem } from '@/src/config/bedsideChecklist';
 import type { HandoverValues } from '@/src/validation/schemas';
-import { isBedsideChecklistComplete } from './bedsideChecklist.constants';
+import { isBedsideChecklistComplete } from '@/src/lib/bedsideChecklist';
 
 // BEGIN HANDOVER D1 – BedsideChecklist
 export function BedsideChecklistSection({
@@ -16,8 +16,9 @@ export function BedsideChecklistSection({
     watch,
     formState: { errors, submitCount },
   } = useFormContext<HandoverValues>();
-  const checklistErrors = (errors as any)?.bedsideChecklist;
+  const checklistErrors = errors.bedsideChecklist;
   const checklist = watch('bedsideChecklist');
+  const checklistMetadata = checklist as Record<string, boolean | string | undefined> | undefined;
   const checklistMessage =
     typeof checklistErrors?.message === 'string'
       ? checklistErrors.message
@@ -59,7 +60,7 @@ export function BedsideChecklistSection({
             <Text style={styles.timestamp}>
               {(() => {
                 const timestamp = formatChecklistTimestamp(
-                  checklist?.[`${item.key}_timestamp`],
+                  checklistMetadata?.[`${item.key}_timestamp`],
                 );
                 return timestamp ? `Marcado ${timestamp}` : 'Marcado';
               })()}

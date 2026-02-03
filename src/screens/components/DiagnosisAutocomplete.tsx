@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Controller, useFieldArray, useFormContext } from 'react-hook-form';
+import { Controller, useFieldArray, useFormContext, type FieldPath } from 'react-hook-form';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
@@ -9,6 +9,7 @@ import {
   type DiagnosisSystem,
 } from '../../catalogs/diagnosisCodes';
 import type { HandoverStructuredDiagnosis } from '../../types/handover';
+import type { HandoverValues } from '../../validation/schemas';
 import { validateSnomed } from '../../lib/terminology-validation';
 
 const styles = StyleSheet.create({
@@ -73,8 +74,10 @@ const styles = StyleSheet.create({
   errorText: { color: '#DC2626' },
 });
 
+type DiagnosisFieldName = FieldPath<Pick<HandoverValues, 'dxMedicalStructured' | 'dxNursingStructured'>>;
+
 interface DiagnosisAutocompleteProps {
-  name: 'dxMedicalStructured' | 'dxNursingStructured' | string;
+  name: DiagnosisFieldName;
   label: string;
   systemsAllowed?: DiagnosisSystem[];
 }
@@ -90,7 +93,7 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     setError,
     clearErrors,
     formState: { errors },
-  } = useFormContext<{ [key: string]: HandoverStructuredDiagnosis[] }>();
+  } = useFormContext<HandoverValues>();
   const { fields, append, remove } = useFieldArray({ control, name });
   const [query, setQuery] = useState('');
   const [validatingCode, setValidatingCode] = useState<string | null>(null);
@@ -100,12 +103,10 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     [query, systemsAllowed],
   );
 
-  const fieldError = (errors as any)?.[name]?.message as string | undefined;
+  const fieldError = errors[name]?.message as string | undefined;
 
   const handleSelect = async (code: DiagnosisCode) => {
-    const alreadySelected = fields.some(
-      (field) => field.code === code.code && (field as any).system === code.system,
-    );
+    const alreadySelected = fields.some((field) => field.code === code.code && field.system === code.system);
     if (alreadySelected) {
       setQuery('');
       return;
@@ -116,12 +117,12 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
       const result = await validateSnomed(code.code, code.display);
       setValidatingCode(null);
       if (!result.valid) {
-        setError(name as any, { type: 'validate', message: result.message });
+        setError(name, { type: 'validate', message: result.message });
         return;
       }
     }
 
-    clearErrors(name as any);
+    clearErrors(name);
     append({
       system: code.system,
       code: code.code,
@@ -172,9 +173,9 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
         {fields.map((field, index) => (
           <View key={field.id} style={styles.selectedItem}>
             <View style={styles.selectedHeader}>
-              <Text style={styles.selectedTitle}>{(field as any).display}</Text>
+              <Text style={styles.selectedTitle}>{field.display}</Text>
               <Text style={styles.pill}>
-                {(field as any).system} · {(field as any).code}
+                {field.system} · {field.code}
               </Text>
             </View>
             <Controller

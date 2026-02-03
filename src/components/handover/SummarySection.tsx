@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Text, TextInput, View } from 'react-native';
+import { Button, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import TtsButton from '@/src/components/TtsButton';
@@ -7,7 +7,7 @@ import type { SttConfig, SttStatus } from '@/src/lib/stt';
 import type { DictationField } from '@/src/screens/HandoverForm';
 
 export type SummarySectionProps = {
-  styles: Record<string, any>;
+  styles: Record<string, TextStyle | ViewStyle>;
   dictationState: {
     activeDictationField: DictationField | null;
     sttStatus: SttStatus | null;
