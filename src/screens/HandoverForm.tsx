@@ -1376,10 +1376,27 @@ export default function HandoverForm({ navigation, route }: Props) {
     return trimmed.slice(0, maxLength);
   };
 
-  const compactObject = (input: Record<string, unknown>) =>
-    Object.fromEntries(
-      Object.entries(input).filter(([, value]) => value !== undefined && value !== null),
-    );
+ const compactObject = <T extends Record<string, unknown>>(input: T): Partial<T> => {
+    const out: Partial<T> = {};
+    (Object.keys(input) as Array<keyof T>).forEach((key) => {
+    const value = input[key];
+    if (value !== undefined && value !== null) {
+      out[key] = value;
+    }
+   });
+  return out;
+};
+
+const compactNumberMap = <T extends Record<string, number | undefined | null>>(input: T) => {
+    const out: Partial<Record<keyof T, number>> = {};
+    (Object.keys(input) as Array<keyof T>).forEach((key) => {
+    const value = input[key];
+    if (typeof value === 'number') {
+      out[key] = value;
+    }
+   });
+  return out;
+};
 
   const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
     const vitals = watchedVitals ?? {};
@@ -1394,7 +1411,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       onOxygen: Boolean(oxygen.device || oxygen.flowLMin != null || oxygen.fio2 != null),
     });
 
-    const scores = compactObject({
+   const scores = compactNumberMap({
       news2: news2Breakdown?.total,
       braden: bradenScore,
     });
@@ -1420,7 +1437,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       language: 'es',
       section,
       vitalSigns: Object.keys(vitalSigns).length ? vitalSigns : undefined,
-      scores: Object.keys(scores).length ? scores : undefined,
+      scores: Object.keys(scores).length ? (scores as ClinicalContext['scores']) : undefined,
       diagnoses: diagnoses.length ? diagnoses : undefined,
       devices,
       notes,
