@@ -16,8 +16,11 @@ const getComponent = (panel: any, loincCode: string) =>
     comp?.code?.coding?.some((c: any) => c.system === LOINC && c.code === loincCode)
   );
 
-const getPatientFullUrl = (bundle: any) =>
-  (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient')?.fullUrl;
+const getPatientReference = (bundle: any) => {
+  const patientEntry = (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient');
+  const id = patientEntry?.resource?.id;
+  return id ? `Patient/${id}` : undefined;
+};
 
 const hasCategory = (obs: any, code: string) =>
   obs?.category?.some((cat: any) =>
@@ -37,13 +40,13 @@ describe('Panel de Presión Arterial 85354-9 — componentes y coherencia', () =
   it('emite BP panel 85354-9 con TAS/TAD cuando ambos están presentes', () => {
     const vitals = { sbp: 118, dbp: 73 };
     const bundle = buildHandoverBundle({ patientId, vitals }, { now, emitBpPanel: true });
-    const patientFullUrl = getPatientFullUrl(bundle);
+    const patientReference = getPatientReference(bundle);
 
     // Panel BP
     const bpPanel = findObsByLoinc(bundle, TEST_VITAL_CODES.BP_PANEL.code); // 85354-9
     expect(bpPanel).toBeTruthy();
     expect(bpPanel.status).toBe('final');
-    expect(bpPanel.subject?.reference).toBe(patientFullUrl);
+    expect(bpPanel.subject?.reference).toBe(patientReference);
     expect(bpPanel.effectiveDateTime).toBe(now);
     expect(hasCategory(bpPanel, TEST_CATEGORY_CODES.VITAL_SIGNS)).toBe(true);
 

@@ -5,6 +5,11 @@ import { TEST_SCALE_CODES } from './fhir-map.test-constants';
 
 const NOW = '2025-03-05T08:00:00.000Z';
 
+const entryReference = (entry: { resource: any }) =>
+  entry.resource?.resourceType && entry.resource?.id
+    ? `${entry.resource.resourceType}/${entry.resource.id}`
+    : undefined;
+
 const findObservation = (
   entries: Array<{ resource: any; fullUrl: string }>,
   target: typeof TEST_SCALE_CODES[keyof typeof TEST_SCALE_CODES],
@@ -79,13 +84,13 @@ describe('clinical scales mapping', () => {
     const sectionByTitle = (title: string) => composition?.section?.find((s: any) => s.title === title);
 
     expect(sectionByTitle('Pain assessment')?.entry?.map((ref: any) => ref.reference)).toContain(
-      evaEntry?.fullUrl,
+      entryReference(evaEntry as { resource: any }),
     );
     expect(sectionByTitle('Braden scale')?.entry?.map((ref: any) => ref.reference)).toContain(
-      bradenEntry?.fullUrl,
+      entryReference(bradenEntry as { resource: any }),
     );
     expect(sectionByTitle('Glasgow scale')?.entry?.map((ref: any) => ref.reference)).toContain(
-      glasgowEntry?.fullUrl,
+      entryReference(glasgowEntry as { resource: any }),
     );
   });
 });

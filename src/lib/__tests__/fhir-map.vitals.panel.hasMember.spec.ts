@@ -15,6 +15,11 @@ const findEntryByLoinc = (bundle: any, code: string) =>
     e?.resource?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
   );
 
+const entryReference = (entry: any) =>
+  entry?.resource?.resourceType && entry?.resource?.id
+    ? `${entry.resource.resourceType}/${entry.resource.id}`
+    : undefined;
+
 describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T12:00:00Z';
@@ -44,12 +49,12 @@ describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
     expect(sbpEntry).toBeDefined();
     expect(dbpEntry).toBeDefined();
 
-    expect(refs).toContain(hrEntry?.fullUrl);
-    expect(refs).toContain(rrEntry?.fullUrl);
-    expect(refs).toContain(tempEntry?.fullUrl);
-    expect(refs).toContain(spo2Entry?.fullUrl);
-    expect(refs).toContain(sbpEntry?.fullUrl);
-    expect(refs).toContain(dbpEntry?.fullUrl);
+    expect(refs).toContain(entryReference(hrEntry));
+    expect(refs).toContain(entryReference(rrEntry));
+    expect(refs).toContain(entryReference(tempEntry));
+    expect(refs).toContain(entryReference(spo2Entry));
+    expect(refs).toContain(entryReference(sbpEntry));
+    expect(refs).toContain(entryReference(dbpEntry));
   });
 
   it('sólo incluye los miembros disponibles (ej. sólo HR)', () => {
@@ -63,7 +68,7 @@ describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
     const hrEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code);
 
     expect(hrEntry).toBeDefined();
-    expect(refs).toEqual([hrEntry?.fullUrl]);
+    expect(refs).toEqual([entryReference(hrEntry)]);
   });
 
   it('por defecto no agrega hasMember (emitHasMember=false)', () => {

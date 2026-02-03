@@ -25,6 +25,7 @@ import type {
 import { zHandover } from '../validation/schemas';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 import { hashHex, fhirId } from './crypto';
+import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
 
 export type HandoverData = z.infer<typeof zHandover>;
@@ -84,6 +85,22 @@ const mergeProfileUrls = <T extends FhirResource>(
   const mergedProfiles = Array.from(new Set([...existingProfiles, ...filteredProfiles]));
   const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
   return { ...(resource as ResourceWithMeta), meta } as unknown as T;
+};
+
+const applyProfileUrls = <T extends FhirResource>(
+  resource: T,
+  options: ResolvedBuildOptions,
+): T => {
+  const defaultProfiles = FHIR_PROFILE_URLS_BY_RESOURCE_TYPE[resource.resourceType] ?? [];
+  if (defaultProfiles.length === 0) {
+    return mergeProfileUrls(resource, options);
+  }
+  const existingProfiles = Array.isArray((resource as ResourceWithMeta).meta?.profile)
+    ? Array.from((resource as ResourceWithMeta).meta?.profile ?? [])
+    : [];
+  const mergedProfiles = Array.from(new Set([...existingProfiles, ...defaultProfiles]));
+  const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
+  return mergeProfileUrls({ ...(resource as ResourceWithMeta), meta } as T, options);
 };
 
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
@@ -265,6 +282,26 @@ type Patient = {
   birthDate?: string;
 };
 
+type Practitioner = {
+  resourceType: 'Practitioner';
+  id?: string;
+  identifier?: Array<{ system: string; value: string }>;
+  name?: Array<{ text?: string }>;
+};
+
+type Encounter = {
+  resourceType: 'Encounter';
+  id?: string;
+  status: 'planned' | 'in-progress' | 'finished' | 'unknown';
+  class: {
+    system: string;
+    code: string;
+    display?: string;
+  };
+  subject?: Reference;
+  period?: Period;
+};
+
 type DetectedIssue = {
   resourceType: 'DetectedIssue';
   id?: string;
@@ -323,6 +360,8 @@ type FhirResource =
   | Device
   | Condition
   | Patient
+  | Practitioner
+  | Encounter
   | DetectedIssue;
 
 type BundleEntry = {
@@ -375,13 +414,79 @@ const PROFILE_OBSERVATION = 'http://hl7.org/fhir/StructureDefinition/Observation
 const DEFAULT_COMPOSITION_TYPE: CodeableConcept = {
   coding: [
     {
-      system: TERMINOLOGY_SYSTEMS.LOINC,
-      code: LOINC.dischargeSummary,
-      display: 'Discharge summary',
+      system: 'urn:handover-pro:composition-type',
+      code: 'handover-shift',
+      display: 'Nursing shift handover',
     },
   ],
   text: 'Clinical handover',
 };
+
+const COMPOSITION_SECTION_CODES = {
+  administrative: {
+    system: 'urn:handover-pro:composition-section',
+    code: 'administrative',
+    display: 'Administrative',
+  },
+  vitals: {
+    system: TERMINOLOGY_SYSTEMS.LOINC,
+    code: LOINC.vitalSignsPanel,
+    display: 'Vital signs',
+  },
+  care: {
+    system: 'urn:handover-pro:composition-section',
+    code: 'care-treatments',
+    display: 'Care / Treatments',
+  },
+  sbar: {
+    system: 'urn:handover-pro:composition-section',
+    code: 'sbar',
+    display: 'SBAR',
+  },
+  bedsideChecklist: {
+    system: 'urn:handover-pro:composition-section',
+    code: 'bedside-checklist',
+    display: 'Bedside checklist',
+  },
+  notes: {
+    system: 'urn:handover-pro:composition-section',
+    code: 'notes-summary',
+    display: 'Notes / Summary',
+  },
+} as const;
+
+const HANDOVER_OBSERVATION_CODES = {
+  administrative: {
+    system: 'urn:handover-pro:observation',
+    code: 'administrative',
+    display: 'Administrative overview',
+  },
+  sbar: {
+    system: 'urn:handover-pro:observation',
+    code: 'sbar',
+    display: 'SBAR summary',
+  },
+  bedsideChecklist: {
+    system: 'urn:handover-pro:observation',
+    code: 'bedside-checklist',
+    display: 'Bedside checklist',
+  },
+  notes: {
+    system: 'urn:handover-pro:observation',
+    code: 'handover-notes',
+    display: 'Handover notes',
+  },
+} as const;
+
+const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
+  codeableConceptFromCode(
+    {
+      system: 'urn:handover-pro:composition-section',
+      code,
+      display,
+    },
+    display,
+  );
 
 const vitalCategoryConcept: CodeableConcept = {
   coding: [
@@ -640,6 +745,11 @@ type BundleReferenceIndex = {
   oxygen: string[];
   devices: string[];
   attachments: string[];
+  administrative: string[];
+  care: string[];
+  sbar: string[];
+  bedsideChecklist: string[];
+  notes: string[];
   nutrition: string[];
   elimination: string[];
   mobilitySkin: string[];
@@ -735,13 +845,21 @@ const normalizePatientId = (patientId: string): string => {
 
 function patientReference(patientId: string): Reference {
   const normalized = normalizePatientId(patientId);
-  return { reference: `Patient/${normalized}`, type: 'Patient' };
+  return {
+    reference: `Patient/${normalized}`,
+    type: 'Patient',
+    identifier: { system: 'urn:handover-pro:patient-id', value: normalized },
+  };
 }
 
 function encounterReference(encounterId?: string): Reference | undefined {
   const normalized = normalizeId(encounterId, '');
   if (!normalized) return undefined;
-  return { reference: `Encounter/${normalized}`, type: 'Encounter' };
+  return {
+    reference: `Encounter/${normalized}`,
+    type: 'Encounter',
+    identifier: { system: 'urn:handover-pro:encounter-id', value: normalized },
+  };
 }
 
 function codeableConceptFromCode(
@@ -787,7 +905,15 @@ function ensureAuthorReference(values: { author?: AuthorInput }): Reference {
     reference: `Practitioner/${id}`,
     type: 'Practitioner',
     display: author?.display ?? 'Handover Practitioner',
+    identifier: { system: 'urn:handover-pro:practitioner-id', value: id },
   };
+}
+
+function resolveReferenceId(reference: string | undefined, resourceType: string): string | undefined {
+  if (!reference) return undefined;
+  const [type, id] = reference.split('/');
+  if (type === resourceType && id) return id;
+  return undefined;
 }
 
 function assertAttachmentData(input: AttachmentInput): void {
@@ -812,12 +938,17 @@ function mapAttesters(inputs?: CompositionInput['attesters']): CompositionAttest
       base.time = attester.time;
     }
     if (attester.partyReference || attester.partyDisplay || attester.partyIdentifier) {
-      base.party = {
-        reference: attester.partyReference ?? '',
-        display: attester.partyDisplay,
-      };
-      if (attester.partyIdentifier) {
-        base.party.identifier = attester.partyIdentifier;
+      const resolvedReference =
+        attester.partyReference?.trim() ||
+        (attester.partyIdentifier?.value
+          ? `Practitioner/${encodeURIComponent(attester.partyIdentifier.value)}`
+          : undefined);
+      if (resolvedReference) {
+        base.party = {
+          reference: resolvedReference,
+          display: attester.partyDisplay,
+          identifier: attester.partyIdentifier,
+        };
       }
     }
     return base;
@@ -911,7 +1042,7 @@ function narrativeFromText(text: string): Narrative {
   };
 }
 
-function administrativeNarrative(data: AdministrativeData): Narrative {
+function administrativeSummaryText(data: AdministrativeData): string {
   const staffIn = data.staffIn?.filter(Boolean) ?? [];
   const staffOut = data.staffOut?.filter(Boolean) ?? [];
   const incidents = data.incidents?.filter(Boolean) ?? [];
@@ -929,7 +1060,11 @@ function administrativeNarrative(data: AdministrativeData): Narrative {
   if (incidents.length > 0) {
     lines.push(`Incidents: ${incidents.join('; ')}`);
   }
-  return narrativeFromText(lines.join('\n'));
+  return lines.join('\n');
+}
+
+function administrativeNarrative(data: AdministrativeData): Narrative {
+  return narrativeFromText(administrativeSummaryText(data));
 }
 
 const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
@@ -942,6 +1077,8 @@ const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
   Composition: 'comp-',
   Condition: 'cond-',
   Patient: 'pat-',
+  Practitioner: 'prac-',
+  Encounter: 'enc-',
   DetectedIssue: 'di-',
 };
 
@@ -950,13 +1087,27 @@ function assignStableIds<T extends FhirResource>(
   patientId: string,
 ): { resource: T; fullUrl: string } {
   const normalizedPatientId = normalizePatientId(patientId);
+  const existingId = typeof resource.id === 'string' && resource.id.trim().length > 0
+    ? resource.id.trim()
+    : undefined;
   const { id: _ignored, ...rest } = resource;
   const key = `${resource.resourceType}|${normalizedPatientId}|${stableStringify(rest)}`;
   const prefix = FHIR_ID_PREFIX[resource.resourceType] ?? '';
-  const id = fhirId(prefix, key);
-  const urn = `urn:uuid:${hashHex(key, 32)}`;
+  const id = existingId ?? fhirId(prefix, key);
+  const urn = `urn:uuid:${hashHex(`${resource.resourceType}|${normalizedPatientId}|${id}`, 32)}`;
   const withId = { ...resource, id } as T;
   return { resource: withId, fullUrl: urn };
+}
+
+function referenceFromResource(resource: Pick<FhirResource, 'resourceType' | 'id'>): Reference {
+  if (!resource.id) {
+    throw new Error(`Missing id for ${resource.resourceType} reference`);
+  }
+  return { reference: `${resource.resourceType}/${resource.id}`, type: resource.resourceType };
+}
+
+function referenceStringFromResource(resource: Pick<FhirResource, 'resourceType' | 'id'>): string {
+  return referenceFromResource(resource).reference;
 }
 
 function replaceSubjectReference<T extends FhirResource>(resource: T, subject: Reference): T {
@@ -1457,7 +1608,7 @@ export function mapMedicationStatements(
 export function mapDeviceUse(
   values: OxygenValues,
   options?: BuildOptions,
-): Array<Procedure | DeviceUseStatement> {
+): Array<Procedure | DeviceUseStatement | Device> {
   const optionsMerged = resolveOptions(options);
   if (!values.oxygenTherapy) return [];
   const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
@@ -1521,17 +1672,25 @@ export function mapDeviceUse(
     procedure.note = [{ text: parsed.note }];
   }
 
-  const resources: Array<Procedure | DeviceUseStatement> = [procedure];
+  const resources: Array<Procedure | DeviceUseStatement | Device> = [procedure];
 
   if (parsed.deviceDisplay || parsed.deviceId || parsed.device) {
     const deviceDisplay = parsed.deviceDisplay ?? parsed.device ?? 'Oxygen delivery device';
+    const deviceId = parsed.deviceId ?? fhirId('device-', `${values.patientId}|${deviceDisplay}`);
+    resources.push({
+      resourceType: 'Device',
+      id: deviceId,
+      status: 'active',
+      deviceName: [{ name: deviceDisplay, type: 'user-friendly' }],
+      patient: subject,
+    });
     resources.push({
       resourceType: 'DeviceUseStatement',
       status: parsed.end ? 'completed' : 'active',
       subject,
       encounter,
       device: {
-        reference: parsed.deviceId ? `Device/${parsed.deviceId}` : 'Device/oxygen-source',
+        reference: `Device/${deviceId}`,
         display: deviceDisplay,
       },
       timingPeriod: parsed.end ? { start, end: parsed.end } : { start },
@@ -2527,6 +2686,160 @@ function mapDocumentReferenceAttachments(
   });
 }
 
+function mapAdministrativeObservation(
+  values: CompositionValues,
+  context: MappingContext,
+): Observation | null {
+  if (!values.administrativeData) return null;
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.administrative),
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    issued: context.effectiveDateTime,
+    valueString: administrativeSummaryText(values.administrativeData),
+  };
+}
+
+function mapSbarObservations(
+  values: CompositionValues,
+  context: MappingContext,
+): Observation[] {
+  const sbar = values.sbar;
+  if (!sbar) return [];
+  const components: ObservationComponent[] = [];
+  const addComponent = (code: string, display: string, value?: string | null) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+    components.push({
+      code: {
+        coding: [{ system: 'urn:handover-pro:sbar', code, display }],
+        text: display,
+      },
+      valueString: trimmed,
+    });
+  };
+  addComponent('situation', 'Situation', sbar.situation);
+  addComponent('background', 'Background', sbar.background);
+  addComponent('assessment', 'Assessment', sbar.assessment);
+  addComponent('recommendation', 'Recommendation', sbar.recommendation);
+
+  if (components.length === 0) return [];
+
+  return [
+    {
+      resourceType: 'Observation',
+      status: 'final',
+      category: [surveyCategoryConcept],
+      code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.sbar),
+      subject: context.subject,
+      encounter: context.encounter,
+      effectiveDateTime: context.effectiveDateTime,
+      issued: context.effectiveDateTime,
+      component: components,
+    },
+  ];
+}
+
+function mapBedsideChecklistObservation(
+  checklist: HandoverBedsideChecklist,
+  context: MappingContext,
+): Observation | null {
+  if (!checklist) return null;
+  const components: ObservationComponent[] = [];
+  const notes: Annotation[] = [];
+  Object.entries(checklist).forEach(([key, value]) => {
+    if (key === 'bedsideNotes' && typeof value === 'string' && value.trim()) {
+      notes.push({ text: value.trim() });
+      return;
+    }
+    if (typeof value === 'boolean') {
+      components.push({
+        code: {
+          coding: [
+            {
+              system: 'urn:handover-pro:bedside-checklist',
+              code: key,
+              display: key,
+            },
+          ],
+          text: key,
+        },
+        valueCodeableConcept: {
+          coding: [
+            {
+              system: 'urn:handover-pro:boolean',
+              code: value ? 'yes' : 'no',
+              display: value ? 'Yes' : 'No',
+            },
+          ],
+          text: value ? 'Yes' : 'No',
+        },
+      });
+    }
+  });
+
+  if (components.length === 0 && notes.length === 0) return null;
+
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.bedsideChecklist),
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    issued: context.effectiveDateTime,
+    component: components.length > 0 ? components : undefined,
+    note: notes.length > 0 ? notes : undefined,
+  };
+}
+
+function mapSummaryObservation(
+  summary: string | null | undefined,
+  context: MappingContext,
+): Observation | null {
+  const trimmed = summary?.trim();
+  if (!trimmed) return null;
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.notes),
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    issued: context.effectiveDateTime,
+    valueString: trimmed,
+  };
+}
+
+function mapPsychosocialObservation(
+  psychosocial: PsychosocialCare | undefined,
+  context: MappingContext,
+): Observation | null {
+  if (!psychosocial) return null;
+  const emotionalStatus = psychosocial.emotionalStatus?.trim() || 'Sin novedad';
+  const familyVisits = psychosocial.familyVisits ? 'Sí' : 'No';
+  const familyNotes = psychosocial.familyNotes?.trim();
+  const notes = familyNotes ? ` (${familyNotes})` : '';
+  const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${notes}.`;
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.notes, 'Psychosocial notes'),
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    issued: context.effectiveDateTime,
+    valueString: narrative,
+  };
+}
+
 export function buildComposition(
   values: CompositionValues,
   refs: BundleReferenceIndex,
@@ -2543,42 +2856,58 @@ export function buildComposition(
     ...attestersFromSignatures(values.signatures),
   ];
 
-  const addSbarSection = (label: string, content?: string | null) => {
-    if (!content) return;
-    const trimmed = content.trim();
-    if (!trimmed) return;
-    sections.push({ title: label, text: narrativeFromText(trimmed) });
-  };
-
-  if (typeof values.closingSummary === 'string') {
-    const trimmed = values.closingSummary.trim();
-    if (trimmed) {
-      sections.push({ title: 'Shift summary', text: narrativeFromText(trimmed) });
-    }
-  }
-
-  if (values.sbar) {
-    addSbarSection('SBAR - Situation', values.sbar.situation);
-    addSbarSection('SBAR - Background', values.sbar.background);
-    addSbarSection('SBAR - Assessment', values.sbar.assessment);
-    addSbarSection('SBAR - Recommendation', values.sbar.recommendation);
-  }
-
-  if (values.administrativeData) {
-    sections.push({ title: 'Administrative data', text: administrativeNarrative(values.administrativeData) });
+  if (refs.administrative.length > 0) {
+    sections.push({
+      title: 'Administrative',
+      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.administrative, 'Administrative'),
+      entry: refs.administrative.map((reference) => ({ reference })),
+    });
   }
 
   if (refs.vitals.length > 0) {
     sections.push({
       title: 'Vital signs',
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.VITAL_SIGNS_PANEL, 'Vital signs'),
+      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.vitals, 'Vital signs'),
       entry: refs.vitals.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.care.length > 0) {
+    sections.push({
+      title: 'Care / Treatments',
+      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.care, 'Care / Treatments'),
+      entry: refs.care.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.sbar.length > 0) {
+    sections.push({
+      title: 'SBAR',
+      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.sbar, 'SBAR'),
+      entry: refs.sbar.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.bedsideChecklist.length > 0) {
+    sections.push({
+      title: 'Bedside checklist',
+      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.bedsideChecklist, 'Bedside checklist'),
+      entry: refs.bedsideChecklist.map((reference) => ({ reference })),
+    });
+  }
+
+  if (refs.notes.length > 0) {
+    sections.push({
+      title: 'Notes / Summary',
+      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.notes, 'Notes / Summary'),
+      entry: refs.notes.map((reference) => ({ reference })),
     });
   }
 
   if (refs.medications.length > 0) {
     sections.push({
       title: 'Medications',
+      code: compositionSectionConcept('medications', 'Medications'),
       entry: refs.medications.map((reference) => ({ reference })),
     });
   }
@@ -2586,16 +2915,7 @@ export function buildComposition(
   if (refs.treatments.length > 0) {
     sections.push({
       title: 'Tratamientos no farmacológicos',
-      code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
-            code: 'treatments',
-            display: 'Non-pharmacological treatments',
-          },
-        ],
-        text: 'Non-pharmacological treatments',
-      },
+      code: compositionSectionConcept('treatments', 'Non-pharmacological treatments'),
       entry: refs.treatments.map((reference) => ({ reference })),
     });
   }
@@ -2603,6 +2923,7 @@ export function buildComposition(
   if (refs.exams.length > 0) {
     sections.push({
       title: 'Exámenes',
+      code: compositionSectionConcept('exams', 'Exámenes'),
       entry: refs.exams.map((reference) => ({ reference })),
     });
   } else if ((values.sectionSources?.exams ?? 0) > 0) {
@@ -2612,6 +2933,7 @@ export function buildComposition(
   if (refs.procedures.length > 0) {
     sections.push({
       title: 'Procedimientos',
+      code: compositionSectionConcept('procedures', 'Procedimientos'),
       entry: refs.procedures.map((reference) => ({ reference })),
     });
   } else if ((values.sectionSources?.procedures ?? 0) > 0) {
@@ -2621,6 +2943,7 @@ export function buildComposition(
   if (refs.oxygen.length > 0) {
     sections.push({
       title: 'Oxygen therapy',
+      code: compositionSectionConcept('oxygen', 'Oxygen therapy'),
       entry: refs.oxygen.map((reference) => ({ reference })),
     });
   }
@@ -2628,6 +2951,7 @@ export function buildComposition(
   if (refs.devices.length > 0) {
     sections.push({
       title: 'Devices',
+      code: compositionSectionConcept('devices', 'Devices'),
       entry: refs.devices.map((reference) => ({ reference })),
     });
   }
@@ -2635,6 +2959,7 @@ export function buildComposition(
   if (refs.nutrition.length > 0) {
     sections.push({
       title: 'Nutrition',
+      code: compositionSectionConcept('nutrition', 'Nutrition'),
       entry: refs.nutrition.map((reference) => ({ reference })),
     });
   }
@@ -2642,6 +2967,7 @@ export function buildComposition(
   if (refs.elimination.length > 0) {
     sections.push({
       title: 'Elimination',
+      code: compositionSectionConcept('elimination', 'Elimination'),
       entry: refs.elimination.map((reference) => ({ reference })),
     });
   }
@@ -2649,6 +2975,7 @@ export function buildComposition(
   if (refs.mobilitySkin.length > 0) {
     sections.push({
       title: 'Mobility and Skin',
+      code: compositionSectionConcept('mobility-skin', 'Mobility and Skin'),
       entry: refs.mobilitySkin.map((reference) => ({ reference })),
     });
   }
@@ -2656,6 +2983,7 @@ export function buildComposition(
   if (refs.risks.length > 0) {
     sections.push({
       title: 'Risks',
+      code: compositionSectionConcept('risks', 'Risks'),
       entry: refs.risks.map((reference) => ({ reference })),
     });
   }
@@ -2663,6 +2991,7 @@ export function buildComposition(
   if (refs.detectedIssues && refs.detectedIssues.length > 0) {
     sections.push({
       title: 'Detected issues',
+      code: compositionSectionConcept('detected-issues', 'Detected issues'),
       entry: refs.detectedIssues.map((reference) => ({ reference })),
     });
   }
@@ -2670,6 +2999,7 @@ export function buildComposition(
   if (refs.diagnoses && refs.diagnoses.length > 0) {
     sections.push({
       title: 'Diagnoses',
+      code: compositionSectionConcept('diagnoses', 'Diagnoses'),
       entry: refs.diagnoses.map((reference) => ({ reference })),
     });
   }
@@ -2677,36 +3007,41 @@ export function buildComposition(
   if (refs.fluidBalance.length > 0) {
     sections.push({
       title: 'Fluid balance',
+      code: compositionSectionConcept('fluid-balance', 'Fluid balance'),
       entry: refs.fluidBalance.map((reference) => ({ reference })),
     });
   }
 
   if (refs.pain.length > 0) {
-    sections.push({ title: 'Pain assessment', entry: refs.pain.map((reference) => ({ reference })) });
+    sections.push({
+      title: 'Pain assessment',
+      code: compositionSectionConcept('pain', 'Pain assessment'),
+      entry: refs.pain.map((reference) => ({ reference })),
+    });
   }
 
   if (refs.braden.length > 0) {
-    sections.push({ title: 'Braden scale', entry: refs.braden.map((reference) => ({ reference })) });
+    sections.push({
+      title: 'Braden scale',
+      code: compositionSectionConcept('braden', 'Braden scale'),
+      entry: refs.braden.map((reference) => ({ reference })),
+    });
   }
 
   if (refs.glasgow.length > 0) {
-    sections.push({ title: 'Glasgow scale', entry: refs.glasgow.map((reference) => ({ reference })) });
+    sections.push({
+      title: 'Glasgow scale',
+      code: compositionSectionConcept('glasgow', 'Glasgow scale'),
+      entry: refs.glasgow.map((reference) => ({ reference })),
+    });
   }
 
   if (refs.attachments.length > 0) {
     sections.push({
       title: 'Attachments',
+      code: compositionSectionConcept('attachments', 'Attachments'),
       entry: refs.attachments.map((reference) => ({ reference })),
     });
-  }
-
-  if (values.psychosocial) {
-    const emotionalStatus = values.psychosocial.emotionalStatus?.trim() || 'Sin novedad';
-    const familyVisits = values.psychosocial.familyVisits ? 'Sí' : 'No';
-    const familyNotes = values.psychosocial.familyNotes?.trim();
-    const notes = familyNotes ? ` (${familyNotes})` : '';
-    const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${notes}.`;
-    sections.push({ title: 'Psicosocial', text: narrativeFromText(narrative) });
   }
 
   const subject = patientReference(values.patientId);
@@ -2743,7 +3078,7 @@ export function buildHandoverBundle(
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { ...optionsMerged, now: () => nowIso };
   const applyProfiles = <T extends FhirResource>(resource: T) =>
-    mergeProfileUrls(resource, optionsMerged);
+    applyProfileUrls(resource, optionsMerged);
   const normalizedPatientId = normalizePatientId(values.patientId);
 
   const patient: Patient = {
@@ -2756,16 +3091,70 @@ export function buildHandoverBundle(
     applyProfiles(patient),
     normalizedPatientId,
   );
-  const patientSubjectReference: Reference = { reference: patientFullUrl, type: 'Patient' };
+  const patientSubjectReference: Reference = {
+    reference: `Patient/${patientWithId.id ?? normalizedPatientId}`,
+    type: 'Patient',
+    identifier: { system: 'urn:handover-pro:patient-id', value: normalizedPatientId },
+  };
+  const practitionerId =
+    resolveReferenceId(values.author?.reference, 'Practitioner') ?? values.author?.id ?? 'handover-app';
+  const practitioner: Practitioner = {
+    resourceType: 'Practitioner',
+    id: practitionerId,
+    identifier: [{ system: 'urn:handover-pro:practitioner-id', value: practitionerId }],
+    name: [{ text: values.author?.display ?? 'Handover Practitioner' }],
+  };
+  const encounterId = normalizeId(values.encounterId, fhirId('enc-', normalizedPatientId));
+  const encounterPeriod =
+    values.administrativeData?.shiftStart && values.administrativeData?.shiftEnd
+      ? {
+          start: values.administrativeData.shiftStart,
+          end: values.administrativeData.shiftEnd,
+        }
+      : undefined;
+  const encounter: Encounter | undefined = encounterId
+    ? {
+        resourceType: 'Encounter',
+        id: encounterId,
+        status: 'finished',
+        class: {
+          system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+          code: 'IMP',
+          display: 'inpatient encounter',
+        },
+        subject: patientSubjectReference,
+        period: encounterPeriod,
+      }
+    : undefined;
 
   const mappingContext: MappingContext = {
     subject: patientSubjectReference,
-    encounter: encounterReference(values.encounterId),
+    encounter: encounterId
+      ? {
+          reference: `Encounter/${encounterId}`,
+          type: 'Encounter',
+          identifier: { system: 'urn:handover-pro:encounter-id', value: encounterId },
+        }
+      : undefined,
     effectiveDateTime: nowIso,
   };
 
   const diagnoses = mapDiagnoses(values as HandoverData, mappingContext);
   const detectedIssues = mapDetectedIssuesFromRisks(values.risksStructured, mappingContext);
+  const administrativeObservation = mapAdministrativeObservation(
+    { administrativeData: values.administrativeData } as CompositionValues,
+    mappingContext,
+  );
+  const sbarObservations = mapSbarObservations(
+    { sbar: values.sbar } as CompositionValues,
+    mappingContext,
+  );
+  const bedsideChecklistObservation = mapBedsideChecklistObservation(
+    values.bedsideChecklist,
+    mappingContext,
+  );
+  const summaryObservation = mapSummaryObservation(values.closingSummary, mappingContext);
+  const psychosocialObservation = mapPsychosocialObservation(values.psychosocial, mappingContext);
 
   const normalizedVitals = values.vitals
     ? (() => {
@@ -2823,7 +3212,7 @@ export function buildHandoverBundle(
         ? mapVitalsToObservations(
             {
               patientId: values.patientId,
-              encounterId: values.encounterId,
+              encounterId,
               vitals: normalizedVitals,
             },
             sharedOptions,
@@ -2831,7 +3220,7 @@ export function buildHandoverBundle(
         : mapObservationVitals(
             {
               patientId: values.patientId,
-              encounterId: values.encounterId,
+              encounterId,
               ...(normalizedVitals as VitalsValues),
             },
             sharedOptions,
@@ -2887,26 +3276,26 @@ export function buildHandoverBundle(
   const oxygenObservations = mapOxygenObservations(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       oxygenTherapy: values.oxygenTherapy,
     },
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const nutritionObservations = mapNutritionCare(
-    { patientId: values.patientId, encounterId: values.encounterId, nutrition: values.nutrition },
+    { patientId: values.patientId, encounterId, nutrition: values.nutrition },
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const eliminationObservations = mapEliminationCare(
-    { patientId: values.patientId, encounterId: values.encounterId, elimination: values.elimination },
+    { patientId: values.patientId, encounterId, elimination: values.elimination },
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const mobilitySkinObservations = mapMobilitySkinCare(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       mobility: values.mobility,
       skin: values.skin,
     },
@@ -2914,7 +3303,7 @@ export function buildHandoverBundle(
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const fluidBalanceObservations = mapFluidBalanceCare(
-    { patientId: values.patientId, encounterId: values.encounterId, fluidBalance: values.fluidBalance },
+    { patientId: values.patientId, encounterId, fluidBalance: values.fluidBalance },
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
@@ -2932,7 +3321,7 @@ export function buildHandoverBundle(
   const examObservations = mapExamObservations(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       exams: values.exams,
       examsPending: (values as { examsPending?: unknown }).examsPending,
     },
@@ -2941,7 +3330,7 @@ export function buildHandoverBundle(
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
   const procedureResources = mapProcedures(
-    { patientId: values.patientId, encounterId: values.encounterId, procedures: values.procedures },
+    { patientId: values.patientId, encounterId, procedures: values.procedures },
     sharedOptions,
   ).map((procedure) => replaceSubjectReference(procedure, patientSubjectReference));
 
@@ -2953,7 +3342,7 @@ export function buildHandoverBundle(
   const medications = mapMedicationStatements(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       medications: values.medications,
       meds: values.meds,
     },
@@ -2961,14 +3350,14 @@ export function buildHandoverBundle(
   ).map((medication) => replaceSubjectReference(medication, patientSubjectReference));
 
   const treatmentProcedures = mapTreatments(
-    { patientId: values.patientId, encounterId: values.encounterId, treatments: values.treatments },
+    { patientId: values.patientId, encounterId, treatments: values.treatments },
     sharedOptions,
   ).map((procedure) => replaceSubjectReference(procedure, patientSubjectReference));
 
   const oxygenResources = mapDeviceUse(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       oxygenTherapy: values.oxygenTherapy,
     },
     sharedOptions,
@@ -2977,7 +3366,7 @@ export function buildHandoverBundle(
   const deviceResources = mapDevices(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       devices: values.devices,
     },
     sharedOptions,
@@ -2994,7 +3383,7 @@ export function buildHandoverBundle(
   const document = mapDocumentReferenceAudio(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       author: values.author,
       audioAttachment: values.audioAttachment,
     },
@@ -3003,7 +3392,7 @@ export function buildHandoverBundle(
   const attachmentDocuments = mapDocumentReferenceAttachments(
     {
       patientId: values.patientId,
-      encounterId: values.encounterId,
+      encounterId,
       author: values.author,
       attachments: values.attachments ?? [],
     },
@@ -3013,17 +3402,49 @@ export function buildHandoverBundle(
     ? replaceSubjectReference(document, patientSubjectReference)
     : undefined;
 
-  const entries: BundleEntry[] = [
-    { fullUrl: patientFullUrl, resource: patientWithId, request: { method: 'POST', url: 'Patient' } },
-  ];
+  const patientEntry: BundleEntry = {
+    fullUrl: patientFullUrl,
+    resource: patientWithId,
+    request: { method: 'POST', url: 'Patient' },
+  };
+  const practitionerEntry: BundleEntry = createTransactionEntry(
+    applyProfiles(practitioner),
+    practitioner.id,
+  ) as BundleEntry;
+  const signaturePractitionerIds = new Set(
+    [values.signatures?.outgoing?.userId, values.signatures?.incoming?.userId].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    ),
+  );
+  signaturePractitionerIds.delete(practitionerId);
+  const extraPractitionerEntries = Array.from(signaturePractitionerIds).map((id) =>
+    createTransactionEntry(
+      applyProfiles({
+        resourceType: 'Practitioner',
+        id,
+        identifier: [{ system: 'urn:handover-pro:practitioner-id', value: id }],
+        name: [{ text: id }],
+      }),
+      id,
+    ) as BundleEntry,
+  );
+  const encounterEntry: BundleEntry | undefined = encounter
+    ? (createTransactionEntry(applyProfiles(encounter), encounter.id) as BundleEntry)
+    : undefined;
+  const resourceEntries: BundleEntry[] = [];
   const vitalObservationByCode = new Map<string, Observation>();
-  const vitalFullUrlsByCode = new Map<string, string>();
+  const vitalReferenceByCode = new Map<string, string>();
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];
   const treatmentRefs: string[] = [];
   const oxygenRefs: string[] = [];
   const deviceRefs: string[] = [];
   const attachmentRefs: string[] = [];
+  const administrativeRefs: string[] = [];
+  const careRefs: string[] = [];
+  const sbarRefs: string[] = [];
+  const bedsideChecklistRefs: string[] = [];
+  const notesRefs: string[] = [];
   const nutritionRefs: string[] = [];
   const eliminationRefs: string[] = [];
   const mobilitySkinRefs: string[] = [];
@@ -3037,23 +3458,46 @@ export function buildHandoverBundle(
   const issueRefs: string[] = [];
   const diagnosisRefs: string[] = [];
 
+  const pushObservationEntry = (
+    observation: Observation | null | undefined,
+    refBucket: string[],
+  ) => {
+    if (!observation) return;
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
+    resourceEntries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    refBucket.push(referenceStringFromResource(resource));
+  };
+
+  pushObservationEntry(administrativeObservation, administrativeRefs);
+  sbarObservations.forEach((observation) => pushObservationEntry(observation, sbarRefs));
+  pushObservationEntry(bedsideChecklistObservation, bedsideChecklistRefs);
+  pushObservationEntry(summaryObservation, notesRefs);
+  pushObservationEntry(psychosocialObservation, careRefs);
+
   vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    vitalsRefs.push(fullUrl);
+    vitalsRefs.push(referenceStringFromResource(resource));
     const loincCode = resource.code?.coding?.find(
       (coding) => coding.system === TERMINOLOGY_SYSTEMS.LOINC,
     )?.code;
     if (loincCode) {
       vitalObservationByCode.set(loincCode, resource);
-      vitalFullUrlsByCode.set(loincCode, fullUrl);
+      vitalReferenceByCode.set(loincCode, referenceStringFromResource(resource));
     }
   });
 
@@ -3062,7 +3506,7 @@ export function buildHandoverBundle(
     if (bpPanelResource) {
       const bpMembers: Reference[] = [];
       const addBpMember = (code: string) => {
-        const ref = vitalFullUrlsByCode.get(code);
+        const ref = vitalReferenceByCode.get(code);
         if (ref) {
           bpMembers.push({ reference: ref });
         }
@@ -3115,7 +3559,7 @@ export function buildHandoverBundle(
       if (optionsMerged.emitHasMember) {
         const members: Reference[] = [];
         const addMemberByCode = (code: string) => {
-          const ref = vitalFullUrlsByCode.get(code);
+          const ref = vitalReferenceByCode.get(code);
           if (ref) {
             members.push({ reference: ref });
           }
@@ -3135,12 +3579,12 @@ export function buildHandoverBundle(
       }
 
       const { resource, fullUrl } = assignStableIds(applyProfiles(panel), values.patientId);
-      entries.push({
+      resourceEntries.push({
         fullUrl,
         resource,
         request: { method: 'POST', url: 'Observation' },
       });
-      vitalsRefs.push(fullUrl);
+      vitalsRefs.push(referenceStringFromResource(resource));
     }
   }
 
@@ -3149,12 +3593,12 @@ export function buildHandoverBundle(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    oxygenRefs.push(fullUrl);
+    oxygenRefs.push(referenceStringFromResource(resource));
   });
 
   nutritionObservations.forEach((observation) => {
@@ -3162,12 +3606,12 @@ export function buildHandoverBundle(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    nutritionRefs.push(fullUrl);
+    nutritionRefs.push(referenceStringFromResource(resource));
   });
 
   eliminationObservations.forEach((observation) => {
@@ -3175,12 +3619,12 @@ export function buildHandoverBundle(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    eliminationRefs.push(fullUrl);
+    eliminationRefs.push(referenceStringFromResource(resource));
   });
 
   mobilitySkinObservations.forEach((observation) => {
@@ -3188,12 +3632,12 @@ export function buildHandoverBundle(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    mobilitySkinRefs.push(fullUrl);
+    mobilitySkinRefs.push(referenceStringFromResource(resource));
   });
 
   fluidBalanceObservations.forEach((observation) => {
@@ -3201,12 +3645,12 @@ export function buildHandoverBundle(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    fluidBalanceRefs.push(fullUrl);
+    fluidBalanceRefs.push(referenceStringFromResource(resource));
   });
 
   examObservations.forEach((observation) => {
@@ -3214,12 +3658,12 @@ export function buildHandoverBundle(
       applyProfiles(observation),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Observation' },
     });
-    examRefs.push(fullUrl);
+    examRefs.push(referenceStringFromResource(resource));
   });
 
   if (evaObservation) {
@@ -3227,8 +3671,8 @@ export function buildHandoverBundle(
       applyProfiles(evaObservation),
       values.patientId,
     );
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
-    painRefs.push(fullUrl);
+    resourceEntries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+    painRefs.push(referenceStringFromResource(resource));
   }
 
   if (bradenObservation) {
@@ -3236,8 +3680,8 @@ export function buildHandoverBundle(
       applyProfiles(bradenObservation),
       values.patientId,
     );
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
-    bradenRefs.push(fullUrl);
+    resourceEntries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+    bradenRefs.push(referenceStringFromResource(resource));
   }
 
   if (glasgowObservation) {
@@ -3245,8 +3689,8 @@ export function buildHandoverBundle(
       applyProfiles(glasgowObservation),
       values.patientId,
     );
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
-    glasgowRefs.push(fullUrl);
+    resourceEntries.push({ fullUrl, resource, request: { method: 'POST', url: 'Observation' } });
+    glasgowRefs.push(referenceStringFromResource(resource));
   }
 
   riskConditions.forEach((condition) => {
@@ -3254,18 +3698,18 @@ export function buildHandoverBundle(
       applyProfiles(condition),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Condition' },
     });
-    riskRefs.push(fullUrl);
+    riskRefs.push(referenceStringFromResource(resource));
   });
 
   detectedIssues.forEach((issue) => {
     const { resource, fullUrl } = assignStableIds(applyProfiles(issue), values.patientId);
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'DetectedIssue' } });
-    issueRefs.push(fullUrl);
+    resourceEntries.push({ fullUrl, resource, request: { method: 'POST', url: 'DetectedIssue' } });
+    issueRefs.push(referenceStringFromResource(resource));
   });
 
   diagnoses.forEach((condition) => {
@@ -3273,8 +3717,8 @@ export function buildHandoverBundle(
       applyProfiles(condition),
       values.patientId,
     );
-    entries.push({ fullUrl, resource, request: { method: 'POST', url: 'Condition' } });
-    diagnosisRefs.push(fullUrl);
+    resourceEntries.push({ fullUrl, resource, request: { method: 'POST', url: 'Condition' } });
+    diagnosisRefs.push(referenceStringFromResource(resource));
   });
 
   medications.forEach((medication) => {
@@ -3282,12 +3726,12 @@ export function buildHandoverBundle(
       applyProfiles(medication),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'MedicationStatement' },
     });
-    medicationRefs.push(fullUrl);
+    medicationRefs.push(referenceStringFromResource(resource));
   });
 
   treatmentProcedures.forEach((procedure) => {
@@ -3295,12 +3739,12 @@ export function buildHandoverBundle(
       applyProfiles(procedure),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Procedure' },
     });
-    treatmentRefs.push(fullUrl);
+    treatmentRefs.push(referenceStringFromResource(resource));
   });
 
   procedureResources.forEach((procedure) => {
@@ -3308,12 +3752,12 @@ export function buildHandoverBundle(
       applyProfiles(procedure),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'Procedure' },
     });
-    procedureRefs.push(fullUrl);
+    procedureRefs.push(referenceStringFromResource(resource));
   });
 
   oxygenResources.forEach((resource) => {
@@ -3321,19 +3765,19 @@ export function buildHandoverBundle(
       applyProfiles(resource),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource: withId,
       request: { method: 'POST', url: resource.resourceType },
     });
-    oxygenRefs.push(fullUrl);
+    oxygenRefs.push(referenceStringFromResource(withId));
   });
 
   deviceResources.forEach((resource) => {
     const entry = createTransactionEntry(applyProfiles(resource), resource.id);
-    entries.push(entry);
+    resourceEntries.push(entry as BundleEntry);
     if (resource.resourceType === 'DeviceUseStatement') {
-      deviceRefs.push(entry.fullUrl);
+      deviceRefs.push(referenceStringFromResource(entry.resource as FhirResource));
     }
   });
 
@@ -3342,12 +3786,12 @@ export function buildHandoverBundle(
       applyProfiles(documentWithPatientReference),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'DocumentReference' },
     });
-    attachmentRefs.push(fullUrl);
+    attachmentRefs.push(referenceStringFromResource(resource));
   }
 
   attachmentDocuments.forEach((attachmentDoc) => {
@@ -3355,13 +3799,23 @@ export function buildHandoverBundle(
       applyProfiles(attachmentDoc),
       values.patientId,
     );
-    entries.push({
+    resourceEntries.push({
       fullUrl,
       resource,
       request: { method: 'POST', url: 'DocumentReference' },
     });
-    attachmentRefs.push(fullUrl);
+    attachmentRefs.push(referenceStringFromResource(resource));
   });
+
+  careRefs.push(
+    ...nutritionRefs,
+    ...eliminationRefs,
+    ...mobilitySkinRefs,
+    ...fluidBalanceRefs,
+    ...treatmentRefs,
+    ...oxygenRefs,
+    ...deviceRefs,
+  );
 
   const composition = replaceSubjectReference(
     buildComposition(
@@ -3384,6 +3838,11 @@ export function buildHandoverBundle(
         oxygen: oxygenRefs,
         devices: deviceRefs,
         attachments: attachmentRefs,
+        administrative: administrativeRefs,
+        care: careRefs,
+        sbar: sbarRefs,
+        bedsideChecklist: bedsideChecklistRefs,
+        notes: notesRefs,
         nutrition: nutritionRefs,
         elimination: eliminationRefs,
         mobilitySkin: mobilitySkinRefs,
@@ -3406,14 +3865,38 @@ export function buildHandoverBundle(
     applyProfiles(composition),
     values.patientId,
   );
-
-  entries.push({
+  const compositionEntry: BundleEntry = {
     fullUrl: compositionFullUrl,
     resource: compositionWithId,
     request: { method: 'POST', url: 'Composition' },
-  });
+  };
 
   const bundleSignature = buildSignatureResource(values.signatures?.outgoing);
+
+  const rollbackPlan = {
+    criticalEntryTypes: ['Patient', 'Practitioner', 'Encounter', 'Composition'],
+    dependentEntryTypes: [
+      'Observation',
+      'Condition',
+      'Procedure',
+      'MedicationStatement',
+      'DeviceUseStatement',
+      'DocumentReference',
+      'DetectedIssue',
+      'Device',
+    ],
+    note: 'Rollback should preserve patient/practitioner/encounter/composition while replaying dependent entries.',
+  };
+  void rollbackPlan;
+
+  const entries: BundleEntry[] = [
+    patientEntry,
+    practitionerEntry,
+    ...extraPractitionerEntries,
+    ...(encounterEntry ? [encounterEntry] : []),
+    compositionEntry,
+    ...resourceEntries,
+  ];
 
   const bundle: Bundle = {
     resourceType: 'Bundle',
@@ -3438,10 +3921,11 @@ export function buildHandoverBundle(
 type BundleEntryTransaction = FhirBundleTransaction['entry'][number];
 
 function createTransactionEntry(resource: FhirResource, idOverride?: string): BundleEntryTransaction {
-  const generatedId = idOverride ?? uuidv4();
-  const resourceWithId = { ...resource, id: resource.id ?? idOverride ?? generatedId } as FhirResource;
+  const resourceId = resource.id ?? idOverride ?? uuidv4();
+  const fullUrlId = hashHex(`${resource.resourceType}|${resourceId}`, 32);
+  const resourceWithId = { ...resource, id: resourceId } as FhirResource;
   return {
-    fullUrl: `urn:uuid:${generatedId}`,
+    fullUrl: `urn:uuid:${fullUrlId}`,
     resource: resourceWithId,
     request: { method: 'POST', url: resource.resourceType },
   };
@@ -3538,10 +4022,11 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const timestamp = data.administrativeData.shiftEnd ?? optionsMerged.now();
   const sharedOptions: BuildOptions = { now: () => timestamp };
   const applyProfiles = <T extends FhirResource>(resource: T) =>
-    mergeProfileUrls(resource, optionsMerged);
+    applyProfileUrls(resource, optionsMerged);
+  const encounterId = normalizeId((data as { encounterId?: string }).encounterId, fhirId('enc-', data.patientId));
   const mappingContext: MappingContext = {
     subject: patientReference(data.patientId),
-    encounter: encounterReference(undefined),
+    encounter: encounterReference(encounterId),
     effectiveDateTime: timestamp,
   };
 
@@ -3550,26 +4035,26 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
       : undefined;
 
   const vitals = data.vitals
-    ? mapObservationVitals({ patientId: data.patientId, ...data.vitals }, sharedOptions)
+    ? mapObservationVitals({ patientId: data.patientId, encounterId, ...data.vitals }, sharedOptions)
     : [];
   const oxygenObservations = mapOxygenObservations(
-    { patientId: data.patientId, oxygenTherapy: oxygenTherapyInput },
+    { patientId: data.patientId, encounterId, oxygenTherapy: oxygenTherapyInput },
     sharedOptions,
   );
   const nutrition = mapNutritionCare(
-    { patientId: data.patientId, nutrition: data.nutrition },
+    { patientId: data.patientId, encounterId, nutrition: data.nutrition },
     sharedOptions,
   );
   const elimination = mapEliminationCare(
-    { patientId: data.patientId, elimination: data.elimination },
+    { patientId: data.patientId, encounterId, elimination: data.elimination },
     sharedOptions,
   );
   const mobilitySkin = mapMobilitySkinCare(
-    { patientId: data.patientId, mobility: data.mobility, skin: data.skin },
+    { patientId: data.patientId, encounterId, mobility: data.mobility, skin: data.skin },
     sharedOptions,
   );
   const fluidBalance = mapFluidBalanceCare(
-    { patientId: data.patientId, fluidBalance: data.fluidBalance },
+    { patientId: data.patientId, encounterId, fluidBalance: data.fluidBalance },
     sharedOptions,
   );
   const normalizedExamsForm = normalizeExamInputs({
@@ -3585,6 +4070,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const examObservations = mapExamObservations(
     {
       patientId: data.patientId,
+      encounterId,
       exams: data.exams,
       examsPending: (data as { examsPending?: unknown }).examsPending,
     },
@@ -3592,7 +4078,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     normalizedExamsForm,
   );
   const procedureResources = mapProcedures(
-    { patientId: data.patientId, procedures: data.procedures },
+    { patientId: data.patientId, encounterId, procedures: data.procedures },
     sharedOptions,
   );
   const evaObservation = mapEvaObservation(data.painAssessment, mappingContext);
@@ -3600,29 +4086,51 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const glasgowObservation = mapGlasgowObservation(data.glasgow, mappingContext);
   const riskConditions = mapRiskConditions(data.risks, mappingContext);
   const detectedIssues = mapDetectedIssuesFromRisks(data.risksStructured, mappingContext);
+  const administrativeObservation = mapAdministrativeObservation(
+    { administrativeData: data.administrativeData } as CompositionValues,
+    mappingContext,
+  );
+  const sbarObservations = mapSbarObservations(
+    {
+      sbar: {
+        situation: data.sbarSituation,
+        background: data.sbarBackground,
+        assessment: data.sbarAssessment,
+        recommendation: data.sbarRecommendation,
+      },
+    } as CompositionValues,
+    mappingContext,
+  );
+  const bedsideChecklistObservation = mapBedsideChecklistObservation(
+    (data as { bedsideChecklist?: HandoverBedsideChecklist }).bedsideChecklist ?? {},
+    mappingContext,
+  );
+  const summaryObservation = mapSummaryObservation(data.closingSummary ?? data.evolution, mappingContext);
+  const psychosocialObservation = mapPsychosocialObservation(data.psychosocial, mappingContext);
   const medications = mapMedicationStatements(
     {
       patientId: data.patientId,
+      encounterId,
       medications: data.medications,
       meds: data.meds,
     },
     sharedOptions,
   );
   const treatmentProcedures = mapTreatments(
-    { patientId: data.patientId, treatments: data.treatments },
+    { patientId: data.patientId, encounterId, treatments: data.treatments },
     sharedOptions,
   );
   const oxygenDevices = mapDeviceUse(
-    { patientId: data.patientId, oxygenTherapy: oxygenTherapyInput },
+    { patientId: data.patientId, encounterId, oxygenTherapy: oxygenTherapyInput },
     sharedOptions,
   );
   const deviceResources = mapDevices(
-    { patientId: data.patientId, encounterId: undefined, devices: data.devices },
+    { patientId: data.patientId, encounterId, devices: data.devices },
     sharedOptions,
   );
   const document = data.audioUri
     ? mapDocumentReferenceAudio(
-        { patientId: data.patientId, audioAttachment: { url: data.audioUri, contentType: 'audio/mpeg' } },
+        { patientId: data.patientId, encounterId, audioAttachment: { url: data.audioUri, contentType: 'audio/mpeg' } },
         sharedOptions,
       )
     : undefined;
@@ -3635,9 +4143,50 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     identifier: [{ system: 'urn:handover-pro:patient-id', value: data.patientId }],
   };
 
-  const entries: BundleEntryTransaction[] = [
-    createTransactionEntry(applyProfiles(patient), uuidv4()),
-  ];
+  const patientEntry = createTransactionEntry(applyProfiles(patient), uuidv4());
+  const practitionerId = resolveReferenceId((data as { authorReference?: string }).authorReference, 'Practitioner')
+    ?? (data as { authorId?: string }).authorId
+    ?? 'handover-app';
+  const practitioner: Practitioner = {
+    resourceType: 'Practitioner',
+    id: practitionerId,
+    identifier: [{ system: 'urn:handover-pro:practitioner-id', value: practitionerId }],
+    name: [{ text: (data as { authorName?: string }).authorName ?? 'Handover Practitioner' }],
+  };
+  const encounter: Encounter | undefined = encounterId
+    ? {
+        resourceType: 'Encounter',
+        id: encounterId,
+        status: 'finished',
+        class: {
+          system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+          code: 'IMP',
+          display: 'inpatient encounter',
+        },
+        subject: patientReference(data.patientId),
+      }
+    : undefined;
+  const practitionerEntry = createTransactionEntry(applyProfiles(practitioner), practitioner.id);
+  const signaturePractitionerIds = new Set(
+    [
+      data.signatures?.outgoing?.userId,
+      data.signatures?.incoming?.userId,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0),
+  );
+  signaturePractitionerIds.delete(practitionerId);
+  const extraPractitionerEntries = Array.from(signaturePractitionerIds).map((id) =>
+    createTransactionEntry(
+      applyProfiles({
+        resourceType: 'Practitioner',
+        id,
+        identifier: [{ system: 'urn:handover-pro:practitioner-id', value: id }],
+        name: [{ text: id }],
+      }),
+      id,
+    ),
+  );
+  const encounterEntry = encounter ? createTransactionEntry(applyProfiles(encounter), encounter.id) : undefined;
+  const resourceEntries: BundleEntryTransaction[] = [];
   const refs: BundleReferenceIndex & { detectedIssues?: string[]; diagnoses?: string[] } = {
     vitals: [],
     medications: [],
@@ -3645,6 +4194,11 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     oxygen: [],
     devices: [],
     attachments: [],
+    administrative: [],
+    care: [],
+    sbar: [],
+    bedsideChecklist: [],
+    notes: [],
     nutrition: [],
     elimination: [],
     mobilitySkin: [],
@@ -3662,67 +4216,96 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const pushEntry = (resource: FhirResource | undefined | null) => {
     if (!resource) return;
     const entry = createTransactionEntry(applyProfiles(resource));
-    entries.push(entry);
+    resourceEntries.push(entry);
+    const reference = referenceStringFromResource(entry.resource as FhirResource);
     switch (resource.resourceType) {
       case 'Observation':
-        if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.EVA.code) refs.pain.push(entry.fullUrl);
-        else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.BRADEN.code) refs.braden.push(entry.fullUrl);
-        else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.GLASGOW.code) refs.glasgow.push(entry.fullUrl);
-        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'vital-signs'))) refs.vitals.push(entry.fullUrl);
+        if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.EVA.code) refs.pain.push(reference);
+        else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.BRADEN.code) refs.braden.push(reference);
+        else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.GLASGOW.code) refs.glasgow.push(reference);
+        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'vital-signs'))) refs.vitals.push(reference);
         else if (
           !resource.code?.coding?.length &&
           resource.category?.some((c) =>
             c.coding?.some((coding) => coding.system === OBSERVATION_CATEGORY_SYSTEM),
           )
         )
-          refs.exams.push(entry.fullUrl);
-        else refs.mobilitySkin.push(entry.fullUrl);
+          refs.exams.push(reference);
+        else refs.mobilitySkin.push(reference);
         break;
       case 'MedicationStatement':
-        refs.medications.push(entry.fullUrl);
+        refs.medications.push(reference);
         break;
       case 'Procedure': {
         const hasTreatmentCoding = resource.code?.coding?.some(
           (coding) => coding.system === TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE,
         );
-        if (hasTreatmentCoding) refs.treatments.push(entry.fullUrl);
-        else refs.procedures.push(entry.fullUrl);
+        if (hasTreatmentCoding) refs.treatments.push(reference);
+        else refs.procedures.push(reference);
         break;
       }
       case 'DeviceUseStatement':
-        refs.oxygen.push(entry.fullUrl);
+        refs.oxygen.push(reference);
         break;
       case 'DocumentReference':
-        refs.attachments.push(entry.fullUrl);
+        refs.attachments.push(reference);
         break;
       case 'Condition':
-        refs.risks.push(entry.fullUrl);
+        refs.risks.push(reference);
         break;
       case 'DetectedIssue':
-        refs.detectedIssues?.push(entry.fullUrl);
+        refs.detectedIssues?.push(reference);
         break;
       default:
         break;
     }
   };
 
+  const pushObservationWithRefs = (
+    observation: Observation | null | undefined,
+    refBucket: string[],
+  ) => {
+    if (!observation) return;
+    const entry = createTransactionEntry(applyProfiles(observation));
+    resourceEntries.push(entry);
+    refBucket.push(referenceStringFromResource(entry.resource as FhirResource));
+  };
+
+  pushObservationWithRefs(administrativeObservation, refs.administrative);
+  sbarObservations.forEach((observation) => pushObservationWithRefs(observation, refs.sbar));
+  pushObservationWithRefs(bedsideChecklistObservation, refs.bedsideChecklist);
+  pushObservationWithRefs(summaryObservation, refs.notes);
+  pushObservationWithRefs(psychosocialObservation, refs.care);
+
   vitals.forEach(pushEntry);
   oxygenObservations.forEach(pushEntry);
   nutrition.forEach((obs) => {
     pushEntry(obs);
-    refs.nutrition.push(entries[entries.length - 1].fullUrl);
+    const lastEntry = resourceEntries[resourceEntries.length - 1];
+    if (lastEntry) {
+      refs.nutrition.push(referenceStringFromResource(lastEntry.resource as FhirResource));
+    }
   });
   elimination.forEach((obs) => {
     pushEntry(obs);
-    refs.elimination.push(entries[entries.length - 1].fullUrl);
+    const lastEntry = resourceEntries[resourceEntries.length - 1];
+    if (lastEntry) {
+      refs.elimination.push(referenceStringFromResource(lastEntry.resource as FhirResource));
+    }
   });
   mobilitySkin.forEach((obs) => {
     pushEntry(obs);
-    refs.mobilitySkin.push(entries[entries.length - 1].fullUrl);
+    const lastEntry = resourceEntries[resourceEntries.length - 1];
+    if (lastEntry) {
+      refs.mobilitySkin.push(referenceStringFromResource(lastEntry.resource as FhirResource));
+    }
   });
   fluidBalance.forEach((obs) => {
     pushEntry(obs);
-    refs.fluidBalance.push(entries[entries.length - 1].fullUrl);
+    const lastEntry = resourceEntries[resourceEntries.length - 1];
+    if (lastEntry) {
+      refs.fluidBalance.push(referenceStringFromResource(lastEntry.resource as FhirResource));
+    }
   });
   examObservations.forEach((obs) => {
     pushEntry(obs);
@@ -3734,8 +4317,8 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   detectedIssues.forEach(pushEntry);
   diagnoses.forEach((condition) => {
     const entry = createTransactionEntry(applyProfiles(condition));
-    entries.push(entry);
-    refs.diagnoses?.push(entry.fullUrl);
+    resourceEntries.push(entry);
+    refs.diagnoses?.push(referenceStringFromResource(entry.resource as FhirResource));
   });
   medications.forEach(pushEntry);
   treatmentProcedures.forEach(pushEntry);
@@ -3745,16 +4328,27 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   oxygenDevices.forEach(pushEntry);
   deviceResources.forEach((resource) => {
     const entry = createTransactionEntry(applyProfiles(resource), resource.id);
-    entries.push(entry);
+    resourceEntries.push(entry);
     if (resource.resourceType === 'DeviceUseStatement') {
-      refs.devices.push(entry.fullUrl);
+      refs.devices.push(referenceStringFromResource(entry.resource as FhirResource));
     }
   });
   if (document) pushEntry(document);
 
+  refs.care.push(
+    ...refs.nutrition,
+    ...refs.elimination,
+    ...refs.mobilitySkin,
+    ...refs.fluidBalance,
+    ...refs.treatments,
+    ...refs.oxygen,
+    ...refs.devices,
+  );
+
   const composition = buildComposition(
     {
       patientId: data.patientId,
+      encounterId,
       closingSummary: data.closingSummary ?? data.evolution,
       administrativeData: data.administrativeData,
       sbar: {
@@ -3771,9 +4365,18 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     sharedOptions,
   );
 
-  entries.push(createTransactionEntry(applyProfiles(composition)));
+  const compositionEntry = createTransactionEntry(applyProfiles(composition));
 
   const bundleSignature = buildSignatureResource(data.signatures?.outgoing);
+
+  const entries: BundleEntryTransaction[] = [
+    patientEntry,
+    practitionerEntry,
+    ...extraPractitionerEntries,
+    ...(encounterEntry ? [encounterEntry] : []),
+    compositionEntry,
+    ...resourceEntries,
+  ];
 
   return {
     resourceType: 'Bundle',
@@ -3805,6 +4408,78 @@ export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; er
       errors: result.error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`),
     };
   }
+
+  const errors: string[] = [];
+  const entries = bundle.entry ?? [];
+  const compositionEntry = entries.find((entry) => entry.resource?.resourceType === 'Composition');
+  if (!compositionEntry) {
+    errors.push('Composition entry is required');
+  }
+
+  const referencePattern = /^[A-Za-z]+\/[A-Za-z0-9.\-]{1,64}$/;
+  const entryReferenceSet = new Set(
+    entries
+      .map((entry) => {
+        const resource = entry.resource as { resourceType?: string; id?: string };
+        return resource?.resourceType && resource?.id ? `${resource.resourceType}/${resource.id}` : null;
+      })
+      .filter((value): value is string => Boolean(value)),
+  );
+  const entryResourceTypes = new Set(
+    entries
+      .map((entry) => (entry.resource as { resourceType?: string }).resourceType)
+      .filter((value): value is string => Boolean(value)),
+  );
+
+  const collectReferences = (value: unknown, refs: string[] = []): string[] => {
+    if (!value || typeof value !== 'object') return refs;
+    if (Array.isArray(value)) {
+      value.forEach((item) => collectReferences(item, refs));
+      return refs;
+    }
+    const record = value as Record<string, unknown>;
+    if (typeof record.reference === 'string') {
+      refs.push(record.reference);
+    }
+    Object.values(record).forEach((item) => collectReferences(item, refs));
+    return refs;
+  };
+
+  entries.forEach((entry, index) => {
+    const resource = entry.resource as { resourceType?: string };
+    if (entry.request?.url && resource?.resourceType && entry.request.url !== resource.resourceType) {
+      errors.push(`entry[${index}].request.url must match resourceType`);
+    }
+    const references = collectReferences(entry.resource);
+    references.forEach((reference) => {
+      if (!referencePattern.test(reference)) {
+        errors.push(`entry[${index}].reference "${reference}" is not ResourceType/id`);
+        return;
+      }
+      const [referenceType] = reference.split('/');
+      if (entryResourceTypes.has(referenceType) && !entryReferenceSet.has(reference)) {
+        errors.push(`entry[${index}].reference "${reference}" does not resolve to bundle entries`);
+      }
+    });
+  });
+
+  if (compositionEntry) {
+    const composition = compositionEntry.resource as Composition;
+    if (!composition.subject?.reference) {
+      errors.push('Composition.subject.reference is required');
+    }
+    if (!composition.encounter?.reference) {
+      errors.push('Composition.encounter.reference is required');
+    }
+    if (!composition.author?.length || !composition.author[0]?.reference) {
+      errors.push('Composition.author.reference is required');
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
   return { ok: true, errors: [] };
 }
 
