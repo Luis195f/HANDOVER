@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Pressable, Text, TextInput, View } from 'react-native';
+import { Button, Pressable, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import type { SttConfig, SttStatus } from '@/src/lib/stt';
@@ -14,7 +14,7 @@ export type DictationMicButtonProps = {
 };
 
 export type AdministrativeSectionProps = {
-  styles: Record<string, any>;
+  styles: Record<string, TextStyle | ViewStyle>;
   onEditShift: () => void;
   parseNumericInput: (value: string) => number | undefined;
   dictationState: {
@@ -40,7 +40,7 @@ const StaffListInput = ({
   label: string;
   placeholder: string;
   error?: string;
-  styles: Record<string, any>;
+  styles: Record<string, TextStyle | ViewStyle>;
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
   const fieldKey = name;

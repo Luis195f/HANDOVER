@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { Controller, useFieldArray, useFormContext, useWatch, type Control } from 'react-hook-form';
+import {
+  Controller,
+  useFieldArray,
+  useFormContext,
+  useWatch,
+  type Control,
+  type FieldErrors,
+} from 'react-hook-form';
 import { v4 as uuid } from 'uuid';
 
 import type { TreatmentItem } from '@/src/types/handover';
@@ -91,7 +98,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
   const { fields, append, remove } = useFieldArray({ control, name });
   const treatments = useWatch({ control, name }) as TreatmentItem[] | undefined;
   const [editing, setEditing] = useState<EditingState>(null);
-  const errorBag = (formState.errors as any)?.[name] ?? [];
+  const errorBag = formState.errors[name] as FieldErrors<TreatmentItem>[] | undefined;
 
   const openEditor = (index: number) => setEditing({ index });
   const handleAdd = () => {
@@ -116,7 +123,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
   const getErrorForField = (index: number, field: TreatmentField) => {
     const fieldErrors = errorBag?.[index];
     if (!fieldErrors) return undefined;
-    const maybeError = (fieldErrors as any)?.[field]?.message;
+    const maybeError = fieldErrors?.[field]?.message;
     return typeof maybeError === 'string' ? maybeError : undefined;
   };
 

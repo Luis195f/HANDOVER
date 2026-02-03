@@ -44,7 +44,7 @@ const defaultValues: HandoverValues = {
 
 function Wrapper() {
   const methods = useForm<HandoverValues>({ defaultValues });
-  const alerts = computeAlerts(methods.watch() as any);
+  const alerts = computeAlerts(methods.watch());
   return (
     <FormProvider {...methods}>
       <SafetySection control={methods.control} watch={methods.watch} />
