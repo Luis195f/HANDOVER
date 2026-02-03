@@ -104,19 +104,28 @@ const applyProfileUrls = <T extends FhirResource>(
   const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
 
   // TS a veces no puede probar que el spread mantiene el genérico T → cast seguro vía unknown
+const applyProfileUrls = <T extends FhirResource>(
+  resource: T,
+  options: ResolvedBuildOptions,
+): T => {
+  const defaultProfiles = FHIR_PROFILE_URLS_BY_RESOURCE_TYPE[resource.resourceType] ?? [];
+  if (defaultProfiles.length === 0) {
+    return mergeProfileUrls(resource, options);
+  }
+
+  const existingProfiles = Array.isArray((resource as ResourceWithMeta).meta?.profile)
+    ? Array.from((resource as ResourceWithMeta).meta?.profile ?? [])
+    : [];
+
+  const mergedProfiles = Array.from(new Set([...existingProfiles, ...defaultProfiles]));
+  const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
+
   const resourceWithProfiles = {
     ...(resource as ResourceWithMeta),
     meta,
   } as unknown as T;
 
   return mergeProfileUrls(resourceWithProfiles, options);
-};
-
-  // TS2352 fix: hacemos el cast vía unknown para dejar claro que es intencional
-  return mergeProfileUrls(
-    { ...(resource as ResourceWithMeta), meta } as unknown as T,
-    options,
-  );
 };
 
 type ISODateTimeString = `${number}-${number}-${number}T${string}`;
