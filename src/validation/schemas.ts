@@ -543,6 +543,7 @@ const zHandoverSignatureBase = z.object({
   role: z.enum(["nurse", "admin", "supervisor"]).optional(),
   unitId: z.string().trim().min(1, "Falta unidad clínica en la firma").max(80),
   signedAt: z.string().datetime().or(z.string()).describe("ISO timestamp de firma"),
+  imageBase64: z.string().min(1).optional(),
   signatureHash: z.string().min(1).optional(),
   deviceInfo: z.string().optional(),
   method: z.enum(["session", "pin", "biometric"]).default("session"),
@@ -670,6 +671,13 @@ export const zHandover = z
         code: z.ZodIssueCode.custom,
         path: ["signatures", "outgoing"],
         message: "La entrega final debe tener firma de enfermera saliente.",
+      });
+    }
+    if (value.status === "final" && value.signatures?.outgoing && !value.signatures.outgoing.imageBase64) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["signatures", "outgoing", "imageBase64"],
+        message: "La firma manuscrita es obligatoria para el cierre legal.",
       });
     }
   });

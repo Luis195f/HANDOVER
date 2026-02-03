@@ -59,7 +59,7 @@ import { ensureFreshAccessToken, getSession, useAuth, type Session } from '@/src
 import type { HandoverUser } from '@/src/security/auth-types';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
 import { SHIFT_TYPES, type AdministrativeData } from '@/src/types/administrative';
-import type { HandoverStructuredDiagnosis, RiskItem } from '@/src/types/handover';
+import type { HandoverSignature, HandoverStructuredDiagnosis, RiskItem } from '@/src/types/handover';
 import type { SBARSummary } from '@/src/types/sbar';
 import {
   normalizeLegacySnomedCoding,
@@ -73,6 +73,7 @@ import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues } from '@/src/validation/schemas';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import AutocompleteSnomedCoding from '@/src/components/AutocompleteSnomedCoding';
+import { SignaturePad, type SignaturePadValue } from '@/src/components/SignaturePad';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
 import { t } from '@/src/i18n';
@@ -190,6 +191,8 @@ const styles = StyleSheet.create({
   sbarTitle: { fontWeight: '700', marginBottom: 8, fontSize: 16 },
   sbarText: { fontFamily: 'monospace' },
   helperText: { marginTop: 6, color: '#4B5563' },
+  signaturePadSection: { marginBottom: 16 },
+  signaturePadHint: { marginTop: 6, color: '#4B5563', fontSize: 12 },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   optionButton: {
     paddingHorizontal: 12,
@@ -442,6 +445,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
+  const auditedSignedRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<ScrollView>(null);
   const { colors, fontSizes, spacing, radius } = useThemeTokens();
   const { width } = useWindowDimensions();
@@ -619,6 +623,13 @@ export default function HandoverForm({ navigation, route }: Props) {
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
+  const statusValue = form.watch('status');
+  const activeUnitId = administrativeUnitValue || signatureUser?.activeUnitId || signatureUser?.units?.[0];
+  const canSignOutgoing = Boolean(
+    signatureUser &&
+      (signatureUser.roles ?? (signatureUser.role ? [signatureUser.role] : [])).includes('nurse') &&
+      activeUnitId,
+  );
   
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
@@ -642,6 +653,32 @@ export default function HandoverForm({ navigation, route }: Props) {
   
   const bedsideChecklistRef = useRef<HandoverFormValues['bedsideChecklist'] | null>(null);
   const watchedValues = form.watch();
+
+  const buildOutgoingSignature = (payload: SignaturePadValue): HandoverSignature | null => {
+    if (!signatureUser || !activeUnitId) return null;
+    const fullName =
+      signatureUser.fullName ??
+      signatureUser.name ??
+      signatureUser.displayName ??
+      signatureUser.userId ??
+      t('signatures.unknownUser');
+    const role = (signatureUser.roles?.[0] as HandoverSignature['role']) ??
+      (signatureUser.role as HandoverSignature['role']);
+    const userId = signatureUser.id ?? signatureUser.userId ?? signatureUser.displayName ?? 'unknown-user';
+    const contentToSign = JSON.stringify(form.getValues());
+    const signatureHash = hashHex(`${contentToSign}${payload.signedAt}${payload.imageBase64}`);
+    return {
+      userId,
+      fullName,
+      role,
+      unitId: activeUnitId,
+      signedAt: payload.signedAt,
+      imageBase64: payload.imageBase64,
+      signatureHash,
+      deviceInfo: undefined,
+      method: 'session',
+    };
+  };
 
   const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
     patientId: patientIdValue,
@@ -1360,7 +1397,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleInvalidSubmit = (formErrors: HandoverFormErrors) => {
     const currentStatus = form.getValues('status');
     const hasOutgoing = form.getValues('signatures')?.outgoing;
-    if (currentStatus === 'final' && !hasOutgoing) {
+    if (currentStatus === 'final' && (!hasOutgoing || !hasOutgoing.imageBase64)) {
       Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
       return;
     }
@@ -1624,6 +1661,27 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         void sendAuditEvent(auditEvent);
       }
 
+      if (status === 'final' && auditUserId && values.patientId && values.signatures?.outgoing) {
+        const signedAt = values.signatures.outgoing.signedAt;
+        const auditKey = `${values.patientId}|${signedAt}`;
+        if (!auditedSignedRef.current.has(auditKey)) {
+          const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
+          const auditEvent = makeAuditEvent(
+            {
+              type: 'handover_signed',
+              patientId: values.patientId,
+              userId: auditUserId,
+              unitId: auditUnitId ?? undefined,
+              shiftCode,
+            },
+            () => new Date(signedAt),
+          );
+          await appendAuditEvent(auditStorageRef.current, auditEvent);
+          void sendAuditEvent(auditEvent);
+          auditedSignedRef.current.add(auditKey);
+        }
+      }
+
       let successMessage = t('handover.submitQueuedMessage');
       if (isOn('ENABLE_ALERTS')) {
         const alerts: string[] = [];
@@ -1728,20 +1786,39 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     return isValid;
   };
 
+  const confirmLegalClosure = () =>
+    new Promise<boolean>((resolve) => {
+      Alert.alert(t('handover.legalConfirmTitle'), t('handover.legalConfirmMessage'), [
+        { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+        { text: t('handover.legalConfirmAction'), style: 'default', onPress: () => resolve(true) },
+      ]);
+    });
+
+  const finalizeSubmission = async () => {
+    form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
+    const outgoing = form.getValues('signatures')?.outgoing;
+    if (!outgoing || !outgoing.imageBase64) {
+      Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
+      return;
+    }
+    const confirmed = await confirmLegalClosure();
+    if (!confirmed) return;
+    onSubmit();
+  };
+
   const handleSaveDraft = () => {
     form.setValue('status', 'draft', { shouldDirty: true, shouldValidate: true });
     onSubmit();
   };
 
-  const handleFinalize = () => {
+  const handleFinalize = async (skipChecklist = false) => {
     const checklist = form.getValues('bedsideChecklist');
-    if (!isBedsideChecklistComplete(checklist, checklistItems)) {
+    if (!skipChecklist && !isBedsideChecklistComplete(checklist, checklistItems)) {
       setBedsideChecklistHighlightMissing(true);
       setBedsideModalVisible(true);
       return;
     }
-    form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
-    onSubmit();
+    await finalizeSubmission();
   };
 
   const handleSectionLayout = (key: SectionKey) => (event: LayoutChangeEvent) => {
@@ -2392,6 +2469,33 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           isCollapsed={collapsedSections.firmas}
           onToggle={() => toggleSection('firmas')}
         >
+          {statusValue === 'final' ? (
+            <View style={styles.signaturePadSection}>
+              <SignaturePad
+                value={
+                  outgoingSignature?.imageBase64
+                    ? { imageBase64: outgoingSignature.imageBase64, signedAt: outgoingSignature.signedAt }
+                    : undefined
+                }
+                onChange={(payload) => {
+                  const nextSignature = buildOutgoingSignature(payload);
+                  if (!nextSignature) return;
+                  form.setValue(
+                    'signatures',
+                    {
+                      ...signaturesValue,
+                      outgoing: nextSignature,
+                    },
+                    { shouldDirty: true, shouldValidate: true },
+                  );
+                }}
+                disabled={!canSignOutgoing}
+              />
+              {!canSignOutgoing ? (
+                <Text style={styles.signaturePadHint}>{t('signatures.signaturePadDisabledHint')}</Text>
+              ) : null}
+            </View>
+          ) : null}
           <SignaturesSection
             value={signaturesValue}
             onChange={(next) =>
@@ -2400,6 +2504,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             currentUser={signatureUser}
             administrativeUnitId={administrativeUnitValue}
             getSignaturePayload={() => form.getValues()}
+            disableOutgoingAction
           />
           {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
           {incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
@@ -2431,8 +2536,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         onConfirm={() => {
           setBedsideModalVisible(false);
           setBedsideChecklistHighlightMissing(false);
-          form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
-          onSubmit();
+          void handleFinalize(true);
         }}
       />
     </FormProvider>

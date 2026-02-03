@@ -7,7 +7,7 @@ import {
   type AsyncStorageAdapter,
 } from './encryptedStorage';
 
-export type AuditEventType = 'patient_open' | 'patient_edit';
+export type AuditEventType = 'patient_open' | 'patient_edit' | 'handover_signed';
 
 export interface AuditEvent {
   id: string; // UUID
@@ -171,6 +171,5 @@ export async function sendAuditEvent(event: AuditEvent): Promise<void> {
     return;
   }
 }
-
 
 

@@ -182,7 +182,13 @@
     "sectionTitle": "Firmas",
     "currentUserLabel": "Usuario actual: {{name}}",
     "selectUnitHint": "Selecciona una unidad para habilitar la firma.",
-    "unknownUser": "Usuario"
+    "unknownUser": "Usuario",
+    "signaturePadTitle": "Firma manuscrita obligatoria",
+    "signaturePadHelper": "Dibuja tu firma para cerrar legalmente el turno.",
+    "signaturePadClear": "Limpiar",
+    "signaturePadSave": "Guardar firma",
+    "signaturePadSignedAt": "Firma registrada: {{date}}",
+    "signaturePadDisabledHint": "No se puede firmar sin unidad activa o rol de enfermería."
   },
   "onboarding": {
     "steps": {
@@ -259,6 +265,9 @@
     "scannerUnavailableMessage": "Esta build no incluye la pantalla de QR (opcional para demo).",
     "signatureMissingTitle": "Falta firma",
     "signatureMissingMessage": "Para finalizar la entrega falta la firma de enfermera saliente.",
+    "legalConfirmTitle": "Cierre legal de entrega",
+    "legalConfirmMessage": "Confirmo que la información es correcta y firmo la entrega del turno",
+    "legalConfirmAction": "Confirmar cierre legal",
     "saveErrorMessageFallback": "No se pudo guardar",
     "unitAccessDeniedTitle": "Sin acceso a la unidad",
     "fhirValidationTitle": "Error de validación FHIR",

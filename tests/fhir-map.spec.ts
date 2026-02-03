@@ -327,6 +327,31 @@ describe('buildHandoverBundle', () => {
     });
   });
 
+  it('includes the handwritten signature in the Bundle', () => {
+    const bundle = buildHandoverBundle(
+      {
+        ...baseValues,
+        signatures: {
+          outgoing: {
+            userId: 'nurse-33',
+            fullName: 'Nurse Test',
+            unitId: 'UCI-1',
+            signedAt: NOW,
+            imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ',
+            method: 'session',
+          },
+        },
+      },
+      { now: () => NOW },
+    );
+
+    expect(bundle.signature).toHaveLength(1);
+    const signature = bundle.signature?.[0];
+    expect(signature?.who?.identifier?.value).toBe('nurse-33');
+    expect(signature?.onBehalfOf?.identifier?.value).toBe('UCI-1');
+    expect(signature?.data).toBe('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ');
+  });
+
   it('validates every generated resource against simplified FHIR schemas', () => {
     const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
 
@@ -461,6 +486,7 @@ describe('buildFhirBundleFromFormData', () => {
           fullName: 'Nurse Example',
           unitId: 'UCI-1',
           signedAt: '2025-01-05T16:00:00Z',
+          imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ',
           method: 'session',
         },
       },

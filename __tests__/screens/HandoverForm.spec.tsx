@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Button } from 'react-native';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,6 +26,7 @@ vi.mock('@/src/security/acl', () => ({
 
 vi.mock('@/src/security/auth', () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
+  useAuth: () => ({ session: { userId: 'nurse-1', displayName: 'Nurse Jane', roles: ['nurse'], units: ['icu-west'] } }),
 }));
 
 vi.mock('@/src/state/filterStore', () => ({
@@ -43,6 +44,31 @@ vi.mock('@/src/config/flags', () => ({
 
 vi.mock('@/src/lib/news2', () => ({
   computeNEWS2: () => ({ total: 0, anyThree: false, band: 'low' }),
+}));
+
+vi.mock('@/src/lib/bedsideChecklist', () => ({
+  isBedsideChecklistComplete: () => true,
+}));
+
+vi.mock('@/src/lib/scores/handoverRisk', () => ({
+  confirmHighRiskSubmission: () => Promise.resolve(true),
+  deriveRiskEvaluationFromValues: () => ({ riskLevel: 'low' }),
+}));
+
+vi.mock('@/src/components/SignaturePad', () => ({
+  SignaturePad: ({ onChange, disabled }: { onChange: (value: { imageBase64: string; signedAt: string }) => void; disabled?: boolean }) => (
+    <Button
+      title="Mock signature"
+      disabled={disabled}
+      onPress={() =>
+        onChange({
+          imageBase64: 'mock-signature',
+          signedAt: '2025-01-05T10:30:00.000Z',
+        })
+      }
+      testID="signature-pad-mock"
+    />
+  ),
 }));
 
 describe('HandoverForm', () => {
@@ -110,5 +136,46 @@ describe('HandoverForm', () => {
     expect(hasUnitAccessMock).toHaveBeenCalledWith('icu-west', expect.anything());
     expect(Alert.alert).toHaveBeenCalledWith('OK', expect.stringContaining('Entrega encolada'));
     expect(navigation.goBack).toHaveBeenCalled();
+  });
+
+  it('bloquea el submit final si no existe firma', async () => {
+    buildHandoverBundleMock.mockReturnValue({ resourceType: 'Bundle', type: 'transaction' });
+    enqueueBundleMock.mockResolvedValue(undefined);
+
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    renderForm();
+
+    fireEvent.press(screen.getByText('Finalizar entrega'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Falta firma',
+        'Para finalizar la entrega falta la firma de enfermera saliente.',
+      );
+    });
+    expect(enqueueBundleMock).not.toHaveBeenCalled();
+  });
+
+  it('permite el submit final con firma y confirmación legal', async () => {
+    buildHandoverBundleMock.mockReturnValue({ resourceType: 'Bundle', type: 'transaction' });
+    enqueueBundleMock.mockResolvedValue(undefined);
+
+    vi.spyOn(Alert, 'alert').mockImplementation((title, _message, buttons) => {
+      if (title === 'Cierre legal de entrega' && Array.isArray(buttons)) {
+        const confirm = buttons.find((btn) => btn.text === 'Confirmar cierre legal');
+        confirm?.onPress?.();
+      }
+      return undefined;
+    });
+
+    renderForm();
+
+    fireEvent.press(screen.getByText('Finalizar entrega'));
+    fireEvent.press(screen.getByTestId('signature-pad-mock'));
+    fireEvent.press(screen.getByText('Finalizar entrega'));
+
+    await waitFor(() => {
+      expect(enqueueBundleMock).toHaveBeenCalled();
+    });
   });
 });
