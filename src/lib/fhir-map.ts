@@ -844,18 +844,25 @@ function attestersFromSignatures(signatures?: HandoverSignatures): AttesterInput
 
 function buildSignatureResource(signature?: HandoverSignature | null): Signature | undefined {
   if (!signature?.imageBase64) return undefined;
+
+  // El tipo Reference del proyecto exige `reference` (además de identifier/display/type).
+  // Usamos un reference estable y "local" (no depende de que exista un Practitioner real en servidor).
   const who: Reference = {
+    reference: `Practitioner/${encodeURIComponent(signature.userId)}`,
     identifier: { system: 'urn:handover:user-id', value: signature.userId },
     display: signature.fullName,
     type: 'Practitioner',
   };
+
   const onBehalfOf: Reference | undefined = signature.unitId
     ? {
+        reference: `Organization/${encodeURIComponent(signature.unitId)}`,
         identifier: { system: 'urn:handover:unit-id', value: signature.unitId },
         display: signature.unitId,
         type: 'Organization',
       }
     : undefined;
+
   return {
     type: [{ system: 'urn:handover:signature-type', code: 'signature', display: 'Signature' }],
     when: signature.signedAt,
