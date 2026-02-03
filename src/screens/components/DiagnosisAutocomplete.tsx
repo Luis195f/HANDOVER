@@ -9,6 +9,7 @@ import {
   type DiagnosisSystem,
 } from '../../catalogs/diagnosisCodes';
 import type { HandoverStructuredDiagnosis } from '../../types/handover';
+import type { HandoverValues } from '../../validation/schemas';
 import { validateSnomed } from '../../lib/terminology-validation';
 
 const styles = StyleSheet.create({
@@ -73,8 +74,15 @@ const styles = StyleSheet.create({
   errorText: { color: '#DC2626' },
 });
 
+/**
+ * IMPORTANTE:
+ * - Limitamos el `name` SOLO a los dos arrays estructurados.
+ * - Tipamos `useFieldArray` con el item real: HandoverStructuredDiagnosis.
+ */
+type DiagnosisArrayName = 'dxMedicalStructured' | 'dxNursingStructured';
+
 interface DiagnosisAutocompleteProps {
-  name: 'dxMedicalStructured' | 'dxNursingStructured' | string;
+  name: DiagnosisArrayName;
   label: string;
   systemsAllowed?: DiagnosisSystem[];
 }
@@ -90,8 +98,18 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     setError,
     clearErrors,
     formState: { errors },
-  } = useFormContext<{ [key: string]: HandoverStructuredDiagnosis[] }>();
-  const { fields, append, remove } = useFieldArray({ control, name });
+  } = useFormContext<HandoverValues>();
+
+  // Tipado explícito para que `fields` sea HandoverStructuredDiagnosis + {id}
+  const { fields, append, remove } = useFieldArray<
+    HandoverValues,
+    DiagnosisArrayName,
+    'id'
+  >({
+    control,
+    name,
+  });
+
   const [query, setQuery] = useState('');
   const [validatingCode, setValidatingCode] = useState<string | null>(null);
 
@@ -100,11 +118,13 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     [query, systemsAllowed],
   );
 
-  const fieldError = (errors as any)?.[name]?.message as string | undefined;
+  // Error en arrays en RHF puede venir como objeto complejo; aquí mantenemos UX simple.
+  const fieldError =
+    (errors?.[name] as unknown as { message?: string } | undefined)?.message ?? undefined;
 
   const handleSelect = async (code: DiagnosisCode) => {
     const alreadySelected = fields.some(
-      (field) => field.code === code.code && (field as any).system === code.system,
+      (field) => field.code === code.code && field.system === code.system,
     );
     if (alreadySelected) {
       setQuery('');
@@ -116,30 +136,33 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
       const result = await validateSnomed(code.code, code.display);
       setValidatingCode(null);
       if (!result.valid) {
-        setError(name as any, { type: 'validate', message: result.message });
+        setError(name, { type: 'validate', message: result.message });
         return;
       }
     }
 
-    clearErrors(name as any);
-    append({
+    clearErrors(name);
+    const nextItem: HandoverStructuredDiagnosis = {
       system: code.system,
       code: code.code,
       display: code.display,
       freeTextNote: '',
-    });
+    };
+    append(nextItem);
     setQuery('');
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>
+
       <TextInput
         placeholder="Buscar diagnóstico..."
         value={query}
         onChangeText={setQuery}
         style={styles.input}
       />
+
       {query.trim() ? (
         <View>
           <Text style={styles.helperText}>
@@ -147,10 +170,11 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
           </Text>
         </View>
       ) : null}
-      {validatingCode ? (
-        <Text style={styles.helperText}>Validando código SNOMED...</Text>
-      ) : null}
+
+      {validatingCode ? <Text style={styles.helperText}>Validando código SNOMED...</Text> : null}
+
       {fieldError ? <Text style={[styles.helperText, styles.errorText]}>{fieldError}</Text> : null}
+
       {suggestions.length > 0 ? (
         <View style={styles.suggestions}>
           {suggestions.map((code) => (
@@ -169,40 +193,47 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
       ) : null}
 
       <View style={styles.selectedList}>
-        {fields.map((field, index) => (
-          <View key={field.id} style={styles.selectedItem}>
-            <View style={styles.selectedHeader}>
-              <Text style={styles.selectedTitle}>{(field as any).display}</Text>
-              <Text style={styles.pill}>
-                {(field as any).system} · {(field as any).code}
-              </Text>
+        {fields.map((field, index) => {
+          // `field` ya está tipado como HandoverStructuredDiagnosis + id
+          const noteName = `${name}.${index}.freeTextNote` as const;
+
+          return (
+            <View key={field.id} style={styles.selectedItem}>
+              <View style={styles.selectedHeader}>
+                <Text style={styles.selectedTitle}>{field.display}</Text>
+                <Text style={styles.pill}>
+                  {field.system} · {field.code}
+                </Text>
+              </View>
+
+              <Controller
+                control={control}
+                name={noteName}
+                defaultValue={field.freeTextNote ?? ''}
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={styles.noteInput}
+                    placeholder="Nota libre (opcional)"
+                    multiline
+                    value={typeof value === 'string' ? value : ''}
+                    onBlur={onBlur}
+                    onChangeText={onChange}
+                  />
+                )}
+              />
+
+              <View style={{ alignItems: 'flex-end' }}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => remove(index)}
+                  style={({ pressed }) => [styles.removeButton, pressed ? { opacity: 0.85 } : null]}
+                >
+                  <Text style={styles.removeButtonText}>Eliminar</Text>
+                </Pressable>
+              </View>
             </View>
-            <Controller
-              control={control}
-              name={`${name}.${index}.freeTextNote`}
-              defaultValue={(field as { freeTextNote?: string }).freeTextNote ?? ''}
-              render={({ field: { onChange, onBlur, value } }) => (
-                <TextInput
-                  style={styles.noteInput}
-                  placeholder="Nota libre (opcional)"
-                  multiline
-                  value={value ?? ''}
-                  onBlur={onBlur}
-                  onChangeText={onChange}
-                />
-              )}
-            />
-            <View style={{ alignItems: 'flex-end' }}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => remove(index)}
-                style={({ pressed }) => [styles.removeButton, pressed ? { opacity: 0.85 } : null]}
-              >
-                <Text style={styles.removeButtonText}>Eliminar</Text>
-              </Pressable>
-            </View>
-          </View>
-        ))}
+          );
+        })}
       </View>
     </View>
   );

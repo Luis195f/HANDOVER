@@ -653,7 +653,8 @@ export const zHandover = z
     );
 
     // Si falta una key, se considera no completada.
-    const hasIncomplete = effectiveKeys.some((k) => (checklist as any)[k] !== true);
+    const checklistRecord = checklist as Record<string, unknown>;
+    const hasIncomplete = effectiveKeys.some((k) => checklistRecord[k] !== true);
 
     if (effectiveKeys.length > 0 && hasIncomplete) {
       ctx.addIssue({

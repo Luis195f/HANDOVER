@@ -1,6 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { Controller, useFieldArray, useFormContext, useWatch, type Control } from 'react-hook-form';
+import {
+  Controller,
+  useFieldArray,
+  useFormContext,
+  useWatch,
+  type Control,
+  type FieldErrors,
+} from 'react-hook-form';
 import { v4 as uuid } from 'uuid';
 
 import { MEDICATIONS_QUICKPICK_ICU } from '@/src/lib/codes';
@@ -132,7 +139,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   const medications = useWatch({ control, name }) as MedicationItem[] | undefined;
   const medsText = useWatch({ control, name: 'meds' }) as string | undefined;
   const [editing, setEditing] = useState<EditingState>(null);
-  const errorBag = (formState.errors as any)?.[name] ?? [];
+  const errorBag = formState.errors[name] as FieldErrors<MedicationItem>[] | undefined;
 
   const openEditor = (index: number) => setEditing({ index });
 
@@ -187,7 +194,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   const getErrorForField = (index: number, field: MedicationSectionFormField): string | undefined => {
     const fieldErrors = errorBag?.[index];
     if (!fieldErrors) return undefined;
-    const maybeError = (fieldErrors as any)?.[field]?.message;
+    const maybeError = fieldErrors?.[field]?.message;
     return typeof maybeError === 'string' ? maybeError : undefined;
   };
 
@@ -196,7 +203,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
     if (!selected) return;
     setValue(`${name}.${index}.name`, selected.name, { shouldDirty: true, shouldValidate: true });
     if (selected.code) {
-      setValue(`${name}.${index}.code`, selected.code as any, { shouldDirty: true, shouldValidate: true });
+      setValue(`${name}.${index}.code`, selected.code, { shouldDirty: true, shouldValidate: true });
     }
   };
 

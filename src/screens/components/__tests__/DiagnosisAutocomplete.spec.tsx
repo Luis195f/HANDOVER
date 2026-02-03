@@ -4,10 +4,11 @@ import type { UseFormReturn } from 'react-hook-form';
 import { FormProvider, useForm } from 'react-hook-form';
 
 import DiagnosisAutocomplete from '../DiagnosisAutocomplete';
+import type { HandoverStructuredDiagnosis } from '@/src/types/handover';
 
 type FormValues = {
-  dxMedicalStructured: any[];
-  dxNursingStructured: any[];
+  dxMedicalStructured: HandoverStructuredDiagnosis[];
+  dxNursingStructured: HandoverStructuredDiagnosis[];
 };
 
 function renderWithForm(
