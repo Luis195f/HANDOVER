@@ -1,5 +1,8 @@
+import { z } from 'zod';
 import { zHandover } from './schemas';
 
-export const vitalsSchema = zHandover.pick({
+const baseSchema = zHandover instanceof z.ZodEffects ? zHandover.innerType() : zHandover;
+
+export const vitalsSchema = baseSchema.pick({
   vitals: true,
 });
