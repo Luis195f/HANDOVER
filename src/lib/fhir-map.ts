@@ -103,6 +103,15 @@ const applyProfileUrls = <T extends FhirResource>(
   const mergedProfiles = Array.from(new Set([...existingProfiles, ...defaultProfiles]));
   const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
 
+  // TS a veces no puede probar que el spread mantiene el genérico T → cast seguro vía unknown
+  const resourceWithProfiles = {
+    ...(resource as ResourceWithMeta),
+    meta,
+  } as unknown as T;
+
+  return mergeProfileUrls(resourceWithProfiles, options);
+};
+
   // TS2352 fix: hacemos el cast vía unknown para dejar claro que es intencional
   return mergeProfileUrls(
     { ...(resource as ResourceWithMeta), meta } as unknown as T,
@@ -462,9 +471,16 @@ const COMPOSITION_SECTION_CODES = {
   },
 } as const;
 
-const HANDOVER_OBSERVATION_SYSTEM = 'urn:handover-pro:observation' as unknown as TerminologySystem;
-const HANDOVER_COMPOSITION_SECTION_SYSTEM =
-  'urn:handover-pro:composition-section' as unknown as TerminologySystem;
+// ---------------------------------------------------------------------------
+// Terminology systems (local URNs)
+// ---------------------------------------------------------------------------
+// En algunos typings de FHIR, Coding.system es string. Si en tu repo no existe
+// un tipo "TerminologySystem" explícito, definimos uno local y no rompemos nada.
+type TerminologySystem = string;
+
+const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem = 'urn:handover-pro:observation';
+const HANDOVER_COMPOSITION_SECTION_SYSTEM: TerminologySystem =
+  'urn:handover-pro:composition-section';
 
 const HANDOVER_OBSERVATION_CODES = {
   administrative: {
@@ -2723,23 +2739,24 @@ function mapSbarObservations(
   if (!sbar) return [];
 
   const components: ObservationComponent[] = [];
-  const addComponent = (code: string, display: string, value?: string | null) => {
-    const trimmed = value?.trim();
-    if (!trimmed) return;
-    components.push({
-      code: {
-        coding: [
-          {
-            system: 'urn:handover-pro:sbar' as unknown as TerminologySystem,
-            code,
-            display,
-          },
-        ],
-        text: display,
-      },
-      valueString: trimmed,
-    });
-  };
+const addComponent = (code: string, display: string, value?: string | null) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return;
+
+  components.push({
+    code: {
+      coding: [
+        {
+          system: 'urn:handover-pro:sbar' as TerminologySystem,
+          code,
+          display,
+        },
+      ],
+      text: display,
+    },
+    valueString: trimmed,
+  });
+};
 
   addComponent('situation', 'Situation', sbar.situation);
   addComponent('background', 'Background', sbar.background);
@@ -2779,31 +2796,30 @@ function mapBedsideChecklistObservation(
     }
 
     if (typeof value === 'boolean') {
-      components.push({
-        code: {
-          coding: [
-            {
-              system: 'urn:handover-pro:bedside-checklist' as unknown as TerminologySystem,
-              code: key,
-              display: key,
-            },
-          ],
-          text: key,
+  components.push({
+    code: {
+      coding: [
+        {
+          system: 'urn:handover-pro:bedside-checklist' as TerminologySystem,
+          code: key,
+          display: key,
         },
-        valueCodeableConcept: {
-          coding: [
-            {
-              system: 'urn:handover-pro:boolean' as unknown as TerminologySystem,
-              code: value ? 'yes' : 'no',
-              display: value ? 'Yes' : 'No',
-            },
-          ],
-          text: value ? 'Yes' : 'No',
+      ],
+      text: key,
+    },
+    valueCodeableConcept: {
+      coding: [
+        {
+          system: 'urn:handover-pro:boolean' as TerminologySystem,
+          code: value ? 'yes' : 'no',
+          display: value ? 'Yes' : 'No',
         },
-      });
-    }
+      ],
+      text: value ? 'Yes' : 'No',
+    },
   });
-
+}
+    
   if (components.length === 0 && notes.length === 0) return null;
 
   return {
@@ -3083,14 +3099,13 @@ export function buildComposition(
     resourceType: 'Composition',
     status,
     type,
-    subject,
-    encounter,
-    date: optionsMerged.now(),
+    subject: ensureSubjectReference(values),
+    encounter: ensureEncounterReference(values),
     author: [authorRef],
     title,
-    attester: mapAttesters(attesters),
-    event: shiftPeriod ? [{ period: shiftPeriod }] : undefined,
+    date: values.composition?.date ?? optionsMerged.effectiveDateTime,
     section: sections.length > 0 ? sections : undefined,
+    attester: attesters.length > 0 ? attesters : undefined,
   };
 }
 
