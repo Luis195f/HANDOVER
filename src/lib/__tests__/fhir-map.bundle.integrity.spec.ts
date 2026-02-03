@@ -4,10 +4,16 @@ import { TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 
 type Entry = { fullUrl?: string; resource?: any };
 
-const byFullUrl = (bundle: any) => {
+const entryReference = (entry: Entry) =>
+  entry.resource?.resourceType && entry.resource?.id
+    ? `${entry.resource.resourceType}/${entry.resource.id}`
+    : undefined;
+
+const byReference = (bundle: any) => {
   const map = new Map<string, any>();
   for (const e of (bundle?.entry ?? []) as Entry[]) {
-    if (e.fullUrl) map.set(e.fullUrl, e.resource);
+    const reference = entryReference(e);
+    if (reference) map.set(reference, e.resource);
   }
   return map;
 };
@@ -31,7 +37,7 @@ const findObsEntryByLoinc = (bundle: any, code: string) =>
     e?.resource?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
   );
 
-describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', () => {
+describe('Bundle — coherencia Composition.section.entry ↔ entry reference', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T20:20:00Z';
 
@@ -61,7 +67,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     expect(titles).toEqual(['Attachments', 'Medications', 'Vital signs'].sort());
 
     // 2) Todas las referencias de las secciones existen en el Bundle
-    const map = byFullUrl(bundle);
+    const map = byReference(bundle);
     const allSectionRefs = new Set<string>();
     for (const s of sections) {
       for (const e of (s.entry ?? [])) {
@@ -75,11 +81,14 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     for (const e of (bundle.entry ?? []) as Entry[]) {
       if (e?.resource?.resourceType === 'Composition') continue;
       if (!sectionedTypes.has(e?.resource?.resourceType)) continue;
-      expect(allSectionRefs.has(e.fullUrl!)).toBe(true);
+      const reference = entryReference(e);
+      if (reference) {
+        expect(allSectionRefs.has(reference)).toBe(true);
+      }
     }
   });
 
-  it('panel 85353-1 y 85354-9 coherentes: componentes ↔ individuales y hasMember apuntando a los fullUrl correctos', () => {
+  it('panel 85353-1 y 85354-9 coherentes: componentes ↔ individuales y hasMember apuntando a las referencias correctas', () => {
     const bundle = buildHandoverBundle({
       patientId,
       vitals: { hr: 82, rr: 18, sbp: 118, dbp: 76, temp: 36.9, spo2: 97, bgMmolL: 5.6, acvpu: 'C' },
@@ -101,14 +110,14 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     // hasMember: debe incluir individuales + ACVPU + Glucemia (normalizada a 2339-0 por defecto)
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
     const expectedRefs = [
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.RESP_RATE.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.TEMPERATURE.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.SPO2.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_SYSTOLIC.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_DIASTOLIC.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code)?.fullUrl,
-      findObsEntryByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code)?.fullUrl,
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.RESP_RATE.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.TEMPERATURE.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.SPO2.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_SYSTOLIC.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_DIASTOLIC.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code) as Entry),
+      entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code) as Entry),
     ].filter(Boolean);
     for (const ref of expectedRefs) expect(members).toContain(ref);
 
@@ -120,8 +129,8 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     expect(new Set(bpCompCodes)).toEqual(new Set([TEST_VITAL_CODES.BP_SYSTOLIC.code, TEST_VITAL_CODES.BP_DIASTOLIC.code]));
 
     const bpMembers = (bpPanel.hasMember ?? []).map((m: any) => m.reference);
-    expect(bpMembers).toContain(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_SYSTOLIC.code)?.fullUrl);
-    expect(bpMembers).toContain(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_DIASTOLIC.code)?.fullUrl);
+    expect(bpMembers).toContain(entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_SYSTOLIC.code) as Entry));
+    expect(bpMembers).toContain(entryReference(findObsEntryByLoinc(bundle, TEST_VITAL_CODES.BP_DIASTOLIC.code) as Entry));
   });
 
   it('caso mínimo: sólo HR → se crea panel 85353-1 con un componente, hasMember sólo HR y sin secciones extra', () => {
@@ -147,7 +156,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const members = (vsPanel.hasMember ?? []).map((m: any) => m.reference);
     const hrEntry = findObsEntryByLoinc(bundle, TEST_VITAL_CODES.HEART_RATE.code);
     expect(hrEntry).toBeDefined();
-    expect(members).toEqual([hrEntry?.fullUrl]);
+    expect(members).toEqual([entryReference(hrEntry as Entry)]);
   });
 
   it('incluye secciones y referencias para exámenes y procedimientos', () => {
@@ -167,7 +176,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     );
 
     const entries = bundle.entry as Array<{ resource: any; fullUrl?: string }>;
-    const fullUrls = new Set(entries.map((e) => e.fullUrl));
+    const referenceSet = new Set(entries.map((e) => entryReference(e as Entry)));
     const observations = entries.filter((e) => e.resource?.resourceType === 'Observation');
     const procedures = entries.filter((e) => e.resource?.resourceType === 'Procedure');
     expect(observations.length).toBeGreaterThan(0);
@@ -181,13 +190,13 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry.fullUrl', ()
     const examsSection = composition?.section?.find((s: any) => s.title === 'Exámenes');
     expect(examsSection?.entry?.length).toBeGreaterThan(0);
     examsSection?.entry?.forEach((entry: any) => {
-      expect(fullUrls.has(entry.reference)).toBe(true);
+      expect(referenceSet.has(entry.reference)).toBe(true);
     });
 
     const proceduresSection = composition?.section?.find((s: any) => s.title === 'Procedimientos');
     expect(proceduresSection?.entry?.length).toBeGreaterThan(0);
     proceduresSection?.entry?.forEach((entry: any) => {
-      expect(fullUrls.has(entry.reference)).toBe(true);
+      expect(referenceSet.has(entry.reference)).toBe(true);
     });
   });
 });

@@ -36,9 +36,12 @@ describe('mapRiskConditions', () => {
     const patientEntry = (bundle.entry as BundleEntry[]).find(
       (entry) => entry.resource?.resourceType === 'Patient'
     );
+    const patientReference = patientEntry?.resource?.id
+      ? `Patient/${patientEntry.resource.id}`
+      : undefined;
 
     conditions.forEach((condition) => {
-      expect(condition.subject?.reference).toBe(patientEntry?.fullUrl);
+      expect(condition.subject?.reference).toBe(patientReference);
       expect(condition.recordedDate).toBe(NOW);
       expect(condition.category?.[0]?.coding?.[0]?.code).toBe('problem-list-item');
     });

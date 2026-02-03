@@ -20,8 +20,11 @@ const getPanelComponent = (panel: any, loincCode: string) =>
     comp?.code?.coding?.some((c: any) => c.system === LOINC && c.code === loincCode)
   );
 
-const getPatientFullUrl = (bundle: any) =>
-  (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient')?.fullUrl;
+const getPatientReference = (bundle: any) => {
+  const patientEntry = (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient');
+  const id = patientEntry?.resource?.id;
+  return id ? `Patient/${id}` : undefined;
+};
 
 const hasCategory = (obs: any, code: string) =>
   obs?.category?.some((cat: any) =>
@@ -48,9 +51,9 @@ describe('Panel de Vitales 85353-1 — componentes presentes y coherentes', () =
       expect(panel).toBeUndefined();
       return;
     }
-    const patientFullUrl = getPatientFullUrl(bundle);
+    const patientReference = getPatientReference(bundle);
     expect(panel.status).toBe('final');
-    expect(panel.subject?.reference).toBe(patientFullUrl);
+    expect(panel.subject?.reference).toBe(patientReference);
     expect(panel.effectiveDateTime).toBe(now);
     expect(hasCategory(panel, TEST_CATEGORY_CODES.VITAL_SIGNS)).toBe(true);
 

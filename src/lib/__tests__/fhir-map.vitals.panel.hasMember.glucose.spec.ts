@@ -17,6 +17,11 @@ const findEntryByLoinc = (bundle: any, code: string) =>
     e?.resource?.code?.coding?.some((c: any) => c.system === LOINC && String(c.code) === String(code))
   );
 
+const entryReference = (entry: any) =>
+  entry?.resource?.resourceType && entry?.resource?.id
+    ? `${entry.resource.resourceType}/${entry.resource.id}`
+    : undefined;
+
 describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T13:10:00Z';
@@ -34,7 +39,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     expect(gluEntry).toBeDefined();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(gluEntry?.fullUrl);
+    expect(refs).toContain(entryReference(gluEntry));
   });
 
   it('normaliza mmol/L→mg/dL por defecto: incluye 2339-0', () => {
@@ -48,7 +53,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     expect(panel && gluEntry).toBeTruthy();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(gluEntry?.fullUrl);
+    expect(refs).toContain(entryReference(gluEntry));
   });
 
   it('si se desactiva la normalización, incluye 14743-9 (mmol/L)', () => {
@@ -62,7 +67,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     expect(panel && gluMolEntry).toBeTruthy();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(gluMolEntry?.fullUrl);
+    expect(refs).toContain(entryReference(gluMolEntry));
   });
 
   it('no incluye glucemia si no existe', () => {
@@ -78,7 +83,7 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
 
     expect(gluEntry).toBeUndefined();
     expect(gluMolEntry).toBeUndefined();
-    expect(refs).not.toContain(gluEntry?.fullUrl);
-    expect(refs).not.toContain(gluMolEntry?.fullUrl);
+    expect(refs).not.toContain(entryReference(gluEntry));
+    expect(refs).not.toContain(entryReference(gluMolEntry));
   });
 });

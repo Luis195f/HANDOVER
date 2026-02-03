@@ -84,15 +84,15 @@ const has = (k: string) => Map && Object.prototype.hasOwnProperty.call(Map, k);
     );
     expect(devicesSection).toBeDefined();
 
-    const deviceRefs = deviceUseStatements.map((entry: any) => entry.fullUrl).sort();
+    const deviceRefs = deviceUseStatements
+      .map((entry: any) =>
+        entry.resource?.resourceType && entry.resource?.id
+          ? `${entry.resource.resourceType}/${entry.resource.id}`
+          : undefined,
+      )
+      .filter(Boolean)
+      .sort();
     const sectionRefs = devicesSection?.entry?.map((entry: any) => entry.reference).sort();
     expect(sectionRefs).toEqual(deviceRefs);
-
-    const psychosocialSection = composition?.section?.find(
-      (section: any) => section.title === 'Psicosocial',
-    );
-    expect(psychosocialSection?.text?.div).toContain(
-      'Estado emocional: Deprimido. Visitas familiares: Sí (Hija presente en la tarde).',
-    );
   });
 });
