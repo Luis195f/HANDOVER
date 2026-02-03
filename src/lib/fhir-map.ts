@@ -2851,6 +2851,7 @@ function mapSummaryObservation(
 ): Observation | null {
   const trimmed = summary?.trim();
   if (!trimmed) return null;
+
   return {
     resourceType: 'Observation',
     status: 'final',
@@ -4550,3 +4551,5 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
+
+  
