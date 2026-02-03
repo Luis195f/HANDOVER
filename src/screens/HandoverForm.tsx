@@ -2481,12 +2481,13 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     const built = buildOutgoingSignature(payload);
     if (!built) return;
 
-    // CI exige method obligatorio: "session" | "pin" | "biometric"
-    // No cambiamos la semántica: firma manuscrita + sesión autenticada => "session".
+    // Tipado fuerte: el schema espera method obligatorio.
+    type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
+
     const nextSignature = {
       ...built,
-      method: built.method ?? 'session',
-    } as typeof built;
+      method: (built.method ?? 'session') as OutgoingSig['method'],
+    } as OutgoingSig;
 
     form.setValue(
       'signatures',
@@ -2504,23 +2505,53 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   <Text style={styles.signaturePadHint}>{t('signatures.signaturePadDisabledHint')}</Text>
 ) : null}
 
-            </View>
-          ) : null}
-          <SignaturesSection
-            value={signaturesValue}
-            onChange={(next) =>
-              form.setValue('signatures', next, { shouldDirty: true, shouldValidate: true })
-            }
-            currentUser={signatureUser}
-            administrativeUnitId={administrativeUnitValue}
-            getSignaturePayload={() => form.getValues()}
-            disableOutgoingAction
-          />
-          {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
-          {incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
-        </CollapsibleSection>
-      </View>
-      {/* END HANDOVER: SIGNATURES_DUAL_UI */}
+</View>
+) : null}
+
+{(() => {
+  // Normalización defensiva: SignaturesSection no puede recibir outgoing.method undefined
+  type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
+
+  const normalizedSignaturesValue = signaturesValue?.outgoing
+    ? ({
+        ...signaturesValue,
+        outgoing: {
+          ...signaturesValue.outgoing,
+          method: ((signaturesValue.outgoing as any).method ?? 'session') as OutgoingSig['method'],
+        } as OutgoingSig,
+      } as typeof signaturesValue)
+    : signaturesValue;
+
+  return (
+    <SignaturesSection
+      value={normalizedSignaturesValue}
+      onChange={(next) => {
+        const normalizedNext =
+          next?.outgoing
+            ? ({
+                ...next,
+                outgoing: {
+                  ...next.outgoing,
+                  method: (((next.outgoing as any).method ?? 'session') as OutgoingSig['method']),
+                } as OutgoingSig,
+              } as typeof next)
+            : next;
+
+        form.setValue('signatures', normalizedNext, { shouldDirty: true, shouldValidate: true });
+      }}
+      currentUser={signatureUser}
+      administrativeUnitId={administrativeUnitValue}
+      getSignaturePayload={() => form.getValues()}
+      disableOutgoingAction
+    />
+  );
+})()}
+
+{outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
+{incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
+</CollapsibleSection>
+</View>
+{/* END HANDOVER: SIGNATURES_DUAL_UI */}
 
       <View style={styles.buttonRow}>
         <HandoverFormActions
