@@ -4550,6 +4550,4 @@ export const __test__ = {
   stableHash,
   stableStringify,
   LOINC: TEST_LOINC,
-};
-
-  
+}
