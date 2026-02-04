@@ -23,7 +23,7 @@ import type {
   PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
-import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
+import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
@@ -511,7 +511,7 @@ const HANDOVER_OBSERVATION_CODES = {
 const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
   codeableConceptFromCode(
     {
-      system: HANDOVER_COMPOSITION_SECTION_SYSTEM,
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION,
       code,
       display,
     },
