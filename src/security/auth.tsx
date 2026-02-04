@@ -14,6 +14,7 @@ import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/s
 import AuthService, { isTokenExpired } from '@/src/security/AuthService';
 import { resetTo } from "@/src/navigation/navigation"; 
 import { configureFHIRClient } from '@/src/lib/fhir-client';
+import { clearSensitiveLocalData } from '@/src/security/secure-cleanup';
 
 const AUTH_DISABLED =
   (process.env.EXPO_PUBLIC_AUTH_DISABLED ?? '').trim().toLowerCase() === 'true';
@@ -53,13 +54,13 @@ try {
 
 // BEGIN HANDOVER: AUTH_CONFIG
 const AUTH0_DOMAIN =
-  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? 'dev-6jmxxysflz2kx61w.us.auth0.com';
+  process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? process.env.AUTH0_DOMAIN ?? '';
 
 const AUTH0_CLIENT_ID =
-  process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? 'zJxhI0SK1J4hmzr1KNzEbWddgZWJDUlL';
+  process.env.EXPO_PUBLIC_AUTH0_CLIENT_ID ?? process.env.AUTH0_CLIENT_ID ?? '';
 
 const OIDC_ISSUER =
-  (process.env.EXPO_PUBLIC_OIDC_ISSUER ?? process.env.OIDC_ISSUER ?? `https://${AUTH0_DOMAIN}`).replace(/\/$/, '');
+  (process.env.EXPO_PUBLIC_OIDC_ISSUER ?? process.env.OIDC_ISSUER ?? (AUTH0_DOMAIN ? `https://${AUTH0_DOMAIN}` : '')).replace(/\/$/, '');
 
 const OIDC_CLIENT_ID =
   process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? process.env.OIDC_CLIENT_ID ?? AUTH0_CLIENT_ID;
@@ -558,9 +559,16 @@ function buildAuthConfig(config?: Partial<typeof DEFAULT_AUTH_CONFIG>) {
   const audience =
     config?.audience?.trim() ||
     (DEFAULT_AUTH_CONFIG as { audience?: string }).audience;
+  const issuer = config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer;
+  const clientId = config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId;
+  const isTestEnv = process.env.NODE_ENV === 'test';
+  if (!AUTH_DISABLED && !isTestEnv) {
+    if (!issuer) throw new Error('OIDC_ISSUER_MISSING');
+    if (!clientId) throw new Error('OIDC_CLIENT_ID_MISSING');
+  }
   return {
-    issuer: config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer,
-    clientId: config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId,
+    issuer,
+    clientId,
     redirectUri: config?.redirectUri ?? DEFAULT_AUTH_CONFIG.redirectUri,
     logoutUri: config?.logoutUri ?? DEFAULT_AUTH_CONFIG.logoutUri,
     scopes: config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes,
@@ -901,6 +909,7 @@ export async function logout(): Promise<void> {
     }
 
     await setSession(null);
+    await clearSensitiveLocalData();
     if (message) {
       Alert.alert(t('auth.sessionExpiredTitle'), message);
     }
@@ -920,6 +929,7 @@ export async function logoutAndClear(options: LogoutOptions = {}): Promise<void>
     if (logoutInFlight) return logoutInFlight;
     logoutInFlight = (async () => {
       await setSession(null);
+      await clearSensitiveLocalData();
       if (options.message) Alert.alert(t('auth.sessionExpiredTitle'), options.message);
       resetTo('Login');
     })().finally(() => {

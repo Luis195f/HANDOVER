@@ -1,8 +1,11 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '@/src/navigation/types';
+import { emitConsentAuditEvent, revokePrivacyConsent } from '@/src/lib/privacy-consent';
+import { clearSensitiveLocalData } from '@/src/security/secure-cleanup';
+import { logoutAndClear } from '@/src/security/auth';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PrivacyPolicy'>;
 
@@ -49,6 +52,29 @@ const sections = [
 ];
 
 export default function PrivacyPolicy({ navigation }: Props) {
+  const handleRevokeConsent = React.useCallback(() => {
+    Alert.alert(
+      'Retirar consentimiento',
+      'Si retiras el consentimiento, se cerrará tu sesión y se borrarán los datos locales cifrados.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Retirar',
+          style: 'destructive',
+          onPress: async () => {
+            const record = await revokePrivacyConsent({ source: 'privacy-policy' });
+            void emitConsentAuditEvent('revoked', record);
+            await clearSensitiveLocalData();
+            await logoutAndClear({
+              skipRemote: true,
+              message: 'Consentimiento revocado. Inicia sesión nuevamente para continuar.',
+            });
+          },
+        },
+      ],
+    );
+  }, []);
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -61,9 +87,14 @@ export default function PrivacyPolicy({ navigation }: Props) {
           </View>
         ))}
       </ScrollView>
-      <Pressable accessibilityRole="button" onPress={() => navigation.goBack()} style={styles.backButton}>
-        <Text style={styles.backButtonText}>Volver</Text>
-      </Pressable>
+      <View style={styles.footer}>
+        <Pressable accessibilityRole="button" onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Text style={styles.backButtonText}>Volver</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={handleRevokeConsent} style={styles.revokeButton}>
+          <Text style={styles.revokeButtonText}>Retirar consentimiento</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -114,5 +145,20 @@ const styles = StyleSheet.create({
     color: '#38BDF8',
     fontWeight: '600',
     fontSize: 16,
+  },
+  footer: {
+    borderTopWidth: 1,
+    borderTopColor: '#1F2937',
+    backgroundColor: '#0B1120',
+  },
+  revokeButton: {
+    padding: 16,
+    alignItems: 'center',
+    backgroundColor: '#111827',
+  },
+  revokeButtonText: {
+    color: '#F87171',
+    fontWeight: '600',
+    fontSize: 15,
   },
 });

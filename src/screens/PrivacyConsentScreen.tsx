@@ -3,49 +3,23 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "@/src/navigation/types";
 
-import { hasPrivacyConsent } from "@/src/lib/privacy-consent";
-
-// Intentar importar un setter si existe (sin romper si no existe).
-// Si tu proyecto NO tiene este export, deja este bloque tal cual y usa el fallback.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const privacyLib: any = (() => {
-  try {
-    // require para evitar fallo si el export no existe
-    return require("@/src/lib/privacy-consent");
-  } catch {
-    return {};
-  }
-})();
+import { emitConsentAuditEvent, hasPrivacyConsent, setPrivacyConsent } from "@/src/lib/privacy-consent";
 
 type Props = NativeStackScreenProps<RootStackParamList, "PrivacyConsent">;
 
 export default function PrivacyConsentScreen({ navigation }: Props) {
   const [saving, setSaving] = React.useState(false);
-
-  async function persistConsentTrue() {
-    // 1) Si existe setPrivacyConsent(true), úsalo
-    if (typeof privacyLib.setPrivacyConsent === "function") {
-      await privacyLib.setPrivacyConsent(true);
-      return;
-    }
-
-    // 2) Si existe setHasPrivacyConsent(true), úsalo
-    if (typeof privacyLib.setHasPrivacyConsent === "function") {
-      await privacyLib.setHasPrivacyConsent(true);
-      return;
-    }
-
-    // 3) Fallback: si tu hasPrivacyConsent ya mira storage interno, esto puede no servir.
-    // Pero evitamos romper el build: si no hay setter, al menos lo informamos.
-    throw new Error(
-      "No se encontró una función para guardar el consentimiento (setPrivacyConsent / setHasPrivacyConsent)."
-    );
-  }
+  const [accepted, setAccepted] = React.useState(false);
 
   const onAccept = async () => {
+    if (!accepted) {
+      Alert.alert("Consentimiento requerido", "Marca la casilla para continuar.");
+      return;
+    }
     setSaving(true);
     try {
-      await persistConsentTrue();
+      const record = await setPrivacyConsent(true, { source: "privacy-consent-screen" });
+      void emitConsentAuditEvent("granted", record);
 
       // Verificación rápida (opcional) para evitar loop
       const ok = await hasPrivacyConsent().catch(() => true);
@@ -81,6 +55,20 @@ export default function PrivacyConsentScreen({ navigation }: Props) {
       </Text>
 
       <Pressable
+        style={styles.checkboxRow}
+        onPress={() => setAccepted((prev) => !prev)}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: accepted }}
+      >
+        <View style={[styles.checkbox, accepted && styles.checkboxChecked]}>
+          {accepted ? <Text style={styles.checkboxTick}>✓</Text> : null}
+        </View>
+        <Text style={styles.checkboxLabel}>
+          Confirmo que he leído la política de privacidad y otorgo mi consentimiento.
+        </Text>
+      </Pressable>
+
+      <Pressable
         style={[styles.button, styles.secondary]}
         onPress={() => navigation.navigate("PrivacyPolicy")}
         disabled={saving}
@@ -89,9 +77,9 @@ export default function PrivacyConsentScreen({ navigation }: Props) {
       </Pressable>
 
       <Pressable
-        style={[styles.button, styles.primary, saving && styles.disabled]}
+        style={[styles.button, styles.primary, (saving || !accepted) && styles.disabled]}
         onPress={onAccept}
-        disabled={saving}
+        disabled={saving || !accepted}
       >
         <Text style={styles.primaryText}>{saving ? "Guardando..." : "Acepto y continuar"}</Text>
       </Pressable>
@@ -111,6 +99,24 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 24, justifyContent: "center" },
   title: { fontSize: 20, fontWeight: "700", marginBottom: 12 },
   body: { fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  checkboxRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderWidth: 1,
+    borderColor: "#94a3b8",
+    borderRadius: 4,
+    marginRight: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "white",
+  },
+  checkboxChecked: {
+    backgroundColor: "#0f172a",
+    borderColor: "#0f172a",
+  },
+  checkboxTick: { color: "white", fontWeight: "700" },
+  checkboxLabel: { flex: 1, fontSize: 14, lineHeight: 20, color: "#1e293b" },
   button: {
     paddingVertical: 12,
     paddingHorizontal: 14,

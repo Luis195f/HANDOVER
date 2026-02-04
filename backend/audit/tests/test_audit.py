@@ -55,7 +55,8 @@ def test_audit_ingest_creates_event():
     event = AuditEvent.objects.first()
     assert event.event_type == "ui_action"
     assert event.request_id == "req-123"
-    assert event.meta == {"client": {"deviceId": "dev-1", "appVersion": "1.0.0"}}
+    assert event.meta["client"] == {"deviceId": "dev-1", "appVersion": "1.0.0"}
+    assert event.meta["fhir"]["resourceType"] == "AuditEvent"
 
 
 @pytest.mark.django_db
@@ -74,6 +75,28 @@ def test_audit_ingest_rejects_forbidden_field():
         response = client.post("/api/audit/events", data=payload, format="json")
 
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_audit_ingest_consent_event_is_fhir_compatible():
+    payload = {
+        "eventType": "consent",
+        "action": "grant",
+        "status": "success",
+        "resourceType": "Consent",
+        "resourceId": "consent-1",
+    }
+
+    with patch.object(AuditEventsIngestView, "permission_classes", [AllowAny]), patch.object(
+        AuditEventsIngestView, "authentication_classes", []
+    ):
+        client = APIClient()
+        response = client.post("/api/audit/events", data=payload, format="json")
+
+    assert response.status_code == 201
+    event = AuditEvent.objects.filter(event_type="consent").first()
+    assert event is not None
+    assert event.meta["fhir"]["resourceType"] == "AuditEvent"
 
 
 @pytest.mark.django_db
