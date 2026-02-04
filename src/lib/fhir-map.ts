@@ -466,7 +466,6 @@ const COMPOSITION_SECTION_CODES = {
 // ---------------------------------------------------------------------------
 // En este repo, codeableConceptFromCode(...) espera system: TerminologySystem.
 // Si no existe un TerminologySystem global/importado, lo definimos aquí como string.
-type TerminologySystem = string;
 
 const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem =
   TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES;
