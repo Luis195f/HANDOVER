@@ -15,6 +15,11 @@ const findEntryByLoinc = (bundle: any, code: string) =>
     e?.resource?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
   );
 
+const entryReference = (entry: any) =>
+  entry?.resource?.resourceType && entry?.resource?.id
+    ? `${entry.resource.resourceType}/${entry.resource.id}`
+    : undefined;
+
 describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
   const patientId = 'pat-001';
   const now = '2025-10-21T12:45:00Z';
@@ -34,8 +39,8 @@ describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
 
     expect(hrEntry).toBeDefined();
     expect(acvpuEntry).toBeDefined();
-    expect(refs).toContain(hrEntry?.fullUrl); // HR incluido
-    expect(refs).toContain(acvpuEntry?.fullUrl); // ACVPU incluido
+    expect(refs).toContain(entryReference(hrEntry)); // HR incluido
+    expect(refs).toContain(entryReference(acvpuEntry)); // ACVPU incluido
   });
 
   it('no incluye ACVPU si no está presente en vitals', () => {
@@ -50,8 +55,8 @@ describe('Panel 85353-1 — hasMember incluye ACVPU cuando existe', () => {
     const acvpuEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.ACVPU.code);
 
     expect(hrEntry).toBeDefined();
-    expect(refs).toContain(hrEntry?.fullUrl);
+    expect(refs).toContain(entryReference(hrEntry));
     expect(acvpuEntry).toBeUndefined();
-    expect(refs).not.toContain(acvpuEntry?.fullUrl);
+    expect(refs).not.toContain(entryReference(acvpuEntry));
   });
 });

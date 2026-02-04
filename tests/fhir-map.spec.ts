@@ -218,6 +218,26 @@ const patientSchema = z.object({
   identifier: z.array(z.object({ system: z.string(), value: z.string() })).optional(),
 });
 
+const practitionerSchema = z.object({
+  resourceType: z.literal('Practitioner'),
+  id: z.string().optional(),
+  identifier: z.array(z.object({ system: z.string(), value: z.string() })).optional(),
+});
+
+const encounterSchema = z.object({
+  resourceType: z.literal('Encounter'),
+  id: z.string().optional(),
+  status: z.string(),
+  class: z.object({ system: z.string(), code: z.string(), display: z.string().optional() }),
+  subject: referenceSchema.optional(),
+});
+
+const deviceSchema = z.object({
+  resourceType: z.literal('Device'),
+  id: z.string().optional(),
+  status: z.string().optional(),
+});
+
 const resourceValidators = {
   Observation: observationSchema,
   MedicationStatement: medicationStatementSchema,
@@ -226,6 +246,9 @@ const resourceValidators = {
   DocumentReference: documentReferenceSchema,
   Composition: compositionSchema,
   Patient: patientSchema,
+  Practitioner: practitionerSchema,
+  Encounter: encounterSchema,
+  Device: deviceSchema,
 } as const;
 
 function collectReferenceStrings(resource: unknown): string[] {
@@ -247,6 +270,10 @@ function collectReferenceStrings(resource: unknown): string[] {
     }
   }
   return refs;
+}
+
+function entryReference(entry: { resource: { resourceType: string; id?: string } }): string {
+  return `${entry.resource.resourceType}/${entry.resource.id ?? ''}`;
 }
 
 describe('mapObservationVitals', () => {
@@ -301,6 +328,8 @@ describe('buildHandoverBundle', () => {
 
     const fullUrls = bundle.entry.map((entry) => entry.fullUrl);
     expect(new Set(fullUrls).size).toBe(fullUrls.length);
+    const entryReferences = bundle.entry.map((entry) => entryReference(entry));
+    expect(new Set(entryReferences).size).toBe(entryReferences.length);
 
     const compositionEntry = bundle.entry.find(
       (entry) => entry.resource.resourceType === 'Composition',
@@ -312,7 +341,7 @@ describe('buildHandoverBundle', () => {
     const sectionRefs = (composition.section ?? []).flatMap((section: any) =>
       section.entry?.map((ref: any) => ref.reference) ?? [],
     );
-    sectionRefs.forEach((ref: string) => expect(fullUrls).toContain(ref));
+    sectionRefs.forEach((ref: string) => expect(entryReferences).toContain(ref));
 
     const documentEntry = bundle.entry.find(
       (entry) => entry.resource.resourceType === 'DocumentReference',
@@ -377,37 +406,28 @@ describe('buildHandoverBundle', () => {
 
   it('resolves all internal references to bundle entries', () => {
     const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
-    const fullUrlSet = new Set(bundle.entry.map((entry) => entry.fullUrl));
+    const entryReferenceSet = new Set(bundle.entry.map((entry) => entryReference(entry)));
 
     bundle.entry.forEach((entry) => {
       const references = collectReferenceStrings(entry.resource);
-      references
-        .filter((reference) => reference.startsWith('urn:uuid:'))
-        .forEach((reference) => {
-          expect(fullUrlSet.has(reference)).toBe(true);
-        });
+      references.forEach((reference) => {
+        expect(entryReferenceSet.has(reference)).toBe(true);
+      });
     });
   });
 
-  it('uses the patient fullUrl for every patient reference', () => {
+  it('uses the patient ResourceType/id for every patient reference', () => {
     const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
     const patientEntry = bundle.entry.find((entry) => entry.resource.resourceType === 'Patient');
     expect(patientEntry).toBeDefined();
-    expect(patientEntry?.fullUrl).toMatch(/^urn:uuid:[0-9a-f]{32}$/);
 
-    const expectedPatientReference = patientEntry!.fullUrl;
-    const patientIdReference = `Patient/${baseValues.patientId}`;
+    const expectedPatientReference = entryReference(patientEntry!);
 
     bundle.entry
       .filter((entry) => 'subject' in entry.resource && entry.resource.resourceType !== 'Patient')
       .forEach((entry) => {
         expect((entry.resource as any).subject?.reference).toBe(expectedPatientReference);
       });
-
-    bundle.entry.forEach((entry) => {
-      const references = collectReferenceStrings(entry.resource);
-      expect(references).not.toContain(patientIdReference);
-    });
   });
 
   it('produces deterministic fullUrls for repeated builds', () => {
@@ -495,7 +515,6 @@ describe('buildFhirBundleFromFormData', () => {
 
     const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
     const validation = validateBundle(bundle);
-
     expect(bundle.resourceType).toBe('Bundle');
     expect(bundle.type).toBe('transaction');
     expect(validation.ok).toBe(true);

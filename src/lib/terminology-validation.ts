@@ -35,13 +35,23 @@ const loincLocalCodes = new Set<string>([
 
 const cache = new Map<string, CodeValidationResult>();
 
+// IMPORTANTE: Record<TerminologySystem, string> debe cubrir TODOS los keys del union.
+// Si agregas systems a TERMINOLOGY_SYSTEMS, debes agregarlos aquí también.
 const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.SNOMED]: 'El código SNOMED ingresado no es válido',
   [TERMINOLOGY_SYSTEMS.LOINC]: 'Código LOINC desconocido',
   [TERMINOLOGY_SYSTEMS.UCUM]: 'Código UCUM desconocido',
   [TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY]: 'Código de categoría de observación desconocido',
+
   [TERMINOLOGY_SYSTEMS.HANDOVER_CARE]: 'Código de cuidado no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE]: 'Tipo de tratamiento no reconocido',
+
+  // ✅ NUEVOS systems HANDOVER (URNs)
+  [TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES]: 'Código HANDOVER Observation Codes no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION]: 'Código HANDOVER Composition Section no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_SBAR]: 'Código HANDOVER SBAR no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST]: 'Código HANDOVER Bedside Checklist no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN]: 'Valor booleano HANDOVER no reconocido',
 };
 
 export const isLocalSnomedCode = (code: string | undefined | null): boolean => {
@@ -82,6 +92,33 @@ type OutcomeIssue = {
 
 const asOutcome = (value: unknown): ValidationOutcome =>
   value && typeof value === 'object' ? (value as ValidationOutcome) : {};
+
+// Local validation para URNs HANDOVER:
+// - HANDOVER_BOOLEAN lo restringimos a yes/no.
+// - El resto: si hay code (no vacío), lo damos por válido localmente (son códigos internos controlados por la app).
+const isLocalHandoverUrnCode = (
+  system: TerminologySystem,
+  code: string | undefined | null,
+): boolean => {
+  if (!code) return false;
+  const trimmed = String(code).trim();
+  if (!trimmed) return false;
+
+  if (system === TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN) {
+    return trimmed === 'yes' || trimmed === 'no';
+  }
+
+  const isHandoverSystem =
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_CARE ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_SBAR ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST;
+
+  if (!isHandoverSystem) return false;
+  return true;
+};
 
 async function validateRemotely({
   system,
@@ -148,7 +185,7 @@ export async function validateTerminologyCode({
       ? isLocalSnomedCode(code)
       : system === TERMINOLOGY_SYSTEMS.LOINC
         ? isLocalLoincCode(code)
-        : false;
+        : isLocalHandoverUrnCode(system, code);
 
   if (isLocalValid) {
     const result = { valid: true, source: 'local' as const };
