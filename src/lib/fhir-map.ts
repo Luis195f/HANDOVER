@@ -464,14 +464,12 @@ const COMPOSITION_SECTION_CODES = {
 // ---------------------------------------------------------------------------
 // Terminology systems (local URNs)
 // ---------------------------------------------------------------------------
-// Nota: NO redefinimos TerminologySystem aquí (podría existir/importarse ya en el repo).
-// En su lugar, casteamos los URNs al tipo TerminologySystem esperado por codeableConceptFromCode.
+// En este repo, codeableConceptFromCode(...) espera system: TerminologySystem.
+// Si no existe un TerminologySystem global/importado, lo definimos aquí como string.
+type TerminologySystem = string;
 
-const HANDOVER_OBSERVATION_SYSTEM =
-  'urn:handover-pro:observation-codes' as unknown as TerminologySystem;
-
-const HANDOVER_COMPOSITION_SECTION_SYSTEM =
-  'urn:handover-pro:composition-section' as unknown as TerminologySystem;
+const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem = 'urn:handover-pro:observation-codes';
+const HANDOVER_COMPOSITION_SECTION_SYSTEM: TerminologySystem = 'urn:handover-pro:composition-section';
 
 const HANDOVER_OBSERVATION_CODES = {
   administrative: {
