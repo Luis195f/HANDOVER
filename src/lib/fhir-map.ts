@@ -464,13 +464,14 @@ const COMPOSITION_SECTION_CODES = {
 // ---------------------------------------------------------------------------
 // Terminology systems (local URNs)
 // ---------------------------------------------------------------------------
-// En algunos typings de FHIR, Coding.system es string. Si en tu repo no existe
-// un tipo "TerminologySystem" explícito, definimos uno local y no rompemos nada.
-type TerminologySystem = string;
+// Nota: NO redefinimos TerminologySystem aquí (podría existir/importarse ya en el repo).
+// En su lugar, casteamos los URNs al tipo TerminologySystem esperado por codeableConceptFromCode.
 
-const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem = 'urn:handover-pro:observation';
-const HANDOVER_COMPOSITION_SECTION_SYSTEM: TerminologySystem =
-  'urn:handover-pro:composition-section';
+const HANDOVER_OBSERVATION_SYSTEM =
+  'urn:handover-pro:observation-codes' as unknown as TerminologySystem;
+
+const HANDOVER_COMPOSITION_SECTION_SYSTEM =
+  'urn:handover-pro:composition-section' as unknown as TerminologySystem;
 
 const HANDOVER_OBSERVATION_CODES = {
   administrative: {
@@ -498,7 +499,7 @@ const HANDOVER_OBSERVATION_CODES = {
 const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
   codeableConceptFromCode(
     {
-      system: HANDOVER_COMPOSITION_SECTION_SYSTEM as TerminologySystem,
+      system: HANDOVER_COMPOSITION_SECTION_SYSTEM,
       code,
       display,
     },
@@ -839,7 +840,6 @@ export type HandoverValues = {
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
-
 
 type MappingContext = {
   subject: Reference;
