@@ -5,6 +5,11 @@ export const TERMINOLOGY_SYSTEMS = {
   OBSERVATION_CATEGORY: 'http://terminology.hl7.org/CodeSystem/observation-category',
   HANDOVER_CARE: 'urn:handover-pro:care',
   HANDOVER_TREATMENT_TYPE: 'urn:handover-pro:care:treatment-type',
+  HANDOVER_OBSERVATION_CODES: 'urn:handover-pro:observation-codes',
+  HANDOVER_COMPOSITION_SECTION: 'urn:handover-pro:composition-section',
+  HANDOVER_SBAR: 'urn:handover-pro:sbar',
+  HANDOVER_BEDSIDE_CHECKLIST: 'urn:handover-pro:bedside-checklist',
+  HANDOVER_BOOLEAN: 'urn:handover-pro:boolean',
 } as const;
 
 export type TerminologySystem =
@@ -261,11 +266,5 @@ export const ALERT_CODES = {
   dressingOverdue: 'alert.dressing.overdue',
   drainOverdue: 'alert.drain.overdue',
   oxygenProlonged: 'alert.oxygen.prolonged',
-
-  HANDOVER_OBSERVATION_CODES: 'urn:handover-pro:observation-codes',
-  HANDOVER_COMPOSITION_SECTION: 'urn:handover-pro:composition-section',
-  HANDOVER_SBAR: 'urn:handover-pro:sbar',
-  HANDOVER_BEDSIDE_CHECKLIST: 'urn:handover-pro:bedside-checklist',
-  HANDOVER_BOOLEAN: 'urn:handover-pro:boolean',
 
 } as const;
