@@ -534,7 +534,7 @@ describe('buildFhirBundleFromFormData', () => {
 
     const composition = bundle.entry.find((entry) => entry.resource.resourceType === 'Composition')
       ?.resource as any;
-    expect(composition?.event?.[0]?.period).toEqual({
+    expect(composition?.event?.[0]?.period).toEqual({ start, end })
       start: '2025-01-05T08:00:00Z',
       end: '2025-01-05T16:00:00Z',
     });
