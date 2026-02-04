@@ -468,8 +468,11 @@ const COMPOSITION_SECTION_CODES = {
 // Si no existe un TerminologySystem global/importado, lo definimos aquí como string.
 type TerminologySystem = string;
 
-const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem = 'urn:handover-pro:observation-codes';
-const HANDOVER_COMPOSITION_SECTION_SYSTEM: TerminologySystem = 'urn:handover-pro:composition-section';
+const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem =
+  TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES;
+
+const HANDOVER_COMPOSITION_SECTION_SYSTEM: TerminologySystem =
+  TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION;
 
 const HANDOVER_OBSERVATION_CODES = {
   administrative: {
@@ -2734,7 +2737,7 @@ function mapSbarObservations(values: CompositionValues, context: MappingContext)
       code: {
         coding: [
           {
-            system: 'urn:handover-pro:sbar' as TerminologySystem,
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_SBAR,
             code,
             display,
           },
@@ -2787,7 +2790,7 @@ function mapBedsideChecklistObservation(
         code: {
           coding: [
             {
-              system: 'urn:handover-pro:bedside-checklist' as TerminologySystem,
+              system: TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST,
               code: key,
               display: key,
             },
@@ -2797,7 +2800,7 @@ function mapBedsideChecklistObservation(
         valueCodeableConcept: {
           coding: [
             {
-              system: 'urn:handover-pro:boolean' as TerminologySystem,
+              system: TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN,
               code: value ? 'yes' : 'no',
               display: value ? 'Yes' : 'No',
             },
