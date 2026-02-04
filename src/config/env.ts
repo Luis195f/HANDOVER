@@ -1,5 +1,41 @@
 import Constants from 'expo-constants';
 
+function isLocalhostUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function shouldAllowInsecureHttp(): boolean {
+  const flag = process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP ?? process.env.ALLOW_INSECURE_HTTP;
+  if (typeof flag === 'string' && flag.trim()) {
+    const normalized = flag.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes';
+  }
+  return false;
+}
+
+function assertSecureUrl(raw: string, label: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.startsWith('https://')) return trimmed;
+  if (trimmed.startsWith('http://') && isLocalhostUrl(trimmed)) return trimmed;
+
+  const allowInsecure = shouldAllowInsecureHttp();
+  const isTestEnv = process.env.NODE_ENV === 'test';
+  const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+
+  if (allowInsecure || isTestEnv || isDev) {
+    console.warn(`[env] ${label} is not HTTPS. Configure HTTPS for production.`);
+    return trimmed;
+  }
+
+  throw new Error(`${label} must use HTTPS in production.`);
+}
+
 function resolveBaseUrl(): string {
   const expoValue = Constants.expoConfig?.extra?.FHIR_BASE_URL;
   const envValue = process.env.EXPO_PUBLIC_FHIR_BASE_URL ?? process.env.FHIR_BASE_URL;
@@ -8,7 +44,7 @@ function resolveBaseUrl(): string {
   if (!raw) {
     throw new Error('Missing FHIR_BASE_URL');
   }
-  return raw.replace(/\/+$/, '');
+  return assertSecureUrl(raw.replace(/\/+$/, ''), 'FHIR_BASE_URL');
 }
 
 function resolveSttEndpoint(): string | null {
@@ -16,7 +52,7 @@ function resolveSttEndpoint(): string | null {
   const envValue = process.env.EXPO_PUBLIC_STT_ENDPOINT ?? process.env.STT_ENDPOINT;
   const rawSource = typeof expoValue === 'string' ? expoValue : envValue ?? '';
   const raw = rawSource.trim();
-  return raw.length > 0 ? raw : null;
+  return raw.length > 0 ? assertSecureUrl(raw, 'STT_ENDPOINT') : null;
 }
 
 export const FHIR_BASE_URL: string = resolveBaseUrl();
@@ -33,7 +69,7 @@ function resolveAiBackendBaseUrl(): string | null {
     Constants.expoConfig?.extra?.AI_BACKEND_BASE_URL;
 
   if (typeof aiEnv === 'string' && aiEnv.trim()) {
-    return sanitizeBaseUrl(aiEnv.trim());
+    return assertSecureUrl(sanitizeBaseUrl(aiEnv.trim()), 'AI_BACKEND_BASE_URL');
   }
 
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
@@ -53,7 +89,7 @@ function resolveAiSbarBaseUrl(): string | null {
     null;
 
   if (typeof aiSbarEnv === 'string' && aiSbarEnv.trim()) {
-    return sanitizeBaseUrl(aiSbarEnv.trim());
+    return assertSecureUrl(sanitizeBaseUrl(aiSbarEnv.trim()), 'AI_SBAR_URL');
   }
 
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
@@ -85,7 +121,7 @@ function resolveOpenAiBaseUrl(): string | null {
     null;
 
   if (typeof openAiEnv === 'string' && openAiEnv.trim()) {
-    return sanitizeBaseUrl(openAiEnv.trim());
+    return assertSecureUrl(sanitizeBaseUrl(openAiEnv.trim()), 'OPENAI_BASE_URL');
   }
 
   return null;
@@ -135,4 +171,5 @@ export const ENV = {
   OPENAI_ENABLED,
 } as const;
 
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const RAW_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
+export const API_BASE_URL = assertSecureUrl(RAW_API_BASE_URL, 'API_BASE_URL');

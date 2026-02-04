@@ -78,6 +78,7 @@ function ns(): string {
   } catch { return 'nurseos'; }
 }
 const PREFIX = `${ns()}:drafts`;
+const INDEX_KEY = `${PREFIX}:__index__`;
 
 // Acepta 'Patient/{id}' o '{id}'
 function normalizePatientId(patientId: string): string {
@@ -88,6 +89,27 @@ function normalizePatientId(patientId: string): string {
 // Clave primaria (normalizada) y clave legacy (sin normalizar) para compat
 const keyNorm = (patientId: string) => `${PREFIX}:${normalizePatientId(patientId)}`;
 const keyLegacy = (patientId: string) => `${PREFIX}:${patientId}`;
+
+async function loadIndex(): Promise<string[]> {
+  try {
+    const raw = await storage.getItem(INDEX_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as string[];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveIndex(keys: string[]): Promise<void> {
+  try {
+    if (!keys.length) {
+      await storage.removeItem(INDEX_KEY);
+      return;
+    }
+    await storage.setItem(INDEX_KEY, JSON.stringify(keys));
+  } catch {}
+}
 
 // ----------------------------
 // JSON helpers
@@ -190,6 +212,10 @@ export async function setDraft<T = any>(patientId: string, data: T): Promise<voi
     }
   }
   await storage.setItem(k1, payload);
+  const index = await loadIndex();
+  if (!index.includes(k1)) {
+    await saveIndex([...index, k1]);
+  }
 }
 
 export async function clearDraft(patientId?: string): Promise<void> {
@@ -199,6 +225,16 @@ export async function clearDraft(patientId?: string): Promise<void> {
   // Borra ambas posibles claves para idempotencia/compat
   try { await storage.removeItem(k1); } catch {}
   if (k2 !== k1) { try { await storage.removeItem(k2); } catch {} }
+  const index = await loadIndex();
+  if (index.length) {
+    await saveIndex(index.filter((item) => item !== k1 && item !== k2));
+  }
+}
+
+export async function clearAllDrafts(): Promise<void> {
+  const index = await loadIndex();
+  await Promise.allSettled(index.map((key) => storage.removeItem(key)));
+  await saveIndex([]);
 }
 
 // ----------------------------

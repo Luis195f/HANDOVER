@@ -1,4 +1,5 @@
 from typing import Any, Dict
+import re
 
 from rest_framework import serializers
 
@@ -37,6 +38,23 @@ class AuditEventIngestSerializer(serializers.Serializer):
     payloadSize = serializers.IntegerField(required=False, allow_null=True)
     requestId = serializers.CharField(required=False, allow_blank=True)
     client = ClientInfoSerializer(required=False)
+
+    _pattern = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
+    def validate_eventType(self, value: str) -> str:
+        if not self._pattern.match(value):
+            raise serializers.ValidationError("Invalid eventType")
+        return value
+
+    def validate_action(self, value: str) -> str:
+        if not self._pattern.match(value):
+            raise serializers.ValidationError("Invalid action")
+        return value
+
+    def validate_status(self, value: str) -> str:
+        if not self._pattern.match(value):
+            raise serializers.ValidationError("Invalid status")
+        return value
 
     def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
         self._validate_keys()

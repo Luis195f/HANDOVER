@@ -7,6 +7,7 @@ import httpx
 from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.conf import settings
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
@@ -150,9 +151,23 @@ class FHIRJSONRenderer(JSONRenderer):
 # Config
 # =========================
 
-FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
+FHIR_BASE = os.environ.get("FHIR_BASE") or os.environ.get("FHIR_BASE_URL") or "http://localhost:8080/fhir"
 FHIR_TOKEN = os.environ.get("FHIR_TOKEN", "")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off").lower().strip()
+
+
+def _ensure_secure_url(url: str) -> str:
+    if url.startswith("https://"):
+        return url
+    if url.startswith("http://localhost") or url.startswith("http://127.0.0.1"):
+        return url
+    if settings.DEBUG:
+        logger.warning("FHIR_BASE is not HTTPS; configure HTTPS in production.")
+        return url
+    raise RuntimeError("FHIR_BASE must use HTTPS in production.")
+
+
+FHIR_BASE = _ensure_secure_url(FHIR_BASE)
 
 
 def auth_headers() -> Dict[str, str]:
@@ -166,6 +181,36 @@ def auth_headers() -> Dict[str, str]:
     if FHIR_TOKEN:
         headers["Authorization"] = f"Bearer {FHIR_TOKEN}"
     return headers
+
+
+def _ensure_json_object(payload: Any) -> Optional[Response]:
+    if not isinstance(payload, dict):
+        return Response({"errors": ["Invalid payload."]}, status=400)
+    return None
+
+
+def _emit_resource_audit(
+    *,
+    request: HttpRequest,
+    resource_type: str,
+    payload_obj: Any,
+    status: str,
+    http_status: int,
+    resource_id: str = "",
+    action: str = "create",
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    emit_audit_event(
+        event_type="fhir_resource",
+        action=action,
+        status=status,
+        http_status=http_status,
+        request=request,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        payload_obj=payload_obj,
+        meta=meta,
+    )
 
 
 def _validate_remotely(resource: Dict[str, Any], resource_type: str) -> Optional[Response]:
@@ -220,7 +265,7 @@ def _post_to_fhir(resource: Dict[str, Any], resource_type: str) -> Response:
         return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
 
     if resp.status_code >= 400:
-        return Response({"errors": [resp.text]}, status=resp.status_code)
+        return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
 
     try:
         return Response(resp.json(), status=resp.status_code)
@@ -323,17 +368,56 @@ class PatientView(AuthenticatedAPIView):
         if Patient is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
 
+        payload_obj = request.data
+        invalid_payload = _ensure_json_object(payload_obj)
+        if invalid_payload:
+            _emit_resource_audit(
+                request=request,
+                resource_type="Patient",
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=400,
+                meta={"errorCode": "INVALID_PAYLOAD"},
+            )
+            return invalid_payload
+
         try:
-            patient_obj = Patient.parse_obj(request.data)
-        except Exception as exc:
-            return Response({"errors": [str(exc)]}, status=422)
+            patient_obj = Patient.parse_obj(payload_obj)
+        except Exception:
+            _emit_resource_audit(
+                request=request,
+                resource_type="Patient",
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=422,
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
+            return Response({"errors": ["Invalid Patient payload."]}, status=422)
 
         patient = patient_obj.dict(exclude_none=True)
         validation_response = _validate_remotely(patient, "Patient")
         if validation_response:
+            _emit_resource_audit(
+                request=request,
+                resource_type="Patient",
+                payload_obj=patient,
+                status="fail",
+                http_status=validation_response.status_code,
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return validation_response
 
-        return _post_to_fhir(patient, "Patient")
+        response = _post_to_fhir(patient, "Patient")
+        status_label = "success" if response.status_code < 400 else "fail"
+        _emit_resource_audit(
+            request=request,
+            resource_type="Patient",
+            payload_obj=patient,
+            status=status_label,
+            http_status=response.status_code,
+            resource_id=str(patient.get("id") or ""),
+        )
+        return response
 
 
 class MedicationStatementView(AuthenticatedAPIView):
@@ -342,17 +426,56 @@ class MedicationStatementView(AuthenticatedAPIView):
         if MedicationStatement is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
 
+        payload_obj = request.data
+        invalid_payload = _ensure_json_object(payload_obj)
+        if invalid_payload:
+            _emit_resource_audit(
+                request=request,
+                resource_type="MedicationStatement",
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=400,
+                meta={"errorCode": "INVALID_PAYLOAD"},
+            )
+            return invalid_payload
+
         try:
-            ms_obj = MedicationStatement.parse_obj(request.data)
-        except Exception as exc:
-            return Response({"errors": [str(exc)]}, status=422)
+            ms_obj = MedicationStatement.parse_obj(payload_obj)
+        except Exception:
+            _emit_resource_audit(
+                request=request,
+                resource_type="MedicationStatement",
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=422,
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
+            return Response({"errors": ["Invalid MedicationStatement payload."]}, status=422)
 
         medication_statement = ms_obj.dict(exclude_none=True)
         validation_response = _validate_remotely(medication_statement, "MedicationStatement")
         if validation_response:
+            _emit_resource_audit(
+                request=request,
+                resource_type="MedicationStatement",
+                payload_obj=medication_statement,
+                status="fail",
+                http_status=validation_response.status_code,
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
             return validation_response
 
-        return _post_to_fhir(medication_statement, "MedicationStatement")
+        response = _post_to_fhir(medication_statement, "MedicationStatement")
+        status_label = "success" if response.status_code < 400 else "fail"
+        _emit_resource_audit(
+            request=request,
+            resource_type="MedicationStatement",
+            payload_obj=medication_statement,
+            status=status_label,
+            http_status=response.status_code,
+            resource_id=str(medication_statement.get("id") or ""),
+        )
+        return response
 
 
 class BundleView(AuthenticatedAPIView):
@@ -366,9 +489,20 @@ class BundleView(AuthenticatedAPIView):
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
 
         payload_obj = request.data
+        invalid_payload = _ensure_json_object(payload_obj)
+        if invalid_payload:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=400,
+                resource_id=getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "INVALID_PAYLOAD"},
+            )
+            return invalid_payload
         try:
             bundle_obj = Bundle.parse_obj(request.data)
-        except Exception as exc:
+        except Exception:
             _emit_bundle_audit(
                 request=request,
                 payload_obj=payload_obj,
@@ -377,7 +511,7 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=getattr(request, "audit_request_id", ""),
                 meta={"errorCode": "FHIR_VALIDATION_ERROR"},
             )
-            return Response({"errors": [str(exc)]}, status=422)
+            return Response({"errors": ["Invalid Bundle payload."]}, status=422)
 
         if getattr(bundle_obj, "type", None) != "transaction":
             _emit_bundle_audit(
@@ -388,7 +522,7 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=getattr(request, "audit_request_id", ""),
                 meta={"errorCode": "FHIR_VALIDATION_ERROR"},
             )
-            return Response({"errors": ["Solo se permiten bundles de tipo transaction."]}, status=422)
+            return Response({"errors": ["Invalid Bundle payload."]}, status=422)
 
         bundle = bundle_obj.dict(exclude_none=True)
 
@@ -443,7 +577,7 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
                 meta=meta,
             )
-            return Response({"errors": [resp.text]}, status=resp.status_code)
+            return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
 
         try:
             payload = resp.json()
@@ -486,17 +620,39 @@ class AuditLogView(AuthenticatedAPIView):
 
         logs = AuditEvent.objects.all()[:limit]
         payload = [self._serialize_event(event) for event in logs]
+        emit_audit_event(
+            event_type="audit_access",
+            action="read",
+            status="success",
+            http_status=200,
+            request=request,
+            resource_type="AuditEvent",
+            resource_id="",
+        )
         return Response(payload, status=200)
 
     def post(self, request: HttpRequest) -> Response:
+        invalid_payload = _ensure_json_object(request.data)
+        if invalid_payload:
+            emit_audit_event(
+                event_type="audit_access",
+                action="create",
+                status="fail",
+                http_status=400,
+                request=request,
+                resource_type="AuditEvent",
+                resource_id="",
+                meta={"errorCode": "INVALID_PAYLOAD"},
+            )
+            return invalid_payload
         data = request.data if isinstance(request.data, dict) else {}
         event_type = data.get("type")
         if event_type not in self.allowed_types:
-            return Response({"errors": ["Tipo de auditoría inválido."]}, status=400)
+            return Response({"errors": ["Invalid audit payload."]}, status=400)
 
         user_id = data.get("userId")
         if not user_id:
-            return Response({"errors": ["userId es requerido."]}, status=400)
+            return Response({"errors": ["Invalid audit payload."]}, status=400)
 
         raw_at = data.get("at")
         occurred_at = parse_datetime(raw_at) if isinstance(raw_at, str) else None
@@ -513,6 +669,16 @@ class AuditLogView(AuthenticatedAPIView):
             shift_code=str(data.get("shiftCode") or ""),
             meta=data.get("meta") if isinstance(data.get("meta"), dict) else None,
             occurred_at=occurred_at,
+        )
+
+        emit_audit_event(
+            event_type="audit_access",
+            action="create",
+            status="success",
+            http_status=201,
+            request=request,
+            resource_type="AuditEvent",
+            resource_id=str(event.id),
         )
 
         return Response(self._serialize_event(event), status=201)

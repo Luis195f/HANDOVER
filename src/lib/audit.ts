@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { apiPost } from '@/src/lib/api';
 import {
   encryptedGetItem,
+  encryptedRemoveItem,
   encryptedSetItem,
   getAsyncStorageAdapter,
   type AsyncStorageAdapter,
@@ -23,6 +24,7 @@ export interface AuditEvent {
 export interface AuditStorage {
   load(): Promise<AuditEvent[]>;
   save(events: AuditEvent[]): Promise<void>;
+  clear?: () => Promise<void>;
 }
 
 export interface MakeAuditEventInput {
@@ -149,6 +151,15 @@ export function createAsyncStorageAuditStorage(key = 'handover:audit:v1'): Audit
       await encryptedSetItem(key, serialized, storage);
       memoryCopy = null;
     },
+    async clear(): Promise<void> {
+      const storage = await getStorage();
+      if (!storage) {
+        memoryCopy = [];
+        return;
+      }
+      await encryptedRemoveItem(key, storage);
+      memoryCopy = [];
+    },
   };
 }
 
@@ -172,4 +183,9 @@ export async function sendAuditEvent(event: AuditEvent): Promise<void> {
   }
 }
 
+export async function clearAuditStorage(key = 'handover:audit:v1'): Promise<void> {
+  const storage = await getAsyncStorageAdapter();
+  if (!storage) return;
+  await encryptedRemoveItem(key, storage);
+}
 

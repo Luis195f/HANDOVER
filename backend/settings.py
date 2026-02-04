@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 from os import environ
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,7 +13,16 @@ ENV_PATH = BASE_DIR / "backend" / ".env"
 if ENV_PATH.exists():
     load_dotenv(ENV_PATH)
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-placeholder")
+# -----------------------------
+# Flags de entorno
+# -----------------------------
+RUNNING_TESTS = (
+    "test" in sys.argv
+    or "pytest" in sys.argv
+    or os.environ.get("PYTEST_CURRENT_TEST") is not None
+)
+
+SECRET_KEY = os.environ.get("SECRET_KEY")
 
 # DEBUG controlable por env (default True para dev)
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
@@ -21,20 +31,30 @@ HANDOVER_PRIVATE_KEY_PATH = os.getenv("HANDOVER_PRIVATE_KEY_PATH")
 HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
 HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").lower() == "true"
 
-# ---- Hosts / CORS ----
+# -----------------------------
+# Hosts / CORS / CSRF
+# -----------------------------
 RAW_ALLOWED_ORIGINS = os.getenv("HANDOVER_ALLOWED_ORIGINS", "").strip()
 
 # Fallback dev-friendly (no te rompe nada)
-DEFAULT_DEV_ORIGINS = "http://localhost:19006,http://localhost:3000,http://127.0.0.1:19006,http://127.0.0.1:3000"
+DEFAULT_DEV_ORIGINS = (
+    "http://localhost:19006,"
+    "http://localhost:3000,"
+    "http://127.0.0.1:19006,"
+    "http://127.0.0.1:3000"
+)
+
 if not RAW_ALLOWED_ORIGINS and DEBUG:
     RAW_ALLOWED_ORIGINS = DEFAULT_DEV_ORIGINS
 
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [o.strip() for o in RAW_ALLOWED_ORIGINS.split(",") if o.strip()]
+
+# Regex útil para dev (manténlo)
 CORS_ALLOWED_ORIGIN_REGEXES = [r"^https?:\/\/localhost(:\d+)?$"]
 
 # ALLOWED_HOSTS: usa hosts de los origins + fallback
-hosts_from_origins = []
+hosts_from_origins: list[str] = []
 for origin in CORS_ALLOWED_ORIGINS:
     try:
         h = urlparse(origin).hostname
@@ -44,33 +64,50 @@ for origin in CORS_ALLOWED_ORIGINS:
         pass
 
 ALLOWED_HOSTS = sorted(set(hosts_from_origins + ["localhost", "127.0.0.1"]))
-RUNNING_TESTS = (
-    "test" in sys.argv
-    or "pytest" in sys.argv
-    or os.environ.get("PYTEST_CURRENT_TEST") is not None
-)
 
+# Django test client usa "testserver"
 if RUNNING_TESTS and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS += ["testserver"]
+
 LOCAL_IP = environ.get("LOCAL_IP")
+
+# CSRF_TRUSTED_ORIGINS requiere esquema (http/https)
 CSRF_TRUSTED_ORIGINS = [
     *CORS_ALLOWED_ORIGINS,
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ] + ([f"http://{LOCAL_IP}:8000"] if LOCAL_IP else [])
 
+# En producción, evita arrancar sin orígenes (te protege de CORS/CSRF mal configurado)
+if not DEBUG and not RUNNING_TESTS and not CORS_ALLOWED_ORIGINS:
+    raise RuntimeError(
+        "HANDOVER_ALLOWED_ORIGINS is required in production (set allowed https origins)."
+    )
+
+# -----------------------------
+# Secret key
+# -----------------------------
+if not SECRET_KEY:
+    if DEBUG or RUNNING_TESTS:
+        SECRET_KEY = "django-insecure-placeholder"
+    else:
+        raise RuntimeError("SECRET_KEY is required in production.")
+
+# -----------------------------
+# Apps / DRF
+# -----------------------------
 INSTALLED_APPS = [
-    "corsheaders",
-    "csp",
-    "rest_framework",
-    "backend.api",
-    "backend.audit",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
+    "csp",
+    "rest_framework",
+    "backend.api",
+    "backend.audit",
 ]
 
 REST_FRAMEWORK = {
@@ -115,6 +152,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "backend.wsgi.application"
 
+# -----------------------------
+# DB
+# -----------------------------
 DATABASES = {
     "default": {
         "ENGINE": os.environ.get("DJANGO_DB_ENGINE", "django.db.backends.sqlite3"),
@@ -138,32 +178,35 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ---- Seguridad: solo fuerte en prod ----
+# -----------------------------
+# Seguridad (HTTPS / Cookies / HSTS)
+# -----------------------------
+# Por defecto: true (hardening). En TESTS: siempre OFF para evitar 301 del client HTTP de Django.
 ENABLE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "true").lower() == "true"
+if RUNNING_TESTS:
+    ENABLE_SSL_REDIRECT = False
 
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    X_FRAME_OPTIONS = "DENY"
-    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
-else:
-    SECURE_SSL_REDIRECT = False
-    SECURE_HSTS_SECONDS = 0
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-    SECURE_HSTS_PRELOAD = False
-    SECURE_PROXY_SSL_HEADER = None
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
-    X_FRAME_OPTIONS = "DENY"
-    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_SSL_REDIRECT = ENABLE_SSL_REDIRECT
 
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000")) if ENABLE_SSL_REDIRECT else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = ENABLE_SSL_REDIRECT
+SECURE_HSTS_PRELOAD = ENABLE_SSL_REDIRECT
+
+# Si estás detrás de proxy (nginx) con X-Forwarded-Proto
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if ENABLE_SSL_REDIRECT else None
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+
+SESSION_COOKIE_SECURE = ENABLE_SSL_REDIRECT
+CSRF_COOKIE_SECURE = ENABLE_SSL_REDIRECT
+
+X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+# -----------------------------
+# CSP (mantengo tu dict + compatibilidad django-csp)
+# -----------------------------
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         "default-src": ("'self'",),
@@ -178,9 +221,33 @@ CONTENT_SECURITY_POLICY = {
     }
 }
 
-AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
-AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET", "dev-secret")
+# Compatibilidad estándar con django-csp (no rompe tu dict)
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ("'self'",),
+        "script-src": ("'self'", "https://cdn.jsdelivr.net"),
+        "style-src": ("'self'", "https://fonts.googleapis.com"),
+        "img-src": ("'self'", "data:"),
+        "font-src": ("'self'", "https://fonts.gstatic.com"),
+        "connect-src": (
+            "'self'",
+            *tuple(
+                origin for origin in CORS_ALLOWED_ORIGINS
+                if origin.startswith("https://")
+            ),
+        ),
+    }
+}
 
+# -----------------------------
+# Auditoría
+# -----------------------------
+AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
+AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET") or SECRET_KEY
+
+# -----------------------------
+# Logging
+# -----------------------------
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

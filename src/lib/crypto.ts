@@ -10,7 +10,7 @@ import {
   getOrCreateEncryptionKey,
   isPayloadEncrypted,
 } from '../security/crypto';
-import { secureGetItem, secureSetItem } from '../security/secure-storage';
+import { secureDeleteItem, secureGetItem, secureSetItem } from '../security/secure-storage';
 
 const AES_GCM_ALGO = 'AES-256-GCM' as const;
 
@@ -220,6 +220,15 @@ export const LEGACY_ENCRYPTION_PREFIX = 'enc:v1:';
 export const OFFLINE_ENCRYPTION_DISABLED = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED === 'true';
 
 let cachedLegacyKey: string | null = null;
+
+export async function clearOfflineEncryptionKeys(): Promise<void> {
+  cachedOfflineKey = null;
+  cachedLegacyKey = null;
+  await Promise.allSettled([
+    secureDeleteItem(OFFLINE_KEY_STORAGE),
+    secureDeleteItem(LEGACY_QUEUE_KEY),
+  ]);
+}
 
 function generateLegacyKey(): string {
   const randomBytes = CryptoJS.lib.WordArray.random(32);

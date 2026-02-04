@@ -5,6 +5,7 @@ from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 
 from backend.audit.serializers import AuditEventIngestSerializer
@@ -26,9 +27,14 @@ class AuditEventsIngestView(APIView):
 
     def post(self, request):
         data = request.data
+        if not isinstance(data, (dict, list)):
+            return Response({"errors": ["Invalid audit payload."]}, status=400)
         is_batch = isinstance(data, list)
         serializer = AuditEventIngestSerializer(data=data, many=is_batch)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError:
+            return Response({"errors": ["Invalid audit payload."]}, status=400)
 
         events: List[Dict[str, Any]] = serializer.validated_data if is_batch else [serializer.validated_data]
         for event in events:
