@@ -95,18 +95,22 @@ async def transcribe_audio(file: UploadFile, language: Optional[str]) -> str:
         raise
 
 
-def _build_sbar_prompt(text: str, language: str) -> str:
+def build_sbar_prompt(text: str, language: str) -> str:
     return (
         "Eres una enfermera clínica experta en un hospital de España.\n"
-        "A partir del siguiente texto de notas de enfermería, resume en formato SBAR"
+        "A partir de los datos estructurados y notas breves, resume en formato SBAR"
         " (Situation, Background, Assessment, Recommendation) en español profesional,"
         " claro y conciso, sin inventar datos que no estén presentes.\n"
         "Incluye datos clínicos relevantes como signos vitales, escalas, dispositivos, medicaciones"
-        " y riesgos si aparecen en el texto.\n"
+        " y riesgos si aparecen en el contexto.\n"
+        "Si falta un dato, indica explícitamente \"dato no disponible\".\n"
         "No hagas diagnósticos médicos nuevos ni órdenes médicas.\n"
+        "No incluyas dosis, pautas ni recomendaciones terapéuticas específicas.\n"
+        "Incluye una advertencia de seguridad: \"Asistente de apoyo, no diagnóstico ni prescripción\""
+        " dentro de full_text.\n"
         "Devuelve un objeto JSON con las claves situation, background, assessment, recommendation y full_text."
         f"\nIdioma de salida: {language}.\n"
-        f"Notas:\n{text}"
+        f"Contexto:\n{text}"
     )
 
 
@@ -118,7 +122,7 @@ async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
             model=OPENAI_MODEL_SBAR,
             messages=[
                 {"role": "system", "content": "Asistente de enfermería"},
-                {"role": "user", "content": _build_sbar_prompt(text, language)},
+                {"role": "user", "content": build_sbar_prompt(text, language)},
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
@@ -135,12 +139,16 @@ async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
             raise RuntimeError("invalid-keys")
 
         full_text = payload.get("full_text")
+        warning = "Asistente de apoyo, no diagnóstico ni prescripción."
+        final_full_text = full_text if isinstance(full_text, str) else ""
+        if warning.lower() not in final_full_text.lower():
+            final_full_text = (final_full_text + "\n\n" if final_full_text else "") + warning
         return {
             "situation": payload.get("situation", ""),
             "background": payload.get("background", ""),
             "assessment": payload.get("assessment", ""),
             "recommendation": payload.get("recommendation", ""),
-            "full_text": full_text if isinstance(full_text, str) else "",
+            "full_text": final_full_text,
         }
     except Exception as exc:  # pragma: no cover - logged for observability
         logger.exception("[ai] sbar failed length=%s error_type=%s", len(text), type(exc).__name__)

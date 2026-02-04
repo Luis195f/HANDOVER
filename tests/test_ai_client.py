@@ -94,13 +94,11 @@ async def test_generate_sbar_success(monkeypatch):
 
     result = await ai_client.generate_sbar("texto libre", "es")
 
-    assert result == {
-        "situation": "S",
-        "background": "B",
-        "assessment": "A",
-        "recommendation": "R",
-        "full_text": "Full",
-    }
+    assert result["situation"] == "S"
+    assert result["background"] == "B"
+    assert result["assessment"] == "A"
+    assert result["recommendation"] == "R"
+    assert "Asistente de apoyo" in result["full_text"]
 
 
 async def test_generate_sbar_invalid_response(monkeypatch):
