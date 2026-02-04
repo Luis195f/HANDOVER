@@ -27,7 +27,6 @@ import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type Terminol
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
-import { TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 
 export type HandoverData = z.infer<typeof zHandover>;
 
