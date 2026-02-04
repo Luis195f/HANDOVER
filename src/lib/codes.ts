@@ -261,4 +261,11 @@ export const ALERT_CODES = {
   dressingOverdue: 'alert.dressing.overdue',
   drainOverdue: 'alert.drain.overdue',
   oxygenProlonged: 'alert.oxygen.prolonged',
+
+  HANDOVER_OBSERVATION_CODES: 'urn:handover-pro:observation-codes',
+  HANDOVER_COMPOSITION_SECTION: 'urn:handover-pro:composition-section',
+  HANDOVER_SBAR: 'urn:handover-pro:sbar',
+  HANDOVER_BEDSIDE_CHECKLIST: 'urn:handover-pro:bedside-checklist',
+  HANDOVER_BOOLEAN: 'urn:handover-pro:boolean',
+
 } as const;
