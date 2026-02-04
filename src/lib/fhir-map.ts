@@ -27,6 +27,7 @@ import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type Terminol
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
+import { TERMINOLOGY_SYSTEMS, type TerminologyCode } from './codes';
 
 export type HandoverData = z.infer<typeof zHandover>;
 
@@ -474,29 +475,40 @@ const HANDOVER_OBSERVATION_SYSTEM: TerminologySystem =
 const HANDOVER_COMPOSITION_SECTION_SYSTEM: TerminologySystem =
   TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION;
 
+const HANDOVER_SBAR_SYSTEM: TerminologySystem =
+  TERMINOLOGY_SYSTEMS.HANDOVER_SBAR;
+
+const HANDOVER_BEDSIDE_CHECKLIST_SYSTEM: TerminologySystem =
+  TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST;
+
+const HANDOVER_BOOLEAN_SYSTEM: TerminologySystem =
+  TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN;
+
+// Códigos Observation (TIPADOS con TerminologyCode)
 const HANDOVER_OBSERVATION_CODES = {
   administrative: {
-    system: HANDOVER_OBSERVATION_SYSTEM,
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES,
     code: 'administrative',
     display: 'Administrative overview',
   },
   sbar: {
-    system: HANDOVER_OBSERVATION_SYSTEM,
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_SBAR,
     code: 'sbar',
     display: 'SBAR summary',
   },
   bedsideChecklist: {
-    system: HANDOVER_OBSERVATION_SYSTEM,
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST,
     code: 'bedside-checklist',
     display: 'Bedside checklist',
   },
   notes: {
-    system: HANDOVER_OBSERVATION_SYSTEM,
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES,
     code: 'handover-notes',
     display: 'Handover notes',
   },
-} as const;
+} as const satisfies Record<string, TerminologyCode>;
 
+// Helper para secciones del Composition
 const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
   codeableConceptFromCode(
     {
