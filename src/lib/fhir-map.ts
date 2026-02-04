@@ -101,13 +101,10 @@ const applyProfileUrls = <T extends FhirResource>(
     : [];
 
   const mergedProfiles = Array.from(new Set([...existingProfiles, ...defaultProfiles]));
-  const meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles } satisfies Meta;
+  const meta: Meta = { ...(resource as ResourceWithMeta).meta, profile: mergedProfiles };
 
   // TS a veces no puede probar que el spread mantiene el genérico T → cast seguro vía unknown
-  const resourceWithProfiles = {
-    ...(resource as ResourceWithMeta),
-    meta,
-  } as unknown as T;
+  const resourceWithProfiles = { ...(resource as ResourceWithMeta), meta } as unknown as T;
 
   return mergeProfileUrls(resourceWithProfiles, options);
 };
