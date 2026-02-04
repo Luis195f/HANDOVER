@@ -2786,30 +2786,31 @@ function mapBedsideChecklistObservation(
     }
 
     if (typeof value === 'boolean') {
-  components.push({
-    code: {
-      coding: [
-        {
-          system: 'urn:handover-pro:bedside-checklist' as TerminologySystem,
-          code: key,
-          display: key,
+      components.push({
+        code: {
+          coding: [
+            {
+              system: 'urn:handover-pro:bedside-checklist' as TerminologySystem,
+              code: key,
+              display: key,
+            },
+          ],
+          text: key,
         },
-      ],
-      text: key,
-    },
-    valueCodeableConcept: {
-      coding: [
-        {
-          system: 'urn:handover-pro:boolean' as TerminologySystem,
-          code: value ? 'yes' : 'no',
-          display: value ? 'Yes' : 'No',
+        valueCodeableConcept: {
+          coding: [
+            {
+              system: 'urn:handover-pro:boolean' as TerminologySystem,
+              code: value ? 'yes' : 'no',
+              display: value ? 'Yes' : 'No',
+            },
+          ],
+          text: value ? 'Yes' : 'No',
         },
-      ],
-      text: value ? 'Yes' : 'No',
-    },
-  });
-}
-    
+      });
+    }
+  }); 
+
   if (components.length === 0 && notes.length === 0) return null;
 
   return {
@@ -2825,6 +2826,7 @@ function mapBedsideChecklistObservation(
     note: notes.length > 0 ? notes : undefined,
   };
 }
+
 
 function mapSummaryObservation(
   summary: string | null | undefined,
