@@ -5,6 +5,7 @@ import RootNavigator from "@/src/navigation/RootNavigator";
 import { navigationRef, onReady } from "@/src/navigation/navigation";
 import { AppThemeProvider } from "@/src/theme";
 import { AuthProvider } from "@/src/security/auth";
+import { SessionTimeoutProvider } from "@/src/security/SessionTimeoutProvider";
 import { installQueueSync } from "@/src/lib/queueBootstrap";
 import "@/src/i18n";
 import { useTranslation } from "@/src/i18n";
@@ -31,15 +32,17 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <AppThemeProvider>
-        <NavigationContainer
-          ref={navigationRef}
-          onReady={onReady}
-          onUnhandledAction={__DEV__ ? (action) => console.warn("[NAV][unhandled]", action) : undefined}
-        >
-          <RootNavigator />
-        </NavigationContainer>
-      </AppThemeProvider>
+      <SessionTimeoutProvider>
+        <AppThemeProvider>
+          <NavigationContainer
+            ref={navigationRef}
+            onReady={onReady}
+            onUnhandledAction={__DEV__ ? (action) => console.warn("[NAV][unhandled]", action) : undefined}
+          >
+            <RootNavigator />
+          </NavigationContainer>
+        </AppThemeProvider>
+      </SessionTimeoutProvider>
     </AuthProvider>
   );
 }

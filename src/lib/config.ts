@@ -1,1 +1,3 @@
-export const CONFIG = { FHIR_BASE_URL: "http://localhost:8080/fhir" };
+import { FHIR_BASE_URL } from '@/src/config/env';
+
+export const CONFIG = { FHIR_BASE_URL };

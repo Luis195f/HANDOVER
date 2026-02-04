@@ -12,7 +12,7 @@ ENV_PATH = BASE_DIR / "backend" / ".env"
 if ENV_PATH.exists():
     load_dotenv(ENV_PATH)
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-placeholder")
+SECRET_KEY = os.environ.get("SECRET_KEY")
 
 # DEBUG controlable por env (default True para dev)
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
@@ -49,6 +49,12 @@ RUNNING_TESTS = (
     or "pytest" in sys.argv
     or os.environ.get("PYTEST_CURRENT_TEST") is not None
 )
+
+if not SECRET_KEY:
+    if DEBUG or RUNNING_TESTS:
+        SECRET_KEY = "django-insecure-placeholder"
+    else:
+        raise RuntimeError("SECRET_KEY is required in production.")
 
 if RUNNING_TESTS and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS += ["testserver"]
@@ -138,31 +144,19 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ---- Seguridad: solo fuerte en prod ----
+# ---- Seguridad: forzar HTTPS cuando esté habilitado ----
 ENABLE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "true").lower() == "true"
-
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    X_FRAME_OPTIONS = "DENY"
-    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
-else:
-    SECURE_SSL_REDIRECT = False
-    SECURE_HSTS_SECONDS = 0
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-    SECURE_HSTS_PRELOAD = False
-    SECURE_PROXY_SSL_HEADER = None
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
-    X_FRAME_OPTIONS = "DENY"
-    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_SSL_REDIRECT = ENABLE_SSL_REDIRECT
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000")) if ENABLE_SSL_REDIRECT else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = ENABLE_SSL_REDIRECT
+SECURE_HSTS_PRELOAD = ENABLE_SSL_REDIRECT
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if ENABLE_SSL_REDIRECT else None
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+SESSION_COOKIE_SECURE = ENABLE_SSL_REDIRECT
+CSRF_COOKIE_SECURE = ENABLE_SSL_REDIRECT
+X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
@@ -179,7 +173,7 @@ CONTENT_SECURITY_POLICY = {
 }
 
 AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
-AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET", "dev-secret")
+AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET") or SECRET_KEY
 
 LOGGING = {
     "version": 1,

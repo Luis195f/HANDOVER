@@ -2,7 +2,7 @@
 import CryptoJS from 'crypto-js';
 import { Buffer } from 'buffer';
 
-import { secureGetItem, secureSetItem } from './secure-storage';
+import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
 import { warn } from "@/src/lib/otel";
 
 const STORAGE_KEYS = ['handover_local_crypto_key', 'handover_encryption_key_v1'] as const;
@@ -11,6 +11,13 @@ const PREFIX = `${VERSION_TAG}:`;
 const LEGACY_PREFIX = 'enc:v1:'; // compatibilidad con versiones previas
 
 let cachedKey: string | null = null;
+
+export async function clearCryptoKeys(): Promise<void> {
+  cachedKey = null;
+  await Promise.allSettled(
+    [...STORAGE_KEYS, CLIENT_SIGNING_KEY_STORAGE].map((key) => secureDeleteItem(key)),
+  );
+}
 
 function getRandomKeyBase64(): string {
   const randomBytes = CryptoJS.lib.WordArray.random(32);
