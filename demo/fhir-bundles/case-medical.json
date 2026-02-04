@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "identifier": {"value": "demo-medical-001"},
+  "entry": [
+    {
+      "request": {"method": "POST", "url": "Patient"},
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pat-med-001",
+        "name": [{"use": "official", "family": "Sintético", "given": ["Paciente", "A"]}],
+        "gender": "unknown",
+        "birthDate": "1975-01-01"
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Condition"},
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-med-001",
+        "subject": {"reference": "Patient/pat-med-001"},
+        "code": {"text": "Diabetes mellitus tipo 2 (sintético)"},
+        "clinicalStatus": {"text": "active"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Condition"},
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-med-002",
+        "subject": {"reference": "Patient/pat-med-001"},
+        "code": {"text": "Hipertensión arterial (sintético)"},
+        "clinicalStatus": {"text": "active"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Observation"},
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-med-001",
+        "status": "final",
+        "code": {"text": "Signos vitales"},
+        "subject": {"reference": "Patient/pat-med-001"},
+        "valueString": "TA 130/80, FC 78, SatO2 98%"
+      }
+    }
+  ]
+}

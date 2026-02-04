@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover - dependency guard
 django.setup()
 
 from backend.audit.models import AuditEvent  # noqa: E402
+from backend.audit.service import emit_audit_event  # noqa: E402
 from backend.audit.views import AuditEventsIngestView  # noqa: E402
 from backend.api.views import BundleView  # noqa: E402
 
@@ -60,6 +61,26 @@ def test_audit_ingest_creates_event():
 
 
 @pytest.mark.django_db
+def test_audit_event_stores_hash_only():
+    payload = {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Patient"}}]}
+
+    emit_audit_event(
+        event_type="security_check",
+        action="execute",
+        status="success",
+        resource_type="Bundle",
+        resource_id="bundle-phi",
+        payload_obj=payload,
+    )
+
+    event = AuditEvent.objects.filter(event_type="security_check").first()
+    assert event is not None
+    assert event.payload_hash
+    assert event.payload_size
+    assert "payload" not in (event.meta or {})
+
+
+@pytest.mark.django_db
 def test_audit_ingest_rejects_forbidden_field():
     payload = {
         "eventType": "ui_action",
@@ -74,7 +95,7 @@ def test_audit_ingest_rejects_forbidden_field():
         client = APIClient()
         response = client.post("/api/audit/events", data=payload, format="json")
 
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 @pytest.mark.django_db

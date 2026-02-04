@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "identifier": {"value": "demo-geri-001"},
+  "entry": [
+    {
+      "request": {"method": "POST", "url": "Patient"},
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pat-geri-001",
+        "name": [{"use": "official", "family": "Sintético", "given": ["Paciente", "D"]}],
+        "gender": "unknown",
+        "birthDate": "1940-03-05"
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "AllergyIntolerance"},
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-geri-001",
+        "patient": {"reference": "Patient/pat-geri-001"},
+        "clinicalStatus": {"text": "active"},
+        "code": {"text": "Alergia a penicilina (sintético)"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Condition"},
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-geri-001",
+        "subject": {"reference": "Patient/pat-geri-001"},
+        "code": {"text": "Síndrome geriátrico de fragilidad (sintético)"},
+        "clinicalStatus": {"text": "active"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Observation"},
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-geri-001",
+        "status": "final",
+        "code": {"text": "Riesgo de caídas"},
+        "subject": {"reference": "Patient/pat-geri-001"},
+        "valueString": "Alto riesgo (sintético)."
+      }
+    }
+  ]
+}

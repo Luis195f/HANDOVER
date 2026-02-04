@@ -74,6 +74,8 @@ def test_invalid_payload_422(monkeypatch, api_client):
 
     res = _post_fhir(api_client, INVALID_BUNDLE, token="test")
     assert res.status_code == 422
+    data = res.json()
+    assert data.get("code") == "INVALID_BUNDLE"
 
 
 def test_ok_200_or_201(monkeypatch, api_client):

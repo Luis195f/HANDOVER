@@ -16,6 +16,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
 
+from django.conf import settings
+
 from backend.ai_client import (
     ClinicalContext,
     SuggestionsResponse,
@@ -23,6 +25,8 @@ from backend.ai_client import (
     generate_sbar,
     transcribe_audio,
 )
+from backend.audit.service import emit_audit_event
+from backend.audit.utils import canonical_json, hash_payload
 from backend.signature import (
     SignatureSettings,
     SignatureVerificationError,
@@ -303,19 +307,65 @@ async def audio_to_fhir(patientId: str = Form(...),
         return r.json()
 
 
-def _merge_context(req: SbarRequest) -> str:
-    base_text = req.free_text.strip()
+MAX_NOTES_LENGTH = 500
+
+
+def _build_sbar_input(req: SbarRequest) -> tuple[str, dict]:
+    base_text = (req.free_text or "").strip()
+    if len(base_text) > MAX_NOTES_LENGTH:
+        base_text = base_text[:MAX_NOTES_LENGTH].rstrip() + "…"
+
     context = req.context or {}
     if not isinstance(context, dict) or not context:
-        return base_text
+        return base_text, {}
     context_lines = []
     for key, value in context.items():
         if value is None:
             continue
         context_lines.append(f"{key}: {value}")
     if not context_lines:
-        return base_text
-    return base_text + "\n\nContexto estructurado:\n" + "\n".join(context_lines)
+        return base_text, {}
+    if base_text:
+        return base_text + "\n\nContexto estructurado:\n" + "\n".join(context_lines), context
+    return "Contexto estructurado:\n" + "\n".join(context_lines), context
+
+
+def _audit_ai_summary(
+    *,
+    status: str,
+    http_status: int,
+    user_sub: str | None,
+    notes: str,
+    context: dict,
+    language: str,
+    request: Request | None,
+) -> None:
+    payload_obj = {
+        "notes": notes,
+        "context": context,
+        "language": language,
+    }
+    try:
+        payload_hash = hash_payload(payload_obj, settings.AUDIT_HASH_SECRET)
+        payload_size = len(canonical_json(payload_obj))
+        emit_audit_event(
+            event_type="ai_summary_generated",
+            action="execute",
+            status=status,
+            http_status=http_status,
+            user_sub=user_sub,
+            resource_type="SBAR",
+            resource_id="",
+            payload_hash=payload_hash,
+            payload_size=payload_size,
+            meta={
+                "model": OPENAI_MODEL_SBAR,
+                "promptVersion": "v1",
+                "ip": request.client.host if request and request.client else "",
+            },
+        )
+    except Exception:
+        logger.exception("No se pudo registrar auditoría de IA")
 
 
 @app.post("/ai/transcribe")
@@ -338,22 +388,74 @@ async def ai_transcribe(
 
 
 @app.post("/ai/summarize-sbar", response_model=SbarResponse)
-async def summarize_sbar(req: SbarRequest) -> SbarResponse:
+async def summarize_sbar(
+    req: SbarRequest,
+    request: Request,
+    x_user_id: str | None = Header(None),
+) -> SbarResponse:
     if len(req.free_text or "") > MAX_FREE_TEXT_LENGTH:
+        _audit_ai_summary(
+            status="fail",
+            http_status=400,
+            user_sub=x_user_id,
+            notes=(req.free_text or "")[:MAX_NOTES_LENGTH],
+            context=req.context or {},
+            language=req.language or "es",
+            request=request,
+        )
         raise HTTPException(status_code=400, detail="Texto demasiado largo para resumir")
 
-    combined_text = _merge_context(req)
+    combined_text, context = _build_sbar_input(req)
+    notes = (req.free_text or "").strip()
+    if len(notes) > MAX_NOTES_LENGTH:
+        notes = notes[:MAX_NOTES_LENGTH].rstrip() + "…"
     try:
         payload = await generate_sbar(combined_text, language=req.language or "es")
     except HTTPException:
+        _audit_ai_summary(
+            status="fail",
+            http_status=502,
+            user_sub=x_user_id,
+            notes=notes,
+            context=context,
+            language=req.language or "es",
+            request=request,
+        )
         raise
     except Exception:
+        _audit_ai_summary(
+            status="fail",
+            http_status=502,
+            user_sub=x_user_id,
+            notes=notes,
+            context=context,
+            language=req.language or "es",
+            request=request,
+        )
         raise HTTPException(status_code=502, detail="Error al generar SBAR con el servicio de IA")
 
     required_keys = ["situation", "background", "assessment", "recommendation", "full_text"]
     if not all(isinstance(payload.get(key), str) for key in required_keys):
+        _audit_ai_summary(
+            status="fail",
+            http_status=502,
+            user_sub=x_user_id,
+            notes=notes,
+            context=context,
+            language=req.language or "es",
+            request=request,
+        )
         raise HTTPException(status_code=502, detail="Formato de respuesta de IA inesperado")
 
+    _audit_ai_summary(
+        status="success",
+        http_status=200,
+        user_sub=x_user_id,
+        notes=notes,
+        context=context,
+        language=req.language or "es",
+        request=request,
+    )
     return SbarResponse(**payload)
 
 

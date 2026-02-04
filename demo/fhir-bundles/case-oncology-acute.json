@@ -1,0 +1,48 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "identifier": {"value": "demo-onco-001"},
+  "entry": [
+    {
+      "request": {"method": "POST", "url": "Patient"},
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pat-onco-001",
+        "name": [{"use": "official", "family": "Sintético", "given": ["Paciente", "C"]}],
+        "gender": "unknown",
+        "birthDate": "1995-11-20"
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Condition"},
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-onco-001",
+        "subject": {"reference": "Patient/pat-onco-001"},
+        "code": {"text": "Neutropenia febril (sintético)"},
+        "clinicalStatus": {"text": "active"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Condition"},
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-onco-002",
+        "subject": {"reference": "Patient/pat-onco-001"},
+        "code": {"text": "Neoplasia hematológica en seguimiento (sintético)"},
+        "clinicalStatus": {"text": "active"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Observation"},
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-onco-001",
+        "status": "final",
+        "code": {"text": "Signos vitales"},
+        "subject": {"reference": "Patient/pat-onco-001"},
+        "valueString": "T 38.4°C, FC 110, TA 100/60"
+      }
+    }
+  ]
+}

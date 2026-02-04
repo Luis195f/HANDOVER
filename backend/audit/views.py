@@ -20,7 +20,7 @@ class AuditEventsIngestView(APIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
-        HasAnyScope.required("handover:write"),
+        HasAnyScope.required("audit:write", "handover:write"),
     ]
     parser_classes = [JSONParser]
     renderer_classes = [JSONRenderer]
@@ -28,13 +28,13 @@ class AuditEventsIngestView(APIView):
     def post(self, request):
         data = request.data
         if not isinstance(data, (dict, list)):
-            return Response({"errors": ["Invalid audit payload."]}, status=400)
+            return Response({"errors": ["Invalid audit payload."], "code": "INVALID_AUDIT"}, status=422)
         is_batch = isinstance(data, list)
         serializer = AuditEventIngestSerializer(data=data, many=is_batch)
         try:
             serializer.is_valid(raise_exception=True)
         except ValidationError:
-            return Response({"errors": ["Invalid audit payload."]}, status=400)
+            return Response({"errors": ["Invalid audit payload."], "code": "INVALID_AUDIT"}, status=422)
 
         events: List[Dict[str, Any]] = serializer.validated_data if is_batch else [serializer.validated_data]
         for event in events:

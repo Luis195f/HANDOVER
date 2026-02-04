@@ -80,12 +80,6 @@ function withCapabilityGuard<P extends object>(
 function AuthGate() {
   const { session, capabilities, loading, logout } = useAuth();
 
-  if (__DEV__) {
-    // OJO: esto loguea roles y modo; no loguees tokens aquí.
-    // eslint-disable-next-line no-console
-    console.log('[NAV] session.roles:', session?.roles, 'mode:', session?.mode);
-  }
-
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
   const [privacyConsent, setPrivacyConsentState] = React.useState<boolean | null>(null);
 

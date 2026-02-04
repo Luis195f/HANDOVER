@@ -21,6 +21,7 @@ from backend.security.permissions import ClinicianAuditPermission, NurseOrAdminP
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
 from backend.security.scope_permissions import HasAnyScope, _extract_permissions_from_request, _get_claims_from_request
+from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,30 @@ def _ensure_json_object(payload: Any) -> Optional[Response]:
     return None
 
 
+def _validate_minimal_bundle(payload: Dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if payload.get("resourceType") != "Bundle":
+        errors.append("Payload no es un Bundle FHIR válido (resourceType != 'Bundle').")
+        return errors
+
+    bundle_type = payload.get("type")
+    if bundle_type != "transaction":
+        errors.append("El Bundle FHIR debe ser de tipo 'transaction'.")
+
+    entries = payload.get("entry")
+    if not isinstance(entries, list):
+        errors.append("El Bundle FHIR debe incluir 'entry' como lista.")
+        return errors
+
+    for entry in entries:
+        resource = (entry or {}).get("resource") if isinstance(entry, dict) else None
+        if not isinstance(resource, dict) or not isinstance(resource.get("resourceType"), str):
+            errors.append("Cada entry debe incluir un resource con resourceType.")
+            break
+
+    return errors
+
+
 def _emit_resource_audit(
     *,
     request: HttpRequest,
@@ -345,8 +370,8 @@ class CapabilitiesView(APIView):
         permissions = {
             "canWriteHandover": "handover:write" in scopes,
             "canSignHandover": any(role in {"supervisor", "admin"} for role in roles),
-            "canViewAudit": "handover:audit" in scopes,
-            "canSendAuditEvents": "handover:write" in scopes,
+            "canViewAudit": ("audit:read" in scopes) or ("handover:audit" in scopes),
+            "canSendAuditEvents": ("audit:write" in scopes) or ("handover:write" in scopes),
             "isAdmin": "admin" in roles,
         }
 
@@ -355,6 +380,8 @@ class CapabilitiesView(APIView):
             "roles": roles,
             "scopes": scopes,
             "permissions": permissions,
+            "scopeCatalog": CLINICAL_SCOPES,
+            "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
         }
         return Response(payload, status=200)
 
@@ -482,11 +509,11 @@ class BundleView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
-        HasAnyScope.required("handover:write"),
+        HasAnyScope.required("fhir:transaction", "handover:write"),
     ]
     def post(self, request: HttpRequest) -> Response:
         if Bundle is None:
-            return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
+            return Response({"errors": ["Dependencia fhir.resources no disponible."], "code": "FHIR_DEPENDENCY"}, status=500)
 
         payload_obj = request.data
         invalid_payload = _ensure_json_object(payload_obj)
@@ -499,7 +526,19 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=getattr(request, "audit_request_id", ""),
                 meta={"errorCode": "INVALID_PAYLOAD"},
             )
-            return invalid_payload
+            return Response({"errors": ["Invalid Bundle payload."], "code": "INVALID_BUNDLE"}, status=400)
+
+        minimal_errors = _validate_minimal_bundle(payload_obj)
+        if minimal_errors:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=422,
+                resource_id=getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+            )
+            return Response({"errors": minimal_errors, "code": "INVALID_BUNDLE"}, status=422)
         try:
             bundle_obj = Bundle.parse_obj(request.data)
         except Exception:
@@ -511,7 +550,7 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=getattr(request, "audit_request_id", ""),
                 meta={"errorCode": "FHIR_VALIDATION_ERROR"},
             )
-            return Response({"errors": ["Invalid Bundle payload."]}, status=422)
+            return Response({"errors": ["Invalid Bundle payload."], "code": "INVALID_BUNDLE"}, status=422)
 
         if getattr(bundle_obj, "type", None) != "transaction":
             _emit_bundle_audit(
@@ -522,7 +561,7 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=getattr(request, "audit_request_id", ""),
                 meta={"errorCode": "FHIR_VALIDATION_ERROR"},
             )
-            return Response({"errors": ["Invalid Bundle payload."]}, status=422)
+            return Response({"errors": ["Invalid Bundle payload."], "code": "INVALID_BUNDLE"}, status=422)
 
         bundle = bundle_obj.dict(exclude_none=True)
 
@@ -607,7 +646,7 @@ class AuditLogView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,
         ClinicianAuditPermission,
-        HasAnyScope.required("handover:audit"),
+        HasAnyScope.required("audit:read", "handover:audit"),
     ]
     allowed_types = {"patient_open", "patient_edit"}
 
