@@ -35,9 +35,8 @@ const loincLocalCodes = new Set<string>([
 
 const cache = new Map<string, CodeValidationResult>();
 
-// Importante:
-// - TerminologySystem ahora es un union de TODOS los values de TERMINOLOGY_SYSTEMS.
-// - Por eso este Record debe cubrir también los nuevos URNs HANDOVER_* que agregaste.
+// IMPORTANTE: Record<TerminologySystem, string> debe cubrir TODOS los keys del union.
+// Si agregas systems a TERMINOLOGY_SYSTEMS, debes agregarlos aquí también.
 const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.SNOMED]: 'El código SNOMED ingresado no es válido',
   [TERMINOLOGY_SYSTEMS.LOINC]: 'Código LOINC desconocido',
@@ -47,12 +46,12 @@ const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.HANDOVER_CARE]: 'Código de cuidado no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE]: 'Tipo de tratamiento no reconocido',
 
-  // ✅ NUEVOS (deben existir aquí para que el Record<TerminologySystem, ...> compile)
-  [TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES]: 'Código HANDOVER (observación) no reconocido',
-  [TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION]: 'Código HANDOVER (sección de composición) no reconocido',
-  [TERMINOLOGY_SYSTEMS.HANDOVER_SBAR]: 'Código HANDOVER (SBAR) no reconocido',
-  [TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST]: 'Código HANDOVER (bedside checklist) no reconocido',
-  [TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN]: 'Código HANDOVER (boolean) no reconocido',
+  // ✅ NUEVOS systems HANDOVER (URNs)
+  [TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES]: 'Código HANDOVER Observation Codes no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION]: 'Código HANDOVER Composition Section no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_SBAR]: 'Código HANDOVER SBAR no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST]: 'Código HANDOVER Bedside Checklist no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN]: 'Valor booleano HANDOVER no reconocido',
 };
 
 export const isLocalSnomedCode = (code: string | undefined | null): boolean => {
@@ -63,31 +62,6 @@ export const isLocalSnomedCode = (code: string | undefined | null): boolean => {
 export const isLocalLoincCode = (code: string | undefined | null): boolean => {
   if (!code) return false;
   return loincLocalCodes.has(String(code));
-};
-
-// Para tus URNs internos (urn:handover-pro:*), en modo local/off no tiene sentido
-// marcar inválido lo que la propia app genera/usa.
-// - HANDOVER_BOOLEAN lo restringimos a yes/no.
-// - El resto: si hay code (no vacío), lo damos por válido localmente.
-const isLocalHandoverUrnCode = (system: TerminologySystem, code: string | undefined | null): boolean => {
-  if (!code) return false;
-
-  if (system === TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN) {
-    return code === 'yes' || code === 'no';
-  }
-
-  const isHandoverSystem =
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_CARE ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_SBAR ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN;
-
-  if (!isHandoverSystem) return false;
-
-  return String(code).trim().length > 0;
 };
 
 const resolveValidationMode = (): ValidationMode => {
@@ -118,6 +92,33 @@ type OutcomeIssue = {
 
 const asOutcome = (value: unknown): ValidationOutcome =>
   value && typeof value === 'object' ? (value as ValidationOutcome) : {};
+
+// Local validation para URNs HANDOVER:
+// - HANDOVER_BOOLEAN lo restringimos a yes/no.
+// - El resto: si hay code (no vacío), lo damos por válido localmente (son códigos internos controlados por la app).
+const isLocalHandoverUrnCode = (
+  system: TerminologySystem,
+  code: string | undefined | null,
+): boolean => {
+  if (!code) return false;
+  const trimmed = String(code).trim();
+  if (!trimmed) return false;
+
+  if (system === TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN) {
+    return trimmed === 'yes' || trimmed === 'no';
+  }
+
+  const isHandoverSystem =
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_CARE ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_SBAR ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST;
+
+  if (!isHandoverSystem) return false;
+  return true;
+};
 
 async function validateRemotely({
   system,
@@ -216,4 +217,3 @@ export async function validateSnomed(code: string, display?: string) {
 export async function validateLoinc(code: string, display?: string) {
   return validateTerminologyCode({ system: TERMINOLOGY_SYSTEMS.LOINC, code, display });
 }
-
