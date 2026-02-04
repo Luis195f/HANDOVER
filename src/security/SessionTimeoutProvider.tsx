@@ -3,22 +3,14 @@ import { AppState, AppStateStatus, View } from 'react-native';
 
 import { t } from '@/src/i18n';
 import { logoutAndClear } from '@/src/security/auth';
-import { createSessionTimeoutController } from '@/src/security/session-timeout';
+import { createSessionTimeoutController, SessionTimeoutReason } from '@/src/security/session-timeout';
+import { getSessionTimeoutMs } from '@/src/security/session-config';
 import { useAuth } from '@/src/security/auth';
-
-const DEFAULT_IDLE_MINUTES = 10;
-
-function resolveIdleMinutes(): number {
-  const raw = process.env.EXPO_PUBLIC_SESSION_IDLE_MINUTES ?? '';
-  const parsed = Number.parseInt(raw, 10);
-  if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  return DEFAULT_IDLE_MINUTES;
-}
 
 export function SessionTimeoutProvider({ children }: { children: React.ReactNode }) {
   const { session } = useAuth();
   const controllerRef = React.useRef<ReturnType<typeof createSessionTimeoutController> | null>(null);
-  const idleMs = React.useMemo(() => resolveIdleMinutes() * 60 * 1000, []);
+  const { idleMs, hardMs } = React.useMemo(() => getSessionTimeoutMs(), []);
 
   React.useEffect(() => {
     if (!session) {
@@ -29,7 +21,8 @@ export function SessionTimeoutProvider({ children }: { children: React.ReactNode
 
     const controller = createSessionTimeoutController({
       idleMs,
-      onTimeout: async () => {
+      hardMs,
+      onTimeout: async (_reason: SessionTimeoutReason) => {
         await logoutAndClear({
           skipRemote: true,
           message: t('auth.sessionExpiredMessage'),

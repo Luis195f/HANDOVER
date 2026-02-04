@@ -10,11 +10,24 @@ export type CapabilityPermissions = {
   isAdmin: boolean;
 };
 
+export type FhirProfile = {
+  canonical: string;
+  version?: string;
+  title?: string;
+};
+
+export type FhirCapabilities = {
+  version: string;
+  transaction: boolean;
+  profiles: FhirProfile[];
+};
+
 export type Capabilities = {
   userSub: string;
   roles: string[];
   scopes: string[];
   permissions: CapabilityPermissions;
+  fhir?: FhirCapabilities;
 };
 
 export type RouteName = keyof RootStackParamList;
@@ -62,13 +75,24 @@ export function getDemoCapabilities(userSub = 'demo-user'): Capabilities {
   return {
     userSub,
     roles: ['admin'],
-    scopes: ['handover:write', 'handover:audit'],
+    scopes: ['handover:write', 'audit:read', 'audit:write', 'fhir:transaction'],
     permissions: {
       canWriteHandover: true,
       canSignHandover: true,
       canViewAudit: true,
       canSendAuditEvents: true,
       isAdmin: true,
+    },
+    fhir: {
+      version: 'R4',
+      transaction: true,
+      profiles: [
+        {
+          canonical: 'http://hl7.org/fhir/StructureDefinition/Bundle',
+          version: '4.0.1',
+          title: 'FHIR R4 Bundle',
+        },
+      ],
     },
   };
 }

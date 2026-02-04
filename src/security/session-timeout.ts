@@ -1,4 +1,4 @@
-export type SessionTimeoutReason = 'idle' | 'background';
+export type SessionTimeoutReason = 'idle' | 'background' | 'hard';
 
 export type SessionTimeoutController = {
   recordActivity: (source?: string) => void;
@@ -8,14 +8,16 @@ export type SessionTimeoutController = {
 
 export type SessionTimeoutOptions = {
   idleMs: number;
+  hardMs?: number;
   onTimeout: (reason: SessionTimeoutReason) => void;
   onActivity?: (source?: string) => void;
   now?: () => number;
 };
 
 export function createSessionTimeoutController(options: SessionTimeoutOptions): SessionTimeoutController {
-  const { idleMs, onTimeout, onActivity, now = () => Date.now() } = options;
+  const { idleMs, hardMs, onTimeout, onActivity, now = () => Date.now() } = options;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let hardTimer: ReturnType<typeof setTimeout> | null = null;
   let backgroundAt: number | null = null;
 
   const clearTimer = () => {
@@ -25,12 +27,27 @@ export function createSessionTimeoutController(options: SessionTimeoutOptions): 
     }
   };
 
+  const clearHardTimer = () => {
+    if (hardTimer) {
+      clearTimeout(hardTimer);
+      hardTimer = null;
+    }
+  };
+
   const schedule = () => {
     if (!Number.isFinite(idleMs) || idleMs <= 0) return;
     clearTimer();
     timer = setTimeout(() => {
       onTimeout('idle');
     }, idleMs);
+  };
+
+  const scheduleHardTimeout = () => {
+    if (!Number.isFinite(hardMs) || !hardMs || hardMs <= 0) return;
+    clearHardTimer();
+    hardTimer = setTimeout(() => {
+      onTimeout('hard');
+    }, hardMs);
   };
 
   const recordActivity = (source?: string) => {
@@ -59,9 +76,11 @@ export function createSessionTimeoutController(options: SessionTimeoutOptions): 
   const stop = () => {
     backgroundAt = null;
     clearTimer();
+    clearHardTimer();
   };
 
   schedule();
+  scheduleHardTimeout();
 
   return {
     recordActivity,

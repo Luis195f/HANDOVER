@@ -1,0 +1,49 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "identifier": {"value": "demo-postop-001"},
+  "entry": [
+    {
+      "request": {"method": "POST", "url": "Patient"},
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pat-postop-001",
+        "name": [{"use": "official", "family": "Sintético", "given": ["Paciente", "B"]}],
+        "gender": "unknown",
+        "birthDate": "1988-06-15"
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Condition"},
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-postop-001",
+        "subject": {"reference": "Patient/pat-postop-001"},
+        "code": {"text": "Post-operatorio de cirugía abdominal (sintético)"},
+        "clinicalStatus": {"text": "active"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "MedicationStatement"},
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "med-postop-001",
+        "subject": {"reference": "Patient/pat-postop-001"},
+        "status": "active",
+        "medicationCodeableConcept": {"text": "Anticoagulación profiláctica (sintético)"},
+        "note": [{"text": "No especifica dosis; solo contexto clínico."}]
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "Observation"},
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-postop-001",
+        "status": "final",
+        "code": {"text": "Dolor postoperatorio"},
+        "subject": {"reference": "Patient/pat-postop-001"},
+        "valueString": "Dolor moderado controlado con medidas estándar (sin detalles terapéuticos)."
+      }
+    }
+  ]
+}

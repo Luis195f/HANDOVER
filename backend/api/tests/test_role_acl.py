@@ -32,7 +32,7 @@ class RoleAclTests(TestCase):
             {
                 "sub": "auth0|nurse-1",
                 "roles": ["nurse"],
-                "permissions": ["handover:write"],
+                "permissions": ["fhir:transaction"],
             }
         )
         url = reverse("fhir-transaction")
@@ -68,7 +68,7 @@ class RoleAclTests(TestCase):
             {
                 "sub": "auth0|viewer-1",
                 "roles": ["viewer"],
-                "permissions": ["handover:write"],
+                "permissions": ["fhir:transaction"],
             }
         )
         url = reverse("fhir-transaction")
@@ -85,8 +85,8 @@ class RoleAclTests(TestCase):
             {
                 "sub": "auth0|sup-1",
                 "roles": ["supervisor"],
-                "permissions": ["handover:audit"],
-                "scope": "handover:write",
+                "permissions": ["audit:read"],
+                "scope": "handover:write fhir:transaction",
             }
         )
         url = reverse("me-capabilities")
@@ -99,6 +99,7 @@ class RoleAclTests(TestCase):
         perms = data.get("permissions", {})
         self.assertIs(perms.get("canSignHandover"), True)
         self.assertIs(perms.get("canViewAudit"), True)
+        self.assertEqual(data.get("fhir", {}).get("version"), "R4")
 
     def test_me_capabilities_for_nurse(self):
         client = _auth_client(
@@ -117,4 +118,3 @@ class RoleAclTests(TestCase):
         perms = data.get("permissions", {})
         self.assertIs(perms.get("canSignHandover"), False)
         self.assertIs(perms.get("canViewAudit"), False)
-
