@@ -498,7 +498,7 @@ const HANDOVER_OBSERVATION_CODES = {
 const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
   codeableConceptFromCode(
     {
-      system: HANDOVER_COMPOSITION_SECTION_SYSTEM,
+      system: HANDOVER_COMPOSITION_SECTION_SYSTEM as TerminologySystem,
       code,
       display,
     },
@@ -2708,6 +2708,7 @@ function mapAdministrativeObservation(
   context: MappingContext,
 ): Observation | null {
   if (!values.administrativeData) return null;
+
   return {
     resourceType: 'Observation',
     status: 'final',
@@ -2721,32 +2722,30 @@ function mapAdministrativeObservation(
   };
 }
 
-function mapSbarObservations(
-  values: CompositionValues,
-  context: MappingContext,
-): Observation[] {
+function mapSbarObservations(values: CompositionValues, context: MappingContext): Observation[] {
   const sbar = values.sbar;
   if (!sbar) return [];
 
   const components: ObservationComponent[] = [];
-const addComponent = (code: string, display: string, value?: string | null) => {
-  const trimmed = value?.trim();
-  if (!trimmed) return;
 
-  components.push({
-    code: {
-      coding: [
-        {
-          system: 'urn:handover-pro:sbar' as TerminologySystem,
-          code,
-          display,
-        },
-      ],
-      text: display,
-    },
-    valueString: trimmed,
-  });
-};
+  const addComponent = (code: string, display: string, value?: string | null) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+
+    components.push({
+      code: {
+        coding: [
+          {
+            system: 'urn:handover-pro:sbar' as TerminologySystem,
+            code,
+            display,
+          },
+        ],
+        text: display,
+      },
+      valueString: trimmed,
+    });
+  };
 
   addComponent('situation', 'Situation', sbar.situation);
   addComponent('background', 'Background', sbar.background);
@@ -2809,7 +2808,7 @@ function mapBedsideChecklistObservation(
         },
       });
     }
-  }); 
+  });
 
   if (components.length === 0 && notes.length === 0) return null;
 
@@ -2827,11 +2826,7 @@ function mapBedsideChecklistObservation(
   };
 }
 
-
-function mapSummaryObservation(
-  summary: string | null | undefined,
-  context: MappingContext,
-): Observation | null {
+function mapSummaryObservation(summary: string | null | undefined, context: MappingContext): Observation | null {
   const trimmed = summary?.trim();
   if (!trimmed) return null;
 
@@ -2857,8 +2852,8 @@ function mapPsychosocialObservation(
   const emotionalStatus = psychosocial.emotionalStatus?.trim() || 'Sin novedad';
   const familyVisits = psychosocial.familyVisits ? 'Sí' : 'No';
   const familyNotes = psychosocial.familyNotes?.trim();
-  const notes = familyNotes ? ` (${familyNotes})` : '';
-  const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${notes}.`;
+  const extra = familyNotes ? ` (${familyNotes})` : '';
+  const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${extra}.`;
 
   return {
     resourceType: 'Observation',
@@ -3080,23 +3075,16 @@ export function buildComposition(
 
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
-  const shiftPeriod =
-    values.administrativeData?.shiftStart && values.administrativeData?.shiftEnd
-      ? {
-          start: values.administrativeData.shiftStart,
-          end: values.administrativeData.shiftEnd,
-        }
-      : undefined;
 
   return {
     resourceType: 'Composition',
     status,
     type,
-    subject: ensureSubjectReference(values),
-    encounter: ensureEncounterReference(values),
+    subject,
+    encounter,
     author: [authorRef],
     title,
-    date: values.composition?.date ?? optionsMerged.effectiveDateTime,
+    date: optionsMerged.now(),
     section: sections.length > 0 ? sections : undefined,
     attester: attesters.length > 0 ? attesters : undefined,
   };
