@@ -3086,19 +3086,26 @@ export function buildComposition(
 
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
+  const shiftPeriod =
+  values.administrativeData?.shiftStart && values.administrativeData?.shiftEnd
+    ? { start: values.administrativeData.shiftStart, end: values.administrativeData.shiftEnd }
+    : undefined;
+
+  const event = shiftPeriod ? [{ period: shiftPeriod }] : undefined;
 
   return {
-    resourceType: 'Composition',
-    status,
-    type,
-    subject,
-    encounter,
-    author: [authorRef],
-    title,
-    date: optionsMerged.now(),
-    section: sections.length > 0 ? sections : undefined,
-    attester: attesters.length > 0 ? attesters : undefined,
-  };
+  resourceType: 'Composition',
+  status,
+  type,
+  subject: ensureSubjectReference(values),
+  encounter: ensureEncounterReference(values),
+  author: [authorRef],
+  title,
+  date: values.composition?.date ?? optionsMerged.effectiveDateTime,
+  event, 
+  section: sections.length > 0 ? sections : undefined,
+  attester: attesters.length > 0 ? attesters : undefined,
+};
 }
 
 export function buildHandoverBundle(
