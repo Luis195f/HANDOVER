@@ -181,9 +181,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # -----------------------------
 # Seguridad (HTTPS / Cookies / HSTS)
 # -----------------------------
-# Por defecto: true (hardening). En TESTS: siempre OFF para evitar 301 del client HTTP de Django.
+# Por defecto: true (hardening). En DEBUG/TESTS: siempre OFF para no romper dev/local.
 ENABLE_SSL_REDIRECT = os.getenv("ENABLE_SSL_REDIRECT", "true").lower() == "true"
-if RUNNING_TESTS:
+if DEBUG or RUNNING_TESTS:
     ENABLE_SSL_REDIRECT = False
 
 SECURE_SSL_REDIRECT = ENABLE_SSL_REDIRECT

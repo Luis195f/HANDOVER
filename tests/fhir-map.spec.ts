@@ -272,8 +272,8 @@ function collectReferenceStrings(resource: unknown): string[] {
   return refs;
 }
 
-function entryReference(entry: { resource: { resourceType: string; id?: string } }): string {
-  return `${entry.resource.resourceType}/${entry.resource.id ?? ''}`;
+function entryReference(entry: { fullUrl?: string; resource: { resourceType: string; id?: string } }): string {
+  return entry.fullUrl ?? `${entry.resource.resourceType}/${entry.resource.id ?? ''}`;
 }
 
 describe('mapObservationVitals', () => {
@@ -341,7 +341,10 @@ describe('buildHandoverBundle', () => {
     const sectionRefs = (composition.section ?? []).flatMap((section: any) =>
       section.entry?.map((ref: any) => ref.reference) ?? [],
     );
-    sectionRefs.forEach((ref: string) => expect(entryReferences).toContain(ref));
+    sectionRefs.forEach((ref: string) => {
+      expect(ref).toMatch(/^urn:uuid:[0-9a-f]{32}$/);
+      expect(entryReferences).toContain(ref);
+    });
 
     const documentEntry = bundle.entry.find(
       (entry) => entry.resource.resourceType === 'DocumentReference',
@@ -416,7 +419,18 @@ describe('buildHandoverBundle', () => {
     });
   });
 
-  it('uses the patient ResourceType/id for every patient reference', () => {
+  it('links Composition.encounter to the normalized encounter entry', () => {
+    const bundle = buildHandoverBundle({ ...baseValues, encounterId: '' }, { now: () => NOW });
+    const encounterEntry = bundle.entry.find((entry) => entry.resource.resourceType === 'Encounter');
+    const compositionEntry = bundle.entry.find((entry) => entry.resource.resourceType === 'Composition');
+    expect(encounterEntry).toBeDefined();
+    expect(compositionEntry).toBeDefined();
+
+    const composition = compositionEntry!.resource as any;
+    expect(composition.encounter?.reference).toBe(entryReference(encounterEntry!));
+  });
+
+  it('uses the patient fullUrl for every patient reference in the transaction bundle', () => {
     const bundle = buildHandoverBundle(baseValues, { now: () => NOW });
     const patientEntry = bundle.entry.find((entry) => entry.resource.resourceType === 'Patient');
     expect(patientEntry).toBeDefined();

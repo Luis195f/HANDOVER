@@ -5,10 +5,11 @@ import { TEST_SCALE_CODES } from './fhir-map.test-constants';
 
 const NOW = '2025-03-05T08:00:00.000Z';
 
-const entryReference = (entry: { resource: any }) =>
-  entry.resource?.resourceType && entry.resource?.id
+const entryReference = (entry: { resource: any; fullUrl?: string }) =>
+  entry.fullUrl ??
+  (entry.resource?.resourceType && entry.resource?.id
     ? `${entry.resource.resourceType}/${entry.resource.id}`
-    : undefined;
+    : undefined);
 
 const findObservation = (
   entries: Array<{ resource: any; fullUrl: string }>,

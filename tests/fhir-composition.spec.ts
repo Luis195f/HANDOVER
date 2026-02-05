@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 
-const entryReference = (entry: { resource: { resourceType: string; id?: string } }) =>
-  `${entry.resource.resourceType}/${entry.resource.id ?? ''}`;
+const entryReference = (entry: { fullUrl?: string; resource: { resourceType: string; id?: string } }) =>
+  entry.fullUrl ?? `${entry.resource.resourceType}/${entry.resource.id ?? ''}`;
 
 describe('FHIR Composition', () => {
   it('includes required sections with resolvable references', () => {
@@ -62,7 +62,7 @@ describe('FHIR Composition', () => {
     (composition.section ?? []).forEach((section: any) => {
       expect(section.code).toBeDefined();
       (section.entry ?? []).forEach((entry: any) => {
-        expect(entry.reference).toMatch(/^[A-Za-z]+\/[A-Za-z0-9.\-]{1,64}$/);
+        expect(entry.reference).toMatch(/^urn:uuid:[0-9a-f]{32}$/);
         expect(entryReferenceSet.has(entry.reference)).toBe(true);
       });
     });
