@@ -256,12 +256,35 @@ export async function clearAllDrafts(): Promise<void> {
       }
     }
   } else {
-    const patientIds = index
+    const patientIdsFromIndex = index
       .map((key) => (key.startsWith(`${PREFIX}:`) ? key.slice(`${PREFIX}:`.length) : null))
       .filter((value): value is string => Boolean(value));
+    const patientIdsFromLegacyMaps = new Set<string>();
+    for (const legacyPrefix of LEGACY_PREFIXES) {
+      try {
+        // Mitigación RGPD/MDR: si no hay listKeys, intentamos extraer ids de
+        // mapas legacy para evitar PHI persistente tras logout.
+        const legacyRaw = await storage.getItem(legacyPrefix);
+        const legacyParsed = safeParse<unknown>(legacyRaw);
+        if (Array.isArray(legacyParsed)) {
+          for (const entry of legacyParsed) {
+            if (typeof entry === 'string') patientIdsFromLegacyMaps.add(entry);
+          }
+        } else if (legacyParsed && typeof legacyParsed === 'object') {
+          for (const entry of Object.keys(legacyParsed)) {
+            patientIdsFromLegacyMaps.add(entry);
+          }
+        }
+      } catch {}
+    }
+    const patientIds = new Set([...patientIdsFromIndex, ...patientIdsFromLegacyMaps]);
     for (const patientId of patientIds) {
+      const normalized = normalizePatientId(patientId);
       for (const prefix of LEGACY_PREFIXES) {
         keysToRemove.add(`${prefix}${patientId}`);
+        if (normalized !== patientId) {
+          keysToRemove.add(`${prefix}${normalized}`);
+        }
       }
     }
     for (const prefix of LEGACY_PREFIXES) {
