@@ -40,7 +40,11 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    ```bash
    cp .env.example .env
    ```
-   - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE` y `OIDC_REDIRECT_SCHEME` alimentan el flujo de OAuth/OIDC implementado en `src/lib/auth.ts` y las guardias RBAC de `src/security/acl.ts`.
+   - Variables de Auth0/OIDC (cliente móvil):
+     - `EXPO_PUBLIC_AUTH0_DOMAIN` + `EXPO_PUBLIC_AUTH0_CLIENT_ID` (recomendado para Auth0) o, en su defecto, `EXPO_PUBLIC_OIDC_ISSUER` + `EXPO_PUBLIC_OIDC_CLIENT_ID`.
+     - `EXPO_PUBLIC_AUTH0_AUDIENCE` o `EXPO_PUBLIC_OIDC_AUDIENCE` para emitir access tokens con audiencia del API.
+     - `EXPO_PUBLIC_OIDC_SCOPE` (por ejemplo `openid profile email offline_access` para refresh tokens).
+     - El flujo se resuelve en `src/security/OAuthService.ts` y se integra en `src/security/auth.tsx`; las guardias RBAC viven en `src/security/acl.ts`.
     - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
     - `EXPO_PUBLIC_ALLOWED_UNITS` y `EXPO_PUBLIC_ALLOW_ALL_UNITS` filtran el acceso a unidades clínicas específicas.
     - `EXPO_PUBLIC_BYPASS_SCOPE` habilita cuentas de soporte que omiten filtros RBAC en situaciones operativas.
@@ -61,7 +65,12 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 
 ## Login y permisos
 
-- El login usa OAuth 2.0/OIDC mediante `expo-auth-session`. Define permisos y roles en el backend de identidad para que el claim `role` incluya valores como `nurse`, `admin` o `viewer`.
+- El login usa OAuth 2.0/OIDC mediante `expo-auth-session` con Auth0. Define permisos y roles en el backend de identidad para que el claim `role` incluya valores como `nurse`, `admin` o `viewer`.
+- Deep links de autenticación:
+  - Prod: `handover-pro://redirect` y `handover-pro://logout`.
+  - Dev Client: `exp+handover-pro://redirect`.
+  - En Web se usan `--/redirect` y `--/logout` (ver `app.config.ts`).
+- `AuthProvider` llama `configureFHIRClient({ getToken, ensureFreshToken })` para que el FHIR client renueve tokens silenciosamente antes de cada request.
 - En Android se solicitan permisos para cámara, micrófono y notificaciones (ver `app.json`). El flujo de QR y notas de audio depende de `android.permission.CAMERA` y `android.permission.RECORD_AUDIO` respectivamente.
 - Para pruebas sin un proveedor OIDC real, puedes habilitar la pantalla mock en `src/screens/LoginMock.tsx` ajustando las banderas de características en `app.json`.
 - Las guardias RBAC reutilizables viven en `src/security/acl.ts`; usa `ensureRole` y `ensureUnit` para proteger nuevas pantallas.

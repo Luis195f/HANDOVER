@@ -247,14 +247,29 @@ export interface FhirOperationOptions {
 let hooks: AuthHooks = {};
 let clientConfig: FhirClientConfig = {};
 
-/** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
-export function configureFHIRClient(h: AuthHooks & FhirClientConfig) {
-  const mapped: AuthHooks = { ...h };
+type AuthHooksWithToken = AuthHooks & { getToken?: () => Promise<string | null> };
+
+function mapAuthHooks(input: AuthHooksWithToken): AuthHooks {
+  const mapped: AuthHooks = { ...input };
   if (mapped.baseUrl && !mapped.getBaseUrl) {
     const fixed = mapped.baseUrl.replace(/\/$/, '');
     mapped.getBaseUrl = () => fixed;
   }
+  return mapped;
+}
+
+/** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
+export function setAuthHooks(h: AuthHooksWithToken) {
+  const mapped = mapAuthHooks(h);
   hooks = { ...hooks, ...mapped };
+  if (h.getToken) {
+    clientConfig = { ...clientConfig, getToken: h.getToken };
+  }
+}
+
+/** Configura el cliente FHIR (incluye hooks para auth, baseURL y headers). */
+export function configureFHIRClient(h: AuthHooks & FhirClientConfig) {
+  setAuthHooks(h);
   clientConfig = { ...clientConfig, ...h };
 }
 
