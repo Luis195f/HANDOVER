@@ -118,7 +118,7 @@ beforeEach(() => {
 
   process.env.EXPO_PUBLIC_OIDC_ISSUER = 'https://issuer.example';
   process.env.EXPO_PUBLIC_OIDC_CLIENT_ID = 'client_test';
-  process.env.EXPO_PUBLIC_OIDC_SCOPES = 'openid profile email offline_access';
+  process.env.EXPO_PUBLIC_OIDC_SCOPE = 'openid profile email offline_access';
   process.env.EXPO_PUBLIC_STORAGE_NAMESPACE = 'handover';
 
   (globalThis as any).fetch = vi.fn(async () => ({
@@ -170,4 +170,3 @@ describe('auth refresh', () => {
     expect((globalThis as any).fetch).toHaveBeenCalledTimes(1);
   });
 });
-
