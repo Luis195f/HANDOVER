@@ -21,6 +21,7 @@ type Store = {
   getItem: (k: string) => Promise<string | null>;
   setItem: (k: string, v: string) => Promise<void>;
   removeItem: (k: string) => Promise<void>;
+  listKeys?: () => Promise<string[]>;
 };
 
 // ----------------------------
@@ -31,6 +32,7 @@ const memStore: Store = {
   async getItem(k) { return mem.has(k) ? (mem.get(k) as string) : null; },
   async setItem(k, v) { mem.set(k, v); },
   async removeItem(k) { mem.delete(k); },
+  async listKeys() { return Array.from(mem.keys()); },
 };
 
 const localStore: Store = {
@@ -45,6 +47,10 @@ const localStore: Store = {
   async removeItem(k) {
     try { if (typeof localStorage !== 'undefined') localStorage.removeItem(k); }
     catch {}
+  },
+  async listKeys() {
+    try { return typeof localStorage === 'undefined' ? [] : Object.keys(localStorage); }
+    catch { return []; }
   },
 };
 
@@ -79,6 +85,13 @@ function ns(): string {
 }
 const PREFIX = `${ns()}:drafts`;
 const INDEX_KEY = `${PREFIX}:__index__`;
+const LEGACY_PREFIXES = [
+  `${ns()}:draft:`,
+  `${ns()}:draft`,
+  'handover:draft:',
+  'draft:',
+  'handoverDraft',
+];
 
 // Acepta 'Patient/{id}' o '{id}'
 function normalizePatientId(patientId: string): string {
@@ -233,7 +246,30 @@ export async function clearDraft(patientId?: string): Promise<void> {
 
 export async function clearAllDrafts(): Promise<void> {
   const index = await loadIndex();
-  await Promise.allSettled(index.map((key) => storage.removeItem(key)));
+  const keysToRemove = new Set(index);
+  const allKeys = await storage.listKeys?.();
+
+  if (allKeys?.length) {
+    for (const key of allKeys) {
+      if (key.startsWith(PREFIX) || LEGACY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        keysToRemove.add(key);
+      }
+    }
+  } else {
+    const patientIds = index
+      .map((key) => (key.startsWith(`${PREFIX}:`) ? key.slice(`${PREFIX}:`.length) : null))
+      .filter((value): value is string => Boolean(value));
+    for (const patientId of patientIds) {
+      for (const prefix of LEGACY_PREFIXES) {
+        keysToRemove.add(`${prefix}${patientId}`);
+      }
+    }
+    for (const prefix of LEGACY_PREFIXES) {
+      keysToRemove.add(prefix);
+    }
+  }
+
+  await Promise.allSettled(Array.from(keysToRemove).map((key) => storage.removeItem(key)));
   await saveIndex([]);
 }
 
@@ -244,6 +280,8 @@ export const __test__ = {
   normalizePatientId,
   keyNorm,
   keyLegacy,
+  indexKey: INDEX_KEY,
+  legacyPrefixes: LEGACY_PREFIXES,
   readRaw: (key: string) => storage.getItem(key),
   writeRaw: (key: string, value: string) => storage.setItem(key, value),
 };

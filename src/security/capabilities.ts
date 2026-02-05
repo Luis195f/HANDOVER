@@ -37,8 +37,14 @@ const STORAGE_NAMESPACE = (process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handove
   '_',
 );
 const CAPABILITIES_KEY = `${STORAGE_NAMESPACE}_capabilities`;
+const DEFAULT_MAX_AGE_MS = 5 * 60 * 1000;
 
-let memoryCache: Capabilities | null = null;
+type CapabilitiesCacheEntry = {
+  capabilities: Capabilities;
+  cachedAt: number;
+};
+
+let memoryCache: CapabilitiesCacheEntry | null = null;
 let inflight: Promise<Capabilities | null> | null = null;
 
 function isCapabilities(value: unknown): value is Capabilities {
@@ -53,17 +59,39 @@ function isCapabilities(value: unknown): value is Capabilities {
   );
 }
 
-function parseCapabilities(raw: string | null): Capabilities | null {
+function isCacheEntry(value: unknown): value is CapabilitiesCacheEntry {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as CapabilitiesCacheEntry;
+  return (
+    typeof candidate.cachedAt === 'number' &&
+    isCapabilities(candidate.capabilities)
+  );
+}
+
+function parseCapabilities(raw: string | null): CapabilitiesCacheEntry | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return isCapabilities(parsed) ? parsed : null;
+    if (isCacheEntry(parsed)) return parsed;
+    if (isCapabilities(parsed)) {
+      return { capabilities: parsed, cachedAt: 0 };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-async function hydrateCapabilitiesCache(): Promise<Capabilities | null> {
+function isFresh(cache: CapabilitiesCacheEntry, maxAgeMs: number): boolean {
+  return maxAgeMs >= 0 && Date.now() - cache.cachedAt <= maxAgeMs;
+}
+
+async function persistCapabilitiesCache(entry: CapabilitiesCacheEntry): Promise<void> {
+  memoryCache = entry;
+  await secureSetItem(CAPABILITIES_KEY, JSON.stringify(entry));
+}
+
+async function hydrateCapabilitiesCache(): Promise<CapabilitiesCacheEntry | null> {
   if (memoryCache) return memoryCache;
   const stored = await secureGetItem(CAPABILITIES_KEY);
   const parsed = parseCapabilities(stored);
@@ -97,36 +125,50 @@ export function getDemoCapabilities(userSub = 'demo-user'): Capabilities {
   };
 }
 
-export async function fetchCapabilities(options: { forceRefresh?: boolean } = {}): Promise<Capabilities | null> {
-  if (memoryCache && !options.forceRefresh) return memoryCache;
+export async function fetchCapabilities(
+  options: { forceRefresh?: boolean; maxAgeMs?: number } = {},
+): Promise<Capabilities | null> {
+  const maxAgeMs = options.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
+
   if (!options.forceRefresh && !memoryCache) {
     await hydrateCapabilitiesCache();
   }
 
-  if (!options.forceRefresh && inflight) return inflight;
+  if (!options.forceRefresh && memoryCache && isFresh(memoryCache, maxAgeMs)) {
+    return memoryCache.capabilities;
+  }
+
+  if (!options.forceRefresh && inflight) {
+    const result = await inflight;
+    return result ?? memoryCache?.capabilities ?? null;
+  }
 
   inflight = (async () => {
     try {
       const fresh = (await apiGet('/api/me/capabilities')) as Capabilities;
       if (isCapabilities(fresh)) {
-        memoryCache = fresh;
-        await secureSetItem(CAPABILITIES_KEY, JSON.stringify(fresh));
+        await persistCapabilitiesCache({ capabilities: fresh, cachedAt: Date.now() });
       }
     } catch {
       // keep cached capabilities if network fails
     } finally {
       inflight = null;
     }
-    return memoryCache;
+    return memoryCache?.capabilities ?? null;
   })();
 
-  return inflight;
+  const updated = await inflight;
+  return updated ?? memoryCache?.capabilities ?? null;
 }
 
-export async function clearCapabilitiesCache(): Promise<void> {
+export async function invalidateCapabilitiesCache(): Promise<void> {
   memoryCache = null;
   inflight = null;
   await secureDeleteItem(CAPABILITIES_KEY);
+}
+
+export async function clearCapabilitiesCache(): Promise<void> {
+  await invalidateCapabilitiesCache();
 }
 
 export function canAccess(route: RouteName, capabilities: Capabilities | null | undefined): boolean {
