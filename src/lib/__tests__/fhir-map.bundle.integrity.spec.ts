@@ -5,9 +5,10 @@ import { TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 type Entry = { fullUrl?: string; resource?: any };
 
 const entryReference = (entry: Entry) =>
-  entry.resource?.resourceType && entry.resource?.id
+  entry.fullUrl ??
+  (entry.resource?.resourceType && entry.resource?.id
     ? `${entry.resource.resourceType}/${entry.resource.id}`
-    : undefined;
+    : undefined);
 
 const byReference = (bundle: any) => {
   const map = new Map<string, any>();

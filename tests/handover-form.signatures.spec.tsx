@@ -108,7 +108,7 @@ vi.mock('@/src/components/SignaturePad', () => ({
     onChange,
     disabled,
   }: {
-    onChange: (value: { imageBase64: string; signedAt: string }) => void;
+    onChange: (value: { imageBase64: string; signedAt: string } | null) => void;
     disabled?: boolean;
   }) => {
     if (disabled) return null;

@@ -85,11 +85,7 @@ const has = (k: string) => Map && Object.prototype.hasOwnProperty.call(Map, k);
     expect(devicesSection).toBeDefined();
 
     const deviceRefs = deviceUseStatements
-      .map((entry: any) =>
-        entry.resource?.resourceType && entry.resource?.id
-          ? `${entry.resource.resourceType}/${entry.resource.id}`
-          : undefined,
-      )
+      .map((entry: any) => entry.fullUrl)
       .filter(Boolean)
       .sort();
     const sectionRefs = devicesSection?.entry?.map((entry: any) => entry.reference).sort();

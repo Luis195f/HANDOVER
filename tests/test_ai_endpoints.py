@@ -68,6 +68,29 @@ def test_summarize_sbar_success(client):
     assert body['full_text'] == 'Full'
 
 
+def test_summarize_sbar_accepts_long_text_without_truncation(monkeypatch):
+    test_client = TestClient(main.app)
+    captured = {}
+    long_text = 'x' * 800
+
+    async def fake_generate(text, language='es'):
+        captured['text'] = text
+        return {
+            'situation': 'S',
+            'background': 'B',
+            'assessment': 'A',
+            'recommendation': 'R',
+            'full_text': 'Full',
+        }
+
+    monkeypatch.setattr(main, 'generate_sbar', fake_generate)
+
+    response = test_client.post('/ai/summarize-sbar', json={'free_text': long_text, 'language': 'es'})
+
+    assert response.status_code == 200
+    assert captured['text'] == long_text
+
+
 def test_summarize_sbar_invalid_response(monkeypatch):
     test_client = TestClient(main.app)
 

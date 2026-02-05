@@ -16,9 +16,10 @@ const findEntryByLoinc = (bundle: any, code: string) =>
   );
 
 const entryReference = (entry: any) =>
-  entry?.resource?.resourceType && entry?.resource?.id
+  entry?.fullUrl ??
+  (entry?.resource?.resourceType && entry?.resource?.id
     ? `${entry.resource.resourceType}/${entry.resource.id}`
-    : undefined;
+    : undefined);
 
 describe('Panel 85353-1 — hasMember a individuales (opcional)', () => {
   const patientId = 'pat-001';

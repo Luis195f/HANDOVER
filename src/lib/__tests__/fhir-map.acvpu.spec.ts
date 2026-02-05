@@ -21,8 +21,7 @@ const findObsByLoinc = (bundle: any, loincCode: string) =>
 
 const getPatientReference = (bundle: any) => {
   const patientEntry = (bundle?.entry ?? []).find((e: any) => e.resource?.resourceType === 'Patient');
-  const id = patientEntry?.resource?.id;
-  return id ? `Patient/${id}` : undefined;
+  return patientEntry?.fullUrl ?? undefined;
 };
 
 const hasCoding = (cc: any, system: string, code: string) =>
