@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Alert, Button } from 'react-native';
 
 import { generateHandoverPdf } from '@/src/lib/export/export-pdf';
+import { uploadSignedHandoverPdf } from '@/src/lib/fhir-client';
 import { useAuth } from '@/src/security/auth';
 import type { HandoverValues } from '@/src/validation/schemas';
 import { t } from '@/src/i18n';
@@ -25,13 +26,17 @@ export function ExportPdfButton({ handover, onBeforeExport }: Props) {
     try {
       setExporting(true);
       const pdf = await generateHandoverPdf(handover, session);
+      await uploadSignedHandoverPdf(pdf, {
+        patientId: handover.patientId,
+        handoverId: handover.id ?? '',
+      });
       Alert.alert(
         t('export.pdfSuccessTitle'),
-        t('export.pdfSuccessMessage', { uri: pdf.uri }),
+        t('export.pdfSignedUploadMessage', { uri: pdf.uri }),
       );
-      // En el futuro se podría llamar a uploadSignedHandoverPdf(pdf, { patientId: handover.patientId, handoverId: handover.id ?? '' })
-    } catch {
-      Alert.alert(t('common.error'), t('export.pdfErrorMessage'));
+    } catch (error) {
+      const details = error instanceof Error ? `\n${error.message}` : '';
+      Alert.alert(t('common.error'), `${t('export.pdfErrorMessage')}${details}`);
     } finally {
       setExporting(false);
     }

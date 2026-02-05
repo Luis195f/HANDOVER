@@ -152,6 +152,7 @@
   "export": {
     "pdfSuccessTitle": "Export completed",
     "pdfSuccessMessage": "PDF generated at: {{uri}}",
+    "pdfSignedUploadMessage": "Signed PDF uploaded successfully. File: {{uri}}",
     "pdfErrorMessage": "Could not generate the handover PDF.",
     "exporting": "Exporting…",
     "exportButton": "Export PDF"

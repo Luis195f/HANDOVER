@@ -3,6 +3,9 @@ import { HTTPError, fetchWithRetry } from './net';
 import { getValidationErrorsFromBundle, validateBundleWithZod as validateFhirBundle } from './fhir-validation';
 import { formatIssuesForUser, isOperationOutcome, type OperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { GeneratedPdf } from './export/export-pdf';
+import * as FileSystem from 'expo-file-system';
+import type { HandoverSession } from '../security/auth-types';
+import { signPdf } from './eidas-signature';
 // BEGIN HANDOVER D2 – VitalTrends fhir-client
 import { LOINC, TERMINOLOGY_SYSTEMS } from './codes';
 import type { VitalPoint, VitalTrendsData } from '../../types/vitals';
@@ -217,6 +220,7 @@ type AuthHooks = {
   ensureFreshToken?: () => Promise<string | null>;
   logout?: () => Promise<void> | void;
   getBaseUrl?: () => string | undefined;
+  getSession?: () => Promise<HandoverSession | null> | HandoverSession | null;
   /** Compat: algunos callers pasan baseUrl directo */
   baseUrl?: string;
 };
@@ -705,11 +709,82 @@ export async function uploadSignedHandoverPdf(
   pdf: GeneratedPdf,
   ctx: PdfUploadContext,
 ): Promise<void> {
-  // Nota: cuando el backend exponga /upload/pdf-to-fhir, implementar aquí la llamada POST
-  // usando el mismo cliente HTTP FHIR. Por ahora, no hace nada (stub) para mantener idempotencia.
-  void pdf;
-  void ctx;
-  return;
+  const session = await hooks.getSession?.();
+  if (!session) {
+    throw new Error('EIDAS_SESSION_MISSING');
+  }
+
+  let signed;
+  try {
+    signed = await signPdf(pdf, session);
+  } catch (error) {
+    console.warn('EIDAS_SIGN_FAILED', { error });
+    throw error;
+  }
+
+  let attachmentData: string;
+  try {
+    attachmentData = await FileSystem.readAsStringAsync(signed.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } catch (error) {
+    console.warn('EIDAS_READ_SIGNED_PDF_FAILED', { error });
+    throw error;
+  }
+
+  const documentReference = {
+    resourceType: 'DocumentReference',
+    status: 'current',
+    type: {
+      text: 'Signed handover PDF',
+    },
+    subject: {
+      reference: `Patient/${ctx.patientId}`,
+    },
+    date: signed.signedAt,
+    author: [
+      {
+        display: session.displayName ?? session.userId,
+      },
+    ],
+    description: `Signed handover PDF for ${ctx.handoverId}`,
+    content: [
+      {
+        attachment: {
+          contentType: 'application/pdf',
+          data: attachmentData,
+          title: pdf.name,
+          creation: pdf.createdAt,
+        },
+      },
+    ],
+    extension: [
+      {
+        url: 'http://ihe.net/fhir/StructureDefinition/ihe-xds-signature',
+        extension: [
+          { url: 'signatureFormat', valueString: 'PAdES' },
+          { url: 'signature', valueString: signed.signature },
+          { url: 'signedAt', valueDateTime: signed.signedAt },
+          { url: 'certificateIssuer', valueString: signed.certificateInfo.issuer },
+          { url: 'certificateSubject', valueString: signed.certificateInfo.subject },
+          { url: 'certificateValidTo', valueDateTime: signed.certificateInfo.validTo },
+        ],
+      },
+    ],
+  };
+
+  const response = await fetchFHIR({
+    path: 'DocumentReference',
+    method: 'POST',
+    body: documentReference,
+    token: (await getAuthToken()) ?? undefined,
+  });
+
+  if (!response.ok) {
+    const message = response.message ?? `FHIR_UPLOAD_FAILED_${response.status}`;
+    console.warn('FHIR_SIGNED_PDF_UPLOAD_FAILED', { message, status: response.status });
+    throw new Error(message);
+  }
 }
 
 // BEGIN HANDOVER D2 – VitalTrends fhir-client

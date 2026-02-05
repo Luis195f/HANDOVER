@@ -61,6 +61,8 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo; `true/1/TRUE` lo deshabilitan, cualquier otro valor lo deja activo por defecto).
    - `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` habilita la firma ECDSA P-256 de los Bundles FHIR en el cliente antes de encolarlos (por defecto `false`; si no hay WebCrypto o clave, continúa enviando sin firma).
    - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` habilita una validación remota rápida (`Bundle/$validate`) antes de encolar si hay conectividad. Si el servidor devuelve un `OperationOutcome` con severidad `error`/`fatal`, se muestra un alert con los detalles y no se encola el bundle; en modo offline sigue encolando para respetar offline-first. Recomendado en entornos de staging/producción para detectar problemas de estructura antes de ocupar la cola.
+   - `EXPO_PUBLIC_EIDAS_API_URL` apunta al proveedor eIDAS homologado (firma cualificada PAdES).
+   - `EXPO_PUBLIC_EIDAS_CLIENT_ID`, `EXPO_PUBLIC_EIDAS_CLIENT_SECRET` y/o `EXPO_PUBLIC_EIDAS_API_KEY` son credenciales del proveedor (gestionarlas como secretos).
 3. Define `EXPO_TOKEN` o credenciales EAS en CI/CD cuando generes binarios firmados con Expo Application Services.
 
 ## Login y permisos
@@ -91,6 +93,12 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 
 - Hashing y random bytes se resuelven vía `expo-crypto` sin añadir polyfills globales de `crypto`.
 - La firma de bundles FHIR depende de `globalThis.crypto.subtle`; si no está disponible, la firma se omite y el envío continúa sin bloquear la cola.
+
+## Firma eIDAS de PDFs (entrega clínica)
+
+- El flujo de firma cualificada eIDAS se integra en `src/lib/eidas-signature.ts` y genera PDFs firmados en formato PAdES, con metadatos de auditoría (certificado, timestamp) anexados al `DocumentReference` FHIR.
+- En producción configura `EXPO_PUBLIC_EIDAS_API_URL` y credenciales (`EXPO_PUBLIC_EIDAS_CLIENT_ID`, `EXPO_PUBLIC_EIDAS_CLIENT_SECRET`, `EXPO_PUBLIC_EIDAS_API_KEY`) mediante secretos o almacenamiento seguro; nunca hardcodear certificados o claves.
+- En desarrollo, si no hay proveedor configurado, se genera un mock local para no bloquear la UI. Antes de usar en un entorno real, valida el flujo con el proveedor eIDAS homologado y actualiza las políticas internas de trazabilidad (IEC 62304, MDR, eIDAS).
 
 ## Instalación y ejecución
 
