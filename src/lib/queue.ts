@@ -145,7 +145,10 @@ async function encryptQueuePayload(payload: unknown, patientId?: string): Promis
   return JSON.stringify({ __encryptionFailed: true, payloadHash, v: 1 });
 }
 
-async function decryptQueuePayload<TFallback = unknown>(payload: unknown, opts: { unwrap?: boolean } = {}): Promise<TFallback | unknown> {
+export async function decryptQueuePayload<TFallback = unknown>(
+  payload: unknown,
+  opts: { unwrap?: boolean } = {}
+): Promise<TFallback | unknown> {
   if (payload === null || typeof payload === "undefined") return payload as TFallback | unknown;
   if (typeof payload !== "string") return payload as TFallback | unknown;
 
