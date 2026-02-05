@@ -24,6 +24,7 @@ import {
 } from './fhir-validation/zod';
 import {
   deleteOfflineQueueItem,
+  decryptQueuePayload,
   updateOfflineQueueStatus,
   listOfflineQueue,
   type QueueItem as OfflineQueueItem,
@@ -465,6 +466,29 @@ function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
   };
 }
 
+async function resolveOfflineBundle(bundle: unknown): Promise<Bundle | null> {
+  if (bundle == null) return null;
+  if (typeof bundle !== 'string') return bundle as Bundle;
+
+  // Reuse queue decryption logic so v1/legacy/plain formats stay symmetric.
+  const decrypted = await decryptQueuePayload(bundle, { unwrap: true });
+  if (decrypted == null) return null;
+
+  if (typeof decrypted === 'string') {
+    try {
+      return JSON.parse(decrypted) as Bundle;
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof decrypted === 'object') {
+    return decrypted as Bundle;
+  }
+
+  return null;
+}
+
 function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
   return async (item) => {
     const parsed = extractOfflinePayload(item.payload);
@@ -648,9 +672,12 @@ export async function processQueueOnce(): Promise<void> {
 
     const normalizedPayload = { ...preparedPayload };
     if (typeof preparedPayload.bundle === 'string') {
-  try {
-   const decrypted = preparedPayload.bundle; // <-- tu función real
-    normalizedPayload.bundle = JSON.parse(decrypted) as Bundle;
+      try {
+        const resolved = await resolveOfflineBundle(preparedPayload.bundle);
+        if (!resolved) {
+          throw new Error('Offline bundle could not be decrypted');
+        }
+        normalizedPayload.bundle = resolved;
       } catch (error) {
         await updateOfflineQueueStatus(item.id, 'error', {
           attemptCount,
