@@ -3861,7 +3861,7 @@ export function buildHandoverBundle(
     buildComposition(
       {
         patientId: values.patientId,
-        encounterId: values.encounterId,
+        encounterId,
         author: values.author,
         composition: values.composition,
         closingSummary: values.closingSummary,
@@ -3937,6 +3937,35 @@ export function buildHandoverBundle(
     compositionEntry,
     ...resourceEntries,
   ];
+
+  const replaceInternalReferencesWithFullUrl = (bundleEntries: BundleEntry[]) => {
+    const fullUrlByReference = new Map<string, string>();
+    bundleEntries.forEach((entry) => {
+      const resource = entry.resource as { resourceType?: string; id?: string };
+      if (!resource?.resourceType || !resource.id || !entry.fullUrl) return;
+      fullUrlByReference.set(`${resource.resourceType}/${resource.id}`, entry.fullUrl);
+    });
+
+    const replaceReferences = (value: unknown) => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) {
+        value.forEach((item) => replaceReferences(item));
+        return;
+      }
+      const record = value as Record<string, unknown>;
+      if (typeof record.reference === 'string') {
+        const fullUrl = fullUrlByReference.get(record.reference);
+        if (fullUrl) {
+          record.reference = fullUrl;
+        }
+      }
+      Object.values(record).forEach((item) => replaceReferences(item));
+    };
+
+    bundleEntries.forEach((entry) => replaceReferences(entry.resource));
+  };
+
+  replaceInternalReferencesWithFullUrl(entries);
 
   const bundle: Bundle = {
     resourceType: 'Bundle',
@@ -4457,6 +4486,7 @@ export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; er
   }
 
   const referencePattern = /^[A-Za-z]+\/[A-Za-z0-9.\-]{1,64}$/;
+  const urnPattern = /^urn:uuid:[0-9a-f]{32}$/;
   const entryReferenceSet = new Set(
     entries
       .map((entry) => {
@@ -4465,6 +4495,7 @@ export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; er
       })
       .filter((value): value is string => Boolean(value)),
   );
+  const entryFullUrlSet = new Set(entries.map((entry) => entry.fullUrl).filter(Boolean));
   const entryResourceTypes = new Set(
     entries
       .map((entry) => (entry.resource as { resourceType?: string }).resourceType)
@@ -4492,8 +4523,14 @@ export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; er
     }
     const references = collectReferences(entry.resource);
     references.forEach((reference) => {
-      if (!referencePattern.test(reference)) {
+      if (!referencePattern.test(reference) && !urnPattern.test(reference)) {
         errors.push(`entry[${index}].reference "${reference}" is not ResourceType/id`);
+        return;
+      }
+      if (urnPattern.test(reference)) {
+        if (!entryFullUrlSet.has(reference)) {
+          errors.push(`entry[${index}].reference "${reference}" does not resolve to bundle entries`);
+        }
         return;
       }
       const [referenceType] = reference.split('/');

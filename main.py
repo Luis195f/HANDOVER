@@ -310,10 +310,16 @@ async def audio_to_fhir(patientId: str = Form(...),
 MAX_NOTES_LENGTH = 500
 
 
+def _truncate_audit_notes(text: str) -> str:
+    """Trunca solo para auditoría/hash, no para generación clínica."""
+    if len(text) <= MAX_NOTES_LENGTH:
+        return text
+    return text[:MAX_NOTES_LENGTH].rstrip() + "…"
+
+
 def _build_sbar_input(req: SbarRequest) -> tuple[str, dict]:
+    # Usar el texto completo (validado por MAX_FREE_TEXT_LENGTH) para generación SBAR.
     base_text = (req.free_text or "").strip()
-    if len(base_text) > MAX_NOTES_LENGTH:
-        base_text = base_text[:MAX_NOTES_LENGTH].rstrip() + "…"
 
     context = req.context or {}
     if not isinstance(context, dict) or not context:
@@ -398,7 +404,7 @@ async def summarize_sbar(
             status="fail",
             http_status=400,
             user_sub=x_user_id,
-            notes=(req.free_text or "")[:MAX_NOTES_LENGTH],
+            notes=_truncate_audit_notes((req.free_text or "").strip()),
             context=req.context or {},
             language=req.language or "es",
             request=request,
@@ -406,9 +412,7 @@ async def summarize_sbar(
         raise HTTPException(status_code=400, detail="Texto demasiado largo para resumir")
 
     combined_text, context = _build_sbar_input(req)
-    notes = (req.free_text or "").strip()
-    if len(notes) > MAX_NOTES_LENGTH:
-        notes = notes[:MAX_NOTES_LENGTH].rstrip() + "…"
+    notes = _truncate_audit_notes((req.free_text or "").strip())
     try:
         payload = await generate_sbar(combined_text, language=req.language or "es")
     except HTTPException:

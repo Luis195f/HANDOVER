@@ -65,4 +65,18 @@ describe('SignaturePad', () => {
       signedAt: '2025-01-05T10:30:00.000Z',
     });
   });
+
+  it('clears the signature and notifies the parent', () => {
+    const onChange = vi.fn();
+    const { getByTestId } = render(
+      <SignaturePad
+        onChange={onChange}
+        value={{ imageBase64: 'existing', signedAt: '2025-01-05T10:20:00.000Z' }}
+      />,
+    );
+
+    fireEvent.press(getByTestId('signature-pad-clear'));
+
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
 });

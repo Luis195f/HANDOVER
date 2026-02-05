@@ -2472,34 +2472,49 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           {statusValue === 'final' ? (
             <View style={styles.signaturePadSection}>
               <SignaturePad
-  value={
-    outgoingSignature?.imageBase64
-      ? { imageBase64: outgoingSignature.imageBase64, signedAt: outgoingSignature.signedAt }
-      : undefined
-  }
-  onChange={(payload) => {
-    const built = buildOutgoingSignature(payload);
-    if (!built) return;
+                value={
+                  outgoingSignature?.imageBase64
+                    ? { imageBase64: outgoingSignature.imageBase64, signedAt: outgoingSignature.signedAt }
+                    : undefined
+                }
+                onChange={(payload) => {
+                  if (!payload) {
+                    const nextSignatures = { ...(signaturesValue ?? {}) } as NonNullable<
+                      HandoverValues['signatures']
+                    >;
+                    if ('outgoing' in nextSignatures) {
+                      delete nextSignatures.outgoing;
+                    }
+                    form.setValue(
+                      'signatures',
+                      Object.keys(nextSignatures).length > 0 ? nextSignatures : undefined,
+                      { shouldDirty: true, shouldValidate: true },
+                    );
+                    return;
+                  }
 
-    // Tipado fuerte: el schema espera method obligatorio.
-    type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
+                  const built = buildOutgoingSignature(payload);
+                  if (!built) return;
 
-    const nextSignature = {
-      ...built,
-      method: (built.method ?? 'session') as OutgoingSig['method'],
-    } as OutgoingSig;
+                  // Tipado fuerte: el schema espera method obligatorio.
+                  type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
 
-    form.setValue(
-      'signatures',
-      {
-        ...(signaturesValue ?? {}),
-        outgoing: nextSignature,
-      },
-      { shouldDirty: true, shouldValidate: true },
-    );
-  }}
-  disabled={!canSignOutgoing}
-/>
+                  const nextSignature = {
+                    ...built,
+                    method: (built.method ?? 'session') as OutgoingSig['method'],
+                  } as OutgoingSig;
+
+                  form.setValue(
+                    'signatures',
+                    {
+                      ...(signaturesValue ?? {}),
+                      outgoing: nextSignature,
+                    },
+                    { shouldDirty: true, shouldValidate: true },
+                  );
+                }}
+                disabled={!canSignOutgoing}
+              />
 
 {!canSignOutgoing ? (
   <Text style={styles.signaturePadHint}>{t('signatures.signaturePadDisabledHint')}</Text>

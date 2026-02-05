@@ -33,12 +33,10 @@ describe('mapRiskConditions', () => {
       TEST_RISK_CODES.PRESSURE_ULCER.code,
     ].sort());
 
-    const patientEntry = (bundle.entry as BundleEntry[]).find(
+    const patientEntry = (bundle.entry as Array<BundleEntry & { fullUrl?: string }>).find(
       (entry) => entry.resource?.resourceType === 'Patient'
     );
-    const patientReference = patientEntry?.resource?.id
-      ? `Patient/${patientEntry.resource.id}`
-      : undefined;
+    const patientReference = patientEntry?.fullUrl;
 
     conditions.forEach((condition) => {
       expect(condition.subject?.reference).toBe(patientReference);

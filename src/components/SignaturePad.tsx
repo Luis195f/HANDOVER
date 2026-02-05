@@ -15,7 +15,7 @@ type SvgRef = React.ElementRef<typeof Svg> & {
 
 type SignaturePadProps = {
   value?: SignaturePadValue | null;
-  onChange: (value: SignaturePadValue) => void;
+  onChange: (value: SignaturePadValue | null) => void;
   disabled?: boolean;
 };
 
@@ -33,6 +33,7 @@ export function SignaturePad({ value, onChange, disabled }: SignaturePadProps) {
     currentPathRef.current = null;
     setCurrentPath(null);
     setPaths([]);
+    onChange(null);
   };
 
   const handleSave = () => {
@@ -109,7 +110,12 @@ export function SignaturePad({ value, onChange, disabled }: SignaturePadProps) {
         </Svg>
       </View>
       <View style={styles.actions}>
-        <Button title={t('signatures.signaturePadClear')} onPress={handleClear} disabled={disabled} />
+        <Button
+          title={t('signatures.signaturePadClear')}
+          onPress={handleClear}
+          disabled={disabled}
+          testID="signature-pad-clear"
+        />
         <Button
           title={t('signatures.signaturePadSave')}
           onPress={handleSave}
