@@ -205,23 +205,8 @@ X_FRAME_OPTIONS = "DENY"
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 # -----------------------------
-# CSP (mantengo tu dict + compatibilidad django-csp)
+# CSP (formato django-csp >= 4.0)
 # -----------------------------
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        "default-src": ("'self'",),
-        "script-src": ("'self'", "https://cdn.jsdelivr.net"),
-        "style-src": ("'self'", "https://fonts.googleapis.com"),
-        "img-src": ("'self'", "data:"),
-        "font-src": ("'self'", "https://fonts.gstatic.com"),
-        "connect-src": (
-            "'self'",
-            *tuple(origin for origin in CORS_ALLOWED_ORIGINS if origin.startswith("https://")),
-        ),
-    }
-}
-
-# Compatibilidad estándar con django-csp (no rompe tu dict)
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         "default-src": ("'self'",),
