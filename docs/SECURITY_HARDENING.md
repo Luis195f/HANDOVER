@@ -17,6 +17,10 @@
 - **Scopes clínicos**: se define catálogo mínimo de scopes y se expone en `/api/me/capabilities` junto con perfiles FHIR soportados.【F:backend/security/scopes.py†L1-L19】【F:backend/api/views.py†L329-L369】
 - **Auditoría de IA**: cada resumen SBAR genera evento de auditoría (`ai_summary_generated`) con hash del input y metadatos (modelo, versión).【F:main.py†L211-L343】
 
+## CSP (django-csp)
+
+- **Formato actualizado**: la política CSP se mantiene en `CONTENT_SECURITY_POLICY` con el formato esperado por `django-csp >= 4.0` y se restringe a orígenes explícitos (self + CDNs de fuentes/scripts y orígenes HTTPS permitidos por CORS). Esto evita fallos de `manage.py check/migrate` por formato antiguo y mantiene el endurecimiento sin abrir la política.【F:backend/settings.py†L210-L232】【F:requirements.txt†L14】
+
 ## Variables de entorno relevantes
 
 - `EXPO_PUBLIC_SESSION_IDLE_MINUTES`: minutos de inactividad antes de logout (default 15).【F:src/security/session-config.ts†L5-L29】

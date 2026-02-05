@@ -3,7 +3,7 @@ import { clearAuditStorage } from '@/src/lib/audit';
 import { clearAllDrafts } from '@/src/lib/drafts';
 import { clearOfflineEncryptionKeys } from '@/src/lib/crypto';
 import { clearOfflineQueue, clearTxQueue } from '@/src/lib/queue';
-import { clearCapabilitiesCache } from '@/src/security/capabilities';
+import { invalidateCapabilitiesCache } from '@/src/security/capabilities';
 import { clearCryptoKeys } from '@/src/security/crypto';
 import { clearAllUsers, createUserSwitchStorage } from '@/src/security/user-switch';
 
@@ -14,7 +14,7 @@ export async function clearSensitiveLocalData(): Promise<void> {
     clearLegacyOfflineQueue(),
     clearAuditStorage(),
     clearAllDrafts(),
-    clearCapabilitiesCache(),
+    invalidateCapabilitiesCache(),
     clearCryptoKeys(),
     clearOfflineEncryptionKeys(),
     clearAllUsers(createUserSwitchStorage()),

@@ -11,5 +11,5 @@ gunicorn>=21.2
 djangorestframework>=3.14  # si usas API
 psycopg2-binary>=2.9       # si usas Postgres
 django-cors-headers>=4.3
-django-csp>=3.8
+django-csp>=4.0
 openai>=1.42.0
