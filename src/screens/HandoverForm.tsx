@@ -1102,13 +1102,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     return Number.isNaN(parsed) ? undefined : parsed;
   };
 
-  const handleShiftDetailsPress = () => {
-    navigation.navigate('ShiftDetails', {
-      returnTo: 'HandoverForm',
-      administrativeData: form.getValues('administrativeData'),
-    });
-  };
-
   const buildDraftSbar = (values: HandoverFormValues): SBARSummary => {
     const manualDraft: SBARSummary = {
       situation: values.sbarSituation?.trim() ?? '',
@@ -1898,7 +1891,6 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           >
             <AdministrativeSection
               styles={styles}
-              onEditShift={handleShiftDetailsPress}
               parseNumericInput={parseNumericInput}
               dictationState={{
                 activeDictationField,

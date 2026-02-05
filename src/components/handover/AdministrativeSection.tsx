@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Pressable, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Pressable, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import type { SttConfig, SttStatus } from '@/src/lib/stt';
@@ -15,7 +15,6 @@ export type DictationMicButtonProps = {
 
 export type AdministrativeSectionProps = {
   styles: Record<string, TextStyle | ViewStyle>;
-  onEditShift: () => void;
   parseNumericInput: (value: string) => number | undefined;
   dictationState: {
     activeDictationField: DictationField | null;
@@ -75,7 +74,6 @@ const StaffListInput = ({
 
 export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
   styles,
-  onEditShift,
   parseNumericInput,
   dictationState,
   DictationMicButton,
@@ -97,9 +95,6 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
 
   return (
     <>
-      <View style={styles.buttonRow}>
-        <Button title="Editar detalles del turno" color="#2563EB" onPress={onEditShift} />
-      </View>
       <View style={styles.field}>
         <Text style={styles.label}>Unidad</Text>
         <Controller

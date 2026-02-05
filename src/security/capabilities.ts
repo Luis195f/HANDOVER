@@ -187,8 +187,10 @@ export function canAccess(route: RouteName, capabilities: Capabilities | null | 
       return perms.canWriteHandover;
     case 'AuditLog':
       return perms.canViewAudit;
-    case 'SupervisorDashboard':
-      return perms.canSignHandover;
+    case 'SupervisorDashboard': {
+      const roles = capabilities.roles;
+      return perms.canSignHandover && (roles.includes('supervisor') || roles.includes('admin'));
+    }
     case 'AdminDashboard':
       return perms.isAdmin;
     case 'Login':
