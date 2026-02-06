@@ -17,10 +17,16 @@ type Listener = (lang: SupportedLang) => void;
 
 const listeners = new Set<Listener>();
 
+const getNavigatorLocale = (): string | undefined => {
+  if (typeof navigator === 'undefined') return undefined;
+  if ('language' in navigator && typeof navigator.language === 'string') return navigator.language;
+  return undefined;
+};
+
 const detectLang = (): SupportedLang => {
   try {
     const locale =
-      (typeof navigator !== 'undefined' && (navigator as any).language) ||
+      getNavigatorLocale() ||
       (typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().locale) ||
       '';
     return String(locale).toLowerCase().startsWith('en') ? 'en' : 'es';

@@ -457,6 +457,7 @@ export default function PatientList({ navigation }: Props) {
                 styles.patientCard,
                 { backgroundColor: colors.background, borderColor: colors.border },
               ]}
+              testID={`patient-card-${item.patientId}`}
             >
               <Text style={[styles.patientName, { color: colors.text }]}>{item.displayName}</Text>
               <Text style={[styles.patientMeta, { color: colors.muted }]}>

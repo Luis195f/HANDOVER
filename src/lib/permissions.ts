@@ -23,6 +23,11 @@ type CameraModule = {
   requestCameraPermissionsAsync: () => Promise<PermissionState>;
 };
 
+type AudioPermissionsModule = {
+  getRecordingPermissionsAsync: () => Promise<PermissionState>;
+  requestRecordingPermissionsAsync: () => Promise<PermissionState>;
+};
+
 type PermissionFlow = {
   name: string;
   getCurrent: () => Promise<PermissionState>;
@@ -34,12 +39,12 @@ const Camera: CameraModule =
   ((ExpoCamera as unknown as { Camera?: CameraModule })?.Camera ??
     (ExpoCamera as unknown as CameraModule)) as CameraModule;
 
+const AudioPermissions = ExpoAudio as unknown as AudioPermissionsModule;
+
 const microphoneFlow: PermissionFlow = {
   name: 'micrófono',
-  getCurrent: () =>
-    (ExpoAudio as any).getRecordingPermissionsAsync() as Promise<PermissionState>,
-  request: () =>
-    (ExpoAudio as any).requestRecordingPermissionsAsync() as Promise<PermissionState>,
+  getCurrent: () => AudioPermissions.getRecordingPermissionsAsync(),
+  request: () => AudioPermissions.requestRecordingPermissionsAsync(),
 };
 
 const cameraFlow: PermissionFlow = {
@@ -137,4 +142,3 @@ export async function ensureCameraPermission(): Promise<PermissionGuidance> {
 export async function ensureAudioPermission(): Promise<PermissionGuidance> {
   return ensurePermission(microphoneFlow);
 }
-

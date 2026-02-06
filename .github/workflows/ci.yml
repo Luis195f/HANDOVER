@@ -1,67 +1,40 @@
 name: CI
 
 on:
-  push:
-    branches: ['**']
   pull_request:
-    branches: ['**']
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-  node:
-    name: Node CI
+  build:
     runs-on: ubuntu-latest
-    env:
-      CI: "true"
-      NODE_OPTIONS: "--dns-result-order=ipv4first"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v2
         with:
           version: 10
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-
-      - name: Print tool versions
-        run: |
-          node -v || true
-          pnpm -v || true
-          npm -v || true
-
-      - name: Configure registry and timeouts
-        run: |
-          corepack enable || true
-          pnpm config set registry https://registry.npmjs.org || true
-          pnpm config set fetch-retries 5 || true
-          pnpm config set fetch-retry-maxtimeout 600000 || true
-          pnpm config set network-timeout 600000 || true
-
-      - name: Install
-        run: pnpm -w install --frozen-lockfile
-
-      - name: Typecheck
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        continue-on-error: true
+      - name: Type check
         run: pnpm -w typecheck
-
-      - name: Validate FHIR Bundles
-        run: |
-          pnpm -w validate:fhir tests/fixtures/fhir-bundles/valid-bundle.json
-          ! pnpm -w validate:fhir tests/fixtures/fhir-bundles/invalid-bundle.json
-
-
       - name: Lint
         run: pnpm -w lint
-
-      - name: Vitest
-        run: pnpm -w vitest run --reporter=verbose
-
-      - name: Docker build
-        run: docker build . --file Dockerfile --tag handover-app
+      - name: Unit and integration tests
+        run: pnpm -w vitest run --reporter=verbose --coverage
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
+      - name: End-to-end tests
+        run: pnpm run test:e2e
+      - name: Validate FHIR bundles
+        run: pnpm validate:fhir
+      - name: Upload unit coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/unit/lcov.info

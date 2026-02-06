@@ -12,7 +12,8 @@
     "test:watch": "jest --config jest.config.cjs --watch",
     "test:cov": "jest --config jest.config.cjs --coverage",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
-    "validate:fhir": "tsx scripts/validate-fhir.ts"
+    "validate:fhir": "tsx scripts/validate-fhir.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -69,6 +70,7 @@
   },
   "devDependencies": {
     "@expo/cli": "^54.0.13",
+    "@playwright/test": "^1.49.1",
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react": "^16.0.1",
     "@testing-library/react-native": "^12.9.0",

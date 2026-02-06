@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 
 import { FALL_BASIC_ACTIONS, PRESSURE_ULCER_PREVENTION_ACTIONS } from '../config/risks';
 import type { Handover, RiskItem, RiskType } from '../types/handover';
@@ -149,6 +150,20 @@ export interface HandoverAlert {
   riskType?: RiskType;
 }
 
+const vitalsSchema = z
+  .object({
+    rr: z.number().optional(),
+    spo2: z.number().optional(),
+    tempC: z.number().optional(),
+    temp: z.number().optional(),
+    sbp: z.number().optional(),
+    hr: z.number().optional(),
+    o2: z.boolean().optional(),
+    avpu: z.enum(['A', 'C', 'V', 'P', 'U']).optional(),
+    scale2: z.boolean().optional(),
+  })
+  .passthrough();
+
 function deriveRisksFromLegacy(risks?: Handover['risks']): RiskItem[] {
   if (!risks) return [];
   const items: RiskItem[] = [];
@@ -160,21 +175,22 @@ function deriveRisksFromLegacy(risks?: Handover['risks']): RiskItem[] {
 }
 
 function safeNews2Score(handover: Handover): number | undefined {
-  const vitals = handover.vitals;
-  if (!vitals) return undefined;
-  const hasVitals = ['rr', 'spo2', 'tempC', 'sbp', 'hr'].some(
-    key => typeof (vitals as Record<string, unknown>)[key] === 'number',
+  const parsed = vitalsSchema.safeParse(handover.vitals);
+  if (!parsed.success) return undefined;
+  const vitals = parsed.data;
+  const hasVitals = [vitals.rr, vitals.spo2, vitals.tempC, vitals.temp, vitals.sbp, vitals.hr].some(
+    (value) => typeof value === 'number',
   );
   if (!hasVitals) return undefined;
   const breakdown = computeNEWS2({
     rr: vitals.rr,
     spo2: vitals.spo2,
-    temp: (vitals as any).temp ?? vitals.tempC,
+    temp: vitals.temp ?? vitals.tempC,
     sbp: vitals.sbp,
     hr: vitals.hr,
-    o2: (vitals as any).o2,
-    avpu: vitals.avpu as any,
-    scale2: (vitals as any).scale2,
+    o2: vitals.o2,
+    avpu: vitals.avpu,
+    scale2: vitals.scale2,
   });
   return breakdown.total;
 }
@@ -196,12 +212,14 @@ export function computeAlerts(handover: Handover): HandoverAlert[] {
 
   const risks = normalizeRisks(handover);
   const news2 = safeNews2Score(handover);
-  const bradenScore =
-    typeof handover.braden?.totalScore === 'number'
-      ? handover.braden.totalScore
-      : typeof (handover as any)?.clinicalScales?.braden?.score === 'number'
-        ? (handover as any).clinicalScales.braden.score
-        : undefined;
+  const bradenScore = (() => {
+    if (typeof handover.braden?.totalScore === 'number') return handover.braden.totalScore;
+    const clinicalScales = handover.clinicalScales;
+    if (!clinicalScales || typeof clinicalScales !== 'object') return undefined;
+    if (!('braden' in clinicalScales)) return undefined;
+    const braden = (clinicalScales as { braden?: { score?: unknown } }).braden;
+    return typeof braden?.score === 'number' ? braden.score : undefined;
+  })();
 
   const fallRisk = risks.find(risk => risk.type === 'fall' && risk.present);
   if (fallRisk && !hasAnyAction(fallRisk, FALL_BASIC_ACTIONS)) {

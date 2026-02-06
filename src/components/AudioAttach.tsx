@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Linking } from 'react-native';
 import {
-  useAudioRecorder,
   RecordingPresets,
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
   type PermissionResponse,
 } from 'expo-audio';
 import { t } from '@/src/i18n';
+import { useAudioRecorderWithFallback } from '@/src/lib/audio-recorder';
 
 type Props = {
   onRecorded?: (uri: string) => void;
@@ -22,9 +22,17 @@ export default function AudioAttach({
   startLabel = t('audioAttach.start'),
   stopLabel = t('audioAttach.stop'),
 }: Props) {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY as any);
+  const recordingPreset =
+    RecordingPresets.HIGH_QUALITY ??
+    RecordingPresets.LOW_QUALITY ??
+    Object.values(RecordingPresets)[0];
+  if (!recordingPreset) {
+    throw new Error('Expo Audio recording presets unavailable');
+  }
+  const recorder = useAudioRecorderWithFallback(recordingPreset);
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(null);
+  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
 
   const openSettings = useCallback(async () => {
     try {
@@ -46,18 +54,36 @@ export default function AudioAttach({
   }, [openSettings]);
 
   const requestPermission = useCallback(async () => {
+    if (isE2E) {
+      const grantedPermission: PermissionResponse = {
+        status: 'granted',
+        granted: true,
+        canAskAgain: true,
+      };
+      setPermission(grantedPermission);
+      return grantedPermission;
+    }
     const result = await requestRecordingPermissionsAsync();
     setPermission(result);
     return result;
-  }, []);
+  }, [isE2E]);
 
   const loadInitialPermission = useCallback(async () => {
+    if (isE2E) {
+      const grantedPermission: PermissionResponse = {
+        status: 'granted',
+        granted: true,
+        canAskAgain: true,
+      };
+      setPermission(grantedPermission);
+      return;
+    }
     const current = await getRecordingPermissionsAsync();
     setPermission(current);
     if (!current.granted) {
       await requestPermission();
     }
-  }, [requestPermission]);
+  }, [isE2E, requestPermission]);
 
   useEffect(() => {
     void loadInitialPermission();

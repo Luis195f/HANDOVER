@@ -18,10 +18,10 @@ export type WarnCode =
 
 function getEnv(name: string): string | undefined {
   try {
-    if (typeof process !== "undefined" && (process as any).env) {
-      const v = (process as any).env[name];
-      return typeof v === "string" ? v : undefined;
-    }
+    const nodeProcess: NodeJS.Process | undefined = typeof process !== "undefined" ? process : undefined;
+    const env = nodeProcess?.env;
+    const v = env?.[name];
+    return typeof v === "string" ? v : undefined;
   } catch {
     // ignore
   }
@@ -30,10 +30,9 @@ function getEnv(name: string): string | undefined {
 
 function shouldLogWarn(): boolean {
   // CLAVE: en Vitest/CI estás en Node aunque navigator.product diga "ReactNative"
-  const hasNode =
-    typeof process !== "undefined" &&
-    !!(process as any).versions &&
-    typeof (process as any).versions.node === "string";
+  const nodeProcess: NodeJS.Process | undefined = typeof process !== "undefined" ? process : undefined;
+  const nodeVersion = nodeProcess?.versions?.node;
+  const hasNode = typeof nodeVersion === "string";
 
   if (hasNode) return true;
 
@@ -88,7 +87,7 @@ function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | u
       const sanitized = value
         .filter((item) => isPrimitive(item))
         .slice(0, MAX_META_ARRAY_ITEMS)
-        .map((item) => sanitizePrimitive(item as any));
+        .map((item) => sanitizePrimitive(item));
 
       if (sanitized.length > 0) safe[key] = sanitized;
       continue;
