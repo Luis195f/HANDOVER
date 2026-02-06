@@ -53,7 +53,12 @@ def test_audit_event_without_attesters():
             return_value=httpx.Response(201, json={"resourceType": "AuditEvent", "id": "ae-1"})
         )
 
-        r = client.post("/fhir/transaction", json=bundle, headers={"X-User-Id": "nurse-1"})
+        r = client.post(
+    "/fhir/transaction",
+    json=bundle,
+    headers={"X-User-Id": "nurse-1", "Authorization": "Bearer test-access-token"},
+)
+        
         assert r.status_code == 200
         req = ae_route.calls[0].request
         ae_body = json.loads(req.content.decode("utf-8"))
@@ -88,7 +93,12 @@ def test_audit_event_with_dual_signatures():
             return_value=httpx.Response(201, json={"resourceType": "AuditEvent", "id": "ae-2"})
         )
 
-        r = client.post("/fhir/transaction", json=bundle, headers={"X-User-Id": "nurse-1"})
+        r = client.post(
+    "/fhir/transaction",
+    json=bundle,
+    headers={"X-User-Id": "nurse-1", "Authorization": "Bearer test-access-token"},
+)
+
         assert r.status_code == 200
         req = ae_route.calls[0].request
         ae_body = json.loads(req.content.decode("utf-8"))
