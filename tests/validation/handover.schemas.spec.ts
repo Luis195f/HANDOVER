@@ -123,6 +123,19 @@ describe('zHandover schema', () => {
     expect(() => zHandover.parse(data)).toThrowError(ZodError);
   });
 
+  it('rejects invalid ISO timestamps in vitals', () => {
+    const data = buildValidHandover();
+    data.vitals = { ...data.vitals, recordedAt: 'no-es-fecha' };
+    expect(() => zHandover.parse(data)).toThrowError(ZodError);
+  });
+
+  it('accepts exams and procedures entries', () => {
+    const data = buildValidHandover();
+    data.exams = [{ type: 'laboratory', state: 'result', description: 'PCR' }];
+    data.procedures = [{ description: 'Curación', done: true }];
+    expect(() => zHandover.parse(data)).not.toThrowError();
+  });
+
   it('rejects incoherent blood pressure', () => {
     const data = buildValidHandover();
     data.vitals = { ...data.vitals, sbp: 90, dbp: 95 };

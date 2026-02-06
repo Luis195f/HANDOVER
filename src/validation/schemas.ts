@@ -140,6 +140,8 @@ export const zVitals = z
       .enum(["A", "C", "V", "P", "U"])
       .describe("Escala AVPU codificada con SNOMED/LOINC para el mapeo a FHIR")
       .optional(),
+    recordedAt: z.string().datetime().optional(),
+    issuedAt: z.string().datetime().optional(),
   })
   .superRefine((value, ctx) => {
     if (typeof value.glucoseMgDl === "number" && typeof value.glucoseMmolL === "number") {
