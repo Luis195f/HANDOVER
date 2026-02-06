@@ -111,6 +111,8 @@ export type Vitals = {
   glucoseMgDl?: number;
   glucoseMmolL?: number;
   avpu?: 'A' | 'C' | 'V' | 'P' | 'U';
+  recordedAt?: string;
+  issuedAt?: string;
 };
 
 export type VitalsSnapshot = {

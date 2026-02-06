@@ -35,3 +35,8 @@
 
 ## Variables de entorno adicionales (frontend)
 - `EXPO_PUBLIC_OIDC_SCOPE`: incluye `offline_access` para recibir `refresh_token`.
+
+## Captura clínica en el relevo
+- Las secciones de enfermería capturan nutrición (tipo de dieta, tolerancia, ingesta), eliminación (diuresis, patrón deposicional, sonda rectal), movilidad/piel (nivel de movilidad, plan de reposicionamiento, estado de piel y úlceras por presión) y balance hídrico (entradas, salidas, balance neto y notas).
+- Signos vitales incluyen valores numéricos, AVPU y timestamps opcionales de registro/emisión en formato ISO (útiles para el mapeo FHIR y auditoría clínica).
+- Exámenes y procedimientos permiten registrar descripción, estado y si se realizaron, para sincronizar con el backend y el bundle FHIR correspondiente.
