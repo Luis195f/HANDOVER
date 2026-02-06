@@ -297,14 +297,16 @@ async def fhir_transaction(bundle: dict,
             return r.json()
 
 @app.post("/upload/audio-to-fhir")
-async def audio_to_fhir(patientId: str = Form(...),
-                        label: str = Form("Handover Audio"),
-                        encounterRef: str | None = Form(None),
-                        file: UploadFile = File(...),
-                        request: Request):
+async def audio_to_fhir(
+    request: Request,
+    patientId: str = Form(...),
+    label: str = Form("Handover Audio"),
+    encounterRef: str | None = Form(None),
+    file: UploadFile = File(...),
+):
     data = await file.read()
     b64 = base64.b64encode(data).decode("utf-8")
-    now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
+    now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
     doc = {
         "resourceType": "DocumentReference",
         "status": "current",
@@ -312,11 +314,18 @@ async def audio_to_fhir(patientId: str = Form(...),
         "subject": {"reference": f"Patient/{patientId}"},
         "date": now,
         **({"context": {"encounter": [{"reference": encounterRef}]}} if encounterRef else {}),
-        "content": [{"attachment": {"contentType": file.content_type or "audio/mpeg",
-                                    "data": b64, "title": file.filename}}],
+        "content": [
+            {
+                "attachment": {
+                    "contentType": file.content_type or "audio/mpeg",
+                    "data": b64,
+                    "title": file.filename,
+                }
+            }
+        ],
     }
     async with httpx.AsyncClient(timeout=60) as client:
-        authorization = request.headers.get("Authorization") if request else None
+        authorization = request.headers.get("Authorization")
         r = await client.post(
             f"{FHIR_BASE}/DocumentReference",
             json=doc,
@@ -325,7 +334,6 @@ async def audio_to_fhir(patientId: str = Form(...),
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
         return r.json()
-
 
 MAX_NOTES_LENGTH = 500
 
