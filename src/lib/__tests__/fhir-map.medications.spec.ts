@@ -43,6 +43,35 @@ describe('FHIR map — medicaciones estructuradas y tratamientos', () => {
     expect(meds.some((item: any) => item.medicationCodeableConcept.text === 'Metamizol 2 g IV')).toBe(true);
   });
 
+  it('genera MedicationAdministration para medicaciones no continuas con alertas', () => {
+    const bundle = buildHandoverBundle(
+      {
+        patientId,
+        medications: [
+          {
+            id: 'med-3',
+            name: 'Furosemida',
+            dose: '20 mg',
+            route: 'iv',
+            frequency: 'cada 8h',
+            isContinuous: false,
+            isHighAlert: true,
+            startTime: '2024-01-01T08:00:00Z',
+          },
+        ],
+      },
+      { now },
+    );
+
+    const administrations = listResources(bundle, 'MedicationAdministration');
+    expect(administrations).toHaveLength(1);
+    expect(administrations[0].status).toBe('in-progress');
+    expect(administrations[0].medicationCodeableConcept.text).toBe('Furosemida');
+    expect(administrations[0].dosage?.route?.coding?.[0]?.code).toBe('IV');
+    expect(administrations[0].dosage?.dose?.value).toBe(20);
+    expect(administrations[0].extension?.[0]?.valueBoolean).toBe(true);
+  });
+
   it('mapea tratamientos no farmacológicos a Procedure', () => {
     const bundle = buildHandoverBundle(
       {
