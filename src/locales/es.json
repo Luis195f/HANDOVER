@@ -152,6 +152,7 @@
   "export": {
     "pdfSuccessTitle": "Exportación completada",
     "pdfSuccessMessage": "PDF generado en: {{uri}}",
+    "pdfSignedUploadMessage": "PDF firmado y enviado correctamente. Archivo: {{uri}}",
     "pdfErrorMessage": "No se pudo generar el PDF de la entrega.",
     "exporting": "Exportando…",
     "exportButton": "Exportar PDF"
