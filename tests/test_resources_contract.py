@@ -189,8 +189,16 @@ def test_transaction_resources_contract_and_audit():
             return_value=httpx.Response(201, json={"resourceType": "AuditEvent", "id": "ae-2"})
         )
 
-        r = client.post("/fhir/transaction", json=SAMPLE_BUNDLE,
-                        headers={"X-User-Id": "nurse-88", "X-Unit-Id": "icu-adulto"})
+        r = client.post(
+    "/fhir/transaction",
+    json=SAMPLE_BUNDLE,
+    headers={
+        "X-User-Id": "nurse-88",
+        "X-Unit-Id": "icu-adulto",
+        "Authorization": "Bearer test-access-token",
+    },
+)
+
         assert r.status_code == 200
         assert tx_route.called
         assert ae_route.called
