@@ -8,6 +8,7 @@ import type { SuggestionsResult } from '@/src/lib/ai-suggestions';
 import type { deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import type { VitalTrendsData } from '../../../types/vitals';
 import VitalSignsChart from '@/src/components/VitalSignsChart';
+import { PickerField, avpuOptions } from '@/src/screens/components/nursingShared';
 
 export type VitalsSectionProps = {
   styles: Record<string, TextStyle | ViewStyle>;
@@ -116,22 +117,67 @@ const VitalsGroup = ({
         })}
       </View>
       <View style={styles.field}>
-        <Text style={styles.label}>AVPU</Text>
         <Controller
           control={control}
           name="vitals.avpu"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={styles.input}
-              placeholder="A / C / V / P / U"
-              autoCapitalize="characters"
-              onBlur={onBlur}
-              value={value ?? ''}
-              onChangeText={(text) => onChange(text.trim().toUpperCase().slice(0, 1) || undefined)}
+          render={({ field: { onChange, value } }) => (
+            <PickerField
+              testID="vitals.avpu"
+              label="AVPU"
+              placeholder="Seleccionar"
+              value={value}
+              options={avpuOptions}
+              onValueChange={onChange}
+              error={errors?.vitals?.avpu?.message as string | undefined}
             />
           )}
         />
-        {errors?.vitals?.avpu?.message ? <Text style={styles.error}>{errors.vitals.avpu.message}</Text> : null}
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Registro (ISO)</Text>
+        <Controller
+          control={control}
+          name="vitals.recordedAt"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="2024-01-01T08:00:00Z"
+              autoCapitalize="none"
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={(text) => {
+                const trimmed = text.trim();
+                onChange(trimmed.length ? trimmed : undefined);
+              }}
+            />
+          )}
+        />
+        {errors?.vitals?.recordedAt?.message ? (
+          <Text style={styles.error}>{errors.vitals.recordedAt.message}</Text>
+        ) : null}
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>Emitido (ISO)</Text>
+        <Controller
+          control={control}
+          name="vitals.issuedAt"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="2024-01-01T08:05:00Z"
+              autoCapitalize="none"
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={(text) => {
+                const trimmed = text.trim();
+                onChange(trimmed.length ? trimmed : undefined);
+              }}
+            />
+          )}
+        />
+        {errors?.vitals?.issuedAt?.message ? (
+          <Text style={styles.error}>{errors.vitals.issuedAt.message}</Text>
+        ) : null}
       </View>
     </View>
   );

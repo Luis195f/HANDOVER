@@ -98,6 +98,14 @@ export const mobilityOptions: Array<Option<MobilityLevel>> = [
   { label: 'Encamado', value: 'bedbound' },
 ];
 
+export const avpuOptions: Array<Option<'A' | 'C' | 'V' | 'P' | 'U'>> = [
+  { label: 'Alerta (A)', value: 'A' },
+  { label: 'Confusión nueva (C)', value: 'C' },
+  { label: 'Responde a voz (V)', value: 'V' },
+  { label: 'Responde al dolor (P)', value: 'P' },
+  { label: 'No responde (U)', value: 'U' },
+];
+
 export const nursingStyles = StyleSheet.create({
   field: { marginBottom: 16 },
   label: { fontSize: 16, fontWeight: '500', marginBottom: 4 },

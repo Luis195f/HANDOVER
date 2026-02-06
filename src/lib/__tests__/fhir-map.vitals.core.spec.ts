@@ -55,4 +55,16 @@ describe('Vitales LOINC núcleo — individuos + UCUM', () => {
     expect(findByLoinc(out, TEST_VITAL_CODES.HEART_RATE.code)).toBeFalsy();
     expect(findByLoinc(out, TEST_VITAL_CODES.RESP_RATE.code)).toBeFalsy();
   });
+
+  it('respeta timestamps de registro y emisión cuando se informan', () => {
+    const recordedAt = '2025-10-21T07:00:00Z';
+    const issuedAt = '2025-10-21T07:05:00Z';
+    const out = mapVitalsToObservations(
+      { patientId, vitals: { hr: 90, recordedAt, issuedAt } },
+      { now }
+    );
+    const hr = findByLoinc(out, TEST_VITAL_CODES.HEART_RATE.code);
+    expect(hr?.effectiveDateTime).toBe(new Date(recordedAt).toISOString());
+    expect(hr?.issued).toBe(new Date(issuedAt).toISOString());
+  });
 });
