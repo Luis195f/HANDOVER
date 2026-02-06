@@ -32,18 +32,53 @@ type EidasConfig = {
   apiKey?: string;
 };
 
-const getEidasConfig = (): EidasConfig => ({
-  apiUrl: Constants.expoConfig?.extra?.EIDAS_API_URL,
-  clientId: Constants.expoConfig?.extra?.EIDAS_CLIENT_ID,
-  clientSecret: Constants.expoConfig?.extra?.EIDAS_CLIENT_SECRET,
-  apiKey: Constants.expoConfig?.extra?.EIDAS_API_KEY,
-});
+const pick = (...values: Array<string | undefined | null>): string | undefined =>
+  values.find((v) => typeof v === 'string' && v.trim().length > 0) ?? undefined;
+
+const getEidasConfig = (): EidasConfig => {
+  // 1) En CI/tests (Vitest/Node) y también en Expo con EXPO_PUBLIC_*
+  const env = typeof process !== 'undefined' ? process.env : undefined;
+
+  // 2) En runtime Expo (app.config.ts -> extra)
+  const extra =
+    (Constants as any)?.expoConfig?.extra ??
+    (Constants as any)?.manifest?.extra ??
+    {};
+
+  return {
+    apiUrl: pick(
+      env?.EXPO_PUBLIC_EIDAS_API_URL,
+      env?.EIDAS_API_URL,
+      extra.EXPO_PUBLIC_EIDAS_API_URL,
+      extra.EIDAS_API_URL,
+    ),
+    clientId: pick(
+      env?.EXPO_PUBLIC_EIDAS_CLIENT_ID,
+      env?.EIDAS_CLIENT_ID,
+      extra.EXPO_PUBLIC_EIDAS_CLIENT_ID,
+      extra.EIDAS_CLIENT_ID,
+    ),
+    clientSecret: pick(
+      env?.EXPO_PUBLIC_EIDAS_CLIENT_SECRET,
+      env?.EIDAS_CLIENT_SECRET,
+      extra.EXPO_PUBLIC_EIDAS_CLIENT_SECRET,
+      extra.EIDAS_CLIENT_SECRET,
+    ),
+    apiKey: pick(
+      env?.EXPO_PUBLIC_EIDAS_API_KEY,
+      env?.EIDAS_API_KEY,
+      extra.EXPO_PUBLIC_EIDAS_API_KEY,
+      extra.EIDAS_API_KEY,
+    ),
+  };
+};
 
 const normalizeApiUrl = (url?: string): string | undefined =>
   url?.replace(/\/$/, '');
 
 const toBase64 = (digest: ArrayBuffer | Uint8Array | string): string => {
   if (typeof digest === 'string') {
+    // Nota: expo-crypto suele devolver base64; si devolviera hex, igualmente queda estable.
     return Buffer.from(digest).toString('base64');
   }
   const bytes = digest instanceof ArrayBuffer ? new Uint8Array(digest) : digest;
@@ -168,7 +203,8 @@ export async function signPdf(
   }
 
   const payload = (await response.json()) as EidasSignResponse;
-  const signedAt = payload.signedAt ?? payload.timestamp ?? new Date().toISOString();
+  const signedAt =
+    payload.signedAt ?? payload.timestamp ?? new Date().toISOString();
   const signature = payload.signature ?? '';
   const certificateInfo = normalizeCertificateInfo(
     payload.certificateInfo,
