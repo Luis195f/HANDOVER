@@ -27,6 +27,42 @@ interface RefineSbarResponse {
   sbar?: Partial<SBARSummary> | null;
 }
 
+const LEGAL_NOTICE_BY_LANG: Record<'es' | 'en', string> = {
+  es: 'Aviso legal: Asistente de apoyo, no diagnóstico ni prescripción.',
+  en: 'Legal notice: Support assistant, not a diagnosis or prescription.',
+};
+
+const formatSbarText = (summary: Pick<SbarResult, 'situation' | 'background' | 'assessment' | 'recommendation'>, language: 'es' | 'en') => {
+  const labels =
+    language === 'en'
+      ? {
+          situation: 'S: Situation',
+          background: 'B: Background',
+          assessment: 'A: Assessment',
+          recommendation: 'R: Recommendation',
+        }
+      : {
+          situation: 'S: Situación',
+          background: 'B: Antecedentes',
+          assessment: 'A: Valoración',
+          recommendation: 'R: Recomendación',
+        };
+
+  return [
+    `${labels.situation}: ${summary.situation}`,
+    `${labels.background}: ${summary.background}`,
+    `${labels.assessment}: ${summary.assessment}`,
+    `${labels.recommendation}: ${summary.recommendation}`,
+  ].join('\n');
+};
+
+const appendLegalNotice = (text: string, language: 'es' | 'en') => {
+  const notice = LEGAL_NOTICE_BY_LANG[language];
+  const trimmed = text.trim();
+  if (!trimmed) return notice;
+  return `${trimmed}\n\n${notice}`;
+};
+
 function getAiSbarConfig(): AISBARConfig | null {
   const baseUrl = typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim()
     ? AI_SBAR_BASE_URL.trim()
@@ -143,7 +179,20 @@ export async function generateSbarViaBackend(
     throw new Error('No se pudo generar el SBAR con IA');
   }
 
-  const fullText = typeof data.full_text === 'string' ? data.full_text : '';
+  const rawText = typeof data.full_text === 'string' ? data.full_text : '';
+  const baseText = rawText.trim()
+    ? rawText
+    : formatSbarText(
+        {
+          situation: data.situation,
+          background: data.background,
+          assessment: data.assessment,
+          recommendation: data.recommendation,
+        },
+        language,
+      );
+
+  const fullText = appendLegalNotice(baseText, language);
 
   return {
     situation: data.situation,

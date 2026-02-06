@@ -64,6 +64,7 @@ type TranscriptionPayload = {
 };
 
 const SUPPORTED_PLATFORMS = new Set(['ios', 'android']);
+const BACKEND_FALLBACK_PLATFORMS = new Set(['ios', 'android']);
 
 class NativeSttService implements SttService {
   private status: SttStatus = 'idle';
@@ -288,6 +289,15 @@ const ENGINE_ERROR = Symbol('ENGINE_ERROR');
 const TRANSCRIPTION_ERROR_MESSAGE = 'No se pudo transcribir el audio con IA';
 export const STT_FALLBACK_TEXT = '[Transcripción no disponible]';
 
+const ALLOWED_AUDIO_MIME_TYPES = new Set([
+  'audio/m4a',
+  'audio/x-m4a',
+  'audio/mp3',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/ogg',
+]);
+
 const AUDIO_MIME_BY_EXTENSION: Record<string, string> = {
   m4a: 'audio/m4a',
   mp3: 'audio/mp3',
@@ -298,10 +308,13 @@ const AUDIO_MIME_BY_EXTENSION: Record<string, string> = {
 
 export function createSttService(): SttService {
   const endpoint = STT_ENDPOINT?.trim();
-  if (!endpoint || !SUPPORTED_PLATFORMS.has(Platform.OS)) {
-    return new UnsupportedSttService();
+  if (endpoint && SUPPORTED_PLATFORMS.has(Platform.OS)) {
+    return new NativeSttService(endpoint);
   }
-  return new NativeSttService(endpoint);
+  if (AI_BACKEND_BASE_URL && BACKEND_FALLBACK_PLATFORMS.has(Platform.OS)) {
+    return new BackendFallbackSttService();
+  }
+  return new UnsupportedSttService();
 }
 
 const defaultTranscriptionMock = async (): Promise<string> => '';
@@ -310,6 +323,11 @@ function resolveMimeType(fileUri: string): string {
   const [, extension = ''] = /\.([a-z0-9]+)$/i.exec(fileUri) ?? [];
   const normalized = extension.toLowerCase();
   return AUDIO_MIME_BY_EXTENSION[normalized] ?? 'audio/m4a';
+}
+
+function normalizeAllowedMimeType(mimeType: string): string {
+  if (mimeType === 'audio/mp4') return 'audio/m4a';
+  return mimeType;
 }
 
 const isAbortError = (error: unknown): error is Error =>
@@ -363,9 +381,12 @@ export async function transcribeAudioViaBackend(
   }
 
   const name = fileUri.split('/').pop() ?? 'audio.m4a';
-  const mimeType = resolveMimeType(name);
+  const resolvedMime = normalizeAllowedMimeType(resolveMimeType(name));
+  if (!ALLOWED_AUDIO_MIME_TYPES.has(resolvedMime)) {
+    throw new STTError('ENGINE', 'Audio inválido o formato no soportado');
+  }
   const formData = new FormData();
-  formData.append('file', { uri: fileUri, name, type: mimeType } as unknown as Blob);
+  formData.append('file', { uri: fileUri, name, type: resolvedMime } as unknown as Blob);
   if (options?.language) {
     formData.append('language', options.language);
   }
@@ -416,6 +437,160 @@ export async function transcribeAudioViaBackend(
     throw normalizeSttError(error);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+class BackendFallbackSttService implements SttService {
+  private status: SttStatus = 'idle';
+  private lastError: SttErrorCode | null = null;
+  private readonly listeners = new Set<Listener>();
+  private recording: Audio.Recording | null = null;
+  private recordingUri: string | null = null;
+  private activeLocale: SttConfig['locale'] = 'es-ES';
+  private autoStopTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async start(config: SttConfig): Promise<void> {
+    if (this.status === 'listening' || this.status === 'processing') {
+      await this.cancel();
+    }
+
+    this.clearAutoStopTimer();
+    this.lastError = null;
+    this.activeLocale = config.locale;
+
+    const permission = await this.ensurePermission();
+    if (!permission) {
+      this.setErrorState('PERMISSION_DENIED');
+      throw new Error('Microphone permission denied');
+    }
+
+    await this.prepareRecorder();
+    this.status = 'listening';
+    this.scheduleAutoStop(config.maxSeconds);
+  }
+
+  async stop(): Promise<void> {
+    if (!this.recording) {
+      this.status = 'idle';
+      return;
+    }
+
+    this.status = 'processing';
+    this.clearAutoStopTimer();
+
+    try {
+      await this.recording.stopAndUnloadAsync();
+      this.recordingUri = this.recording.getURI();
+    } catch (error) {
+      this.setErrorState('ENGINE');
+      throw error instanceof Error ? error : new Error('Failed to stop recording');
+    } finally {
+      this.recording = null;
+    }
+
+    if (!this.recordingUri) {
+      this.setErrorState('ENGINE');
+      throw new Error('Recording URI unavailable');
+    }
+
+    try {
+      const text = await transcribeAudioViaBackend(this.recordingUri, {
+        language: this.activeLocale.startsWith('en') ? 'en' : 'es',
+      });
+      this.status = 'idle';
+      this.notifyListeners({ text, isFinal: true });
+    } catch (error) {
+      const normalized = normalizeSttError(error);
+      this.setErrorState(normalized.code);
+      throw error instanceof Error ? error : new Error('Transcription failed');
+    } finally {
+      await this.cleanupRecordingFile();
+    }
+  }
+
+  async cancel(): Promise<void> {
+    this.clearAutoStopTimer();
+    if (this.recording) {
+      try {
+        await this.recording.stopAndUnloadAsync();
+      } catch {
+      }
+      this.recording = null;
+    }
+    await this.cleanupRecordingFile();
+    this.status = 'idle';
+  }
+
+  addListener(handler: Listener): () => void {
+    this.listeners.add(handler);
+    return () => {
+      this.listeners.delete(handler);
+    };
+  }
+
+  getStatus(): SttStatus {
+    return this.status;
+  }
+
+  getLastError(): SttErrorCode | null {
+    return this.lastError;
+  }
+
+  private async ensurePermission(): Promise<boolean> {
+    const current: PermissionResponse | undefined =
+      typeof Audio.getPermissionsAsync === 'function' ? await Audio.getPermissionsAsync() : undefined;
+    if (current?.granted) {
+      return true;
+    }
+    const response = await Audio.requestPermissionsAsync();
+    return response.granted;
+  }
+
+  private async prepareRecorder(): Promise<void> {
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+    const recorder = new Audio.Recording();
+    await recorder.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+    await recorder.startAsync();
+    this.recording = recorder;
+    this.recordingUri = null;
+  }
+
+  private scheduleAutoStop(maxSeconds?: number): void {
+    this.clearAutoStopTimer();
+    if (!maxSeconds || maxSeconds <= 0) {
+      return;
+    }
+    this.autoStopTimer = setTimeout(() => {
+      void this.stop().catch(() => {});
+    }, maxSeconds * 1000);
+  }
+
+  private clearAutoStopTimer(): void {
+    if (this.autoStopTimer) {
+      clearTimeout(this.autoStopTimer);
+      this.autoStopTimer = null;
+    }
+  }
+
+  private async cleanupRecordingFile(): Promise<void> {
+    if (this.recordingUri) {
+      try {
+        await FileSystem.deleteAsync(this.recordingUri, { idempotent: true });
+      } catch {
+      }
+      this.recordingUri = null;
+    }
+  }
+
+  private notifyListeners(result: SttResult): void {
+    for (const listener of this.listeners) {
+      listener(result);
+    }
+  }
+
+  private setErrorState(code: SttErrorCode): void {
+    this.status = 'error';
+    this.lastError = code;
   }
 }
 

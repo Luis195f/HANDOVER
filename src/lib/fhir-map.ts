@@ -27,6 +27,7 @@ import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type Terminol
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
+import { resolveSnomedCoding } from '../data/snomed-dict';
 
 export type HandoverData = z.infer<typeof zHandover>;
 
@@ -4239,14 +4240,18 @@ function mapDiagnoses(
 ): Condition[] {
   const conditions: Condition[] = [];
   const addCondition = (diagnosis: HandoverData['dxMedical'], categoryCode?: TerminologyCode<string>) => {
-    const trimmed = diagnosis?.display?.trim();
+    const resolved =
+      diagnosis?.code?.trim()
+        ? diagnosis
+        : resolveSnomedCoding(diagnosis?.display ?? '');
+    const trimmed = (resolved?.display ?? diagnosis?.display ?? '').trim();
     if (!trimmed) return;
-    const coding = diagnosis?.code
+    const coding = resolved?.code
       ? [
           {
-            system: diagnosis.system,
-            code: diagnosis.code,
-            display: diagnosis.display,
+            system: resolved.system,
+            code: resolved.code,
+            display: resolved.display,
           },
         ]
       : [];
