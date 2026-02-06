@@ -12,6 +12,18 @@ interface Props {
   onBeforeExport?: () => Promise<boolean> | boolean;
 }
 
+function buildHandoverId(handover: HandoverValues): string {
+  // Usa campos existentes en HandoverValues -> id estable y reproducible
+  const patientId = handover.patientId ?? 'unknown-patient';
+  const shiftStart = handover.administrativeData?.shiftStart ?? 'unknown-start';
+  const shiftEnd = handover.administrativeData?.shiftEnd ?? 'unknown-end';
+  const shiftType = handover.administrativeData?.shiftType ?? 'unknown-shift';
+
+  // Evita caracteres problemáticos si esto termina en URLs/paths
+  const raw = `${patientId}-${shiftType}-${shiftStart}-${shiftEnd}`;
+  return raw.replace(/[^\w.-]+/g, '_');
+}
+
 export function ExportPdfButton({ handover, onBeforeExport }: Props) {
   const { session } = useAuth();
   const [exporting, setExporting] = useState(false);
@@ -25,11 +37,17 @@ export function ExportPdfButton({ handover, onBeforeExport }: Props) {
 
     try {
       setExporting(true);
+
       const pdf = await generateHandoverPdf(handover, session);
+
+      const patientId = handover.patientId ?? '';
+      const handoverId = buildHandoverId(handover);
+
       await uploadSignedHandoverPdf(pdf, {
-        patientId: handover.patientId,
-        handoverId: handover.id ?? '',
+        patientId,
+        handoverId,
       });
+
       Alert.alert(
         t('export.pdfSuccessTitle'),
         t('export.pdfSignedUploadMessage', { uri: pdf.uri }),
