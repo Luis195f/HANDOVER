@@ -1,3 +1,4 @@
+# backend/api/tests/test_role_acl.py
 from __future__ import annotations
 
 from unittest.mock import Mock, patch
@@ -13,10 +14,16 @@ def _auth_client(claims: dict) -> APIClient:
     """
     Create an APIClient authenticated with an Auth0User built from JWT-like claims.
     Uses force_authenticate to bypass token verification in unit tests.
+
+    IMPORTANT:
+    The backend now requires a user access token string to be forwarded to FHIR
+    (Authorization header). force_authenticate sets request.user, but does not
+    automatically populate Authorization. We set a test Bearer token here.
     """
     client = APIClient()
     user = Auth0User(sub=str(claims.get("sub", "test|user")), claims=claims)
     client.force_authenticate(user=user)
+    client.credentials(HTTP_AUTHORIZATION="Bearer test-access-token")
     return client
 
 
