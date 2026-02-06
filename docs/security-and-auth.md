@@ -2,11 +2,13 @@
 
 ## Flujo OAuth2/OIDC
 - La app usa `expo-auth-session` para iniciar sesión contra el proveedor OIDC configurado.
-- Variables clave en `.env` o `app.json` (`expo.extra`): `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE`, `OIDC_REDIRECT_SCHEME`. Ajusta el `client_secret` si el flujo lo requiere.
-- Tras autenticarse, los tokens se usan para llamar al servidor FHIR y al backend opcional.
+- Solicita el scope `offline_access` (u otro equivalente) para recibir `refresh_token`.
+- Variables clave en `.env` o `app.json` (`expo.extra`): `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE` (incluye `offline_access`), `OIDC_REDIRECT_SCHEME`.
+- Tras autenticarse, la app almacena `access_token` y `refresh_token` en `SecureStore` y renueva automáticamente cuando falten ~5 minutos para expirar.
+- El backend expone `/api/auth/refresh` para renovar tokens si se necesita centralizar el flujo (usa `OIDC_TOKEN_URL`).
 
 ## Almacenamiento de sesión
-- `src/security/auth.ts` guarda tokens y metadatos en `SecureStore`, maneja renovación y limpia la sesión en logout.
+- `src/security/auth.tsx` guarda tokens y metadatos en `SecureStore`, maneja renovación y limpia la sesión en logout.
 - Se expone el estado de autenticación para proteger rutas y reintentos de red.
 
 ## Endurecimiento de red y cabeceras
@@ -22,3 +24,14 @@
   - `ensureRole` valida que el usuario posea alguno de los roles requeridos.
   - `ensureUnit` limita acceso a unidades clínicas específicas según `EXPO_PUBLIC_ALLOWED_UNITS`/`EXPO_PUBLIC_ALLOW_ALL_UNITS`.
 - Usa estas utilidades en nuevas pantallas para mantener reglas de acceso coherentes.
+- El backend valida roles + scopes antes de ejecutar la lógica de la vista y reenvía el `access_token` del usuario al servidor FHIR para aplicar RBAC de forma consistente.
+- Evita usar tokens estáticos (`FHIR_TOKEN`) para llamadas de usuario; el token del usuario se reenvía en `Authorization`.
+
+## Variables de entorno adicionales (backend)
+- `OIDC_TOKEN_URL`: endpoint del proveedor OIDC para `refresh_token` (requerido por `/api/auth/refresh`).
+- `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`: credenciales para el flujo de refresh.
+- `OIDC_SCOPE`: scopes solicitados en el refresh (incluye `offline_access` si el proveedor lo exige).
+- `HANDOVER_REQUIRE_RBAC_ON_FHIR`: si es `true`, el backend requiere un token de usuario para reenviar peticiones a FHIR (evita usar tokens estáticos).
+
+## Variables de entorno adicionales (frontend)
+- `EXPO_PUBLIC_OIDC_SCOPE`: incluye `offline_access` para recibir `refresh_token`.

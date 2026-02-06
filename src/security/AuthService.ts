@@ -16,7 +16,9 @@ const OIDC_CLIENT_ID =
   process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? process.env.OIDC_CLIENT_ID ?? AUTH0_CLIENT_ID;
 
 const OIDC_SCOPE =
-  process.env.EXPO_PUBLIC_OIDC_SCOPE ?? process.env.OIDC_SCOPE ?? 'openid profile email';
+  process.env.EXPO_PUBLIC_OIDC_SCOPE ??
+  process.env.OIDC_SCOPE ??
+  'openid profile email offline_access';
 
 export type AuthTokens = {
   accessToken: string;

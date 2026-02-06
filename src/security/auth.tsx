@@ -3,6 +3,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
+import { Buffer } from 'buffer';
 import { t } from '@/src/i18n';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
@@ -53,7 +54,7 @@ type AuthWarnCode =
 function warnAuth(_code: AuthWarnCode, _meta: Record<string, unknown> = {}): void {}
 
 let refreshInFlight: Promise<HandoverSession | null> | null = null;
-const REFRESH_SKEW_MS = 60_000;
+const REFRESH_SKEW_MS = 300_000;
 const NO_ROLE = 'NO_ROLE';
 
 
@@ -86,6 +87,30 @@ function toIsoExpiresAt(value: string | number | undefined): string | undefined 
     if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
   }
   return undefined;
+}
+
+function getJwtExpiresAtMs(token: string | undefined): number | null {
+  if (!token) return null;
+  try {
+    const [, payload] = token.split('.');
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
+    const claims = JSON.parse(decoded) as { exp?: number };
+    if (!claims.exp) return null;
+    return claims.exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
+function resolveSessionExpiryMs(session: HandoverSession | null): number | null {
+  if (!session) return null;
+  if (session.expiresAt) {
+    const parsed = Date.parse(session.expiresAt);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return getJwtExpiresAtMs(session.accessToken);
 }
 
 function normalizeExpiresAt(expiresAt: string | number | undefined): string | undefined {
@@ -129,15 +154,8 @@ function normalizeSession(session: StoredAuthSession | null): HandoverSession | 
 
 async function ensureSessionValid(session: HandoverSession | null): Promise<HandoverSession | null> {
   if (!session) return null;
-  if (!session.expiresAt) return session;
-
-  const tokens = {
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-    expiresAt: session.expiresAt,
-  };
-
-  if (!isTokenExpired(tokens)) return session;
+  const expiresAtMs = resolveSessionExpiryMs(session);
+  if (expiresAtMs && expiresAtMs > Date.now()) return session;
 
   if (session.refreshToken) {
     if (isLocalSession(session)) {
@@ -152,7 +170,10 @@ async function ensureSessionValid(session: HandoverSession | null): Promise<Hand
         await setSession(nextSession);
         return nextSession;
       } catch {
-        await setSession(null);
+        await logoutAndClear({
+          skipRemote: true,
+          message: t('auth.sessionExpiredMessage'),
+        });
         return null;
       }
     }
@@ -170,7 +191,10 @@ async function ensureSessionValid(session: HandoverSession | null): Promise<Hand
     }
   }
 
-  await setSession(null);
+  await logoutAndClear({
+    skipRemote: true,
+    message: t('auth.sessionExpiredMessage'),
+  });
   return null;
 }
 
@@ -495,8 +519,8 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   const skewMs =
     typeof REFRESH_SKEW_MS === 'number' && REFRESH_SKEW_MS > 0 ? REFRESH_SKEW_MS : 60_000;
 
-  const expiresAtMs = session.expiresAt ? Date.parse(session.expiresAt) : Number.NaN;
-  const isExpiring = !Number.isFinite(expiresAtMs) || expiresAtMs - Date.now() <= skewMs;
+  const expiresAtMs = resolveSessionExpiryMs(session);
+  const isExpiring = !expiresAtMs || expiresAtMs - Date.now() <= skewMs;
 
   if (!isExpiring && !forceRefresh) return accessToken;
 
@@ -534,14 +558,18 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
 
       return nextSession;
     } catch {
-      return session;
+      await logoutAndClear({
+        skipRemote: true,
+        message: t('auth.sessionExpiredMessage'),
+      });
+      return null;
     } finally {
       refreshInFlight = null;
     }
   })();
 
   const refreshedSession = await refreshInFlight;
-  return refreshedSession?.accessToken ?? accessToken;
+  return refreshedSession?.accessToken ?? null;
 }
 
 // Alias usado por algunos tests / consumers

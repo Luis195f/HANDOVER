@@ -1,7 +1,14 @@
 from django.urls import path
 
 from backend.audit.views import AuditEventsIngestView
-from .views import AuditLogView, BundleView, CapabilitiesView, MedicationStatementView, PatientView
+from .views import (
+    AuditLogView,
+    BundleView,
+    CapabilitiesView,
+    MedicationStatementView,
+    OAuthRefreshView,
+    PatientView,
+)
 
 urlpatterns = [
     path("fhir/patient", PatientView.as_view(), name="patient"),
@@ -18,4 +25,6 @@ urlpatterns = [
     path("audit/events/", AuditEventsIngestView.as_view(), name="audit-events-slash"),
     path("me/capabilities", CapabilitiesView.as_view(), name="me-capabilities"),
     path("me/capabilities/", CapabilitiesView.as_view(), name="me-capabilities-slash"),
+    path("auth/refresh", OAuthRefreshView.as_view(), name="auth-refresh"),
+    path("auth/refresh/", OAuthRefreshView.as_view(), name="auth-refresh-slash"),
 ]

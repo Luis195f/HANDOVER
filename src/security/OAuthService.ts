@@ -31,7 +31,9 @@ const RAW_OIDC_AUDIENCE =
 const OIDC_AUDIENCE = RAW_OIDC_AUDIENCE.trim() ? RAW_OIDC_AUDIENCE : undefined;
 
 const OIDC_SCOPE =
-  process.env.EXPO_PUBLIC_OIDC_SCOPE ?? process.env.OIDC_SCOPE ?? 'openid profile email';
+  process.env.EXPO_PUBLIC_OIDC_SCOPE ??
+  process.env.OIDC_SCOPE ??
+  'openid profile email offline_access';
 
 const REDIRECT_PATH_WEB = '--/redirect';
 const LOGOUT_PATH_WEB = '--/logout';
