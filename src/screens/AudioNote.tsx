@@ -2,7 +2,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import {
-  useAudioRecorder,
   setAudioModeAsync,
   RecordingPresets,
   getRecordingPermissionsAsync,
@@ -20,6 +19,7 @@ import {
 } from "@/src/lib/stt";
 import { t } from "@/src/i18n";
 import { useThemeTokens } from "@/src/theme";
+import { useAudioRecorderWithFallback } from "@/src/lib/audio-recorder";
 
 type AudioNoteStackParamList = {
   AudioNote: { onDoneRoute?: "HandoverForm" | "HandoverMain" | "PatientList" } | undefined;
@@ -75,7 +75,7 @@ const appendDictationText = (current: string, addition: string) => {
 
 export default function AudioNote({ navigation, route }: Props) {
   const { colors } = useThemeTokens();
-  const recorder = useAudioRecorder(REC_OPTS);
+  const recorder = useAudioRecorderWithFallback(REC_OPTS);
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(recorder.uri ?? null);
   const sttServiceRef = useRef<SttService>(createSttService());
@@ -88,20 +88,39 @@ export default function AudioNote({ navigation, route }: Props) {
   const [dictationError, setDictationError] = useState<SttErrorCode | null>(sttService.getLastError());
   const [dictatedPartial, setDictatedPartial] = useState('');
   const [uploadToFhir, setUploadToFhir] = useState(false);
+  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
 
   const requestPermission = useCallback(async () => {
+    if (isE2E) {
+      const grantedPermission: PermissionResponse = {
+        status: 'granted',
+        granted: true,
+        canAskAgain: true,
+      };
+      setPermission(grantedPermission);
+      return grantedPermission;
+    }
     const result = await requestRecordingPermissionsAsync();
     setPermission(result);
     return result;
-  }, []);
+  }, [isE2E]);
 
   const loadInitialPermission = useCallback(async () => {
+    if (isE2E) {
+      const grantedPermission: PermissionResponse = {
+        status: 'granted',
+        granted: true,
+        canAskAgain: true,
+      };
+      setPermission(grantedPermission);
+      return;
+    }
     const current = await getRecordingPermissionsAsync();
     setPermission(current);
     if (!current.granted) {
       await requestPermission();
     }
-  }, [requestPermission]);
+  }, [isE2E, requestPermission]);
 
   useEffect(() => {
     void loadInitialPermission();
@@ -431,6 +450,7 @@ export default function AudioNote({ navigation, route }: Props) {
           </Text>
           <Pressable
             onPress={accept}
+            testID="audio-attach"
             style={({ pressed }) => ({
               padding: 12,
               borderRadius: 10,

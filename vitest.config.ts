@@ -26,6 +26,7 @@ export default defineConfig({
       "**/.pnpm/**",
       "src/validation/**",
       "src/security/**",
+      "tests/e2e/**",
       "src/**/__tests__/**/fhir-map.test.ts",
       "src/**/__tests__/**/news2.test.ts",
       "src/**/__tests__/**/prefill.test.ts",

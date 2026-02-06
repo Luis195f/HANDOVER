@@ -26,6 +26,7 @@ export const PatientSection: React.FC<PatientSectionProps> = ({ styles, onScanPr
             render={({ field: { onChange, onBlur, value } }) => (
               <TextInput
                 style={styles.input}
+                testID="handover-patient-id"
                 placeholder="Paciente"
                 onBlur={onBlur}
                 value={value ?? ''}
@@ -35,7 +36,7 @@ export const PatientSection: React.FC<PatientSectionProps> = ({ styles, onScanPr
           />
         </View>
         <View style={styles.spacer} />
-        <Button title="Escanear" onPress={onScanPress} />
+        <Button title="Escanear" onPress={onScanPress} testID="handover-scan-qr" />
       </View>
       {patientError ? <Text style={styles.error}>{patientError}</Text> : null}
     </View>

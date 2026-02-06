@@ -1,6 +1,6 @@
 // src/screens/QRScan.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import {
   CameraView,
@@ -102,12 +102,14 @@ export function QRScanScreen({ navigation, route }: Props) {
   const [prefilledValues, setPrefilledValues] = useState<PrefillOutput | null>(null);
   const [prefillError, setPrefillError] = useState<string | null>(null);
   const [prefillLoading, setPrefillLoading] = useState(false);
+  const [manualPayload, setManualPayload] = useState('');
   const currentPatientId = route.params?.patientIdParam?.trim();
   const targetPatientId = patientMismatch ? undefined : parsedPayload?.patientId;
   const { loading, error, summary } = usePatientSummary(targetPatientId || undefined);
   const { session } = useAuth();
   const { colors } = useThemeTokens();
   const permissionAlertedRef = useRef(false);
+  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
 
   const { returnTo, unitIdParam, specialtyId } = route.params ?? {};
   const clearTransientStates = useCallback(() => {
@@ -176,7 +178,7 @@ export function QRScanScreen({ navigation, route }: Props) {
         if (!cancelled) {
           setPrefilledValues(values);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!cancelled) {
           const netError = normalizeNetError(err);
           const ui = getUserFacingNetworkMessage(netError, { screen: 'QRScan', op: 'prefill' });
@@ -235,24 +237,32 @@ export function QRScanScreen({ navigation, route }: Props) {
   const handleContinue = () => {
     if (!parsedPayload?.patientId || patientMismatch) return;
     const targetRoute = returnTo ?? 'HandoverForm';
-    const params =
-      targetRoute === 'HandoverForm'
-        ? {
-            patientId: parsedPayload.patientId,
-            unitId: parsedPayload.unit ?? unitIdParam,
-            specialtyId,
-            prefilledValues,
-            patientSummary: summary,
-            prefillMeta: {
-              server: parsedPayload.server,
-              unit: parsedPayload.unit ?? unitIdParam,
-              bed: parsedPayload.bed,
-              visitId: parsedPayload.visitId,
-            },
-        }
-        : { patientId: parsedPayload.patientId };
-    clearTransientStates();
-    (navigation as any).navigate(targetRoute, params);
+    if (targetRoute === 'HandoverForm' || targetRoute === 'HandoverMain') {
+      clearTransientStates();
+      navigation.navigate(targetRoute, {
+        patientId: parsedPayload.patientId,
+        unitId: parsedPayload.unit ?? unitIdParam,
+        specialtyId,
+        prefilledValues,
+        patientSummary: summary,
+        prefillMeta: {
+          server: parsedPayload.server,
+          unit: parsedPayload.unit ?? unitIdParam,
+          bed: parsedPayload.bed,
+          visitId: parsedPayload.visitId,
+        },
+      });
+      return;
+    }
+    if (targetRoute === 'PatientList') {
+      clearTransientStates();
+      navigation.navigate('PatientList');
+      return;
+    }
+    if (targetRoute === 'AudioNote') {
+      clearTransientStates();
+      navigation.navigate('AudioNote', { onDoneRoute: 'HandoverForm' });
+    }
   };
 
   const handleRescan = () => {
@@ -291,7 +301,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     [parsedPayload?.patientId, patientMismatch],
   );
 
-  if (!permission) {
+  if (!permission && !isE2E) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
@@ -300,7 +310,7 @@ export function QRScanScreen({ navigation, route }: Props) {
     );
   }
 
-  if (!permission.granted) {
+  if (permission && !permission.granted && !isE2E) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
@@ -365,6 +375,7 @@ export function QRScanScreen({ navigation, route }: Props) {
               onPress={handleContinue}
               style={[styles.primaryButton, continueDisabled && styles.primaryButtonDisabled]}
               disabled={continueDisabled}
+              testID="qr-continue"
             >
               <Text style={styles.primaryButtonText} onPress={handleContinue}>
                 {t('qr.continueHandover')}
@@ -387,6 +398,33 @@ export function QRScanScreen({ navigation, route }: Props) {
             <Text style={styles.subtitle}>
               {t('qr.scanPromptSubtitle')}
             </Text>
+            {isE2E ? (
+              <View style={styles.e2eBox}>
+                <Text style={styles.e2eTitle}>E2E QR (mock)</Text>
+                <TextInput
+                  testID="qr-e2e-input"
+                  style={[styles.input, { backgroundColor: '#FFFFFF' }]}
+                  placeholder="patientId o JSON"
+                  value={manualPayload}
+                  onChangeText={setManualPayload}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  testID="qr-e2e-submit"
+                  onPress={() => {
+                    const parsed = parseQRCodePayload(manualPayload);
+                    if (parsed) {
+                      setParsedPayload(parsed);
+                      setScanned(true);
+                      setPatientMismatch(null);
+                    }
+                  }}
+                  style={[styles.primaryButton, { marginTop: 8 }]}
+                >
+                  <Text style={styles.primaryButtonText}>Aplicar QR mock</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </>
         )}
       </View>
@@ -485,5 +523,23 @@ const styles = StyleSheet.create({
   warningActions: {
     marginTop: 8,
     gap: 4,
+  },
+  e2eBox: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  e2eTitle: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
 });

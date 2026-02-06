@@ -150,6 +150,7 @@ export default function LoginScreen() {
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               accessibilityLabel={t("login.usernameLabel")}
+              testID="login-username"
               placeholder={t("login.usernamePlaceholder")}
               placeholderTextColor={colors.muted}
               autoCapitalize="none"
@@ -173,6 +174,7 @@ export default function LoginScreen() {
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               accessibilityLabel={t("login.passwordLabel")}
+              testID="login-password"
               placeholder={t("login.passwordPlaceholder")}
               placeholderTextColor={colors.muted}
               secureTextEntry
@@ -191,6 +193,7 @@ export default function LoginScreen() {
         style={[styles.button, styles.primaryButton, (!isOnline || isBusy) ? { opacity: 0.6 } : null]}
         accessibilityRole="button"
         accessibilityLabel={t("login.signInAccessibility")}
+        testID="login-submit"
         disabled={!isOnline || isBusy}
       >
         {submitting ? <ActivityIndicator color={colors.onPrimary} /> : null}
@@ -204,6 +207,7 @@ export default function LoginScreen() {
         style={[styles.button, styles.secondaryButton, (!isOnline || isBusy) ? { opacity: 0.6 } : null]}
         accessibilityRole="button"
         accessibilityLabel="Continuar con Auth0"
+        testID="login-auth0"
         disabled={!isOnline || isBusy || !loginWithOAuth}
       >
         {oauthSubmitting ? <ActivityIndicator color={colors.text} /> : null}
@@ -219,6 +223,7 @@ export default function LoginScreen() {
         style={[styles.button, styles.secondaryButton, isBusy ? { opacity: 0.6 } : null]}
         accessibilityRole="button"
         accessibilityLabel={t("login.demoAccessibility")}
+        testID="login-demo"
         disabled={isBusy}
       >
         {demoSubmitting ? <ActivityIndicator color={colors.text} /> : null}

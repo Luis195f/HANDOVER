@@ -82,6 +82,7 @@ function AuthGate() {
 
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
   const [privacyConsent, setPrivacyConsentState] = React.useState<boolean | null>(null);
+  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
 
   React.useEffect(() => {
     let alive = true;
@@ -132,7 +133,10 @@ function AuthGate() {
   }, [session]);
 
   // Splash mientras hidrata auth + flags (si hay sesión)
-  if (loading || (session && (onboardingCompleted === null || privacyConsent === null))) {
+  const onboardingReady = isE2E ? true : onboardingCompleted;
+  const consentReady = isE2E ? true : privacyConsent;
+
+  if (loading || (session && (onboardingReady === null || consentReady === null))) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator size="large" />
@@ -168,7 +172,7 @@ function AuthGate() {
     : (capabilities?.permissions.canViewAudit ? 'AuditLog' : 'Unauthorized');
 
   const initialRouteName: keyof RootStackParamList =
-    onboardingCompleted ? (privacyConsent ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
+    onboardingReady ? (consentReady ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
 
   // ✅ Guard factory (cerramos sobre session/isDemo una sola vez)
   const guardBase = () => ({ capabilities, isDemo });

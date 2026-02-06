@@ -1,4 +1,4 @@
-import Constants from 'expo-constants';
+import { getAppConfigExtra } from '@/src/config/app-config';
 
 type Bool = boolean | '1' | 'true' | 'yes' | undefined | null;
 const truthy = (v: Bool) =>
@@ -7,7 +7,7 @@ const truthy = (v: Bool) =>
   String(v).toLowerCase() === 'true' ||
   String(v).toLowerCase() === 'yes';
 
-const extra = (Constants.expoConfig?.extra ?? {}) as any;
+const extra = getAppConfigExtra();
 
 export const flags = {
   ALLOW_ALL_UNITS: extra.ALLOW_ALL_UNITS ?? process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS,
