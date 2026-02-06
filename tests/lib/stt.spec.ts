@@ -227,10 +227,12 @@ describe('createSttService', () => {
 
   afterEach(() => {
     envState.STT_ENDPOINT = 'https://stt.example';
+    envState.AI_BACKEND_BASE_URL = 'https://ai.example';
   });
 
   it('devuelve servicio no soportado cuando no hay endpoint configurado', async () => {
     envState.STT_ENDPOINT = '' as unknown as string;
+    envState.AI_BACKEND_BASE_URL = null as unknown as string;
     const { createSttService } = await import('@/src/lib/stt');
 
     const service = createSttService();

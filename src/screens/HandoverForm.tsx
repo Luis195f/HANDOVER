@@ -4,6 +4,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   type TextStyle,
@@ -27,9 +28,8 @@ import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundle, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
-import { refineSBARWithAI } from '@/src/lib/ai-sbar';
+import { generateSbarViaBackend, refineSBARWithAI } from '@/src/lib/ai-sbar';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
-import { openAIClient } from '@/src/lib/openai';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import useDraftAutosave from '@/src/lib/useDraftAutosave';
 import {
@@ -52,7 +52,7 @@ import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
 import { validateBundle } from '@/src/lib/fhir-validation';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
-import { AI_SBAR_ENABLED } from '@/src/config/env';
+import { AI_BACKEND_ENABLED, AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
 import { ensureFreshAccessToken, getSession, useAuth, type Session } from '@/src/security/auth';
@@ -63,6 +63,7 @@ import type { HandoverSignature, HandoverStructuredDiagnosis, RiskItem } from '@
 import type { SBARSummary } from '@/src/types/sbar';
 import {
   normalizeLegacySnomedCoding,
+  resolveSnomedCoding,
   SNOMED_SYSTEM,
   type SnomedCoding,
 } from '@/src/data/snomed-dict';
@@ -114,6 +115,7 @@ import { isBedsideChecklistComplete } from '@/src/lib/bedsideChecklist';
 import { SbarSection } from './handover/SbarSection';
 import * as SecureStore from 'expo-secure-store';
 import { HandoverFormActions } from './handover/HandoverFormActions';
+import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
 
@@ -221,6 +223,13 @@ const styles = StyleSheet.create({
   riskLow: { backgroundColor: '#ecfdf3', borderColor: '#a7f3d0', borderWidth: 1 },
   riskTitle: { fontWeight: '700', marginBottom: 4 },
   riskReason: { color: '#374151', marginTop: 2 },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  switchLabel: { flex: 1, color: '#1F2937' },
 });
 
 type HandoverRouteName = "HandoverForm" | "HandoverMain";
@@ -439,6 +448,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefilledValues: prefilledValuesParam,
     patientSummary: patientSummaryParam,
     prefillMeta,
+    audioNote: audioNoteParam,
   } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession, logout } = useAuth();
@@ -571,6 +581,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbarBackground: '',
       sbarAssessment: '',
       sbarRecommendation: '',
+      sbarFullText: '',
       vitals: prefilledVitals ?? {},
       oxygenTherapy: {},
       devices: [],
@@ -591,6 +602,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         incoming: undefined,
       },
       attachments: [],
+      audioTranscription: '',
     };
     return { ...base, risksStructured: deriveInitialRisksStructured(base) };
   }, [
@@ -701,6 +713,28 @@ export default function HandoverForm({ navigation, route }: Props) {
       form.reset({ ...form.getValues(), ...normalizedData });
     },
   });
+  const lastAudioNoteUriRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!audioNoteParam) return;
+    const { uri, transcription, uploadToFhir } = audioNoteParam;
+    if (uri && uri === lastAudioNoteUriRef.current) {
+      return;
+    }
+    if (uri) {
+      form.setValue('audioUri', uri, { shouldDirty: true, shouldValidate: true });
+      lastAudioNoteUriRef.current = uri;
+    }
+    if (typeof transcription === 'string' && transcription.trim()) {
+      const current = form.getValues('audioTranscription') ?? '';
+      const merged = mergeDictationText(current, transcription);
+      form.setValue('audioTranscription', merged, { shouldDirty: true, shouldValidate: true });
+    }
+    if (typeof uploadToFhir === 'boolean') {
+      setAudioUploadToFhir(uploadToFhir);
+    }
+    navigation.setParams({ audioNote: undefined } as never);
+  }, [audioNoteParam, form, navigation]);
 
   useEffect(() => {
     if (IS_TEST) return;
@@ -841,9 +875,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   >({});
   const aiSuggestionsEnabled = isOn('AI_SUGGESTIONS_ENABLED');
   const buildDraftSnomedCoding = (display: string): SnomedCoding => ({
-    system: SNOMED_SYSTEM,
-    code: '',
-    display,
+    ...(resolveSnomedCoding(display) ?? {
+      system: SNOMED_SYSTEM,
+      code: '',
+      display,
+    }),
   });
   const dictationAdapters = useMemo(
     () => ({
@@ -909,8 +945,18 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [isGeneratingSbarWithAI, setIsGeneratingSbarWithAI] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
+  const [audioUploadToFhir, setAudioUploadToFhir] = useState(false);
+  const [audioUploadStatus, setAudioUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
   const aiSbarAvailable = AI_SBAR_ENABLED;
-  const aiSbarGenerationAvailable = openAIClient.isConfigured;
+  const aiSbarGenerationAvailable = AI_BACKEND_ENABLED;
+
+  useEffect(() => {
+    if (!audioUploadToFhir) {
+      setAudioUploadStatus('idle');
+      setAudioUploadError(null);
+    }
+  }, [audioUploadToFhir]);
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -1048,6 +1094,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const sbarBackgroundError = errors.sbarBackground?.message as string | undefined;
   const sbarAssessmentError = errors.sbarAssessment?.message as string | undefined;
   const sbarRecommendationError = errors.sbarRecommendation?.message as string | undefined;
+  const sbarFullTextError = errors.sbarFullText?.message as string | undefined;
 
   useEffect(() => {
     if (patientIdParam) {
@@ -1122,86 +1169,52 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
-  const buildSBARPrompt = (values: HandoverFormValues) => {
-    const clinicalContext = {
-      patientId: values.patientId,
-      administrativeData: values.administrativeData,
-      dxMedical: values.dxMedical?.display ?? '',
-      dxNursing: values.dxNursing?.display ?? '',
-      vitals: values.vitals,
-      medications: values.medications,
-      medsFreeText: values.meds,
-      treatments: values.treatments,
-      exams: values.exams,
-      procedures: values.procedures,
-      evolution: values.evolution,
-      risks: values.risks,
-      risksStructured: values.risksStructured,
-      oxygenTherapy: values.oxygenTherapy,
-      devices: values.devices,
-      nutrition: values.nutrition,
-      elimination: values.elimination,
-      mobility: values.mobility,
-      skin: values.skin,
-      psychosocial: values.psychosocial,
-      fluidBalance: values.fluidBalance,
-      painAssessment: values.painAssessment,
-      braden: values.braden,
-      glasgow: values.glasgow,
-      bedsideChecklist: values.bedsideChecklist,
-    };
+  const buildSbarContext = (values: HandoverFormValues) => ({
+    patientId: values.patientId,
+    administrativeData: values.administrativeData,
+    dxMedical: values.dxMedical?.display ?? '',
+    dxNursing: values.dxNursing?.display ?? '',
+    vitals: values.vitals,
+    medications: values.medications,
+    medsFreeText: values.meds,
+    treatments: values.treatments,
+    exams: values.exams,
+    procedures: values.procedures,
+    evolution: values.evolution,
+    audioTranscription: values.audioTranscription,
+    risks: values.risks,
+    risksStructured: values.risksStructured,
+    oxygenTherapy: values.oxygenTherapy,
+    devices: values.devices,
+    nutrition: values.nutrition,
+    elimination: values.elimination,
+    mobility: values.mobility,
+    skin: values.skin,
+    psychosocial: values.psychosocial,
+    fluidBalance: values.fluidBalance,
+    painAssessment: values.painAssessment,
+    braden: values.braden,
+    glasgow: values.glasgow,
+    bedsideChecklist: values.bedsideChecklist,
+  });
 
-    return [
-      'Genera un resumen clínico SBAR en español usando los datos proporcionados.',
-      'Responde SOLO con un JSON válido con las claves: situation, background, assessment, recommendation.',
-      'No inventes datos. Si un campo no tiene información suficiente, deja una cadena vacía.',
-      'Datos del paciente:',
-      JSON.stringify(clinicalContext, null, 2),
-    ].join('\n');
+  const buildSbarFreeText = (values: HandoverFormValues) => {
+    const sections = [
+      values.evolution,
+      values.closingSummary,
+      values.audioTranscription,
+      values.meds,
+    ]
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean);
+
+    return sections.join('\n\n');
   };
 
-  const parseSBARResponse = (response: string): SBARSummary => {
-    const cleaned = response.trim();
-    const jsonBlockMatch =
-      cleaned.match(/```json\s*([\s\S]*?)```/i) ?? cleaned.match(/({[\s\S]*})/);
-    const candidate = jsonBlockMatch ? jsonBlockMatch[1] ?? jsonBlockMatch[0] : cleaned;
-    const parsed = safeJsonParse<Record<string, unknown>>(candidate);
-
-    const normalize = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-
-    if (parsed && typeof parsed === 'object') {
-      return {
-        situation: normalize(parsed.situation),
-        background: normalize(parsed.background),
-        assessment: normalize(parsed.assessment),
-        recommendation: normalize(parsed.recommendation),
-      };
-    }
-
-    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const headings = [
-      { key: 'situation', labels: ['Situación', 'Situation'] },
-      { key: 'background', labels: ['Antecedentes', 'Background'] },
-      { key: 'assessment', labels: ['Evaluación', 'Assessment'] },
-      { key: 'recommendation', labels: ['Recomendaciones', 'Recommendation', 'Recommendations'] },
-    ];
-    const allLabels = headings.flatMap((item) => item.labels).map(escapeRegExp).join('|');
-
-    const extractSection = (labels: string[]) => {
-      const pattern = new RegExp(
-        `(?:^|\\n)\\s*(?:${labels.map(escapeRegExp).join('|')})\\s*[:\\-]\\s*([\\s\\S]*?)(?=\\n\\s*(?:${allLabels})\\s*[:\\-]|$)`,
-        'i',
-      );
-      const match = cleaned.match(pattern);
-      return match ? match[1].trim() : '';
-    };
-
-    return {
-      situation: extractSection(headings[0].labels),
-      background: extractSection(headings[1].labels),
-      assessment: extractSection(headings[2].labels),
-      recommendation: extractSection(headings[3].labels),
-    };
+  const buildSbarFullText = (summary: SBARSummary) => {
+    const base = formatSbar(summary, 'es');
+    const notice = t('handover.sbarLegalNotice');
+    return base.trim() ? `${base}\n\n${notice}` : notice;
   };
 
   const handleRefineSbarWithAi = async () => {
@@ -1220,6 +1233,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         form.setValue('sbarBackground', refined.background, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarAssessment', refined.assessment, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarRecommendation', refined.recommendation, { shouldDirty: true, shouldValidate: true });
+        form.setValue('sbarFullText', buildSbarFullText(refined), { shouldDirty: true, shouldValidate: true });
         setSbarHelperMessage(t('handover.sbarRefinedHelper'));
       } else {
         setSbarAiError(t('handover.sbarAiUnavailable'));
@@ -1238,16 +1252,15 @@ export default function HandoverForm({ navigation, route }: Props) {
     setSbarHelperMessage(null);
 
     try {
-      const prompt = buildSBARPrompt(values);
-      const response = await openAIClient.complete(prompt);
-      const parsed = parseSBARResponse(response);
-      form.setValue('sbarSituation', parsed.situation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarBackground', parsed.background, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarAssessment', parsed.assessment, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarRecommendation', parsed.recommendation, { shouldDirty: true, shouldValidate: true });
+      const freeText = buildSbarFreeText(values);
+      const result = await generateSbarViaBackend(freeText, buildSbarContext(values), 'es');
+      form.setValue('sbarSituation', result.situation, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarBackground', result.background, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarAssessment', result.assessment, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarRecommendation', result.recommendation, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarFullText', result.fullText, { shouldDirty: true, shouldValidate: true });
       setSbarHelperMessage(t('handover.sbarGeneratedAiHelper'));
-    } catch (error) {
-      console.error('[sbar] No se pudo generar SBAR con IA', error);
+    } catch {
       setSbarAiError(t('handover.sbarAiGenerateError'));
       Alert.alert(
         t('handover.sbarAiGenerateAlertTitle'),
@@ -1266,6 +1279,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
+      form.setValue('sbarFullText', buildSbarFullText(summary), { shouldDirty: true, shouldValidate: true });
       setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
       setSbarAiError(null);
     } catch {
@@ -1460,7 +1474,10 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       diagnoses.push(watchedValues.dxNursing.display);
     }
 
-    const notes = truncateNote(watchedValues.evolution) ?? truncateNote(watchedValues.closingSummary);
+    const notes =
+      truncateNote(watchedValues.evolution) ??
+      truncateNote(watchedValues.audioTranscription) ??
+      truncateNote(watchedValues.closingSummary);
     const devices = oxygen.device ? [oxygen.device] : undefined;
 
     const context: ClinicalContext = {
@@ -1554,6 +1571,28 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             fio2: oxygenTherapyInput.fio2,
           }
         : null;
+
+      if (audioUploadToFhir && values.audioUri) {
+        setAudioUploadStatus('uploading');
+        setAudioUploadError(null);
+        const uploadResult = await uploadAudioToFhir({
+          uri: values.audioUri,
+          patientId: values.patientId,
+          label: t('handover.audioUploadLabel'),
+        });
+        if (!uploadResult.ok) {
+          const errorMessage =
+            uploadResult.code === 'UNSUPPORTED_MIME'
+              ? t('handover.audioUploadUnsupported')
+              : uploadResult.code === 'UNAVAILABLE'
+                ? t('handover.audioUploadUnavailable')
+                : t('handover.audioUploadFailed');
+          setAudioUploadStatus('error');
+          setAudioUploadError(errorMessage);
+        } else {
+          setAudioUploadStatus('done');
+        }
+      }
 
       const audioAttachment = await buildAudioAttachment(values.audioUri);
 
@@ -1944,6 +1983,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               sbarBackgroundError={sbarBackgroundError}
               sbarAssessmentError={sbarAssessmentError}
               sbarRecommendationError={sbarRecommendationError}
+              sbarFullTextError={sbarFullTextError}
             />
           </CollapsibleSection>
         </View>
@@ -2237,10 +2277,45 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             isCollapsed={collapsedSections.adjuntos}
             onToggle={() => toggleSection('adjuntos')}
           >
+            <View style={styles.field}>
+              <BotonPrimario
+                label={t('audioNote.openRecorder')}
+                onPress={() => navigation.navigate('AudioNote', { onDoneRoute: 'HandoverForm' })}
+              />
+              <Text style={styles.helperText}>{t('audioNote.openRecorderHint')}</Text>
+            </View>
             <AudioAttach
               onRecorded={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
               onAttach={(uri) => form.setValue('audioUri', uri, { shouldDirty: true })}
             />
+            <View style={styles.field}>
+              <Text style={styles.label}>{t('audioNote.transcriptionLabel')}</Text>
+              <Controller
+                control={control}
+                name="audioTranscription"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    onBlur={onBlur}
+                    value={value ?? ''}
+                    onChangeText={onChange}
+                    placeholder={t('audioNote.transcriptionPlaceholder')}
+                  />
+                )}
+              />
+              <Text style={styles.helperText}>{t('audioNote.transcriptionHelper')}</Text>
+            </View>
+            <View style={styles.field}>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchLabel}>{t('handover.audioUploadToggle')}</Text>
+                <Switch value={audioUploadToFhir} onValueChange={setAudioUploadToFhir} />
+              </View>
+              {audioUploadStatus === 'uploading' ? (
+                <Text style={styles.helperText}>{t('handover.audioUploadInProgress')}</Text>
+              ) : null}
+              {audioUploadError ? <Text style={styles.error}>{audioUploadError}</Text> : null}
+            </View>
             <FileAttach />
           </CollapsibleSection>
         </View>

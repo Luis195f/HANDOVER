@@ -20,6 +20,12 @@ export type PrefillMeta = {
   visitId?: string;
 };
 
+export type AudioNotePayload = {
+  uri: string;
+  transcription?: string;
+  uploadToFhir?: boolean;
+};
+
 export type HandoverFormParams = {
   patientIdParam?: string;
   unitIdParam?: string;
@@ -28,6 +34,7 @@ export type HandoverFormParams = {
   prefilledValues?: PrefillOutput | null;
   patientSummary?: PatientSummary | null;
   prefillMeta?: PrefillMeta;
+  audioNote?: AudioNotePayload;
 } & LegacyHandoverParams;
 
 type HandoverRouteName = "HandoverForm" | "HandoverMain";
@@ -58,7 +65,7 @@ export type QRScanParams = {
 export type RootStackParamList = {
   PatientList: undefined;
 
-  AudioNote: { onDoneRoute?: string } | undefined;
+  AudioNote: { onDoneRoute?: MainReturnRoute } | undefined;
 
   // Mantener ambas rutas (HandoverMain y HandoverForm) es válido y tipado.
   HandoverMain: HandoverFormParams;
