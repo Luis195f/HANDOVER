@@ -1,8 +1,8 @@
 # backend/api/tests/test_handover_api.py
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
-from django.contrib.auth import get_user_model
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
 
 class HandoverApiTests(TestCase):
@@ -20,7 +20,12 @@ class HandoverApiTests(TestCase):
         self.user = User.objects.create_user(username="testuser", password="testpass")
 
         if self.client:
+            # Autenticación de usuario Django (aunque luego bypass en view)
             self.client.force_authenticate(user=self.user)
+
+            # ✅ IMPORTANTE: el backend ahora exige token de usuario para reenviar a FHIR
+            # (aunque se bypassen authenticators/perms)
+            self.client.credentials(HTTP_AUTHORIZATION="Bearer test-access-token")
 
         # ✅ BYPASS auth/permissions SOLO para estos tests del endpoint fhir-transaction
         from backend.api import views as api_views
@@ -81,6 +86,7 @@ class HandoverApiTests(TestCase):
             self.url,
             data=json.dumps(payload),
             content_type="application/fhir+json",
+            HTTP_AUTHORIZATION="Bearer test-access-token",
         )
 
     def test_post_bundle_invalid(self):
