@@ -144,6 +144,12 @@ type Annotation = {
   text: string;
 };
 
+type Extension = {
+  url: string;
+  valueBoolean?: boolean;
+  valueString?: string;
+};
+
 type Signature = {
   type: Coding[];
   when: string;
@@ -153,8 +159,26 @@ type Signature = {
   data?: string;
 };
 
-type MedicationDosage = {
+type TimingRepeat = {
+  frequency?: number;
+  period?: number;
+  periodUnit?: 'h' | 'd' | 'wk' | 'mo' | 'a';
+};
+
+type Timing = {
+  repeat?: TimingRepeat;
+};
+
+type DoseAndRate = {
+  doseQuantity?: Quantity;
+};
+
+type Dosage = {
   text?: string;
+  timing?: Timing;
+  route?: CodeableConcept;
+  doseAndRate?: DoseAndRate[];
+  asNeededBoolean?: boolean;
 };
 
 type Period = {
@@ -199,9 +223,31 @@ type MedicationStatement = {
   subject: Reference;
   encounter?: Reference;
   effectivePeriod?: Period;
+  effectiveDateTime?: string;
   dateAsserted: string;
   note?: Annotation[];
-  dosage?: MedicationDosage[];
+  dosage?: Dosage[];
+  extension?: Extension[];
+};
+
+type MedicationAdministration = {
+  resourceType: 'MedicationAdministration';
+  identifier?: Array<{ system: string; value: string }>;
+  id?: string;
+  status: 'in-progress' | 'completed' | 'stopped' | 'entered-in-error' | 'on-hold' | 'unknown' | 'not-done';
+  medicationCodeableConcept: CodeableConcept;
+  subject: Reference;
+  encounter?: Reference;
+  effectivePeriod?: Period;
+  effectiveDateTime?: string;
+  dosage?: {
+    text?: string;
+    route?: CodeableConcept;
+    dose?: Quantity;
+    rateQuantity?: Quantity;
+  };
+  note?: Annotation[];
+  extension?: Extension[];
 };
 
 type Procedure = {
@@ -359,6 +405,7 @@ type Narrative = {
 type FhirResource =
   | Observation
   | MedicationStatement
+  | MedicationAdministration
   | Procedure
   | DeviceUseStatement
   | DocumentReference
@@ -1098,6 +1145,7 @@ function administrativeNarrative(data: AdministrativeData): Narrative {
 const FHIR_ID_PREFIX: Record<FhirResource['resourceType'], string> = {
   Observation: 'obs-',
   MedicationStatement: 'ms-',
+  MedicationAdministration: 'ma-',
   Procedure: 'proc-',
   DeviceUseStatement: 'dus-',
   Device: 'device',
@@ -1486,6 +1534,81 @@ const MEDICATION_ROUTE_LABELS: Partial<Record<NonNullable<MedicationItem['route'
   other: 'Otra vía',
 };
 
+const MEDICATION_HIGH_ALERT_EXTENSION_URL = 'urn:handover-pro:medication-high-alert';
+
+const MEDICATION_ROUTE_CONCEPTS: Partial<Record<NonNullable<MedicationItem['route']>, CodeableConcept>> = {
+  oral: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'PO',
+        display: 'Oral',
+      },
+    ],
+    text: 'Oral',
+  },
+  iv: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'IV',
+        display: 'Intravenous',
+      },
+    ],
+    text: 'IV',
+  },
+  im: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'IM',
+        display: 'Intramuscular',
+      },
+    ],
+    text: 'IM',
+  },
+  sc: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'SC',
+        display: 'Subcutaneous',
+      },
+    ],
+    text: 'SC',
+  },
+  inhaled: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'INHAL',
+        display: 'Inhalation',
+      },
+    ],
+    text: 'Inhalada',
+  },
+  topical: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'TOP',
+        display: 'Topical',
+      },
+    ],
+    text: 'Tópica',
+  },
+  other: {
+    coding: [
+      {
+        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
+        code: 'OTH',
+        display: 'Other',
+      },
+    ],
+    text: 'Otra vía',
+  },
+};
+
 function structuredDosageText(medication: MedicationItem): string | undefined {
   const parts = [medication.dose, medication.route ? MEDICATION_ROUTE_LABELS[medication.route] : null, medication.frequency]
     .filter(Boolean)
@@ -1493,15 +1616,100 @@ function structuredDosageText(medication: MedicationItem): string | undefined {
   return parts || undefined;
 }
 
-// BEGIN HANDOVER D7 – Medication FHIR mapping (pendiente)
-// Pendiente: mapear cada MedicationItem a un recurso FHIR:
-// - MedicationStatement o MedicationAdministration según isContinuous.
-// - name → medicationCodeableConcept
-// - dose, route, frequency → Dosage.elements
-// - startTime, endTime → effectiveDateTime o effectivePeriod
-// - isHighAlert → extensiones de riesgo.
-// - notes → note.text
-// END HANDOVER D7 – Medication FHIR mapping (pendiente)
+const frequencyPatterns = [
+  {
+    regex: /(\d+)\s*(?:x|veces)\s*(?:\/|por)\s*d[ií]a/i,
+    builder: (match: RegExpMatchArray) => ({ frequency: Number(match[1]), period: 1, periodUnit: 'd' as const }),
+  },
+  {
+    regex: /cada\s*(\d+)\s*(h|horas?|hora)/i,
+    builder: (match: RegExpMatchArray) => ({ frequency: 1, period: Number(match[1]), periodUnit: 'h' as const }),
+  },
+  {
+    regex: /cada\s*(\d+)\s*(d|d[ií]as?|día)/i,
+    builder: (match: RegExpMatchArray) => ({ frequency: 1, period: Number(match[1]), periodUnit: 'd' as const }),
+  },
+  {
+    regex: /^q(\d+)h$/i,
+    builder: (match: RegExpMatchArray) => ({ frequency: 1, period: Number(match[1]), periodUnit: 'h' as const }),
+  },
+] as const;
+
+function parseFrequencyToTiming(frequency?: string): Timing | undefined {
+  if (!frequency) return undefined;
+  const trimmed = frequency.trim();
+  if (!trimmed) return undefined;
+  for (const pattern of frequencyPatterns) {
+    const match = trimmed.match(pattern.regex);
+    if (match) {
+      return { repeat: pattern.builder(match) };
+    }
+  }
+  return undefined;
+}
+
+function parseDoseQuantity(dose?: string): Quantity | undefined {
+  if (!dose) return undefined;
+  const match = dose.trim().match(/^(\d+(?:[.,]\d+)?)\s*([^\d\s]+)?/);
+  if (!match) return undefined;
+  const value = Number(match[1].replace(',', '.'));
+  if (Number.isNaN(value)) return undefined;
+  const unit = match[2]?.trim();
+  return {
+    value,
+    unit,
+    system: unit ? 'http://unitsofmeasure.org' : undefined,
+    code: unit || undefined,
+  };
+}
+
+function buildMedicationDosage(medication: MedicationItem): Dosage | undefined {
+  const timing = parseFrequencyToTiming(medication.frequency);
+  const doseQuantity = parseDoseQuantity(medication.dose);
+  const route = medication.route ? MEDICATION_ROUTE_CONCEPTS[medication.route] : undefined;
+  const text = structuredDosageText(medication);
+  if (!timing && !doseQuantity && !route && !text) return undefined;
+  return {
+    text,
+    timing,
+    route,
+    doseAndRate: doseQuantity ? [{ doseQuantity }] : undefined,
+  };
+}
+
+function buildAdministrationDosage(medication: MedicationItem): MedicationAdministration['dosage'] | undefined {
+  const route = medication.route ? MEDICATION_ROUTE_CONCEPTS[medication.route] : undefined;
+  const dose = parseDoseQuantity(medication.dose);
+  const text = structuredDosageText(medication);
+  if (!route && !dose && !text) return undefined;
+  return {
+    text,
+    route,
+    dose,
+  };
+}
+
+function buildHighAlertExtension(isHighAlert?: boolean): Extension[] | undefined {
+  if (!isHighAlert) return undefined;
+  return [{ url: MEDICATION_HIGH_ALERT_EXTENSION_URL, valueBoolean: true }];
+}
+
+function buildMedicationNotes(medication: MedicationItem): Annotation[] | undefined {
+  const notes: Annotation[] = [];
+  if (medication.isHighAlert) {
+    notes.push({ text: 'High alert medication' });
+  }
+  if (medication.notes) {
+    notes.push({ text: medication.notes });
+  }
+  if (medication.signature) {
+    const role = medication.signature.role ?? 'nurse';
+    notes.push({
+      text: `Signed by ${medication.signature.fullName} (${role}) at ${medication.signature.signedAt}`,
+    });
+  }
+  return notes.length > 0 ? notes : undefined;
+}
 
 function isStructuredMedication(
   input: MedicationStatementInput | MedicationItem,
@@ -1509,15 +1717,14 @@ function isStructuredMedication(
   return (input as MedicationItem).name !== undefined;
 }
 
-function mapStructuredMedicationStatement(
+type MedicationResource = MedicationStatement | MedicationAdministration;
+
+function mapStructuredMedicationResource(
   medication: MedicationItem,
   subject: Reference,
   encounter: Reference | undefined,
   assertedAt: string,
-): MedicationStatement {
-  // Pendiente HANDOVER D7 – soportar isContinuous/startTime/endTime para elegir entre
-  // MedicationStatement y MedicationAdministration, agregar extensiones de alto riesgo y reflejar
-  // firmas específicas de medicación si están presentes.
+): MedicationResource {
   const concept: CodeableConcept = medication.code
     ? {
         coding: [medication.code],
@@ -1527,27 +1734,52 @@ function mapStructuredMedicationStatement(
         coding: [],
         text: medication.name,
       };
+  const notes = buildMedicationNotes(medication);
+  const extension = buildHighAlertExtension(medication.isHighAlert);
+  const normalizedStart = normalizeIsoDateTimeValue(medication.startTime) ?? assertedAt;
+  const normalizedEnd = normalizeIsoDateTimeValue(medication.endTime);
+  const isContinuous = medication.isContinuous === true;
 
-  const notes: Annotation[] = [];
-  if (medication.isHighAlert) {
-    notes.push({ text: 'High alert medication' });
-  }
-  if (medication.notes) {
-    notes.push({ text: medication.notes });
+  if (!isContinuous && medication.isContinuous === false) {
+    const effectivePeriod = normalizedEnd ? { start: normalizedStart, end: normalizedEnd } : undefined;
+    return {
+      resourceType: 'MedicationAdministration',
+      identifier: [{ system: 'urn:handover-pro:medication-item', value: medication.id }],
+      status: normalizedEnd ? 'completed' : 'in-progress',
+      medicationCodeableConcept: concept,
+      subject,
+      encounter,
+      effectiveDateTime: effectivePeriod ? undefined : normalizedStart,
+      effectivePeriod,
+      note: notes,
+      dosage: buildAdministrationDosage(medication),
+      extension,
+    };
   }
 
-  const dosageText = structuredDosageText(medication);
+  const effectivePeriod = normalizedStart || normalizedEnd
+    ? {
+        start: normalizedStart,
+        end: normalizedEnd ?? undefined,
+      }
+    : undefined;
 
   return {
     resourceType: 'MedicationStatement',
     identifier: [{ system: 'urn:handover-pro:medication-item', value: medication.id }],
-    status: 'active',
+    status: normalizedEnd ? 'completed' : 'active',
     medicationCodeableConcept: concept,
     subject,
     encounter,
+    effectivePeriod,
+    effectiveDateTime: effectivePeriod ? undefined : normalizedStart,
     dateAsserted: assertedAt,
-    note: notes.length > 0 ? notes : undefined,
-    dosage: dosageText ? [{ text: dosageText }] : undefined,
+    note: notes,
+    dosage: (() => {
+      const dosage = buildMedicationDosage(medication);
+      return dosage ? [dosage] : undefined;
+    })(),
+    extension,
   };
 }
 
@@ -1594,7 +1826,7 @@ function mapLegacyMedicationStatement(
 export function mapMedicationStatements(
   values: MedicationValues,
   options?: BuildOptions,
-): MedicationStatement[] {
+): MedicationResource[] {
   const inputs = values.medications ?? [];
   const optionsMerged = resolveOptions(options);
   const subject = patientReference(values.patientId);
@@ -1605,7 +1837,7 @@ export function mapMedicationStatements(
   const legacyInputs = inputs.filter((item): item is MedicationStatementInput => !isStructuredMedication(item));
 
   const structuredStatements = structuredInputs.map((item) =>
-    mapStructuredMedicationStatement(item, subject, encounter, assertedAt),
+    mapStructuredMedicationResource(item, subject, encounter, assertedAt),
   );
 
   const legacyStatements = legacyInputs
@@ -1616,7 +1848,7 @@ export function mapMedicationStatements(
   const medsText = Array.isArray(values.meds) ? values.meds.join(', ') : values.meds;
   const trimmedText = typeof medsText === 'string' ? medsText.trim() : '';
 
-  const textFallback: MedicationStatement[] = !hasStatements && trimmedText
+  const textFallback: MedicationResource[] = !hasStatements && trimmedText
     ? [
         {
           resourceType: 'MedicationStatement',
@@ -2594,7 +2826,7 @@ function mapGlasgowObservation(
   };
 }
 
-function mapRiskConditions(
+export function mapRiskConditions(
   risks: RiskFlags | undefined,
   context: MappingContext,
 ): Condition[] {
@@ -3769,7 +4001,7 @@ export function buildHandoverBundle(
     resourceEntries.push({
       fullUrl,
       resource,
-      request: { method: 'POST', url: 'MedicationStatement' },
+      request: { method: 'POST', url: resource.resourceType },
     });
     medicationRefs.push(referenceStringFromResource(resource));
   });
@@ -3920,6 +4152,7 @@ export function buildHandoverBundle(
       'Condition',
       'Procedure',
       'MedicationStatement',
+      'MedicationAdministration',
       'DeviceUseStatement',
       'DocumentReference',
       'DetectedIssue',
@@ -4303,6 +4536,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         else refs.mobilitySkin.push(reference);
         break;
       case 'MedicationStatement':
+      case 'MedicationAdministration':
         refs.medications.push(reference);
         break;
       case 'Procedure': {
@@ -4563,6 +4797,7 @@ export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; er
 export type {
   Observation,
   MedicationStatement,
+  MedicationAdministration,
   Procedure,
   DeviceUseStatement,
   Device,
@@ -4570,6 +4805,7 @@ export type {
   Composition,
   Condition,
   Bundle,
+  MedicationResource,
 };
 
 export const __test__ = {
