@@ -2,6 +2,21 @@
   "compilerOptions": {
     "strict": true,
     "skipLibCheck": true,
+
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM"],
+
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "jsx": "react-jsx",
+
+    "types": ["node"],
+    "typeRoots": ["./node_modules/@types"],
+
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
@@ -9,9 +24,7 @@
       "expo-file-system": ["src/types/expo-file-system-stub"],
       "expo-file-system/*": ["src/types/expo-file-system-stub"]
     },
-    "jsx": "react-jsx",
-    "lib": ["es2021", "dom"],
-    "typeRoots": ["./node_modules/@types"],
+
     "noImplicitAny": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
