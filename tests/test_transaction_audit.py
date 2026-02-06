@@ -37,8 +37,16 @@ def test_proxy_and_auditevent_ok():
             return_value=httpx.Response(201, json={"resourceType": "AuditEvent", "id": "ae-1"})
         )
 
-        r = client.post("/fhir/transaction", json=SAMPLE_TX,
-                        headers={"X-User-Id": "nurse-77", "X-Unit-Id": "icu-adulto"})
+        r = client.post(
+    "/fhir/transaction",
+    json=SAMPLE_TX,
+    headers={
+        "X-User-Id": "nurse-77",
+        "X-Unit-Id": "icu-adulto",
+        "Authorization": "Bearer test-access-token",
+    },
+)
+
         assert r.status_code == 200
         assert tx_route.called, "La transacción no llegó al FHIR"
         assert ae_route.called, "No se emitió AuditEvent"
@@ -57,5 +65,10 @@ def test_proxy_and_auditevent_ok():
 def test_transaction_error_bubbles_up():
     with respx.mock(base_url=FHIR_BASE) as mock:
         mock.post("/").mock(return_value=httpx.Response(400, text="bad request"))
-        r = client.post("/fhir/transaction", json=SAMPLE_TX)
+        r = client.post(
+    "/fhir/transaction",
+    json=SAMPLE_TX,
+    headers={"Authorization": "Bearer test-access-token"},
+)
+
         assert r.status_code == 400
