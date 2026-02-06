@@ -699,6 +699,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     configureFHIRClient({
       getToken: () => AuthService.getAccessToken(),
       ensureFreshToken: () => ensureFreshToken('fhir'),
+      getSession: () => getCurrentSession(),
       logout: async () =>
         logoutAndClear({
           skipRemote: true,

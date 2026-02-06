@@ -1,0 +1,221 @@
+import * as FileSystem from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
+import Constants from 'expo-constants';
+import { Buffer } from 'buffer';
+
+import type { GeneratedPdf } from './export/export-pdf';
+import type { HandoverSession } from '../security/auth-types';
+
+export type SignedPdf = {
+  uri: string;
+  signature: string;
+  certificateInfo: { issuer: string; subject: string; validTo: string };
+  signedAt: string;
+};
+
+type EidasSignResponse = {
+  signedPdfBase64?: string;
+  signature?: string;
+  certificateInfo?: {
+    issuer?: string;
+    subject?: string;
+    validTo?: string;
+  };
+  signedAt?: string;
+  timestamp?: string;
+};
+
+type EidasConfig = {
+  apiUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  apiKey?: string;
+};
+
+const pick = (...values: Array<string | undefined | null>): string | undefined =>
+  values.find((v) => typeof v === 'string' && v.trim().length > 0) ?? undefined;
+
+const getEidasConfig = (): EidasConfig => {
+  // 1) En CI/tests (Vitest/Node) y también en Expo con EXPO_PUBLIC_*
+  const env = typeof process !== 'undefined' ? process.env : undefined;
+
+  // 2) En runtime Expo (app.config.ts -> extra)
+  const extra =
+    (Constants as any)?.expoConfig?.extra ??
+    (Constants as any)?.manifest?.extra ??
+    {};
+
+  return {
+    apiUrl: pick(
+      env?.EXPO_PUBLIC_EIDAS_API_URL,
+      env?.EIDAS_API_URL,
+      extra.EXPO_PUBLIC_EIDAS_API_URL,
+      extra.EIDAS_API_URL,
+    ),
+    clientId: pick(
+      env?.EXPO_PUBLIC_EIDAS_CLIENT_ID,
+      env?.EIDAS_CLIENT_ID,
+      extra.EXPO_PUBLIC_EIDAS_CLIENT_ID,
+      extra.EIDAS_CLIENT_ID,
+    ),
+    clientSecret: pick(
+      env?.EXPO_PUBLIC_EIDAS_CLIENT_SECRET,
+      env?.EIDAS_CLIENT_SECRET,
+      extra.EXPO_PUBLIC_EIDAS_CLIENT_SECRET,
+      extra.EIDAS_CLIENT_SECRET,
+    ),
+    apiKey: pick(
+      env?.EXPO_PUBLIC_EIDAS_API_KEY,
+      env?.EIDAS_API_KEY,
+      extra.EXPO_PUBLIC_EIDAS_API_KEY,
+      extra.EIDAS_API_KEY,
+    ),
+  };
+};
+
+const normalizeApiUrl = (url?: string): string | undefined =>
+  url?.replace(/\/$/, '');
+
+const toBase64 = (digest: ArrayBuffer | Uint8Array | string): string => {
+  if (typeof digest === 'string') {
+    // Nota: expo-crypto suele devolver base64; si devolviera hex, igualmente queda estable.
+    return Buffer.from(digest).toString('base64');
+  }
+  const bytes = digest instanceof ArrayBuffer ? new Uint8Array(digest) : digest;
+  return Buffer.from(bytes).toString('base64');
+};
+
+const stripDataUriPrefix = (value: string): string =>
+  value.replace(/^data:application\/pdf;base64,/, '');
+
+const buildSignedFilename = (name: string): string =>
+  name.toLowerCase().endsWith('.pdf')
+    ? name.replace(/\.pdf$/i, '_signed.pdf')
+    : `${name}_signed.pdf`;
+
+const persistSignedPdf = async (
+  pdf: GeneratedPdf,
+  base64?: string,
+): Promise<string> => {
+  const directory = FileSystem.documentDirectory;
+  const targetName = buildSignedFilename(pdf.name);
+  const targetUri = directory ? `${directory}${targetName}` : pdf.uri;
+
+  if (base64) {
+    await FileSystem.writeAsStringAsync(
+      targetUri,
+      stripDataUriPrefix(base64),
+      { encoding: FileSystem.EncodingType.Base64 },
+    );
+    return targetUri;
+  }
+
+  if (pdf.uri !== targetUri) {
+    await FileSystem.copyAsync({ from: pdf.uri, to: targetUri });
+  }
+
+  return targetUri;
+};
+
+const computePdfHash = async (pdf: GeneratedPdf): Promise<string> => {
+  const base64 = await FileSystem.readAsStringAsync(pdf.uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  const bytes = Buffer.from(base64, 'base64');
+  const digest = await Crypto.digest(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    bytes,
+  );
+  return toBase64(digest);
+};
+
+const buildSignaturePayload = (
+  pdf: GeneratedPdf,
+  userSession: HandoverSession,
+  hashBase64: string,
+) => ({
+  hash: hashBase64,
+  hashAlgorithm: 'SHA-256',
+  documentName: pdf.name,
+  createdAt: pdf.createdAt,
+  signer: {
+    userId: userSession.userId,
+    displayName: userSession.displayName ?? userSession.userId,
+    email: userSession.email,
+  },
+});
+
+const buildHeaders = (config: EidasConfig): Record<string, string> => ({
+  'Content-Type': 'application/json',
+  ...(config.clientId ? { 'X-Client-Id': config.clientId } : {}),
+  ...(config.clientSecret ? { 'X-Client-Secret': config.clientSecret } : {}),
+  ...(config.apiKey ? { 'X-API-Key': config.apiKey } : {}),
+});
+
+const normalizeCertificateInfo = (
+  info: EidasSignResponse['certificateInfo'] | undefined,
+  session: HandoverSession,
+): SignedPdf['certificateInfo'] => ({
+  issuer: info?.issuer ?? 'unknown',
+  subject: info?.subject ?? session.displayName ?? session.userId,
+  validTo: info?.validTo ?? '',
+});
+
+/**
+ * Firma un PDF usando un proveedor eIDAS homologado (PAdES).
+ * - En __DEV__ sin API configurada se genera un mock local.
+ * - En producción requiere proveedor eIDAS real.
+ */
+export async function signPdf(
+  pdf: GeneratedPdf,
+  userSession: HandoverSession,
+): Promise<SignedPdf> {
+  const config = getEidasConfig();
+  const apiUrl = normalizeApiUrl(config.apiUrl);
+
+  if (!apiUrl) {
+    if (__DEV__) {
+      const signedAt = new Date().toISOString();
+      const uri = await persistSignedPdf(pdf);
+      return {
+        uri,
+        signature: 'DEV-MOCK-EIDAS-SIGNATURE',
+        certificateInfo: {
+          issuer: 'DEV-CA',
+          subject: userSession.displayName ?? userSession.userId,
+          validTo: signedAt,
+        },
+        signedAt,
+      };
+    }
+    throw new Error('EIDAS_API_URL_MISSING');
+  }
+
+  const hashBase64 = await computePdfHash(pdf);
+  const response = await fetch(`${apiUrl}/signatures/pades`, {
+    method: 'POST',
+    headers: buildHeaders(config),
+    body: JSON.stringify(buildSignaturePayload(pdf, userSession, hashBase64)),
+  });
+
+  if (!response.ok) {
+    throw new Error(`EIDAS_SIGN_FAILED_${response.status}`);
+  }
+
+  const payload = (await response.json()) as EidasSignResponse;
+  const signedAt =
+    payload.signedAt ?? payload.timestamp ?? new Date().toISOString();
+  const signature = payload.signature ?? '';
+  const certificateInfo = normalizeCertificateInfo(
+    payload.certificateInfo,
+    userSession,
+  );
+  const uri = await persistSignedPdf(pdf, payload.signedPdfBase64);
+
+  return {
+    uri,
+    signature,
+    certificateInfo,
+    signedAt,
+  };
+}
