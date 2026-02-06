@@ -5,6 +5,7 @@ import { useController, type Control, type FieldPath } from 'react-hook-form';
 
 import {
   SNOMED_SYSTEM,
+  resolveSnomedCoding,
   snomedTerms,
   type SnomedCoding,
   type SnomedTerm,
@@ -96,11 +97,15 @@ export const AutocompleteSnomedCoding = <TFieldValues extends SnomedFormValues>(
 
   const handleChangeText = (text: string) => {
     setQuery(text);
-    field.onChange({
-      system: SNOMED_SYSTEM,
-      code: '',
-      display: text,
-    });
+    setIsFocused(true);
+    const resolved = resolveSnomedCoding(text);
+    field.onChange(
+      resolved ?? {
+        system: SNOMED_SYSTEM,
+        code: '',
+        display: text,
+      },
+    );
   };
 
   const handleSelect = (item: SnomedTerm) => {
@@ -121,6 +126,11 @@ export const AutocompleteSnomedCoding = <TFieldValues extends SnomedFormValues>(
         value={query}
         onFocus={() => setIsFocused(true)}
         onBlur={() => {
+          const resolved = resolveSnomedCoding(query);
+          if (resolved) {
+            field.onChange(resolved);
+            setQuery(resolved.display);
+          }
           field.onBlur();
           setIsFocused(false);
         }}

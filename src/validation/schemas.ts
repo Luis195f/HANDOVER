@@ -602,6 +602,7 @@ export const zHandover = z
     sbarBackground: optionalTrimmedString(800).optional(),
     sbarAssessment: optionalTrimmedString(800).optional(),
     sbarRecommendation: optionalTrimmedString(800).optional(),
+    sbarFullText: optionalTrimmedString(2000).optional(),
 
     meds: optionalTrimmedString(1000).optional(),
 
@@ -638,6 +639,7 @@ export const zHandover = z
       .optional(),
 
     audioUri: z.string().trim().min(1).max(500).optional(),
+    audioTranscription: optionalTrimmedString(2000).optional(),
     attachments: z.array(zFileAttachment).default([]),
   })
   .superRefine((value, ctx) => {

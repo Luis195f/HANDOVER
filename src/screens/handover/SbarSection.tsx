@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Button, Text, TextInput, View } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { t } from '@/src/i18n';
 
 export type SbarSectionProps = {
   styles: Record<string, any>;
@@ -18,6 +19,7 @@ export type SbarSectionProps = {
   sbarBackgroundError?: string;
   sbarAssessmentError?: string;
   sbarRecommendationError?: string;
+  sbarFullTextError?: string;
 };
 
 export const SbarSection: React.FC<SbarSectionProps> = ({
@@ -35,8 +37,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   sbarBackgroundError,
   sbarAssessmentError,
   sbarRecommendationError,
+  sbarFullTextError,
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
+  const aiUnavailableMessage =
+    !aiSbarAvailable || !aiSbarGenerationAvailable ? t('handover.sbarAiDisabled') : null;
 
   return (
     <>
@@ -45,24 +50,24 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
           title={
             aiSbarGenerationAvailable
               ? isGeneratingSbarWithAI
-                ? 'Generando SBAR…'
-                : 'Generar SBAR'
-              : 'IA no disponible'
+                ? t('handover.sbarGenerating')
+                : t('handover.sbarGenerate')
+              : t('handover.aiNotAvailable')
           }
           onPress={handleGenerateSbarWithAi}
           disabled={!aiSbarGenerationAvailable || isGeneratingSbarWithAI}
         />
         <View style={styles.secondaryButton}>
-          <Button title="Generar SBAR sugerida" onPress={handleGenerateSbarSuggestion} />
+          <Button title={t('handover.sbarSuggested')} onPress={handleGenerateSbarSuggestion} />
         </View>
         <View style={styles.secondaryButton}>
           <Button
             title={
               aiSbarAvailable
                 ? isRefiningSbarWithAI
-                  ? 'Refinando SBAR con IA…'
-                  : 'Refinar SBAR con IA'
-                : 'IA no disponible'
+                  ? t('handover.sbarRefining')
+                  : t('handover.sbarRefine')
+                : t('handover.aiNotAvailable')
             }
             onPress={handleRefineSbarWithAi}
             disabled={!aiSbarAvailable || isRefiningSbarWithAI}
@@ -72,10 +77,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
           <ActivityIndicator style={{ marginLeft: 12 }} />
         ) : null}
       </View>
+      {aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
       {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
       {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
       <View style={styles.field}>
-        <Text style={styles.label}>SBAR - Situation</Text>
+        <Text style={styles.label}>{t('handover.sbarSituationLabel')}</Text>
         <Controller
           control={control}
           name="sbarSituation"
@@ -92,7 +98,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         {sbarSituationError ? <Text style={styles.error}>{sbarSituationError}</Text> : null}
       </View>
       <View style={styles.field}>
-        <Text style={styles.label}>SBAR - Background</Text>
+        <Text style={styles.label}>{t('handover.sbarBackgroundLabel')}</Text>
         <Controller
           control={control}
           name="sbarBackground"
@@ -109,7 +115,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         {sbarBackgroundError ? <Text style={styles.error}>{sbarBackgroundError}</Text> : null}
       </View>
       <View style={styles.field}>
-        <Text style={styles.label}>SBAR - Assessment</Text>
+        <Text style={styles.label}>{t('handover.sbarAssessmentLabel')}</Text>
         <Controller
           control={control}
           name="sbarAssessment"
@@ -126,7 +132,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         {sbarAssessmentError ? <Text style={styles.error}>{sbarAssessmentError}</Text> : null}
       </View>
       <View style={styles.field}>
-        <Text style={styles.label}>SBAR - Recommendation</Text>
+        <Text style={styles.label}>{t('handover.sbarRecommendationLabel')}</Text>
         <Controller
           control={control}
           name="sbarRecommendation"
@@ -141,6 +147,24 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
           )}
         />
         {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
+      </View>
+      <View style={styles.field}>
+        <Text style={styles.label}>{t('handover.sbarFullTextLabel')}</Text>
+        <Controller
+          control={control}
+          name="sbarFullText"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              multiline
+              onBlur={onBlur}
+              value={value ?? ''}
+              onChangeText={onChange}
+              placeholder={t('handover.sbarFullTextPlaceholder')}
+            />
+          )}
+        />
+        {sbarFullTextError ? <Text style={styles.error}>{sbarFullTextError}</Text> : null}
       </View>
     </>
   );

@@ -61,6 +61,12 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo; `true/1/TRUE` lo deshabilitan, cualquier otro valor lo deja activo por defecto).
    - `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` habilita la firma ECDSA P-256 de los Bundles FHIR en el cliente antes de encolarlos (por defecto `false`; si no hay WebCrypto o clave, continúa enviando sin firma).
    - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` habilita una validación remota rápida (`Bundle/$validate`) antes de encolar si hay conectividad. Si el servidor devuelve un `OperationOutcome` con severidad `error`/`fatal`, se muestra un alert con los detalles y no se encola el bundle; en modo offline sigue encolando para respetar offline-first. Recomendado en entornos de staging/producción para detectar problemas de estructura antes de ocupar la cola.
+   - Voz + IA:
+     - `EXPO_PUBLIC_STT_ENDPOINT`/`STT_ENDPOINT`: endpoint HTTPS para dictado (STT).
+     - `EXPO_PUBLIC_AI_BACKEND_BASE_URL`/`AI_BACKEND_BASE_URL`: backend IA (FastAPI) con `/ai/transcribe` y `/ai/summarize-sbar`.
+     - `EXPO_PUBLIC_AI_SBAR_URL`/`AI_SBAR_URL` (expone `AI_SBAR_BASE_URL`): backend de refinado SBAR.
+     - `EXPO_PUBLIC_AI_SBAR_API_KEY`/`AI_SBAR_API_KEY`: token opcional para el refinado.
+     - `EXPO_PUBLIC_OPENAI_API_KEY`/`OPENAI_API_KEY`: credencial del proveedor de IA (configurada en el backend).
    - `EXPO_PUBLIC_EIDAS_API_URL` apunta al proveedor eIDAS homologado (firma cualificada PAdES).
    - `EXPO_PUBLIC_EIDAS_CLIENT_ID`, `EXPO_PUBLIC_EIDAS_CLIENT_SECRET` y/o `EXPO_PUBLIC_EIDAS_API_KEY` son credenciales del proveedor (gestionarlas como secretos).
 3. Define `EXPO_TOKEN` o credenciales EAS en CI/CD cuando generes binarios firmados con Expo Application Services.
@@ -88,6 +94,20 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 
 - Los adjuntos (imágenes, documentos, audio) se capturan con `expo-image-picker`, `expo-document-picker` y `expo-file-system`. Mantén estos paquetes en `dependencies` para asegurar compatibilidad con el SDK de Expo.
 - El flujo de audio utiliza `expo-audio` y permisos de micrófono definidos en `app.json`.
+
+## Voz, dictado y SBAR con IA
+
+- En móvil, usa **Adjuntos → “Abrir nota de voz avanzada”** para grabar audio, dictar o transcribir la nota. En web el dictado con micrófono se marca como no disponible.
+- Dictado STT:
+  - `STT_ENDPOINT` habilita el proveedor externo de dictado (stream/near‑real‑time) en iOS/Android.
+  - Si no hay `STT_ENDPOINT`, la app puede degradar a una transcripción batch vía `AI_BACKEND_BASE_URL` (envía el audio grabado al backend).
+  - Si ningún backend está configurado, el dictado se desactiva y no bloquea el flujo clínico (feature preparada para proveedor externo).
+- Transcripción con IA (botón “Transcribir nota con IA”) usa `AI_BACKEND_BASE_URL` → `/ai/transcribe` y requiere un backend configurado. Sin backend, la UI muestra error y el resto del formulario funciona.
+- SBAR con IA:
+  - Generación y refinado usan `AI_BACKEND_BASE_URL` (`/ai/summarize-sbar`) y/o `AI_SBAR_BASE_URL` (`/api/sbar/refine`).
+  - Si no hay credenciales, los botones de IA se deshabilitan y se mantiene la generación local determinística.
+- TTS usa `expo-speech` y solo está disponible en iOS/Android; en web se muestra como no disponible.
+- Subida de audio a FHIR (opcional) requiere `API_BASE_URL` con el endpoint `/upload/audio-to-fhir`.
 
 ## Criptografía en cliente
 

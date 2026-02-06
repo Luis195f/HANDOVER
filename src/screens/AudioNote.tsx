@@ -1,6 +1,6 @@
 // src/screens/AudioNote.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import {
   useAudioRecorder,
   setAudioModeAsync,
@@ -21,7 +21,9 @@ import {
 import { t } from "@/src/i18n";
 import { useThemeTokens } from "@/src/theme";
 
-type AudioNoteStackParamList = { AudioNote: { onDoneRoute?: string } | undefined };
+type AudioNoteStackParamList = {
+  AudioNote: { onDoneRoute?: "HandoverForm" | "HandoverMain" | "PatientList" } | undefined;
+};
 
 const FALLBACK_PRESET =
   RecordingPresets.HIGH_QUALITY ??
@@ -71,7 +73,7 @@ const appendDictationText = (current: string, addition: string) => {
   return `${current.trimEnd()}\n${trimmed}`;
 };
 
-export default function AudioNote({ navigation }: Props) {
+export default function AudioNote({ navigation, route }: Props) {
   const { colors } = useThemeTokens();
   const recorder = useAudioRecorder(REC_OPTS);
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
@@ -85,6 +87,7 @@ export default function AudioNote({ navigation }: Props) {
   const [dictationStatus, setDictationStatus] = useState<SttStatus>(sttService.getStatus());
   const [dictationError, setDictationError] = useState<SttErrorCode | null>(sttService.getLastError());
   const [dictatedPartial, setDictatedPartial] = useState('');
+  const [uploadToFhir, setUploadToFhir] = useState(false);
 
   const requestPermission = useCallback(async () => {
     const result = await requestRecordingPermissionsAsync();
@@ -258,7 +261,18 @@ export default function AudioNote({ navigation }: Props) {
   const accept = () => {
     const uri = lastUri ?? recorder.uri;
     if (uri) {
-      navigation.goBack();
+      const onDoneRoute = route.params?.onDoneRoute ?? 'HandoverForm';
+      navigation.navigate({
+        name: onDoneRoute,
+        params: {
+          audioNote: {
+            uri,
+            transcription: transcription.trim() ? transcription : undefined,
+            uploadToFhir,
+          },
+        },
+        merge: true,
+      } as never);
     }
   };
 
@@ -399,7 +413,16 @@ export default function AudioNote({ navigation }: Props) {
       <Text style={{ color: '#9fb3d9', marginTop: 8 }}>
         {t('audioNote.transcriptionEditHint')}
       </Text>
-      {/* Nota: Integrar envío automático del audio al backend Whisper para transcripción en una iteración posterior. */}
+      <View style={{ marginTop: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <Text style={{ color: '#eaf2ff', flex: 1 }}>{t('audioNote.uploadToFhirToggle')}</Text>
+          <Switch value={uploadToFhir} onValueChange={setUploadToFhir} />
+        </View>
+        <Text style={{ color: '#9fb3d9', marginTop: 6 }}>
+          {t('audioNote.uploadToFhirHelper')}
+        </Text>
+      </View>
+      {/* La transcripción puede enviarse al backend IA usando el botón de "Transcribir nota con IA". */}
 
       {hasUri && (
         <>
