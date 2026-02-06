@@ -11,30 +11,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v2
         with:
           version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
+
+      - name: Use npmjs registry (avoid 403 from custom registries)
+        run: pnpm config set registry https://registry.npmjs.org/
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        continue-on-error: true
+
       - name: Type check
         run: pnpm -w typecheck
+
       - name: Lint
         run: pnpm -w lint
+
       - name: Unit and integration tests
         run: pnpm -w vitest run --reporter=verbose --coverage
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
+
       - name: End-to-end tests
         run: pnpm run test:e2e
+
       - name: Validate FHIR bundles
         run: pnpm validate:fhir
+
       - name: Upload unit coverage
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
           path: coverage/unit/lcov.info
+
