@@ -169,6 +169,7 @@ class Auth0JWTAuthentication(BaseAuthentication):
             raise AuthenticationFailed("Token missing sub")
 
         user = Auth0User(sub=sub, claims=claims)
+        request.auth_token = token
 
         # ✅ IMPORTANTE: devolvemos claims como request.auth para que HasAnyScope funcione
         return (user, claims)

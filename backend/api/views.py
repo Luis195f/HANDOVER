@@ -10,6 +10,7 @@ from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,10 +18,15 @@ from rest_framework.views import APIView
 from backend.audit.service import emit_audit_event
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import AuditEvent
-from backend.security.permissions import ClinicianAuditPermission, NurseOrAdminPermission
+from backend.security.permissions import ClinicianAuditPermission
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
-from backend.security.scope_permissions import HasAnyScope, _extract_permissions_from_request, _get_claims_from_request
+from backend.security.scope_permissions import (
+    HasAllScopes,
+    HasAnyScope,
+    _extract_permissions_from_request,
+    _get_claims_from_request,
+)
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
 
@@ -153,8 +159,12 @@ class FHIRJSONRenderer(JSONRenderer):
 # =========================
 
 FHIR_BASE = os.environ.get("FHIR_BASE") or os.environ.get("FHIR_BASE_URL") or "http://localhost:8080/fhir"
-FHIR_TOKEN = os.environ.get("FHIR_TOKEN", "")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off").lower().strip()
+HANDOVER_REQUIRE_RBAC_ON_FHIR = os.getenv("HANDOVER_REQUIRE_RBAC_ON_FHIR", "true").lower().strip()
+OIDC_TOKEN_URL = os.getenv("OIDC_TOKEN_URL", "")
+OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")
+OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
+OIDC_SCOPE = os.getenv("OIDC_SCOPE", "")
 
 
 def _ensure_secure_url(url: str) -> str:
@@ -171,16 +181,36 @@ def _ensure_secure_url(url: str) -> str:
 FHIR_BASE = _ensure_secure_url(FHIR_BASE)
 
 
-def auth_headers() -> Dict[str, str]:
+def _get_request_bearer_token(request: HttpRequest) -> Optional[str]:
+    token = getattr(request, "auth_token", None)
+    if isinstance(token, str) and token.strip():
+        return token.strip()
+    auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+    if not auth_header:
+        return None
+    parts = auth_header.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1]
+    return None
+
+
+def get_fhir_headers(request: HttpRequest) -> Dict[str, str]:
     """
     Headers para hablar con el servidor FHIR aguas abajo.
+    Reenvía el access token del usuario para aplicar RBAC en el FHIR server.
     """
     headers = {
         "Content-Type": "application/fhir+json",
         "Accept": "application/fhir+json",
     }
-    if FHIR_TOKEN:
-        headers["Authorization"] = f"Bearer {FHIR_TOKEN}"
+    token = _get_request_bearer_token(request)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    if HANDOVER_REQUIRE_RBAC_ON_FHIR in ("1", "true", "yes", "on"):
+        raise PermissionDenied("Missing user access token for FHIR request.")
+
     return headers
 
 
@@ -238,13 +268,15 @@ def _emit_resource_audit(
     )
 
 
-def _validate_remotely(resource: Dict[str, Any], resource_type: str) -> Optional[Response]:
+def _validate_remotely(
+    request: HttpRequest, resource: Dict[str, Any], resource_type: str
+) -> Optional[Response]:
     if HANDOVER_FHIR_VALIDATION_MODE != "remote":
         return None
 
     validate_url = f"{FHIR_BASE.rstrip('/')}/{resource_type}/$validate"
     try:
-        resp = httpx.post(validate_url, json=resource, headers=auth_headers(), timeout=30)
+        resp = httpx.post(validate_url, json=resource, headers=get_fhir_headers(request), timeout=30)
     except httpx.HTTPError as exc:
         logger.warning("Error al llamar a $validate para %s (%s): %s", resource_type, validate_url, exc)
         return Response({"errors": ["No se pudo contactar al servidor FHIR (validate)."]}, status=503)
@@ -277,14 +309,14 @@ def _validate_remotely(resource: Dict[str, Any], resource_type: str) -> Optional
     return None
 
 
-def _post_to_fhir(resource: Dict[str, Any], resource_type: str) -> Response:
+def _post_to_fhir(request: HttpRequest, resource: Dict[str, Any], resource_type: str) -> Response:
     resource = dict(resource)
     if not resource.get("id"):
         resource["id"] = str(uuid.uuid4())
 
     url = f"{FHIR_BASE.rstrip('/')}/{resource_type}"
     try:
-        resp = httpx.post(url, json=resource, headers=auth_headers(), timeout=30)
+        resp = httpx.post(url, json=resource, headers=get_fhir_headers(request), timeout=30)
     except httpx.HTTPError as exc:
         logger.error("Error al enviar %s al servidor FHIR (%s): %s", resource_type, url, exc)
         return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
@@ -339,7 +371,7 @@ class AuthenticatedAPIView(APIView):
     Además: soporta application/fhir+json (parser+renderer).
     """
     authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated, NurseOrAdminPermission, HasAnyScope.required("handover:write")]
+    permission_classes = [IsAuthenticated]
 
     # ✅ Esto arregla 415 y 406 para FHIR JSON
     parser_classes = [FHIRJSONParser, JSONParser]
@@ -385,12 +417,103 @@ class CapabilitiesView(APIView):
         }
         return Response(payload, status=200)
 
+
+class OAuthRefreshView(APIView):
+    """
+    Intercambia refresh_token por access_token usando el proveedor OIDC.
+    """
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request: HttpRequest) -> Response:
+        if not OIDC_TOKEN_URL or not OIDC_CLIENT_ID:
+            return Response({"errors": ["OIDC refresh endpoint not configured."]}, status=500)
+
+        payload = request.data if isinstance(request.data, dict) else {}
+        refresh_token = payload.get("refresh_token")
+        if not refresh_token:
+            return Response({"errors": ["Missing refresh_token."]}, status=400)
+
+        form = {
+            "grant_type": "refresh_token",
+            "client_id": OIDC_CLIENT_ID,
+            "refresh_token": refresh_token,
+        }
+        if OIDC_CLIENT_SECRET:
+            form["client_secret"] = OIDC_CLIENT_SECRET
+        if OIDC_SCOPE:
+            form["scope"] = OIDC_SCOPE
+
+        try:
+            resp = httpx.post(
+                OIDC_TOKEN_URL,
+                data=form,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=15,
+            )
+        except httpx.HTTPError as exc:
+            logger.error("OIDC refresh failed: %s", exc)
+            return Response({"errors": ["OIDC refresh failed."]}, status=502)
+
+        if resp.status_code >= 400:
+            return Response({"errors": ["OIDC refresh rejected."]}, status=resp.status_code)
+
+        try:
+            data = resp.json()
+        except Exception:
+            return Response({"errors": ["OIDC refresh response invalid."]}, status=502)
+
+        return Response(
+            {
+                "access_token": data.get("access_token"),
+                "refresh_token": data.get("refresh_token"),
+                "expires_in": data.get("expires_in"),
+                "token_type": data.get("token_type"),
+            },
+            status=200,
+        )
+
 class PatientView(AuthenticatedAPIView):
-    permission_classes = [
-        IsAuthenticated,
-        NurseOrAdminPermission,
-        HasAnyScope.required("patients:write"),
-    ]
+    def get_permissions(self):
+        if self.request.method == "GET":
+            permissions = [
+                IsAuthenticated(),
+                HasAnyRole.required("viewer", "nurse", "supervisor", "admin")(),
+                HasAnyScope.required("patients:read")(),
+            ]
+        else:
+            permissions = [
+                IsAuthenticated(),
+                HasAnyRole.required("nurse", "supervisor", "admin")(),
+                HasAnyScope.required("patients:write")(),
+            ]
+        return permissions
+
+    def get(self, request: HttpRequest) -> Response:
+        if Patient is None:
+            return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
+
+        params = dict(request.query_params.items())
+        patient_id = params.pop("id", None) or params.pop("patientId", None)
+        base_url = f"{FHIR_BASE.rstrip('/')}/Patient"
+        url = f"{base_url}/{patient_id}" if patient_id else base_url
+
+        try:
+            resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
+        except httpx.HTTPError as exc:
+            logger.error("Error al leer Patient desde FHIR (%s): %s", url, exc)
+            return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
+
+        if resp.status_code >= 400:
+            return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
+
+        try:
+            payload = resp.json()
+        except Exception:
+            return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
+
+        return Response(payload, status=resp.status_code)
+
     def post(self, request: HttpRequest) -> Response:
         if Patient is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -422,7 +545,7 @@ class PatientView(AuthenticatedAPIView):
             return Response({"errors": ["Invalid Patient payload."]}, status=422)
 
         patient = patient_obj.dict(exclude_none=True)
-        validation_response = _validate_remotely(patient, "Patient")
+        validation_response = _validate_remotely(request, patient, "Patient")
         if validation_response:
             _emit_resource_audit(
                 request=request,
@@ -434,7 +557,7 @@ class PatientView(AuthenticatedAPIView):
             )
             return validation_response
 
-        response = _post_to_fhir(patient, "Patient")
+        response = _post_to_fhir(request, patient, "Patient")
         status_label = "success" if response.status_code < 400 else "fail"
         _emit_resource_audit(
             request=request,
@@ -448,7 +571,11 @@ class PatientView(AuthenticatedAPIView):
 
 
 class MedicationStatementView(AuthenticatedAPIView):
-    permission_classes = [IsAuthenticated, HasAnyScope.required("patients:write")]
+    permission_classes = [
+        IsAuthenticated,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
+        HasAnyScope.required("patients:write"),
+    ]
     def post(self, request: HttpRequest) -> Response:
         if MedicationStatement is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -480,7 +607,7 @@ class MedicationStatementView(AuthenticatedAPIView):
             return Response({"errors": ["Invalid MedicationStatement payload."]}, status=422)
 
         medication_statement = ms_obj.dict(exclude_none=True)
-        validation_response = _validate_remotely(medication_statement, "MedicationStatement")
+        validation_response = _validate_remotely(request, medication_statement, "MedicationStatement")
         if validation_response:
             _emit_resource_audit(
                 request=request,
@@ -492,7 +619,7 @@ class MedicationStatementView(AuthenticatedAPIView):
             )
             return validation_response
 
-        response = _post_to_fhir(medication_statement, "MedicationStatement")
+        response = _post_to_fhir(request, medication_statement, "MedicationStatement")
         status_label = "success" if response.status_code < 400 else "fail"
         _emit_resource_audit(
             request=request,
@@ -509,7 +636,7 @@ class BundleView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
-        HasAnyScope.required("fhir:transaction", "handover:write"),
+        HasAllScopes.required("fhir:transaction", "handover:write"),
     ]
     def post(self, request: HttpRequest) -> Response:
         if Bundle is None:
@@ -573,7 +700,7 @@ class BundleView(AuthenticatedAPIView):
         bundle_meta["tag"] = tags
         bundle["meta"] = bundle_meta
 
-        validation_response = _validate_remotely(bundle, "Bundle")
+        validation_response = _validate_remotely(request, bundle, "Bundle")
         if validation_response:
             _emit_bundle_audit(
                 request=request,
@@ -586,7 +713,7 @@ class BundleView(AuthenticatedAPIView):
             return validation_response
 
         # POST transaction: se envía al "base endpoint" del servidor FHIR
-        headers = auth_headers()
+        headers = get_fhir_headers(request)
         headers["Prefer"] = "return=representation"
 
         fhir_tx_url = FHIR_BASE.rstrip("/")
@@ -642,7 +769,6 @@ class BundleView(AuthenticatedAPIView):
 
 
 class AuditLogView(AuthenticatedAPIView):
-    # OJO: sobrescribe el permiso base (NurseOrAdminPermission) por el de auditoría
     permission_classes = [
         IsAuthenticated,
         ClinicianAuditPermission,

@@ -38,8 +38,8 @@ from backend.signature import (
 from backend.validation import validate_fhir_bundle
 
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
-FHIR_TOKEN = os.environ.get("FHIR_TOKEN", "")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off")
+HANDOVER_REQUIRE_RBAC_ON_FHIR = os.getenv("HANDOVER_REQUIRE_RBAC_ON_FHIR", "true").lower()
 AI_SUGGESTIONS_ENABLED = (
     os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
 )
@@ -97,10 +97,13 @@ class SbarResponse(BaseModel):
     full_text: str
 
 
-def auth_headers():
+def build_fhir_headers(authorization: str | None):
     h = {"Content-Type": "application/fhir+json"}
-    if FHIR_TOKEN:
-        h["Authorization"] = f"Bearer {FHIR_TOKEN}"
+    if authorization:
+        h["Authorization"] = authorization
+        return h
+    if HANDOVER_REQUIRE_RBAC_ON_FHIR in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=403, detail="Missing user access token for FHIR request")
     return h
 
 
@@ -117,7 +120,8 @@ async def create_audit_event(client: httpx.AsyncClient, *,
                              bundle: dict,
                              user_id: str | None,
                              unit_id: str | None,
-                             ip: str | None):
+                             ip: str | None,
+                             authorization: str | None):
     """Crea un AuditEvent R4 mínimo por cada transacción."""
     # intentar sacar PatientId (si viene como campo auxiliar en tu bundle; opcional)
     patient_id = None
@@ -217,7 +221,11 @@ async def create_audit_event(client: httpx.AsyncClient, *,
             }
         ]
 
-    r = await client.post(f"{FHIR_BASE}/AuditEvent", json=audit, headers=auth_headers())
+    r = await client.post(
+        f"{FHIR_BASE}/AuditEvent",
+        json=audit,
+        headers=build_fhir_headers(authorization),
+    )
     # No levantar excepción si el servidor no soporta AuditEvent (no bloquea el MVP)
     try:
         r.raise_for_status()
@@ -266,7 +274,12 @@ async def fhir_transaction(bundle: dict,
                     )
         else:
             logger.info("Firma digital de Bundle deshabilitada; se reenvía sin firma/validación criptográfica.")
-        r = await client.post(f"{FHIR_BASE}", json=bundle, headers=auth_headers())
+        authorization = request.headers.get("Authorization")
+        r = await client.post(
+            f"{FHIR_BASE}",
+            json=bundle,
+            headers=build_fhir_headers(authorization),
+        )
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
 
@@ -278,18 +291,22 @@ async def fhir_transaction(bundle: dict,
                 user_id=x_user_id,
                 unit_id=x_unit_id,
                 ip=(request.client.host if request.client else None),
+                authorization=authorization,
             )
         finally:
             return r.json()
 
 @app.post("/upload/audio-to-fhir")
-async def audio_to_fhir(patientId: str = Form(...),
-                        label: str = Form("Handover Audio"),
-                        encounterRef: str | None = Form(None),
-                        file: UploadFile = File(...)):
+async def audio_to_fhir(
+    request: Request,
+    patientId: str = Form(...),
+    label: str = Form("Handover Audio"),
+    encounterRef: str | None = Form(None),
+    file: UploadFile = File(...),
+):
     data = await file.read()
     b64 = base64.b64encode(data).decode("utf-8")
-    now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
+    now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
     doc = {
         "resourceType": "DocumentReference",
         "status": "current",
@@ -297,15 +314,26 @@ async def audio_to_fhir(patientId: str = Form(...),
         "subject": {"reference": f"Patient/{patientId}"},
         "date": now,
         **({"context": {"encounter": [{"reference": encounterRef}]}} if encounterRef else {}),
-        "content": [{"attachment": {"contentType": file.content_type or "audio/mpeg",
-                                    "data": b64, "title": file.filename}}],
+        "content": [
+            {
+                "attachment": {
+                    "contentType": file.content_type or "audio/mpeg",
+                    "data": b64,
+                    "title": file.filename,
+                }
+            }
+        ],
     }
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(f"{FHIR_BASE}/DocumentReference", json=doc, headers=auth_headers())
+        authorization = request.headers.get("Authorization")
+        r = await client.post(
+            f"{FHIR_BASE}/DocumentReference",
+            json=doc,
+            headers=build_fhir_headers(authorization),
+        )
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
         return r.json()
-
 
 MAX_NOTES_LENGTH = 500
 

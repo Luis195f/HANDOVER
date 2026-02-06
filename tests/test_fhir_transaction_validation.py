@@ -42,7 +42,11 @@ def test_validation_mode_off_does_not_block(monkeypatch):
             )
         )
 
-        response = client.post("/fhir/transaction", json=build_bundle())
+        response = client.post(
+    "/fhir/transaction",
+    json=build_bundle(),
+    headers={"Authorization": "Bearer test-access-token"},
+)
 
         assert response.status_code == 200
         assert tx_route.called
@@ -71,7 +75,11 @@ def test_remote_validation_allows_success(monkeypatch):
             )
         )
 
-        response = client.post("/fhir/transaction", json=build_bundle())
+        response = client.post(
+    "/fhir/transaction",
+    json=build_bundle(),
+    headers={"Authorization": "Bearer test-access-token"},
+)
 
         assert response.status_code == 200
         assert tx_route.called
@@ -99,7 +107,11 @@ def test_remote_validation_blocks_on_error(monkeypatch):
             )
         )
 
-        response = client.post("/fhir/transaction", json=build_bundle())
+        response = client.post(
+    "/fhir/transaction",
+    json=build_bundle(),
+    headers={"Authorization": "Bearer test-access-token"},
+)
 
         assert response.status_code == 422
         assert "Profile XYZ" in response.json().get("detail", {}).get("errors", [""])[0]
@@ -118,7 +130,11 @@ def test_remote_validation_not_supported_allows_flow(monkeypatch):
             )
         )
 
-        response = client.post("/fhir/transaction", json=build_bundle())
+        response = client.post(
+    "/fhir/transaction",
+    json=build_bundle(),
+    headers={"Authorization": "Bearer test-access-token"},
+)
 
         assert response.status_code == 200
         assert tx_route.called
