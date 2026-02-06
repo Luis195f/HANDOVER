@@ -32,7 +32,7 @@ class RoleAclTests(TestCase):
             {
                 "sub": "auth0|nurse-1",
                 "roles": ["nurse"],
-                "permissions": ["fhir:transaction"],
+                "permissions": ["fhir:transaction", "handover:write"],
             }
         )
         url = reverse("fhir-transaction")
@@ -73,6 +73,44 @@ class RoleAclTests(TestCase):
         )
         url = reverse("fhir-transaction")
         payload = {"resourceType": "Bundle", "type": "transaction", "entry": []}
+
+        with patch("backend.api.views.httpx.post", autospec=True) as mock_post:
+            response = client.post(url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        mock_post.assert_not_called()
+
+    def test_patient_read_viewer_allowed(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|viewer-1",
+                "roles": ["viewer"],
+                "permissions": ["patients:read"],
+            }
+        )
+        url = reverse("patient")
+
+        with patch("backend.api.views.httpx.get", autospec=True) as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {"resourceType": "Patient", "id": "pat-1"}
+            mock_resp.text = '{"resourceType":"Patient","id":"pat-1"}'
+            mock_get.return_value = mock_resp
+
+            response = client.get(url, data={"id": "pat-1"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_patient_create_viewer_forbidden(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|viewer-2",
+                "roles": ["viewer"],
+                "permissions": ["patients:read"],
+            }
+        )
+        url = reverse("patient")
+        payload = {"resourceType": "Patient", "id": "pat-2"}
 
         with patch("backend.api.views.httpx.post", autospec=True) as mock_post:
             response = client.post(url, data=payload, format="json")

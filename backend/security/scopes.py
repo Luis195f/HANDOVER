@@ -8,6 +8,7 @@ CLINICAL_SCOPES: List[str] = [
     "audit:read",
     "audit:write",
     "fhir:transaction",
+    "patients:read",
     "patients:write",
 ]
 
