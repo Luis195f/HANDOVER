@@ -11,15 +11,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function fetchText(url) {
   const res = await fetch(url, { redirect: "follow" });
   const text = await res.text().catch(() => "");
-  return { ok: res.ok, status: res.status, text };
+  return { ok: res.ok, status: res.status, text, url: res.url };
 }
 
-function extractBundlePath(html) {
-  const m = html.match(/<script\s+src="([^"]*index\.ts\.bundle[^"]*)"/i);
-  return m?.[1] || null;
+function extractScriptSrcs(html) {
+  // Extrae TODOS los <script src="..."> del HTML (no solo index.ts.bundle)
+  const out = [];
+  const re = /<script\s+[^>]*src="([^"]+)"[^>]*>/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    out.push(m[1]);
+  }
+  // Filtra cosas inútiles (si existieran)
+  return out.filter((s) => typeof s === "string" && s.length > 0);
 }
 
-async function waitForReady(timeoutMs = 170_000) {
+function toAbsolute(urlOrPath) {
+  if (urlOrPath.startsWith("http://") || urlOrPath.startsWith("https://")) return urlOrPath;
+  if (urlOrPath.startsWith("/")) return `${baseURL}${urlOrPath}`;
+  // relativo
+  return `${baseURL}/${urlOrPath}`;
+}
+
+async function waitForReady(timeoutMs = 180_000) {
   const startedAt = Date.now();
   let lastErr = "";
 
@@ -28,41 +42,56 @@ async function waitForReady(timeoutMs = 170_000) {
       const root = await fetchText(`${baseURL}/`);
       if (!root.ok) {
         lastErr = `GET / => ${root.status}`;
-        await sleep(750);
+        await sleep(800);
         continue;
       }
 
-      const bundlePath = extractBundlePath(root.text);
-      if (!bundlePath) {
-        lastErr = `No bundle script found in HTML (len=${root.text.length})`;
-        await sleep(750);
+      const scriptSrcs = extractScriptSrcs(root.text);
+
+      // Si por algún motivo aún no aparecen scripts en el HTML, espera.
+      if (!scriptSrcs.length) {
+        lastErr = `No <script src="..."> found in HTML (len=${root.text.length})`;
+        await sleep(800);
         continue;
       }
 
-      const bundleUrl = bundlePath.startsWith("http") ? bundlePath : `${baseURL}${bundlePath}`;
-      const bundle = await fetchText(bundleUrl);
+      // Probamos scripts en orden. Consideramos READY cuando al menos 1 devuelve 200 y “tiene cuerpo”.
+      let anyOk = false;
+      let bestInfo = "";
 
-      if (bundle.ok && bundle.text && bundle.text.length > 500) {
+      for (const src of scriptSrcs) {
+        const abs = toAbsolute(src);
+        const r = await fetchText(abs);
+
+        // Un bundle/minified JS real suele tener bastante más que 500 chars.
+        if (r.ok && r.text && r.text.length > 800) {
+          anyOk = true;
+          break;
+        }
+
+        bestInfo = `script ${abs} => ${r.status}, len=${r.text?.length ?? 0}`;
+      }
+
+      if (anyOk) {
         console.log(`[e2e-webserver] READY ${baseURL}`);
         return;
       }
 
-      lastErr = `GET bundle => ${bundle.status}, len=${bundle.text?.length ?? 0}`;
-      await sleep(750);
+      lastErr = bestInfo || `Scripts found but none OK enough`;
+      await sleep(800);
     } catch (e) {
       lastErr = String(e?.message || e);
-      await sleep(750);
+      await sleep(800);
     }
   }
 
-  throw new Error(`[e2e-webserver] Timed out waiting for Expo web + bundle. Last: ${lastErr}`);
+  throw new Error(`[e2e-webserver] Timed out waiting for Expo web + runnable script. Last: ${lastErr}`);
 }
 
 function startExpo() {
   const filterName = process.env.E2E_APP_FILTER || "handover-pro";
 
-  // ✅ FIX: Expo espera --host en {lan|tunnel|localhost}, no IP literal.
-  // Usamos localhost para CI, y mantenemos baseURL 127.0.0.1 (equivalente).
+  // Expo espera --host en {lan|tunnel|localhost}
   const pnpmArgs = [
     "--filter",
     filterName,
@@ -84,6 +113,7 @@ function startExpo() {
       EXPO_PUBLIC_E2E: "true",
       EXPO_NO_TELEMETRY: "1",
       CI: process.env.CI ? "1" : process.env.CI,
+      E2E_PORT: String(port),
     },
   });
 
@@ -108,7 +138,7 @@ function startExpo() {
     }
   });
 
-  await waitForReady(170_000);
+  await waitForReady(180_000);
 
   // Mantén vivo el proceso mientras Playwright corre
   // eslint-disable-next-line no-constant-condition
