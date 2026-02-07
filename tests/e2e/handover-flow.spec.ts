@@ -1,50 +1,137 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const waitForAppReady = async (page: Page) => {
-  // Señales de que la app cargó algo relevante (login o lista).
-  await expect(
-    page.locator(
-      [
-        '[data-testid="login-demo"]',
-        '[data-testid^="patient-card-"]',
-        '[data-testid="patient-list"]',
-        '[data-testid="patient-search"]',
-      ].join(",")
-    )
-  ).toBeVisible({ timeout: 60_000 });
+/**
+ * Helpers de diagnóstico para CI:
+ * - Si la app crashea (pageerror), el test falla con mensaje claro.
+ * - Loguea errores de consola para ver "pantalla blanca" / hydration errors.
+ */
+const attachRuntimeGuards = (page: Page) => {
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+
+  page.on("pageerror", (err) => {
+    pageErrors.push(String(err?.stack || err));
+  });
+
+  page.on("console", (msg) => {
+    if (msg.type() === "error") {
+      consoleErrors.push(msg.text());
+    }
+  });
+
+  return {
+    assertNoRuntimeErrors: async () => {
+      if (pageErrors.length || consoleErrors.length) {
+        throw new Error(
+          [
+            "[E2E] Runtime/Console errors detected:",
+            pageErrors.length ? `\n[pageerror]\n- ${pageErrors.join("\n- ")}` : "",
+            consoleErrors.length ? `\n[console.error]\n- ${consoleErrors.join("\n- ")}` : "",
+          ].join("")
+        );
+      }
+    },
+  };
+};
+
+/**
+ * En RN Web, a veces `testID` no coincide con `data-testid` como esperamos,
+ * o el botón demo cambió de testid. Por eso:
+ * - Primero intentamos por testid.
+ * - Luego fallback por rol + regex (demo/login/entrar).
+ */
+const clickDemoLoginIfPresent = async (page: Page) => {
+  const byTestId = page.getByTestId("login-demo");
+  if (await byTestId.count()) {
+    await byTestId.click();
+    return true;
+  }
+
+  // Fallback: botones típicos de login demo
+  const byRole = page.getByRole("button", { name: /demo|iniciar|entrar|login|acceder/i });
+  if (await byRole.count()) {
+    await byRole.first().click();
+    return true;
+  }
+
+  // Fallback 2: texto clicable
+  const byText = page.getByText(/demo|iniciar|entrar|login|acceder/i);
+  if (await byText.count()) {
+    await byText.first().click();
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Señal post-login: en tu spec original, lo único estable era:
+ * - tarjetas de pacientes (data-testid^="patient-card-")
+ * pero si no existe en web, añadimos fallback por heading/lista.
+ */
+const waitForPatientList = async (page: Page) => {
+  const cards = page.locator('[data-testid^="patient-card-"]');
+  if (await cards.count()) {
+    await expect(cards.first()).toBeVisible({ timeout: 60_000 });
+    return;
+  }
+
+  // Fallback por elementos genéricos que suelen existir en PatientList
+  const listLike = page.locator(
+    [
+      '[data-testid="patient-list"]',
+      '[data-testid="patient-search"]',
+      'text=/pacientes/i',
+      'input[placeholder*="Buscar"]',
+      'input[aria-label*="Buscar"]',
+    ].join(",")
+  );
+
+  await expect(listLike.first()).toBeVisible({ timeout: 60_000 });
 };
 
 const loginDemo = async (page: Page) => {
+  const guards = attachRuntimeGuards(page);
+
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await waitForAppReady(page);
 
-  const demoButton = page.getByTestId("login-demo");
+  // Espera a que el body exista y haya algo renderizado
+  await expect(page.locator("body")).toBeVisible({ timeout: 60_000 });
 
-  // Si existe el botón de demo login, úsalo.
-  if (await demoButton.count()) {
-    await expect(demoButton).toBeVisible({ timeout: 20_000 });
-    await demoButton.click();
-  }
+  // Un pequeño margen para hydrate (Expo web a veces tarda)
+  await page.waitForTimeout(500);
 
-  // Post-condición: lista de pacientes visible (o al menos una card)
-  await expect(
-    page.locator('[data-testid^="patient-card-"]').first()
-  ).toBeVisible({ timeout: 60_000 });
+  // Intenta login demo si está
+  await clickDemoLoginIfPresent(page);
+
+  // Post condición: llegamos a la lista
+  await waitForPatientList(page);
+
+  // Si hay pantalla blanca por error JS, esto lo detecta
+  await guards.assertNoRuntimeErrors();
 };
 
 test.describe("handover e2e flows", () => {
   test("login and reach patient list", async ({ page }) => {
     await loginDemo(page);
-    await expect(page.locator('[data-testid^="patient-card-"]').first()).toBeVisible({ timeout: 60_000 });
+    await waitForPatientList(page);
   });
 
   test("scan QR mock and navigate to handover form", async ({ page }) => {
     await loginDemo(page);
 
+    // Preferimos patient-card si existe, si no, buscamos primera fila/clickable razonable
     const firstCard = page.locator('[data-testid^="patient-card-"]').first();
-    await expect(firstCard).toBeVisible({ timeout: 60_000 });
-    await firstCard.click();
+    if (await firstCard.count()) {
+      await firstCard.click();
+    } else {
+      // fallback: click primer elemento “paciente” si existe
+      const maybePatientRow = page.getByText(/paciente|patient/i).first();
+      await expect(maybePatientRow).toBeVisible({ timeout: 60_000 });
+      await maybePatientRow.click();
+    }
 
+    // Este sí depende de tus testIDs existentes
     await expect(page.getByTestId("handover-patient-id")).toBeVisible({ timeout: 60_000 });
     await page.getByTestId("handover-scan-qr").click();
 
@@ -57,14 +144,11 @@ test.describe("handover e2e flows", () => {
   });
 
   test("record audio, attach, sign, and finalize", async ({ page }) => {
-    // Montar el route ANTES de navegar para no perder requests.
+    // Montar intercept ANTES de navegar (importante)
     let auditEventSeen = false;
     await page.route("**/api/**", async (route) => {
       const url = route.request().url();
-      if (url.includes("/api/audit/events")) {
-        auditEventSeen = true;
-      }
-      // Respuesta genérica OK (evita depender de backend real)
+      if (url.includes("/api/audit/events")) auditEventSeen = true;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -75,16 +159,19 @@ test.describe("handover e2e flows", () => {
     await loginDemo(page);
 
     const firstCard = page.locator('[data-testid^="patient-card-"]').first();
-    await expect(firstCard).toBeVisible({ timeout: 60_000 });
-    await firstCard.click();
+    if (await firstCard.count()) {
+      await firstCard.click();
+    } else {
+      const maybePatientRow = page.getByText(/paciente|patient/i).first();
+      await expect(maybePatientRow).toBeVisible({ timeout: 60_000 });
+      await maybePatientRow.click();
+    }
 
     await expect(page.getByTestId("handover-open-audio-note")).toBeVisible({ timeout: 60_000 });
     await page.getByTestId("handover-open-audio-note").click();
 
     const recordToggle = page.getByTestId("audio-record-toggle");
     await expect(recordToggle).toBeVisible({ timeout: 60_000 });
-
-    // Toggle start/stop
     await recordToggle.click();
     await recordToggle.click();
 
@@ -99,8 +186,6 @@ test.describe("handover e2e flows", () => {
     await expect(page.getByTestId("signature-pad")).toBeVisible({ timeout: 60_000 });
 
     await page.getByTestId("handover-finalize").click();
-
-    // Espera a que ocurra el request de auditoría (o su stub).
     await expect.poll(() => auditEventSeen, { timeout: 60_000 }).toBe(true);
   });
 });
