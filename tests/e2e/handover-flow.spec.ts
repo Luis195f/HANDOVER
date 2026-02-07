@@ -10,7 +10,7 @@ const attachRuntimeGuards = (page: Page) => {
   const consoleErrors: string[] = [];
 
   page.on('pageerror', (err) => {
-    pageErrors.push(String(err?.stack || err));
+    pageErrors.push(String((err as any)?.stack || err));
   });
 
   page.on('console', (msg) => {
@@ -41,21 +41,18 @@ const attachRuntimeGuards = (page: Page) => {
  * – Luego fallback por rol + regex (demo/login/entrar).
  */
 const clickDemoLoginIfPresent = async (page: Page) => {
-  // Botón con testID "login-demo"
   const byTestId = page.getByTestId('login-demo');
   if (await byTestId.count()) {
-    await byTestId.click();
+    await byTestId.first().click();
     return true;
   }
 
-  // Fallback: botones típicos de login demo por su label
   const byRole = page.getByRole('button', { name: /demo|iniciar|entrar|login|acceder/i });
   if (await byRole.count()) {
     await byRole.first().click();
     return true;
   }
 
-  // Fallback 2: texto clicable
   const byText = page.getByText(/demo|iniciar|entrar|login|acceder/i);
   if (await byText.count()) {
     await byText.first().click();
@@ -66,41 +63,74 @@ const clickDemoLoginIfPresent = async (page: Page) => {
 };
 
 /**
- * Señal post‑login: buscamos distintos indicadores de que la lista de pacientes se ha cargado.
- * No lanzamos una excepción inmediata si no encontramos algo; como último recurso esperamos a que la red
- * se estabilice, para dar tiempo a que se renderice la pantalla.
+ * Señal post-login: buscamos distintos indicadores de que la lista de pacientes se ha cargado.
+ * – NO mezclamos engines (css + text) en un mismo locator.
+ * – Como fallback final, entregamos diagnóstico útil.
  */
 const waitForPatientList = async (page: Page) => {
-  // 1) Si existen tarjetas de paciente con data-testid, usamos eso
+  // 1) Tarjetas de paciente
   const cards = page.locator('[data-testid^="patient-card-"]');
   if (await cards.count()) {
     await expect(cards.first()).toBeVisible({ timeout: 60_000 });
     return;
   }
 
-  // 2) Contenedores con testID habituales
+  // 2) Contenedores con testID habituales (CSS puro)
   const byTestId = page.locator('[data-testid="patient-list"], [data-testid="patient-search"]');
   if (await byTestId.count()) {
     await expect(byTestId.first()).toBeVisible({ timeout: 60_000 });
     return;
   }
 
-  // 3) Textos habituales ("paciente" o "patient") – Playwright usa un buscador de texto
+  // 3) Textos habituales (Playwright text engine)
   const byText = page.getByText(/paciente|patient|pacientes|patients/i);
   if (await byText.count()) {
     await expect(byText.first()).toBeVisible({ timeout: 60_000 });
     return;
   }
 
-  // 4) Fallback: entradas de búsqueda por placeholder o aria-label
+  // 4) Inputs de búsqueda (CSS puro)
   const byInput = page.locator('input[placeholder*="Buscar"], input[aria-label*="Buscar"]');
   if (await byInput.count()) {
     await expect(byInput.first()).toBeVisible({ timeout: 60_000 });
     return;
   }
 
-  // 5) Si nada de lo anterior existe, esperamos a que la red se calme y continuamos sin lanzar excepción
+  // 5) Último recurso: deja que la app termine de “cargar” (si hay fetches)
   await page.waitForLoadState('networkidle', { timeout: 60_000 });
+
+  // Re-intenta después del networkidle (por si se renderiza justo al final)
+  if (await cards.count()) {
+    await expect(cards.first()).toBeVisible({ timeout: 10_000 });
+    return;
+  }
+  if (await byTestId.count()) {
+    await expect(byTestId.first()).toBeVisible({ timeout: 10_000 });
+    return;
+  }
+  if (await byText.count()) {
+    await expect(byText.first()).toBeVisible({ timeout: 10_000 });
+    return;
+  }
+  if (await byInput.count()) {
+    await expect(byInput.first()).toBeVisible({ timeout: 10_000 });
+    return;
+  }
+
+  // Diagnóstico final
+  const url = page.url();
+  const title = await page.title().catch(() => '(no title)');
+  const bodyText = await page.locator('body').innerText().catch(() => '(no body text)');
+  const snippet = bodyText.length > 800 ? `${bodyText.slice(0, 800)}…` : bodyText;
+
+  throw new Error(
+    [
+      'Patient list not detected in any known form',
+      `URL: ${url}`,
+      `Title: ${title}`,
+      `Body snippet:\n${snippet}`,
+    ].join('\n')
+  );
 };
 
 const loginDemo = async (page: Page) => {
@@ -108,33 +138,32 @@ const loginDemo = async (page: Page) => {
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  // Espera a que el body exista y haya algo renderizado
   await expect(page.locator('body')).toBeVisible({ timeout: 60_000 });
 
-  // Pequeño margen para que React hydrate en Expo web
+  // margen para hydrate en Expo web
   await page.waitForTimeout(500);
 
-  // Intenta login demo si está
+  // intenta login demo si existe
   await clickDemoLoginIfPresent(page);
 
-  // Post‑condición: llegamos a la lista de pacientes
+  // post-condición: lista cargada
   await waitForPatientList(page);
 
-  // Verifica que no haya errores de ejecución
+  // si hay pantalla blanca por error JS, esto lo detecta
   await guards.assertNoRuntimeErrors();
 };
 
 test.describe('handover e2e flows', () => {
   test('login and reach patient list', async ({ page }) => {
+    test.setTimeout(120_000);
     await loginDemo(page);
-    // Confirmamos de nuevo que la lista de pacientes se detecta
     await waitForPatientList(page);
   });
 
   test('scan QR mock and navigate to handover form', async ({ page }) => {
+    test.setTimeout(120_000);
     await loginDemo(page);
 
-    // Tomamos la primera tarjeta de paciente, o cualquier elemento razonable si no existe la tarjeta
     const firstCard = page.locator('[data-testid^="patient-card-"]').first();
     if (await firstCard.count()) {
       await firstCard.click();
@@ -144,7 +173,6 @@ test.describe('handover e2e flows', () => {
       await maybePatientRow.click();
     }
 
-    // Continuamos con el flujo previsto
     await expect(page.getByTestId('handover-patient-id')).toBeVisible({ timeout: 60_000 });
     await page.getByTestId('handover-scan-qr').click();
 
@@ -153,19 +181,18 @@ test.describe('handover e2e flows', () => {
     await page.getByTestId('qr-e2e-submit').click();
     await page.getByTestId('qr-continue').click();
 
-    await expect(page.getByTestId('handover-patient-id')).toHaveValue('E2E-123', {
-      timeout: 60_000,
-    });
+    await expect(page.getByTestId('handover-patient-id')).toHaveValue('E2E-123', { timeout: 60_000 });
   });
 
   test('record audio, attach, sign, and finalize', async ({ page }) => {
-    // Interceptamos las llamadas a /api/** antes de navegar
+    test.setTimeout(150_000);
+
+    // Interceptamos /api/** antes de navegar
     let auditEventSeen = false;
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
-      if (url.includes('/api/audit/events')) {
-        auditEventSeen = true;
-      }
+      if (url.includes('/api/audit/events')) auditEventSeen = true;
+
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -201,6 +228,14 @@ test.describe('handover e2e flows', () => {
     await page.getByTestId('e2e-complete-checklist').click();
 
     await expect(page.getByTestId('signature-pad')).toBeVisible({ timeout: 60_000 });
+
+    await expect(page.getByTestId('handover-finalize')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('handover-finalize').click();
+
+    await expect.poll(() => auditEventSeen, { timeout: 60_000 }).toBe(true);
+  });
+});
+
 
     await page.getByTestId('handover-finalize').click();
     await expect.poll(() => auditEventSeen, { timeout: 60_000 }).toBe(true);
