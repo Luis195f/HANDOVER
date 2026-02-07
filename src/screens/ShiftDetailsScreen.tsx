@@ -78,10 +78,10 @@ const deriveShiftType = (shiftStartValue?: string | null) => {
 };
 
 function StaffListInput({ control, name, label, placeholder, error }: StaffListInputProps) {
-  const { fields, append, remove } = useFieldArray<AdministrativeData, typeof name>({
-  control,
-  name,
-});
+  const { fields, append, remove } = useFieldArray({
+    control: control as any,
+    name: name as any,
+  });
 
   return (
     <View style={styles.field}>
@@ -116,10 +116,10 @@ function StaffListInput({ control, name, label, placeholder, error }: StaffListI
 }
 
 function IncidentListInput({ control, name, label, placeholder, helper, error }: IncidentListInputProps) {
-  const { fields, append, remove } = useFieldArray<AdministrativeData, typeof name>({
-  control,
-  name,
-});
+  const { fields, append, remove } = useFieldArray({
+    control: control as any,
+    name: name as any,
+  });
 
   return (
     <View style={styles.field}>
