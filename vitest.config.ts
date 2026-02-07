@@ -51,6 +51,8 @@ export default defineConfig({
         "src/validation/schemas.ts",
         "src/components/Chip.tsx",
       ],
+      all: false,
+      perFile: true,
       thresholds: {
         lines: 80,
         statements: 80,
