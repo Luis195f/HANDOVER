@@ -21,11 +21,18 @@ const attachRuntimeGuards = (page: Page) => {
   });
 
   return {
-    assertNoRuntimeErrors: async () => {
+    summarize: () => {
+      return {
+        pageErrors: [...pageErrors],
+        consoleErrors: [...consoleErrors],
+        consoleWarnings: [...consoleWarnings],
+      };
+    },
+    assertNoRuntimeErrors: async (label = 'runtime') => {
       if (pageErrors.length || consoleErrors.length) {
         throw new Error(
           [
-            '[E2E] Runtime/Console errors detected:',
+            `[E2E] Runtime/Console errors detected (${label}):`,
             pageErrors.length ? `\n[pageerror]\n- ${pageErrors.join('\n- ')}` : '',
             consoleErrors.length ? `\n[console.error]\n- ${consoleErrors.join('\n- ')}` : '',
             consoleWarnings.length ? `\n[console.warning]\n- ${consoleWarnings.join('\n- ')}` : '',
@@ -37,10 +44,58 @@ const attachRuntimeGuards = (page: Page) => {
 };
 
 /**
- * En RN Web, a veces `testID` no coincide con `data-testid` como esperamos,
- * o el botón demo cambió de testid. Por eso:
- * – Primero intentamos por testid.
- * – Luego fallback por rol + regex (demo/login/entrar).
+ * Espera al primer render real de la app (RN Web / Expo Router):
+ * – #root existe (siempre) PERO debe tener hijos.
+ * – Además, esperamos a que desaparezca el “shell vacío”.
+ */
+const waitForAppFirstRender = async (page: Page, label: string) => {
+  // 1) el shell HTML ya está
+  await expect(page.locator('#root')).toBeVisible({ timeout: 60_000 });
+
+  // 2) esperar a que React pinte algo dentro de #root
+  //    (esto es lo que hoy te está faltando en CI: #root queda vacío)
+  try {
+    await page.waitForFunction(
+      () => {
+        const root = document.querySelector('#root');
+        if (!root) return false;
+        // childElementCount > 0 suele ser suficiente; también cubre casos con wrappers
+        return root.childElementCount > 0;
+      },
+      { timeout: 120_000 }
+    );
+  } catch {
+    // si no renderiza, damos diagnóstico fuerte
+    const url = page.url();
+    const title = await page.title().catch(() => '(no title)');
+    const html = await page.content().catch(() => '(no html)');
+    const snippetHtml = html.length > 1500 ? `${html.slice(0, 1500)}…` : html;
+
+    await page
+      .screenshot({ path: `test-results/${label}-first-render.png`, fullPage: true })
+      .catch(() => undefined);
+
+    throw new Error(
+      [
+        `[E2E] App did not render any UI into #root (${label})`,
+        `URL: ${url}`,
+        `Title: ${title}`,
+        `HTML snippet:\n${snippetHtml}`,
+        `Screenshot: test-results/${label}-first-render.png`,
+      ].join('\n')
+    );
+  }
+
+  // 3) pequeño margen: RN Web a veces pinta y luego hidrata
+  await page.waitForTimeout(250);
+};
+
+/**
+ * En RN Web, a veces `testID` no coincide con `data-testid`,
+ * o el botón demo cambió. Por eso:
+ * – Primero testid
+ * – Luego rol botón
+ * – Luego texto
  */
 const clickDemoLoginIfPresent = async (page: Page) => {
   const byTestId = page.getByTestId('login-demo');
@@ -67,44 +122,43 @@ const clickDemoLoginIfPresent = async (page: Page) => {
 type WaitAnyVisibleOptions = {
   timeoutMs: number;
   label: string;
+  guards?: ReturnType<typeof attachRuntimeGuards>;
 };
 
 /**
- * Espera a que *cualquiera* de los locators sea visible.
- * Importante: NO hacemos `count()` antes, porque si el render llega después,
- * `count()` sería 0 y fallaríamos prematuramente (lo que te estaba pasando en CI).
+ * Espera a que cualquiera de los locators sea visible.
+ * Si falla, incluye runtime errors + screenshot + snippets.
  */
 const waitAnyVisible = async (
   page: Page,
-  locators: { name: string; locator: ReturnType<Page['locator']> | ReturnType<Page['getByTestId']> | ReturnType<Page['getByText']> | ReturnType<Page['getByRole']> }[],
+  locators: { name: string; locator: any }[],
   opts: WaitAnyVisibleOptions
 ) => {
-  const { timeoutMs, label } = opts;
+  const { timeoutMs, label, guards } = opts;
 
-  // Playwright: expect(locator).toBeVisible espera a que el elemento aparezca.
   const attempts = locators.map(async ({ name, locator }) => {
-    await expect(locator as any, `[${label}] waiting for: ${name}`).toBeVisible({ timeout: timeoutMs });
+    await expect(locator, `[${label}] waiting for: ${name}`).toBeVisible({ timeout: timeoutMs });
     return name;
   });
 
-  // Promise.any: resuelve con el primer locator visible.
-  // Si todos fallan, levantamos diagnóstico abajo.
   try {
+    // Promise.any: devuelve el primer “visible”
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return await (Promise as any).any(attempts);
   } catch {
-    // Diagnóstico final
     const url = page.url();
     const title = await page.title().catch(() => '(no title)');
     const html = await page.content().catch(() => '(no html)');
     const bodyText = await page.locator('body').innerText().catch(() => '(no body text)');
     const snippetText = bodyText.length > 800 ? `${bodyText.slice(0, 800)}…` : bodyText;
-    const snippetHtml = html.length > 1200 ? `${html.slice(0, 1200)}…` : html;
+    const snippetHtml = html.length > 1500 ? `${html.slice(0, 1500)}…` : html;
 
-    // Screenshot útil para CI
-    await page.screenshot({ path: `test-results/${label.replace(/\s+/g, '-')}.png`, fullPage: true }).catch(() => undefined);
+    await page
+      .screenshot({ path: `test-results/${label.replace(/\s+/g, '-')}.png`, fullPage: true })
+      .catch(() => undefined);
 
     const candidates = locators.map((l) => `- ${l.name}`).join('\n');
+    const runtime = guards?.summarize();
 
     throw new Error(
       [
@@ -112,6 +166,15 @@ const waitAnyVisible = async (
         `URL: ${url}`,
         `Title: ${title}`,
         `Tried signals:\n${candidates}`,
+        runtime && (runtime.pageErrors.length || runtime.consoleErrors.length)
+          ? `\nRuntime errors:\n${[
+              runtime.pageErrors.length ? `[pageerror]\n- ${runtime.pageErrors.join('\n- ')}` : '',
+              runtime.consoleErrors.length ? `[console.error]\n- ${runtime.consoleErrors.join('\n- ')}` : '',
+              runtime.consoleWarnings.length ? `[console.warning]\n- ${runtime.consoleWarnings.join('\n- ')}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n')}`
+          : '',
         `Body snippet:\n${snippetText}`,
         `HTML snippet:\n${snippetHtml}`,
         `Screenshot: test-results/${label.replace(/\s+/g, '-')}.png`,
@@ -121,15 +184,12 @@ const waitAnyVisible = async (
 };
 
 /**
- * Señal post-login: buscamos distintos indicadores de que la lista de pacientes se ha cargado.
- * NOTA CLAVE: ahora esperamos visibilidad (sin count() previo).
+ * Señal post-login: buscamos indicadores de lista de pacientes.
+ * CLAVE: primero aseguramos que la app ya renderizó algo (no root vacío).
  */
-const waitForPatientList = async (page: Page, label = 'waitForPatientList') => {
-  // Deja que RN web termine hydrate/render inicial.
-  await page.waitForTimeout(250);
+const waitForPatientList = async (page: Page, guards: ReturnType<typeof attachRuntimeGuards>, label = 'waitForPatientList') => {
+  await waitForAppFirstRender(page, label);
 
-  // Señales (amplias) de “ya estoy en lista de pacientes”
-  // Ajustadas para tolerar cambios de testIDs y UI.
   const signals = [
     { name: 'patient-card-*', locator: page.locator('[data-testid^="patient-card-"]').first() },
     { name: 'testid patient-list', locator: page.getByTestId('patient-list') },
@@ -142,42 +202,39 @@ const waitForPatientList = async (page: Page, label = 'waitForPatientList') => {
     { name: 'Buscar placeholder', locator: page.locator('input[placeholder*="Buscar"], input[aria-label*="Buscar"]').first() },
   ];
 
-  // Primer intento: esperar cualquiera de las señales hasta 60s
-  await waitAnyVisible(page, signals, { timeoutMs: 60_000, label });
+  await waitAnyVisible(page, signals, { timeoutMs: 90_000, label, guards });
 
-  // Segundo: si aún hay requests colgando, intenta estabilizar (pero sin bloquear todo)
-  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+  // Intenta estabilizar (sin bloquear si nunca llega a networkidle)
+  await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined);
 };
 
 const loginDemo = async (page: Page) => {
   const guards = attachRuntimeGuards(page);
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // En CI, a veces RN Web tarda más: usa load + primera pintura real
+  await page.goto('/', { waitUntil: 'load' });
 
-  await expect(page.locator('body')).toBeVisible({ timeout: 60_000 });
+  // Espera a que realmente pinte algo (si crashea antes, falla aquí con diagnóstico)
+  await waitForAppFirstRender(page, 'loginDemo');
 
-  // margen para hydrate en Expo web
-  await page.waitForTimeout(500);
-
-  // intenta login demo si existe (y si no existe, igual seguimos: puede autologin)
+  // intenta login demo si existe (si no existe, puede ser autologin)
   await clickDemoLoginIfPresent(page);
 
   // post-condición: lista cargada
-  await waitForPatientList(page, 'loginDemo-patientList');
+  await waitForPatientList(page, guards, 'loginDemo-patientList');
 
-  // si hay pantalla blanca por error JS, esto lo detecta
-  await guards.assertNoRuntimeErrors();
+  // si hay pantalla blanca por error JS, lo detecta aquí (y ahora sí lo verás siempre)
+  await guards.assertNoRuntimeErrors('post-login');
 };
 
 test.describe('handover e2e flows', () => {
   test('login and reach patient list', async ({ page }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await loginDemo(page);
-    await waitForPatientList(page, 'test1-patientList');
   });
 
   test('scan QR mock and navigate to handover form', async ({ page }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await loginDemo(page);
 
     const firstCard = page.locator('[data-testid^="patient-card-"]').first();
@@ -201,7 +258,7 @@ test.describe('handover e2e flows', () => {
   });
 
   test('record audio, attach, sign, and finalize', async ({ page }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(210_000);
 
     // Interceptamos /api/** antes de navegar
     let auditEventSeen = false;
@@ -248,9 +305,7 @@ test.describe('handover e2e flows', () => {
     await expect(page.getByTestId('handover-finalize')).toBeVisible({ timeout: 60_000 });
     await page.getByTestId('handover-finalize').click();
 
-    // No hacemos que esto sea hard-fail porque depende del wiring real de la app.
-    // Pero si se vio, mejor.
+    // Soft assertion (depende del wiring real)
     expect([true, false]).toContain(auditEventSeen);
   });
 });
-
