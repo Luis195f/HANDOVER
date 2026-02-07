@@ -522,32 +522,63 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [prefilledValuesParam?.vitals]);
 
   const emptySnomedCoding: SnomedCoding = {
-    system: SNOMED_SYSTEM,
-    code: '',
-    display: '',
+  system: SNOMED_SYSTEM,
+  code: "",
+  display: "",
+};
+
+type BedsideChecklistValue = HandoverFormValues["bedsideChecklist"];
+type BedsideChecklistKey = Exclude<keyof BedsideChecklistValue, "bedsideNotes">;
+
+const isBedsideChecklistKey = (k: string): k is BedsideChecklistKey => {
+  return (
+    k === "patientIdentityConfirmed" ||
+    k === "allergiesReviewed" ||
+    k === "linesAndDevicesChecked" ||
+    k === "medicationPlanReviewed" ||
+    k === "safetyMeasuresApplied" ||
+    k === "questionsAnswered"
+  );
+};
+
+const buildChecklistDefaults = (
+  checklistItems: { key: BedsideChecklistKey }[],
+  base: BedsideChecklistValue
+): BedsideChecklistValue => {
+  const next: BedsideChecklistValue = { ...base };
+  for (const item of checklistItems) {
+    next[item.key] = false;
+  }
+  return next;
+};
+
+const defaultValues = useMemo<HandoverFormValues>(() => {
+  const initialUnitConfig =
+    getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
+
+  const rawItems =
+    initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
+
+  const checklistItems: { key: BedsideChecklistKey }[] = rawItems
+    .map((it) => ({ key: String((it as any)?.key ?? "") }))
+    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
+
+  const baseChecklistDefaults: BedsideChecklistValue = {
+    patientIdentityConfirmed: false,
+    allergiesReviewed: false,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+    bedsideNotes: "",
   };
 
-  const defaultValues = useMemo<HandoverFormValues>(() => {
-    const initialUnitConfig = getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
-    const checklistItems = initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
-    const baseChecklistDefaults: HandoverFormValues['bedsideChecklist'] = {
-      patientIdentityConfirmed: false,
-      allergiesReviewed: false,
-      linesAndDevicesChecked: false,
-      medicationPlanReviewed: false,
-      safetyMeasuresApplied: false,
-      questionsAnswered: false,
-      bedsideNotes: '',
-    };
-    const bedsideChecklistDefaults = checklistItems.reduce<
-      HandoverFormValues['bedsideChecklist'] & Record<string, boolean | string | undefined>
-    >((acc, item) => {
-      acc[item.key] = false;
-      return acc;
-    }, baseChecklistDefaults);
-    const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
-    const shiftEndDefault =
-      administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+  const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults);
+
+  const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
+  const shiftEndDefault =
+    administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+
     const administrativeDefaults: AdministrativeData = {
       unit:
         administrativeDataParam?.unit ??
@@ -731,12 +762,10 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const handleE2EChecklistComplete = () => {
-    const currentChecklist = form.getValues('bedsideChecklist') ?? {};
-    const completed = checklistItems.reduce<Record<string, boolean | string | undefined>>((acc, item) => {
-      acc[item.key] = true;
-      return acc;
-    }, { ...currentChecklist });
-    form.setValue('bedsideChecklist', completed, { shouldDirty: true, shouldValidate: true });
+    const currentChecklist = (form.getValues("bedsideChecklist") ?? {}) as BedsideChecklistValue;
+const completed = buildChecklistDefaults(checklistItems, { ...baseChecklistDefaults, ...currentChecklist });
+for (const item of checklistItems) (completed as any)[item.key] = true;
+form.setValue("bedsideChecklist", completed, { shouldDirty: true, shouldValidate: true });
   };
 
   const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
