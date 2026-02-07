@@ -530,7 +530,6 @@ export default function HandoverForm({ navigation, route }: Props) {
 type BedsideChecklistValue = HandoverFormValues["bedsideChecklist"];
 type BedsideChecklistKey = Exclude<keyof BedsideChecklistValue, "bedsideNotes">;
 
-// Guard runtime: solo permite keys booleanas válidas (evita config basura)
 const isBedsideChecklistKey = (k: string): k is BedsideChecklistKey => {
   return (
     k === "patientIdentityConfirmed" ||
@@ -553,24 +552,31 @@ const buildChecklistDefaults = (
   return next;
 };
 
-const baseChecklistDefaults: BedsideChecklistValue = {
-  patientIdentityConfirmed: false,
-  allergiesReviewed: false,
-  linesAndDevicesChecked: false,
-  medicationPlanReviewed: false,
-  safetyMeasuresApplied: false,
-  questionsAnswered: false,
-  bedsideNotes: "",
-};
+  const defaultValues = useMemo<HandoverFormValues>(() => {
+  const initialUnitConfig =
+    getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
 
   const rawItems =
-  initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
+    initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
 
-const checklistItems: { key: BedsideChecklistKey }[] = rawItems
-  .map((it) => ({ key: String((it as any)?.key ?? "") }))
-  .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
+  const checklistItems: { key: BedsideChecklistKey }[] = rawItems
+    .map((it) => ({ key: String((it as any)?.key ?? "") }))
+    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
 
-const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults);
+  const baseChecklistDefaults: BedsideChecklistValue = {
+    patientIdentityConfirmed: false,
+    allergiesReviewed: false,
+    linesAndDevicesChecked: false,
+    medicationPlanReviewed: false,
+    safetyMeasuresApplied: false,
+    questionsAnswered: false,
+    bedsideNotes: "",
+  };
+
+  const bedsideChecklistDefaults = buildChecklistDefaults(
+    checklistItems,
+    baseChecklistDefaults
+  );
 
   const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
   const shiftEndDefault =
@@ -644,16 +650,16 @@ const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChec
       audioTranscription: '',
     };
     return { ...base, risksStructured: deriveInitialRisksStructured(base) };
-  }, [
-    patientIdParam,
-    patientSummaryParam,
-    unitIdParam,
-    administrativeDataParam,
-    selectedUnitId,
-    prefilledValuesParam,
-    prefilledVitals,
-    prefillMeta,
-  ]);
+}, [
+  patientIdParam,
+  patientSummaryParam,
+  unitIdParam,
+  administrativeDataParam,
+  selectedUnitId,
+  prefilledValuesParam,
+  prefilledVitals,
+  prefillMeta,
+]);
 
   const form = useZodForm(zHandover, defaultValues);
   const { watch, reset, getValues } = form;
