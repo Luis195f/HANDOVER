@@ -779,7 +779,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
 
   const checklistItems = normalizeChecklistItems(rawItems);
 
-  const completed: BedsideChecklistValue = { ...baseChecklistDefaults, ...currentChecklist };
+  const completed: BedsideChecklistValue = { ...baseChecklistDefaults };
+
+  for (const [key, value] of Object.entries(currentChecklist)) {
+    if (value !== undefined) {
+      (completed as any)[key] = value;
+    }
+  }
 
   for (const item of checklistItems) {
     completed[item.key] = true;
