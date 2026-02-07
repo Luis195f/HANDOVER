@@ -1,27 +1,51 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAudioRecorder as useExpoAudioRecorder, type RecordingOptions } from "expo-audio";
 
-type AudioRecorderHook = {
+export type AudioRecorderHook = {
   isRecording: boolean;
   uri: string | null;
-  record?: () => void;
-  stop?: () => Promise<string | undefined>;
-  prepareToRecordAsync?: () => Promise<void>;
+  record: () => void;
+  stop: () => Promise<string | undefined>;
+  prepareToRecordAsync: () => Promise<void>;
 };
 
 const isE2E = process.env.EXPO_PUBLIC_E2E === "true";
 
 export const useAudioRecorderWithFallback = (options: RecordingOptions): AudioRecorderHook => {
+  // ✅ Caso real: usamos el hook de expo, pero normalizamos stop() => uri
   if (!isE2E) {
-    return useExpoAudioRecorder(options);
+    const base = useExpoAudioRecorder(options) as unknown as {
+      isRecording: boolean;
+      uri: string | null;
+      record: () => void;
+      stop: () => Promise<void>;
+      prepareToRecordAsync: () => Promise<void>;
+    };
+
+    const uriRef = useRef<string | null>(base.uri);
+    useEffect(() => {
+      uriRef.current = base.uri;
+    }, [base.uri]);
+
+    const stop = useCallback(async () => {
+      await base.stop();
+      return uriRef.current ?? undefined;
+    }, [base]);
+
+    return {
+      isRecording: base.isRecording,
+      uri: base.uri,
+      record: base.record,
+      stop,
+      prepareToRecordAsync: base.prepareToRecordAsync,
+    };
   }
 
+  // ✅ Caso E2E: fallback determinista
   const [isRecording, setIsRecording] = useState(false);
   const [uri, setUri] = useState<string | null>(null);
 
-  const prepareToRecordAsync = useCallback(async () => {
-    return;
-  }, []);
+  const prepareToRecordAsync = useCallback(async () => {}, []);
 
   const record = useCallback(() => {
     setIsRecording(true);
@@ -34,11 +58,5 @@ export const useAudioRecorderWithFallback = (options: RecordingOptions): AudioRe
     return nextUri;
   }, []);
 
-  return {
-    isRecording,
-    uri,
-    record,
-    stop,
-    prepareToRecordAsync,
-  };
+  return { isRecording, uri, record, stop, prepareToRecordAsync };
 };
