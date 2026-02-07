@@ -5,7 +5,6 @@ import {
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
   type PermissionResponse,
-  useAudioRecorder,
 } from 'expo-audio';
 import { t } from '@/src/i18n';
 import { useAudioRecorderWithFallback } from '@/src/lib/audio-recorder';
@@ -17,9 +16,11 @@ type Props = {
   stopLabel?: string;
 };
 
-function resolveLabel(raw: string, fallback: string) {
-  // En tests, a veces t('x.y') devuelve 'x.y' si no hay i18n cargado.
-  return raw && raw !== fallback ? raw : fallback;
+function resolveLabel(value: string, fallback: string) {
+  // En tests, a veces t('x.y') devuelve la key. Si pasa, usa fallback.
+  if (!value) return fallback;
+  if (value === 'audioAttach.start' || value === 'audioAttach.stop') return fallback;
+  return value;
 }
 
 export default function AudioAttach({
@@ -37,37 +38,21 @@ export default function AudioAttach({
     throw new Error('Expo Audio recording presets unavailable');
   }
 
-  // ✅ En CI/tests: tratamos como E2E para evitar flakiness por permisos.
-  const isE2E =
-    process.env.EXPO_PUBLIC_E2E === 'true' || process.env.NODE_ENV === 'test';
+  // ✅ Solo E2E cuando el flag lo dice (NO por NODE_ENV).
+  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
 
-  // ✅ Labels robustos (si t devuelve la key, cae a ES usado en tests)
-  const i18nStart = t('audioAttach.start');
-  const i18nStop = t('audioAttach.stop');
-
+  // ✅ Labels robustos (para que tu test encuentre “Grabar audio” / “Detener y adjuntar”)
   const resolvedStartLabel = useMemo(() => {
     if (startLabel) return startLabel;
-    // si t devolvió la key, fallback a texto de test
-    return resolveLabel(i18nStart, 'Grabar audio');
-  }, [startLabel, i18nStart]);
+    return resolveLabel(t('audioAttach.start'), 'Grabar audio');
+  }, [startLabel]);
 
   const resolvedStopLabel = useMemo(() => {
     if (stopLabel) return stopLabel;
-    return resolveLabel(i18nStop, 'Detener y adjuntar');
-  }, [stopLabel, i18nStop]);
+    return resolveLabel(t('audioAttach.stop'), 'Detener y adjuntar');
+  }, [stopLabel]);
 
-  /**
-   * ✅ Compatibilidad con mocks:
-   * - Tu app usa useAudioRecorderWithFallback(...)
-   * - Pero en tests tú mockeas expo-audio/useAudioRecorder
-   *   => dejamos un fallback directo a useAudioRecorder si el wrapper no devuelve algo usable.
-   */
-  const recorderFromWrapper = useAudioRecorderWithFallback(recordingPreset) as any;
-  const recorderFromExpo = useAudioRecorder(recordingPreset) as any;
-  const recorder =
-    recorderFromWrapper && typeof recorderFromWrapper === 'object'
-      ? recorderFromWrapper
-      : recorderFromExpo;
+  const recorder = useAudioRecorderWithFallback(recordingPreset);
 
   const [permission, setPermission] = useState<PermissionResponse | null>(null);
   const [lastUri, setLastUri] = useState<string | null>(null);
@@ -117,8 +102,11 @@ export default function AudioAttach({
       setPermission(grantedPermission);
       return;
     }
+
+    // ✅ En modo normal (y en tests), SIEMPRE consultamos permisos actuales
     const current = await getRecordingPermissionsAsync();
     setPermission(current);
+
     if (!current.granted) {
       await requestPermission();
     }
@@ -140,24 +128,24 @@ export default function AudioAttach({
   }, [permission, requestPermission, showMicPermissionDenied]);
 
   useEffect(() => {
-    if (!recorder?.isRecording && recorder?.uri && recorder.uri !== lastUri) {
+    if (!recorder.isRecording && recorder.uri && recorder.uri !== lastUri) {
       setLastUri(recorder.uri);
     }
-  }, [recorder?.isRecording, recorder?.uri, lastUri]);
+  }, [recorder.isRecording, recorder.uri, lastUri]);
 
   const startRecording = async () => {
-    if (typeof recorder?.prepareToRecordAsync === 'function') {
+    if (typeof recorder.prepareToRecordAsync === 'function') {
       await recorder.prepareToRecordAsync();
     }
-    recorder?.record?.();
+    recorder.record?.();
   };
 
   const stopRecording = async () => {
-    const maybeUri = (await recorder?.stop?.()) as unknown;
+    const maybeUri = (await recorder.stop?.()) as unknown;
 
     const uri =
       (typeof maybeUri === 'string' && maybeUri.length > 0 && maybeUri) ||
-      (typeof recorder?.uri === 'string' && recorder.uri.length > 0 && recorder.uri) ||
+      recorder.uri ||
       null;
 
     if (uri) {
@@ -168,7 +156,7 @@ export default function AudioAttach({
   };
 
   const onToggle = async () => {
-    if (recorder?.isRecording) {
+    if (recorder.isRecording) {
       await stopRecording();
     } else {
       const granted = await ensurePermissionGranted();
@@ -179,7 +167,7 @@ export default function AudioAttach({
 
   return (
     <Button
-      title={recorder?.isRecording ? resolvedStopLabel : resolvedStartLabel}
+      title={recorder.isRecording ? resolvedStopLabel : resolvedStartLabel}
       onPress={onToggle}
     />
   );
