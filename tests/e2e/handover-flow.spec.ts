@@ -1,3 +1,4 @@
+// tests/e2e/handover-flow.spec.ts
 import { test, expect, type Page } from "@playwright/test";
 
 /**
@@ -85,7 +86,7 @@ const waitForPatientList = async (page: Page) => {
   }
 
   // 3) Fallback por texto (NO CSS → Playwright text engine)
-  const byText = page.getByText(/pacientes/i);
+  const byText = page.getByText(/pacientes|patients/i);
   if (await byText.count()) {
     await expect(byText.first()).toBeVisible({ timeout: 60_000 });
     return;
@@ -93,7 +94,12 @@ const waitForPatientList = async (page: Page) => {
 
   // 4) Fallback por inputs tipo búsqueda (CSS puro)
   const byInput = page.locator('input[placeholder*="Buscar"], input[aria-label*="Buscar"]');
-  await expect(byInput.first()).toBeVisible({ timeout: 60_000 });
+  if (await byInput.count()) {
+    await expect(byInput.first()).toBeVisible({ timeout: 60_000 });
+    return;
+  }
+
+  throw new Error('Patient list not detected in any known form');
 };
 
 const loginDemo = async (page: Page) => {
