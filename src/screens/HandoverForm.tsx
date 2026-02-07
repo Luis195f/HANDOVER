@@ -528,55 +528,60 @@ export default function HandoverForm({ navigation, route }: Props) {
 };
 
 type BedsideChecklistValue = HandoverFormValues["bedsideChecklist"];
-type BedsideChecklistKey = Exclude<keyof BedsideChecklistValue, "bedsideNotes">;
+
+// ✅ Deja el tipo como union de strings (NO string | number)
+const BEDSIDE_CHECKLIST_KEYS = [
+  "patientIdentityConfirmed",
+  "allergiesReviewed",
+  "linesAndDevicesChecked",
+  "medicationPlanReviewed",
+  "safetyMeasuresApplied",
+  "questionsAnswered",
+] as const;
+
+type BedsideChecklistKey = (typeof BEDSIDE_CHECKLIST_KEYS)[number];
 
 const isBedsideChecklistKey = (k: string): k is BedsideChecklistKey => {
-  return (
-    k === "patientIdentityConfirmed" ||
-    k === "allergiesReviewed" ||
-    k === "linesAndDevicesChecked" ||
-    k === "medicationPlanReviewed" ||
-    k === "safetyMeasuresApplied" ||
-    k === "questionsAnswered"
-  );
+  return (BEDSIDE_CHECKLIST_KEYS as readonly string[]).includes(k);
+};
+
+// ✅ base común (queda en scope para defaultValues Y handleE2EChecklistComplete)
+const baseChecklistDefaults: BedsideChecklistValue = {
+  patientIdentityConfirmed: false,
+  allergiesReviewed: false,
+  linesAndDevicesChecked: false,
+  medicationPlanReviewed: false,
+  safetyMeasuresApplied: false,
+  questionsAnswered: false,
+  bedsideNotes: "",
+};
+
+const normalizeChecklistItems = (rawItems: unknown): { key: BedsideChecklistKey }[] => {
+  const list = Array.isArray(rawItems) ? rawItems : [];
+  return list
+    .map((it) => ({ key: String((it as any)?.key ?? "") }))
+    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
 };
 
 const buildChecklistDefaults = (
   checklistItems: { key: BedsideChecklistKey }[],
-  base: BedsideChecklistValue
+  base: BedsideChecklistValue,
 ): BedsideChecklistValue => {
   const next: BedsideChecklistValue = { ...base };
-  for (const item of checklistItems) {
-    next[item.key] = false;
-  }
+  for (const item of checklistItems) next[item.key] = false;
   return next;
 };
 
-  const defaultValues = useMemo<HandoverFormValues>(() => {
+const defaultValues = useMemo<HandoverFormValues>(() => {
   const initialUnitConfig =
     getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
 
   const rawItems =
     initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
 
-  const checklistItems: { key: BedsideChecklistKey }[] = rawItems
-    .map((it) => ({ key: String((it as any)?.key ?? "") }))
-    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
+  const checklistItems = normalizeChecklistItems(rawItems);
 
-  const baseChecklistDefaults: BedsideChecklistValue = {
-    patientIdentityConfirmed: false,
-    allergiesReviewed: false,
-    linesAndDevicesChecked: false,
-    medicationPlanReviewed: false,
-    safetyMeasuresApplied: false,
-    questionsAnswered: false,
-    bedsideNotes: "",
-  };
-
-  const bedsideChecklistDefaults = buildChecklistDefaults(
-    checklistItems,
-    baseChecklistDefaults
-  );
+  const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults)
 
   const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
   const shiftEndDefault =
@@ -772,9 +777,7 @@ const buildChecklistDefaults = (
     getUnitConfig(unitIdParam ?? selectedUnitId)?.features?.checklistItems ??
     DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
 
-  const checklistItems: { key: BedsideChecklistKey }[] = rawItems
-    .map((it) => ({ key: String((it as any)?.key ?? "") }))
-    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
+  const checklistItems = normalizeChecklistItems(rawItems);
 
   const completed: BedsideChecklistValue = { ...baseChecklistDefaults, ...currentChecklist };
 
