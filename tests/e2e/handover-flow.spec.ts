@@ -236,8 +236,3 @@ test.describe('handover e2e flows', () => {
   });
 });
 
-
-    await page.getByTestId('handover-finalize').click();
-    await expect.poll(() => auditEventSeen, { timeout: 60_000 }).toBe(true);
-  });
-});
