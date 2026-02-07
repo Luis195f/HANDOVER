@@ -70,24 +70,30 @@ const clickDemoLoginIfPresent = async (page: Page) => {
  * pero si no existe en web, añadimos fallback por heading/lista.
  */
 const waitForPatientList = async (page: Page) => {
+  // 1) Si existen patient-card por data-testid, perfecto
   const cards = page.locator('[data-testid^="patient-card-"]');
   if (await cards.count()) {
     await expect(cards.first()).toBeVisible({ timeout: 60_000 });
     return;
   }
 
-  // Fallback por elementos genéricos que suelen existir en PatientList
-  const listLike = page.locator(
-    [
-      '[data-testid="patient-list"]',
-      '[data-testid="patient-search"]',
-      'text=/pacientes/i',
-      'input[placeholder*="Buscar"]',
-      'input[aria-label*="Buscar"]',
-    ].join(",")
-  );
+  // 2) Si existe algún contenedor testid típico (CSS puro)
+  const byTestId = page.locator('[data-testid="patient-list"],[data-testid="patient-search"]');
+  if (await byTestId.count()) {
+    await expect(byTestId.first()).toBeVisible({ timeout: 60_000 });
+    return;
+  }
 
-  await expect(listLike.first()).toBeVisible({ timeout: 60_000 });
+  // 3) Fallback por texto (NO CSS → Playwright text engine)
+  const byText = page.getByText(/pacientes/i);
+  if (await byText.count()) {
+    await expect(byText.first()).toBeVisible({ timeout: 60_000 });
+    return;
+  }
+
+  // 4) Fallback por inputs tipo búsqueda (CSS puro)
+  const byInput = page.locator('input[placeholder*="Buscar"], input[aria-label*="Buscar"]');
+  await expect(byInput.first()).toBeVisible({ timeout: 60_000 });
 };
 
 const loginDemo = async (page: Page) => {
