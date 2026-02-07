@@ -15,12 +15,11 @@ async function fetchText(url) {
 }
 
 function extractBundlePath(html) {
-  // Busca el script típico de Expo: /index.ts.bundle?platform=web&dev=false...
   const m = html.match(/<script\s+src="([^"]*index\.ts\.bundle[^"]*)"/i);
   return m?.[1] || null;
 }
 
-async function waitForReady(timeoutMs = 150_000) {
+async function waitForReady(timeoutMs = 170_000) {
   const startedAt = Date.now();
   let lastErr = "";
 
@@ -35,7 +34,6 @@ async function waitForReady(timeoutMs = 150_000) {
 
       const bundlePath = extractBundlePath(root.text);
       if (!bundlePath) {
-        // Aún no insertó el script (o algo raro en HTML)
         lastErr = `No bundle script found in HTML (len=${root.text.length})`;
         await sleep(750);
         continue;
@@ -45,7 +43,6 @@ async function waitForReady(timeoutMs = 150_000) {
       const bundle = await fetchText(bundleUrl);
 
       if (bundle.ok && bundle.text && bundle.text.length > 500) {
-        // READY: Expo sirve HTML + bundle real
         console.log(`[e2e-webserver] READY ${baseURL}`);
         return;
       }
@@ -62,17 +59,10 @@ async function waitForReady(timeoutMs = 150_000) {
 }
 
 function startExpo() {
-  // En monorepo, SIEMPRE es mejor targetear el workspace app:
-  // Ajusta el filtro si tu app tiene otro nombre.
-  //
-  // Opción A (recomendada): si tu app se llama "handover-pro" en package.json:
-  // const cmd = ["pnpm", ["--filter", "handover-pro", "web", "--", "--no-dev", "--minify", "--port", String(port), "--host", "127.0.0.1"]];
-  //
-  // Opción B: si el script web está en apps/mobile o apps/app:
-  // cambia el --filter.
-
   const filterName = process.env.E2E_APP_FILTER || "handover-pro";
 
+  // ✅ FIX: Expo espera --host en {lan|tunnel|localhost}, no IP literal.
+  // Usamos localhost para CI, y mantenemos baseURL 127.0.0.1 (equivalente).
   const pnpmArgs = [
     "--filter",
     filterName,
@@ -83,7 +73,7 @@ function startExpo() {
     "--port",
     String(port),
     "--host",
-    "127.0.0.1",
+    "localhost",
   ];
 
   console.log(`[e2e-webserver] Starting Expo web on ${baseURL} (filter=${filterName})`);
@@ -111,7 +101,6 @@ function startExpo() {
 (async () => {
   const child = startExpo();
 
-  // Si Expo muere antes de estar listo, cortamos aquí.
   child.on("exit", (code) => {
     if (code !== 0) {
       console.error(`[e2e-webserver] Expo process exited with code ${code}`);
@@ -121,8 +110,7 @@ function startExpo() {
 
   await waitForReady(170_000);
 
-  // Mantén el proceso vivo mientras Playwright corre.
-  // Playwright gestiona el lifecycle del webServer.
+  // Mantén vivo el proceso mientras Playwright corre
   // eslint-disable-next-line no-constant-condition
   while (true) {
     await sleep(10_000);
