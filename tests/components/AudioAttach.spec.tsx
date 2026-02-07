@@ -22,7 +22,11 @@ const mockRecorder: MockRecorder = {
   uri: null,
   prepareToRecordAsync: vi.fn(async () => undefined),
   record: vi.fn(),
-  stop: vi.fn(async () => 'file://test-audio.m4a'),
+  stop: vi.fn(async () => {
+    mockRecorder.uri = 'file://test-audio.m4a';
+    mockRecorder.isRecording = false;
+    return mockRecorder.uri;
+  }),
 };
 
 vi.mock('expo-audio', () => ({
