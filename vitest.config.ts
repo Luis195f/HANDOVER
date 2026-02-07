@@ -63,20 +63,25 @@ export default defineConfig({
      * IMPORTANTE:
      * - NO inline react-native-svg.
      * - Mockeamos victory-native para que NO arrastre react-native-svg en tests.
+     *
+     * Nota Vitest:
+     * - "deps.inline" está deprecado. Usar "server.deps.inline".
      */
-    deps: {
-      inline: [
-        "react-native",
-        "@testing-library/react-native",
-        "@expo/vector-icons",
-        "expo-av",
-        "expo-modules-core",
-        "expo-file-system",
-      ],
-      optimizer: {
-        esbuildOptions: {
-          loader: {
-            ".js": "jsx",
+    server: {
+      deps: {
+        inline: [
+          "react-native",
+          "@testing-library/react-native",
+          "@expo/vector-icons",
+          "expo-av",
+          "expo-modules-core",
+          "expo-file-system",
+        ],
+        optimizer: {
+          esbuildOptions: {
+            loader: {
+              ".js": "jsx",
+            },
           },
         },
       },
