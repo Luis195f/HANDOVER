@@ -8,13 +8,21 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   retries: process.env.CI ? 1 : 0,
   use: {
-    baseURL: `http://localhost:${webPort}`,
+    baseURL: `http://127.0.0.1:${webPort}`,
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `EXPO_PUBLIC_E2E=true pnpm web -- --non-interactive --no-dev --minify --port ${webPort}`,
-    url: `http://localhost:${webPort}`,
+    // OJO: Expo NO soporta --non-interactive, por eso fallaba.
+    // Mantengo tus flags válidos: --no-dev, --minify y --port.
+    command: `pnpm web -- --no-dev --minify --port ${webPort}`,
+    url: `http://127.0.0.1:${webPort}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      EXPO_PUBLIC_E2E: "true",
+      CI: process.env.CI ? "1" : process.env.CI,
+      EXPO_NO_TELEMETRY: "1",
+    },
   },
 });
