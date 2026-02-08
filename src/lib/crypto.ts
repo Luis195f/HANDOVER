@@ -1,6 +1,6 @@
 import CryptoJS from 'crypto-js';
 import * as Crypto from 'expo-crypto';
-import { gcm } from '@noble/ciphers/aes';
+import { gcm } from '@noble/ciphers/aes.js';
 import { sha256 } from 'js-sha256';
 import { Buffer } from 'buffer';
 
@@ -133,8 +133,8 @@ export async function encryptOfflinePayload(plaintext: unknown): Promise<string>
   const iv = await Crypto.getRandomBytesAsync(GCM_IV_SIZE);
   const encoder = new TextEncoder();
   const data = encoder.encode(ensurePlaintext(plaintext));
-  const cipher = gcm(keyBytes, iv);
-  const cipherBytes = cipher.encrypt(data);
+  const cipher = gcm(keyBytes);
+  const decryptedBytes = cipher.decrypt(iv, combined);
   const tagBytes = cipherBytes.slice(cipherBytes.length - 16);
   const ctBytes = cipherBytes.slice(0, cipherBytes.length - 16);
 
