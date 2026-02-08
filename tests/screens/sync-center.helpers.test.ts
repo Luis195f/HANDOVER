@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildIssuesText,
-  formatIssueLine,
-  parseErrorIssuesJson,
-  resolveErrorCopy,
-} from '@/src/screens/SyncCenter.helpers';
+import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from '@/src/screens/SyncCenter.helpers';
+import { formatIssueLine } from '@/src/lib/sync-errors';
 
 describe('SyncCenter helpers', () => {
   it('parses issues JSON defensively', () => {
@@ -34,8 +30,8 @@ describe('SyncCenter helpers', () => {
 
   it('resolves error copy depending on status', () => {
     expect(resolveErrorCopy(422)).toMatchObject({
-      title: 'Datos inválidos',
-      subtitle: 'Datos inválidos',
+      title: 'Error de validación FHIR',
+      subtitle: 'Error de validación FHIR',
     });
     expect(resolveErrorCopy(500).title).toBe('Error del servidor');
   });

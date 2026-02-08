@@ -53,6 +53,8 @@ import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
 import { validateBundle } from '@/src/lib/fhir-validation';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
+import { forceSync, getSyncSnapshot, subscribeSyncStatus } from '@/src/lib/sync';
+import { getValidationErrorDetails } from '@/src/lib/sync-errors';
 import { AI_BACKEND_ENABLED, AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
@@ -194,6 +196,16 @@ const styles = StyleSheet.create({
   sbarTitle: { fontWeight: '700', marginBottom: 8, fontSize: 16 },
   sbarText: { fontFamily: 'monospace' },
   helperText: { marginTop: 6, color: '#4B5563' },
+  syncNotice: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  syncNoticeTitle: { fontWeight: '700', marginBottom: 4 },
+  syncNoticeMessage: { fontSize: 13 },
+  syncNoticeActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  syncNoticeCta: { fontWeight: '600' },
   e2eControls: {
     marginBottom: 16,
     padding: 12,
@@ -1050,6 +1062,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const [audioUploadToFhir, setAudioUploadToFhir] = useState(false);
   const [audioUploadStatus, setAudioUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
+  const [syncSnapshot, setSyncSnapshot] = useState(getSyncSnapshot());
+  const [handoverSyncStatus, setHandoverSyncStatus] = useState<'idle' | 'queued' | 'syncing' | 'synced' | 'error'>('idle');
+  const [handoverSyncError, setHandoverSyncError] = useState<string | null>(null);
   const aiSbarAvailable = AI_SBAR_ENABLED;
   const aiSbarGenerationAvailable = AI_BACKEND_ENABLED;
 
@@ -1059,6 +1074,26 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       setAudioUploadError(null);
     }
   }, [audioUploadToFhir]);
+
+  useEffect(() => subscribeSyncStatus(setSyncSnapshot), []);
+
+  useEffect(() => {
+    if (handoverSyncStatus === 'idle') return;
+    if (syncSnapshot.lastError) {
+      setHandoverSyncStatus('error');
+      setHandoverSyncError(syncSnapshot.lastError);
+      return;
+    }
+    if (syncSnapshot.status === 'running' || syncSnapshot.pendingCount > 0) {
+      setHandoverSyncStatus('syncing');
+      setHandoverSyncError(null);
+      return;
+    }
+    if (syncSnapshot.status === 'idle' && syncSnapshot.pendingCount === 0) {
+      setHandoverSyncStatus('synced');
+      setHandoverSyncError(null);
+    }
+  }, [handoverSyncStatus, syncSnapshot]);
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -1757,9 +1792,19 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             token: freshToken ?? activeSession?.accessToken ?? null,
           });
           if (!validation.ok) {
+            const issueDetails = getValidationErrorDetails(validation.issues);
+            const buttons: AlertButton[] = [];
+            if (issueDetails) {
+              buttons.push({
+                text: t('sync.viewDetails'),
+                onPress: () => Alert.alert(t('sync.errorDetailsTitle'), issueDetails),
+              });
+            }
+            buttons.push({ text: t('common.close'), style: 'cancel' });
             Alert.alert(
               t('handover.fhirValidationTitle'),
               validation.message ?? t('handover.fhirValidationServerRejectedMessage'),
+              buttons,
             );
             return;
           }
@@ -1775,6 +1820,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         specialtyId,
         signerId,
       });
+      setHandoverSyncStatus('queued');
+      setHandoverSyncError(null);
 
       const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
       const auditUnitId =
@@ -1999,6 +2046,33 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     fontSize: fontSizes.sm,
     fontWeight: '600',
   };
+  const syncNoticeCopy = useMemo(() => {
+    switch (handoverSyncStatus) {
+      case 'queued':
+        return t('handover.syncQueuedMessage');
+      case 'syncing':
+        return t('handover.syncSyncingMessage');
+      case 'synced':
+        return t('handover.syncSyncedMessage');
+      case 'error':
+        return t('handover.syncErrorMessage', { error: handoverSyncError ?? t('sync.syncErrorTitle') });
+      case 'idle':
+      default:
+        return '';
+    }
+  }, [handoverSyncError, handoverSyncStatus, t]);
+  const syncNoticeColors = useMemo(() => {
+    if (handoverSyncStatus === 'error') {
+      return { backgroundColor: `${colors.danger}12`, borderColor: colors.danger, textColor: colors.danger };
+    }
+    if (handoverSyncStatus === 'synced') {
+      return { backgroundColor: `${colors.success}12`, borderColor: colors.success, textColor: colors.success };
+    }
+    if (handoverSyncStatus === 'syncing' || handoverSyncStatus === 'queued') {
+      return { backgroundColor: `${colors.warning}12`, borderColor: colors.warning, textColor: colors.warning };
+    }
+    return { backgroundColor: `${colors.info}12`, borderColor: colors.info, textColor: colors.info };
+  }, [colors, handoverSyncStatus]);
 
   return (
     <FormProvider {...form}>
@@ -2020,6 +2094,37 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
         <PatientBanner summary={bannerSummary} loading={bannerLoading} error={patientSummaryError} />
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
+        {handoverSyncStatus !== 'idle' ? (
+          <View
+            style={[
+              styles.syncNotice,
+              { backgroundColor: syncNoticeColors.backgroundColor, borderColor: syncNoticeColors.borderColor },
+            ]}
+          >
+            <Text style={[styles.syncNoticeTitle, { color: syncNoticeColors.textColor }]}>{t('sync.syncTitle')}</Text>
+            <Text style={[styles.syncNoticeMessage, { color: colors.text }]}>{syncNoticeCopy}</Text>
+            <View style={styles.syncNoticeActions}>
+              {handoverSyncStatus === 'error' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    void forceSync();
+                  }}
+                >
+                  <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.retryNow')}</Text>
+                </Pressable>
+              ) : null}
+              {syncSnapshot.status === 'paused' ? (
+                <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Login')}>
+                  <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.loginCta')}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable accessibilityRole="button" onPress={() => navigation.navigate('SyncCenter')}>
+                <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.openSyncCenter')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         {isE2E ? (
           <View style={styles.e2eControls} testID="e2e-controls">
             <Text style={styles.e2eTitle}>E2E controles</Text>
