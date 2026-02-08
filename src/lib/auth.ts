@@ -646,7 +646,10 @@ async function handleTokenResponse(response: TokenResponse, discovery: Discovery
 let pendingAuthRequest: AuthRequestLike | null = null;
 
 function createAuthRequest(): AuthRequestLike {
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: oidcConfig.redirectScheme, path: 'redirect' });
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: oidcConfig.redirectScheme,
+    path: 'redirect',
+  });
 
   const request = new AuthSession.AuthRequest({
     clientId: oidcConfig.clientId,
@@ -656,6 +659,7 @@ function createAuthRequest(): AuthRequestLike {
     redirectUri,
     extraParams: { audience: oidcConfig.audience },
   });
+
   return request as unknown as AuthRequestLike;
 }
 
