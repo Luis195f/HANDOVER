@@ -1,35 +1,32 @@
+// src/types/noble-ciphers-compat.d.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Compat typings for @noble/ciphers AES-GCM.
- * Only for TypeScript – runtime comes from the real package.
+ * Compat typings for @noble/ciphers subpath imports used in this repo.
+ * Compile-time only. Runtime behavior is unchanged.
  *
- * This project uses the "factory with nonce" call style:
- *   const cipher = gcm(key, nonce)
- *   cipher.encrypt(plaintext[, aad])
- *   cipher.decrypt(ciphertext[, aad])
+ * This matches the API shape used by current @noble/ciphers versions:
+ *   const cipher = gcm(key);
+ *   const ct = cipher.encrypt(nonce, plaintext, aad?);
+ *   const pt = cipher.decrypt(nonce, ciphertext, aad?);
  */
 
-type Uint8 = Uint8Array;
-
-declare module '@noble/ciphers/aes' {
+declare module '@noble/ciphers/aes.js' {
   export type AesGcmCipher = {
-    encrypt(plaintext: Uint8, aad?: Uint8): Uint8;
-    decrypt(ciphertext: Uint8, aad?: Uint8): Uint8;
+    encrypt(nonce: Uint8Array, plaintext: Uint8Array, aad?: Uint8Array): Uint8Array;
+    decrypt(nonce: Uint8Array, ciphertext: Uint8Array, aad?: Uint8Array): Uint8Array;
   };
 
-  // Common runtime shape used in this repo: gcm(key, nonce) => cipher
-  export function gcm(key: Uint8, nonce: Uint8): AesGcmCipher;
-
-  // Some bundlers/envs may also allow gcm(key) returning a builder.
-  // Keep a permissive overload so TS doesn't block alternate usage.
-  export function gcm(key: Uint8): {
-    (nonce: Uint8): AesGcmCipher;
-    encrypt(nonce: Uint8, plaintext: Uint8, aad?: Uint8): Uint8;
-    decrypt(nonce: Uint8, ciphertext: Uint8, aad?: Uint8): Uint8;
-  };
+  export function gcm(key: Uint8Array): AesGcmCipher;
 }
 
-declare module '@noble/ciphers/aes.js' {
-  export * from '@noble/ciphers/aes';
+// Opcional: si en algún sitio importas sin ".js", puedes cubrirlo también.
+// Si NO lo importas, lo puedes borrar.
+declare module '@noble/ciphers/aes' {
+  export type AesGcmCipher = {
+    encrypt(nonce: Uint8Array, plaintext: Uint8Array, aad?: Uint8Array): Uint8Array;
+    decrypt(nonce: Uint8Array, ciphertext: Uint8Array, aad?: Uint8Array): Uint8Array;
+  };
+
+  export function gcm(key: Uint8Array): AesGcmCipher;
 }
