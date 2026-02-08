@@ -490,7 +490,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         acc[key] = React.createRef<View>();
         return acc;
       },
-      {} as Record<SectionKey, React.RefObject<View | null>>,
+      {} as Record<SectionKey, React.RefObject<View | null>>
     ),
   [],
 );
