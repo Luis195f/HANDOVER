@@ -362,9 +362,12 @@ async function performAuth0Login(options: {
   return session;
 }
 
-export async function loginWithOAuth(config?: Partial<OAuthConfig>): Promise<SessionModel> {
+export async function loginWithOAuth(
+  config?: Partial<OAuthConfig>,
+): Promise<SessionModel> {
   const merged = buildAuthConfig(config);
   const discovery = await AuthSession.fetchDiscoveryAsync(merged.issuer);
+
   const request = new AuthSession.AuthRequest({
     clientId: merged.clientId,
     redirectUri: merged.redirectUri,
