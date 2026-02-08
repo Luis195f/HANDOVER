@@ -134,7 +134,7 @@ export async function encryptOfflinePayload(plaintext: unknown): Promise<string>
   const encoder = new TextEncoder();
   const data = encoder.encode(ensurePlaintext(plaintext));
   const cipher = gcm(keyBytes);
-  const decryptedBytes = cipher.decrypt(iv, combined);
+  const cipherBytes = cipher.encrypt(iv, data);
   const tagBytes = cipherBytes.slice(cipherBytes.length - 16);
   const ctBytes = cipherBytes.slice(0, cipherBytes.length - 16);
 
@@ -185,8 +185,8 @@ async function decryptEnvelope(envelope: EncryptedEnvelopeV1): Promise<string> {
   combined.set(tagBytes, ctBytes.length);
 
   try {
-    const cipher = gcm(keyBytes, iv);
-    const decryptedBytes = cipher.decrypt(combined);
+    const cipher = gcm(keyBytes);
+    const decryptedBytes = cipher.decrypt(iv, combined);
     const decoder = new TextDecoder();
     return decoder.decode(decryptedBytes);
   } catch (error) {
