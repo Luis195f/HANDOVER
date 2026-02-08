@@ -481,6 +481,18 @@ export default function PatientList({ navigation }: Props) {
                     ? t("patientList.syncQueued")
                     : t("patientList.syncSynced")}
                 </Text>
+                {syncState !== "synced" ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t("patientList.syncDetailsAccessibility")}
+                    onPress={() => navigation.navigate("SyncCenter")}
+                    style={styles.syncLink}
+                  >
+                    <Text style={[styles.syncLinkText, { color: colors.info }]}>
+                      {t("patientList.syncDetails")}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
               {/* END HANDOVER_OFFLINE */}
               <View style={styles.priorityRow}>
@@ -644,6 +656,8 @@ const styles = StyleSheet.create({
   syncRow: {
     marginTop: 6,
     flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   syncBadge: {
     paddingHorizontal: 10,
@@ -663,6 +677,14 @@ const styles = StyleSheet.create({
   syncBadgeSynced: {
     backgroundColor: "#a7f3d0",
     color: "#064e3b",
+  },
+  syncLink: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  syncLinkText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
   // END HANDOVER_OFFLINE
   priorityRow: {

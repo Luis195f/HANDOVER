@@ -31,6 +31,7 @@ import {
 } from './queue';
 import { signBundleIfEnabled } from '../security/crypto';
 import { notifySyncStopped } from './notifications';
+import { resolveSyncErrorMessage } from './sync-errors';
 
 export type LegacyQueueItem = {
   patientId: string;
@@ -714,11 +715,7 @@ export async function processQueueOnce(): Promise<void> {
     const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
 
     if (status && status >= 400 && status < 500 && !isAuthError) {
-      const userFacingMessage =
-        status === 422
-          ? 'Sincronización detenida: error 422 en validación FHIR'
-          : `Error en sincronización: ${status}`;
-      const errorMessage = userFacingMessage;
+      const errorMessage = resolveSyncErrorMessage(status, result.message);
       await updateOfflineQueueStatus(item.id, 'error', {
         attemptCount,
         lastAttemptAt: startedAt,
@@ -726,7 +723,7 @@ export async function processQueueOnce(): Promise<void> {
         errorStatus: status,
         errorIssuesJson: cappedIssuesJson,
       });
-      updateSyncSnapshot({ lastError: userFacingMessage });
+      updateSyncSnapshot({ lastError: errorMessage });
       if (status === 422) {
         void notifySyncStopped(status);
       }

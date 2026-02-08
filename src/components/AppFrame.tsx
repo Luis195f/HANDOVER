@@ -4,6 +4,7 @@ import { SafeAreaView, View, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import OfflineBanner from '@/src/components/OfflineBanner';
+import SyncStatusBanner from '@/src/components/SyncStatusBanner';
 import type { RootStackParamList } from '@/src/navigation/types';
 
 type Props = { children: React.ReactNode };
@@ -14,6 +15,7 @@ export default function AppFrame({ children }: Props) {
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         <OfflineBanner onPress={() => nav.navigate('SyncCenter')} />
+        <SyncStatusBanner onOpenSyncCenter={() => nav.navigate('SyncCenter')} />
         <View style={styles.content}>{children}</View>
       </View>
     </SafeAreaView>
