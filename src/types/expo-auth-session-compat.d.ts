@@ -17,14 +17,16 @@ declare module "expo-auth-session" {
 
   // ---- Request classes / hooks (used by some flows) ----
   export class AuthRequest {
-    codeVerifier?: string;
-    codeChallengeMethod?: string;
+  codeVerifier?: string;
+  codeChallengeMethod?: string;
 
-    promptAsync(
-      discovery: DiscoveryDocument | null,
-      options?: any
-    ): Promise<AuthSessionResult>;
-  }
+  constructor(config?: any);
+
+  promptAsync(
+    discovery: DiscoveryDocument | null,
+    options?: any
+  ): Promise<AuthSessionResult>;
+}
 
   export function useAutoDiscovery(issuer: string): DiscoveryDocument | null;
 
