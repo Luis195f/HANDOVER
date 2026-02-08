@@ -1,48 +1,16 @@
-import type { OperationIssue } from '@/src/lib/fhir-outcome';
-import { getUserFacingNetworkMessage } from '@/src/lib/net-errors';
-
-export function parseErrorIssuesJson(raw?: string | null): OperationIssue[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((issue): issue is OperationIssue => !!issue && typeof issue === 'object');
-  } catch {
-    return [];
-  }
-}
-
-export function formatIssueLine(issue: OperationIssue): string | null {
-  if (!issue || typeof issue !== 'object') return null;
-  const expression = Array.isArray(issue.expression)
-    ? issue.expression.filter((it): it is string => typeof it === 'string').join(', ')
-    : typeof issue.expression === 'string'
-    ? issue.expression
-    : null;
-  const detail = issue.diagnostics ?? issue.details?.text ?? issue.code;
-  if (expression && detail) return `${expression}: ${detail}`;
-  return detail ?? expression ?? null;
-}
-
-export function buildIssuesText(issues: OperationIssue[]): string {
-  const lines = issues.map(formatIssueLine).filter(Boolean) as string[];
-  if (lines.length === 0) return '';
-  return lines.map((line) => `• ${line}`).join('\n');
-}
+import { buildIssuesText, parseErrorIssuesJson, getSyncErrorMessage } from '@/src/lib/sync-errors';
 
 export function resolveErrorCopy(errorStatus?: number | null): {
   title: string;
   subtitle: string;
   message: string;
 } {
-  const hasStatus = typeof errorStatus === 'number';
-  const ui = getUserFacingNetworkMessage(
-    hasStatus ? { kind: 'HTTP', status: errorStatus ?? undefined } : { kind: 'UNKNOWN' },
-    { log: false },
-  );
+  const ui = getSyncErrorMessage(errorStatus);
   return {
     title: ui.title,
     subtitle: ui.title,
     message: ui.message,
   };
 }
+
+export { buildIssuesText, parseErrorIssuesJson };

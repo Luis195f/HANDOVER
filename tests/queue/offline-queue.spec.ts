@@ -114,7 +114,7 @@ describe('offline queue end-to-end', () => {
     const pending = items.filter((item) => item.syncStatus === 'pending' || item.syncStatus === 'inFlight');
     expect(pending).toHaveLength(0);
     expect(items[0]?.syncStatus).toBe('error');
-    expect(items[0]?.errorMessage).toBe('Sincronización detenida: error 422 en validación FHIR');
+    expect(items[0]?.errorMessage).toBe('Sincronización detenida: validación remota fallida (422).');
 
     const scheduleSpy = vi.mocked(Notifications.scheduleNotificationAsync);
     expect(scheduleSpy).toHaveBeenCalled();
