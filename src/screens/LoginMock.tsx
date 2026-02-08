@@ -1,9 +1,11 @@
 // src/screens/LoginMock.tsx
 import React from "react";
-import { View, Text, Button } from "react-native";
+import { View, Text } from "react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import { loginWithMockUser } from '@/src/lib/auth';
 import type { RootStackParamList } from '@/src/navigation/types';
+import { t } from '@/src/i18n';
+import { PrimaryButton } from '@/src/components/PrimaryButton';
 
 export default function LoginMock() {
   const nav = useNavigation<NavigationProp<RootStackParamList>>();
@@ -20,12 +22,21 @@ export default function LoginMock() {
   };
 
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <Text style={{ fontSize: 20, fontWeight: "600", marginBottom: 12 }}>Ingreso (Mock)</Text>
-      <Text style={{ textAlign: "center", marginBottom: 24 }}>
-        Este login simula OIDC/SMART en FASE 0. Se reemplazará por OAuth real.
+    <View
+      accessibilityRole="summary"
+      style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}
+    >
+      <Text allowFontScaling style={{ fontSize: 20, fontWeight: "600", marginBottom: 12 }}>
+        {t("loginMock.title")}
       </Text>
-      <Button title="Entrar como enfermera" onPress={onLogin} />
+      <Text allowFontScaling style={{ textAlign: "center", marginBottom: 24 }}>
+        {t("loginMock.description")}
+      </Text>
+      <PrimaryButton
+        label={t("loginMock.cta")}
+        onPress={onLogin}
+        accessibilityHint={t("loginMock.ctaHint")}
+      />
     </View>
   );
 }

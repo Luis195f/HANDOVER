@@ -1,8 +1,12 @@
 {
   "common": {
+    "_comment": "Etiquetas compartidas en toda la interfaz.",
     "error": "Error",
     "ok": "OK",
     "cancel": "Cancelar",
+    "save": "Guardar",
+    "add": "Añadir",
+    "remove": "Eliminar",
     "understood": "Entendido",
     "retry": "Reintentar",
     "openSettings": "Abrir Ajustes",
@@ -133,16 +137,20 @@
     "scanPromptSubtitle": "Centra el código dentro del recuadro. Se detectará automáticamente."
   },
   "login": {
+    "_comment": "Textos de la pantalla de inicio de sesión.",
     "title": "Handover Pro",
     "subtitle": "Inicia sesión con tu cuenta.",
     "usernameLabel": "Usuario",
     "usernamePlaceholder": "Usuario",
+    "usernameHint": "Introduce tu usuario.",
     "usernameRequired": "El usuario es obligatorio",
     "passwordLabel": "Contraseña",
     "passwordPlaceholder": "Contraseña",
+    "passwordHint": "Introduce tu contraseña.",
     "passwordRequired": "La contraseña es obligatoria",
     "signIn": "Iniciar sesión",
     "signInAccessibility": "Iniciar sesión con credenciales",
+    "signInHint": "Autentica con el usuario y contraseña ingresados.",
     "loading": "Cargando…",
     "offlineAlertTitle": "Sin conexión a Internet",
     "offlineAlertMessage": "Conéctate para iniciar sesión.",
@@ -150,10 +158,23 @@
     "invalidCredentialsMessage": "Usuario o contraseña incorrectos.",
     "loginErrorTitle": "Error de inicio de sesión",
     "loginErrorMessage": "No se pudo iniciar sesión. Intenta de nuevo.",
+    "oauthUnavailableMessage": "OAuth no está disponible en este build.",
     "offlineIndicator": "Sin conexión a Internet",
+    "oauthButton": "Continuar con Auth0",
+    "oauthConnecting": "Conectando…",
+    "oauthAccessibility": "Continuar con Auth0",
+    "oauthHint": "Inicia sesión con la cuenta de tu organización.",
     "demoButton": "Iniciar demo",
     "demoAccessibility": "Iniciar demo con datos ficticios",
+    "demoHint": "Accede al modo demo con datos de ejemplo.",
     "demoHelper": "Modo demo – datos ficticios, no usar con pacientes reales."
+  },
+  "loginMock": {
+    "_comment": "Pantalla de login simulada para entornos de desarrollo o demo.",
+    "title": "Ingreso (Mock)",
+    "description": "Este login simula OIDC/SMART en fase 0. Se reemplazará por OAuth real.",
+    "cta": "Entrar como enfermera",
+    "ctaHint": "Accede con un perfil de enfermería simulado."
   },
   "export": {
     "pdfSuccessTitle": "Exportación completada",
@@ -232,6 +253,7 @@
     "next": "Siguiente"
   },
   "sync": {
+    "_comment": "Centro de sincronización y estado de la cola.",
     "title": "Sync Center",
     "syncTitle": "Sync",
     "syncErrorTitle": "Error en sincronización",
@@ -259,9 +281,25 @@
     "dateLabel": "Fecha: {{date}}",
     "attemptsLabel": "Intentos: {{count}}",
     "viewError": "Ver error",
-    "hashLabel": "hash"
+    "hashLabel": "hash",
+    "unknownStatus": "desconocido",
+    "autoRetryAccessibilityLabel": "Auto-reintento",
+    "autoRetryAccessibilityHint": "Activa o desactiva los reintentos automáticos.",
+    "intervalDecreaseLabel": "Reducir intervalo",
+    "intervalDecreaseHint": "Disminuye el intervalo de reintento automático.",
+    "intervalIncreaseLabel": "Aumentar intervalo",
+    "intervalIncreaseHint": "Aumenta el intervalo de reintento automático.",
+    "intervalValueLabel": "{{seconds}}s",
+    "status": {
+      "_comment": "Etiquetas cortas para el estado de la cola.",
+      "pending": "PENDIENTE",
+      "queued": "EN COLA",
+      "synced": "SINCRONIZADO",
+      "running": "SINCRONIZANDO"
+    }
   },
   "handover": {
+    "_comment": "Textos del formulario de entrega y asistente.",
     "dictationProcessing": "Procesando dictado…",
     "aiNotAvailable": "IA no disponible",
     "sbarGenerate": "Generar SBAR",
@@ -317,7 +355,55 @@
     "alertsSectionTitle": "Alertas",
     "news2AlertLine": "NEWS2 {{total}} ({{band}})",
     "spo2LowAlertLine": "SpO₂ menor a 90%",
-    "formReviewPdfMessage": "Completa los campos obligatorios antes de exportar el PDF."
+    "formReviewPdfMessage": "Completa los campos obligatorios antes de exportar el PDF.",
+    "actions": {
+      "_comment": "Botones del pie del formulario de entrega.",
+      "saveDraft": "Guardar borrador",
+      "finalize": "Finalizar entrega"
+    }
+  },
+  "shiftDetails": {
+    "_comment": "Pantalla de detalles del turno y ayudas de accesibilidad.",
+    "unitSectionTitle": "Datos de unidad",
+    "unitLabel": "Unidad",
+    "unitPlaceholder": "UCI Adulto",
+    "unitHint": "Introduce el nombre de la unidad.",
+    "censusLabel": "Censo de pacientes",
+    "censusPlaceholder": "0",
+    "censusHint": "Introduce el número de pacientes.",
+    "scheduleSectionTitle": "Horario",
+    "shiftStartLabel": "Inicio de turno",
+    "shiftStartPlaceholder": "2024-01-01T08:00",
+    "shiftStartHint": "Introduce fecha y hora de inicio del turno.",
+    "shiftEndLabel": "Fin de turno",
+    "shiftEndPlaceholder": "2024-01-01T20:00",
+    "shiftEndHint": "Introduce fecha y hora de fin del turno.",
+    "shiftTypeLabel": "Tipo de turno",
+    "shiftTypeHint": "Selecciona el tipo de turno.",
+    "shiftType": {
+      "morning": "Mañana",
+      "afternoon": "Tarde",
+      "night": "Noche"
+    },
+    "staffSectionTitle": "Personal entrante/saliente",
+    "staffInLabel": "Personal entrante",
+    "staffOutLabel": "Personal saliente",
+    "staffPlaceholder": "Nombre {{index}}",
+    "staffHint": "Introduce el nombre del profesional.",
+    "addStaffHint": "Añade otra persona al listado.",
+    "removeStaffHint": "Elimina la entrada {{index}} de personal.",
+    "observationsSectionTitle": "Observaciones",
+    "generalNotesLabel": "Notas generales",
+    "generalNotesPlaceholder": "Notas generales del turno",
+    "generalNotesHint": "Introduce notas generales del turno.",
+    "incidentsLabel": "Observaciones/Incidentes",
+    "incidentsPlaceholder": "Incidencia {{index}}",
+    "incidentsHint": "Describe la incidencia.",
+    "incidentsHelper": "Registra cada observación en una línea diferente.",
+    "addIncidentHint": "Añade otra incidencia.",
+    "removeIncidentHint": "Elimina la incidencia {{index}}.",
+    "saveHint": "Guarda los detalles del turno.",
+    "cancelHint": "Vuelve sin guardar cambios."
   },
   "patientList": {
     "notFoundTitle": "Paciente no encontrado",

@@ -64,7 +64,7 @@ export default function LoginScreen() {
   const handleOAuth = useCallback(async () => {
     if (!ensureOnline()) return;
     if (!loginWithOAuth) {
-      Alert.alert(t("login.loginErrorTitle"), "OAuth no disponible en este build.");
+      Alert.alert(t("login.loginErrorTitle"), t("login.oauthUnavailableMessage"));
       return;
     }
     setOauthSubmitting(true);
@@ -138,11 +138,11 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{t("login.title")}</Text>
-      <Text style={styles.subtitle}>{t("login.subtitle")}</Text>
+      <Text allowFontScaling style={styles.title}>{t("login.title")}</Text>
+      <Text allowFontScaling style={styles.subtitle}>{t("login.subtitle")}</Text>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>{t("login.usernameLabel")}</Text>
+        <Text allowFontScaling style={styles.label}>{t("login.usernameLabel")}</Text>
         <Controller
           control={control}
           name="username"
@@ -150,9 +150,11 @@ export default function LoginScreen() {
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               accessibilityLabel={t("login.usernameLabel")}
+              accessibilityHint={t("login.usernameHint")}
               testID="login-username"
               placeholder={t("login.usernamePlaceholder")}
               placeholderTextColor={colors.muted}
+              allowFontScaling
               autoCapitalize="none"
               autoCorrect={false}
               onBlur={onBlur}
@@ -162,11 +164,11 @@ export default function LoginScreen() {
             />
           )}
         />
-        {errors.username ? <Text style={styles.errorText}>{errors.username.message}</Text> : null}
+        {errors.username ? <Text allowFontScaling style={styles.errorText}>{errors.username.message}</Text> : null}
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>{t("login.passwordLabel")}</Text>
+        <Text allowFontScaling style={styles.label}>{t("login.passwordLabel")}</Text>
         <Controller
           control={control}
           name="password"
@@ -174,9 +176,11 @@ export default function LoginScreen() {
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               accessibilityLabel={t("login.passwordLabel")}
+              accessibilityHint={t("login.passwordHint")}
               testID="login-password"
               placeholder={t("login.passwordPlaceholder")}
               placeholderTextColor={colors.muted}
+              allowFontScaling
               secureTextEntry
               onBlur={onBlur}
               onChangeText={onChange}
@@ -185,7 +189,7 @@ export default function LoginScreen() {
             />
           )}
         />
-        {errors.password ? <Text style={styles.errorText}>{errors.password.message}</Text> : null}
+        {errors.password ? <Text allowFontScaling style={styles.errorText}>{errors.password.message}</Text> : null}
       </View>
 
       <Pressable
@@ -193,11 +197,12 @@ export default function LoginScreen() {
         style={[styles.button, styles.primaryButton, (!isOnline || isBusy) ? { opacity: 0.6 } : null]}
         accessibilityRole="button"
         accessibilityLabel={t("login.signInAccessibility")}
+        accessibilityHint={t("login.signInHint")}
         testID="login-submit"
         disabled={!isOnline || isBusy}
       >
         {submitting ? <ActivityIndicator color={colors.onPrimary} /> : null}
-        <Text style={[styles.buttonText, styles.primaryText]}>
+        <Text allowFontScaling style={[styles.buttonText, styles.primaryText]}>
           {submitting ? t("login.loading") : t("login.signIn")}
         </Text>
       </Pressable>
@@ -206,31 +211,33 @@ export default function LoginScreen() {
         onPress={handleOAuth}
         style={[styles.button, styles.secondaryButton, (!isOnline || isBusy) ? { opacity: 0.6 } : null]}
         accessibilityRole="button"
-        accessibilityLabel="Continuar con Auth0"
+        accessibilityLabel={t("login.oauthAccessibility")}
+        accessibilityHint={t("login.oauthHint")}
         testID="login-auth0"
         disabled={!isOnline || isBusy || !loginWithOAuth}
       >
         {oauthSubmitting ? <ActivityIndicator color={colors.text} /> : null}
-        <Text style={[styles.buttonText, styles.secondaryText]}>
-          {oauthSubmitting ? "Conectando…" : "Continuar con Auth0"}
+        <Text allowFontScaling style={[styles.buttonText, styles.secondaryText]}>
+          {oauthSubmitting ? t("login.oauthConnecting") : t("login.oauthButton")}
         </Text>
       </Pressable>
 
-      {!isOnline ? <Text style={styles.offlineText}>{t("login.offlineIndicator")}</Text> : null}
+      {!isOnline ? <Text allowFontScaling style={styles.offlineText}>{t("login.offlineIndicator")}</Text> : null}
 
       <Pressable
         onPress={handleDemo}
         style={[styles.button, styles.secondaryButton, isBusy ? { opacity: 0.6 } : null]}
         accessibilityRole="button"
         accessibilityLabel={t("login.demoAccessibility")}
+        accessibilityHint={t("login.demoHint")}
         testID="login-demo"
         disabled={isBusy}
       >
         {demoSubmitting ? <ActivityIndicator color={colors.text} /> : null}
-        <Text style={[styles.buttonText, styles.secondaryText]}>{t("login.demoButton")}</Text>
+        <Text allowFontScaling style={[styles.buttonText, styles.secondaryText]}>{t("login.demoButton")}</Text>
       </Pressable>
 
-      <Text style={styles.helper}>{t("login.demoHelper")}</Text>
+      <Text allowFontScaling style={styles.helper}>{t("login.demoHelper")}</Text>
     </View>
   );
 }
