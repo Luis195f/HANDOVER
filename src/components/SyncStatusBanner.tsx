@@ -11,8 +11,7 @@ type Props = {
   onOpenSyncCenter?: () => void;
 };
 
-// Alineado con el tipo real de tu i18n:
-// params solo admite string | number | undefined (no unknown).
+// Params i18n: solo string | number | undefined (no unknown)
 type TranslateFn = (key: string, params?: Record<string, string | number | undefined>) => string;
 
 function resolveStatusMessage(snapshot: SyncSnapshot, t: TranslateFn, now: number) {
@@ -35,13 +34,24 @@ function resolveStatusMessage(snapshot: SyncSnapshot, t: TranslateFn, now: numbe
   }
 }
 
+// lastError en tu SyncSnapshot es string (según el TS2339).
+// Igual lo convertimos de forma defensiva por si alguna capa lo cambiara.
+function toErrorText(err: unknown): string {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string') return msg;
+  }
+  return String(err);
+}
+
 export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
   const { colors } = useThemeTokens();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { t } = useTranslation();
 
-  // Cast seguro: tu `t` es más estricto (TranslationKey/TranslationParams),
-  // pero para este componente lo usamos como (string, Record<string,string|number|undefined>).
+  // Cast controlado para usar keys string sin pelear con TranslationKey/Params
   const tt = t as unknown as TranslateFn;
 
   const [snapshot, setSnapshot] = React.useState(getSyncSnapshot());
@@ -59,7 +69,9 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
   if (!shouldShow) return null;
 
   const message = resolveStatusMessage(snapshot, tt, now);
-  const hasError = Boolean(snapshot.lastError);
+
+  const errorText = toErrorText(snapshot.lastError);
+  const hasError = errorText.length > 0;
   const isPaused = snapshot.status === 'paused';
 
   const bannerBackground = isPaused
@@ -95,9 +107,9 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
       <View style={styles.content}>
         <Text style={[styles.title, { color: titleColor }]}>{message}</Text>
 
-        {hasError && snapshot.lastError ? (
+        {hasError ? (
           <Text style={[styles.detail, { color: colors.danger }]}>
-            {tt('sync.lastErrorMessage', { error: snapshot.lastError.message })}
+            {tt('sync.lastErrorMessage', { error: errorText })}
           </Text>
         ) : null}
 
