@@ -7,7 +7,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HandoverMain'>;
 
 export default function HandoverMain({ navigation, route }: Props) {
   useEffect(() => {
-    navigation.replace('HandoverForm', route.params as any);
+    navigation.replace('HandoverForm', route.params);
   }, [navigation, route.params]);
 
   return (

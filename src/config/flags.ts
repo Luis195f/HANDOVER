@@ -1,25 +1,25 @@
-import Constants from 'expo-constants';
+import { getAppConfigExtra } from "@/src/config/app-config";
 
-type Bool = boolean | '1' | 'true' | 'yes' | undefined | null;
-const truthy = (v: Bool) =>
-  String(v ?? '').toLowerCase() === '1' ||
-  v === true ||
-  String(v).toLowerCase() === 'true' ||
-  String(v).toLowerCase() === 'yes';
+type FlagValue = string | boolean | null | undefined;
 
-const extra = (Constants.expoConfig?.extra ?? {}) as any;
+const truthy = (v: FlagValue): boolean => {
+  const s = String(v ?? "").trim().toLowerCase();
+  return v === true || s === "1" || s === "true" || s === "yes" || s === "on";
+};
+
+const extra = getAppConfigExtra();
 
 export const flags = {
-  ALLOW_ALL_UNITS: extra.ALLOW_ALL_UNITS ?? process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS,
-  SHOW_SBAR: extra.FEATURES?.handover?.showSBAR ?? process.env.EXPO_PUBLIC_SHOW_SBAR,
-  SHOW_VITALS: extra.FEATURES?.handover?.showVitals ?? process.env.EXPO_PUBLIC_SHOW_VITALS,
-  SHOW_OXY: extra.FEATURES?.handover?.showOxygen ?? process.env.EXPO_PUBLIC_SHOW_OXY,
-  SHOW_MEDS: extra.FEATURES?.handover?.showMeds ?? process.env.EXPO_PUBLIC_SHOW_MEDS,
-  SHOW_ATTACH: extra.FEATURES?.handover?.showAttachments ?? process.env.EXPO_PUBLIC_SHOW_ATTACH,
-  ENABLE_ALERTS: extra.FEATURES?.handover?.enableAlerts ?? process.env.EXPO_PUBLIC_ENABLE_ALERTS,
+  ALLOW_ALL_UNITS: (extra as any)?.ALLOW_ALL_UNITS ?? process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS,
+  SHOW_SBAR: (extra as any)?.FEATURES?.handover?.showSBAR ?? process.env.EXPO_PUBLIC_SHOW_SBAR,
+  SHOW_VITALS: (extra as any)?.FEATURES?.handover?.showVitals ?? process.env.EXPO_PUBLIC_SHOW_VITALS,
+  SHOW_OXY: (extra as any)?.FEATURES?.handover?.showOxygen ?? process.env.EXPO_PUBLIC_SHOW_OXY,
+  SHOW_MEDS: (extra as any)?.FEATURES?.handover?.showMeds ?? process.env.EXPO_PUBLIC_SHOW_MEDS,
+  SHOW_ATTACH: (extra as any)?.FEATURES?.handover?.showAttachments ?? process.env.EXPO_PUBLIC_SHOW_ATTACH,
+  ENABLE_ALERTS: (extra as any)?.FEATURES?.handover?.enableAlerts ?? process.env.EXPO_PUBLIC_ENABLE_ALERTS,
   AI_SUGGESTIONS_ENABLED:
-    extra.FEATURES?.handover?.aiSuggestions ?? process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED,
-  REMOTE_CONFIG_DISABLED_FOR_NOW: extra.FEATURES?.handover?.remoteConfigDisabled,
-};
+    (extra as any)?.FEATURES?.handover?.aiSuggestions ?? process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED,
+  REMOTE_CONFIG_DISABLED_FOR_NOW: (extra as any)?.FEATURES?.handover?.remoteConfigDisabled,
+} satisfies Record<string, FlagValue>;
 
 export const isOn = (k: keyof typeof flags) => truthy(flags[k]);

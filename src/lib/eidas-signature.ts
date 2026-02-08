@@ -1,10 +1,10 @@
 import * as FileSystem from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
-import Constants from 'expo-constants';
 import { Buffer } from 'buffer';
 
 import type { GeneratedPdf } from './export/export-pdf';
 import type { HandoverSession } from '../security/auth-types';
+import { getAppConfigExtra } from '@/src/config/app-config';
 
 export type SignedPdf = {
   uri: string;
@@ -40,10 +40,7 @@ const getEidasConfig = (): EidasConfig => {
   const env = typeof process !== 'undefined' ? process.env : undefined;
 
   // 2) En runtime Expo (app.config.ts -> extra)
-  const extra =
-    (Constants as any)?.expoConfig?.extra ??
-    (Constants as any)?.manifest?.extra ??
-    {};
+  const extra = getAppConfigExtra();
 
   return {
     apiUrl: pick(

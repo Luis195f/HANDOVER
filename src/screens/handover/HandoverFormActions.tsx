@@ -22,12 +22,13 @@ export const HandoverFormActions: React.FC<HandoverFormActionsProps> = ({
   onBeforeExport,
 }) => (
   <>
-    <BotonPrimario label="Guardar borrador" onPress={onSaveDraft} />
+    <BotonPrimario label="Guardar borrador" onPress={onSaveDraft} testID="handover-save-draft" />
     <View style={styles.secondaryButton}>
       <BotonPrimario
         label="Finalizar entrega"
         onPress={onFinalize}
         disabled={finalizeDisabled}
+        testID="handover-finalize"
       />
     </View>
     <View style={styles.secondaryButton}>

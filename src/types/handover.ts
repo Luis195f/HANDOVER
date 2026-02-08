@@ -152,6 +152,12 @@ export type OxygenTherapy = {
   fio2?: number;
 };
 
+export type ClinicalScales = {
+  painAssessment?: PainAssessment;
+  braden?: BradenScale;
+  glasgow?: GlasgowScale;
+};
+
 export type PainAssessment = {
   hasPain: boolean;
   evaScore?: number | null;
@@ -226,6 +232,7 @@ export type HandoverValues = {
   skin?: SkinInfo;
   psychosocial?: PsychosocialCare;
   fluidBalance?: FluidBalanceInfo;
+  clinicalScales?: ClinicalScales;
   painAssessment?: PainAssessment;
   braden?: BradenScale;
   glasgow?: GlasgowScale;

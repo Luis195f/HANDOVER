@@ -1,6 +1,6 @@
 # Handover Pro
 
-![Backend tests](./ci-badge.svg)
+![CI](./ci-badge.svg)
 ![Coverage](./coverage-badge.svg)
 
 Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend Django opcional para pruebas locales y una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.

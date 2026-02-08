@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Button,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -193,6 +194,16 @@ const styles = StyleSheet.create({
   sbarTitle: { fontWeight: '700', marginBottom: 8, fontSize: 16 },
   sbarText: { fontFamily: 'monospace' },
   helperText: { marginTop: 6, color: '#4B5563' },
+  e2eControls: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5F5',
+    backgroundColor: '#F8FAFF',
+  },
+  e2eTitle: { fontWeight: '700', marginBottom: 8, color: '#1F2937' },
+  e2eActions: { flexDirection: 'row', gap: 12 },
   signaturePadSection: { marginBottom: 16 },
   signaturePadHint: { marginTop: 6, color: '#4B5563', fontSize: 12 },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -511,32 +522,71 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [prefilledValuesParam?.vitals]);
 
   const emptySnomedCoding: SnomedCoding = {
-    system: SNOMED_SYSTEM,
-    code: '',
-    display: '',
-  };
+  system: SNOMED_SYSTEM,
+  code: "",
+  display: "",
+};
 
-  const defaultValues = useMemo<HandoverFormValues>(() => {
-    const initialUnitConfig = getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
-    const checklistItems = initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
-    const baseChecklistDefaults: HandoverFormValues['bedsideChecklist'] = {
-      patientIdentityConfirmed: false,
-      allergiesReviewed: false,
-      linesAndDevicesChecked: false,
-      medicationPlanReviewed: false,
-      safetyMeasuresApplied: false,
-      questionsAnswered: false,
-      bedsideNotes: '',
-    };
-    const bedsideChecklistDefaults = checklistItems.reduce<
-      HandoverFormValues['bedsideChecklist'] & Record<string, boolean | string | undefined>
-    >((acc, item) => {
-      acc[item.key] = false;
-      return acc;
-    }, baseChecklistDefaults);
-    const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
-    const shiftEndDefault =
-      administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+type BedsideChecklistValue = HandoverFormValues["bedsideChecklist"];
+
+// ✅ Deja el tipo como union de strings (NO string | number)
+const BEDSIDE_CHECKLIST_KEYS = [
+  "patientIdentityConfirmed",
+  "allergiesReviewed",
+  "linesAndDevicesChecked",
+  "medicationPlanReviewed",
+  "safetyMeasuresApplied",
+  "questionsAnswered",
+] as const;
+
+type BedsideChecklistKey = (typeof BEDSIDE_CHECKLIST_KEYS)[number];
+
+const isBedsideChecklistKey = (k: string): k is BedsideChecklistKey => {
+  return (BEDSIDE_CHECKLIST_KEYS as readonly string[]).includes(k);
+};
+
+// ✅ base común (queda en scope para defaultValues Y handleE2EChecklistComplete)
+const baseChecklistDefaults: BedsideChecklistValue = {
+  patientIdentityConfirmed: false,
+  allergiesReviewed: false,
+  linesAndDevicesChecked: false,
+  medicationPlanReviewed: false,
+  safetyMeasuresApplied: false,
+  questionsAnswered: false,
+  bedsideNotes: "",
+};
+
+const normalizeChecklistItems = (rawItems: unknown): { key: BedsideChecklistKey }[] => {
+  const list = Array.isArray(rawItems) ? rawItems : [];
+  return list
+    .map((it) => ({ key: String((it as any)?.key ?? "") }))
+    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
+};
+
+const buildChecklistDefaults = (
+  checklistItems: { key: BedsideChecklistKey }[],
+  base: BedsideChecklistValue,
+): BedsideChecklistValue => {
+  const next: BedsideChecklistValue = { ...base };
+  for (const item of checklistItems) next[item.key] = false;
+  return next;
+};
+
+const defaultValues = useMemo<HandoverFormValues>(() => {
+  const initialUnitConfig =
+    getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
+
+  const rawItems =
+    initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
+
+  const checklistItems = normalizeChecklistItems(rawItems);
+
+  const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults)
+
+  const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
+  const shiftEndDefault =
+    administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+
     const administrativeDefaults: AdministrativeData = {
       unit:
         administrativeDataParam?.unit ??
@@ -605,16 +655,16 @@ export default function HandoverForm({ navigation, route }: Props) {
       audioTranscription: '',
     };
     return { ...base, risksStructured: deriveInitialRisksStructured(base) };
-  }, [
-    patientIdParam,
-    patientSummaryParam,
-    unitIdParam,
-    administrativeDataParam,
-    selectedUnitId,
-    prefilledValuesParam,
-    prefilledVitals,
-    prefillMeta,
-  ]);
+}, [
+  patientIdParam,
+  patientSummaryParam,
+  unitIdParam,
+  administrativeDataParam,
+  selectedUnitId,
+  prefilledValuesParam,
+  prefilledVitals,
+  prefillMeta,
+]);
 
   const form = useZodForm(zHandover, defaultValues);
   const { watch, reset, getValues } = form;
@@ -662,6 +712,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     'braden',
     'oxygenTherapy',
   ]);
+  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
   
   const bedsideChecklistRef = useRef<HandoverFormValues['bedsideChecklist'] | null>(null);
   const watchedValues = form.watch();
@@ -691,6 +742,57 @@ export default function HandoverForm({ navigation, route }: Props) {
       method: 'session',
     };
   };
+
+  const handleE2ESignature = () => {
+    const payload: SignaturePadValue = {
+      imageBase64:
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA' +
+        'AAC0lEQVR42mP8/5+hHgAFgwJ/lKX0LgAAAABJRU5ErkJggg==',
+      signedAt: new Date().toISOString(),
+    };
+    const built = buildOutgoingSignature(payload);
+    if (!built) return;
+
+    type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
+    const nextSignature: OutgoingSig = {
+      ...built,
+      method: (built.method ?? 'session') as OutgoingSig['method'],
+    };
+
+    form.setValue(
+      'signatures',
+      {
+        ...(signaturesValue ?? {}),
+        outgoing: nextSignature,
+      },
+      { shouldDirty: true, shouldValidate: true },
+    );
+  };
+
+  const handleE2EChecklistComplete = () => {
+  const currentChecklist =
+    (form.getValues("bedsideChecklist") ?? {}) as Partial<BedsideChecklistValue>;
+
+  const rawItems =
+    getUnitConfig(unitIdParam ?? selectedUnitId)?.features?.checklistItems ??
+    DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
+
+  const checklistItems = normalizeChecklistItems(rawItems);
+
+  const completed: BedsideChecklistValue = { ...baseChecklistDefaults };
+
+  for (const [key, value] of Object.entries(currentChecklist)) {
+    if (value !== undefined) {
+      (completed as any)[key] = value;
+    }
+  }
+
+  for (const item of checklistItems) {
+    completed[item.key] = true;
+  }
+
+  form.setValue("bedsideChecklist", completed, { shouldDirty: true, shouldValidate: true });
+};
 
   const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
     patientId: patientIdValue,
@@ -1918,6 +2020,20 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
         <PatientBanner summary={bannerSummary} loading={bannerLoading} error={patientSummaryError} />
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
+        {isE2E ? (
+          <View style={styles.e2eControls} testID="e2e-controls">
+            <Text style={styles.e2eTitle}>E2E controles</Text>
+            <View style={styles.e2eActions}>
+              <Button
+                title="Forzar estado final"
+                onPress={() => form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true })}
+                testID="e2e-set-final"
+              />
+              <Button title="Añadir firma mock" onPress={handleE2ESignature} testID="e2e-add-signature" />
+              <Button title="Completar checklist" onPress={handleE2EChecklistComplete} testID="e2e-complete-checklist" />
+            </View>
+          </View>
+        ) : null}
         <View
           ref={sectionRefs.turno}
           onLayout={handleSectionLayout('turno')}
@@ -2281,6 +2397,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               <BotonPrimario
                 label={t('audioNote.openRecorder')}
                 onPress={() => navigation.navigate('AudioNote', { onDoneRoute: 'HandoverForm' })}
+                testID="handover-open-audio-note"
               />
               <Text style={styles.helperText}>{t('audioNote.openRecorderHint')}</Text>
             </View>

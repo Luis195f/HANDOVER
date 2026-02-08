@@ -78,7 +78,10 @@ const deriveShiftType = (shiftStartValue?: string | null) => {
 };
 
 function StaffListInput({ control, name, label, placeholder, error }: StaffListInputProps) {
-  const { fields, append, remove } = useFieldArray({ control: control as any, name: name as any });
+  const { fields, append, remove } = useFieldArray({
+    control: control as any,
+    name: name as any,
+  });
 
   return (
     <View style={styles.field}>
@@ -113,7 +116,10 @@ function StaffListInput({ control, name, label, placeholder, error }: StaffListI
 }
 
 function IncidentListInput({ control, name, label, placeholder, helper, error }: IncidentListInputProps) {
-  const { fields, append, remove } = useFieldArray({ control: control as any, name: name as any });
+  const { fields, append, remove } = useFieldArray({
+    control: control as any,
+    name: name as any,
+  });
 
   return (
     <View style={styles.field}>
@@ -199,7 +205,11 @@ export default function ShiftDetailsScreen({ navigation, route }: Props) {
 
   const onSubmit = form.handleSubmit((values) => {
     const target = route.params?.returnTo ?? 'HandoverForm';
-    (navigation as any).navigate(target, { administrativeData: values });
+    if (target === 'PatientList') {
+      navigation.navigate('PatientList');
+      return;
+    }
+    navigation.navigate(target, { administrativeData: values });
   });
 
   const onCancel = () => {
