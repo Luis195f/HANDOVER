@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SyncCenter from '@/src/screens/SyncCenter';
+import { t } from '@/src/i18n';
 
 const listOfflineQueue = vi.fn();
 const flushQueueNow = vi.fn();
@@ -83,16 +84,16 @@ describe('SyncCenter', () => {
       expect(listOfflineQueue).toHaveBeenCalled();
     });
 
-    expect(view.getByText('Sync Center')).toBeTruthy();
+    expect(view.getByText(t('sync.title'))).toBeTruthy();
     expect(view.getByTestId('sync-flush')).toBeTruthy();
     expect(view.getByTestId('sync-item-pending-1')).toBeTruthy();
     expect(view.getByTestId('sync-item-error-1')).toBeTruthy();
-    expect(view.getByText('Intentos: 1')).toBeTruthy();
-    expect(view.getByText('Intentos: 2')).toBeTruthy();
-    expect(view.getByText('PENDING')).toBeTruthy();
+    expect(view.getByText(t('sync.attemptsLabel', { count: 1 }))).toBeTruthy();
+    expect(view.getByText(t('sync.attemptsLabel', { count: 2 }))).toBeTruthy();
+    expect(view.getByText(t('sync.status.pending'))).toBeTruthy();
     expect(view.getByText('Error del servidor')).toBeTruthy();
-    expect(view.getByText('Ver error')).toBeTruthy();
-    expect(view.getByText('Error')).toBeTruthy();
+    expect(view.getByText(t('sync.viewError'))).toBeTruthy();
+    expect(view.getByText(t('common.error'))).toBeTruthy();
   });
 
   it('dispara el reintento y recarga la cola', async () => {
@@ -142,7 +143,7 @@ describe('SyncCenter', () => {
     });
 
     await act(async () => {
-      fireEvent.press(view.getByText('Ver error'));
+      fireEvent.press(view.getByText(t('sync.viewError')));
     });
 
     expect(alertSpy).toHaveBeenCalledWith(

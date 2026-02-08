@@ -1,8 +1,12 @@
 {
   "common": {
+    "_comment": "Shared UI labels used across screens and components.",
     "error": "Error",
     "ok": "OK",
     "cancel": "Cancel",
+    "save": "Save",
+    "add": "Add",
+    "remove": "Remove",
     "understood": "Got it",
     "retry": "Retry",
     "openSettings": "Open Settings",
@@ -133,16 +137,20 @@
     "scanPromptSubtitle": "Center the code inside the frame. It will be detected automatically."
   },
   "login": {
+    "_comment": "Login and authentication screen copy.",
     "title": "Handover Pro",
     "subtitle": "Sign in with your account.",
     "usernameLabel": "Username",
     "usernamePlaceholder": "Username",
+    "usernameHint": "Enter your username.",
     "usernameRequired": "Username is required",
     "passwordLabel": "Password",
     "passwordPlaceholder": "Password",
+    "passwordHint": "Enter your password.",
     "passwordRequired": "Password is required",
     "signIn": "Sign in",
     "signInAccessibility": "Sign in with credentials",
+    "signInHint": "Authenticates with the username and password you entered.",
     "loading": "Loading…",
     "offlineAlertTitle": "No internet connection",
     "offlineAlertMessage": "Connect to sign in.",
@@ -150,10 +158,23 @@
     "invalidCredentialsMessage": "Incorrect username or password.",
     "loginErrorTitle": "Sign-in error",
     "loginErrorMessage": "Could not sign in. Please try again.",
+    "oauthUnavailableMessage": "OAuth is not available in this build.",
     "offlineIndicator": "No internet connection",
+    "oauthButton": "Continue with Auth0",
+    "oauthConnecting": "Connecting…",
+    "oauthAccessibility": "Continue with Auth0",
+    "oauthHint": "Sign in using your organization account.",
     "demoButton": "Start demo",
     "demoAccessibility": "Start demo with mock data",
+    "demoHint": "Access demo mode with sample data.",
     "demoHelper": "Demo mode – mock data, do not use with real patients."
+  },
+  "loginMock": {
+    "_comment": "Mock login screen used for development or demo environments.",
+    "title": "Mock login",
+    "description": "This login simulates OIDC/SMART in phase 0. It will be replaced by real OAuth.",
+    "cta": "Sign in as nurse",
+    "ctaHint": "Log in with a mock nurse profile."
   },
   "export": {
     "pdfSuccessTitle": "Export completed",
@@ -232,6 +253,7 @@
     "next": "Next"
   },
   "sync": {
+    "_comment": "Sync center status and queue messages.",
     "title": "Sync Center",
     "syncTitle": "Sync",
     "syncErrorTitle": "Sync error",
@@ -259,9 +281,25 @@
     "dateLabel": "Date: {{date}}",
     "attemptsLabel": "Attempts: {{count}}",
     "viewError": "View error",
-    "hashLabel": "hash"
+    "hashLabel": "hash",
+    "unknownStatus": "unknown",
+    "autoRetryAccessibilityLabel": "Auto-retry",
+    "autoRetryAccessibilityHint": "Enable or disable automatic retries.",
+    "intervalDecreaseLabel": "Decrease interval",
+    "intervalDecreaseHint": "Shorten the auto-retry interval.",
+    "intervalIncreaseLabel": "Increase interval",
+    "intervalIncreaseHint": "Lengthen the auto-retry interval.",
+    "intervalValueLabel": "{{seconds}}s",
+    "status": {
+      "_comment": "Short status labels for sync queue items.",
+      "pending": "PENDING",
+      "queued": "QUEUED",
+      "synced": "SYNCED",
+      "running": "SYNCING"
+    }
   },
   "handover": {
+    "_comment": "Handover form UI and AI assistant copy.",
     "dictationProcessing": "Processing dictation…",
     "aiNotAvailable": "AI not available",
     "sbarGenerate": "Generate SBAR",
@@ -317,7 +355,55 @@
     "alertsSectionTitle": "Alerts",
     "news2AlertLine": "NEWS2 {{total}} ({{band}})",
     "spo2LowAlertLine": "SpO₂ below 90%",
-    "formReviewPdfMessage": "Complete required fields before exporting the PDF."
+    "formReviewPdfMessage": "Complete required fields before exporting the PDF.",
+    "actions": {
+      "_comment": "Buttons and actions shown at the bottom of the handover form.",
+      "saveDraft": "Save draft",
+      "finalize": "Finalize handover"
+    }
+  },
+  "shiftDetails": {
+    "_comment": "Shift details screen fields and accessibility hints.",
+    "unitSectionTitle": "Unit details",
+    "unitLabel": "Unit",
+    "unitPlaceholder": "Adult ICU",
+    "unitHint": "Enter the unit name.",
+    "censusLabel": "Patient census",
+    "censusPlaceholder": "0",
+    "censusHint": "Enter the number of patients.",
+    "scheduleSectionTitle": "Schedule",
+    "shiftStartLabel": "Shift start",
+    "shiftStartPlaceholder": "2024-01-01T08:00",
+    "shiftStartHint": "Enter the shift start date and time.",
+    "shiftEndLabel": "Shift end",
+    "shiftEndPlaceholder": "2024-01-01T20:00",
+    "shiftEndHint": "Enter the shift end date and time.",
+    "shiftTypeLabel": "Shift type",
+    "shiftTypeHint": "Select the shift type.",
+    "shiftType": {
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "night": "Night"
+    },
+    "staffSectionTitle": "Incoming/outgoing staff",
+    "staffInLabel": "Incoming staff",
+    "staffOutLabel": "Outgoing staff",
+    "staffPlaceholder": "Name {{index}}",
+    "staffHint": "Enter the staff member name.",
+    "addStaffHint": "Adds another staff member.",
+    "removeStaffHint": "Removes staff entry {{index}}.",
+    "observationsSectionTitle": "Observations",
+    "generalNotesLabel": "General notes",
+    "generalNotesPlaceholder": "General shift notes",
+    "generalNotesHint": "Enter general notes for the shift.",
+    "incidentsLabel": "Observations/Incidents",
+    "incidentsPlaceholder": "Incident {{index}}",
+    "incidentsHint": "Describe the incident.",
+    "incidentsHelper": "Record each observation on a separate line.",
+    "addIncidentHint": "Adds another incident entry.",
+    "removeIncidentHint": "Removes incident entry {{index}}.",
+    "saveHint": "Save the shift details.",
+    "cancelHint": "Go back without saving changes."
   },
   "patientList": {
     "notFoundTitle": "Patient not found",
