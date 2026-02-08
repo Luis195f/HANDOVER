@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { stdin as input } from 'node:process';
-import { resolve } from 'node:path';
+import { resolve, extname, join } from 'node:path';
 import process from 'node:process';
 
 import { ZodError } from 'zod';
@@ -35,14 +35,17 @@ async function readJson(source: string): Promise<unknown> {
   return JSON.parse(raw);
 }
 
-function printSuccess(label: string, summary: {
-  entries: number;
-  observations: number;
-  medications: number;
-  deviceUses: number;
-  documents: number;
-  compositions: number;
-}) {
+function printSuccess(
+  label: string,
+  summary: {
+    entries: number;
+    observations: number;
+    medications: number;
+    deviceUses: number;
+    documents: number;
+    compositions: number;
+  },
+) {
   const stats = [
     `${summary.entries} entries`,
     `${summary.observations} observations`,
@@ -68,52 +71,125 @@ function printFailure(label: string, error: unknown) {
   }
 }
 
+/**
+ * Busca fixtures FHIR en rutas típicas del repo.
+ * No falla si no existen; simplemente devuelve [].
+ */
+async function findFixtureBundles(): Promise<string[]> {
+  const candidates = [
+    resolve('tests/fixtures/fhir'),
+    resolve('test/fixtures/fhir'),
+    resolve('scripts/fixtures/fhir'),
+    resolve('fixtures/fhir'),
+  ];
+
+  const found: string[] = [];
+
+  for (const dir of candidates) {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ent.isFile() && extname(ent.name).toLowerCase() === '.json') {
+          found.push(join(dir, ent.name));
+        }
+      }
+      // también soporta 1 nivel de subcarpetas (común en fixtures)
+      for (const ent of entries) {
+        if (ent.isDirectory()) {
+          const subdir = join(dir, ent.name);
+          const subentries = await readdir(subdir, { withFileTypes: true });
+          for (const s of subentries) {
+            if (s.isFile() && extname(s.name).toLowerCase() === '.json') {
+              found.push(join(subdir, s.name));
+            }
+          }
+        }
+      }
+    } catch {
+      // dir no existe: ignore
+    }
+  }
+
+  // Dedup + orden estable
+  return Array.from(new Set(found)).sort((a, b) => a.localeCompare(b));
+}
+
+async function validateSource(source: string) {
+  const label = source === '-' ? 'stdin' : resolve(source);
+
+  const data = await readJson(source);
+  const result = validateBundle(data);
+
+  if (!result.isValid) {
+    const issues = [...result.errors, ...(getValidationErrorsFromBundle(data) ?? [])];
+    throw new ZodError(
+      issues.map((issue) => ({
+        code: 'custom',
+        path: [issue.path],
+        message: issue.message,
+      })),
+    );
+  }
+
+  const bundle = data as { entry?: Array<{ resource?: { resourceType?: string } }> };
+  const counts = (bundle.entry ?? []).reduce(
+    (acc, entry) => {
+      const rt = entry?.resource?.resourceType;
+      if (rt === 'Observation') acc.observations += 1;
+      if (rt === 'MedicationStatement') acc.medications += 1;
+      if (rt === 'DeviceUseStatement' || rt === 'Procedure') acc.deviceUses += 1;
+      if (rt === 'DocumentReference') acc.documents += 1;
+      if (rt === 'Composition') acc.compositions += 1;
+      acc.entries += 1;
+      return acc;
+    },
+    { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
+  );
+
+  printSuccess(label, { ...counts });
+}
+
 async function main() {
   const [, , ...args] = process.argv;
 
+  // ✅ Modo “smart”: si no pasan args y hay stdin con datos, valida stdin.
+  if (args.length === 0 && !process.stdin.isTTY) {
+    try {
+      await validateSource('-');
+      return;
+    } catch (error) {
+      printFailure('stdin', error);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // ✅ Modo CI-friendly: si no pasan args, busca fixtures típicos y los valida.
   if (args.length === 0) {
-    console.error('Usage: pnpm validate:fhir <bundle.json> [more.json | -]');
-    process.exitCode = 1;
-    return;
+    const fixtures = await findFixtureBundles();
+    if (fixtures.length === 0) {
+      console.error('Usage: pnpm validate:fhir <bundle.json> [more.json | -]');
+      console.error('Tip: pass a bundle path or pipe JSON via stdin, e.g. `cat bundle.json | pnpm -w validate:fhir -`');
+      process.exitCode = 1;
+      return;
+    }
+    // Usa fixtures como argumentos implícitos
+    args.push(...fixtures);
   }
 
   let hasErrors = false;
 
   for (const source of args) {
-    const label = source === '-' ? 'stdin' : resolve(source);
     try {
-      const data = await readJson(source);
-      const result = validateBundle(data);
-      if (!result.isValid) {
-        const issues = [...result.errors, ...(getValidationErrorsFromBundle(data) ?? [])];
-        throw new ZodError(issues.map((issue) => ({ code: 'custom', path: [issue.path], message: issue.message })));
-      }
-      const bundle = data as { entry?: Array<{ resource?: { resourceType?: string } }> };
-      const counts = (bundle.entry ?? []).reduce(
-        (acc, entry) => {
-          const rt = entry?.resource?.resourceType;
-          if (rt === 'Observation') acc.observations += 1;
-          if (rt === 'MedicationStatement') acc.medications += 1;
-          if (rt === 'DeviceUseStatement' || rt === 'Procedure') acc.deviceUses += 1;
-          if (rt === 'DocumentReference') acc.documents += 1;
-          if (rt === 'Composition') acc.compositions += 1;
-          acc.entries += 1;
-          return acc;
-        },
-        { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
-      );
-      printSuccess(label, {
-        ...counts,
-      });
+      await validateSource(source);
     } catch (error) {
       hasErrors = true;
+      const label = source === '-' ? 'stdin' : resolve(source);
       printFailure(label, error);
     }
   }
 
-  if (hasErrors) {
-    process.exitCode = 1;
-  }
+  if (hasErrors) process.exitCode = 1;
 }
 
 main().catch((error) => {
