@@ -43,16 +43,17 @@ jobs:
         run: pnpm -w lint
 
       - name: Unit and integration tests
-        run: pnpm -w vitest run --reporter=verbose --coverage
+        run: pnpm -w vitest run --reporter=verbose --coverage --coverage.reporter=cobertura --coverage.reporter=lcov
 
       - name: Install python deps for genbadge
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade setuptools wheel
-          python -m pip install --upgrade genbadge[all]
+          python -m pip install --upgrade genbadge
 
       - name: Coverage badge
-        run: genbadge coverage -i coverage.xml -o coverage-badge.svg
+        run: genbadge coverage -i coverage/cobertura-coverage.xml -o coverage-badge.svg
+
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
