@@ -1,6 +1,6 @@
 import CryptoJS from 'crypto-js';
 import * as Crypto from 'expo-crypto';
-import { gcm } from '@noble/ciphers/aes.js';
+import { gcm } from '@noble/ciphers/aes';
 import { sha256 } from 'js-sha256';
 import { Buffer } from 'buffer';
 
