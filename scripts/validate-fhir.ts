@@ -27,7 +27,11 @@ async function readFromStdin(): Promise<string> {
 async function readJson(source: string): Promise<unknown> {
   if (source === '-' || source === '/dev/stdin') {
     const raw = await readFromStdin();
-    return JSON.parse(raw);
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      throw new Error('stdin was empty (no JSON provided)');
+    }
+    return JSON.parse(trimmed);
   }
 
   const filePath = resolve(source);
@@ -71,10 +75,6 @@ function printFailure(label: string, error: unknown) {
   }
 }
 
-/**
- * Busca fixtures FHIR en rutas típicas del repo.
- * No falla si no existen; simplemente devuelve [].
- */
 async function findFixtureBundles(): Promise<string[]> {
   const candidates = [
     resolve('tests/fixtures/fhir'),
@@ -88,12 +88,13 @@ async function findFixtureBundles(): Promise<string[]> {
   for (const dir of candidates) {
     try {
       const entries = await readdir(dir, { withFileTypes: true });
+
       for (const ent of entries) {
         if (ent.isFile() && extname(ent.name).toLowerCase() === '.json') {
           found.push(join(dir, ent.name));
         }
       }
-      // también soporta 1 nivel de subcarpetas (común en fixtures)
+
       for (const ent of entries) {
         if (ent.isDirectory()) {
           const subdir = join(dir, ent.name);
@@ -106,11 +107,10 @@ async function findFixtureBundles(): Promise<string[]> {
         }
       }
     } catch {
-      // dir no existe: ignore
+      // ignore missing directories
     }
   }
 
-  // Dedup + orden estable
   return Array.from(new Set(found)).sort((a, b) => a.localeCompare(b));
 }
 
@@ -150,46 +150,88 @@ async function validateSource(source: string) {
 }
 
 async function main() {
-  const [, , ...args] = process.argv;
+  const [, , ...argv] = process.argv;
+  const args = [...argv];
 
-  // ✅ Modo “smart”: si no pasan args y hay stdin con datos, valida stdin.
-  if (args.length === 0 && !process.stdin.isTTY) {
-    try {
-      await validateSource('-');
-      return;
-    } catch (error) {
-      printFailure('stdin', error);
-      process.exitCode = 1;
-      return;
+  // Si pasan args, comportamiento original (sin magia).
+  if (args.length > 0) {
+    let hasErrors = false;
+    for (const source of args) {
+      try {
+        await validateSource(source);
+      } catch (error) {
+        hasErrors = true;
+        const label = source === '-' ? 'stdin' : resolve(source);
+        printFailure(label, error);
+      }
+    }
+    if (hasErrors) process.exitCode = 1;
+    return;
+  }
+
+  // ✅ Sin args: primero buscamos fixtures (CI-friendly, determinista).
+  const fixtures = await findFixtureBundles();
+  if (fixtures.length > 0) {
+    let hasErrors = false;
+    for (const f of fixtures) {
+      try {
+        await validateSource(f);
+      } catch (error) {
+        hasErrors = true;
+        printFailure(resolve(f), error);
+      }
+    }
+    if (hasErrors) process.exitCode = 1;
+    return;
+  }
+
+  // ✅ Sin args y sin fixtures: solo intentamos stdin si trae datos reales.
+  if (!process.stdin.isTTY) {
+    const raw = await readFromStdin();
+    const trimmed = raw.trim();
+    if (trimmed) {
+      try {
+        const data = JSON.parse(trimmed);
+        const result = validateBundle(data);
+        if (!result.isValid) {
+          const issues = [...result.errors, ...(getValidationErrorsFromBundle(data) ?? [])];
+          throw new ZodError(
+            issues.map((issue) => ({
+              code: 'custom',
+              path: [issue.path],
+              message: issue.message,
+            })),
+          );
+        }
+        const bundle = data as { entry?: Array<{ resource?: { resourceType?: string } }> };
+        const counts = (bundle.entry ?? []).reduce(
+          (acc, entry) => {
+            const rt = entry?.resource?.resourceType;
+            if (rt === 'Observation') acc.observations += 1;
+            if (rt === 'MedicationStatement') acc.medications += 1;
+            if (rt === 'DeviceUseStatement' || rt === 'Procedure') acc.deviceUses += 1;
+            if (rt === 'DocumentReference') acc.documents += 1;
+            if (rt === 'Composition') acc.compositions += 1;
+            acc.entries += 1;
+            return acc;
+          },
+          { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
+        );
+        printSuccess('stdin', { ...counts });
+        return;
+      } catch (error) {
+        printFailure('stdin', error);
+        process.exitCode = 1;
+        return;
+      }
     }
   }
 
-  // ✅ Modo CI-friendly: si no pasan args, busca fixtures típicos y los valida.
-  if (args.length === 0) {
-    const fixtures = await findFixtureBundles();
-    if (fixtures.length === 0) {
-      console.error('Usage: pnpm validate:fhir <bundle.json> [more.json | -]');
-      console.error('Tip: pass a bundle path or pipe JSON via stdin, e.g. `cat bundle.json | pnpm -w validate:fhir -`');
-      process.exitCode = 1;
-      return;
-    }
-    // Usa fixtures como argumentos implícitos
-    args.push(...fixtures);
-  }
-
-  let hasErrors = false;
-
-  for (const source of args) {
-    try {
-      await validateSource(source);
-    } catch (error) {
-      hasErrors = true;
-      const label = source === '-' ? 'stdin' : resolve(source);
-      printFailure(label, error);
-    }
-  }
-
-  if (hasErrors) process.exitCode = 1;
+  // Igual que antes, pero ahora con mensaje claro
+  console.error('Usage: pnpm validate:fhir <bundle.json> [more.json | -]');
+  console.error('Tip: pass a bundle path or pipe JSON via stdin, e.g. `cat bundle.json | pnpm -w validate:fhir -`');
+  console.error('Tip: or add fixtures under tests/fixtures/fhir/*.json for CI.');
+  process.exitCode = 1;
 }
 
 main().catch((error) => {
