@@ -484,16 +484,16 @@ export default function HandoverForm({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 900;
   const sectionRefs = useMemo(
-    () =>
-      sectionsInfo.reduce(
-        (acc, { key }) => {
-          acc[key] = React.createRef<View>();
-          return acc;
-        },
-        {} as Record<SectionKey, React.RefObject<View | null>>,
-      ),
-    [],
-  );
+  () =>
+    sectionsInfo.reduce(
+      (acc, { key }) => {
+        acc[key] = React.createRef<View>();
+        return acc;
+      },
+      {} as Record<SectionKey, React.RefObject<View | null>>,
+    ),
+  [],
+);
   const [sectionPositions, setSectionPositions] = useState<Partial<Record<SectionKey, number>>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<SectionKey, boolean>>(() =>
     sectionsInfo.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
