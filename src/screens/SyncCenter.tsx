@@ -1,8 +1,14 @@
 // FILE: src/screens/SyncCenter.tsx
 import React from 'react';
 import {
-  View, Text, FlatList, RefreshControl,
-  Pressable, StyleSheet, Alert, useColorScheme, Switch
+  View,
+  Text,
+  FlatList,
+  RefreshControl,
+  Pressable,
+  StyleSheet,
+  Alert,
+  Switch,
 } from 'react-native';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,7 +16,7 @@ import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
 import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
 import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
-import BotonPrimario from '../components/BotonPrimario';
+import { PrimaryButton } from '../components/PrimaryButton';
 import { useThemeTokens } from '../theme';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { t } from '@/src/i18n';
@@ -56,12 +62,9 @@ function resolveSyncOpts(): SyncOpts | null {
 }
 
 export default function SyncCenter() {
-  const scheme = useColorScheme();
-  const C = scheme === 'dark' ? D_COLORS : L_COLORS;
-  const { colors } = useThemeTokens();
+  const { colors, fontSizes } = useThemeTokens();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const palette: Colors = {
-    ...C,
     bg: colors.background,
     textPrimary: colors.text,
     textSecondary: colors.muted,
@@ -71,7 +74,7 @@ export default function SyncCenter() {
     accent: colors.info,
     btn: colors.primary,
     btnDisabled: colors.muted,
-    btnText: '#ffffff',
+    btnText: colors.onPrimary,
     statePending: colors.warning,
     stateError: colors.danger,
   };
@@ -127,7 +130,7 @@ export default function SyncCenter() {
     });
 
     if (!candidate) return;
-    const status = candidate.errorStatus ?? 'desconocido';
+    const status = candidate.errorStatus ?? t('sync.unknownStatus');
     alertedErrorsRef.current.add(`${candidate.id}:${status}`);
     Alert.alert(
       t('sync.syncErrorTitle'),
@@ -200,17 +203,19 @@ export default function SyncCenter() {
 
   return (
     <View style={[styles.container, { backgroundColor: palette.bg }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: palette.textPrimary }]}>{t('sync.title')}</Text>
+      <View style={styles.header} accessibilityRole="header">
+        <Text allowFontScaling style={[styles.title, { color: palette.textPrimary, fontSize: fontSizes.xl }]}>
+          {t('sync.title')}
+        </Text>
 
         <View style={styles.actionsRow}>
-          <BotonPrimario
+          <PrimaryButton
             testID="sync-flush"
             disabled={busy}
             onPress={doFlush}
             label={busy ? t('sync.retrying') : t('sync.retryNow')}
           />
-          <BotonPrimario
+          <PrimaryButton
             testID="audit-log"
             onPress={() => navigation.navigate('AuditLog')}
             label={t('sync.viewAudit')}
@@ -218,35 +223,54 @@ export default function SyncCenter() {
         </View>
       </View>
       {authRequired && (
-        <Text style={[styles.authWarning, { color: palette.stateError }]}>{t('sync.authRequiredMessage')}</Text>
+        <Text allowFontScaling style={[styles.authWarning, { color: palette.stateError }]}>
+          {t('sync.authRequiredMessage')}
+        </Text>
       )}
 
       {/* Controles de Auto-retry */}
       <View style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.cardTitle, { color: palette.textPrimary }]}>{t('sync.autoRetryTitle')}</Text>
-          <Switch value={autoRetry} onValueChange={setAutoRetry} />
+          <Text allowFontScaling style={[styles.cardTitle, { color: palette.textPrimary, fontSize: fontSizes.lg }]}>
+            {t('sync.autoRetryTitle')}
+          </Text>
+          <Switch
+            value={autoRetry}
+            onValueChange={setAutoRetry}
+            accessibilityLabel={t('sync.autoRetryAccessibilityLabel')}
+            accessibilityHint={t('sync.autoRetryAccessibilityHint')}
+          />
         </View>
         <View style={[styles.rowBetween, { marginTop: 10 }]}>
-          <Text style={{ color: palette.textSecondary }}>{t('sync.intervalLabel')}</Text>
+          <Text allowFontScaling style={{ color: palette.textSecondary }}>
+            {t('sync.intervalLabel')}
+          </Text>
           <View style={styles.intervalRow}>
             <Pressable
               onPress={decInterval}
               style={[styles.intervalBtn, { borderColor: palette.border }]}
+              accessibilityRole="button"
+              accessibilityLabel={t('sync.intervalDecreaseLabel')}
+              accessibilityHint={t('sync.intervalDecreaseHint')}
             >
-              <Text style={{ color: palette.textPrimary }}>−</Text>
+              <Text allowFontScaling style={{ color: palette.textPrimary }}>−</Text>
             </Pressable>
-            <Text style={{ color: palette.textPrimary, marginHorizontal: 8 }}>{intervalSec}s</Text>
+            <Text allowFontScaling style={{ color: palette.textPrimary, marginHorizontal: 8 }}>
+              {t('sync.intervalValueLabel', { seconds: intervalSec })}
+            </Text>
             <Pressable
               onPress={incInterval}
               style={[styles.intervalBtn, { borderColor: palette.border }]}
+              accessibilityRole="button"
+              accessibilityLabel={t('sync.intervalIncreaseLabel')}
+              accessibilityHint={t('sync.intervalIncreaseHint')}
             >
-              <Text style={{ color: palette.textPrimary }}>＋</Text>
+              <Text allowFontScaling style={{ color: palette.textPrimary }}>＋</Text>
             </Pressable>
           </View>
         </View>
         {lastRun && (
-          <Text style={{ marginTop: 8, color: palette.textHint }}>
+          <Text allowFontScaling style={{ marginTop: 8, color: palette.textHint }}>
             {t('sync.lastRunLabel', { time: lastRun })}
           </Text>
         )}
@@ -267,7 +291,7 @@ export default function SyncCenter() {
         renderItem={({ item }) => <ItemRow item={item} C={palette} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ color: palette.textSecondary }}>{t('sync.emptyQueue')}</Text>
+            <Text allowFontScaling style={{ color: palette.textSecondary }}>{t('sync.emptyQueue')}</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: 24 }}
@@ -288,7 +312,9 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
 
   const isError = item.syncStatus === 'error';
   const { subtitle, title, message } = resolveErrorCopy(item.errorStatus);
-  const statusLabel = isError ? subtitle : (item.syncStatus ?? 'pending').toUpperCase();
+  const statusLabel = isError
+    ? subtitle
+    : t(`sync.status.${item.syncStatus ?? 'pending'}`);
 
   const rowStyle = [
     styles.row,
@@ -330,36 +356,43 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
     >
       <View style={{ flex: 1 }}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
+          <Text allowFontScaling style={[styles.id, { color: C.textPrimary }]}>#{short(item.id, 12)}</Text>
           {isError && (
             <View style={[styles.errorBadge, { backgroundColor: `${C.stateError}22`, borderColor: C.stateError }]}>
-              <Text style={[styles.errorBadgeText, { color: C.stateError }]}>{t('common.error')}</Text>
+              <Text allowFontScaling style={[styles.errorBadgeText, { color: C.stateError }]}>
+                {t('common.error')}
+              </Text>
             </View>
           )}
         </View>
-        <Text style={[styles.sub, { color: C.textSecondary }]}>
+        <Text allowFontScaling style={[styles.sub, { color: C.textSecondary }]}>
           {t('sync.dateLabel', { date: when })}
         </Text>
-        <Text style={[styles.sub, { color: C.textSecondary }]}>
+        <Text allowFontScaling style={[styles.sub, { color: C.textSecondary }]}>
           {t('sync.attemptsLabel', { count: item.attempts })}
         </Text>
         {isError && (
           <>
-            <Text style={[styles.sub, { color: C.stateError, marginTop: 4 }]} numberOfLines={2}>
+            <Text allowFontScaling style={[styles.sub, { color: C.stateError, marginTop: 4 }]} numberOfLines={2}>
               {subtitle}
             </Text>
             <Pressable onPress={showErrorAlert} style={({ pressed }) => pressed && { opacity: 0.85 }}>
-              <Text style={[styles.errorAction, { color: C.stateError }]}>{t('sync.viewError')}</Text>
+              <Text allowFontScaling style={[styles.errorAction, { color: C.stateError }]}>
+                {t('sync.viewError')}
+              </Text>
             </Pressable>
           </>
         )}
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.hash, { color: C.textHint }]}>{t('sync.hashLabel')}</Text>
-        <Text style={[styles.hashVal, { color: C.textPrimary }]}>{short(item.hash, 24) || t('common.notAvailable')}</Text>
+        <Text allowFontScaling style={[styles.hash, { color: C.textHint }]}>{t('sync.hashLabel')}</Text>
+        <Text allowFontScaling style={[styles.hashVal, { color: C.textPrimary }]}>
+          {short(item.hash, 24) || t('common.notAvailable')}
+        </Text>
         <Text
           style={[styles.state, { color: isError ? C.stateError : C.statePending }]}
           numberOfLines={2}
+          allowFontScaling
         >
           {statusLabel}
         </Text>
@@ -382,36 +415,6 @@ type Colors = {
   btnText: string;
   statePending: string;
   stateError: string;
-};
-
-const L_COLORS: Colors = {
-  bg: '#ffffff',
-  textPrimary: '#111111',
-  textSecondary: '#555555',
-  textHint: '#777777',
-  card: '#fafafa',
-  border: '#e5e5e5',
-  accent: '#2962FF',
-  btn: '#2962FF',
-  btnDisabled: '#90CAF9',
-  btnText: '#ffffff',
-  statePending: '#FF8F00',
-  stateError: '#C62828',
-};
-
-const D_COLORS: Colors = {
-  bg: '#121212',
-  textPrimary: '#ECECEC',
-  textSecondary: '#B3B3B3',
-  textHint: '#9E9E9E',
-  card: '#1E1E1E',
-  border: '#333333',
-  accent: '#82B1FF',
-  btn: '#82B1FF',
-  btnDisabled: '#4F6B9B',
-  btnText: '#000000',
-  statePending: '#FFB300',
-  stateError: '#EF9A9A',
 };
 
 /* ===== STYLES ===== */
