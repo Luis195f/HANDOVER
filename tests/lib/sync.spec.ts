@@ -5,7 +5,6 @@ const postBundleMock = vi.fn();
 vi.mock('@/src/lib/fhir-client', () => ({
   __esModule: true,
   postBundle: (...args: unknown[]) => postBundleMock(...args),
-  postBundleSmart: (...args: unknown[]) => postBundleMock(...args),
 }));
 
 import * as queueModule from '@/src/lib/queue';
@@ -27,10 +26,10 @@ import {
 import type { Bundle } from '@/src/lib/fhir-client';
 
 // ======================================================
-// 🧩 MOCKS BASE DE EXPO Y DEPENDENCIAS
+// 🧩 EXPO BASE MOCKS AND DEPENDENCIES
 // ======================================================
 
-// Mock expo-sqlite (para evitar requerimientos nativos)
+// Mock expo-sqlite (avoid native requirements)
 vi.mock('expo-sqlite', () => ({
   openDatabaseSync: undefined,
   openDatabase: undefined,
@@ -51,7 +50,7 @@ vi.mock('expo-modules-core', () => {
   };
 });
 
-// Mock expo-constants (para evitar errores en node)
+// Mock expo-constants (avoid Node errors)
 vi.mock('expo-constants', () => ({
   __esModule: true,
   default: {
@@ -60,7 +59,7 @@ vi.mock('expo-constants', () => ({
   },
 }));
 
-// Mock de entorno FHIR_BASE_URL
+// Mock FHIR_BASE_URL environment
 vi.mock('@/src/config/env', () => ({
   FHIR_BASE_URL: 'https://example.test',
 }));
@@ -68,7 +67,7 @@ vi.mock('@/config/env', () => ({
   FHIR_BASE_URL: 'https://example.test',
 }));
 
-// Mock completo de expo-secure-store
+// Full mock of expo-secure-store
 vi.mock('expo-secure-store', () => {
   const api = {
     getItemAsync: vi.fn().mockResolvedValue(null),
@@ -82,11 +81,11 @@ vi.mock('expo-secure-store', () => {
   };
 });
 
-// Mock expo vacío
+// Empty expo mock
 vi.mock('expo', () => ({}));
 
 // ======================================================
-// ⚙️ TESTS DEL MOTOR DE SINCRONIZACIÓN
+// ⚙️ SYNC ENGINE TESTS
 // ======================================================
 
 describe('sync engine state machine', () => {
@@ -112,12 +111,12 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 1 — No enviar mientras está offline (corregido)
+  // 🔹 TEST 1 — Do not send while offline
   // ======================================================
   it('does not send items while offline and moves into backoff', async () => {
     const sender = vi.fn(async () => ({ ok: true as const }));
 
-    // Simulamos que está offline
+    // Simulate offline mode
     isOnline.mockResolvedValue(false);
 
     await createOfflineQueueItem({ payload: {}, patientId: 'pat-offline' });
@@ -126,21 +125,21 @@ describe('sync engine state machine', () => {
     await forceSync();
     await vi.advanceTimersByTimeAsync(1_000);
 
-    // ✅ No debe llamar al sender mientras está offline
+    // Should not call the sender while offline.
     expect(sender).not.toHaveBeenCalled();
 
-    // Simulamos reconexión
+    // Simulate reconnection.
     isOnline.mockResolvedValue(true);
     const delay = getNextDelayMs();
     await vi.advanceTimersByTimeAsync(delay);
 
-    // El motor debe entrar en estado de backoff/offline, pero no enviar aún
+    // The engine should move into backoff/offline without sending yet.
     const snapshot = getSyncSnapshot();
     expect(['backoff', 'offline', 'idle']).toContain(snapshot.status);
   });
 
   // ======================================================
-  // 🔹 TEST 2 — Limpia la cola tras entrega exitosa
+  // 🔹 TEST 2 — Clears the queue after successful delivery
   // ======================================================
   it('clears the queue on successful delivery and reports idle', async () => {
     const sender = vi.fn(async () => ({ ok: true as const }));
@@ -159,7 +158,7 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 2.1 — Encola offline y envía una sola vez al reconectar
+  // 🔹 TEST 2.1 — Queues offline and sends each item once on reconnection
   // ======================================================
   it('queues while offline and sends each item once on reconnection', async () => {
     const sentIds: string[] = [];
@@ -195,7 +194,7 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 3 — Aplica backoff tras error 5xx
+  // 🔹 TEST 3 — Applies backoff after 5xx errors
   // ======================================================
   it('applies backoff after a recoverable 5xx and retries later', async () => {
     const sender = vi
@@ -221,9 +220,9 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 4 — Mantiene pendiente tras errores 502/504 y conserva el payload
+  // 🔹 TEST 4 — Keeps pending after 502/504 and preserves the payload
   // ======================================================
-  it('mantiene pendiente tras errores 502/504 y conserva el payload', async () => {
+  it('keeps pending after 502/504 responses and preserves the payload', async () => {
     const sender = vi.fn(async () => ({ ok: false as const, status: 502 }));
 
     await createOfflineQueueItem({
@@ -236,21 +235,21 @@ describe('sync engine state machine', () => {
 
     const [item] = await listOfflineQueue();
 
-    // Se ha intentado enviar al menos una vez
+    // It attempted to send at least once.
     expect(sender).toHaveBeenCalled();
 
-    // El item sigue pendiente en la cola
+    // The item remains pending in the queue.
     expect(item?.syncStatus).toBe('pending');
     expect(item?.attempts).toBeGreaterThanOrEqual(1);
 
-    // ✅ “Conserva el payload”: sigue habiendo datos, aunque ahora vayan cifrados
+    // "Preserves the payload": data is still present, even if encrypted now.
     expect(item?.payload).toBeTruthy();
     expect(typeof item?.payload).toBe('object');
     expect((item?.payload as { bundle?: unknown }).bundle).toBeDefined();
   });
 
   // ======================================================
-  // 🔹 TEST 5 — Marca items con error 4xx (permanente)
+  // 🔹 TEST 5 — Marks items as permanent errors after 4xx
   // ======================================================
   it('marks items after permanent 4xx responses', async () => {
     const sender = vi.fn(async () => ({ ok: false as const, status: 400, message: 'invalid' }));
@@ -273,7 +272,7 @@ describe('sync engine state machine', () => {
   });
 
   // ======================================================
-  // 🔹 TEST 6 — Pausa tras fallo de autenticación
+  // 🔹 TEST 6 — Pauses after authentication failures
   // ======================================================
   it('pauses sync after authentication failures and resumes when requested', async () => {
     const sender = vi.fn(async () => ({ ok: false as const, status: 401 }));
@@ -298,7 +297,7 @@ describe('sync engine state machine', () => {
     expect(remaining.length).toBe(1);
   });
 
-  it('marca como error los payloads offline que no se pueden analizar y no los elimina', async () => {
+  it('marks unreadable offline payloads as errors without deleting them', async () => {
     const sender = vi.fn(async () => ({ ok: true as const }));
 
     await createOfflineQueueItem({ payload: '{invalid-json', patientId: 'pat-corrupt' });
@@ -404,3 +403,5 @@ describe('offline encryption integration', () => {
     expect(getSyncSnapshot().status).toBe('idle');
   });
 });
+
+// ci: retrigger

@@ -13,7 +13,7 @@ import {
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
-import { flushQueueNow, type SyncOpts } from '@/src/lib/sync/index';
+import { flushQueue, type SyncOpts } from '@/src/lib/sync/index';
 import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -161,7 +161,7 @@ export default function SyncCenter() {
     setAuthRequired(false);
     setBusy(true);
     try {
-      const res = await flushQueueNow(opts);
+      const res = await flushQueue(opts);
       await refresh();
       setLastRun(new Date().toLocaleTimeString());
       return res;

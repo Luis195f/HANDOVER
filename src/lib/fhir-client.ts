@@ -61,12 +61,12 @@ const isBundleLike = (value: unknown): value is BundleLike =>
   typeof value === 'object' && value !== null;
 
 /**
- * Obtiene un resumen de paciente a partir de su ID.
- * - Lee el recurso Patient (nombre, fecha de nacimiento, género, identificadores MRN).
- * - Lee Encounter/Location para obtener la cama actual.
- * - Lee AllergyIntolerance para listar alergias activas.
- * - Si algo falla o no hay datos, devuelve un objeto con los campos disponibles.
- * - En entorno __DEV__, si no hay servidor FHIR, devuelve datos mock para no romper la UI.
+ * Fetches a patient summary by ID.
+ * - Reads Patient (name, birth date, gender, MRN identifiers).
+ * - Reads Encounter/Location for the current bed.
+ * - Reads AllergyIntolerance for active allergies.
+ * - If anything fails or data is missing, returns an object with the available fields.
+ * - In __DEV__ without a FHIR server, returns mock data to keep the UI functional.
  */
 export async function fetchPatientSummary(
   patientId: string,
@@ -221,7 +221,7 @@ type AuthHooks = {
   logout?: () => Promise<void> | void;
   getBaseUrl?: () => string | undefined;
   getSession?: () => Promise<HandoverSession | null> | HandoverSession | null;
-  /** Compat: algunos callers pasan baseUrl directo */
+  /** Compatibility: some callers still pass baseUrl directly (remove after migration). */
   baseUrl?: string;
 };
 
@@ -262,7 +262,7 @@ function mapAuthHooks(input: AuthHooksWithToken): AuthHooks {
   return mapped;
 }
 
-/** Permite inyectar hooks desde Auth u otros módulos (token/baseURL/logout). */
+/** Injects auth hooks (token/baseURL/logout) from Auth or other modules. */
 export function setAuthHooks(h: AuthHooksWithToken) {
   const mapped = mapAuthHooks(h);
   hooks = { ...hooks, ...mapped };
@@ -271,7 +271,7 @@ export function setAuthHooks(h: AuthHooksWithToken) {
   }
 }
 
-/** Configura el cliente FHIR (incluye hooks para auth, baseURL y headers). */
+/** Configures the FHIR client (auth hooks, baseURL, and headers). */
 export function configureFHIRClient(h: AuthHooks & FhirClientConfig) {
   setAuthHooks(h);
   clientConfig = { ...clientConfig, ...h };
@@ -366,7 +366,7 @@ type FhirClientRuntimeConfig = {
   getTimeout?: () => number | undefined;
 };
 
-// === Sobrecargas para que los tests puedan llamar fetchFHIR('/Patient', {...})
+// === Overloads so tests can call fetchFHIR('/Patient', {...})
 export async function fetchFHIR<TResource = unknown, TBody = unknown>(
   path: string,
   opts?: Omit<FetchFHIRParams<TBody>, 'path'>
@@ -375,7 +375,7 @@ export async function fetchFHIR<TResource = unknown, TBody = unknown>(
   params: FetchFHIRParams<TBody>
 ): Promise<FhirResponse<TResource>>;
 
-/** Client FHIR con inyección de Authorization + manejo de 401/403. */
+/** FHIR client with Authorization injection and 401/403 handling. */
 export async function fetchFHIR<TResource = unknown, TBody = unknown>(
   arg1: string | FetchFHIRParams<TBody>,
   arg2?: Omit<FetchFHIRParams<TBody>, 'path'>
@@ -549,9 +549,10 @@ export function createFHIRClient(config: ScopedFHIRClientConfig) {
 }
 
 /**
- * POST /Bundle con shape de respuesta compatible con OperationOutcome.
- * En caso de error, devuelve tanto `issues` como alias `issue` (para compat tests).
- * Acepta `opts` objeto o una *string* tratada como `Idempotency-Key` (compat sync).
+ * POST /Bundle with an OperationOutcome-compatible response shape.
+ * On error, returns both `issues` and the `issue` alias for legacy tests
+ * (planned removal after test callers migrate).
+ * Accepts `opts` as an object or a string treated as an `Idempotency-Key` (sync compatibility).
  */
 export async function postBundle(
   bundle: unknown,
@@ -696,7 +697,10 @@ const idempotencyKey =
   }
 }
 
-/** === Compat con código existente === */
+/**
+ * @deprecated Use {@link postBundle} instead. This alias remains for legacy imports and
+ * will be removed in a future major release.
+ */
 export const postBundleSmart = postBundle;
 const postBundleFn = postBundle;
 
@@ -847,8 +851,8 @@ const mapObservationToVitalTrends = (
 };
 
 export interface FetchVitalTrendsOptions {
-  hoursBack?: number; // por defecto 24 o 48
-  maxPointsPerSeries?: number; // por defecto 20–30
+  hoursBack?: number; // defaults to 24 or 48
+  maxPointsPerSeries?: number; // defaults to 20–30
 }
 
 export async function fetchVitalTrends(
@@ -913,7 +917,7 @@ export async function fetchVitalTrends(
   }
 }
 
-// Solo para desarrollo / demo – no usar en producción
+// Development/demo only – do not use in production.
 // BEGIN HANDOVER D2 – VitalTrends mocks
 function buildMockVitalTrendsData(): VitalTrendsData {
   const trends = createEmptyVitalTrends();
@@ -941,7 +945,10 @@ function buildMockVitalTrendsData(): VitalTrendsData {
 // END HANDOVER D2 – VitalTrends mocks
 // END HANDOVER D2 – VitalTrends fhir-client
 
-/** Clase para compat con sync: permite new FhirClient(hooks) + idemKey → Response-like */
+/**
+ * Legacy sync client wrapper: allows new FhirClient(hooks) + idemKey → Response-like.
+ * Planned removal after all sync callers migrate to the functional API.
+ */
 export class FhirClient {
   constructor(h?: AuthHooks) {
     if (h) configureFHIRClient(h);
@@ -957,7 +964,7 @@ export class FhirClient {
   async postBundle(bundle: any, opts?: any): Promise<any> {
     if (typeof opts === 'string') {
       const result: PostBundleResult = await postBundleFn(bundle, opts);
-      // Devuelve objeto con .text() para compat con sync
+      // Returns an object with .text() for sync compatibility.
       const resp = {
         ok: !!result.ok,
         status: result.status ?? (result.ok ? 200 : 400),

@@ -1,19 +1,34 @@
-# Offline y cola de sincronización
+# Offline sync and queue
 
-## safeFetch y reintentos
-- `src/lib/net.ts` implementa `safeFetch`: fuerza HTTPS en producción, aplica timeouts y reintentos con backoff ante errores 502/503/504, y agrega cabeceras de idempotencia para evitar duplicados.
+## safeFetch and retries
+- `src/lib/net.ts` implements `safeFetch`: enforces HTTPS in production, applies timeouts and backoff retries for 502/503/504, and adds idempotency headers to prevent duplicates.
 
-## Cola y sincronización
-- `src/lib/queue.ts` genera bundles con UUID y los persiste en SQLite junto con metadatos de reintento.
-- `src/lib/sync.ts` detecta conectividad, reintenta envíos con backoff exponencial (`getNextDelayMs`) y elimina items exitosos; reutiliza el cliente FHIR para manejar `OperationOutcome`.
-- El almacenamiento puede cifrarse; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` permite desactivar el cifrado en desarrollo.
-  - Cada item conserva `firstEnqueuedAt`, `lastAttemptAt` y `attemptCount`/`attempts` para calcular ventanas de reintento.
-  - Se respeta un máximo de reintentos (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Al superar el límite, el item queda con `syncStatus="error"`.
+## Queue and synchronization
+- `src/lib/queue.ts` persists bundles in SQLite alongside retry metadata.
+- `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses.
+- Storage can be encrypted; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` can disable encryption in development.
+  - Each item keeps `firstEnqueuedAt`, `lastAttemptAt`, and `attemptCount`/`attempts` to compute retry windows.
+  - A maximum number of attempts is enforced (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Items that exceed the limit are marked with `syncStatus="error"`.
 
-## Cifrado de la cola offline
-- Los bundles FHIR almacenados en la cola SQLite se guardan cifrados por defecto usando cifrado simétrico con AEAD (AES-256-GCM vía `@noble/ciphers` + `expo-crypto`).
-- Solo se cifra el payload clínico (bundle FHIR); los metadatos de la cola (estado, timestamps, código de respuesta) permanecen en claro para facilitar el debugging y el control de flujo.
-- Formato de almacenamiento de los nuevos sobres (`EncryptedEnvelopeV1`, gestionado por `src/lib/crypto.ts`):
+## Transaction identifiers (txId)
+- `ensureBundleTx` (`src/lib/sync.ts`) assigns a transaction identifier when one is missing using UUID v4 to guarantee global uniqueness.
+- The transaction identifier is attached to every entry via `attachTxIdToEntry`, which adds a conditional create token (`ifNoneExist`) so retries remain idempotent.
+- The txId is also reflected in `Bundle.identifier` (`system=urn:handover-pro:tx`) for traceability.
+
+## Queue item identifiers (offline queue)
+- `computeId(fullUrls: string[])` (`src/lib/sync.ts`) builds a deterministic ID for an offline queue item by sorting the entry `fullUrl` values, joining them, and hashing the result with `hashHex`.
+- `hashHex` (`src/lib/crypto.ts`) uses SHA-256 and returns a configurable hex prefix (default 64 chars). This makes it deterministic while keeping IDs compact.
+- The goal is to detect duplicates and avoid enqueueing the same resource set twice. Hash collisions are astronomically unlikely, but if they ever occur the safe mitigation is to compare the original `fullUrl` lists before skipping an enqueue.
+
+## Other identifiers and hash usage
+- `hashHex` also backs other deterministic identifiers such as `fhirId` (`src/lib/crypto.ts`) and several resource ID helpers in `src/lib/fhir-map.ts`.
+- `fhirId` prefixes the hash, truncates to a maximum length (default 64), and replaces invalid characters to ensure valid FHIR IDs.
+- Grouping keys for queue batching use time windows rather than hashing: `computeWindowStart` rounds timestamps to `GROUP_WINDOW_MS` buckets to keep related items together.
+
+## Offline queue encryption
+- FHIR bundles stored in the SQLite queue are encrypted by default using symmetric AEAD (AES-256-GCM via `@noble/ciphers` + `expo-crypto`).
+- Only the clinical payload (FHIR bundle) is encrypted; queue metadata (status, timestamps, response code) stays in plaintext for debugging and control flow.
+- Storage format for new envelopes (`EncryptedEnvelopeV1`, handled in `src/lib/crypto.ts`):
 
   ```json
   {
@@ -25,36 +40,41 @@
   }
   ```
 
-- Compatibilidad hacia atrás:
-  - JSON plano heredado (colas antiguas sin cifrado) se sigue leyendo sin cambios.
-  - Sobres `enc:v1` previos de la cola offline se descifran con `security/crypto`.
-  - Los nuevos sobres AES-GCM (`EncryptedEnvelopeV1`) se manejan en `src/lib/crypto.ts`.
-  - En todos los casos, `queue.ts` y `sync.ts` trabajan con JSON en claro tras leer el item.
-- Consideraciones de seguridad:
-  - El cifrado offline refuerza la protección de datos en reposo (alineado con buenas prácticas RGPD/HIPAA, sin suponer cumplimiento legal automático).
-  - La clave derivada de `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` es el secreto real y debe gestionarse como un secreto sensible.
+- Backward compatibility:
+  - Legacy plain JSON queues are still readable.
+  - Legacy `enc:v1` envelopes are decrypted via `security/crypto`.
+  - New AES-GCM envelopes (`EncryptedEnvelopeV1`) are handled in `src/lib/crypto.ts`.
+  - In all cases, `queue.ts` and `sync.ts` operate on plaintext JSON after loading.
+- Security notes:
+  - Offline encryption protects data at rest (aligned with GDPR/HIPAA best practices, without implying compliance).
+  - The derived key from `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` is the true secret and must be managed securely.
 
-## WebCrypto y polyfills
-- El cliente usa `expo-crypto` para hashing y generación de bytes aleatorios; no se añade un polyfill global de `crypto` en tiempo de ejecución.
-- La firma ECDSA del bundle FHIR (si `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) depende de `globalThis.crypto.subtle` cuando está disponible.
-- Si WebCrypto no existe (por ejemplo, web/entornos restringidos), la firma cliente se omite y la cola continúa enviando sin firma, dejando registro en logs estructurados.
+## WebCrypto and polyfills
+- The client uses `expo-crypto` for hashing and random bytes; no global `crypto` polyfill is added at runtime.
+- FHIR bundle ECDSA signing (if `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) depends on `globalThis.crypto.subtle` when available.
+- If WebCrypto is missing (e.g., web/restricted environments), client signing is skipped and the queue continues without signatures, with structured logs.
 
-## Interfaz de usuario
-- `src/screens/SyncCenter.tsx` permite inspeccionar, reintentar o vaciar la cola manualmente. Los elementos con `syncStatus="error"` muestran un badge “Error”, diferencian `422 Error de validación FHIR` del resto de fallos, y ofrecen un botón “Ver error” que abre un alert con el mensaje y, si existe, un detalle de issues (`expression` + `diagnostics`) devuelto por el servidor.
+## UI
+- `src/screens/SyncCenter.tsx` lets users inspect, retry, or clear the queue. Items with `syncStatus="error"` show an “Error” badge, differentiate `422 FHIR validation errors`, and allow viewing server-provided details (`expression` + `diagnostics`).
 
-## Variables relacionadas
-- `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: número máximo de reintentos.
-- `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`: base del backoff exponencial.
-- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY`: semilla para derivar la clave simétrica (256 bits) del cifrado offline. Debe tener al menos 32 caracteres y gestionarse como secreto (vault/CI/CD), no en texto plano.
-- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`: feature flag para desactivar el cifrado offline (solo debugging local). Valores `true/1/TRUE` lo desactivan; cualquier otro valor lo mantiene activo por defecto.
+## Related environment variables
+- `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: maximum number of retries.
+- `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`: base value for exponential backoff.
+- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY`: seed for deriving the 256-bit offline encryption key. Must be at least 32 characters and stored as a secret (vault/CI/CD), not in plaintext.
+- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`: feature flag to disable offline encryption (local debugging only). Values `true/1/TRUE` disable it; any other value keeps encryption enabled.
 
-## Validación rápida antes de encolar
-- `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` (por defecto `false`) activa una validación remota previa (`Bundle/$validate`) siempre que haya conectividad. Si el servidor responde con un `OperationOutcome` severidad `error` o `fatal`, la app muestra un alert con `formatIssuesForUser(...)` y no encola el bundle; sin conectividad, la cola sigue funcionando en modo offline-first. Se recomienda habilitarlo en staging/producción para atrapar errores estructurales antes de saturar la cola.
+## Fast validation before enqueue
+- `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` (default `false`) enables a remote `Bundle/$validate` check when online. If the server returns an `OperationOutcome` with `error` or `fatal` severity, the app shows an alert via `formatIssuesForUser(...)` and does not enqueue the bundle. Offline mode still enqueues for offline-first behavior.
 
-## Estado de sincronización
-- La sync expone `SyncSnapshot` (`status`, `pendingCount`, `lastRunAt`, `lastError`, `nextRetryAt`).
-- Estados posibles:
-  - `idle`: sin trabajos pendientes o esperando nuevas órdenes.
-  - `running`: procesando la cola.
-  - `backoff`: esperando el próximo reintento (por ejemplo tras 5xx o sin red).
-  - `paused`: bloqueado por autenticación (401/403) hasta re-login o `resumeSync()`.
+## Sync status
+- The sync engine exposes a `SyncSnapshot` (`status`, `pendingCount`, `lastRunAt`, `lastError`, `nextRetryAt`).
+- Possible statuses:
+  - `idle`: no pending work or waiting for new work.
+  - `running`: processing the queue.
+  - `backoff`: waiting for the next retry (e.g., after 5xx or no network).
+  - `paused`: blocked by authentication (401/403) until re-login or `resumeSync()`.
+
+## Compatibility aliases and migration notes
+- `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of `flushQueue`.
+- `postBundleSmart` (alias of `postBundle` in `src/lib/fhir-client.ts`) is deprecated. Prefer `postBundle`.
+- These aliases remain for compatibility but will be removed in a future major release. Update imports to the canonical names when migrating.
