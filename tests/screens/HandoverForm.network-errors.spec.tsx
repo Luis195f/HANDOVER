@@ -7,7 +7,7 @@ import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
 const enqueueBundle = vi.fn();
-const buildHandoverBundle = vi.fn(() => ({ bundle: true }));
+const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
@@ -67,7 +67,9 @@ vi.mock('@/src/security/auth', () => ({
 }));
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
+vi.mock('@/src/lib/fhir-map', () => ({
+  buildHandoverBundleAsync: (...args: unknown[]) => buildHandoverBundleAsync(...args),
+}));
 vi.mock('@/src/lib/fhir-validation', () => ({ validateBundle: (...args: unknown[]) => validateBundle(...args) }));
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
@@ -188,7 +190,7 @@ describe('HandoverForm network errors', () => {
 
   beforeEach(() => {
     enqueueBundle.mockReset();
-    buildHandoverBundle.mockReset();
+    buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
     confirmHighRiskSubmission.mockClear();
     mockUseZodForm.mockReset();
@@ -253,13 +255,13 @@ describe('HandoverForm network errors', () => {
     expect(typeof retryButton?.onPress).toBe('function');
 
     const initialEnqueueCalls = enqueueBundle.mock.calls.length;
-    const initialBundleCalls = buildHandoverBundle.mock.calls.length;
+    const initialBundleCalls = buildHandoverBundleAsync.mock.calls.length;
     await retryButton?.onPress?.();
     await lastSubmitHandler?.();
 
     await waitFor(() => {
       expect(enqueueBundle.mock.calls.length).toBeGreaterThanOrEqual(initialEnqueueCalls + 1);
-      expect(buildHandoverBundle.mock.calls.length).toBeGreaterThanOrEqual(initialBundleCalls + 1);
+      expect(buildHandoverBundleAsync.mock.calls.length).toBeGreaterThanOrEqual(initialBundleCalls + 1);
     });
   });
 

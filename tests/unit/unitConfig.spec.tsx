@@ -49,7 +49,7 @@ vi.mock('@/src/lib/queue', () => ({
 
 vi.mock('@/src/lib/fhir-map', () => ({
   __esModule: true,
-  buildHandoverBundle: vi.fn(),
+  buildHandoverBundleAsync: vi.fn(),
 }));
 
 vi.mock('expo-router', () => ({

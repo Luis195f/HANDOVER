@@ -7,7 +7,7 @@ import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
 const enqueueBundle = vi.fn();
-const buildHandoverBundle = vi.fn(() => ({ bundle: true }));
+const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
@@ -71,7 +71,9 @@ vi.mock('@/src/security/auth', () => ({
 
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
+vi.mock('@/src/lib/fhir-map', () => ({
+  buildHandoverBundleAsync: (...args: unknown[]) => buildHandoverBundleAsync(...args),
+}));
 vi.mock('@/src/lib/fhir-validation', () => ({ validateBundle: (...args: unknown[]) => validateBundle(...args) }));
 
 // ✅ FIX: agregar sendAuditEvent y hacer appendAuditEvent async + makeAuditEvent consistente
@@ -223,7 +225,7 @@ describe('HandoverForm drafts', () => {
 
   beforeEach(() => {
     enqueueBundle.mockReset();
-    buildHandoverBundle.mockReset();
+    buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
     confirmHighRiskSubmission.mockClear();
     mockUseZodForm.mockReset();
@@ -247,8 +249,8 @@ describe('HandoverForm drafts', () => {
       expect(enqueueBundle).toHaveBeenCalledTimes(1);
     });
 
-    expect(buildHandoverBundle).toHaveBeenCalled();
-    const [handoverInput] = buildHandoverBundle.mock.calls[0];
+    expect(buildHandoverBundleAsync).toHaveBeenCalled();
+    const [handoverInput] = buildHandoverBundleAsync.mock.calls[0];
     expect(handoverInput.status).toBe('draft');
 
     // ✅ Ahora vuelve a ser el OK (ya no cae en el catch por el audit)

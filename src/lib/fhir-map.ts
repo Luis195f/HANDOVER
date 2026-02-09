@@ -4221,6 +4221,19 @@ export function buildHandoverBundle(
   return bundle;
 }
 
+const deferBuild = () =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+export async function buildHandoverBundleAsync(
+  input: HandoverInput,
+  options?: BuildOptions,
+): Promise<Bundle> {
+  await deferBuild();
+  return buildHandoverBundle(input, options);
+}
+
 type BundleEntryTransaction = FhirBundleTransaction['entry'][number];
 
 function createTransactionEntry(resource: FhirResource, idOverride?: string): BundleEntryTransaction {
