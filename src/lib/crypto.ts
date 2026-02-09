@@ -80,6 +80,7 @@ async function persistOfflineKey(bytes: Uint8Array): Promise<void> {
   try {
     await secureSetItem(OFFLINE_KEY_STORAGE, base64);
   } catch {
+    // ignore
   }
 }
 
@@ -96,6 +97,7 @@ async function deriveKeyBytes(): Promise<Uint8Array> {
       }
     }
   } catch {
+    // ignore
   }
 
   const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
@@ -133,8 +135,12 @@ export async function encryptOfflinePayload(plaintext: unknown): Promise<string>
   const iv = await Crypto.getRandomBytesAsync(GCM_IV_SIZE);
   const encoder = new TextEncoder();
   const data = encoder.encode(ensurePlaintext(plaintext));
+
+  // ✅ noble-ciphers API (y tus mocks de tests) esperan: gcm(key, iv) y cipher.encrypt(plaintext)
   const cipher = gcm(keyBytes, iv);
   const cipherBytes = cipher.encrypt(data);
+
+  // Convención: cipherBytes = ct || tag (tag al final, 16 bytes)
   const tagBytes = cipherBytes.slice(cipherBytes.length - 16);
   const ctBytes = cipherBytes.slice(0, cipherBytes.length - 16);
 
@@ -146,6 +152,7 @@ export async function encryptOfflinePayload(plaintext: unknown): Promise<string>
     ct: toBase64(ctBytes),
   };
 
+  // ✅ lo que pides explícitamente
   return JSON.stringify(envelope);
 }
 
@@ -185,6 +192,7 @@ async function decryptEnvelope(envelope: EncryptedEnvelopeV1): Promise<string> {
   combined.set(tagBytes, ctBytes.length);
 
   try {
+    // ✅ noble-ciphers API (y mocks): gcm(key, iv) y cipher.decrypt(ciphertextWithTag)
     const cipher = gcm(keyBytes, iv);
     const decryptedBytes = cipher.decrypt(combined);
     const decoder = new TextDecoder();
@@ -224,10 +232,7 @@ let cachedLegacyKey: string | null = null;
 export async function clearOfflineEncryptionKeys(): Promise<void> {
   cachedOfflineKey = null;
   cachedLegacyKey = null;
-  await Promise.allSettled([
-    secureDeleteItem(OFFLINE_KEY_STORAGE),
-    secureDeleteItem(LEGACY_QUEUE_KEY),
-  ]);
+  await Promise.allSettled([secureDeleteItem(OFFLINE_KEY_STORAGE), secureDeleteItem(LEGACY_QUEUE_KEY)]);
 }
 
 function generateLegacyKey(): string {
@@ -244,6 +249,7 @@ async function readLegacyKey(): Promise<string | null> {
       return stored;
     }
   } catch {
+    // ignore
   }
   return null;
 }
@@ -252,6 +258,7 @@ async function persistLegacyKey(key: string): Promise<void> {
   try {
     await secureSetItem(LEGACY_QUEUE_KEY, key);
   } catch {
+    // ignore
   }
 }
 
@@ -279,7 +286,10 @@ function decryptLegacyPayload(ciphertext: string): string {
 }
 
 export function payloadIsEncrypted(payload: unknown): payload is string {
-  return typeof payload === 'string' && (payload.startsWith(ENCRYPTION_PREFIX) || payload.startsWith(LEGACY_ENCRYPTION_PREFIX));
+  return (
+    typeof payload === 'string' &&
+    (payload.startsWith(ENCRYPTION_PREFIX) || payload.startsWith(LEGACY_ENCRYPTION_PREFIX))
+  );
 }
 
 export async function encryptPayload(plaintext: string): Promise<string> {
@@ -333,3 +343,4 @@ export async function decryptDraft(ciphertext: string): Promise<string> {
 }
 
 export { getOrCreateEncryptionKey };
+

@@ -1,7 +1,10 @@
 name: Django CI
+
 on:
-  push: { branches: [main] }
+  push:
+    branches: [main]
   pull_request:
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -13,14 +16,21 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - run: pip install -r backend/requirements.txt
-      - run: python manage.py migrate --noinput
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r backend/requirements.txt
+
+      - name: Migrate
+        run: python manage.py migrate --noinput
+
       - name: Run tests
         run: python manage.py test -v 2
 
@@ -34,31 +44,44 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - run: pip install -r backend/requirements.txt
-      - run: pip install -r requirements-dev.txt
-      - name: Run coverage
+
+      - name: Install dependencies (incl. coverage tools)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run coverage (produces coverage.xml)
         run: |
           pytest tests --ds=backend.settings --cov=backend --cov=main \
             --cov-report=xml --cov-report=html --cov-report=term \
             --ignore=.venv --ignore=.venv-stt
-      - name: Install genbadge
-        run: pip install genbadge[all]      
+          test -f coverage.xml
+
+      # Fix definitivo para Python 3.12 + pkg_resources + defusedxml
+      - name: Install genbadge (stable on Py3.12)
+        run: |
+          python -m pip uninstall -y setuptools || true
+          python -m pip install "setuptools<81" wheel
+          python -m pip install "genbadge[coverage]" defusedxml
+          python -c "import pkg_resources; import defusedxml; print('genbadge deps OK')"
+
       - name: Generate badges
         run: |
           genbadge coverage -i coverage.xml -o coverage-badge.svg
           curl -s "https://img.shields.io/badge/backend%20tests-passing-brightgreen" -o ci-badge.svg
+
       - name: Extract coverage value
         id: coverage_value
         run: |
           percent=$(python - <<'PY'
           import xml.etree.ElementTree as ET
-
           tree = ET.parse("coverage.xml")
           rate = float(tree.getroot().get("line-rate", 0))
           percent = round(rate * 100, 2)
@@ -67,6 +90,7 @@ jobs:
           )
           echo "percent=$percent" >> "$GITHUB_OUTPUT"
           echo '{"schemaVersion":1,"label":"coverage","message":"'"${percent}%"'","color":"green"}' > .coverage-badge.json
+
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -78,6 +102,7 @@ jobs:
             ci-badge.svg
             .coverage-badge.json
           retention-days: 7
+
       - name: Publish coverage summary
         run: |
           {
@@ -85,6 +110,7 @@ jobs:
             echo "";
             echo "Percent: ${{ steps.coverage_value.outputs.percent }}%";
           } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Persist badges on main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
