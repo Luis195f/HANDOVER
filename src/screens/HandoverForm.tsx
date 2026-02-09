@@ -1579,6 +1579,20 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   return out;
 };
 
+  const normalizeOxygenTherapy = (value: unknown) => {
+  if (value == null) return value; // null/undefined OK
+  if (typeof value !== "object") return value;
+
+  // Si ya trae status, no tocamos nada
+  if ("status" in (value as any)) return value;
+
+  // Si viene en formato antiguo (sin status), ponemos uno por defecto seguro
+  return {
+    status: "in-progress",
+    ...(value as any),
+  };
+};
+
   const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
     const vitals = watchedVitals ?? {};
     const oxygen = watchedOxygen ?? {};
