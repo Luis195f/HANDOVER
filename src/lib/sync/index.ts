@@ -1,13 +1,13 @@
 // FILE: src/lib/sync/index.ts
 // ---------------------------------------------------------------------
-// Sincronización FHIR con soporte offline-first + backoff + idempotencia
-// + telemetría (mark) y utilidades para UI (flushQueueNow / getQueueSize).
+// FHIR sync with offline-first behavior, backoff, and idempotency.
+// Includes telemetry (mark) and UI helpers (flushQueue / getQueueSize).
 //
 // Exports:
 //   - syncBundleOrEnqueue(bundle, opts): 'sent' | 'queued'
-//   - startSyncDaemon(opts): () => void   (suscribe cambios de red y drena)
-//   - flushQueueNow(opts): { processed, remaining }  (botón "Reintentar ahora")
-//   - getQueueSize(): Promise<number>     (para banner)
+//   - startSyncDaemon(opts): () => void   (subscribes to network changes and drains)
+//   - flushQueue(opts): { processed, remaining }     (manual "Retry now" action)
+//   - getQueueSize(): Promise<number>     (for banners/indicators)
 // ---------------------------------------------------------------------
 
 import NetInfo from '@/src/lib/netinfo';
@@ -21,7 +21,7 @@ import { retryWithBackoff } from './backoff';
 import { bundleIdempotencyKey } from './ident';
 import { enqueueTx, flushQueue as runQueueFlush, readQueue } from '../offlineQueue';
 
-// --- mark() tolerante: no-op si el módulo de otel no está disponible ---
+// --- Tolerant mark(): no-op when the otel module is not available. ---
 type MarkFn = (name: string, attrs?: Record<string, unknown>) => void;
 let mark: MarkFn = () => {};
 try {
@@ -66,7 +66,7 @@ try {
   if (mod?.mark) mark = mod.mark as MarkFn;
 } catch {}
 
-// --- Estados HTTP de interés ---
+// --- HTTP statuses of interest ---
 function isSuccessStatus(status: number) {
   return status === 200 || status === 201 || status === 202 || status === 204;
 }
@@ -77,7 +77,7 @@ function isRetryable(status: number) {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
-// --- Tipos públicos ---
+// --- Public types ---
 export type SyncOpts = {
   fhirBaseUrl: string;
   getToken: () => Promise<string | null>;
@@ -86,10 +86,10 @@ export type SyncOpts = {
 
 type FlushResult = { processed: number; remaining: number };
 
-// Guardado global para coalescer flushes concurrentes (evita carreras)
+// Global guard to coalesce concurrent flushes (prevents races).
 let _currentFlush: Promise<FlushResult> | null = null;
 
-// --- API principal: intenta enviar o encola si no hay red / error ---
+// --- Main API: send immediately or enqueue when offline or on error. ---
 export async function syncBundleOrEnqueue(
   bundle: unknown,
   opts: SyncOpts
@@ -115,7 +115,7 @@ export async function syncBundleOrEnqueue(
   }
 }
 
-// --- Envío con backoff + marcas por intento ---
+// --- Send with backoff + per-attempt marks. ---
 async function sendWithRetry(bundle: unknown, idemKey: string, opts: SyncOpts) {
   enforceBundleValidation(bundle, 'sync sendWithRetry');
   return await retryWithBackoff(
@@ -138,20 +138,20 @@ async function sendWithRetry(bundle: unknown, idemKey: string, opts: SyncOpts) {
   );
 }
 
-// --- Encolar cifrado + marca ---
+// --- Enqueue (encrypted) + telemetry mark. ---
 async function enqueue(bundle: unknown, idemKey: string) {
   mark('sync.enqueue', { kind: 'FHIR_BUNDLE', idemKey });
   enforceBundleValidation(bundle, 'sync enqueue');
   await enqueueTx({ payload: { bundle, meta: { hash: idemKey } } });
 }
 
-// --- Estado de red ---
+// --- Network state ---
 async function hasInternet(): Promise<boolean> {
   const s = await NetInfo.fetch();
   return !!(s.isConnected && (s.isInternetReachable ?? true));
 }
 
-/** Factoriza el flush para reuse (daemon + acción manual). */
+/** Builds a reusable flush function for both the daemon and manual actions. */
 function createFlusher(opts: SyncOpts) {
   configureFHIRClient({
     getBaseUrl: () => opts.fhirBaseUrl,
@@ -203,7 +203,7 @@ function createFlusher(opts: SyncOpts) {
   };
 }
 
-// Coalescer flushes concurrentes (misma instancia de módulo)
+// Coalesce concurrent flushes (same module instance).
 async function triggerFlush(opts: SyncOpts): Promise<FlushResult> {
   if (_currentFlush) return _currentFlush;
   const flush = createFlusher(opts);
@@ -221,22 +221,31 @@ async function triggerFlush(opts: SyncOpts): Promise<FlushResult> {
 export function startSyncDaemon(opts: SyncOpts) {
   const unsub = NetInfo.addEventListener((state: { isConnected?: boolean | null; isInternetReachable?: boolean | null }) => {
     if (state.isConnected && (state.isInternetReachable ?? true)) {
-      // coalesce
+      // Coalesce multiple trigger attempts.
       triggerFlush(opts).catch(() => {});
     }
   });
 
-  // Intento inicial (por si ya hay red al iniciar la app)
+  // Initial attempt (in case the app starts with connectivity).
   triggerFlush(opts).catch(() => {});
   return () => unsub();
 }
 
-/** === Permite forzar un flush desde la UI (Sync Center) === */
-export async function flushQueueNow(opts: SyncOpts): Promise<FlushResult> {
+/**
+ * Flushes the queue on demand (e.g., from the Sync Center UI).
+ */
+export async function flushQueue(opts: SyncOpts): Promise<FlushResult> {
   return triggerFlush(opts);
 }
 
-/** === Tamaño actual de la cola (para banner/UI) === */
+/**
+ * @deprecated Use {@link flushQueue} instead. This alias will be removed in a future major release.
+ */
+export async function flushQueueNow(opts: SyncOpts): Promise<FlushResult> {
+  return flushQueue(opts);
+}
+
+/** Returns the current queue size (for banners/UI). */
 export async function getQueueSize(): Promise<number> {
   try {
     const queue = await readQueue();

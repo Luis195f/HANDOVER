@@ -1,6 +1,6 @@
 import { configureFHIRClient, postBundle } from './fhir-client';
 import { ENV, FHIR_BASE_URL } from '../config/env';
-import { startSyncDaemon, flushQueueNow, type SyncOpts } from './sync/index';
+import { startSyncDaemon, flushQueue, type SyncOpts } from './sync/index';
 
 export async function postTransactionBundle(
   bundle: any,
@@ -41,5 +41,5 @@ export async function flushNow() {
     fhirBaseUrl: ENV.FHIR_BASE_URL ?? FHIR_BASE_URL,
     getToken: async () => null,
   };
-  await flushQueueNow(opts);
+  await flushQueue(opts);
 }

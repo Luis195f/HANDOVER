@@ -13,7 +13,7 @@ import {
   type HandoverValues,
 } from './fhir-map';
 import type { AdministrativeData } from '../types/administrative';
-import { postBundleSmart, postBundle, type ResponseLike } from './fhir-client';
+import { postBundle, type ResponseLike } from './fhir-client';
 import { formatIssuesForUser, hasFatalOutcome, type OperationIssue } from './fhir-outcome';
 import { hashHex } from './crypto';
 import { z } from 'zod';
@@ -53,12 +53,12 @@ export type SendFn = (tx: LegacyQueueItem) => Promise<SenderResult>;
 export type FlushCompatOptions = {
   sender?: SendFn;
   /**
-   * Si se indica, intenta limpiar el borrador de este patientId cuando
-   * el envío del Bundle termine en 201 Created / 200 OK o 409/412 Already exists.
+   * When provided, clears the draft for this patientId after a successful send
+   * (201 Created / 200 OK) or a duplicate response (409/412 Already exists).
    */
   onSent?: (input: { patientId: string }) => Promise<void> | void;
   /**
-   * Pausa entre elementos, por si el backend prefiere no recibir ráfagas.
+   * Optional pause between items, in case the backend prefers to avoid bursts.
    */
   delayMs?: number;
   validation?: ValidationOptions;
@@ -144,11 +144,11 @@ async function enforceLocalBundleValidation(
   context: string,
   opts?: ValidationOptions
 ): Promise<void> {
-  // Si el modo está OFF, no validar (esto evita romper tests)
+  // Skip validation when the mode is off (keeps compatibility with tests).
   const mode = resolveValidationMode(opts?.mode);
   if (mode === 'off') return;
 
-  // Validación local (estructura + zod), sin remote aquí
+  // Local validation (structure + Zod); remote validation happens elsewhere.
   enforceBundleValidation(bundle, context);
 }
 
@@ -214,7 +214,7 @@ async function remoteValidateResource(
     return errors.length > 0 ? errors : null;
   } catch (error) {
     const err = error as Error;
-    throw new Error(`Error al validar remotamente ${resourceType}: ${err.message}`);
+    throw new Error(`Remote validation failed for ${resourceType}: ${err.message}`);
   }
 }
 
@@ -511,9 +511,9 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
     }
 
     try {
-      // ✅ Validación LOCAL antes de enviar (lo que pide el prompt)
-    await enforceLocalBundleValidation(parsed.bundle, 'offline drain', options.validation);
-    await enforceRemoteBundleValidationIfNeeded(parsed.bundle, 'offline drain (remote)', options.validation);
+      // Local validation before sending (may annotate validationErrors).
+      await enforceLocalBundleValidation(parsed.bundle, 'offline drain', options.validation);
+      await enforceRemoteBundleValidationIfNeeded(parsed.bundle, 'offline drain (remote)', options.validation);
 
 
       const headers = {
@@ -580,7 +580,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         return { ok: false, status: 401, recoverable: false, message: error.message };
       }
 
-      // ✅ Si viene de Zod/local validation, lo tratamos como 422 no-recoverable
+      // If the error comes from Zod/local validation, treat it as a non-recoverable 422.
       if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
         const errs = (error as Error & { validationErrors?: ValidationResult['errors'] }).validationErrors;
         const issues = errs?.map((err) => ({ diagnostics: err.message, expression: [err.path] }));
@@ -819,7 +819,7 @@ async function runSyncCycle(): Promise<SyncSnapshot> {
     lastError: errored?.errorMessage ?? syncSnapshot.lastError ?? null,
   });
 
-  // Limpia entradas marcadas como sincronizadas para no dejar basura en la cola.
+  // Clean up entries marked as synced to avoid leaving stale data in the queue.
   const synced = refreshed.filter((item) => item.syncStatus === 'synced');
   if (synced.length > 0) {
     await Promise.all(synced.map((item) => deleteOfflineQueueItem(item.id)));
@@ -953,6 +953,11 @@ function scheduleSecureOfflineRetry(item: QueueItem): QueueItem {
   };
 }
 
+/**
+ * Adds a conditional create token to an entry so the transaction can be retried
+ * safely. The token embeds the transaction ID and entry index to make each
+ * conditional create idempotent across retries.
+ */
 function attachTxIdToEntry(entry: any, txId: string, index: number) {
   if (!entry || typeof entry !== 'object') return entry;
   const request = entry.request && typeof entry.request === 'object' ? { ...entry.request } : undefined;
@@ -971,6 +976,15 @@ function attachTxIdToEntry(entry: any, txId: string, index: number) {
   };
 }
 
+/**
+ * Ensures a transaction bundle has a transaction identifier and per-entry
+ * conditional create tokens.
+ *
+ * - Generates a UUID v4 when no txId is provided to guarantee global uniqueness.
+ * - Attaches the txId to each entry via {@link attachTxIdToEntry}, enabling
+ *   idempotent conditional POSTs on retry.
+ * - Mirrors the txId in the Bundle.identifier for traceability.
+ */
 function ensureBundleTx(
   bundle: { resourceType: 'Bundle'; entry?: any[]; identifier?: any; type?: string },
   existingTxId?: string
@@ -995,9 +1009,9 @@ function ensureBundleTx(
 }
 
 /**
- * Utilidades simples para SecureStore:
- * - en Android usa un fallback sin encriptar si hace falta (dev/test)
- * - en iOS usa por defecto el almacenamiento seguro
+ * SecureStore helpers:
+ * - On Android, falls back to an in-memory map for dev/test when SecureStore fails.
+ * - On iOS, uses secure storage by default.
  */
 async function safeSetItemAsync(key: string, value: string) {
   try {
@@ -1006,7 +1020,7 @@ async function safeSetItemAsync(key: string, value: string) {
     });
   } catch (e) {
     if (Platform.OS === 'android') {
-      // En Android en modo dev algunas builds tiran con fallback
+      // Some Android dev builds fail; fall back to an in-memory store.
       (globalThis as any).__insecureKV ??= new Map<string, string>();
       (globalThis as any).__insecureKV.set(key, value);
       return;
@@ -1188,11 +1202,23 @@ function backoff(attempt: number): number {
   return Math.min(BACKOFF_MAX_MS, exp);
 }
 
+/**
+ * Computes the start of the grouping window used to coalesce queue items
+ * for the same patient.
+ */
 function computeWindowStart(timestamp: number): number {
   const window = Math.floor(timestamp / GROUP_WINDOW_MS) * GROUP_WINDOW_MS;
   return window;
 }
 
+/**
+ * Computes a deterministic queue item ID based on the sorted fullUrl list.
+ *
+ * Uses {@link hashHex} (SHA-256, truncated) to detect duplicate bundles and
+ * avoid enqueueing the same set of resources more than once. Collisions are
+ * astronomically unlikely, but callers could guard against them by comparing
+ * the fullUrl sets before skipping an enqueue.
+ */
 function computeId(fullUrls: string[]): string {
   if (fullUrls.length === 0) return 'empty';
   const base = fullUrls.slice().sort().join('|');
@@ -1304,19 +1330,19 @@ export async function drain(
           const token = await getToken();
           if (!token) throw new Error('OAuth token is required');
 
-          // ✅ Validación local antes de enviar (puede lanzar validationErrors)
+          // Local validation before sending (may throw validationErrors).
           await enforceLocalBundleValidation(current.bundle, 'secure-queue drain', validation);
           await enforceRemoteBundleValidationIfNeeded(current.bundle, 'secure-queue drain (remote)', validation);
 
           response = await postBundle(current.bundle, { token });
         } catch (error) {
-          // ✅ Si es error de validación local/Zod → NO reintentar. Remover y dead-letter.
+          // Local/Zod validation errors are non-retryable. Remove and dead-letter.
           if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {
             const [removed] = freshQueue.splice(index, 1);
             await writeSecureQueue(freshQueue);
             await pushDeadEntry(removed ?? current, {
               error: error instanceof Error ? error.message : String(error),
-              // status 422 es coherente con el resto del archivo para validation errors
+              // Use 422 to align with the rest of this module for validation errors.
               response: { ok: false, status: 422 } as any,
             });
             continue;
@@ -1478,7 +1504,7 @@ async function saveQueue(items: LegacyQueueItem[]) {
 }
 
 /**
- * Encola un bundle ya construido (útil para reintentos fuera del form)
+ * Enqueues an already-built bundle (useful for retries outside the form flow).
  */
 type EnqueueBundleInput = {
   patientId: string;
@@ -1570,20 +1596,22 @@ export async function enqueueBundle(
 }
 
 /**
- * Retorna el tamaño actual de la cola offline.
- * Usamos el origen real de la cola (loadQueue) para no acoplar a detalles internos.
+ * Returns the current offline queue size.
+ * Uses the actual queue sources (loadQueue) to avoid coupling to internal details.
  */
 export async function getQueueSize(): Promise<number> {
   const [legacy, secure] = await Promise.all([loadQueue(), readSecureQueue()]);
   return legacy.length + secure.length;
 }
 
-// Alias de compatibilidad: algunos sitios importan flushQueueNow.
+/**
+ * @deprecated Use {@link flushQueue}. This alias remains for legacy imports and will be removed in a future major release.
+ */
 export const flushQueueNow = flushQueue;
 
 /**
- * Crea y encola un Bundle de handover a partir de los valores del formulario.
- * Si falla la construcción/validación, lanza ZodError.
+ * Builds and enqueues a handover Bundle from form values.
+ * Throws ZodError if construction/validation fails.
  */
 export async function enqueueTxFromValues(
   values: HandoverValues,
@@ -1598,7 +1626,7 @@ export async function enqueueTxFromValues(
     emitHasMember: opts?.emitHasMember,
     emitBpPanel: opts?.emitBpPanel,
     profileUrls: opts?.profileUrls,
-    // cualquier otra opción que tengas añadida al tipo BuildOptions
+    // Any additional BuildOptions fields can be added here.
   });
 
   return enqueueBundle({
@@ -1610,10 +1638,10 @@ export async function enqueueTxFromValues(
 }
 
 /**
- * Envía la cola con un "sender" (por defecto usa postBundleSmart)
- * - 201/200: éxito → elimina el elemento
- * - 409/412: conflicto (ya existe) → considera entregado y elimina el elemento
- * - Otros: deja el elemento para reintento y sigue con el siguiente
+ * Sends the legacy queue with a sender.
+ * - 201/200: success → remove the item
+ * - 409/412: duplicate → consider delivered and remove
+ * - Others: keep the item for retry and continue
  */
 export async function flushQueue(opts?: FlushCompatOptions) {
   ensureConnectivityListener();
@@ -1621,13 +1649,13 @@ export async function flushQueue(opts?: FlushCompatOptions) {
     opts?.sender ??
     (async (tx) => {
       const { bundle } = tx;
-      return postBundleSmart({ fhirBase: FHIR_BASE_URL, bundle });
+      return postBundle(bundle);
     });
   const sender: SendFn = async (tx) => {
     if (tx?.bundle) {
       await enforceLocalBundleValidation(tx.bundle, 'legacy flushQueue sender', opts?.validation);
       await enforceRemoteBundleValidationIfNeeded(tx.bundle, 'legacy flushQueue sender (remote)', opts?.validation);
-  }
+    }
     return baseSender(tx);
   };
 
@@ -1721,7 +1749,8 @@ export async function flushQueue(opts?: FlushCompatOptions) {
 }
 
 /**
- * Compatibilidad con tests: función "flush" que delega en flushQueue.
+ * Legacy flush wrapper kept for test compatibility. Prefer {@link flushQueue}.
+ * Planned removal: once all test callers migrate to flushQueue.
  */
 export async function flush(
   sender?: SendFn | FlushCompatOptions,
@@ -1753,10 +1782,9 @@ export async function flush(
 }
 
 /**
- * Construye un Bundle type=transaction con entradas binarias + conditional create
- * para Observations/Patient, según lo que hay encolado.
- * (Útil para suites de test que quieran inspeccionar la forma del bundle
- * que termina llegando al sender.)
+ * Builds a transaction Bundle with binary entries + conditional creates for
+ * Observations/Patient based on the queued data.
+ * Useful for test suites that want to inspect the bundle shape sent to the sender.
  */
 export function buildTransactionBundleForQueue(
   input: HandoverInput | HandoverValues,
@@ -1895,9 +1923,7 @@ export function buildTransactionBundleForQueue(
   return ensureBundleTx(baseBundle).bundle;
 }
 
-/**
- * Devuelve el estado actual de la cola (para debug / UI).
- */
+/** Returns the current queue state (for debugging / UI). */
 export async function readQueueState() {
   const items = await loadQueue();
   return {
@@ -1906,16 +1932,14 @@ export async function readQueueState() {
   };
 }
 
-/**
- * Borra por completo la cola (utilidad de depuración)
- */
+/** Clears the queue entirely (debug utility). */
 export async function clearQueue() {
   await saveQueue([]);
 }
 
 /**
- * Encola desde un HandoverInput minimal, usado en pruebas de integración o
- * cuando ya tienes los valores sueltos (no desde el form).
+ * Enqueues from a minimal HandoverInput, used in integration tests or when you
+ * already have the values (not from the form).
  */
 export async function enqueueTx(
   input: HandoverInput | HandoverValues,
@@ -1929,8 +1953,8 @@ export async function enqueueTx(
 }
 
 /**
- * Validación rápida (útil en tests) para asegurar que el input del handover
- * al menos tiene patientId o patient.id
+ * Fast validation (useful in tests) to ensure the handover input contains
+ * patientId or patient.id.
  */
 export function validateHandoverInput(input: unknown) {
   const S = z
