@@ -114,6 +114,11 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 - Hashing y random bytes se resuelven vía `expo-crypto` sin añadir polyfills globales de `crypto`.
 - La firma de bundles FHIR depende de `globalThis.crypto.subtle`; si no está disponible, la firma se omite y el envío continúa sin bloquear la cola.
 
+## Optimización del mapeo FHIR
+
+- El mapeo FHIR vive en `src/lib/fhir-map.ts` y se expone vía `buildHandoverBundle`. Para evitar bloqueos en UI, usa `buildHandoverBundleAsync` en flujos interactivos (defer en el event loop) y encapsula la creación del bundle dentro de callbacks memoizados. Así evitas recrear funciones costosas en cada render y preparas el terreno para futuras ejecuciones en Web Workers para web.
+- Las pruebas de estrés están en `src/lib/__tests__/fhir-map.performance.spec.ts` y usan `performance.now()` para capturar duraciones de escenarios pequeños/medianos/grandes. Ajusta los tamaños si necesitas calibrar tiempos en dispositivos de baja gama.
+
 ## Firma eIDAS de PDFs (entrega clínica)
 
 - El flujo de firma cualificada eIDAS se integra en `src/lib/eidas-signature.ts` y genera PDFs firmados en formato PAdES, con metadatos de auditoría (certificado, timestamp) anexados al `DocumentReference` FHIR.
@@ -191,6 +196,10 @@ El reporte HTML queda en `coverage/unit/index.html` y el `lcov.info` en `coverag
 ### CI y resiliencia del registry
 
 El workflow `CI` usa Node 20 y pnpm 10. El job de Node está configurado como “non-blocking” (`continue-on-error: true`) para mitigar errores `403` intermitentes del registry de npm; revisa los logs del paso `Install` para confirmar si ocurrió la incidencia.
+
+### Seguridad de dependencias
+
+Se recomienda activar Dependabot para revisar automáticamente librerías frontend/backend y recibir PRs con actualizaciones de seguridad. El archivo de configuración vive en `.github/dependabot.yml` y está preparado para el ecosistema npm/pnpm.
 
 ## Estructura relevante
 

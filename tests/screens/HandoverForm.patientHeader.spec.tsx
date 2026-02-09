@@ -59,7 +59,7 @@ vi.mock('@/src/security/auth', () => ({
 }));
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: vi.fn() }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: vi.fn(async () => undefined) }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: vi.fn() }));
+vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundleAsync: vi.fn() }));
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(),
