@@ -1321,7 +1321,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     audioTranscription: values.audioTranscription,
     risks: values.risks,
     risksStructured: values.risksStructured,
-    oxygenTherapy: values.oxygenTherapy,
+    oxygenTherapy: normalizeOxygenTherapy(values.oxygenTherapy),
     devices: values.devices,
     nutrition: values.nutrition,
     elimination: values.elimination,
@@ -1655,14 +1655,30 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     }
   };
 
-  const buildHandoverInput = useMemo(
-    () =>
-      (values: HandoverFormValues, overrides: Partial<FhirHandoverInput>): FhirHandoverInput => ({
-        ...values,
-        ...overrides,
-      }),
-    [],
-  );
+  const buildHandoverInput = useMemo(() => {
+  const normalizeOxygenTherapy = (value: unknown) => {
+    if (value == null) return value; // null/undefined OK
+    if (typeof value !== "object") return value;
+
+    // Si ya trae status, no tocamos nada
+    if ("status" in (value as any)) return value;
+
+    // Si viene en formato antiguo (sin status), ponemos uno por defecto seguro
+    return {
+      status: "in-progress",
+      ...(value as any),
+    };
+  };
+
+  return (
+    values: HandoverFormValues,
+    overrides: Partial<FhirHandoverInput>
+  ): FhirHandoverInput => ({
+    ...values,
+    oxygenTherapy: normalizeOxygenTherapy((values as any).oxygenTherapy) as any,
+    ...overrides,
+  });
+}, []);
 
   const buildBundle = useCallback(
     async (handoverInput: FhirHandoverInput, nowIso: string) =>
