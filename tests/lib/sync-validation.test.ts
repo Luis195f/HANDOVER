@@ -89,7 +89,6 @@ describe('sync remote validation and 422 handling', () => {
       outcome,
       message: 'Bad bundle',
     } as any);
-    vi.spyOn(fhirClient, 'postBundleSmart').mockResolvedValue({} as any);
 
     const sync = await import('@/src/lib/sync');
     const queue = await import('@/src/lib/queue');

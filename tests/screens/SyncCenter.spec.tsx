@@ -7,9 +7,9 @@ import SyncCenter from '@/src/screens/SyncCenter';
 import { t } from '@/src/i18n';
 
 const listOfflineQueue = vi.fn();
-const flushQueueNow = vi.fn();
+const flushQueue = vi.fn();
 
-// ✅ DECLARAR ANTES del vi.mock (por el hoisting)
+// ✅ Declare before vi.mock (hoisting)
 const navigationMock = {
   navigate: vi.fn(),
   goBack: vi.fn(),
@@ -19,7 +19,7 @@ const navigationMock = {
   push: vi.fn(),
 };
 
-// ✅ Mock “total” (NO importActual) para evitar NavigationContainer real y useBackButton
+// ✅ Full mock (no importActual) to avoid the real NavigationContainer and useBackButton
 vi.mock('@react-navigation/native', () => ({
   useIsFocused: () => true,
   useNavigation: () => navigationMock,
@@ -33,7 +33,7 @@ vi.mock('@/src/lib/queue', () => ({
 }));
 
 vi.mock('@/src/lib/sync/index', () => ({
-  flushQueueNow: (...args: unknown[]) => flushQueueNow(...args),
+  flushQueue: (...args: unknown[]) => flushQueue(...args),
 }));
 
 vi.mock('@/src/services/AuthService', () => ({
@@ -66,18 +66,18 @@ const queueItems = [
 describe('SyncCenter', () => {
   beforeEach(() => {
     listOfflineQueue.mockReset();
-    flushQueueNow.mockReset();
+    flushQueue.mockReset();
 
-    // opcional, pero no estorba
+    // Optional, but harmless in tests.
     process.env.EXPO_PUBLIC_FHIR_BASE = 'https://example.test';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
 
     listOfflineQueue.mockResolvedValue(queueItems);
-    flushQueueNow.mockResolvedValue({ processed: 2, remaining: 0 });
+    flushQueue.mockResolvedValue({ processed: 2, remaining: 0 });
   });
 
-  it('muestra los elementos de la cola con estados esperados', async () => {
+  it('renders queue items with the expected statuses', async () => {
     const view = render(<SyncCenter />);
 
     await waitFor(() => {
@@ -96,7 +96,7 @@ describe('SyncCenter', () => {
     expect(view.getByText(t('common.error'))).toBeTruthy();
   });
 
-  it('dispara el reintento y recarga la cola', async () => {
+  it('triggers a retry and reloads the queue', async () => {
     const view = render(<SyncCenter />);
 
     await waitFor(() => {
@@ -110,13 +110,13 @@ describe('SyncCenter', () => {
     });
 
     await waitFor(() => {
-      expect(flushQueueNow).toHaveBeenCalled();
+      expect(flushQueue).toHaveBeenCalled();
     });
 
     expect(listOfflineQueue.mock.calls.length).toBeGreaterThan(initialCalls);
   });
 
-  it('permite refrescar la lista', async () => {
+  it('allows refreshing the list', async () => {
     const view = render(<SyncCenter />);
 
     await waitFor(() => {
@@ -134,7 +134,7 @@ describe('SyncCenter', () => {
     expect(listOfflineQueue.mock.calls.length).toBeGreaterThan(initialCalls);
   });
 
-  it('muestra el detalle del error al pulsar el ítem', async () => {
+  it('shows error details when tapping the item', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const view = render(<SyncCenter />);
 

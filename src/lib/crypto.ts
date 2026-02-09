@@ -211,12 +211,20 @@ export async function decryptOfflinePayload(stored: string): Promise<string> {
   return decryptEnvelope(envelope);
 }
 
+/**
+ * Returns a SHA-256 hex digest truncated to the requested length.
+ * Used for deterministic identifiers where repeatability is required.
+ */
 export function hashHex(input: string, len = 64): string {
   const hex = sha256(input);
   const L = Math.max(1, Math.min(len, hex.length));
   return hex.slice(0, L);
 }
 
+/**
+ * Builds a deterministic FHIR-safe identifier by prefixing a hash and enforcing
+ * maximum length and allowed characters.
+ */
 export function fhirId(prefix: string, input: string, maxLen = 64): string {
   const base = `${prefix}${hashHex(input, maxLen)}`;
   return base.slice(0, maxLen).replace(/[^A-Za-z0-9\-.]/g, '-');
@@ -322,17 +330,17 @@ export async function decryptPayload(ciphertext: string): Promise<string> {
 }
 
 /**
- * Cifra borradores reutilizando la misma clave que la cola offline.
- * Si fallase el cifrado, el caller NO debería persistir datos sensibles en claro.
+ * Encrypts drafts using the same key as the offline queue.
+ * If encryption fails, callers should NOT persist sensitive data in plaintext.
  */
 export async function encryptDraft(plaintext: string): Promise<string> {
   return encryptPayload(plaintext);
 }
 
 /**
- * Descifra borradores reutilizando la misma clave que la cola offline. Si el
- * cifrado está desactivado pero el valor tiene prefijo, igualmente se intenta
- * descifrar para mantener compatibilidad.
+ * Decrypts drafts using the same key as the offline queue. If encryption is
+ * disabled but the value is still prefixed, it still attempts to decrypt for
+ * compatibility.
  */
 export async function decryptDraft(ciphertext: string): Promise<string> {
   const encryptionDisabledAndPlain = isEncryptionDisabled() && !payloadIsEncrypted(ciphertext);
@@ -343,4 +351,3 @@ export async function decryptDraft(ciphertext: string): Promise<string> {
 }
 
 export { getOrCreateEncryptionKey };
-
