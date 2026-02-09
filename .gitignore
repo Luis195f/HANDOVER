@@ -68,7 +68,9 @@ Thumbs.db
 
 # Jest / Tests / Coverage
 coverage/
-jest-tests/
+# jest-tests mocks: keep tracked mocks, ignore everything else if needed
+!jest-tests/__mocks__/
+!jest-tests/__mocks__/*.js
 pytest-cache/
 .cache/
 
