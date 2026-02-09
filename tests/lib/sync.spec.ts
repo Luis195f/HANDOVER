@@ -403,3 +403,5 @@ describe('offline encryption integration', () => {
     expect(getSyncSnapshot().status).toBe('idle');
   });
 });
+
+// ci: retrigger
