@@ -2,7 +2,7 @@ import { Alert } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const enqueueBundle = vi.fn();
-const buildHandoverBundle = vi.fn(() => ({ bundle: true }));
+const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
 
@@ -27,7 +27,9 @@ vi.mock('@/src/security/auth', () => ({
 }));
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
+vi.mock('@/src/lib/fhir-map', () => ({
+  buildHandoverBundleAsync: (...args: unknown[]) => buildHandoverBundleAsync(...args),
+}));
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(),
@@ -87,15 +89,15 @@ const baseValues = {
 describe('HandoverForm validation & envío', () => {
   beforeEach(() => {
     enqueueBundle.mockReset();
-    buildHandoverBundle.mockReset();
-    buildHandoverBundle.mockReturnValue({ bundle: true });
+    buildHandoverBundleAsync.mockReset();
+    buildHandoverBundleAsync.mockResolvedValue({ bundle: true });
     ensureUnitAccess.mockReset();
     confirmHighRiskSubmission.mockClear();
   });
 
   it('envía un borrador válido y encola el bundle', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert');
-    const bundle = buildHandoverBundle(baseValues);
+    const bundle = await buildHandoverBundleAsync(baseValues);
     await enqueueBundle(bundle, {
       patientId: baseValues.patientId,
       unitId: baseValues.administrativeData.unit,

@@ -1,1 +1,1 @@
-export { buildHandoverBundle, buildFhirBundleFromFormData, validateBundle } from '../fhir-map';
+export { buildHandoverBundle, buildHandoverBundleAsync, buildFhirBundleFromFormData, validateBundle } from '../fhir-map';

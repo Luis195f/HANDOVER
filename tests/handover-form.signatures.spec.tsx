@@ -45,7 +45,7 @@ vi.mock('react-hook-form', async () => {
 });
 
 const enqueueBundle = vi.fn();
-const buildHandoverBundle = vi.fn();
+const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const ensureUnitAccess = vi.fn();
 const mockSession = {
   userId: 'nurse-1',
@@ -69,7 +69,9 @@ vi.mock('@/src/security/auth', () => ({
 }));
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
-vi.mock('@/src/lib/fhir-map', () => ({ buildHandoverBundle: (...args: unknown[]) => buildHandoverBundle(...args) }));
+vi.mock('@/src/lib/fhir-map', () => ({
+  buildHandoverBundleAsync: (...args: unknown[]) => buildHandoverBundleAsync(...args),
+}));
 
 // ✅ FIX: agregar sendAuditEvent para evitar unhandled rejections
 vi.mock('@/src/lib/audit', () => ({
@@ -132,7 +134,7 @@ vi.mock('@/src/validation/form-hooks', () => ({
 describe('HandoverForm signatures', () => {
   beforeEach(() => {
     enqueueBundle.mockReset();
-    buildHandoverBundle.mockReset();
+    buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
     mockSession.roles = ['nurse'];
     mockSession.user.roles = ['nurse'];
@@ -232,7 +234,7 @@ describe('HandoverForm signatures', () => {
         'Para finalizar la entrega falta la firma de enfermera saliente.',
       );
     });
-    expect(buildHandoverBundle).not.toHaveBeenCalled();
+    expect(buildHandoverBundleAsync).not.toHaveBeenCalled();
 
     alertSpy.mockRestore();
   });

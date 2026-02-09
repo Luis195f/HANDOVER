@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -26,7 +26,7 @@ import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
 import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
-import { buildHandoverBundle, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
+import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { generateSbarViaBackend, refineSBARWithAI } from '@/src/lib/ai-sbar';
@@ -1321,7 +1321,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     audioTranscription: values.audioTranscription,
     risks: values.risks,
     risksStructured: values.risksStructured,
-    oxygenTherapy: values.oxygenTherapy,
+    oxygenTherapy: normalizeOxygenTherapy(values.oxygenTherapy),
     devices: values.devices,
     nutrition: values.nutrition,
     elimination: values.elimination,
@@ -1579,6 +1579,20 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   return out;
 };
 
+  const normalizeOxygenTherapy = (value: unknown) => {
+  if (value == null) return value; // null/undefined OK
+  if (typeof value !== "object") return value;
+
+  // Si ya trae status, no tocamos nada
+  if ("status" in (value as any)) return value;
+
+  // Si viene en formato antiguo (sin status), ponemos uno por defecto seguro
+  return {
+    status: "in-progress",
+    ...(value as any),
+  };
+};
+
   const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
     const vitals = watchedVitals ?? {};
     const oxygen = watchedOxygen ?? {};
@@ -1654,6 +1668,37 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       setSuggestionsLoading(null);
     }
   };
+
+  const buildHandoverInput = useMemo(() => {
+  const normalizeOxygenTherapy = (value: unknown) => {
+    if (value == null) return value; // null/undefined OK
+    if (typeof value !== "object") return value;
+
+    // Si ya trae status, no tocamos nada
+    if ("status" in (value as any)) return value;
+
+    // Si viene en formato antiguo (sin status), ponemos uno por defecto seguro
+    return {
+      status: "in-progress",
+      ...(value as any),
+    };
+  };
+
+  return (
+    values: HandoverFormValues,
+    overrides: Partial<FhirHandoverInput>
+  ): FhirHandoverInput => ({
+    ...values,
+    oxygenTherapy: normalizeOxygenTherapy((values as any).oxygenTherapy) as any,
+    ...overrides,
+  });
+}, []);
+
+  const buildBundle = useCallback(
+    async (handoverInput: FhirHandoverInput, nowIso: string) =>
+      buildHandoverBundleAsync(handoverInput, { now: () => nowIso }),
+    [],
+  );
 
   const submitHandover = async (values: HandoverFormValues, attempt = 0): Promise<void> => {
     try {
@@ -1746,8 +1791,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       };
 
       const nowIso = new Date().toISOString();
-      const handoverInput: FhirHandoverInput = {
-        ...values,
+      const handoverInput = buildHandoverInput(values, {
         status,
         author: signatureUser?.userId
           ? { id: signatureUser.userId, display: signatureUser.fullName ?? signatureUser.displayName }
@@ -1772,9 +1816,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         painAssessment: values.painAssessment,
         signatures: values.signatures,
         attachments: values.attachments ?? [],
-      };
+      });
 
-      const bundle = buildHandoverBundle(handoverInput, { now: () => nowIso });
+      const bundle = await buildBundle(handoverInput, nowIso);
       const localValidation = validateBundle(bundle);
       if (!localValidation.isValid) {
         Alert.alert(
