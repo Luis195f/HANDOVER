@@ -575,9 +575,16 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   return refreshedSession?.accessToken ?? null;
 }
 
-// Alias usado por algunos tests / consumers
-export const ensureFreshAccessToken = ensureFreshToken;
+let tokenSupplier: null | (() => Promise<string | null>) = null;
 
+export function registerTokenSupplier(fn: () => Promise<string | null>) {
+  tokenSupplier = fn;
+}
+
+export async function ensureFreshAccessToken(): Promise<string | null> {
+  if (!tokenSupplier) return null;
+  return tokenSupplier();
+}
 
 export async function setCurrentSession(session: SessionModel | null): Promise<void> {
   await setSession(session);

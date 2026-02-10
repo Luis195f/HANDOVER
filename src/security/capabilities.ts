@@ -146,14 +146,25 @@ export async function fetchCapabilities(
   inflight = (async () => {
     try {
       const fresh = (await apiGet('/api/me/capabilities')) as Capabilities;
+
       if (isCapabilities(fresh)) {
-        await persistCapabilitiesCache({ capabilities: fresh, cachedAt: Date.now() });
+        const next = { capabilities: fresh, cachedAt: Date.now() };
+
+        // ✅ IMPORTANTE: actualiza cache en memoria SIEMPRE
+        memoryCache = next;
+
+        // persistencia (disco/secure store)
+        await persistCapabilitiesCache(next);
+
+        // ✅ devuelve el fresh inmediatamente (evita null)
+        return fresh;
       }
     } catch {
       // keep cached capabilities if network fails
     } finally {
       inflight = null;
     }
+
     return memoryCache?.capabilities ?? null;
   })();
 
