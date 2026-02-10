@@ -9,6 +9,7 @@ import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import type { Capabilities } from '@/src/security/capabilities';
 import { clearCapabilitiesCache, fetchCapabilities, getDemoCapabilities } from '@/src/security/capabilities';
+import { secureGetItem, secureSetItem, secureDeleteItem } from "@/src/security/secure-storage";
 import AuthService, {
   createLocalAuthProvider,
   isTokenExpired,
@@ -51,6 +52,18 @@ type AuthWarnCode =
  * Logger de eventos de autenticación (solo en DEV).
  * Importante: no loguear PHI ni secretos (tokens, auth headers, emails, etc.).
  */
+function sanitizeNamespace(nsRaw: string): string {
+  const ns = (nsRaw ?? "").replace(/[^\w.-]/g, "");
+  return ns || "handover";
+}
+
+export function getAuthSessionStorageKey(): string {
+  const ns = sanitizeNamespace(process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? "handover");
+  return `${ns}_auth_session`;
+}
+
+// Export estable para tests (si quieres)
+export const AUTH_SESSION_STORAGE_KEY = getAuthSessionStorageKey();
 function warnAuth(_code: AuthWarnCode, _meta: Record<string, unknown> = {}): void {}
 
 let refreshInFlight: Promise<HandoverSession | null> | null = null;
@@ -575,9 +588,23 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   return refreshedSession?.accessToken ?? null;
 }
 
-// Alias usado por algunos tests / consumers
-export const ensureFreshAccessToken = ensureFreshToken;
+let tokenSupplier: null | (() => Promise<string | null>) = null;
 
+export function registerTokenSupplier(fn: () => Promise<string | null>) {
+  tokenSupplier = fn;
+}
+
+export async function ensureFreshAccessToken(service?: string): Promise<string | null> {
+  try {
+    if (tokenSupplier) {
+      const supplied = await tokenSupplier();
+      if (supplied) return supplied;
+    }
+  } catch {
+    // si el supplier falla, caemos a ensureFreshToken
+  }
+  return ensureFreshToken(service);
+}
 
 export async function setCurrentSession(session: SessionModel | null): Promise<void> {
   await setSession(session);
@@ -689,6 +716,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted) setLoading(false);
       }
     })();
+
+  useEffect(() => {
+    if (!session?.accessToken) {
+      registerTokenSupplier(async () => null);
+      return;
+    }
+
+    registerTokenSupplier(async () => ensureFreshToken('fhir'));
+  }, [session?.accessToken, session?.refreshToken, session?.expiresAt, session?.mode]);
+
     const unsubscribe = onAuthChange((next) => {
       setSessionState(next);
     });

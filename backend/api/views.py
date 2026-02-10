@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from rest_framework.parsers import JSONParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny 
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
@@ -29,6 +29,28 @@ from backend.security.scope_permissions import (
 )
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
+# ---------------------------------------------------------------------
+# FHIR Parser/Renderer (fallback seguro)
+# ---------------------------------------------------------------------
+try:
+    from backend.api.fhir import FHIRJSONParser, FHIRJSONRenderer 
+except Exception:
+    FHIRJSONParser = JSONParser
+    FHIRJSONRenderer = JSONRenderer
+
+
+class AuthenticatedAPIView(APIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    parser_classes = [FHIRJSONParser, JSONParser]
+    renderer_classes = [FHIRJSONRenderer, JSONRenderer]
+
+    def get_authenticators(self):
+        classes = [a for a in self.authentication_classes if a is not None]
+        return [auth() for auth in classes]
+
+
+AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
 
@@ -316,18 +338,37 @@ def _post_to_fhir(request: HttpRequest, resource: Dict[str, Any], resource_type:
 
     url = f"{FHIR_BASE.rstrip('/')}/{resource_type}"
     try:
-        resp = httpx.post(url, json=resource, headers=get_fhir_headers(request), timeout=30)
+        resp = httpx.post(
+            url,
+            json=resource,
+            headers=get_fhir_headers(request),
+            timeout=30,
+        )
     except httpx.HTTPError as exc:
-        logger.error("Error al enviar %s al servidor FHIR (%s): %s", resource_type, url, exc)
-        return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
+        logger.error(
+            "Error al enviar %s al servidor FHIR (%s): %s",
+            resource_type,
+            url,
+            exc,
+        )
+        return Response(
+            {"errors": ["No se pudo contactar al servidor FHIR."]},
+            status=503,
+        )
 
     if resp.status_code >= 400:
-        return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
+        return Response(
+            {"errors": ["FHIR server rejected the request."]},
+            status=resp.status_code,
+        )
 
     try:
         return Response(resp.json(), status=resp.status_code)
     except Exception:
-        return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
+        return Response(
+            {"errors": ["Respuesta del servidor FHIR no es JSON."]},
+            status=502,
+        )
 
 
 def _get_bundle_identifier_value(bundle: Dict[str, Any]) -> str:
@@ -365,29 +406,48 @@ def _emit_bundle_audit(
 # Views
 # =========================
 
-class AuthenticatedAPIView(APIView):
+class CapabilitiesView(APIView):
     """
-    Base para endpoints protegidos con JWT (Auth0).
-    Además: soporta application/fhir+json (parser+renderer).
-    """
-    authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    Devuelve las capacidades efectivas del usuario actual.
 
-    # ✅ Esto arregla 415 y 406 para FHIR JSON
-    parser_classes = [FHIRJSONParser, JSONParser]
-    renderer_classes = [FHIRJSONRenderer, JSONRenderer]
+    DEV (DEBUG):
+      - Si NO hay Authorization: devuelve guest (sin intentar Auth0)
+      - Si HAY Authorization: intenta Auth0 y devuelve capacidades reales
+
+    PROD:
+      - Requiere JWT Auth0 válido
+    """
+    permission_classes = [AllowAny] if settings.DEBUG else [IsAuthenticated]
+    authentication_classes = [Auth0JWTAuthentication]  # en DEBUG lo controlamos vía get_authenticators()
 
     def get_authenticators(self):
-        # ✅ Evita explotar si hay None accidental en authentication_classes
-        classes = [a for a in self.authentication_classes if a is not None]
-        return [auth() for auth in classes]
+        # En DEBUG, si no hay Bearer token, no intentes Auth0 (evita 401/403 por config/token)
+        if settings.DEBUG:
+            auth = self.request.META.get("HTTP_AUTHORIZATION", "")
+            if not auth or not auth.lower().startswith("bearer "):
+                return []
+        return super().get_authenticators()
 
+    def get(self, request):
+        # DEV fallback
+        if settings.DEBUG and (not getattr(request, "user", None) or not request.user.is_authenticated):
+            payload = {
+                "userSub": "guest",
+                "roles": ["guest"],
+                "scopes": [],
+                "permissions": {
+                    "canWriteHandover": False,
+                    "canSignHandover": False,
+                    "canViewAudit": False,
+                    "canSendAuditEvents": False,
+                    "isAdmin": False,
+                },
+                "scopeCatalog": CLINICAL_SCOPES,
+                "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
+            }
+            return Response(payload, status=200)
 
-class CapabilitiesView(APIView):
-    authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request: HttpRequest) -> Response:
+        # Normal authenticated flow (con token)
         claims = _get_claims_from_request(request) or {}
         roles = sorted(extract_roles(claims))
         scopes = sorted(_extract_permissions_from_request(request))
@@ -401,7 +461,7 @@ class CapabilitiesView(APIView):
 
         permissions = {
             "canWriteHandover": "handover:write" in scopes,
-            "canSignHandover": any(role in {"supervisor", "admin"} for role in roles),
+            "canSignHandover": any(r in {"supervisor", "admin"} for r in roles),
             "canViewAudit": ("audit:read" in scopes) or ("handover:audit" in scopes),
             "canSendAuditEvents": ("audit:write" in scopes) or ("handover:write" in scopes),
             "isAdmin": "admin" in roles,
@@ -417,6 +477,52 @@ class CapabilitiesView(APIView):
         }
         return Response(payload, status=200)
 
+        # Normal authenticated flow
+        claims = _get_claims_from_request(request) or {}
+        roles = sorted(extract_roles(claims))
+        scopes = sorted(_extract_permissions_from_request(request))
+
+        user_sub = ""
+        if isinstance(claims, dict):
+            user_sub = str(claims.get("sub") or "")
+
+        if not user_sub:
+            user = getattr(request, "user", None)
+            user_sub = str(
+                getattr(user, "sub", "")
+                or getattr(user, "username", "")
+                or ""
+            )
+
+        permissions = {
+            "canWriteHandover": "handover:write" in scopes,
+            "canSignHandover": any(
+                r in {"supervisor", "admin"} for r in roles
+            ),
+            "canViewAudit": (
+                "audit:read" in scopes
+                or "handover:audit" in scopes
+            ),
+            "canSendAuditEvents": (
+                "audit:write" in scopes
+                or "handover:write" in scopes
+            ),
+            "isAdmin": "admin" in roles,
+        }
+
+        payload = {
+            "userSub": user_sub,
+            "roles": roles,
+            "scopes": scopes,
+            "permissions": permissions,
+            "scopeCatalog": CLINICAL_SCOPES,
+            "fhir": {
+                "version": "R4",
+                "transaction": True,
+                "profiles": FHIR_PROFILES,
+            },
+        }
+        return Response(payload, status=200)
 
 class OAuthRefreshView(APIView):
     """

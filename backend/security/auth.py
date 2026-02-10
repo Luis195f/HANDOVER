@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
+from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -118,7 +119,10 @@ class Auth0JWTAuthentication(BaseAuthentication):
     """
 
     def authenticate(self, request) -> Optional[Tuple[Auth0User, Any]]:
+        # ✅ DEV: si Auth0 no está configurado, NO explotes; simplemente no autentiques.
         if not AUTH0_ISSUER_BASE_URL or not AUTH0_AUDIENCE:
+            if settings.DEBUG:
+                return None
             raise AuthenticationFailed(
                 "Auth0 not configured. Set AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE."
             )
@@ -168,7 +172,7 @@ class Auth0JWTAuthentication(BaseAuthentication):
         if not sub:
             raise AuthenticationFailed("Token missing sub")
 
-        user = Auth0User(sub=sub, claims=claims)
+        user = Auth0User(sub=str(sub), claims=claims)
         request.auth_token = token
 
         # ✅ IMPORTANTE: devolvemos claims como request.auth para que HasAnyScope funcione
@@ -180,8 +184,6 @@ def verify_jwt(token: str):
     Backwards-compatible alias for tests.
     Tests monkeypatch this symbol; keep it stable.
     """
-    # Si ya tienes una función real tipo verify_token/verify_jwt_token, llámala aquí.
-    # Por defecto, devolvemos el payload decodificado por tu lógica existente.
     if "verify_token" in globals():
         return verify_token(token)  # type: ignore[name-defined]
     raise NotImplementedError("verify_jwt is not wired to a real implementation")
