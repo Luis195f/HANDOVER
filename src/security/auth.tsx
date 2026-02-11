@@ -667,8 +667,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSessionState] = useState<SessionModel | null>(null);
   const [capabilities, setCapabilitiesState] = useState<Capabilities | null>(null);
   const [loading, setLoading] = useState(true);
+
   const authConfig = useMemo(() => buildAuthConfig(), []);
   const discovery = AuthSession.useAutoDiscovery(authConfig.issuer);
+
   const [authRequest, , promptAsync] = AuthSession.useAuthRequest(
     {
       clientId: authConfig.clientId,
@@ -683,7 +685,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithCredentials = useCallback(async (params: { username: string; password: string }) => {
     const result = await loginWithProvider(createLocalAuthProvider(), params);
-    const session: HandoverSession = {
+
+    const nextSession: HandoverSession = {
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken ?? undefined,
       expiresAt: result.tokens.expiresAt,
@@ -698,12 +701,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         units: result.user.units ?? [],
       },
     };
-    await setSession(session);
-    return session;
+
+    await setSession(nextSession);
+    return nextSession;
   }, []);
 
+  // 1) Hidratar sesión + suscripción auth-change (una sola vez)
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
         const hydratedSession = await getCurrentSession();
@@ -717,24 +723,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
 
-  useEffect(() => {
-    if (!session?.accessToken) {
-      registerTokenSupplier(async () => null);
-      return;
-    }
-
-    registerTokenSupplier(async () => ensureFreshToken('fhir'));
-  }, [session?.accessToken, session?.refreshToken, session?.expiresAt, session?.mode]);
-
     const unsubscribe = onAuthChange((next) => {
       setSessionState(next);
     });
+
     return () => {
       mounted = false;
       unsubscribe();
     };
   }, []);
 
+  // 2) Token supplier (se actualiza cuando cambia la sesión)
+  useEffect(() => {
+    if (!session?.accessToken) {
+      registerTokenSupplier(async () => null);
+      return;
+    }
+
+    // Nota: supplier debe ser estable y “fresh”; ensureFreshToken ya debe leer sesión actual internamente
+    registerTokenSupplier(async () => ensureFreshToken("fhir"));
+  }, [session?.accessToken, session?.refreshToken, session?.expiresAt, session?.mode]);
+
+  // 3) Capabilities
   useEffect(() => {
     let alive = true;
 
@@ -746,7 +756,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    if (session?.mode === 'demo') {
+    if (session?.mode === "demo") {
       setCapabilitiesState(getDemoCapabilities(session.userId));
       return () => {
         alive = false;
@@ -763,22 +773,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [session]);
 
+  // 4) Configuración FHIR client (una vez)
   useEffect(() => {
     configureFHIRClient({
       getToken: () => AuthService.getAccessToken(),
-      ensureFreshToken: () => ensureFreshToken('fhir'),
+      ensureFreshToken: () => ensureFreshToken("fhir"),
       getSession: () => getCurrentSession(),
       logout: async () =>
         logoutAndClear({
           skipRemote: true,
-          message: t('auth.sessionExpiredMessage'),
+          message: t("auth.sessionExpiredMessage"),
         }),
     });
   }, []);
 
   const loginWithAuth0 = useCallback(async () => {
     if (!authRequest) {
-      throw new Error('AUTH_REQUEST_NOT_READY');
+      throw new Error("AUTH_REQUEST_NOT_READY");
     }
     try {
       return await performAuth0Login({
@@ -789,7 +800,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (error) {
       if (!isAuthCancelledError(error)) {
-        Alert.alert(t('auth.invalidCredentialsTitle'), t('auth.invalidCredentialsMessage'));
+        Alert.alert(t("auth.invalidCredentialsTitle"), t("auth.invalidCredentialsMessage"));
       }
       throw error;
     }
@@ -800,7 +811,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCapabilitiesState(null);
       return null;
     }
-    if (session.mode === 'demo') {
+    if (session.mode === "demo") {
       const demoCaps = getDemoCapabilities(session.userId);
       setCapabilitiesState(demoCaps);
       return demoCaps;
@@ -810,16 +821,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return caps;
   }, [session]);
 
-  const value = useMemo<AuthContextValue>(() => ({
-    session,
-    capabilities,
-    loading,
-    loginWithOAuth: loginWithAuth0,
-    loginWithCredentials,
-    loginDemo,
-    logout,
-    refreshCapabilities,
-  }), [session, capabilities, loading, loginWithAuth0, loginWithCredentials, refreshCapabilities]);
+  // ✅ IMPORTANTE: incluye loginDemo/logout en deps (no rompe nada; evita bugs por closures)
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      session,
+      capabilities,
+      loading,
+      loginWithOAuth: loginWithAuth0,
+      loginWithCredentials,
+      loginDemo,
+      logout,
+      refreshCapabilities,
+    }),
+    [
+      session,
+      capabilities,
+      loading,
+      loginWithAuth0,
+      loginWithCredentials,
+      loginDemo,
+      logout,
+      refreshCapabilities,
+    ],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -827,8 +851,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error("useAuth must be used within AuthProvider");
   }
   return ctx;
 }
 // END HANDOVER_AUTH
+
