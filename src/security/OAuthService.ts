@@ -142,19 +142,25 @@ export async function clearStoredSession(): Promise<void> {
 export function buildAuthConfig(config?: Partial<OAuthConfig>) {
   const audience =
     config?.audience?.trim() || (DEFAULT_AUTH_CONFIG as { audience?: string }).audience;
+
   const issuer = config?.issuer ?? DEFAULT_AUTH_CONFIG.issuer;
   const clientId = config?.clientId ?? DEFAULT_AUTH_CONFIG.clientId;
+
   const isTestEnv = process.env.NODE_ENV === 'test';
   if (!AUTH_DISABLED && !isTestEnv) {
     if (!issuer) throw new Error('OIDC_ISSUER_MISSING');
     if (!clientId) throw new Error('OIDC_CLIENT_ID_MISSING');
   }
+
+  const scopes =
+    config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes;
+
   return {
     issuer,
     clientId,
     redirectUri: config?.redirectUri ?? DEFAULT_AUTH_CONFIG.redirectUri,
     logoutUri: config?.logoutUri ?? DEFAULT_AUTH_CONFIG.logoutUri,
-    scopes: config?.scopes ?? DEFAULT_AUTH_CONFIG.scopes,
+    scopes: Array.isArray(scopes) ? scopes : String(scopes).split(/\s+/).filter(Boolean),
     ...(audience ? { audience } : {}),
   };
 }

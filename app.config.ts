@@ -1,6 +1,6 @@
-import 'dotenv/config';
+require('dotenv/config');
 
-export default ({ config }) => ({
+module.exports = ({ config }) => ({
   ...config,
 
   name: 'handover-pro',
@@ -69,27 +69,58 @@ export default ({ config }) => ({
     versionCode: 1,
     edgeToEdgeEnabled: true,
 
-    // Deep links (Auth + Dev Client)
+    // Deep links (Auth + Dev Client) — soporta host y path
     intentFilters: [
-      // Auth callback (prod): handover-pro://redirect
+      // PROD handover-pro://redirect  (host)
       {
         action: 'VIEW',
         category: ['BROWSABLE', 'DEFAULT'],
         data: [{ scheme: 'handover-pro', host: 'redirect' }],
       },
-
-      // Logout (prod): handover-pro://logout
+      // PROD handover-pro:///redirect (path)
       {
         action: 'VIEW',
         category: ['BROWSABLE', 'DEFAULT'],
-        data: [{ scheme: 'handover-pro', host: 'logout', pathPrefix: '/' }],
+        data: [{ scheme: 'handover-pro', pathPrefix: '/redirect' }],
       },
 
-      // Auth callback (dev build): exp+handover-pro://redirect
+      // PROD logout host
       {
         action: 'VIEW',
         category: ['BROWSABLE', 'DEFAULT'],
-        data: [{ scheme: 'exp+handover-pro', host: 'redirect', pathPrefix: '/' }],
+        data: [{ scheme: 'handover-pro', host: 'logout' }],
+      },
+      // PROD logout path
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'handover-pro', pathPrefix: '/logout' }],
+      },
+
+      // DEV exp+handover-pro://redirect (host)
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'exp+handover-pro', host: 'redirect' }],
+      },
+      // DEV exp+handover-pro:///redirect (path)
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'exp+handover-pro', pathPrefix: '/redirect' }],
+      },
+
+      // DEV exp+handover-pro logout host
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'exp+handover-pro', host: 'logout' }],
+      },
+      // DEV exp+handover-pro logout path
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'exp+handover-pro', pathPrefix: '/logout' }],
       },
 
       // Expo Dev Client launcher: exp+handover-pro://expo-development-client/?url=...
@@ -131,7 +162,6 @@ export default ({ config }) => ({
       projectId: '4341b7e0-da12-42a3-8452-745c68996e36',
     },
 
-    // Ajusta estos si los manejas por env:
     FHIR_BASE_URL: process.env.EXPO_PUBLIC_FHIR_BASE_URL ?? 'https://fhir.example.com',
     STT_ENDPOINT: process.env.EXPO_PUBLIC_STT_ENDPOINT ?? 'http://192.168.0.16:8091/stt',
     ENCRYPTION_NAMESPACE: process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover-pro',
