@@ -50,8 +50,13 @@ if not RAW_ALLOWED_ORIGINS and DEBUG:
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [o.strip() for o in RAW_ALLOWED_ORIGINS.split(",") if o.strip()]
 
-# Regex útil para dev (manténlo)
-CORS_ALLOWED_ORIGIN_REGEXES = [r"^https?:\/\/localhost(:\d+)?$"]
+# Regex útil para dev (localhost + LAN)
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?:\/\/localhost(:\d+)?$",
+    r"^https?:\/\/127\.0\.0\.1(:\d+)?$",
+    r"^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^https?:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$",
+]
 
 # ALLOWED_HOSTS: usa hosts de los origins + fallback
 hosts_from_origins: list[str] = []
@@ -83,6 +88,27 @@ if not DEBUG and not RUNNING_TESTS and not CORS_ALLOWED_ORIGINS:
     raise RuntimeError(
         "HANDOVER_ALLOWED_ORIGINS is required in production (set allowed https origins)."
     )
+
+# ✅ Dev: permite llamadas por LAN (web/móvil) usando LOCAL_IP
+if DEBUG and LOCAL_IP:
+    # Permite Expo/Metro en LAN (dev)
+    lan_origins = [
+        f"http://{LOCAL_IP}:19006",  # Expo (legacy)
+        f"http://{LOCAL_IP}:8081",   # Expo web dev server (tu caso)
+        f"http://{LOCAL_IP}:3000",
+    ]
+    for o in lan_origins:
+        if o not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(o)
+
+    # Permite requests con Host header = LOCAL_IP (evita DisallowedHost)
+    if LOCAL_IP not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(LOCAL_IP)
+
+    # CSRF trusted para el backend en LAN
+    csrf_lan = f"http://{LOCAL_IP}:8000"
+    if csrf_lan not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(csrf_lan)
 
 # -----------------------------
 # Secret key

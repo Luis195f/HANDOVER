@@ -36,6 +36,10 @@ function assertSecureUrl(raw: string, label: string): string {
   throw new Error(`${label} must use HTTPS in production.`);
 }
 
+function sanitizeBaseUrl(raw: string): string {
+  return raw.replace(/\/+$/, '');
+}
+
 function resolveBaseUrl(): string {
   const expoValue = Constants.expoConfig?.extra?.FHIR_BASE_URL;
   const envValue = process.env.EXPO_PUBLIC_FHIR_BASE_URL ?? process.env.FHIR_BASE_URL;
@@ -44,7 +48,7 @@ function resolveBaseUrl(): string {
   if (!raw) {
     throw new Error('Missing FHIR_BASE_URL');
   }
-  return assertSecureUrl(raw.replace(/\/+$/, ''), 'FHIR_BASE_URL');
+  return assertSecureUrl(sanitizeBaseUrl(raw), 'FHIR_BASE_URL');
 }
 
 function resolveSttEndpoint(): string | null {
@@ -58,10 +62,6 @@ function resolveSttEndpoint(): string | null {
 export const FHIR_BASE_URL: string = resolveBaseUrl();
 export const STT_ENDPOINT: string | null = resolveSttEndpoint();
 
-function sanitizeBaseUrl(raw: string): string {
-  return raw.replace(/\/+$/, '');
-}
-
 function resolveAiBackendBaseUrl(): string | null {
   const aiEnv =
     process.env.EXPO_PUBLIC_AI_BACKEND_BASE_URL ??
@@ -73,6 +73,7 @@ function resolveAiBackendBaseUrl(): string | null {
   }
 
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    // noop
   }
 
   return null;
@@ -171,5 +172,56 @@ export const ENV = {
   OPENAI_ENABLED,
 } as const;
 
-const RAW_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
-export const API_BASE_URL = assertSecureUrl(RAW_API_BASE_URL, 'API_BASE_URL');
+/**
+ * API base URL:
+ * - En test: fallback estable para CI.
+ * - En dev: si no está definido por env, intenta derivar el host del bundler (LAN) para que funcione en móvil.
+ * - En web dev: cae a 127.0.0.1.
+ * - En prod: exige definir API_BASE_URL y que sea HTTPS (vía assertSecureUrl).
+ */
+function resolveApiBaseUrl(): string {
+  const fromEnv =
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE ?? // compat con variable vieja
+    process.env.API_BASE_URL ??
+    process.env.API_BASE ??
+    '';
+
+  const trimmed = (typeof fromEnv === 'string' ? fromEnv : '').trim();
+  if (trimmed) return assertSecureUrl(sanitizeBaseUrl(trimmed), 'API_BASE_URL');
+
+  // ✅ CI / tests: no dependas de Expo runtime ni de env vars
+  if (process.env.NODE_ENV === 'test') {
+    return assertSecureUrl('http://127.0.0.1:8000', 'API_BASE_URL');
+  }
+
+  const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+  if (isDev) {
+    // hostUri suele ser "192.168.0.16:8081" en LAN (cuando corres Expo/Metro)
+    const hostUriFromExpoConfig = Constants.expoConfig?.hostUri;
+
+    // Fallback legacy: algunos runtimes exponen debuggerHost aunque el tipo no lo tenga.
+    // Usamos `as any` para evitar romper typecheck en CI.
+    const legacyDebuggerHost = (Constants.expoConfig as any)?.debuggerHost as unknown;
+
+    const hostUri =
+      (typeof hostUriFromExpoConfig === 'string' && hostUriFromExpoConfig) ||
+      (typeof legacyDebuggerHost === 'string' && legacyDebuggerHost) ||
+      '';
+
+    if (hostUri.includes(':')) {
+      const host = hostUri.split(':')[0];
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        return assertSecureUrl(`http://${host}:8000`, 'API_BASE_URL');
+      }
+    }
+
+    // fallback para web/local
+    return assertSecureUrl('http://127.0.0.1:8000', 'API_BASE_URL');
+  }
+
+  // ✅ En “prod real” (no dev/test), sí exigimos definirlo
+  throw new Error('Missing API_BASE_URL');
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
