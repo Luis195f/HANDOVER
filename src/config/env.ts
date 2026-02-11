@@ -225,9 +225,3 @@ function resolveApiBaseUrl(): string {
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
-
-
-  throw new Error('Missing API_BASE_URL');
-}
-
-export const API_BASE_URL = resolveApiBaseUrl();
