@@ -174,9 +174,10 @@ export const ENV = {
 
 /**
  * API base URL:
+ * - En test: fallback estable para CI.
  * - En dev: si no está definido por env, intenta derivar el host del bundler (LAN) para que funcione en móvil.
  * - En web dev: cae a 127.0.0.1.
- * - En prod: exige HTTPS (vía assertSecureUrl).
+ * - En prod: exige definir API_BASE_URL y que sea HTTPS (vía assertSecureUrl).
  */
 function resolveApiBaseUrl(): string {
   const fromEnv =
@@ -188,6 +189,11 @@ function resolveApiBaseUrl(): string {
 
   const trimmed = (typeof fromEnv === 'string' ? fromEnv : '').trim();
   if (trimmed) return assertSecureUrl(sanitizeBaseUrl(trimmed), 'API_BASE_URL');
+
+  // ✅ CI / tests: no dependas de Expo runtime ni de env vars
+  if (process.env.NODE_ENV === 'test') {
+    return assertSecureUrl('http://127.0.0.1:8000', 'API_BASE_URL');
+  }
 
   const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
   if (isDev) {
@@ -213,6 +219,13 @@ function resolveApiBaseUrl(): string {
     // fallback para web/local
     return assertSecureUrl('http://127.0.0.1:8000', 'API_BASE_URL');
   }
+
+  // ✅ En “prod real” (no dev/test), sí exigimos definirlo
+  throw new Error('Missing API_BASE_URL');
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
 
   throw new Error('Missing API_BASE_URL');
 }
