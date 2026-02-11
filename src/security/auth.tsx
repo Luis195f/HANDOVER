@@ -364,21 +364,62 @@ async function performAuth0Login(options: {
     });
   }
 
-  const session = await oauthLogin({
-    config: options.config,
-    discovery: options.discovery,
-    promptAsync: options.promptAsync,
-    request: options.request,
-  });
+  // Debug fuerte: si esto no calza con Auth0 Allowed Callback URLs, se rompe el flujo.
+  if (__DEV__) {
+    try {
+      console.info('[auth] performAuth0Login config', {
+        issuer: options.config?.issuer,
+        clientId: options.config?.clientId,
+        redirectUri: options.config?.redirectUri,
+        logoutUri: options.config?.logoutUri,
+        scopes: options.config?.scopes,
+        hasAudience: Boolean((options.config as any)?.audience),
+      });
+    } catch {
+      // no-op
+    }
+  }
 
-  await setSession(session);
-  return session;
+  try {
+    const session = await oauthLogin({
+      config: options.config,
+      discovery: options.discovery,
+      promptAsync: options.promptAsync,
+      request: options.request,
+    });
+
+    await setSession(session);
+    return session;
+  } catch (error) {
+    // Si el usuario cierra / cancela, no “rompas” el flujo.
+    // Deja que el caller decida si alerta o no, pero evita estados inconsistentes.
+    if (__DEV__) {
+      console.warn('[auth] performAuth0Login failed', error);
+    }
+    throw error;
+  }
 }
 
 export async function loginWithOAuth(
   config?: Partial<OAuthConfig>,
 ): Promise<SessionModel> {
   const merged = buildAuthConfig(config);
+
+  if (__DEV__) {
+    try {
+      console.info('[auth] loginWithOAuth merged', {
+        issuer: merged.issuer,
+        clientId: merged.clientId,
+        redirectUri: merged.redirectUri,
+        logoutUri: merged.logoutUri,
+        scopes: merged.scopes,
+        hasAudience: Boolean((merged as any)?.audience),
+      });
+    } catch {
+      // no-op
+    }
+  }
+
   const discovery = await AuthSession.fetchDiscoveryAsync(merged.issuer);
 
   const request = new AuthSession.AuthRequest({
@@ -387,13 +428,20 @@ export async function loginWithOAuth(
     scopes: merged.scopes,
     usePKCE: true,
     responseType: AuthSession.ResponseType.Code,
-    extraParams: buildExtraParams(merged.audience),
+    extraParams: buildExtraParams((merged as any).audience),
   });
 
   return performAuth0Login({
     config: merged,
     discovery,
-    promptAsync: (options) => request.promptAsync(discovery, options),
+    // IMPORTANTE: En móvil (EAS dev build), esto debe devolver a tu app por deep link.
+    // preferEphemeralSession ayuda a evitar cookies “pegadas” en iOS; no rompe Android.
+    promptAsync: (options) =>
+      request.promptAsync(discovery, {
+        useProxy: false,
+        preferEphemeralSession: true,
+        ...(options ?? {}),
+      }),
     request,
   });
 }
@@ -440,6 +488,7 @@ export async function logout(): Promise<void> {
 
   const runner = async () => {
     await hydrateSession();
+
     const config = buildAuthConfig();
     const issuerOrigin = (() => {
       try {
@@ -449,20 +498,41 @@ export async function logout(): Promise<void> {
       }
     })();
 
+    if (__DEV__) {
+      try {
+        console.info('[auth] logout config', {
+          issuer: config.issuer,
+          issuerOrigin,
+          clientId: config.clientId,
+          logoutUri: config.logoutUri,
+        });
+      } catch {
+        // no-op
+      }
+    }
+
     try {
-      const authUrl = `${issuerOrigin}/v2/logout?client_id=${config.clientId}&returnTo=${encodeURIComponent(
-        config.logoutUri,
-      )}`;
+      const authUrl =
+        `${issuerOrigin}/v2/logout?client_id=${encodeURIComponent(config.clientId)}` +
+        `&returnTo=${encodeURIComponent(config.logoutUri)}`;
+
+      // Si el deep link de logout no está registrado, esto puede fallar/silenciarse.
       await WebBrowser.openAuthSessionAsync(authUrl, config.logoutUri);
-    } catch {
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[auth] logout openAuthSessionAsync failed', error);
+      }
+      // seguimos igual: limpiamos local y reseteamos navegación
     }
 
     await setSession(null);
     await clearSensitiveLocalData();
+
     if (message) {
       Alert.alert(t('auth.sessionExpiredTitle'), message);
     }
-    resetTo("Login");
+
+    resetTo('Login');
   };
 
   logoutInFlight = runner().finally(() => {
@@ -472,21 +542,30 @@ export async function logout(): Promise<void> {
 
   return logoutInFlight;
 }
+
 export async function logoutAndClear(options: LogoutOptions = {}): Promise<void> {
   if (options.message) pendingLogoutMessage = options.message;
+
   if (options.skipRemote) {
     if (logoutInFlight) return logoutInFlight;
+
     logoutInFlight = (async () => {
       await setSession(null);
       await clearSensitiveLocalData();
-      if (options.message) Alert.alert(t('auth.sessionExpiredTitle'), options.message);
+
+      if (options.message) {
+        Alert.alert(t('auth.sessionExpiredTitle'), options.message);
+      }
+
       resetTo('Login');
     })().finally(() => {
       logoutInFlight = null;
       pendingLogoutMessage = undefined;
     });
+
     return logoutInFlight;
   }
+
   return logout();
 }
 // END HANDOVER: AUTH_LOGOUT
