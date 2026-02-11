@@ -191,10 +191,19 @@ function resolveApiBaseUrl(): string {
 
   const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
   if (isDev) {
-    const hostUri = Constants.expoConfig?.hostUri || Constants.expoConfig?.debuggerHost;
+    // hostUri suele ser "192.168.0.16:8081" en LAN (cuando corres Expo/Metro)
+    const hostUriFromExpoConfig = Constants.expoConfig?.hostUri;
 
-    // hostUri suele ser "192.168.0.16:8081" en LAN
-    if (typeof hostUri === 'string' && hostUri.includes(':')) {
+    // Fallback legacy: algunos runtimes exponen debuggerHost aunque el tipo no lo tenga.
+    // Usamos `as any` para evitar romper typecheck en CI.
+    const legacyDebuggerHost = (Constants.expoConfig as any)?.debuggerHost as unknown;
+
+    const hostUri =
+      (typeof hostUriFromExpoConfig === 'string' && hostUriFromExpoConfig) ||
+      (typeof legacyDebuggerHost === 'string' && legacyDebuggerHost) ||
+      '';
+
+    if (hostUri.includes(':')) {
       const host = hostUri.split(':')[0];
       if (host && host !== 'localhost' && host !== '127.0.0.1') {
         return assertSecureUrl(`http://${host}:8000`, 'API_BASE_URL');
