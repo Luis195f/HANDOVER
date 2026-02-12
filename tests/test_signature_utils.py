@@ -12,26 +12,35 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.management import call_command
 from django.utils import timezone
 
+# ---------------------------------------------------------------------
+# Ensure repo root is on sys.path for direct execution
+# ---------------------------------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# ---------------------------------------------------------------------
+# Django setup (kept to avoid breaking standalone runs)
+# In CI pytest-django usually provides this via --ds, but this is safe.
+# ---------------------------------------------------------------------
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 django.setup()
 
 import backend.signature as sig  # noqa: E402  pylint: disable=C0413
-from backend.api.models import HandoverSignatureAudit  # noqa: E402  pylint: disable=C0413
-
-
 
 if not sig.CRYPTOGRAPHY_AVAILABLE:
     pytest.skip("cryptography no está disponible en el entorno de tests.", allow_module_level=True)
 
 
-@pytest.fixture(scope="module", autouse=True)
-def migrate_db():
-    """Ejecuta migraciones automáticamente antes de las pruebas."""
-    call_command("migrate", run_syncdb=True, verbosity=0)
+# ---------------------------------------------------------------------
+# DB fixture (ONLY used by DB tests).
+# IMPORTANT: uses pytest-django fixtures to legally access DB.
+# ---------------------------------------------------------------------
+@pytest.fixture(scope="function")
+def migrate_db(django_db_setup, django_db_blocker):
+    """Garantiza que migraciones estén aplicadas cuando un test usa BD."""
+    with django_db_blocker.unblock():
+        call_command("migrate", run_syncdb=True, verbosity=0)
 
 
 def generate_ec_keypair(tmp_path):
@@ -54,7 +63,11 @@ def generate_ec_keypair(tmp_path):
     private_path.write_bytes(private_pem)
     public_path.write_bytes(public_pem)
 
-    return sig.SignatureSettings(private_key_path=str(private_path), public_key_path=str(public_path), disabled=False)
+    return sig.SignatureSettings(
+        private_key_path=str(private_path),
+        public_key_path=str(public_path),
+        disabled=False,
+    )
 
 
 def minimal_bundle():
@@ -102,7 +115,11 @@ def test_signature_detects_tampering(tmp_path):
     assert "entry" not in error_text
 
 
-def test_audit_log_is_idempotent(tmp_path):
+@pytest.mark.django_db
+def test_audit_log_is_idempotent(migrate_db, tmp_path):
+    # Import INSIDE the DB test to keep non-DB tests clean.
+    from backend.api.models import HandoverSignatureAudit  # noqa: E402
+
     settings = generate_ec_keypair(tmp_path)
     bundle = minimal_bundle()
 
@@ -111,6 +128,7 @@ def test_audit_log_is_idempotent(tmp_path):
 
     signature_time = timezone.now() - timedelta(minutes=5)
     HandoverSignatureAudit.objects.all().delete()
+
     sig.record_signature_audit(
         user_id="nurse-3",
         bundle_hash=result.bundle_hash,
@@ -134,12 +152,22 @@ def test_canonicalization_is_stable():
     bundle_a = {
         "id": "bundle-1",
         "resourceType": "Bundle",
-        "entry": [{"resource": {"id": "p1", "resourceType": "Patient"}, "request": {"url": "Patient", "method": "POST"}}],
+        "entry": [
+            {
+                "resource": {"id": "p1", "resourceType": "Patient"},
+                "request": {"url": "Patient", "method": "POST"},
+            }
+        ],
         "type": "transaction",
     }
     bundle_b = {
         "type": "transaction",
-        "entry": [{"request": {"method": "POST", "url": "Patient"}, "resource": {"resourceType": "Patient", "id": "p1"}}],
+        "entry": [
+            {
+                "request": {"method": "POST", "url": "Patient"},
+                "resource": {"resourceType": "Patient", "id": "p1"},
+            }
+        ],
         "resourceType": "Bundle",
         "id": "bundle-1",
     }
@@ -154,6 +182,8 @@ def test_canonicalization_is_stable():
 
 def test_production_requires_cryptography(monkeypatch, tmp_path):
     settings = generate_ec_keypair(tmp_path)
+
+    # Ensure we restore value after test, and we patch the module attribute itself.
     monkeypatch.setattr(sig, "CRYPTOGRAPHY_AVAILABLE", False)
 
     with pytest.raises(sig.SignatureOperationError, match="cryptography"):
@@ -210,6 +240,7 @@ def test_signature_audit_events_are_emitted_without_phi(monkeypatch, tmp_path):
 
     signed = sig.sign_bundle(bundle, user_id="nurse-5", settings=settings)
     assert signed is not None
+
     bundle["signature"] = signed.fhir_signature
     sig.verify_bundle_signature(bundle, settings=settings)
 
@@ -217,10 +248,13 @@ def test_signature_audit_events_are_emitted_without_phi(monkeypatch, tmp_path):
     for event in events:
         meta = event.get("meta", {})
         meta_dump = json.dumps(meta, ensure_ascii=False)
+
         assert "entry" not in meta_dump
         assert "Patient" not in meta_dump
         assert "resource" not in meta_dump
         assert json.dumps(bundle, ensure_ascii=False) not in meta_dump
+
         assert set(meta.keys()) == {"signature"}
         signature_meta = meta["signature"]
         assert set(signature_meta.keys()).issubset({"hash", "algorithm", "verified", "stored"})
+
