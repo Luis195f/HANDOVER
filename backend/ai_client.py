@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import UploadFile
@@ -63,6 +64,10 @@ def _safe_length(value: Optional[str] | bytes) -> int:
     return len(value)
 
 
+async def _run_blocking(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
 async def transcribe_audio(file: UploadFile, language: Optional[str]) -> str:
     data: bytes | None = None
     try:
@@ -76,7 +81,8 @@ async def transcribe_audio(file: UploadFile, language: Optional[str]) -> str:
 
         logger.info("[ai] transcribe start size_bytes=%s", size_bytes)
         client = get_client()
-        response = client.audio.transcriptions.create(
+        response = await _run_blocking(
+            client.audio.transcriptions.create,
             model=OPENAI_MODEL_WHISPER,
             file=audio_buffer,
             language=language,
@@ -118,7 +124,8 @@ async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
     try:
         logger.info("[ai] sbar start length=%s language=%s", len(text), language)
         client = get_client()
-        completion = client.chat.completions.create(
+        completion = await _run_blocking(
+            client.chat.completions.create,
             model=OPENAI_MODEL_SBAR,
             messages=[
                 {"role": "system", "content": "Asistente de enfermería"},
@@ -175,7 +182,8 @@ async def generate_intervention_suggestions(ctx: ClinicalContext) -> Suggestions
     try:
         logger.info("[ai] suggestions start section=%s", ctx.section)
         client = get_client()
-        completion = client.chat.completions.create(
+        completion = await _run_blocking(
+            client.chat.completions.create,
             model=OPENAI_MODEL_SUGGESTIONS,
             messages=[
                 {"role": "system", "content": "Asistente de apoyo a la decisión clínica"},
