@@ -1,25 +1,14 @@
-import os
+import types
 from unittest.mock import Mock, patch
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
+import pytest
+from django.test import Client
+from rest_framework.permissions import AllowAny
+from rest_framework.test import APIClient
 
-import django  # noqa: E402
-import pytest  # noqa: E402
-from django.test import Client  # noqa: E402
-from rest_framework.permissions import AllowAny  # noqa: E402
-from rest_framework.test import APIClient  # noqa: E402
-
-try:
-    import pytest_django  # type: ignore  # noqa: F401,E402
-except Exception:  # pragma: no cover - dependency guard
-    pytest.skip("pytest-django is required for audit tests", allow_module_level=True)
-
-django.setup()
-
-from backend.audit.models import AuditEvent  # noqa: E402
-from backend.audit.service import emit_audit_event  # noqa: E402
-from backend.audit.views import AuditEventsIngestView  # noqa: E402
-from backend.api.views import BundleView  # noqa: E402
+from backend.audit.models import AuditEvent
+from backend.audit.service import emit_audit_event
+from backend.audit.views import AuditEventsIngestView
 
 
 @pytest.mark.django_db
@@ -144,11 +133,28 @@ def test_bundle_view_emits_audit_success_and_fail():
     mock_resp.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
     mock_resp.text = "ok"
 
-    with patch.object(BundleView, "permission_classes", [AllowAny]), patch.object(
-        BundleView, "authentication_classes", []
-    ), patch("backend.api.views.httpx.post", return_value=mock_resp):
+    claims = {
+        "sub": "pytest-user",
+        "permissions": ["fhir:transaction", "handover:write"],
+        "scope": "fhir:transaction handover:write",
+        "roles": ["nurse"],
+    }
+    user = types.SimpleNamespace(
+        is_authenticated=True,
+        claims=claims,
+        sub="pytest-user",
+        username="pytest-user",
+    )
+
+    with patch("backend.api.views.httpx.post", return_value=mock_resp):
         client = APIClient()
-        response = client.post("/api/fhir/transaction", data=valid_bundle, format="json")
+        client.force_authenticate(user=user, token=claims)
+        response = client.post(
+            "/api/fhir/transaction",
+            data=valid_bundle,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer test-token",
+        )
 
     assert response.status_code in (200, 201)
     success_event = AuditEvent.objects.filter(event_type="fhir_transaction", status="success").first()
@@ -179,11 +185,14 @@ def test_bundle_view_emits_audit_success_and_fail():
         "entry": [{"resource": {}}],
     }
 
-    with patch.object(BundleView, "permission_classes", [AllowAny]), patch.object(
-        BundleView, "authentication_classes", []
-    ):
-        client = APIClient()
-        response = client.post("/api/fhir/transaction", data=invalid_bundle, format="json")
+    client = APIClient()
+    client.force_authenticate(user=user, token=claims)
+    response = client.post(
+        "/api/fhir/transaction",
+        data=invalid_bundle,
+        format="json",
+        HTTP_AUTHORIZATION="Bearer test-token",
+    )
 
     assert response.status_code == 422
     fail_event = AuditEvent.objects.filter(event_type="fhir_transaction", status="fail").first()

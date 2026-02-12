@@ -1,17 +1,5 @@
 # backend/api/tests/conftest.py
-import os
-
 import pytest
-
-try:
-    import pytest_django  # type: ignore  # noqa: F401
-except Exception:  # pragma: no cover - dependency guard
-    pytest.skip("pytest-django is required for backend API tests", allow_module_level=True)
-
-
-def pytest_configure():
-    # Asegura settings para pytest (evita "settings are not configured")
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 
 
 @pytest.fixture()
