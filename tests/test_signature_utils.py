@@ -9,7 +9,6 @@ import django
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from django.core.management import call_command
 from django.utils import timezone
 
 # ---------------------------------------------------------------------
@@ -30,18 +29,6 @@ import backend.signature as sig  # noqa: E402  pylint: disable=C0413
 
 if not sig.CRYPTOGRAPHY_AVAILABLE:
     pytest.skip("cryptography no está disponible en el entorno de tests.", allow_module_level=True)
-
-
-# ---------------------------------------------------------------------
-# DB fixture (ONLY used by DB tests).
-# IMPORTANT: uses pytest-django fixtures to legally access DB.
-# ---------------------------------------------------------------------
-@pytest.fixture(scope="function")
-def migrate_db(django_db_setup, django_db_blocker):
-    """Garantiza que migraciones estén aplicadas cuando un test usa BD."""
-    with django_db_blocker.unblock():
-        call_command("migrate", run_syncdb=True, verbosity=0)
-
 
 def generate_ec_keypair(tmp_path):
     private_path = tmp_path / "private.pem"
@@ -116,7 +103,7 @@ def test_signature_detects_tampering(tmp_path):
 
 
 @pytest.mark.django_db
-def test_audit_log_is_idempotent(migrate_db, tmp_path):
+def test_audit_log_is_idempotent(tmp_path):
     # Import INSIDE the DB test to keep non-DB tests clean.
     from backend.api.models import HandoverSignatureAudit  # noqa: E402
 
