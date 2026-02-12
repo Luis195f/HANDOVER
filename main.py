@@ -20,6 +20,7 @@ from django.conf import settings
 
 from backend.ai_client import (
     ClinicalContext,
+    OPENAI_MODEL_SBAR,
     SuggestionsResponse,
     generate_intervention_suggestions,
     generate_sbar,
@@ -395,7 +396,7 @@ def _audit_ai_summary(
             meta={
                 "model": OPENAI_MODEL_SBAR,
                 "promptVersion": "v1",
-                "ip": request.client.host if request and request.client else "",
+                "source": "ai/summarize-sbar",
             },
         )
     except Exception:
