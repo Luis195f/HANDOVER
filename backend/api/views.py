@@ -417,8 +417,13 @@ class CapabilitiesView(APIView):
     PROD:
       - Requiere JWT Auth0 válido
     """
-    permission_classes = [AllowAny] if settings.DEBUG else [IsAuthenticated]
+    permission_classes = [AllowAny]
     authentication_classes = [Auth0JWTAuthentication]  # en DEBUG lo controlamos vía get_authenticators()
+
+    def get_permissions(self):
+        if settings.DEBUG:
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get_authenticators(self):
         # En DEBUG, si no hay Bearer token, no intentes Auth0 (evita 401/403 por config/token)
@@ -474,53 +479,6 @@ class CapabilitiesView(APIView):
             "permissions": permissions,
             "scopeCatalog": CLINICAL_SCOPES,
             "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
-        }
-        return Response(payload, status=200)
-
-        # Normal authenticated flow
-        claims = _get_claims_from_request(request) or {}
-        roles = sorted(extract_roles(claims))
-        scopes = sorted(_extract_permissions_from_request(request))
-
-        user_sub = ""
-        if isinstance(claims, dict):
-            user_sub = str(claims.get("sub") or "")
-
-        if not user_sub:
-            user = getattr(request, "user", None)
-            user_sub = str(
-                getattr(user, "sub", "")
-                or getattr(user, "username", "")
-                or ""
-            )
-
-        permissions = {
-            "canWriteHandover": "handover:write" in scopes,
-            "canSignHandover": any(
-                r in {"supervisor", "admin"} for r in roles
-            ),
-            "canViewAudit": (
-                "audit:read" in scopes
-                or "handover:audit" in scopes
-            ),
-            "canSendAuditEvents": (
-                "audit:write" in scopes
-                or "handover:write" in scopes
-            ),
-            "isAdmin": "admin" in roles,
-        }
-
-        payload = {
-            "userSub": user_sub,
-            "roles": roles,
-            "scopes": scopes,
-            "permissions": permissions,
-            "scopeCatalog": CLINICAL_SCOPES,
-            "fhir": {
-                "version": "R4",
-                "transaction": True,
-                "profiles": FHIR_PROFILES,
-            },
         }
         return Response(payload, status=200)
 
