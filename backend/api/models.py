@@ -16,7 +16,7 @@ class HandoverSignatureAudit(models.Model):
         return f"HandoverSignatureAudit(bundle_hash={self.bundle_hash})"
 
 
-class AuditEvent(models.Model):
+class ClientAuditEvent(models.Model):
     type = models.CharField(max_length=64)
     user_id = models.CharField(max_length=255)
     patient_id = models.CharField(max_length=255, blank=True)
@@ -28,6 +28,7 @@ class AuditEvent(models.Model):
 
     class Meta:
         ordering = ["-occurred_at"]
+        db_table = "api_auditevent"
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
-        return f"AuditEvent(type={self.type}, user_id={self.user_id})"
+        return f"ClientAuditEvent(type={self.type}, user_id={self.user_id})"
