@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from django.db import IntegrityError
 from django.utils import timezone as django_timezone
 
+
 try:  # pragma: no cover - dependencia opcional en entornos sin acceso a pip
     from cryptography.exceptions import InvalidSignature as CryptoInvalidSignature
     from cryptography.hazmat.primitives import hashes, serialization
@@ -26,9 +27,23 @@ except ImportError:  # pragma: no cover - fallback cuando cryptography no está 
     hashes = serialization = ec = None  # type: ignore[assignment]
     CRYPTOGRAPHY_AVAILABLE = False
 
-SignatureVerificationError = CryptoInvalidSignature
+class SignatureVerificationError(Exception):
+    """Raised when a bundle signature cannot be validated."""
+
+
+class SignatureOperationError(RuntimeError):
+    """Raised when signing or verification cannot be executed safely."""
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_signature_event(**kwargs: Any) -> None:
+    try:
+        from backend.audit.service import emit_audit_event
+    except Exception:
+        logger.debug("No se pudo cargar backend.audit.service para evento de firma.")
+        return
+    emit_audit_event(**kwargs)
 
 
 @dataclass(frozen=True)
@@ -49,6 +64,17 @@ def load_settings() -> SignatureSettings:
         public_key_path=os.getenv("HANDOVER_PUBLIC_KEY_PATH"),
         disabled=disabled_env,
     )
+
+
+def validate_signature_runtime_requirements(settings: Optional[SignatureSettings] = None) -> None:
+    """Ensure runtime requirements are met for enabled signatures."""
+    selected = settings or load_settings()
+    if not selected.enabled:
+        return
+    if not CRYPTOGRAPHY_AVAILABLE:
+        raise SignatureOperationError(
+            "La firma digital está habilitada, pero falta la dependencia obligatoria `cryptography`."
+        )
 
 
 def _deep_copy_without_signature(bundle: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,28 +102,45 @@ def canonical_bundle_payload(bundle: Dict[str, Any]) -> tuple[str, bytes, str]:
 @lru_cache(maxsize=1)
 def _load_private_key(path: str):
     if not CRYPTOGRAPHY_AVAILABLE:  # pragma: no cover - evitado en entornos sin cryptography
-        raise RuntimeError("La librería cryptography no está disponible.")
-    with open(path, "rb") as fh:
-        data = fh.read()
-    return serialization.load_pem_private_key(data, password=None)
+        raise SignatureOperationError("La librería cryptography no está disponible.")
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        raise SignatureOperationError("No se pudo leer la clave privada configurada.") from exc
+    try:
+        return serialization.load_pem_private_key(data, password=None)
+    except Exception as exc:  # pragma: no cover - depende del backend criptográfico
+        raise SignatureOperationError("No se pudo cargar la clave privada PEM para firma.") from exc
 
 
 @lru_cache(maxsize=1)
 def _load_public_key(path: str):
     if not CRYPTOGRAPHY_AVAILABLE:  # pragma: no cover - evitado en entornos sin cryptography
-        raise RuntimeError("La librería cryptography no está disponible.")
-    with open(path, "rb") as fh:
-        data = fh.read()
-    return serialization.load_pem_public_key(data)
+        raise SignatureOperationError("La librería cryptography no está disponible.")
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        raise SignatureOperationError("No se pudo leer la clave pública configurada.") from exc
+    try:
+        return serialization.load_pem_public_key(data)
+    except Exception as exc:  # pragma: no cover - depende del backend criptográfico
+        raise SignatureOperationError("No se pudo cargar la clave pública PEM para verificación.") from exc
 
 
 def _sign_with_openssl(payload: bytes, private_key_path: str) -> bytes:
-    result = subprocess.run(
-        ["openssl", "dgst", "-sha256", "-sign", private_key_path],
-        input=payload,
-        capture_output=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-sign", private_key_path],
+            input=payload,
+            capture_output=True,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise SignatureOperationError("OpenSSL no está disponible para firmar bundles.") from exc
+    except subprocess.CalledProcessError as exc:
+        raise SignatureOperationError("OpenSSL falló al firmar el bundle; revise el formato de la clave privada.") from exc
     return result.stdout
 
 
@@ -105,12 +148,17 @@ def _verify_with_openssl(payload: bytes, signature: bytes, public_key_path: str)
     with tempfile.NamedTemporaryFile() as sig_file:
         sig_file.write(signature)
         sig_file.flush()
-        subprocess.run(
-            ["openssl", "dgst", "-sha256", "-verify", public_key_path, "-signature", sig_file.name],
-            input=payload,
-            capture_output=True,
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["openssl", "dgst", "-sha256", "-verify", public_key_path, "-signature", sig_file.name],
+                input=payload,
+                capture_output=True,
+                check=True,
+            )
+        except FileNotFoundError as exc:
+            raise SignatureOperationError("OpenSSL no está disponible para verificar firmas.") from exc
+        except subprocess.CalledProcessError as exc:
+            raise SignatureVerificationError("La firma no coincide con el contenido canónico del bundle.") from exc
 
 
 def _build_fhir_signature(user_id: Optional[str], signature_b64: str) -> Dict[str, Any]:
@@ -138,6 +186,7 @@ class SignatureResult:
 
 def sign_bundle(bundle: Dict[str, Any], *, user_id: Optional[str], settings: Optional[SignatureSettings] = None) -> Optional[SignatureResult]:
     settings = settings or load_settings()
+    validate_signature_runtime_requirements(settings)
     if not settings.enabled:
         logger.info("Firma de Bundle omitida: configuración deshabilitada o incompleta.")
         return None
@@ -150,12 +199,22 @@ def sign_bundle(bundle: Dict[str, Any], *, user_id: Optional[str], settings: Opt
         else:
             signature_bytes = _sign_with_openssl(canonical_json.encode("utf-8"), settings.private_key_path)  # type: ignore[arg-type]
     except Exception as exc:
-        logger.error("No se pudo firmar el bundle: %s", exc)
-        raise
+        logger.error("No se pudo firmar el bundle %s", digest_hex)
+        raise SignatureOperationError("No se pudo firmar el bundle; valide configuración de claves y dependencias.") from exc
 
     signature_b64 = base64.b64encode(signature_bytes).decode("ascii")
     fhir_signature = _build_fhir_signature(user_id=user_id, signature_b64=signature_b64)
     logger.debug("Bundle firmado con hash %s", digest_hex)
+    _emit_signature_event(
+        event_type="handover.signature",
+        action="create",
+        status="success",
+        user_sub=user_id,
+        resource_type="Bundle",
+        resource_id=bundle.get("id", ""),
+        payload_hash=digest_hex,
+        meta={"signature": {"algorithm": "ECDSA-SHA256", "hash": digest_hex}},
+    )
     return SignatureResult(fhir_signature=fhir_signature, bundle_hash=digest_hex, signature_b64=signature_b64)
 
 
@@ -167,6 +226,7 @@ class VerificationResult:
 
 def verify_bundle_signature(bundle: Dict[str, Any], settings: Optional[SignatureSettings] = None) -> Optional[VerificationResult]:
     settings = settings or load_settings()
+    validate_signature_runtime_requirements(settings)
     signature_node = bundle.get("signature")
     if not signature_node:
         return None
@@ -179,21 +239,36 @@ def verify_bundle_signature(bundle: Dict[str, Any], settings: Optional[Signature
         raise ValueError("El campo signature.data es obligatorio para verificar la firma.")
 
     canonical_json, digest, digest_hex = canonical_bundle_payload(bundle)
-    signature_bytes = base64.b64decode(signature_b64)
+    try:
+        signature_bytes = base64.b64decode(signature_b64)
+    except (ValueError, TypeError) as exc:
+        raise SignatureVerificationError("El campo signature.data no es base64 válido.") from exc
     try:
         if CRYPTOGRAPHY_AVAILABLE:
             public_key = _load_public_key(settings.public_key_path)  # type: ignore[arg-type]
             public_key.verify(signature_bytes, digest, ec.ECDSA(hashes.SHA256()))
         else:
             _verify_with_openssl(canonical_json.encode("utf-8"), signature_bytes, settings.public_key_path)  # type: ignore[arg-type]
-    except subprocess.CalledProcessError as exc:
+    except CryptoInvalidSignature as exc:
         logger.error("La verificación de firma falló para bundle %s", digest_hex)
-        raise SignatureVerificationError() from exc
-    except SignatureVerificationError as exc:
+        raise SignatureVerificationError("La firma no coincide con el contenido canónico del bundle.") from exc
+    except SignatureVerificationError:
         logger.error("La verificación de firma falló para bundle %s", digest_hex)
-        raise exc
+        raise
+    except Exception as exc:
+        logger.error("Error técnico verificando firma del bundle %s", digest_hex)
+        raise SignatureOperationError("No se pudo verificar la firma del bundle por un error técnico.") from exc
 
     logger.info("Firma FHIR verificada correctamente para bundle %s", digest_hex)
+    _emit_signature_event(
+        event_type="handover.signature",
+        action="read",
+        status="success",
+        resource_type="Bundle",
+        resource_id=bundle.get("id", ""),
+        payload_hash=digest_hex,
+        meta={"signature": {"verified": True, "hash": digest_hex}},
+    )
     return VerificationResult(bundle_hash=digest_hex, signature_b64=signature_b64)
 
 
@@ -220,3 +295,14 @@ def record_signature_audit(
         logger.info("Ya existe un registro de firma para el bundle %s", bundle_hash)
     except Exception as exc:  # pragma: no cover - safeguard against DB errors
         logger.warning("No se pudo registrar la auditoría de firma: %s", exc)
+    else:
+        _emit_signature_event(
+            event_type="handover.signature.audit",
+            action="create",
+            status="success",
+            user_sub=user_id,
+            resource_type="Bundle",
+            payload_hash=bundle_hash,
+            meta={"signature": {"stored": True, "hash": bundle_hash}},
+            timestamp=signed_at_value,
+        )
