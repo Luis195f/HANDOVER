@@ -40,11 +40,20 @@ from backend.validation import validate_fhir_bundle
 
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off")
+HANDOVER_VALIDATE_STRICT = os.getenv("HANDOVER_VALIDATE_STRICT", "false").lower().strip()
 HANDOVER_REQUIRE_RBAC_ON_FHIR = os.getenv("HANDOVER_REQUIRE_RBAC_ON_FHIR", "true").lower()
 AI_SUGGESTIONS_ENABLED = (
     os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
 )
 SIGNATURE_SETTINGS: SignatureSettings = load_settings()
+
+def _is_validate_strict_enabled() -> bool:
+    if HANDOVER_VALIDATE_STRICT in ("1", "true", "yes", "on"):
+        return True
+    if HANDOVER_VALIDATE_STRICT in ("0", "false", "no", "off"):
+        return False
+    return not settings.DEBUG
+
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +254,7 @@ async def fhir_transaction(bundle: dict,
             client=client,
             base_url=FHIR_BASE,
             validation_mode=HANDOVER_FHIR_VALIDATION_MODE,
+            strict_validate=_is_validate_strict_enabled(),
         )
         if SIGNATURE_SETTINGS.enabled:
             try:
