@@ -17,7 +17,7 @@ from rest_framework.views import APIView
 
 from backend.audit.service import emit_audit_event
 from backend.security.auth import Auth0JWTAuthentication
-from backend.api.models import AuditEvent
+from backend.api.models import ClientAuditEvent
 from backend.security.permissions import ClinicianAuditPermission
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
@@ -847,7 +847,7 @@ class AuditLogView(AuthenticatedAPIView):
             limit = 200
         limit = max(10, min(limit, 500))
 
-        logs = AuditEvent.objects.all()[:limit]
+        logs = ClientAuditEvent.objects.all()[:limit]
         payload = [self._serialize_event(event) for event in logs]
         emit_audit_event(
             event_type="audit_access",
@@ -855,7 +855,7 @@ class AuditLogView(AuthenticatedAPIView):
             status="success",
             http_status=200,
             request=request,
-            resource_type="AuditEvent",
+            resource_type="ClientAuditEvent",
             resource_id="",
         )
         return Response(payload, status=200)
@@ -869,7 +869,7 @@ class AuditLogView(AuthenticatedAPIView):
                 status="fail",
                 http_status=400,
                 request=request,
-                resource_type="AuditEvent",
+                resource_type="ClientAuditEvent",
                 resource_id="",
                 meta={"errorCode": "INVALID_PAYLOAD"},
             )
@@ -890,7 +890,7 @@ class AuditLogView(AuthenticatedAPIView):
         if timezone.is_naive(occurred_at):
             occurred_at = timezone.make_aware(occurred_at, timezone.get_current_timezone())
 
-        event = AuditEvent.objects.create(
+        event = ClientAuditEvent.objects.create(
             type=str(event_type),
             user_id=str(user_id),
             patient_id=str(data.get("patientId") or ""),
@@ -906,14 +906,14 @@ class AuditLogView(AuthenticatedAPIView):
             status="success",
             http_status=201,
             request=request,
-            resource_type="AuditEvent",
+            resource_type="ClientAuditEvent",
             resource_id=str(event.id),
         )
 
         return Response(self._serialize_event(event), status=201)
 
     @staticmethod
-    def _serialize_event(event: AuditEvent) -> Dict[str, Any]:
+    def _serialize_event(event: ClientAuditEvent) -> Dict[str, Any]:
         return {
             "id": event.id,
             "type": event.type,
