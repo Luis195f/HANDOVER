@@ -1,0 +1,35 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:obs-synthetic-1",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-synthetic-1",
+        "status": "final",
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "8867-4",
+              "display": "Heart rate"
+            }
+          ]
+        },
+        "subject": {
+          "reference": "Patient/synthetic-001"
+        },
+        "effectiveDateTime": "2026-01-01T08:00:00Z",
+        "valueQuantity": {
+          "value": 72,
+          "unit": "beats/min"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    }
+  ]
+}
