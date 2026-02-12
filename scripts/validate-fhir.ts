@@ -151,6 +151,7 @@ async function validateSource(source: string) {
 async function main() {
   const [, , ...argv] = process.argv;
   const args = [...argv];
+  const isCi = String(process.env.CI ?? '').toLowerCase() === 'true';
 
   // 1) Si pasan args, comportamiento original (estricto).
   if (args.length > 0) {
@@ -184,7 +185,7 @@ async function main() {
     return;
   }
 
-  // 3) Sin args y sin fixtures: si hay stdin con datos, úsalo. Si está vacío, NO rompas.
+  // 3) Sin args y sin fixtures: si hay stdin con datos, úsalo.
   if (!process.stdin.isTTY) {
     const raw = await readFromStdin();
     const trimmed = raw.trim();
@@ -226,9 +227,11 @@ async function main() {
     }
   }
 
-  // ✅ FIX DEFINITIVO: En CI, si no hay inputs reales, se “skippea” para no romper el pipeline.
-  if (process.env.CI) {
-    console.log('ℹ No FHIR bundles provided (no args, no fixtures, empty stdin). Skipping validate:fhir in CI.');
+  if (isCi) {
+    console.error('FHIR validation in CI requires evidence to validate.');
+    console.error('No inputs found: no CLI args, no fixtures under tests/fixtures/fhir, and empty stdin.');
+    console.error('Add at least one fixture JSON bundle or pass a bundle path to pnpm validate:fhir.');
+    process.exitCode = 1;
     return;
   }
 
