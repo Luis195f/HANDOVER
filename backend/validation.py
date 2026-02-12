@@ -12,6 +12,7 @@ async def validate_fhir_bundle(
     client: httpx.AsyncClient,
     base_url: str,
     validation_mode: str,
+    strict_validate: bool = False,
 ) -> None:
     """
     Valida un Bundle FHIR usando la operación $validate del servidor FHIR remoto.
@@ -21,7 +22,7 @@ async def validate_fhir_bundle(
     - Si el servidor devuelve OperationOutcome con `issue.severity` error/fatal,
       lanza HTTPException(422) con detalles resumidos.
     - Si el servidor no soporta $validate (404/405), registra warning y considera
-      la validación como pasada.
+      la validación como pasada, salvo strict_validate=True (falla cerrado).
     """
     if validation_mode == "off":
         return
@@ -53,6 +54,15 @@ async def validate_fhir_bundle(
             response.status_code,
             response.text,
         )
+        if strict_validate:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "errors": [
+                        "El servidor FHIR no soporta $validate y HANDOVER_VALIDATE_STRICT está habilitado."
+                    ]
+                },
+            )
         return
 
     if not (200 <= response.status_code < 300):

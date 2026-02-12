@@ -182,6 +182,7 @@ class FHIRJSONRenderer(JSONRenderer):
 
 FHIR_BASE = os.environ.get("FHIR_BASE") or os.environ.get("FHIR_BASE_URL") or "http://localhost:8080/fhir"
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off").lower().strip()
+HANDOVER_VALIDATE_STRICT = os.getenv("HANDOVER_VALIDATE_STRICT", "false").lower().strip()
 HANDOVER_REQUIRE_RBAC_ON_FHIR = os.getenv("HANDOVER_REQUIRE_RBAC_ON_FHIR", "true").lower().strip()
 OIDC_TOKEN_URL = os.getenv("OIDC_TOKEN_URL", "")
 OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")
@@ -296,6 +297,10 @@ def _validate_remotely(
     if HANDOVER_FHIR_VALIDATION_MODE != "remote":
         return None
 
+    strict_validation = HANDOVER_VALIDATE_STRICT in ("1", "true", "yes", "on") or (
+        HANDOVER_VALIDATE_STRICT == "auto" and not settings.DEBUG
+    )
+
     validate_url = f"{FHIR_BASE.rstrip('/')}/{resource_type}/$validate"
     try:
         resp = httpx.post(validate_url, json=resource, headers=get_fhir_headers(request), timeout=30)
@@ -306,6 +311,18 @@ def _validate_remotely(
     # Si el server no soporta $validate, seguimos sin bloquear
     if resp.status_code in (404, 405):
         logger.warning("$validate no soportado para %s: %s", resource_type, resp.text)
+        if strict_validation:
+            return Response(
+                {
+                    "errors": [
+                        (
+                            "El servidor FHIR no soporta $validate y "
+                            "HANDOVER_VALIDATE_STRICT está habilitado."
+                        )
+                    ]
+                },
+                status=503,
+            )
         return None
 
     try:
