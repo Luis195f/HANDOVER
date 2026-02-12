@@ -40,7 +40,7 @@ from backend.validation import validate_fhir_bundle
 
 FHIR_BASE = os.environ.get("FHIR_BASE", "http://localhost:8080/fhir")
 HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off")
-HANDOVER_VALIDATE_STRICT = os.getenv("HANDOVER_VALIDATE_STRICT", "auto").lower().strip()
+HANDOVER_VALIDATE_STRICT = os.getenv("HANDOVER_VALIDATE_STRICT", "false").lower().strip()
 HANDOVER_REQUIRE_RBAC_ON_FHIR = os.getenv("HANDOVER_REQUIRE_RBAC_ON_FHIR", "true").lower()
 AI_SUGGESTIONS_ENABLED = (
     os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
