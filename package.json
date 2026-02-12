@@ -7,13 +7,14 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --no-error-on-unmatched-pattern",
+    "lint": "eslint .",
     "test": "jest --config jest.config.cjs --passWithNoTests",
     "test:watch": "jest --config jest.config.cjs --watch",
     "test:cov": "jest --config jest.config.cjs --coverage",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
     "validate:fhir": "tsx scripts/validate-fhir.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "lint:ci": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
