@@ -17,5 +17,5 @@ La aplicación móvil usa React Native (Expo) y TypeScript con una capa de formu
 
 ## Configuración y entornos
 - Variables de entorno en `.env` gobiernan OIDC, FHIR y parámetros de red; Expo las expone también desde `app.json` en `expo.extra` para el cliente móvil.
-- `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` indican el endpoint FHIR; otras variables de `EXPO_PUBLIC_*` afinan la cola offline, almacenamiento y autenticación.
+- `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` indican el endpoint FHIR; otras variables de `EXPO_PUBLIC_*` afinan la cola offline, almacenamiento y autenticación.
 - El backend opcional puede ejecutarse localmente para pruebas; la app se comunica con él mediante `EXPO_PUBLIC_API_BASE_URL`.

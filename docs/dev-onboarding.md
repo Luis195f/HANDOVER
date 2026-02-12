@@ -12,7 +12,7 @@
    cd HANDOVER
    cp .env.example .env
    ```
-2. Completa las variables OIDC (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE`, `OIDC_REDIRECT_SCHEME`) y los endpoints FHIR (`FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE`). Ajusta otros valores de `EXPO_PUBLIC_*` según el entorno.
+2. Completa las variables OIDC (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE`, `OIDC_REDIRECT_SCHEME`) y los endpoints FHIR (`FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL`). Ajusta otros valores de `EXPO_PUBLIC_*` según el entorno.
 
 ## Instalación de dependencias
 - Cliente móvil: `pnpm -w install`.
