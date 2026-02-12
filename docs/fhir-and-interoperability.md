@@ -5,7 +5,7 @@
 - `src/lib/fhir-map.ts` convierte los datos del formulario en bundles FHIR listos para envío. Cada entrada se transforma a recursos individuales y se empaqueta en un `Bundle` con referencias coherentes.
 
 ## Cliente y configuración
-- Define `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` en `.env`/`app.json` (`expo.extra`) para apuntar al servidor FHIR.
+- Define `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` en `.env`/`app.json` (`expo.extra`) para apuntar al servidor FHIR.
 - El cliente en `src/lib/fhir-client.ts` agrega cabeceras de idempotencia, maneja respuestas `OperationOutcome` y reintentos seguros.
 - `HANDOVER_FHIR_VALIDATION_MODE` controla la validación de bundles:
   - `"off"`: el backend reenviará sin validar.

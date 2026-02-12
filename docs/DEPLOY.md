@@ -13,7 +13,7 @@ Esta guía describe cómo generar builds para Android, iOS y Web, así como los 
 | Contexto | Variable | Descripción |
 | --- | --- | --- |
 | App runtime | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE`, `OIDC_REDIRECT_SCHEME` | Login OIDC seguro mediante `expo-auth-session`. |
-| App runtime | `FHIR_BASE_URL` / `EXPO_PUBLIC_FHIR_BASE` | Endpoint FHIR con HTTPS obligatorio. |
+| App runtime | `FHIR_BASE_URL` / `EXPO_PUBLIC_FHIR_BASE_URL` | Endpoint FHIR con HTTPS obligatorio. |
 | App runtime | `EXPO_PUBLIC_ALLOWED_UNITS`, `EXPO_PUBLIC_ALLOW_ALL_UNITS`, `EXPO_PUBLIC_BYPASS_SCOPE` | Configuración RBAC/ACL consumida por `src/security/acl.ts`. |
 | App runtime | `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` | Activa la firma cliente (ECDSA P-256 + SHA-256) del Bundle FHIR; si no hay WebCrypto/clave, el envío sigue sin firma. |
 | App runtime | `EXPO_PUBLIC_STORAGE_NAMESPACE` | Namespacing de almacenamiento seguro/offline. |

@@ -33,7 +33,7 @@ type QueueItemMeta = {
 };
 
 function resolveSyncOpts(): SyncOpts | null {
-  const envFallback = (process?.env?.EXPO_PUBLIC_FHIR_BASE as string) ?? '';
+  const envFallback = (process?.env?.EXPO_PUBLIC_FHIR_BASE_URL as string) ?? '';
   let base = envFallback;
 
   try {
