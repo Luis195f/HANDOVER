@@ -69,7 +69,6 @@ describe('SyncCenter', () => {
     flushQueue.mockReset();
 
     // Optional, but harmless in tests.
-    process.env.EXPO_PUBLIC_FHIR_BASE = 'https://example.test';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
 
