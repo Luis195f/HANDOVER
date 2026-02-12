@@ -1,24 +1,10 @@
 import copy
-import os
 import subprocess
-import sys
 from datetime import timedelta
-from pathlib import Path
 
-import django
 import pytest
 from django.core.management import call_command
 from django.utils import timezone
-
-try:
-    import pytest_django  # type: ignore  # noqa: F401
-except Exception:  # pragma: no cover - dependency guard
-    pytest.skip("pytest-django is required for signature utils tests", allow_module_level=True)
-
-# Configura entorno Django antes de importar módulos internos
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
-django.setup()
 
 from backend.signature import (  # noqa: E402  pylint: disable=C0413
     SignatureSettings,
