@@ -104,6 +104,46 @@ def test_summarize_sbar_invalid_response(monkeypatch):
     assert response.status_code == 502
 
 
+
+def test_audit_ai_summary_import_and_safe_failure(monkeypatch):
+    calls = {}
+
+    def fake_emit_audit_event(**kwargs):
+        calls["kwargs"] = kwargs
+
+    monkeypatch.setattr(main, 'emit_audit_event', fake_emit_audit_event)
+
+    main._audit_ai_summary(
+        status='success',
+        http_status=200,
+        user_sub='user-1',
+        notes='nota breve',
+        context={'unit': 'icu'},
+        language='es',
+        request=None,
+    )
+
+    assert calls['kwargs']['meta']['model'] == main.OPENAI_MODEL_SBAR
+    assert calls['kwargs']['meta']['promptVersion'] == 'v1'
+    assert calls['kwargs']['meta']['source'] == 'ai/summarize-sbar'
+
+
+def test_audit_ai_summary_does_not_raise_when_audit_fails(monkeypatch):
+    def broken_emit_audit_event(**_kwargs):
+        raise RuntimeError('audit down')
+
+    monkeypatch.setattr(main, 'emit_audit_event', broken_emit_audit_event)
+
+    main._audit_ai_summary(
+        status='fail',
+        http_status=502,
+        user_sub='user-1',
+        notes='nota breve',
+        context={},
+        language='es',
+        request=None,
+    )
+
 def test_suggest_interventions_success(client):
     response = client.post(
         '/ai/suggest-interventions',
