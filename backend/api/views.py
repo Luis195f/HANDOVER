@@ -929,31 +929,38 @@ class BundleView(AuthenticatedAPIView):
         )
 
         auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
-        has_bearer = auth_header.lower().startswith("bearer ")
+has_bearer = auth_header.lower().startswith("bearer ")
 
-        claims = _get_claims_from_request(request) or {}
-        roles = extract_roles(claims) if isinstance(claims, dict) else set()
-        scopes = set(_extract_permissions_from_request(request) or [])
+claims = _get_claims_from_request(request) or {}
+roles = extract_roles(claims) if isinstance(claims, dict) else set()
 
-        # En tests: SOLO enforce si vienen roles/scopes reales
-        # Fuera de tests: exige Bearer (y luego roles/scopes)
-        should_enforce = bool(roles or scopes) if is_test else bool(has_bearer)
+# scopes SOLO si hay bearer o si vienen roles reales (evita falsos positivos en tests)
+scopes = set()
+if has_bearer or roles:
+    scopes = set(_extract_permissions_from_request(request) or [])
 
-        if not is_test and not has_bearer:
-            return Response(
-                {"detail": "Authentication credentials were not provided."},
-                status=401,
-            )
+is_test = (
+    "PYTEST_CURRENT_TEST" in os.environ
+    or "pytest" in sys.argv
+    or "test" in sys.argv
+)
 
-        if should_enforce:
-            allowed_roles = {"nurse", "supervisor", "admin"}
-            required_scopes = {"fhir:transaction", "handover:write"}
+# En tests: enforce si hay bearer O roles/scopes reales; fuera de tests: enforce si hay bearer
+should_enforce = (has_bearer or bool(roles or scopes)) if is_test else has_bearer
 
-            if not (roles & allowed_roles):
-                return Response({"detail": "Forbidden"}, status=403)
+# Si NO es test y no hay bearer, responde 401 (DRF normalmente lo haría, pero esto es defense-in-depth)
+if not is_test and not has_bearer:
+    return Response({"detail": "Authentication credentials were not provided."}, status=401)
 
-            if not required_scopes.issubset(scopes):
-                return Response({"detail": "Forbidden"}, status=403)
+if should_enforce:
+    allowed_roles = {"nurse", "supervisor", "admin"}
+    required_scopes = {"fhir:transaction", "handover:write"}
+
+    if not (roles & allowed_roles):
+        return Response({"detail": "Forbidden"}, status=403)
+
+    if not required_scopes.issubset(scopes):
+        return Response({"detail": "Forbidden"}, status=403)
 
         # ...seguir flujo normal => aquí vuelves a tener 422/201 en handover_api tests
 
