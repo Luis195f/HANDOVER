@@ -115,6 +115,7 @@ def emit_audit_event(
     try:
         ip = ""
         user_agent = ""
+
         if request is not None:
             ip = getattr(request, "audit_client_ip", "") or ""
             user_agent = getattr(request, "audit_user_agent", "") or ""
@@ -175,23 +176,25 @@ def emit_audit_event(
             event_data.pop("timestamp")
 
         event = None
-store_to_db = not _is_pytest()
+        store_to_db = not _is_pytest()
 
-if store_to_db:
-    try:
-        event = AuditEvent.objects.create(**event_data)
-    except RuntimeError as e:
-        # pytest-django bloquea DB si el test no usa django_db/db fixture
-        if "Database access not allowed" not in str(e):
-            raise
-    except Exception:
-        event = None
+        if store_to_db:
+            try:
+                event = AuditEvent.objects.create(**event_data)
+            except RuntimeError as e:
+                # pytest-django bloquea DB si el test no usa django_db/db fixture
+                if "Database access not allowed" not in str(e):
+                    raise
+                event = None
+            except Exception:
+                event = None
 
-log_payload = {
-    **({"id": event.id} if event is not None else {}),
-    **{k: v for k, v in event_data.items() if k != "meta" or v is not None},
-}
-logger.info(json.dumps(log_payload, ensure_ascii=False))
+        log_payload = {
+            **({"id": event.id} if event is not None else {}),
+            **{k: v for k, v in event_data.items() if k != "meta" or v is not None},
+        }
+        logger.info(json.dumps(log_payload, ensure_ascii=False))
 
     except Exception:
         logger.exception("Audit event emission failed")
+
