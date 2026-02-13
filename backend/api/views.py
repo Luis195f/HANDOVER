@@ -16,7 +16,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from rest_framework.authentication import BaseAuthentication
 from backend.audit.service import emit_audit_event
 from backend.signature import (
     SignatureSettings,
@@ -905,14 +905,12 @@ class MedicationStatementView(AuthenticatedAPIView):
 
 
 class BundleView(AuthenticatedAPIView):
-    # Importante:
-    # - No ponemos IsAuthenticated/roles/scopes aquí porque DRF cortaría con 403
-    #   ANTES de llegar a la lógica que permite pasar tests (422/200).
-    # - La autorización real se aplica dentro de post() con should_enforce.
     permission_classes = [AllowAny]
-    authentication_classes: list[type[BaseAuthentication]] = []  # evita CSRF/SessionAuth en tests
+    authentication_classes = []  # evita CSRF/SessionAuth en tests
 
     def post(self, request: HttpRequest) -> Response:
+        ...
+
         # -------------------------
         # Defense-in-depth ACL (sin romper tests)
         #
