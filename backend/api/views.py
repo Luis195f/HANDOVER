@@ -912,6 +912,23 @@ class BundleView(AuthenticatedAPIView):
     ]
 
     def post(self, request: HttpRequest) -> Response:
+                # -------------------------
+        # Defense-in-depth ACL (no depender solo de permission_classes)
+        # Evita que se intente llamar al FHIR server si el rol/scope no cumple.
+        # -------------------------
+        claims = _get_claims_from_request(request) or {}
+        roles = extract_roles(claims) if isinstance(claims, dict) else set()
+        scopes = set(_extract_permissions_from_request(request) or [])
+
+        allowed_roles = {"nurse", "supervisor", "admin"}
+        required_scopes = {"fhir:transaction", "handover:write"}
+
+        if not (roles & allowed_roles):
+            return Response({"detail": "Forbidden"}, status=403)
+
+        if not required_scopes.issubset(scopes):
+            return Response({"detail": "Forbidden"}, status=403)
+
         if Bundle is None:
             return Response(
                 {"errors": ["Dependencia fhir.resources no disponible."], "code": "FHIR_DEPENDENCY"},
