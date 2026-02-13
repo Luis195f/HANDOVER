@@ -875,9 +875,16 @@ class BundleView(AuthenticatedAPIView):
         HasAnyRole.required("nurse", "supervisor", "admin"),
         HasAllScopes.required("fhir:transaction", "handover:write"),
     ]
+
     def post(self, request: HttpRequest) -> Response:
         if Bundle is None:
-            return Response({"errors": ["Dependencia fhir.resources no disponible."], "code": "FHIR_DEPENDENCY"}, status=500)
+            return Response(
+                {"errors": ["Dependencia fhir.resources no disponible."], "code": "FHIR_DEPENDENCY"},
+                status=500,
+            )
+
+        user_id = request.headers.get("X-User-Id")
+        unit_id = request.headers.get("X-Unit-Id")
 
         payload_obj = request.data
         invalid_payload = _ensure_json_object(payload_obj)
@@ -903,6 +910,7 @@ class BundleView(AuthenticatedAPIView):
                 meta={"errorCode": "FHIR_VALIDATION_ERROR"},
             )
             return Response({"errors": minimal_errors, "code": "INVALID_BUNDLE"}, status=422)
+
         try:
             bundle_obj = Bundle.parse_obj(request.data)
         except Exception:
@@ -929,7 +937,7 @@ class BundleView(AuthenticatedAPIView):
 
         bundle = bundle_obj.dict(exclude_none=True)
 
-        signature_error = _ensure_bundle_signature(bundle, request.headers.get("X-User-Id"))
+        signature_error = _ensure_bundle_signature(bundle, user_id)
         if signature_error:
             _emit_bundle_audit(
                 request=request,
@@ -1017,8 +1025,8 @@ class BundleView(AuthenticatedAPIView):
         _create_audit_event_for_transaction(
             request,
             bundle=bundle,
-            user_id=request.headers.get("X-User-Id"),
-            unit_id=request.headers.get("X-Unit-Id"),
+            user_id=user_id,
+            unit_id=unit_id,
         )
         return Response(payload, status=resp.status_code)
 
