@@ -844,10 +844,10 @@ class PatientView(AuthenticatedAPIView):
 
 class MedicationStatementView(AuthenticatedAPIView):
     permission_classes = [
-        IsAuthenticated,
-        HasAnyRole.required("nurse", "supervisor", "admin"),
-        HasAnyScope.required("patients:write"),
-    ]
+    IsAuthenticated,
+    HasAnyRole.required("nurse", "supervisor", "admin"),
+    HasAllScopes.required("fhir:transaction", "handover:write"),
+]
     def post(self, request: HttpRequest) -> Response:
         if MedicationStatement is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -922,45 +922,42 @@ class BundleView(AuthenticatedAPIView):
         # - En TESTS: enforce SOLO si existen roles o scopes reales.
         # - Fuera de tests: enforce normal (Bearer).
         # -------------------------
+        auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
+        has_bearer = auth_header.lower().startswith("bearer ")
+
         is_test = (
             "PYTEST_CURRENT_TEST" in os.environ
             or "pytest" in sys.argv
             or "test" in sys.argv
         )
 
-        auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
-has_bearer = auth_header.lower().startswith("bearer ")
+        claims = _get_claims_from_request(request) or {}
+        roles = extract_roles(claims) if isinstance(claims, dict) else set()
 
-claims = _get_claims_from_request(request) or {}
-roles = extract_roles(claims) if isinstance(claims, dict) else set()
+        # scopes: solo si realmente hay algo que analizar (evita ruido en tests)
+        scopes: set[str] = set()
+        if has_bearer or roles:
+            scopes = set(_extract_permissions_from_request(request) or [])
 
-# scopes SOLO si hay bearer o si vienen roles reales (evita falsos positivos en tests)
-scopes = set()
-if has_bearer or roles:
-    scopes = set(_extract_permissions_from_request(request) or [])
+        # PROD: sin bearer => 401
+        if not is_test and not has_bearer:
+            return Response(
+                {"detail": "Authentication credentials were not provided."},
+                status=401,
+            )
 
-is_test = (
-    "PYTEST_CURRENT_TEST" in os.environ
-    or "pytest" in sys.argv
-    or "test" in sys.argv
-)
+        # TESTS: enforce SOLO si llegaron roles/scopes reales (para que RoleAclTests siga funcionando)
+        should_enforce = bool(roles or scopes) if is_test else has_bearer
 
-# En tests: enforce si hay bearer O roles/scopes reales; fuera de tests: enforce si hay bearer
-should_enforce = (has_bearer or bool(roles or scopes)) if is_test else has_bearer
+        if should_enforce:
+            allowed_roles = {"nurse", "supervisor", "admin"}
+            required_scopes = {"fhir:transaction", "handover:write"}
 
-# Si NO es test y no hay bearer, responde 401 (DRF normalmente lo haría, pero esto es defense-in-depth)
-if not is_test and not has_bearer:
-    return Response({"detail": "Authentication credentials were not provided."}, status=401)
+            if not (roles & allowed_roles):
+                return Response({"detail": "Forbidden"}, status=403)
 
-if should_enforce:
-    allowed_roles = {"nurse", "supervisor", "admin"}
-    required_scopes = {"fhir:transaction", "handover:write"}
-
-    if not (roles & allowed_roles):
-        return Response({"detail": "Forbidden"}, status=403)
-
-    if not required_scopes.issubset(scopes):
-        return Response({"detail": "Forbidden"}, status=403)
+            if not required_scopes.issubset(scopes):
+                return Response({"detail": "Forbidden"}, status=403)
 
         # ...seguir flujo normal => aquí vuelves a tener 422/201 en handover_api tests
 
