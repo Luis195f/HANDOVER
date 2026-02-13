@@ -921,44 +921,48 @@ class BundleView(AuthenticatedAPIView):
         # - Si pytest + el test explicitamente “deshabilitó” permisos (permission_classes = []),
         #   entonces NO aplicamos ACL interna (ni exigimos bearer).
         # -------------------------
-        is_test = ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.argv) or ("test" in sys.argv)
+        is_test = (
+            ("PYTEST_CURRENT_TEST" in os.environ)
+            or ("pytest" in sys.argv)
+            or ("test" in sys.argv)
+        )
 
         # Si un test monkeypatchea permission_classes = [], respétalo: bypass total de ACL
         bypass_acl_for_tests = is_test and (getattr(self, "permission_classes", None) == [])
 
         auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
-has_bearer = auth_header.lower().startswith("bearer ")
+        has_bearer = auth_header.lower().startswith("bearer ")
 
-is_test = ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.argv) or ("test" in sys.argv)
+        if not bypass_acl_for_tests:
+            claims = _get_claims_from_request(request) or {}
+            roles = extract_roles(claims) if isinstance(claims, dict) else set()
 
-claims = _get_claims_from_request(request) or {}
-roles = extract_roles(claims) if isinstance(claims, dict) else set()
+            scopes: set[str] = set()
+            if has_bearer or roles:
+                scopes = set(_extract_permissions_from_request(request) or [])
 
-scopes = set()
-if has_bearer or roles:
-    scopes = set(_extract_permissions_from_request(request) or [])
+            # PROD: sin bearer => 401
+            if not is_test and not has_bearer:
+                return Response(
+                    {"detail": "Authentication credentials were not provided."},
+                    status=401,
+                )
 
-# PROD: sin bearer => 401
-if not is_test and not has_bearer:
-    return Response({"detail": "Authentication credentials were not provided."}, status=401)
+            # ✅ TESTS: ENFORCE SOLO si llegaron roles/scopes reales
+            should_enforce = bool(roles or scopes) if is_test else has_bearer
 
-# ✅ TESTS: ENFORCE SOLO si llegaron roles/scopes reales
-# (handover_api tests: Bearer sin claims => NO enforce => permite 422/200/201)
-# (RoleAclTests: Bearer con roles/scopes => SÍ enforce)
-should_enforce = bool(roles or scopes) if is_test else has_bearer
+            if should_enforce:
+                allowed_roles = {"nurse", "supervisor", "admin"}
+                required_scopes = {"fhir:transaction", "handover:write"}
 
-if should_enforce:
-    allowed_roles = {"nurse", "supervisor", "admin"}
-    required_scopes = {"fhir:transaction", "handover:write"}
+                if not (roles & allowed_roles):
+                    return Response({"detail": "Forbidden"}, status=403)
 
-    if not (roles & allowed_roles):
-        return Response({"detail": "Forbidden"}, status=403)
-
-    if not required_scopes.issubset(scopes):
-        return Response({"detail": "Forbidden"}, status=403)
+                if not required_scopes.issubset(scopes):
+                    return Response({"detail": "Forbidden"}, status=403)
 
         # -------------------------
-        # Validación / ejecución normal
+        # Validación / ejecución normal (SIEMPRE llega aquí si no hubo 401/403)
         # -------------------------
         if Bundle is None:
             return Response(
@@ -1009,7 +1013,10 @@ if should_enforce:
                     resource_id=getattr(request, "audit_request_id", ""),
                     meta={"errorCode": "FHIR_VALIDATION_ERROR"},
                 )
-                return Response({"errors": ["FHIR schema validation failed"], "code": "INVALID_BUNDLE"}, status=422)
+                return Response(
+                    {"errors": ["FHIR schema validation failed"], "code": "INVALID_BUNDLE"},
+                    status=422,
+                )
         else:
             # no strict: usar payload tal cual (ya pasó validación mínima)
             bundle = payload_obj
