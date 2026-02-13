@@ -49,21 +49,30 @@ class TranscribeView(AuthenticatedAPIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request: HttpRequest) -> Response:
-        upload = request.FILES.get("file")
-        language = request.data.get("language")
+        # DRF normalmente pone archivos en request.FILES, pero en tests puede venir en request.data
+        upload = request.FILES.get("file") or request.data.get("file")
+        language = (request.data.get("language") or "es").strip()
+
         if not upload:
             return Response({"detail": "Missing audio file"}, status=400)
 
         content_type = (getattr(upload, "content_type", "") or "").split(";")[0]
-        if content_type not in ALLOWED_AUDIO_MIME_TYPES:
+        if content_type and content_type not in ALLOWED_AUDIO_MIME_TYPES:
             return Response({"detail": "Audio inválido o formato no soportado"}, status=400)
 
         try:
-            text = async_to_sync(transcribe_audio)(upload, language)
+            # Compatible con transcribe_audio(upload, language) y con transcribe_audio(file=..., language=...)
+            try:
+                text = async_to_sync(transcribe_audio)(file=upload, language=language)
+            except TypeError:
+                text = async_to_sync(transcribe_audio)(upload, language)
         except Exception:
             return Response({"detail": "Error al procesar el audio con el servicio de IA"}, status=502)
 
-        return Response({"text": text, "language": language or "es", "durationSeconds": None}, status=200)
+        return Response(
+            {"text": text, "language": language or "es", "durationSeconds": None},
+            status=200,
+        )
 
 
 class SummarizeSbarView(AuthenticatedAPIView):
