@@ -21,12 +21,9 @@ from backend.ai_client import (
 )
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
-from backend.security.auth import Auth0JWTAuthentication
+from .views import AuthenticatedAPIView, FHIR_BASE, get_fhir_headers
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.scope_permissions import HasAnyScope
-from rest_framework.views import APIView
-
-from .views import FHIR_BASE, get_fhir_headers
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +38,6 @@ ALLOWED_AUDIO_MIME_TYPES = {
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
 AI_SUGGESTIONS_ENABLED = os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
-
-
-class AuthenticatedAPIView(APIView):
-    authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated]
 
 
 class TranscribeView(AuthenticatedAPIView):
