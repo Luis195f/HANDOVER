@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import uuid
@@ -9,13 +10,21 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from rest_framework.parsers import JSONParser
-from rest_framework.permissions import IsAuthenticated, AllowAny 
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from backend.audit.service import emit_audit_event
+from backend.signature import (
+    SignatureSettings,
+    SignatureVerificationError,
+    load_settings,
+    record_signature_audit,
+    sign_bundle,
+    verify_bundle_signature,
+)
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent
 from backend.security.permissions import ClinicianAuditPermission
@@ -188,6 +197,153 @@ OIDC_TOKEN_URL = os.getenv("OIDC_TOKEN_URL", "")
 OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "")
 OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
 OIDC_SCOPE = os.getenv("OIDC_SCOPE", "")
+SIGNATURE_SETTINGS: SignatureSettings = load_settings()
+
+
+def _parse_signature_when(value: str | None) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+        return datetime.datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+
+
+def _create_audit_event_for_transaction(
+    request: HttpRequest,
+    *,
+    bundle: Dict[str, Any],
+    user_id: str | None,
+    unit_id: str | None,
+) -> None:
+    patient_id = None
+    composition = None
+    outgoing_attester = None
+    incoming_attester = None
+    try:
+        for e in (bundle.get("entry") or []):
+            r = (e or {}).get("resource") or {}
+            if r.get("resourceType") == "Patient" and r.get("id"):
+                patient_id = r.get("id")
+            if r.get("resourceType") == "Composition" and not composition:
+                composition = r
+                attesters = r.get("attester") or []
+                if attesters:
+                    outgoing_attester = attesters[0]
+                    if len(attesters) > 1:
+                        incoming_attester = attesters[1]
+    except Exception:
+        pass
+
+    def agent_from_attester(attester: dict | None, label: str):
+        if not attester:
+            return None
+        party = attester.get("party") or {}
+        identifier = (party.get("identifier") or {}).get("value")
+        reference = party.get("reference")
+        who_value = identifier or reference
+        if not who_value:
+            return None
+        display = party.get("display") or who_value
+        return {
+            "type": {"text": label},
+            "who": {"identifier": {"system": "urn:handover:user-id", "value": who_value}, "display": display},
+            "requestor": False,
+        }
+
+    audit = {
+        "resourceType": "AuditEvent",
+        "type": {
+            "system": "http://terminology.hl7.org/CodeSystem/audit-event-type",
+            "code": "rest",
+            "display": "RESTful Operation",
+        },
+        "subtype": [{
+            "system": "http://hl7.org/fhir/restful-interaction",
+            "code": "transaction",
+            "display": "transaction",
+        }],
+        "action": "C",
+        "recorded": datetime.datetime.utcnow().isoformat() + "Z",
+        "outcome": "0",
+        "agent": [{
+            "type": {"text": "human/user"},
+            "who": {"identifier": {"value": user_id or "anonymous"}},
+            "requestor": True,
+            "network": {
+                "address": request.META.get("REMOTE_ADDR") or "0.0.0.0",
+                "type": "2",
+            },
+            "location": {"identifier": {"value": unit_id or ""}},
+        }],
+        "source": {"observer": {"identifier": {"value": "handover-api"}}},
+    }
+
+    outgoing_agent = agent_from_attester(outgoing_attester, "outgoing-nurse-signature")
+    incoming_agent = agent_from_attester(incoming_attester, "incoming-nurse-signature")
+    if outgoing_agent:
+        audit["agent"].append(outgoing_agent)
+    if incoming_agent:
+        audit["agent"].append(incoming_agent)
+
+    if patient_id:
+        audit["entity"] = [{"what": {"reference": f"Patient/{patient_id}"}}]
+
+    if composition:
+        composition_id = composition.get("id") or "unknown"
+        signature_value = (
+            ("outgoingSigned" if outgoing_agent else "notSigned")
+            + (";incomingSigned" if incoming_agent else ";incomingNotSigned")
+        )
+        audit["entity"] = (audit.get("entity") or []) + [{
+            "what": {"reference": f"Composition/{composition_id}"},
+            "detail": [{"type": "signature-status", "valueString": signature_value}],
+        }]
+
+    try:
+        httpx.post(
+            f"{FHIR_BASE.rstrip('/')}/AuditEvent",
+            json=audit,
+            headers=get_fhir_headers(request),
+            timeout=30,
+        )
+    except Exception:
+        logger.exception("No se pudo emitir AuditEvent para transacción FHIR")
+
+
+def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Optional[Response]:
+    if not SIGNATURE_SETTINGS.enabled:
+        logger.info("Firma digital de Bundle deshabilitada; se reenvía sin firma/validación criptográfica.")
+        return None
+    try:
+        verification = verify_bundle_signature(bundle, settings=SIGNATURE_SETTINGS)
+    except SignatureVerificationError:
+        return Response({"errors": ["Invalid signature"]}, status=400)
+    except Exception as exc:
+        return Response({"errors": [str(exc)]}, status=400)
+
+    if verification:
+        record_signature_audit(
+            user_id=user_id,
+            bundle_hash=verification.bundle_hash,
+            signature_b64=verification.signature_b64,
+            signed_at=_parse_signature_when(
+                bundle.get("signature", {}).get("when") if isinstance(bundle.get("signature"), dict) else None
+            ),
+        )
+        return None
+
+    signature = sign_bundle(bundle, user_id=user_id, settings=SIGNATURE_SETTINGS)
+    if signature:
+        bundle["signature"] = signature.fhir_signature
+        record_signature_audit(
+            user_id=user_id,
+            bundle_hash=signature.bundle_hash,
+            signature_b64=signature.signature_b64,
+            signed_at=_parse_signature_when(signature.fhir_signature.get("when")),
+        )
+    return None
 
 
 def _ensure_secure_url(url: str) -> str:
@@ -773,6 +929,18 @@ class BundleView(AuthenticatedAPIView):
 
         bundle = bundle_obj.dict(exclude_none=True)
 
+        signature_error = _ensure_bundle_signature(bundle, request.headers.get("X-User-Id"))
+        if signature_error:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=bundle,
+                status="fail",
+                http_status=signature_error.status_code,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "SIGNATURE_ERROR"},
+            )
+            return signature_error
+
         # Tag de tracking
         bundle_meta = bundle.get("meta") or {}
         tags = bundle_meta.get("tag") or []
@@ -845,6 +1013,12 @@ class BundleView(AuthenticatedAPIView):
             status="success",
             http_status=resp.status_code,
             resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+        )
+        _create_audit_event_for_transaction(
+            request,
+            bundle=bundle,
+            user_id=request.headers.get("X-User-Id"),
+            unit_id=request.headers.get("X-Unit-Id"),
         )
         return Response(payload, status=resp.status_code)
 
