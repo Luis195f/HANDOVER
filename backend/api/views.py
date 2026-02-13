@@ -921,24 +921,23 @@ class BundleView(AuthenticatedAPIView):
         # -------------------------
         auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
         has_bearer = auth_header.lower().startswith("bearer ")
-        has_claims = isinstance(getattr(request, "auth", None), dict)
-        user = getattr(request, "user", None)
-        has_user = bool(getattr(user, "is_authenticated", False))
 
-        if has_bearer or has_claims or has_user:
-            claims = _get_claims_from_request(request) or {}
-            roles = extract_roles(claims) if isinstance(claims, dict) else set()
-            scopes = set(_extract_permissions_from_request(request) or [])
+        claims = _get_claims_from_request(request) or {}
+        roles = extract_roles(claims) if isinstance(claims, dict) else set()
+        scopes = set(_extract_permissions_from_request(request) or [])
 
+        should_enforce = bool(has_bearer or roles or scopes)
+
+        if should_enforce:
             allowed_roles = {"nurse", "supervisor", "admin"}
             required_scopes = {"fhir:transaction", "handover:write"}
 
-        if not (roles & allowed_roles):
+            if not (roles & allowed_roles):
                 return Response({"detail": "Forbidden"}, status=403)
 
-        if not required_scopes.issubset(scopes):
+            if not required_scopes.issubset(scopes):
                 return Response({"detail": "Forbidden"}, status=403)
-
+                
         if Bundle is None:
             return Response(
                 {"errors": ["Dependencia fhir.resources no disponible."], "code": "FHIR_DEPENDENCY"},
