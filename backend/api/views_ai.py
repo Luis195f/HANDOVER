@@ -1,6 +1,7 @@
 import base64
 import datetime
 import logging
+import mimetypes
 import os
 from typing import Any, Dict
 
@@ -28,16 +29,75 @@ from backend.security.scope_permissions import HasAnyScope
 logger = logging.getLogger(__name__)
 
 ALLOWED_AUDIO_MIME_TYPES = {
+    "audio/aac",
     "audio/m4a",
+    "audio/mp4",
     "audio/mp3",
     "audio/mpeg",
-    "audio/wav",
     "audio/ogg",
+    "audio/wav",
+    "audio/webm",
     "audio/x-m4a",
 }
+DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
 AI_SUGGESTIONS_ENABLED = os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
+
+
+def _get_max_audio_bytes() -> int:
+    raw_value = os.getenv("HANDOVER_MAX_AUDIO_BYTES")
+    if not raw_value:
+        return DEFAULT_MAX_AUDIO_BYTES
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return DEFAULT_MAX_AUDIO_BYTES
+    return parsed if parsed > 0 else DEFAULT_MAX_AUDIO_BYTES
+
+
+HANDOVER_MAX_AUDIO_BYTES = _get_max_audio_bytes()
+
+
+def _get_upload_size_bytes(upload: Any) -> int | None:
+    size = getattr(upload, "size", None)
+    if isinstance(size, int) and size >= 0:
+        return size
+
+    stream = getattr(upload, "file", upload)
+    if all(hasattr(stream, attr) for attr in ("tell", "seek")):
+        current_pos = stream.tell()
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(current_pos)
+        if isinstance(size, int) and size >= 0:
+            return size
+    return None
+
+
+def _normalize_audio_content_type(upload: Any) -> str | None:
+    content_type = (getattr(upload, "content_type", "") or "").split(";")[0].strip().lower()
+    if content_type:
+        return content_type
+
+    filename = (getattr(upload, "name", "") or "").strip().lower()
+    if not filename:
+        return None
+    guessed_type, _ = mimetypes.guess_type(filename)
+    return guessed_type.lower() if guessed_type else None
+
+
+def _validate_audio_upload(upload: Any) -> Response | None:
+    size = _get_upload_size_bytes(upload)
+    if size is None:
+        return Response({"detail": "No se pudo determinar el tamaño del audio"}, status=400)
+    if size > HANDOVER_MAX_AUDIO_BYTES:
+        return Response({"detail": "Payload Too Large"}, status=413)
+
+    content_type = _normalize_audio_content_type(upload)
+    if not content_type or content_type not in ALLOWED_AUDIO_MIME_TYPES:
+        return Response({"detail": "Audio inválido o formato no soportado"}, status=415)
+    return None
 
 
 class TranscribeView(AuthenticatedAPIView):
@@ -56,9 +116,9 @@ class TranscribeView(AuthenticatedAPIView):
         if not upload:
             return Response({"detail": "Missing audio file"}, status=400)
 
-        content_type = (getattr(upload, "content_type", "") or "").split(";")[0]
-        if content_type and content_type not in ALLOWED_AUDIO_MIME_TYPES:
-            return Response({"detail": "Audio inválido o formato no soportado"}, status=400)
+        validation_error = _validate_audio_upload(upload)
+        if validation_error:
+            return validation_error
 
         try:
             # Compatible con transcribe_audio(upload, language) y con transcribe_audio(file=..., language=...)
@@ -231,6 +291,14 @@ class AudioToFHIRView(AuthenticatedAPIView):
         if not upload or not patient_id:
             return Response({"detail": "patientId y file son obligatorios"}, status=400)
 
+        validation_error = _validate_audio_upload(upload)
+        if validation_error:
+            return validation_error
+
+        audio_content_type = _normalize_audio_content_type(upload)
+        if not audio_content_type:
+            return Response({"detail": "Audio inválido o formato no soportado"}, status=415)
+
         b64 = base64.b64encode(upload.read()).decode("utf-8")
         now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
         doc = {
@@ -240,7 +308,7 @@ class AudioToFHIRView(AuthenticatedAPIView):
             "subject": {"reference": f"Patient/{patient_id}"},
             "date": now,
             **({"context": {"encounter": [{"reference": encounter_ref}]}} if encounter_ref else {}),
-            "content": [{"attachment": {"contentType": upload.content_type or "audio/mpeg", "data": b64, "title": upload.name}}],
+            "content": [{"attachment": {"contentType": audio_content_type, "data": b64, "title": upload.name}}],
         }
 
         try:
