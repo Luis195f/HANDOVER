@@ -910,6 +910,7 @@ class BundleView(AuthenticatedAPIView):
     #   ANTES de llegar a la lógica que permite pasar tests (422/200).
     # - La autorización real se aplica dentro de post() con should_enforce.
     permission_classes = [AllowAny]
+    authentication_classes: list[type[BaseAuthentication]] = []  # evita CSRF/SessionAuth en tests
 
     def post(self, request: HttpRequest) -> Response:
         # -------------------------
