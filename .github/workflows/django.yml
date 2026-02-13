@@ -59,7 +59,7 @@ jobs:
 
       - name: Run coverage (produces coverage.xml)
         run: |
-          pytest tests --ds=backend.settings --cov=backend --cov=main \
+          pytest tests --ds=backend.settings --cov=backend \
             --cov-report=xml --cov-report=html --cov-report=term \
             --ignore=.venv --ignore=.venv-stt
           test -f coverage.xml

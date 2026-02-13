@@ -50,8 +50,9 @@ def _get_jwks() -> Dict[str, Any]:
         r = httpx.get(JWKS_URL, timeout=10)
         r.raise_for_status()
         data = r.json()
-    except Exception as exc:
-        raise AuthenticationFailed(f"Unable to fetch JWKS: {exc}")
+    except Exception:
+        # Mensaje neutro (evita filtrar detalles internos)
+        raise AuthenticationFailed("Unable to fetch JWKS")
 
     if not isinstance(data, dict) or "keys" not in data:
         raise AuthenticationFailed("Invalid JWKS payload")
@@ -75,7 +76,6 @@ def _b64url_to_int(val: str) -> int:
 
 
 def _jwk_to_public_key(jwk: Dict[str, Any]):
-    # Convierte JWK RSA a clave pública usable por python-jose
     from cryptography.hazmat.primitives.asymmetric import rsa
 
     if jwk.get("kty") != "RSA":
@@ -91,14 +91,12 @@ def _jwk_to_public_key(jwk: Dict[str, Any]):
 
 @dataclass
 class Auth0User:
-    """
-    Usuario mínimo para DRF, sin DB.
-    """
+    """Usuario mínimo para DRF, sin DB."""
     sub: str
     claims: Dict[str, Any]
 
     @property
-    def is_authenticated(self) -> bool:  # DRF/Django lo consultan
+    def is_authenticated(self) -> bool:
         return True
 
     @property
@@ -120,6 +118,7 @@ class Auth0JWTAuthentication(BaseAuthentication):
 
     def authenticate(self, request) -> Optional[Tuple[Auth0User, Any]]:
         # ✅ DEV: si Auth0 no está configurado, NO explotes; simplemente no autentiques.
+        # (El acceso lo controla DRF en settings/permissions)
         if not AUTH0_ISSUER_BASE_URL or not AUTH0_AUDIENCE:
             if settings.DEBUG:
                 return None
@@ -134,7 +133,6 @@ class Auth0JWTAuthentication(BaseAuthentication):
         except Exception:
             raise AuthenticationFailed("Missing dependency: python-jose")
 
-        # Header para kid
         try:
             unverified_header = jwt.get_unverified_header(token)
             kid = unverified_header.get("kid")
@@ -149,7 +147,6 @@ class Auth0JWTAuthentication(BaseAuthentication):
         jwk = _find_jwk_for_kid(jwks, kid)
         public_key = _jwk_to_public_key(jwk)
 
-        # Auth0 suele emitir iss con trailing slash
         expected_issuer = f"{AUTH0_ISSUER_BASE_URL}/"
 
         try:
@@ -165,8 +162,8 @@ class Auth0JWTAuthentication(BaseAuthentication):
                     "verify_signature": True,
                 },
             )
-        except Exception as exc:
-            raise AuthenticationFailed(f"Invalid token: {exc}")
+        except Exception:
+            raise AuthenticationFailed("Invalid token")
 
         sub = claims.get("sub")
         if not sub:
@@ -175,7 +172,7 @@ class Auth0JWTAuthentication(BaseAuthentication):
         user = Auth0User(sub=str(sub), claims=claims)
         request.auth_token = token
 
-        # ✅ IMPORTANTE: devolvemos claims como request.auth para que HasAnyScope funcione
+        # ✅ devolvemos claims como request.auth para scopes/roles
         return (user, claims)
 
 
@@ -187,3 +184,5 @@ def verify_jwt(token: str):
     if "verify_token" in globals():
         return verify_token(token)  # type: ignore[name-defined]
     raise NotImplementedError("verify_jwt is not wired to a real implementation")
+
+

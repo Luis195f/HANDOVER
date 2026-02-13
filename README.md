@@ -3,7 +3,7 @@
 ![CI](./ci-badge.svg)
 ![Coverage](./coverage-badge.svg)
 
-Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend Django opcional para pruebas locales y una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
+Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend único en Django/DRF para FHIR, IA clínica y auditoría, además de una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
 
 ## Identificación comercial y posicionamiento regulatorio
 
@@ -48,7 +48,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
     - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
     - `EXPO_PUBLIC_ALLOWED_UNITS` y `EXPO_PUBLIC_ALLOW_ALL_UNITS` filtran el acceso a unidades clínicas específicas.
     - `EXPO_PUBLIC_BYPASS_SCOPE` habilita cuentas de soporte que omiten filtros RBAC en situaciones operativas.
-    - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend FastAPI (`main.py`).
+    - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend Django/DRF.
       - `"off"` (por defecto): el backend reenviará los Bundles sin validarlos.
       - `"remote"`: se invocará `$validate` contra el servidor FHIR (`FHIR_BASE/Bundle/$validate`) antes de reenviar; si se detectan errores `error`/`fatal` se responderá `422` con detalles.
 2. Variables adicionales leídas desde Expo (`app.json > expo.extra`) o el entorno:
@@ -63,7 +63,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` habilita una validación remota rápida (`Bundle/$validate`) antes de encolar si hay conectividad. Si el servidor devuelve un `OperationOutcome` con severidad `error`/`fatal`, se muestra un alert con los detalles y no se encola el bundle; en modo offline sigue encolando para respetar offline-first. Recomendado en entornos de staging/producción para detectar problemas de estructura antes de ocupar la cola.
    - Voz + IA:
      - `EXPO_PUBLIC_STT_ENDPOINT`/`STT_ENDPOINT`: endpoint HTTPS para dictado (STT).
-     - `EXPO_PUBLIC_AI_BACKEND_BASE_URL`/`AI_BACKEND_BASE_URL`: backend IA (FastAPI) con `/ai/transcribe` y `/ai/summarize-sbar`.
+     - `EXPO_PUBLIC_AI_BACKEND_BASE_URL`/`AI_BACKEND_BASE_URL`: backend IA unificado (Django/DRF). Si no se define, la app usa `API_BASE_URL/api` por defecto.
      - `EXPO_PUBLIC_AI_SBAR_URL`/`AI_SBAR_URL` (expone `AI_SBAR_BASE_URL`): backend de refinado SBAR.
      - `EXPO_PUBLIC_AI_SBAR_API_KEY`/`AI_SBAR_API_KEY`: token opcional para el refinado.
      - `EXPO_PUBLIC_OPENAI_API_KEY`/`OPENAI_API_KEY`: credencial del proveedor de IA (configurada en el backend).
@@ -125,6 +125,27 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 - En producción configura `EXPO_PUBLIC_EIDAS_API_URL` y credenciales (`EXPO_PUBLIC_EIDAS_CLIENT_ID`, `EXPO_PUBLIC_EIDAS_CLIENT_SECRET`, `EXPO_PUBLIC_EIDAS_API_KEY`) mediante secretos o almacenamiento seguro; nunca hardcodear certificados o claves.
 - En desarrollo, si no hay proveedor configurado, se genera un mock local para no bloquear la UI. Antes de usar en un entorno real, valida el flujo con el proveedor eIDAS homologado y actualiza las políticas internas de trazabilidad (IEC 62304, MDR, eIDAS).
 
+
+## Arquitectura backend unificada (Django/DRF)
+
+Se retiró el backend FastAPI (`main.py`) para unificar reglas de validación FHIR, firma digital y auditoría en un único backend Django/DRF.
+
+### Endpoints principales
+
+| Método | Ruta | Descripción | Auth |
+|---|---|---|---|
+| POST | `/api/fhir/transaction` | Transacción Bundle FHIR con validación remota opcional, firma/verificación digital y creación de `AuditEvent`. | JWT + rol/scope clínico |
+| POST | `/api/ai/transcribe` | Transcripción de audio (STT) con `multipart/form-data`. | JWT + `handover:write` |
+| POST | `/api/ai/summarize-sbar` | Resume notas clínicas en formato SBAR. | JWT + `handover:write` |
+| POST | `/api/ai/suggest-interventions` | Genera sugerencias de intervenciones de enfermería. | JWT + `handover:write` |
+| POST | `/api/upload/audio-to-fhir` | Sube audio y crea un `DocumentReference` en servidor FHIR. | JWT + `handover:write` |
+
+### Variables de entorno backend
+
+- FHIR y validación: `FHIR_BASE`, `HANDOVER_FHIR_VALIDATION_MODE`, `HANDOVER_VALIDATE_STRICT`, `HANDOVER_REQUIRE_RBAC_ON_FHIR`.
+- Firma digital: `HANDOVER_PRIVATE_KEY_PATH`, `HANDOVER_PUBLIC_KEY_PATH`, `HANDOVER_SIGNATURE_DISABLED`.
+- IA: `OPENAI_API_KEY`, `OPENAI_MODEL_SBAR`, `OPENAI_MODEL_WHISPER`, `OPENAI_MODEL_SUGGESTIONS`, `AI_SUGGESTIONS_ENABLED`.
+
 ## Instalación y ejecución
 
 1. Instala dependencias JavaScript:
@@ -139,7 +160,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
    python manage.py migrate
    python manage.py runserver 0.0.0.0:8000
    ```
-   - Define `HANDOVER_ALLOWED_ORIGINS` (p. ej. `https://app.handover-pro.es,https://app.handover-pro.lat`) para restringir CORS/ALLOWED_HOSTS y mantener CSP/Referrer-Policy alineadas en Django/FastAPI.
+   - Define `HANDOVER_ALLOWED_ORIGINS` (p. ej. `https://app.handover-pro.es,https://app.handover-pro.lat`) para restringir CORS/ALLOWED_HOSTS en Django.
    - En producción mantén `ENABLE_SSL_REDIRECT=true` y despliega detrás de un proxy TLS 1.3 con HSTS (ya habilitado en `backend/settings.py`).
 
 ### Autenticación JWT (Auth0) en el backend Django

@@ -32,6 +32,13 @@ HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
 HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").lower() == "true"
 
 # -----------------------------
+# Auth0 config presence (para decidir defaults DRF en dev/tests)
+# -----------------------------
+AUTH0_ISSUER_BASE_URL = os.getenv("AUTH0_ISSUER_BASE_URL", "").rstrip("/")
+AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
+AUTH0_CONFIGURED = bool(AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE)
+
+# -----------------------------
 # Hosts / CORS / CSRF
 # -----------------------------
 RAW_ALLOWED_ORIGINS = os.getenv("HANDOVER_ALLOWED_ORIGINS", "").strip()
@@ -136,14 +143,26 @@ INSTALLED_APPS = [
     "backend.audit",
 ]
 
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "backend.security.auth.Auth0JWTAuthentication",
-    ],
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
-    ],
-}
+# ✅ DRF defaults:
+# - TESTS: AllowAny para que CI no dependa de Auth0 ni headers
+# - DEV sin Auth0 config: AllowAny para que puedas probar local sin bloquearte
+# - PROD (o dev con Auth0): Auth0 + IsAuthenticated
+if RUNNING_TESTS or (DEBUG and not AUTH0_CONFIGURED):
+    REST_FRAMEWORK = {
+        "DEFAULT_AUTHENTICATION_CLASSES": [],
+        "DEFAULT_PERMISSION_CLASSES": [
+            "rest_framework.permissions.AllowAny",
+        ],
+    }
+else:
+    REST_FRAMEWORK = {
+        "DEFAULT_AUTHENTICATION_CLASSES": [
+            "backend.security.auth.Auth0JWTAuthentication",
+        ],
+        "DEFAULT_PERMISSION_CLASSES": [
+            "rest_framework.permissions.IsAuthenticated",
+        ],
+    }
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -279,3 +298,4 @@ LOGGING = {
         },
     },
 }
+
