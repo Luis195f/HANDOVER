@@ -172,7 +172,7 @@ def _build_fhir_signature(user_id: Optional[str], signature_b64: str) -> Dict[st
         ],
         "when": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "who": {"identifier": {"value": user_id or "unknown"}},
-        "sigFormat": "application/pkcs7-signature",
+        "sigFormat": "ecdsa-p256-sha256",
         "data": signature_b64,
     }
 
@@ -192,12 +192,13 @@ def sign_bundle(bundle: Dict[str, Any], *, user_id: Optional[str], settings: Opt
         return None
 
     canonical_json, digest, digest_hex = canonical_bundle_payload(bundle)
+    canonical_payload = canonical_json.encode("utf-8")
     try:
         if CRYPTOGRAPHY_AVAILABLE:
             private_key = _load_private_key(settings.private_key_path)  # type: ignore[arg-type]
-            signature_bytes = private_key.sign(digest, ec.ECDSA(hashes.SHA256()))
+            signature_bytes = private_key.sign(canonical_payload, ec.ECDSA(hashes.SHA256()))
         else:
-            signature_bytes = _sign_with_openssl(canonical_json.encode("utf-8"), settings.private_key_path)  # type: ignore[arg-type]
+            signature_bytes = _sign_with_openssl(canonical_payload, settings.private_key_path)  # type: ignore[arg-type]
     except Exception as exc:
         logger.error("No se pudo firmar el bundle %s", digest_hex)
         raise SignatureOperationError("No se pudo firmar el bundle; valide configuración de claves y dependencias.") from exc
@@ -239,6 +240,7 @@ def verify_bundle_signature(bundle: Dict[str, Any], settings: Optional[Signature
         raise ValueError("El campo signature.data es obligatorio para verificar la firma.")
 
     canonical_json, digest, digest_hex = canonical_bundle_payload(bundle)
+    canonical_payload = canonical_json.encode("utf-8")
     try:
         signature_bytes = base64.b64decode(signature_b64)
     except (ValueError, TypeError) as exc:
@@ -246,9 +248,9 @@ def verify_bundle_signature(bundle: Dict[str, Any], settings: Optional[Signature
     try:
         if CRYPTOGRAPHY_AVAILABLE:
             public_key = _load_public_key(settings.public_key_path)  # type: ignore[arg-type]
-            public_key.verify(signature_bytes, digest, ec.ECDSA(hashes.SHA256()))
+            public_key.verify(signature_bytes, canonical_payload, ec.ECDSA(hashes.SHA256()))
         else:
-            _verify_with_openssl(canonical_json.encode("utf-8"), signature_bytes, settings.public_key_path)  # type: ignore[arg-type]
+            _verify_with_openssl(canonical_payload, signature_bytes, settings.public_key_path)  # type: ignore[arg-type]
     except CryptoInvalidSignature as exc:
         logger.error("La verificación de firma falló para bundle %s", digest_hex)
         raise SignatureVerificationError("La firma no coincide con el contenido canónico del bundle.") from exc
