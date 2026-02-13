@@ -72,8 +72,15 @@ function resolveAiBackendBaseUrl(): string | null {
     return assertSecureUrl(sanitizeBaseUrl(aiEnv.trim()), 'AI_BACKEND_BASE_URL');
   }
 
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    // noop
+  // Backend unificado: por defecto reutiliza API_BASE_URL (Django/DRF).
+  const apiFallback =
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE ??
+    process.env.API_BASE_URL ??
+    process.env.API_BASE ??
+    '';
+  if (typeof apiFallback === 'string' && apiFallback.trim()) {
+    return assertSecureUrl(`${sanitizeBaseUrl(apiFallback.trim())}/api`, 'AI_BACKEND_BASE_URL');
   }
 
   return null;

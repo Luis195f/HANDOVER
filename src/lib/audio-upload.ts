@@ -54,7 +54,7 @@ export async function uploadAudioToFhir(params: {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
-    const response = await fetch(`${API_BASE_URL}/upload/audio-to-fhir`, {
+    const response = await fetch(`${API_BASE_URL}/api/upload/audio-to-fhir`, {
       method: 'POST',
       body: formData,
       headers,

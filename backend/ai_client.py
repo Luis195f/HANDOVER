@@ -6,7 +6,6 @@ import os
 import asyncio
 from typing import Any, Dict, Optional
 
-from fastapi import UploadFile
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -68,10 +67,11 @@ async def _run_blocking(func: Any, /, *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
-async def transcribe_audio(file: UploadFile, language: Optional[str]) -> str:
+async def transcribe_audio(file: Any, language: Optional[str]) -> str:
     data: bytes | None = None
     try:
-        data = await file.read()
+        raw = file.read()
+        data = await raw if asyncio.iscoroutine(raw) else raw
         size_bytes = len(data or b"")
         if not data:
             raise ValueError("empty-audio")
