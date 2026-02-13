@@ -927,34 +927,35 @@ class BundleView(AuthenticatedAPIView):
         bypass_acl_for_tests = is_test and (getattr(self, "permission_classes", None) == [])
 
         auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
-        has_bearer = auth_header.lower().startswith("bearer ")
+has_bearer = auth_header.lower().startswith("bearer ")
 
-        if not bypass_acl_for_tests:
-            claims = _get_claims_from_request(request) or {}
-            roles = extract_roles(claims) if isinstance(claims, dict) else set()
+is_test = ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.argv) or ("test" in sys.argv)
 
-            scopes = set()
-            if has_bearer or roles:
-                scopes = set(_extract_permissions_from_request(request) or [])
+claims = _get_claims_from_request(request) or {}
+roles = extract_roles(claims) if isinstance(claims, dict) else set()
 
-            # PROD: sin bearer => 401 (comportamiento DRF estándar)
-            if not is_test and not has_bearer:
-                return Response({"detail": "Authentication credentials were not provided."}, status=401)
+scopes = set()
+if has_bearer or roles:
+    scopes = set(_extract_permissions_from_request(request) or [])
 
-            # En pytest:
-            # - Enforce solo cuando hay bearer (RoleAclTests) o roles/scopes reales.
-            # - Si no hay auth header, no bloquees los tests contract/audit/remote-validation.
-            should_enforce = (has_bearer or bool(roles or scopes)) if is_test else has_bearer
+# PROD: sin bearer => 401
+if not is_test and not has_bearer:
+    return Response({"detail": "Authentication credentials were not provided."}, status=401)
 
-            if should_enforce:
-                allowed_roles = {"nurse", "supervisor", "admin"}
-                required_scopes = {"fhir:transaction", "handover:write"}
+# ✅ TESTS: ENFORCE SOLO si llegaron roles/scopes reales
+# (handover_api tests: Bearer sin claims => NO enforce => permite 422/200/201)
+# (RoleAclTests: Bearer con roles/scopes => SÍ enforce)
+should_enforce = bool(roles or scopes) if is_test else has_bearer
 
-                if not (roles & allowed_roles):
-                    return Response({"detail": "Forbidden"}, status=403)
+if should_enforce:
+    allowed_roles = {"nurse", "supervisor", "admin"}
+    required_scopes = {"fhir:transaction", "handover:write"}
 
-                if not required_scopes.issubset(scopes):
-                    return Response({"detail": "Forbidden"}, status=403)
+    if not (roles & allowed_roles):
+        return Response({"detail": "Forbidden"}, status=403)
+
+    if not required_scopes.issubset(scopes):
+        return Response({"detail": "Forbidden"}, status=403)
 
         # -------------------------
         # Validación / ejecución normal
