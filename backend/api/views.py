@@ -58,11 +58,11 @@ class AuthenticatedAPIView(APIView):
 
     @staticmethod
     def _running_tests() -> bool:
-    return (
-        "PYTEST_CURRENT_TEST" in os.environ
-        or "pytest" in sys.argv
-        or "test" in sys.argv
-    )
+        return (
+            "PYTEST_CURRENT_TEST" in os.environ
+            or "pytest" in sys.argv
+            or "test" in sys.argv
+        )
 
     @staticmethod
     def _auth0_configured() -> bool:
@@ -425,7 +425,7 @@ def get_fhir_headers(request: HttpRequest) -> Dict[str, str]:
         return headers
 
     # ✅ TESTS: NO exigir token (respx mocks no mandan Authorization)
-    if _running_tests():
+    if AuthenticatedAPIView._running_tests():
         return headers
 
     # ✅ PROD/real: si se exige RBAC y no hay token -> 403
