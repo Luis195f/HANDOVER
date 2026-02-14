@@ -1,31 +1,44 @@
-# Pruebas y CI
+# Testing y CI (backend Django)
 
-## Comandos principales
-- Revisar tipos: `pnpm -w typecheck`
-- Linter: `pnpm -w lint`
-- Unit/integration: `pnpm -w vitest run --reporter=verbose`
-- Cobertura: `pnpm -w vitest run --reporter=verbose --coverage`
-- E2E (Playwright): `pnpm run test:e2e`
-- Validación de bundles FHIR: `pnpm validate:fhir`
+## Estrategia CI backend
+La ruta de control backend se centra en **pytest-only** sobre Django/DRF:
+- tests funcionales y de seguridad del backend,
+- sin dependencia de servicios externos,
+- con ejecución determinista en GitHub Actions.
 
-## Cobertura
-- Umbral mínimo esperado: ≥ 80 % definido en `vitest.config.ts`.
-- El reporte HTML se genera en `coverage/unit/index.html` y el `lcov.info` en `coverage/unit/lcov.info` para integraciones externas.
+## Comandos locales recomendados
+- Suite backend:
+  ```bash
+  pytest --ds=backend.settings
+  ```
+- Cobertura backend:
+  ```bash
+  pytest --cov=backend
+  ```
+- Reproducción cercana a CI (aislamiento de red):
+  ```bash
+  pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
+  ```
 
-## CI
-- Pipeline basado en Node 20 y pnpm 10.
-- Ejecuta typecheck, lint, tests unit/integration con cobertura, pruebas E2E y validación FHIR en cada push/PR a `main`.
-- El paso de instalación está marcado como no bloqueante (`continue-on-error: true`) para mitigar errores del registry npm; revisar los logs de `Install` si el workflow pasa con advertencias.
-- El reporte `coverage/unit/lcov.info` se sube como artefacto `coverage-unit` para integraciones externas.
+## Variables dummy usadas en GitHub Actions
+Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
+- `DJANGO_SETTINGS_MODULE=backend.settings`
+- `SECRET_KEY=ci-dummy-secret-key`
+- `OPENAI_API_KEY=dummy`
+- `OPENAI_BASE_URL=http://127.0.0.1:9/v1`
+- `HANDOVER_AI_ENABLED=0`
+- `HANDOVER_OPENAI_DISABLED=1`
+- `AUTH0_ISSUER_BASE_URL=https://example.invalid`
+- `AUTH0_AUDIENCE=handover-api`
+- `FHIR_BASE=http://127.0.0.1:9/fhir`
+- `HANDOVER_FHIR_VALIDATION_MODE=off`
+- `HANDOVER_REQUIRE_RBAC_ON_FHIR=true`
 
-## Pruebas E2E (Playwright)
-- Configuradas en `tests/e2e` con `playwright.config.ts` y ejecución vía `pnpm run test:e2e`.
-- El servidor web arranca con `EXPO_PUBLIC_E2E=true` para habilitar stubs de cámara/audio y atajos de firma.
-- Para crear nuevas pruebas:
-  1. Añade un spec en `tests/e2e/`.
-  2. Reutiliza `data-testid` en pantallas críticas (Login, QR, Audio, Firmas).
-  3. Mockea llamadas HTTP con `page.route()` cuando no haya backend disponible.
+## Garantía de no-calls externas en CI
+- Se bloquea red con `--disable-socket`.
+- El bloqueo de sockets está soportado por el plugin local de `conftest.py` (sin depender de `pytest-socket` externo).
+- Sólo se permiten hosts locales explícitos (`127.0.0.1`, `localhost`).
+- OpenAI/Auth/FHIR usan endpoints dummy para impedir tráfico real.
 
-## Validación FHIR en pipelines
-- Usa `pnpm validate:fhir` o el script `scripts/validate-fhir.ts` para validar bundles antes de publicarlos.
-- `HANDOVER_FHIR_VALIDATION_MODE` controla si el backend hace validación remota (`remote`) o la omite (`off`).
+## Resultado esperado
+- CI valida calidad backend (tests + cobertura) sin exponer PHI ni depender de infra de terceros.

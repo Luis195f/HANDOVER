@@ -1,41 +1,45 @@
-# Seguridad y autenticación
+# Seguridad, autenticación y PHI
 
-## Flujo OAuth2/OIDC
-- La app usa `expo-auth-session` para iniciar sesión contra el proveedor OIDC configurado.
-- Solicita el scope `offline_access` (u otro equivalente) para recibir `refresh_token`.
-- Variables clave en `.env` o `app.json` (`expo.extra`): `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE` (incluye `offline_access`), `OIDC_REDIRECT_SCHEME`.
-- Tras autenticarse, la app almacena `access_token` y `refresh_token` en `SecureStore` y renueva automáticamente cuando falten ~5 minutos para expirar.
-- El backend expone `/api/auth/refresh` para renovar tokens si se necesita centralizar el flujo (usa `OIDC_TOKEN_URL`).
+## Modelo de autenticación/autorización
+- Autenticación JWT OIDC mediante `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE`.
+- Todas las operaciones clínicas sensibles en DRF validan token Bearer.
+- El backend aplica:
+  - **RBAC** por rol (ej. `nurse`, `supervisor`, `admin`).
+  - **Scopes** por operación (ej. `handover:write`, `fhir:transaction`).
 
-## Almacenamiento de sesión
-- `src/security/auth.tsx` guarda tokens y metadatos en `SecureStore`, maneja renovación y limpia la sesión en logout.
-- Se expone el estado de autenticación para proteger rutas y reintentos de red.
+## Identidad clínica y anti-spoofing
+- La identidad de usuario usada para firma/auditoría se deriva del claim `sub` del JWT validado.
+- No se confía en cabeceras cliente para identidad de usuario final.
+- Política explícita: tratar `X-User-Id` (u otras cabeceras equivalentes) como no autoritativas para evitar spoofing.
 
-## Endurecimiento de red y cabeceras
-- Define `HANDOVER_ALLOWED_ORIGINS` con los orígenes HTTPS permitidos (separados por comas). Django/DRF usará esta lista para CORS y `ALLOWED_HOSTS`. En desarrollo se permiten hosts `localhost` via regex.
-- HSTS y redirección a HTTPS se activan con `SECURE_SSL_REDIRECT` (forzado en producción) y `SECURE_HSTS_SECONDS=31536000`. Consulta la guía oficial de Django para cabeceras seguras: https://docs.djangoproject.com/en/stable/topics/security/#ssl-https y valida los valores en `backend/settings.py`.
-- Django añade cabeceras seguras (`X-Content-Type-Options`, `X-Frame-Options=DENY`, `Referrer-Policy=strict-origin-when-cross-origin`) y CSP a través de `django-csp`. Ajusta `CONTENT_SECURITY_POLICY` en `backend/settings.py` si incorporas scripts o fuentes externas adicionales.
-- Para despliegue productivo se recomienda colocar el backend detrás de un reverse proxy (Nginx, Traefik, ALB) configurado con certificados de Let's Encrypt, TLS 1.3, HTTP/2 y suites modernas (p. ej. `TLS_AES_256_GCM_SHA384`). Revisa el ejemplo en `config/nginx/handover.conf` y ajusta el dominio y rutas de certificados. Si se usa `uvicorn` directo, define `ssl_certfile`, `ssl_keyfile` y `ssl_version=ssl.PROTOCOL_TLSv1_3`.
+## Validación FHIR y errores clínicos
+- `HANDOVER_FHIR_VALIDATION_MODE` define la estrategia (`off`, `remote`, `strict`).
+- Cuando procede, los errores de interoperabilidad se normalizan usando `OperationOutcome`.
+- `HANDOVER_REQUIRE_RBAC_ON_FHIR=true` obliga a reenviar solicitudes FHIR sólo con contexto de usuario autorizado.
 
-## Roles y RBAC
-- Roles básicos esperados: `nurse`, `admin`, `viewer` (claim `role` en el token).
-- `src/security/acl.ts` implementa guardias reutilizables:
-  - `ensureRole` valida que el usuario posea alguno de los roles requeridos.
-  - `ensureUnit` limita acceso a unidades clínicas específicas según `EXPO_PUBLIC_ALLOWED_UNITS`/`EXPO_PUBLIC_ALLOW_ALL_UNITS`.
-- Usa estas utilidades en nuevas pantallas para mantener reglas de acceso coherentes.
-- El backend valida roles + scopes antes de ejecutar la lógica de la vista y reenvía el `access_token` del usuario al servidor FHIR para aplicar RBAC de forma consistente.
-- Evita usar tokens estáticos (`FHIR_TOKEN`) para llamadas de usuario; el token del usuario se reenvía en `Authorization`.
+## Firma digital y trazabilidad
+- Firma digital de `Bundle` controlada por:
+  - `HANDOVER_SIGNATURE_DISABLED`
+  - `HANDOVER_PRIVATE_KEY_PATH`
+  - `HANDOVER_PUBLIC_KEY_PATH`
+- Se registra evidencia de firma para auditoría y trazabilidad clínica.
 
-## Variables de entorno adicionales (backend)
-- `OIDC_TOKEN_URL`: endpoint del proveedor OIDC para `refresh_token` (requerido por `/api/auth/refresh`).
-- `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`: credenciales para el flujo de refresh.
-- `OIDC_SCOPE`: scopes solicitados en el refresh (incluye `offline_access` si el proveedor lo exige).
-- `HANDOVER_REQUIRE_RBAC_ON_FHIR`: si es `true`, el backend requiere un token de usuario para reenviar peticiones a FHIR (evita usar tokens estáticos).
+## PHI y Seguridad (política formal)
+### Prohibiciones operativas
+- Prohibido loguear payload clínico completo.
+- Prohibido loguear tokens de acceso/refresh.
+- Prohibido loguear cabeceras `Authorization`.
 
-## Variables de entorno adicionales (frontend)
-- `EXPO_PUBLIC_OIDC_SCOPE`: incluye `offline_access` para recibir `refresh_token`.
+### Reglas de minimización y seudonimización
+- Usar hashing/HMAC para correlación técnica de eventos.
+- Limitar logs a metadatos mínimos (estado, tipo de evento, tamaño, hash, timestamp).
+- Mantener separación entre datos identificativos y telemetría operativa.
 
-## Captura clínica en el relevo
-- Las secciones de enfermería capturan nutrición (tipo de dieta, tolerancia, ingesta), eliminación (diuresis, patrón deposicional, sonda rectal), movilidad/piel (nivel de movilidad, plan de reposicionamiento, estado de piel y úlceras por presión) y balance hídrico (entradas, salidas, balance neto y notas).
-- Signos vitales incluyen valores numéricos, AVPU y timestamps opcionales de registro/emisión en formato ISO (útiles para el mapeo FHIR y auditoría clínica).
-- Exámenes y procedimientos permiten registrar descripción, estado y si se realizaron, para sincronizar con el backend y el bundle FHIR correspondiente.
+### Gestión de errores y respuesta segura
+- Preferir respuestas estándar y estructuradas (`OperationOutcome` en contexto FHIR).
+- Evitar filtrar detalles internos de infraestructura en mensajes al cliente.
+
+### Enfoque regulatorio (MDR/AEMPS-ready)
+- Aplicar defense-in-depth (authn + authz + validación + auditoría + firma).
+- Mantener trazabilidad de cambios, evidencia de test y registro auditable de eventos críticos.
+- Diseñar documentación y controles para facilitar expediente técnico y actividades de vigilancia post-mercado.
