@@ -147,6 +147,9 @@ class TranscribeView(AuthenticatedAPIView):
     def post(self, request: HttpRequest) -> Response:
         # DRF normalmente pone archivos en request.FILES, pero en tests puede venir en request.data
         upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "Missing audio file (expected multipart form-data with 'file')"}, status=400)
+
         language = (request.data.get("language") or "es").strip()
 
         if not upload:
