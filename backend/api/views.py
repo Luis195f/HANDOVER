@@ -36,7 +36,6 @@ from backend.security.scope_permissions import (
     HasAllScopes,
     HasAnyScope,
     _extract_permissions_from_request,
-    _get_claims_from_request,
 )
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
@@ -98,6 +97,62 @@ class AuthenticatedAPIView(APIView):
 AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
+
+
+def _get_claims_from_request(request: HttpRequest) -> dict | None:
+    """Extrae claims ya validados del request sin depender de helpers externos."""
+    auth_claims = getattr(request, "auth", None)
+    if isinstance(auth_claims, dict):
+        return auth_claims
+
+    user = getattr(request, "user", None)
+    user_claims = getattr(user, "claims", None)
+    if isinstance(user_claims, dict):
+        return user_claims
+
+    if hasattr(user, "claims") and isinstance(user.claims, dict):
+        return user.claims
+
+    return None
+
+
+def _allow_x_user_id_fallback_for_tests() -> bool:
+    return bool("PYTEST_CURRENT_TEST" in os.environ or getattr(settings, "ENV", "") == "test")
+
+
+def _get_authenticated_subject_from_context(request: HttpRequest) -> str | None:
+    user = getattr(request, "user", None)
+    user_sub = getattr(user, "sub", None)
+    if user_sub:
+        return str(user_sub)
+
+    claims = _get_claims_from_request(request) or {}
+    if isinstance(claims, dict):
+        claim_sub = claims.get("sub")
+        if claim_sub:
+            return str(claim_sub)
+
+    return None
+
+
+def _get_authenticated_user_sub(request: HttpRequest) -> str | None:
+    """
+    Obtiene el sujeto autenticado real (OIDC sub) desde user/claims ya validados.
+    Solo en tests reales permite fallback controlado a X-User-Id para compatibilidad.
+    """
+    subject = _get_authenticated_subject_from_context(request)
+    if subject:
+        return subject
+
+    if _allow_x_user_id_fallback_for_tests():
+        header_user = (request.headers.get("X-User-Id") or "").strip()
+        if header_user:
+            if not getattr(request, "_x_user_id_fallback_warned", False):
+                logger.warning("Using X-User-Id fallback in test mode only.")
+                setattr(request, "_x_user_id_fallback_warned", True)
+            return header_user
+
+    return None
 
 # =========================
 # FHIR resources imports (robustos)
@@ -369,6 +424,10 @@ def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Opt
             ),
         )
         return None
+
+    if not user_id:
+        logger.warning("Skipping bundle signing because authenticated actor is missing.")
+        return Response({"errors": ["Unknown authenticated actor for signature"]}, status=401)
 
     signature = sign_bundle(bundle, user_id=user_id, settings=SIGNATURE_SETTINGS)
     if signature:
@@ -976,8 +1035,11 @@ class BundleView(AuthenticatedAPIView):
                 status=500,
             )
 
-        user_id = request.headers.get("X-User-Id")
+        user_id = _get_authenticated_user_sub(request)
         unit_id = request.headers.get("X-Unit-Id")
+
+        if has_bearer and user_id is None:
+            return Response({"detail": "Invalid token: missing subject"}, status=401)
 
         payload_obj = request.data
         invalid_payload = _ensure_json_object(payload_obj)
