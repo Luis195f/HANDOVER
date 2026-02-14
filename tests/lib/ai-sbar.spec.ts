@@ -10,7 +10,6 @@ const envState = {
   AI_BACKEND_BASE_URL: 'https://ai.example',
   AI_SBAR_ENABLED: true,
   AI_BACKEND_ENABLED: true,
-  STT_ENDPOINT: 'https://stt.example',
   FHIR_BASE_URL: 'http://fhir.example',
   API_BASE: '',
   API_TOKEN: '',
@@ -31,9 +30,6 @@ vi.mock('@/src/config/env', () => ({
   },
   get AI_BACKEND_ENABLED() {
     return envState.AI_BACKEND_ENABLED;
-  },
-  get STT_ENDPOINT() {
-    return envState.STT_ENDPOINT;
   },
   get FHIR_BASE_URL() {
     return envState.FHIR_BASE_URL;

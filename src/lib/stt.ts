@@ -4,7 +4,7 @@ import { Audio } from 'expo-av';
 import type { PermissionResponse } from 'expo-modules-core';
 import * as FileSystem from 'expo-file-system';
 
-import { AI_BACKEND_BASE_URL, STT_ENDPOINT } from '@/src/config/env';
+import { AI_TRANSCRIBE_ENDPOINT, API_BASE_URL } from '@/src/config/env';
 
 export type SttStatus = 'idle' | 'listening' | 'processing' | 'error';
 
@@ -307,11 +307,7 @@ const AUDIO_MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 export function createSttService(): SttService {
-  const endpoint = STT_ENDPOINT?.trim();
-  if (endpoint && SUPPORTED_PLATFORMS.has(Platform.OS)) {
-    return new NativeSttService(endpoint);
-  }
-  if (AI_BACKEND_BASE_URL && BACKEND_FALLBACK_PLATFORMS.has(Platform.OS)) {
+  if (API_BASE_URL && BACKEND_FALLBACK_PLATFORMS.has(Platform.OS)) {
     return new BackendFallbackSttService();
   }
   return new UnsupportedSttService();
@@ -376,10 +372,6 @@ export async function transcribeAudioViaBackend(
   fileUri: string,
   options?: TranscriptionOptions,
 ): Promise<string> {
-  if (!AI_BACKEND_BASE_URL) {
-    throw new STTError('UNAVAILABLE', 'AI backend not configured');
-  }
-
   const name = fileUri.split('/').pop() ?? 'audio.m4a';
   const resolvedMime = normalizeAllowedMimeType(resolveMimeType(name));
   if (!ALLOWED_AUDIO_MIME_TYPES.has(resolvedMime)) {
@@ -412,7 +404,7 @@ export async function transcribeAudioViaBackend(
 
   try {
     const response = await Promise.race([
-      fetch(`${AI_BACKEND_BASE_URL}/ai/transcribe`, {
+      fetch(AI_TRANSCRIBE_ENDPOINT, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -424,6 +416,10 @@ export async function transcribeAudioViaBackend(
       const data = await parseJsonSafe(response);
       const status = response.status || (data as { status?: number } | undefined)?.status;
       const resolvedStatus = typeof status === 'number' ? status : response.status;
+      if (resolvedStatus === 401) throw new STTError('UNAVAILABLE', TRANSCRIPTION_ERROR_MESSAGE, resolvedStatus);
+      if (resolvedStatus === 413) throw new STTError('ENGINE', 'Payload Too Large', resolvedStatus);
+      if (resolvedStatus === 415) throw new STTError('ENGINE', 'Unsupported Media Type', resolvedStatus);
+      if (resolvedStatus >= 500) throw new STTError('UNAVAILABLE', TRANSCRIPTION_ERROR_MESSAGE, resolvedStatus);
       throw new STTError('ENGINE', TRANSCRIPTION_ERROR_MESSAGE, resolvedStatus);
     }
 
@@ -598,10 +594,6 @@ export async function transcribeAudio(
   fileUri: string,
   options?: TranscriptionOptions,
 ): Promise<string> {
-  if (!AI_BACKEND_BASE_URL) {
-    throw new STTError('UNAVAILABLE', 'AI backend not configured');
-  }
-
   try {
     return await transcribeAudioViaBackend(fileUri, options);
   } catch (error) {
