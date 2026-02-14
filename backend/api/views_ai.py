@@ -9,6 +9,7 @@ import httpx
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.http import HttpRequest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -73,7 +74,19 @@ def _get_upload_size_bytes(upload: Any) -> int | None:
         if isinstance(size, int) and size >= 0:
             return size
     return None
+    
 
+def _coerce_test_upload(upload: Any) -> Any:
+    """
+    En tests DRF puede llegar como tuple: (filename, bytes, content_type).
+    En runtime real viene como UploadedFile en request.FILES.
+    """
+    if isinstance(upload, (tuple, list)) and len(upload) == 3:
+        filename, content, content_type = upload
+        if isinstance(filename, str) and isinstance(content, (bytes, bytearray)) and isinstance(content_type, str):
+            return SimpleUploadedFile(filename, content, content_type=content_type)
+    return upload
+    
 
 def _normalize_audio_content_type(upload: Any) -> str | None:
     content_type = (getattr(upload, "content_type", "") or "").split(";")[0].strip().lower()
@@ -111,6 +124,8 @@ class TranscribeView(AuthenticatedAPIView):
     def post(self, request: HttpRequest) -> Response:
         # DRF normalmente pone archivos en request.FILES, pero en tests puede venir en request.data
         upload = request.FILES.get("file") or request.data.get("file")
+        upload = _coerce_test_upload(upload)
+
         language = (request.data.get("language") or "es").strip()
 
         if not upload:
