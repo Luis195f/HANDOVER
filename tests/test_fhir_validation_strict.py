@@ -1,5 +1,5 @@
 import pytest
-from fastapi import HTTPException
+from rest_framework.exceptions import APIException
 
 from backend.validation import validate_fhir_bundle
 
@@ -44,7 +44,7 @@ async def test_validate_fhir_bundle_404_permissive_by_default():
 async def test_validate_fhir_bundle_404_strict_raises_503():
     client = _Client(_Resp(405, "not supported"))
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(APIException) as exc:
         await validate_fhir_bundle(
             bundle=VALID_BUNDLE,
             client=client,

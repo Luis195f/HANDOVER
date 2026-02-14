@@ -4,13 +4,22 @@ import pathlib
 import sys
 
 import pytest
-from fastapi import UploadFile
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 from backend import ai_client
 
 pytestmark = pytest.mark.anyio("asyncio")
+
+
+class UploadFile:
+    def __init__(self, *, filename: str, file):
+        self.filename = filename
+        self.file = file
+
+    def read(self):
+        return self.file.read()
+
 
 
 @pytest.fixture

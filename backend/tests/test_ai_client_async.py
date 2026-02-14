@@ -5,7 +5,15 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from fastapi import UploadFile
+
+
+class UploadFile:
+    def __init__(self, *, filename: str, file):
+        self.filename = filename
+        self.file = file
+
+    def read(self):
+        return self.file.read()
 
 
 
