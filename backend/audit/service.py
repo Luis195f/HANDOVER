@@ -1,8 +1,5 @@
 import json
 import logging
-import os
-import sys
-
 from typing import Any, Dict, Optional
 
 from django.conf import settings
@@ -25,9 +22,6 @@ FHIR_ACTION_MAP = {
     "revoke": "U",
 }
 
-def _is_pytest() -> bool:
-    return ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.argv)
-    
 def _map_action_to_fhir(action: str) -> str:
     normalized = (action or "").strip().lower()
     return FHIR_ACTION_MAP.get(normalized, "E")
@@ -176,18 +170,15 @@ def emit_audit_event(
             event_data.pop("timestamp")
 
         event = None
-        store_to_db = not _is_pytest()
-
-        if store_to_db:
-            try:
-                event = AuditEvent.objects.create(**event_data)
-            except RuntimeError as e:
-                # pytest-django bloquea DB si el test no usa django_db/db fixture
-                if "Database access not allowed" not in str(e):
-                    raise
-                event = None
-            except Exception:
-                event = None
+        try:
+            event = AuditEvent.objects.create(**event_data)
+        except RuntimeError as e:
+            # pytest-django bloquea DB si el test no usa django_db/db fixture
+            if "Database access not allowed" not in str(e):
+                raise
+            event = None
+        except Exception:
+            event = None
 
         log_payload = {
             **({"id": event.id} if event is not None else {}),
