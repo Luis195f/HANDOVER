@@ -1,8 +1,10 @@
 # backend/api/tests/test_handover_api.py
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 from unittest.mock import Mock, patch
+import types
 
 
 class HandoverApiTests(TestCase):
@@ -20,11 +22,22 @@ class HandoverApiTests(TestCase):
         self.user = User.objects.create_user(username="testuser", password="testpass")
 
         if self.client:
-            # Autenticación de usuario Django (aunque luego bypass en view)
-            self.client.force_authenticate(user=self.user)
+            # Usuario autenticado con subject para tests base del endpoint
+            base_claims = {
+                "sub": "auth0|base-test-user",
+                "permissions": ["fhir:transaction", "handover:write"],
+                "scope": "fhir:transaction handover:write",
+                "roles": ["nurse"],
+            }
+            base_user = types.SimpleNamespace(
+                is_authenticated=True,
+                claims=base_claims,
+                sub="auth0|base-test-user",
+                username="auth0|base-test-user",
+            )
+            self.client.force_authenticate(user=base_user, token=base_claims)
 
-            # ✅ IMPORTANTE: el backend ahora exige token de usuario para reenviar a FHIR
-            # (aunque se bypassen authenticators/perms)
+            # ✅ IMPORTANTE: el backend exige token de usuario para reenviar a FHIR
             self.client.credentials(HTTP_AUTHORIZATION="Bearer test-access-token")
 
         # ✅ BYPASS auth/permissions SOLO para estos tests del endpoint fhir-transaction
@@ -116,3 +129,136 @@ class HandoverApiTests(TestCase):
             (200, 201),
             msg=f"Unexpected status: {resp.status_code}, body={getattr(resp,'data',resp.content)}",
         )
+
+    def _claims_user(self, sub: str = "auth0|real-sub", include_user_sub: bool = True):
+        claims = {
+            "sub": sub,
+            "permissions": ["fhir:transaction", "handover:write"],
+            "scope": "fhir:transaction handover:write",
+            "roles": ["nurse"],
+        }
+        user_kwargs = {
+            "is_authenticated": True,
+            "claims": claims,
+            "username": sub,
+        }
+        if include_user_sub:
+            user_kwargs["sub"] = sub
+        user = types.SimpleNamespace(**user_kwargs)
+        return user, claims
+
+    @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+    @patch("backend.api.views._ensure_bundle_signature", autospec=True)
+    @patch("backend.api.views.httpx.post", autospec=True)
+    def test_ignores_spoofed_x_user_id_header_uses_authenticated_sub(
+        self,
+        mock_httpx_post,
+        mock_ensure_signature,
+        mock_create_audit,
+    ):
+        user, claims = self._claims_user("auth0|real-user")
+        self.client.force_authenticate(user=user, token=claims)
+
+        mock_ensure_signature.return_value = None
+        mock_resp = Mock()
+        mock_resp.status_code = 201
+        mock_resp.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
+        mock_httpx_post.return_value = mock_resp
+
+        resp = self.client.post(
+            self.url,
+            data=self.valid_bundle,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer test-access-token",
+            HTTP_X_USER_ID="attacker|spoofed",
+        )
+
+        self.assertIn(resp.status_code, (200, 201))
+        self.assertEqual(mock_ensure_signature.call_args.args[1], "auth0|real-user")
+        self.assertEqual(mock_create_audit.call_args.kwargs["user_id"], "auth0|real-user")
+
+    @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+    @patch("backend.api.views._ensure_bundle_signature", autospec=True)
+    @patch("backend.api.views.httpx.post", autospec=True)
+    def test_without_x_user_id_header_uses_claim_sub_when_user_sub_missing(
+        self,
+        mock_httpx_post,
+        mock_ensure_signature,
+        mock_create_audit,
+    ):
+        user, claims = self._claims_user("auth0|claims-sub", include_user_sub=False)
+        self.client.force_authenticate(user=user, token=claims)
+
+        mock_ensure_signature.return_value = None
+        mock_resp = Mock()
+        mock_resp.status_code = 201
+        mock_resp.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
+        mock_httpx_post.return_value = mock_resp
+
+        resp = self.client.post(
+            self.url,
+            data=self.valid_bundle,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer test-access-token",
+        )
+
+        self.assertIn(resp.status_code, (200, 201))
+        self.assertEqual(mock_ensure_signature.call_args.args[1], "auth0|claims-sub")
+        self.assertEqual(mock_create_audit.call_args.kwargs["user_id"], "auth0|claims-sub")
+
+
+    @override_settings(DEBUG=False)
+    @patch("backend.api.views.httpx.post", autospec=True)
+    def test_bearer_without_authenticated_sub_returns_401(self, mock_httpx_post):
+        claims = {
+            "permissions": ["fhir:transaction", "handover:write"],
+            "scope": "fhir:transaction handover:write",
+            "roles": ["nurse"],
+        }
+        user = types.SimpleNamespace(
+            is_authenticated=True,
+            claims=claims,
+            username="no-sub-user",
+        )
+        self.client.force_authenticate(user=user, token=claims)
+
+        resp = self.client.post(
+            self.url,
+            data=self.valid_bundle,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer test-access-token",
+        )
+
+        self.assertEqual(resp.status_code, 401)
+        mock_httpx_post.assert_not_called()
+
+    @override_settings(DEBUG=False)
+    @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+    @patch("backend.api.views._ensure_bundle_signature", autospec=True)
+    @patch("backend.api.views.httpx.post", autospec=True)
+    def test_production_mode_does_not_accept_x_user_id_as_actor(
+        self,
+        mock_httpx_post,
+        mock_ensure_signature,
+        mock_create_audit,
+    ):
+        user, claims = self._claims_user("auth0|prod-real")
+        self.client.force_authenticate(user=user, token=claims)
+
+        mock_ensure_signature.return_value = None
+        mock_resp = Mock()
+        mock_resp.status_code = 201
+        mock_resp.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
+        mock_httpx_post.return_value = mock_resp
+
+        resp = self.client.post(
+            self.url,
+            data=self.valid_bundle,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer test-access-token",
+            HTTP_X_USER_ID="auth0|spoofed-prod",
+        )
+
+        self.assertIn(resp.status_code, (200, 201))
+        self.assertEqual(mock_ensure_signature.call_args.args[1], "auth0|prod-real")
+        self.assertEqual(mock_create_audit.call_args.kwargs["user_id"], "auth0|prod-real")
