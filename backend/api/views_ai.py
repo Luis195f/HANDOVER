@@ -61,18 +61,36 @@ HANDOVER_MAX_AUDIO_BYTES = _get_max_audio_bytes()
 
 
 def _get_upload_size_bytes(upload: Any) -> int | None:
+    # 1️⃣ Caso normal UploadedFile
     size = getattr(upload, "size", None)
     if isinstance(size, int) and size >= 0:
         return size
 
-    stream = getattr(upload, "file", upload)
-    if all(hasattr(stream, attr) for attr in ("tell", "seek")):
-        current_pos = stream.tell()
-        stream.seek(0, os.SEEK_END)
-        size = stream.tell()
-        stream.seek(current_pos)
-        if isinstance(size, int) and size >= 0:
-            return size
+    # 2️⃣ Intentar calcular desde file
+    stream = getattr(upload, "file", None)
+    if stream and all(hasattr(stream, attr) for attr in ("tell", "seek")):
+        try:
+            current_pos = stream.tell()
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(current_pos)
+            if isinstance(size, int) and size >= 0:
+                return size
+        except Exception:
+            pass
+
+    # 3️⃣ Fallback seguro para tests (InMemoryUploadedFile edge case)
+    if hasattr(upload, "read"):
+        try:
+            data = upload.read()
+            if isinstance(data, (bytes, bytearray)):
+                return len(data)
+        finally:
+            try:
+                upload.seek(0)
+            except Exception:
+                pass
+
     return None
     
 
