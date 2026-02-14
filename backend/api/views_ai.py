@@ -123,9 +123,7 @@ class TranscribeView(AuthenticatedAPIView):
 
     def post(self, request: HttpRequest) -> Response:
         # DRF normalmente pone archivos en request.FILES, pero en tests puede venir en request.data
-        upload = request.FILES.get("file") or request.data.get("file")
-        upload = _coerce_test_upload(upload)
-
+        upload = request.FILES.get("file")
         language = (request.data.get("language") or "es").strip()
 
         if not upload:
