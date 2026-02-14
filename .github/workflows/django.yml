@@ -6,14 +6,24 @@ on:
   pull_request:
 
 jobs:
-  test:
+  django-tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     env:
       DJANGO_SETTINGS_MODULE: backend.settings
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SECRET_KEY: ci-dummy-secret-key
+      OPENAI_API_KEY: dummy
+      OPENAI_BASE_URL: http://127.0.0.1:9/v1
+      HANDOVER_AI_ENABLED: "0"
+      HANDOVER_OPENAI_DISABLED: "1"
+      AUTH0_ISSUER_BASE_URL: https://example.invalid
+      AUTH0_AUDIENCE: handover-api
+      FHIR_BASE: http://127.0.0.1:9/fhir
+      HANDOVER_FHIR_VALIDATION_MODE: off
+      HANDOVER_REQUIRE_RBAC_ON_FHIR: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -21,101 +31,94 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            backend/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
 
-      - name: Migrate
+      - name: Run database migrations
         run: python manage.py migrate --noinput
 
-      - name: Run tests
-        run: python manage.py test -v 2
+      - name: Run Django backend test suite (pytest)
+        run: |
+          pytest \
+            --ds=backend.settings \
+            --maxfail=1 \
+            --disable-warnings \
+            --disable-socket \
+            --allow-hosts=127.0.0.1,localhost \
+            backend tests
 
   coverage:
-    needs: test
+    needs: django-tests
     runs-on: ubuntu-latest
     env:
       DJANGO_SETTINGS_MODULE: backend.settings
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SECRET_KEY: ci-dummy-secret-key
+      OPENAI_API_KEY: dummy
+      OPENAI_BASE_URL: http://127.0.0.1:9/v1
+      HANDOVER_AI_ENABLED: "0"
+      HANDOVER_OPENAI_DISABLED: "1"
+      AUTH0_ISSUER_BASE_URL: https://example.invalid
+      AUTH0_AUDIENCE: handover-api
+      FHIR_BASE: http://127.0.0.1:9/fhir
+      HANDOVER_FHIR_VALIDATION_MODE: off
+      HANDOVER_REQUIRE_RBAC_ON_FHIR: "true"
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            backend/requirements.txt
 
-      - name: Install dependencies (incl. coverage tools)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r backend/requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run coverage (produces coverage.xml)
+      - name: Run database migrations
+        run: python manage.py migrate --noinput
+
+      - name: Run pytest with coverage (backend only)
         run: |
-          pytest tests --ds=backend.settings --cov=backend \
-            --cov-report=xml --cov-report=html --cov-report=term \
-            --ignore=.venv --ignore=.venv-stt
+          pytest \
+            --ds=backend.settings \
+            --maxfail=1 \
+            --disable-warnings \
+            --disable-socket \
+            --allow-hosts=127.0.0.1,localhost \
+            --cov=backend \
+            --cov-branch \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            backend tests
           test -f coverage.xml
-
-      # Fix definitivo para Python 3.12 + pkg_resources + defusedxml
-      - name: Install genbadge (stable on Py3.12)
-        run: |
-          python -m pip uninstall -y setuptools || true
-          python -m pip install "setuptools<81" wheel
-          python -m pip install "genbadge[coverage]" defusedxml
-          python -c "import pkg_resources; import defusedxml; print('genbadge deps OK')"
-
-      - name: Generate badges
-        run: |
-          genbadge coverage -i coverage.xml -o coverage-badge.svg
-          curl -s "https://img.shields.io/badge/backend%20tests-passing-brightgreen" -o ci-badge.svg
-
-      - name: Extract coverage value
-        id: coverage_value
-        run: |
-          percent=$(python - <<'PY'
-          import xml.etree.ElementTree as ET
-          tree = ET.parse("coverage.xml")
-          rate = float(tree.getroot().get("line-rate", 0))
-          percent = round(rate * 100, 2)
-          print(percent)
-          PY
-          )
-          echo "percent=$percent" >> "$GITHUB_OUTPUT"
-          echo '{"schemaVersion":1,"label":"coverage","message":"'"${percent}%"'","color":"green"}' > .coverage-badge.json
-
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: |
-            coverage.xml
-            htmlcov
-            coverage-badge.svg
-            ci-badge.svg
-            .coverage-badge.json
-          retention-days: 7
 
       - name: Publish coverage summary
         run: |
           {
-            echo "## Backend coverage";
-            echo "";
-            echo "Percent: ${{ steps.coverage_value.outputs.percent }}%";
+            echo "## Backend coverage (pytest + coverage.py)"
+            echo
+            python -c 'import xml.etree.ElementTree as ET; rate=float(ET.parse("coverage.xml").getroot().get("line-rate", "0"))*100; print(f"- Line coverage: {rate:.2f}%")'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Persist badges on main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add coverage-badge.svg ci-badge.svg .coverage-badge.json
-          git commit -m "chore: update backend badges" || echo "No badge updates to commit"
-          git push
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-xml
+          path: coverage.xml
+          retention-days: 7

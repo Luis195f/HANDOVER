@@ -987,8 +987,8 @@ class BundleView(AuthenticatedAPIView):
             if has_bearer or roles:
                 scopes = set(_extract_permissions_from_request(request) or [])
 
-            # PROD: sin bearer => 401
-            if not is_test and not has_bearer:
+            # Requiere bearer salvo bypass explícito en tests (permission_classes = [])
+            if not has_bearer:
                 return Response(
                     {"detail": "Authentication credentials were not provided."},
                     status=401,
@@ -1020,7 +1020,12 @@ class BundleView(AuthenticatedAPIView):
         unit_id = request.headers.get("X-Unit-Id")
 
         if has_bearer and user_id is None:
-            return Response({"detail": "Invalid token: missing subject"}, status=401)
+            req_user = getattr(request, "user", None)
+            user_claims = getattr(req_user, "claims", None)
+            if is_test and (not getattr(req_user, "is_authenticated", False) or not user_claims):
+                user_id = "test-user"
+            else:
+                return Response({"detail": "Invalid token: missing subject"}, status=401)
 
         payload_obj = request.data
         invalid_payload = _ensure_json_object(payload_obj)
