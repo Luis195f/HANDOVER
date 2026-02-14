@@ -116,10 +116,6 @@ def _get_claims_from_request(request: HttpRequest) -> dict | None:
     return None
 
 
-def _allow_x_user_id_fallback_for_tests() -> bool:
-    return bool("PYTEST_CURRENT_TEST" in os.environ or getattr(settings, "ENV", "") == "test")
-
-
 def _get_authenticated_subject_from_context(request: HttpRequest) -> str | None:
     user = getattr(request, "user", None)
     user_sub = getattr(user, "sub", None)
@@ -136,23 +132,8 @@ def _get_authenticated_subject_from_context(request: HttpRequest) -> str | None:
 
 
 def _get_authenticated_user_sub(request: HttpRequest) -> str | None:
-    """
-    Obtiene el sujeto autenticado real (OIDC sub) desde user/claims ya validados.
-    Solo en tests reales permite fallback controlado a X-User-Id para compatibilidad.
-    """
-    subject = _get_authenticated_subject_from_context(request)
-    if subject:
-        return subject
-
-    if _allow_x_user_id_fallback_for_tests():
-        header_user = (request.headers.get("X-User-Id") or "").strip()
-        if header_user:
-            if not getattr(request, "_x_user_id_fallback_warned", False):
-                logger.warning("Using X-User-Id fallback in test mode only.")
-                setattr(request, "_x_user_id_fallback_warned", True)
-            return header_user
-
-    return None
+    """Obtiene el sujeto autenticado real (OIDC sub) desde user/claims ya validados."""
+    return _get_authenticated_subject_from_context(request)
 
 # =========================
 # FHIR resources imports (robustos)

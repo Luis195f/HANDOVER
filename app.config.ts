@@ -163,7 +163,6 @@ module.exports = ({ config }) => ({
     },
 
     FHIR_BASE_URL: process.env.EXPO_PUBLIC_FHIR_BASE_URL ?? 'https://fhir.example.com',
-    STT_ENDPOINT: process.env.EXPO_PUBLIC_STT_ENDPOINT ?? 'http://192.168.0.16:8091/stt',
     ENCRYPTION_NAMESPACE: process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover-pro',
     ALLOW_ALL_UNITS: process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS ?? '1',
 

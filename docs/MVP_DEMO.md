@@ -28,7 +28,7 @@ pnpm expo start
 ### Variables de entorno de ejemplo (sin secretos)
 
 ```bash
-# Backend (Django/FastAPI)
+# Backend (Django/DRF)
 export HANDOVER_ALLOWED_ORIGINS="http://localhost"
 export HANDOVER_FHIR_VALIDATION_MODE=off
 

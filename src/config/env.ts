@@ -51,16 +51,7 @@ function resolveBaseUrl(): string {
   return assertSecureUrl(sanitizeBaseUrl(raw), 'FHIR_BASE_URL');
 }
 
-function resolveSttEndpoint(): string | null {
-  const expoValue = Constants.expoConfig?.extra?.STT_ENDPOINT;
-  const envValue = process.env.EXPO_PUBLIC_STT_ENDPOINT ?? process.env.STT_ENDPOINT;
-  const rawSource = typeof expoValue === 'string' ? expoValue : envValue ?? '';
-  const raw = rawSource.trim();
-  return raw.length > 0 ? assertSecureUrl(raw, 'STT_ENDPOINT') : null;
-}
-
 export const FHIR_BASE_URL: string = resolveBaseUrl();
-export const STT_ENDPOINT: string | null = resolveSttEndpoint();
 
 function resolveAiBackendBaseUrl(): string | null {
   const aiEnv =
@@ -167,7 +158,6 @@ export const ENV = {
   FHIR_BASE_URL,
   API_BASE,
   API_TOKEN,
-  STT_ENDPOINT,
   AI_BACKEND_BASE_URL,
   AI_BACKEND_ENABLED,
   AI_SBAR_BASE_URL,
@@ -232,3 +222,4 @@ function resolveApiBaseUrl(): string {
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
+export const AI_TRANSCRIBE_ENDPOINT = `${API_BASE_URL}/api/ai/transcribe`;
