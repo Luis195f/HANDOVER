@@ -1,10 +1,26 @@
+"""Deprecated legacy validation helpers.
+
+This module is kept for backward compatibility in tests and old integrations.
+Runtime request validation lives in ``backend.api.views._validate_remotely``.
+"""
+
 from typing import Any, Dict, List
 import logging
 
 import httpx
-from fastapi import HTTPException
+from rest_framework.exceptions import APIException, ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+class RemoteValidationUnavailable(APIException):
+    status_code = 503
+    default_detail = {
+        "errors": [
+            "El servidor FHIR no soporta $validate y HANDOVER_VALIDATE_STRICT está habilitado."
+        ]
+    }
+    default_code = "service_unavailable"
 
 
 async def validate_fhir_bundle(
@@ -20,7 +36,7 @@ async def validate_fhir_bundle(
     - Si validation_mode == "off", no hace nada.
     - Si validation_mode == "remote", llama a POST {base_url}/Bundle/$validate.
     - Si el servidor devuelve OperationOutcome con `issue.severity` error/fatal,
-      lanza HTTPException(422) con detalles resumidos.
+      lanza ValidationError(422) con detalles resumidos.
     - Si el servidor no soporta $validate (404/405), registra warning y considera
       la validación como pasada, salvo strict_validate=True (falla cerrado).
     """
@@ -28,17 +44,13 @@ async def validate_fhir_bundle(
         return
 
     if not isinstance(bundle, dict) or bundle.get("resourceType") != "Bundle":
-        raise HTTPException(
-            status_code=422,
-            detail={"errors": ["Payload no es un Bundle FHIR válido (resourceType != 'Bundle')."]},
+        raise ValidationError(
+            {"errors": ["Payload no es un Bundle FHIR válido (resourceType != 'Bundle')."]}
         )
 
     entries = bundle.get("entry")
     if entries is None or not isinstance(entries, list):
-        raise HTTPException(
-            status_code=422,
-            detail={"errors": ["El Bundle FHIR debe incluir 'entry' como lista."]},
-        )
+        raise ValidationError({"errors": ["El Bundle FHIR debe incluir 'entry' como lista."]})
 
     validate_url = base_url.rstrip("/") + "/Bundle/$validate"
 
@@ -55,14 +67,7 @@ async def validate_fhir_bundle(
             response.text,
         )
         if strict_validate:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "errors": [
-                        "El servidor FHIR no soporta $validate y HANDOVER_VALIDATE_STRICT está habilitado."
-                    ]
-                },
-            )
+            raise RemoteValidationUnavailable()
         return
 
     if not (200 <= response.status_code < 300):
@@ -98,7 +103,4 @@ async def validate_fhir_bundle(
         error_messages.append(msg)
 
     if error_messages:
-        raise HTTPException(
-            status_code=422,
-            detail={"errors": error_messages, "operationOutcome": data},
-        )
+        raise ValidationError({"errors": error_messages, "operationOutcome": data})
