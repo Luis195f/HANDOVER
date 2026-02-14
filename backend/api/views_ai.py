@@ -195,62 +195,62 @@ class SummarizeSbarView(AuthenticatedAPIView):
             logger.exception("No se pudo registrar auditoría de IA")
 
     def post(self, request: HttpRequest) -> Response:
-    req = request.data if isinstance(request.data, dict) else {}
-    free_text = req.get("free_text") or ""
-    language = req.get("language") or "es"
-    context = req.get("context") if isinstance(req.get("context"), dict) else {}
+        req = request.data if isinstance(request.data, dict) else {}
+        free_text = req.get("free_text") or ""
+        language = req.get("language") or "es"
+        context = req.get("context") if isinstance(req.get("context"), dict) else {}
 
-    # 🔐 USAR SUJETO AUTENTICADO REAL
-    user_sub = getattr(request.user, "sub", None) or getattr(request.user, "id", None)
+        # Sujeto autenticado real (evita suplantación por header)
+        user_sub = getattr(request.user, "sub", None) or getattr(request.user, "id", None)
 
-    if len(free_text) > MAX_FREE_TEXT_LENGTH:
+        if len(free_text) > MAX_FREE_TEXT_LENGTH:
+            self._audit_ai_summary(
+                status="fail",
+                http_status=400,
+                user_sub=user_sub,
+                notes=self._truncate_audit_notes(free_text.strip()),
+                context=context,
+                language=language,
+            )
+            return Response({"detail": "Texto demasiado largo para resumir"}, status=400)
+
+        combined_text, ctx = self._build_sbar_input(free_text, context)
+        notes = self._truncate_audit_notes(free_text.strip())
+
+        try:
+            payload = async_to_sync(generate_sbar)(combined_text, language=language)
+        except Exception:
+            self._audit_ai_summary(
+                status="fail",
+                http_status=502,
+                user_sub=user_sub,
+                notes=notes,
+                context=ctx,
+                language=language,
+            )
+            return Response({"detail": "Error al generar SBAR con el servicio de IA"}, status=502)
+
+        required_keys = ["situation", "background", "assessment", "recommendation", "full_text"]
+        if not all(isinstance(payload.get(key), str) for key in required_keys):
+            self._audit_ai_summary(
+                status="fail",
+                http_status=502,
+                user_sub=user_sub,
+                notes=notes,
+                context=ctx,
+                language=language,
+            )
+            return Response({"detail": "Formato de respuesta de IA inesperado"}, status=502)
+
         self._audit_ai_summary(
-            status="fail",
-            http_status=400,
-            user_sub=user_sub,
-            notes=self._truncate_audit_notes(free_text.strip()),
-            context=context,
-            language=language,
-        )
-        return Response({"detail": "Texto demasiado largo para resumir"}, status=400)
-
-    combined_text, ctx = self._build_sbar_input(free_text, context)
-    notes = self._truncate_audit_notes(free_text.strip())
-
-    try:
-        payload = async_to_sync(generate_sbar)(combined_text, language=language)
-    except Exception:
-        self._audit_ai_summary(
-            status="fail",
-            http_status=502,
+            status="success",
+            http_status=200,
             user_sub=user_sub,
             notes=notes,
             context=ctx,
             language=language,
         )
-        return Response({"detail": "Error al generar SBAR con el servicio de IA"}, status=502)
-
-    required_keys = ["situation", "background", "assessment", "recommendation", "full_text"]
-    if not all(isinstance(payload.get(key), str) for key in required_keys):
-        self._audit_ai_summary(
-            status="fail",
-            http_status=502,
-            user_sub=user_sub,
-            notes=notes,
-            context=ctx,
-            language=language,
-        )
-        return Response({"detail": "Formato de respuesta de IA inesperado"}, status=502)
-
-    self._audit_ai_summary(
-        status="success",
-        http_status=200,
-        user_sub=user_sub,
-        notes=notes,
-        context=ctx,
-        language=language,
-    )
-    return Response(payload, status=200)
+        return Response(payload, status=200)
 
 
 class SuggestInterventionsView(AuthenticatedAPIView):
