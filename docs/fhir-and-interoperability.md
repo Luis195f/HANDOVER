@@ -12,8 +12,10 @@
   - `"remote"`: se invoca `$validate` en el servidor FHIR y se bloquea la entrega ante errores `error`/`fatal`.
 
 ## Configuración de voz e IA clínica
-- `STT_ENDPOINT`: endpoint HTTPS que recibe audio base64 para dictado (mobile). Se usa por `createSttService`.
-- `AI_BACKEND_BASE_URL`: base URL del backend IA (FastAPI) que expone `/ai/transcribe` y `/ai/summarize-sbar`.
+- `EXPO_PUBLIC_API_BASE_URL`/`API_BASE_URL`: base URL única del backend Django/DRF.
+- STT usa el endpoint único `POST /api/ai/transcribe` (multipart con `file` y opcional `language`).
+- Migración de configuración STT: usa `API_BASE_URL` y construye `${API_BASE_URL}/api/ai/transcribe`.
+- SBAR IA usa `AI_BACKEND_BASE_URL` (por defecto `${API_BASE_URL}/api`) en `/ai/summarize-sbar`.
 - `AI_SBAR_BASE_URL` (configurado vía `AI_SBAR_URL` o `EXPO_PUBLIC_AI_SBAR_URL`): backend especializado en refinado SBAR (`/api/sbar/refine`).
 - `AI_SBAR_API_KEY`: token opcional para autenticar las llamadas al refinado SBAR.
 - `OPENAI_API_KEY`: clave del proveedor de IA (se configura en el backend para Whisper/SBAR).
@@ -24,7 +26,7 @@
 
 Para obtener estas credenciales:
 - Solicita al equipo de infraestructura los endpoints y claves del entorno clínico (staging/producción).
-- En desarrollo, puedes usar servicios locales o un túnel HTTPS (por ejemplo, `ngrok`) para exponer el backend FastAPI.
+- En desarrollo, puedes usar servicios locales o un túnel HTTPS (por ejemplo, `ngrok`) para exponer el backend Django/DRF.
 
 ## Validación y envío offline de bundles
 - `HANDOVER_FHIR_VALIDATION_MODE` admite `off`, `local` y `remote` para controlar la validación previa al envío.
@@ -58,3 +60,13 @@ Para obtener estas credenciales:
 ## Bundles y idempotencia
 - Los bundles generados incluyen UUID y se pueden reenviar sin duplicar gracias a las cabeceras configuradas en el cliente y al soporte de la cola offline.
 - Para depurar esquemas FHIR se puede usar `scripts/validate-fhir.ts` y el comando `pnpm validate:fhir`.
+
+
+## Ejemplo STT (endpoint único DRF)
+
+```bash
+curl -X POST "$API_BASE_URL/api/ai/transcribe" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -F "file=@./demo-audio.m4a;type=audio/m4a" \
+  -F "language=es"
+```

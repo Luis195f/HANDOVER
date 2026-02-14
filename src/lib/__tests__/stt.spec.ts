@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 vi.mock('@/src/config/env', () => ({
-  AI_BACKEND_BASE_URL: 'https://example.com',
-  STT_ENDPOINT: null,
+  API_BASE_URL: 'https://example.com',
+  AI_TRANSCRIBE_ENDPOINT: 'https://example.com/api/ai/transcribe',
 }));
 
 vi.mock('expo-file-system', () => ({
