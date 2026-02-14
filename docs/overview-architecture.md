@@ -1,21 +1,40 @@
-# Arquitectura general
+# Arquitectura general (Django-only)
 
-La aplicación móvil usa React Native (Expo) y TypeScript con una capa de formularios que valida datos con Zod antes de mapearlos a recursos FHIR. El flujo típico es UI → validaciones (`zod`) → mapeo a `Bundle` FHIR → envío mediante el cliente FHIR → backend/HCE opcional cuando se necesita integración adicional.
+HANDOVER mantiene una arquitectura **Django-only** en backend: no existe dependencia operativa de FastAPI para la API clínica principal.
 
-## Componentes principales
-- **Pantallas (`src/screens/`)**: formularios y vistas como `HandoverForm.tsx`, `SyncCenter.tsx` y `LoginMock.tsx` para flujos de clínica, sincronización y pruebas.
-- **Librerías (`src/lib/`)**: 
-  - `net.ts` aplica `safeFetch` con timeouts, backoff y cabeceras de idempotencia.
-  - `fhir-client.ts` centraliza llamadas FHIR, manejo de `OperationOutcome` y compatibilidad con reenvíos.
-  - `queue.ts` y `sync.ts` gestionan la cola offline, almacenando bundles en SQLite y reintentando cuando hay conectividad.
-  - `fhir-map.ts` transforma los datos del formulario en `Bundle` y recursos (`Observation`, `Composition`, `MedicationStatement`, entre otros).
-- **Seguridad (`src/security/`)**: `auth.ts` implementa el flujo OAuth/OIDC y almacenamiento seguro, mientras que `acl.ts` provee guardias (`ensureRole`, `ensureUnit`) para proteger pantallas según rol y unidad.
-- **Validación (`src/validation/schemas.ts`)**: define los esquemas Zod para validar datos del formulario antes de generar recursos interoperables.
-- **Scripts y backend opcional**:
-  - `scripts/validate-fhir.ts` permite validar bundles en CI o de forma local.
-  - El backend Django en `backend/` expone una API REST opcional y puede reenviar bundles al servidor FHIR.
+## Resumen técnico
+- **Frontend**: React Native + Expo (TypeScript).
+- **Backend**: Django + Django REST Framework (DRF) como única capa API.
+- **Interoperabilidad**: FHIR R4 mediante transacciones `Bundle` y recursos clínicos.
+- **Seguridad**: autenticación JWT OIDC (Auth0), RBAC por rol, scopes por operación, firma digital opcional y auditoría.
 
-## Configuración y entornos
-- Variables de entorno en `.env` gobiernan OIDC, FHIR y parámetros de red; Expo las expone también desde `app.json` en `expo.extra` para el cliente móvil.
-- `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` indican el endpoint FHIR; otras variables de `EXPO_PUBLIC_*` afinan la cola offline, almacenamiento y autenticación.
-- El backend opcional puede ejecutarse localmente para pruebas; la app se comunica con él mediante `EXPO_PUBLIC_API_BASE_URL`.
+## Backend clínico (100% Django + DRF)
+- `BundleView` en `/api/fhir/transaction` recibe `Bundle` tipo transacción y reenvía al servidor FHIR.
+- Endpoints complementarios incluyen paciente, medicación, capacidades y refresh de sesión.
+- Endpoints AI disponibles en DRF:
+  - `POST /api/ai/transcribe`
+  - `POST /api/ai/summarize-sbar`
+  - `POST /api/ai/suggest-interventions` (si está habilitado)
+
+## Flujo de transacción FHIR (BundleView)
+1. Verifica autenticación (Bearer) y controles de acceso (rol + scopes).
+2. Resuelve `sub` autenticado desde claims/JWT como identidad canónica.
+3. Valida estructura mínima del `Bundle`; modo de validación ampliado según `HANDOVER_FHIR_VALIDATION_MODE`.
+4. Firma digitalmente (si no está deshabilitado) y registra evidencia de firma/auditoría.
+5. Reenvía al FHIR server y normaliza respuestas de error (`OperationOutcome`) para cliente/observabilidad.
+
+## Controles de seguridad aplicados
+- **Validación FHIR**:
+  - `off`: validación mínima de seguridad/estructura.
+  - `remote`: validación remota `$validate` en servidor FHIR.
+  - `strict`: validación de esquema más estricta.
+- **Firma digital**:
+  - Usa claves configuradas por entorno para firmar bundles.
+  - Permite modo deshabilitado en desarrollo con flag explícito.
+- **Auditoría**:
+  - Eventos clínicos y AI con hash de payload y metadatos operativos.
+- **RBAC + scopes**:
+  - Acceso condicionado por rol clínico y permisos finos (`handover:write`, `fhir:transaction`, etc.).
+- **Protección anti-spoofing de identidad**:
+  - El backend usa el `sub` autenticado del token como fuente de verdad.
+  - Cabeceras cliente como `X-User-Id` no son autoridad para identidad clínica.
