@@ -8,6 +8,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 from rest_framework.test import APIClient
 from backend.api import views_ai
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 
 def _client(monkeypatch):
@@ -22,10 +23,21 @@ def test_ai_transcribe_success(monkeypatch):
     client = _client(monkeypatch)
 
     async def fake_transcribe(*_args, **_kwargs):
-        return 'texto IA'
+        return "texto IA"
 
-    monkeypatch.setattr(views_ai, 'transcribe_audio', fake_transcribe)
-    response = client.post('/api/ai/transcribe', data={'language': 'es', 'file': ('note.m4a', b'123', 'audio/m4a')}, format='multipart')
+    monkeypatch.setattr(views_ai, "transcribe_audio", fake_transcribe)
+
+    upload = SimpleUploadedFile(
+        "note.m4a",
+        b"123",
+        content_type="audio/m4a",
+    )
+
+    response = client.post(
+        "/api/ai/transcribe",
+        data={"language": "es", "file": upload},
+        format="multipart",
+    )
     assert response.status_code == 200
 
 
