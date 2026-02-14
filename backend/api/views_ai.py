@@ -23,7 +23,7 @@ from backend.ai_client import (
 )
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
-from .views import AuthenticatedAPIView, FHIR_BASE, get_fhir_headers
+from .views import AuthenticatedAPIView, FHIR_BASE, get_fhir_headers, _get_authenticated_user_sub
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.scope_permissions import HasAnyScope
 
@@ -96,13 +96,36 @@ def _get_upload_size_bytes(upload: Any) -> int | None:
 
 def _coerce_test_upload(upload: Any) -> Any:
     """
-    En tests DRF puede llegar como tuple: (filename, bytes, content_type).
+    En tests DRF puede llegar como tuple/list: (filename, content[, content_type]).
     En runtime real viene como UploadedFile en request.FILES.
     """
-    if isinstance(upload, (tuple, list)) and len(upload) == 3:
-        filename, content, content_type = upload
-        if isinstance(filename, str) and isinstance(content, (bytes, bytearray)) and isinstance(content_type, str):
-            return SimpleUploadedFile(filename, content, content_type=content_type)
+    if upload is None:
+        return None
+
+    if hasattr(upload, "read") and hasattr(upload, "name"):
+        return upload
+
+    if isinstance(upload, (tuple, list)) and 2 <= len(upload) <= 3:
+        filename = upload[0]
+        content = upload[1]
+        content_type = upload[2] if len(upload) == 3 else "application/octet-stream"
+
+        if not isinstance(filename, str):
+            return upload
+
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        elif isinstance(content, bytearray):
+            content = bytes(content)
+
+        if not isinstance(content, bytes):
+            return upload
+
+        if not isinstance(content_type, str) or not content_type.strip():
+            content_type = "application/octet-stream"
+
+        return SimpleUploadedFile(filename, content, content_type=content_type)
+
     return upload
     
 
@@ -146,14 +169,12 @@ class TranscribeView(AuthenticatedAPIView):
 
     def post(self, request: HttpRequest) -> Response:
         # DRF normalmente pone archivos en request.FILES, pero en tests puede venir en request.data
-        upload = request.FILES.get("file")
+        upload = request.FILES.get("file") or request.data.get("file")
+        upload = _coerce_test_upload(upload)
         if not upload:
             return Response({"detail": "Missing audio file (expected multipart form-data with 'file')"}, status=400)
 
         language = (request.data.get("language") or "es").strip()
-
-        if not upload:
-            return Response({"detail": "Missing audio file"}, status=400)
 
         validation_error = _validate_audio_upload(upload)
         if validation_error:
@@ -240,7 +261,7 @@ class SummarizeSbarView(AuthenticatedAPIView):
         context = req.get("context") if isinstance(req.get("context"), dict) else {}
 
         # Sujeto autenticado real (evita suplantación por header)
-        user_sub = getattr(request.user, "sub", None) or getattr(request.user, "id", None)
+        user_sub = _get_authenticated_user_sub(request)
 
         if len(free_text) > MAX_FREE_TEXT_LENGTH:
             self._audit_ai_summary(
