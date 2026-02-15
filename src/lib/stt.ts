@@ -5,6 +5,7 @@ import type { PermissionResponse } from 'expo-modules-core';
 import * as FileSystem from 'expo-file-system';
 
 import { AI_TRANSCRIBE_ENDPOINT, API_BASE_URL } from '@/src/config/env';
+import { ensureFreshAccessToken } from '@/src/security/auth';
 
 export type SttStatus = 'idle' | 'listening' | 'processing' | 'error';
 
@@ -372,6 +373,12 @@ export async function transcribeAudioViaBackend(
   fileUri: string,
   options?: TranscriptionOptions,
 ): Promise<string> {
+  const token = await ensureFreshAccessToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
   const name = fileUri.split('/').pop() ?? 'audio.m4a';
   const resolvedMime = normalizeAllowedMimeType(resolveMimeType(name));
   if (!ALLOWED_AUDIO_MIME_TYPES.has(resolvedMime)) {
@@ -406,6 +413,7 @@ export async function transcribeAudioViaBackend(
     const response = await Promise.race([
       fetch(AI_TRANSCRIBE_ENDPOINT, {
         method: 'POST',
+        headers,
         body: formData,
         signal: controller.signal,
       }),

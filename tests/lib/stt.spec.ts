@@ -29,6 +29,10 @@ vi.mock('@/src/config/env', () => ({
 
 const getInfoAsync = vi.fn();
 
+
+vi.mock('@/src/security/auth', () => ({
+  ensureFreshAccessToken: vi.fn(async () => 'tok_test_123'),
+}));
 vi.mock('expo-file-system', () => ({
   getInfoAsync,
   readAsStringAsync: vi.fn(async () => 'base64-audio'),
@@ -118,6 +122,7 @@ describe('transcribeAudioWithResult', () => {
     const { transcribeAudioWithResult } = await import('@/src/lib/stt');
 
     const promise = transcribeAudioWithResult('file://nota.m4a', { timeoutMs: 1000 });
+    await Promise.resolve();
     vi.runAllTimers();
     const result = await promise;
     vi.useRealTimers();
