@@ -1,7 +1,7 @@
 // BEGIN HANDOVER_AUTH
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { Buffer } from 'buffer';
 import { t } from '@/src/i18n';
@@ -828,26 +828,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     registerTokenSupplier(async () => ensureFreshToken("fhir"));
   }, [session?.accessToken, session?.refreshToken, session?.expiresAt, session?.mode]);
 
+  const previousUserIdRef = useRef<string | null>(null);
+
   // 3) Capabilities
   useEffect(() => {
     let alive = true;
 
-    if (!session) {
-      setCapabilitiesState(null);
-      void clearCapabilitiesCache();
-      return () => {
-        alive = false;
-      };
-    }
-
-    if (session?.mode === "demo") {
-      setCapabilitiesState(getDemoCapabilities(session.userId));
-      return () => {
-        alive = false;
-      };
-    }
-
     (async () => {
+      const currentUserId = session?.userId ?? null;
+      const previousUserId = previousUserIdRef.current;
+      const userChanged = previousUserId !== null && previousUserId !== currentUserId;
+
+      if (!session) {
+        setCapabilitiesState(null);
+        await clearCapabilitiesCache();
+        previousUserIdRef.current = null;
+        return;
+      }
+
+      if (userChanged) {
+        await clearCapabilitiesCache();
+      }
+
+      previousUserIdRef.current = currentUserId;
+
+      if (session.mode === "demo") {
+        setCapabilitiesState(getDemoCapabilities(session.userId));
+        return;
+      }
+
       const caps = await fetchCapabilities();
       if (alive) setCapabilitiesState(caps);
     })();
