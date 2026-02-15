@@ -68,3 +68,36 @@ class NurseOrAdminPermission(RequireRolesPermission):
 
 class ClinicianAuditPermission(RequireRolesPermission):
     allowed_roles = ("nurse", "supervisor", "admin")
+
+
+class IsAdminOrSupervisor(BasePermission):
+    """Permite acceso únicamente a usuarios admin o supervisor."""
+
+    message = "Solo administradores o supervisores pueden acceder a este recurso."
+
+    def has_permission(self, request, view) -> bool:
+        user = getattr(request, "user", None)
+        user_role = getattr(user, "role", None)
+
+        if isinstance(user_role, str):
+            normalized_role = user_role.strip().lower()
+            if normalized_role in {"admin", "supervisor"}:
+                return True
+
+        auth_claims = getattr(request, "auth", None)
+        user_claims = getattr(user, "claims", None)
+
+        claims: dict | None = None
+        if isinstance(auth_claims, dict):
+            claims = auth_claims
+        elif isinstance(user_claims, dict):
+            claims = user_claims
+
+        if not claims:
+            return False
+
+        user_roles = _extract_roles(claims)
+        if not user_roles:
+            return False
+
+        return bool(user_roles & {"admin", "supervisor"})

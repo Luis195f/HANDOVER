@@ -9,13 +9,19 @@ interface UseAdminDashboardData {
   reload: () => void;
 }
 
-export function useAdminDashboardData(): UseAdminDashboardData {
+export function useAdminDashboardData(enabled = true): UseAdminDashboardData {
   const [data, setData] = useState<AdminDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<Error | null>(null);
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      setData(null);
+      setError(null);
+      return;
+    }
     let cancelled = false;
 
     async function load() {
@@ -42,7 +48,7 @@ export function useAdminDashboardData(): UseAdminDashboardData {
     return () => {
       cancelled = true;
     };
-  }, [nonce]);
+  }, [enabled, nonce]);
 
   const reload = () => setNonce((n) => n + 1);
 

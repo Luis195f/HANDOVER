@@ -13,7 +13,7 @@ vi.mock('@/src/security/auth', () => ({
 }));
 
 vi.mock('@/src/hooks/useAdminDashboardData', () => ({
-  useAdminDashboardData: () => mockUseAdminDashboardData(),
+  useAdminDashboardData: (enabled?: boolean) => mockUseAdminDashboardData(enabled),
 }));
 
 describe('AdminDashboardScreen', () => {
@@ -79,6 +79,30 @@ describe('AdminDashboardScreen', () => {
 
     const { getByText } = render(<AdminDashboardScreen />);
 
+    expect(mockUseAdminDashboardData).toHaveBeenCalledWith(false);
     expect(getByText(/Acceso restringido/)).toBeTruthy();
+  });
+
+  it('permite acceso a supervisor', () => {
+    mockUseAuth.mockReturnValue({
+      session: {
+        userId: 'supervisor-1',
+        roles: ['supervisor'],
+        units: [],
+        accessToken: 'token',
+      },
+      loading: false,
+    });
+    mockUseAdminDashboardData.mockReturnValue({
+      data: { units: [], staff: [], alerts: [] },
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    });
+
+    const { getByText } = render(<AdminDashboardScreen />);
+
+    expect(mockUseAdminDashboardData).toHaveBeenCalledWith(true);
+    expect(getByText('Dashboard administrativo')).toBeTruthy();
   });
 });

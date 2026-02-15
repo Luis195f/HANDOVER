@@ -163,3 +163,43 @@ class RoleAclTests(TestCase):
         perms = data.get("permissions", {})
         self.assertIs(perms.get("canSignHandover"), False)
         self.assertIs(perms.get("canViewAudit"), False)
+
+    def test_dashboard_supervisor_allowed(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|sup-2",
+                "roles": ["supervisor"],
+                "permissions": ["handover:write"],
+            }
+        )
+        url = reverse("dashboard")
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json().get("ok"))
+
+    def test_dashboard_nurse_forbidden(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-3",
+                "roles": ["nurse"],
+                "permissions": ["handover:write"],
+            }
+        )
+        url = reverse("dashboard")
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_dashboard_role_none_forbidden(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|unknown-1",
+                "role": None,
+                "permissions": ["handover:write"],
+            }
+        )
+        url = reverse("dashboard")
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 403)
