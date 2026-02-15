@@ -5,6 +5,10 @@ vi.mock('@/src/config/env', () => ({
   AI_TRANSCRIBE_ENDPOINT: 'https://example.com/api/ai/transcribe',
 }));
 
+
+vi.mock('@/src/security/auth', () => ({
+  ensureFreshAccessToken: vi.fn(async () => 'tok_test_123'),
+}));
 vi.mock('expo-file-system', () => ({
   getInfoAsync: vi.fn(async () => ({ exists: true })),
   deleteAsync: vi.fn(async () => undefined),

@@ -52,6 +52,13 @@ const fileSystemMocks = vi.hoisted(() => ({
 
 vi.mock('expo-file-system', () => fileSystemMocks);
 
+
+const authMocks = vi.hoisted(() => ({
+  ensureFreshAccessToken: vi.fn(async () => 'tok_test_123'),
+}));
+
+vi.mock('@/src/security/auth', () => authMocks);
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace NodeJS {
@@ -72,6 +79,7 @@ beforeEach(() => {
   fileSystemMocks.readAsStringAsync.mockClear();
   fileSystemMocks.deleteAsync.mockClear();
   fileSystemMocks.getInfoAsync.mockClear();
+  authMocks.ensureFreshAccessToken.mockClear();
   mockFetch.mockClear();
   (globalThis as any).fetch = mockFetch;
   Platform.OS = 'ios' as typeof Platform.OS;
@@ -149,6 +157,18 @@ describe('transcribeAudioViaBackend', () => {
     expect(mockFetch).toHaveBeenCalledWith('https://api.test/api/ai/transcribe', expect.anything());
     expect(result).toBe('voz transcrita');
   });
+
+  it('incluye Authorization cuando existe token', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ text: 'voz transcrita' }) });
+
+    await transcribeAudioViaBackend('file:///note.m4a', { language: 'es' });
+
+    expect(authMocks.ensureFreshAccessToken).toHaveBeenCalledTimes(1);
+    const [, init] = mockFetch.mock.calls[0];
+    const headers = init?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer tok_test_123');
+  });
+
 
   it('lanza un error cuando la API devuelve estado de error', async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
