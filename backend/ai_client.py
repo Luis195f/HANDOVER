@@ -77,7 +77,7 @@ async def transcribe_audio(file: Any, language: Optional[str]) -> str:
             raise ValueError("empty-audio")
 
         audio_buffer = io.BytesIO(data)
-        audio_buffer.name = file.filename or "audio.m4a"
+        audio_buffer.name = (getattr(file, "name", None) or "audio.m4a")
 
         logger.info("[ai] transcribe start size_bytes=%s", size_bytes)
         client = get_client()

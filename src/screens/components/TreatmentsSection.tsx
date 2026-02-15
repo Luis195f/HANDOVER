@@ -8,7 +8,7 @@ import {
   type Control,
   type FieldErrors,
 } from 'react-hook-form';
-import { v4 as uuid } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 
 import type { TreatmentItem } from '@/src/types/handover';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
@@ -103,7 +103,7 @@ export function TreatmentsSection({ control, name = 'treatments' }: Props) {
   const openEditor = (index: number) => setEditing({ index });
   const handleAdd = () => {
     const nextIndex = fields.length;
-    append({ id: uuid(), type: 'other', description: '', done: false });
+    append({ id: uuidv4(), type: 'other', description: '', done: false });
     setEditing({ index: nextIndex, isNew: true });
   };
 
