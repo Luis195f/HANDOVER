@@ -35,6 +35,8 @@ describe('ACL helpers', () => {
 
 describe('ACL env flags and edge cases', () => {
   beforeEach(() => {
+    delete process.env.BYPASS_SCOPE;
+    delete process.env.ALLOW_ALL_UNITS;
     delete process.env.EXPO_PUBLIC_BYPASS_SCOPE;
     delete process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS;
     delete process.env.EXPO_PUBLIC_ALLOWED_UNITS;
@@ -47,19 +49,25 @@ describe('ACL env flags and edge cases', () => {
   });
 
   it('returns NO_SESSION when bypass flag is set but session is missing', () => {
-    process.env.EXPO_PUBLIC_BYPASS_SCOPE = 'true';
+    process.env.BYPASS_SCOPE = 'true';
     expect(hasRole(null, 'nurse')).toBe(false);
     expect(() => ensureRole(null, 'nurse')).toThrowError('NO_SESSION');
   });
 
   it('bypasses unit and role checks when bypass flag is enabled with session', () => {
-    process.env.EXPO_PUBLIC_BYPASS_SCOPE = 'true';
+    process.env.BYPASS_SCOPE = 'true';
     expect(() => ensureRole(baseSession, 'admin')).not.toThrow();
     expect(() => ensureUnitAccess(baseSession, 'any-unit')).not.toThrow();
   });
 
+
+  it('ignores public bypass env to avoid exposing bypass in client bundle', () => {
+    process.env.EXPO_PUBLIC_BYPASS_SCOPE = 'true';
+    expect(() => ensureRole(baseSession, 'admin')).toThrowError('FORBIDDEN_ROLE');
+  });
+
   it('allows all units when allow-all flag is set', () => {
-    process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = 'true';
+    process.env.ALLOW_ALL_UNITS = 'true';
     expect(() => ensureUnitAccess({ ...baseSession, roles: ['nurse'] }, 'new-unit')).not.toThrow();
   });
 
