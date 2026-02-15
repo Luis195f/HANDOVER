@@ -20,7 +20,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Controller, FormProvider, useWatch, type Path } from 'react-hook-form';
 import type { FieldErrors } from 'react-hook-form';
 import * as Speech from 'expo-speech';
-import { Audio } from 'expo-av';
+import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -1177,9 +1177,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     setDictatedPartial('');
     setSttError(null);
     try {
-      const permission = await Audio.getPermissionsAsync();
+      const permission = await getRecordingPermissionsAsync();
       if (!permission.granted) {
-        const res = await Audio.requestPermissionsAsync();
+        const res = await requestRecordingPermissionsAsync();
         if (!res.granted) {
           setSttError('PERMISSION_DENIED');
           setActiveDictationField(null);
