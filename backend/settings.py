@@ -67,8 +67,20 @@ DEFAULT_DEV_ORIGINS = (
 if not RAW_ALLOWED_ORIGINS and DEBUG:
     RAW_ALLOWED_ORIGINS = DEFAULT_DEV_ORIGINS
 
+def _parse_origins(raw_origins: str) -> list[str]:
+    parsed: list[str] = []
+    for origin in (item.strip() for item in raw_origins.split(",") if item.strip()):
+        p = urlparse(origin)
+        if p.scheme not in {"http", "https"} or not p.hostname:
+            raise RuntimeError(
+                "HANDOVER_ALLOWED_ORIGINS only accepts absolute http(s) origins. "
+                f"Invalid value: {origin!r}"
+            )
+        parsed.append(f"{p.scheme}://{p.netloc}")
+    return parsed
+
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [o.strip() for o in RAW_ALLOWED_ORIGINS.split(",") if o.strip()]
+CORS_ALLOWED_ORIGINS = _parse_origins(RAW_ALLOWED_ORIGINS)
 
 # Regex útil para dev (localhost + LAN)
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -88,7 +100,10 @@ for origin in CORS_ALLOWED_ORIGINS:
     except Exception:
         pass
 
-ALLOWED_HOSTS = sorted(set(hosts_from_origins + ["localhost", "127.0.0.1"]))
+ALLOWED_HOSTS = sorted(set(hosts_from_origins))
+
+if DEBUG or RUNNING_TESTS:
+    ALLOWED_HOSTS = sorted(set(ALLOWED_HOSTS + ["localhost", "127.0.0.1"]))
 
 # Django test client usa "testserver"
 if RUNNING_TESTS and "testserver" not in ALLOWED_HOSTS:
@@ -99,14 +114,23 @@ LOCAL_IP = environ.get("LOCAL_IP")
 # CSRF_TRUSTED_ORIGINS requiere esquema (http/https)
 CSRF_TRUSTED_ORIGINS = [
     *CORS_ALLOWED_ORIGINS,
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
 ] + ([f"http://{LOCAL_IP}:8000"] if LOCAL_IP else [])
+
+if DEBUG or RUNNING_TESTS:
+    CSRF_TRUSTED_ORIGINS += [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
 
 # En producción, evita arrancar sin orígenes (te protege de CORS/CSRF mal configurado)
 if not DEBUG and not RUNNING_TESTS and not CORS_ALLOWED_ORIGINS:
     raise RuntimeError(
         "HANDOVER_ALLOWED_ORIGINS is required in production (set allowed https origins)."
+    )
+
+if not DEBUG and not RUNNING_TESTS and not ALLOWED_HOSTS:
+    raise RuntimeError(
+        "ALLOWED_HOSTS resolved empty in production. Set HANDOVER_ALLOWED_ORIGINS with public client domains."
     )
 
 # ✅ Dev: permite llamadas por LAN (web/móvil) usando LOCAL_IP
@@ -311,4 +335,3 @@ LOGGING = {
         },
     },
 }
-
