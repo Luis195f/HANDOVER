@@ -1,7 +1,15 @@
 // Fase 3 – Bloque A (STT) implementado: servicio de transcripción de voz con adaptador y fallback.
 import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
-import type { PermissionResponse } from 'expo-modules-core';
+import {
+  AudioModule,
+  RecordingPresets,
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  type AudioRecorder,
+  type PermissionResponse,
+  type RecordingOptions,
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
 
 import { AI_TRANSCRIBE_ENDPOINT, API_BASE_URL } from '@/src/config/env';
@@ -67,11 +75,23 @@ type TranscriptionPayload = {
 const SUPPORTED_PLATFORMS = new Set(['ios', 'android']);
 const BACKEND_FALLBACK_PLATFORMS = new Set(['ios', 'android']);
 
+const STT_RECORDING_OPTIONS =
+  RecordingPresets.HIGH_QUALITY ??
+  RecordingPresets.LOW_QUALITY ??
+  Object.values(RecordingPresets)[0] ??
+  null;
+
+if (!STT_RECORDING_OPTIONS) {
+  throw new Error('Expo Audio recording presets unavailable');
+}
+
+const STT_PRESET = STT_RECORDING_OPTIONS as RecordingOptions;
+
 class NativeSttService implements SttService {
   private status: SttStatus = 'idle';
   private lastError: SttErrorCode | null = null;
   private readonly listeners = new Set<Listener>();
-  private recording: Audio.Recording | null = null;
+  private recording: AudioRecorder | null = null;
   private recordingUri: string | null = null;
   private readonly endpoint: string;
   private activeLocale: SttConfig['locale'] = 'es-ES';
@@ -111,8 +131,8 @@ class NativeSttService implements SttService {
     this.clearAutoStopTimer();
 
     try {
-      await this.recording.stopAndUnloadAsync();
-      this.recordingUri = this.recording.getURI();
+      await this.recording.stop();
+      this.recordingUri = this.recording.uri ?? null;
     } catch (error) {
       this.setErrorState('ENGINE');
       throw error instanceof Error ? error : new Error('Failed to stop recording');
@@ -141,7 +161,7 @@ class NativeSttService implements SttService {
     this.clearAutoStopTimer();
     if (this.recording) {
       try {
-        await this.recording.stopAndUnloadAsync();
+        await this.recording.stop();
       } catch {
       }
       this.recording = null;
@@ -166,20 +186,19 @@ class NativeSttService implements SttService {
   }
 
   private async ensurePermission(): Promise<boolean> {
-    const current: PermissionResponse | undefined =
-      typeof Audio.getPermissionsAsync === 'function' ? await Audio.getPermissionsAsync() : undefined;
+    const current: PermissionResponse | null = await getRecordingPermissionsAsync();
     if (current?.granted) {
       return true;
     }
-    const response = await Audio.requestPermissionsAsync();
+    const response = await requestRecordingPermissionsAsync();
     return response.granted;
   }
 
   private async prepareRecorder(): Promise<void> {
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-    const recorder = new Audio.Recording();
-    await recorder.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-    await recorder.startAsync();
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    const recorder = new AudioModule.AudioRecorder(STT_PRESET);
+    await recorder.prepareToRecordAsync(STT_PRESET);
+    recorder.record();
     this.recording = recorder;
     this.recordingUri = null;
   }
@@ -448,7 +467,7 @@ class BackendFallbackSttService implements SttService {
   private status: SttStatus = 'idle';
   private lastError: SttErrorCode | null = null;
   private readonly listeners = new Set<Listener>();
-  private recording: Audio.Recording | null = null;
+  private recording: AudioRecorder | null = null;
   private recordingUri: string | null = null;
   private activeLocale: SttConfig['locale'] = 'es-ES';
   private autoStopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -483,8 +502,8 @@ class BackendFallbackSttService implements SttService {
     this.clearAutoStopTimer();
 
     try {
-      await this.recording.stopAndUnloadAsync();
-      this.recordingUri = this.recording.getURI();
+      await this.recording.stop();
+      this.recordingUri = this.recording.uri ?? null;
     } catch (error) {
       this.setErrorState('ENGINE');
       throw error instanceof Error ? error : new Error('Failed to stop recording');
@@ -516,7 +535,7 @@ class BackendFallbackSttService implements SttService {
     this.clearAutoStopTimer();
     if (this.recording) {
       try {
-        await this.recording.stopAndUnloadAsync();
+        await this.recording.stop();
       } catch {
       }
       this.recording = null;
@@ -541,20 +560,19 @@ class BackendFallbackSttService implements SttService {
   }
 
   private async ensurePermission(): Promise<boolean> {
-    const current: PermissionResponse | undefined =
-      typeof Audio.getPermissionsAsync === 'function' ? await Audio.getPermissionsAsync() : undefined;
+    const current: PermissionResponse | null = await getRecordingPermissionsAsync();
     if (current?.granted) {
       return true;
     }
-    const response = await Audio.requestPermissionsAsync();
+    const response = await requestRecordingPermissionsAsync();
     return response.granted;
   }
 
   private async prepareRecorder(): Promise<void> {
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-    const recorder = new Audio.Recording();
-    await recorder.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-    await recorder.startAsync();
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    const recorder = new AudioModule.AudioRecorder(STT_PRESET);
+    await recorder.prepareToRecordAsync(STT_PRESET);
+    recorder.record();
     this.recording = recorder;
     this.recordingUri = null;
   }
