@@ -67,7 +67,9 @@
     "react-native-worklets": "0.5.1",
     "uuid": "^13.0.0",
     "victory-native": "^36.8.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "expo-random": "~14.0.1",
+    "react-native-get-random-values": "~1.11.0"
   },
   "devDependencies": {
     "@expo/cli": "^54.0.13",

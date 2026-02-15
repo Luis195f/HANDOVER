@@ -8,7 +8,7 @@ import {
   type Control,
   type FieldErrors,
 } from 'react-hook-form';
-import { v4 as uuid } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 
 import { MEDICATIONS_QUICKPICK_ICU } from '@/src/lib/codes';
 import type { MedicationItem } from '@/src/types/handover';
@@ -146,7 +146,7 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   const handleAdd = () => {
     const nextIndex = fields.length;
     append({
-      id: uuid(),
+      id: uuidv4(),
       name: '',
       dose: '',
       route: undefined,
