@@ -8,6 +8,7 @@ import { useNetInfo } from "@/src/lib/netinfo";
 import { hasNetwork } from "@/src/lib/fast-validate";
 import { useThemeTokens } from "@/src/theme";
 import { t } from "@/src/i18n";
+import { isDemoAccessEnabled } from "@/src/security/demo-access";
 
 type LoginFormValues = {
   username: string;
@@ -86,6 +87,8 @@ export default function LoginScreen() {
       setDemoSubmitting(false);
     }
   }, [loginDemo]);
+
+  const isDemoEnabled = isDemoAccessEnabled();
 
   const styles = useMemo(
     () =>
@@ -224,20 +227,24 @@ export default function LoginScreen() {
 
       {!isOnline ? <Text allowFontScaling style={styles.offlineText}>{t("login.offlineIndicator")}</Text> : null}
 
-      <Pressable
-        onPress={handleDemo}
-        style={[styles.button, styles.secondaryButton, isBusy ? { opacity: 0.6 } : null]}
-        accessibilityRole="button"
-        accessibilityLabel={t("login.demoAccessibility")}
-        accessibilityHint={t("login.demoHint")}
-        testID="login-demo"
-        disabled={isBusy}
-      >
-        {demoSubmitting ? <ActivityIndicator color={colors.text} /> : null}
-        <Text allowFontScaling style={[styles.buttonText, styles.secondaryText]}>{t("login.demoButton")}</Text>
-      </Pressable>
+      {isDemoEnabled ? (
+        <>
+          <Pressable
+            onPress={handleDemo}
+            style={[styles.button, styles.secondaryButton, isBusy ? { opacity: 0.6 } : null]}
+            accessibilityRole="button"
+            accessibilityLabel={t("login.demoAccessibility")}
+            accessibilityHint={t("login.demoHint")}
+            testID="login-demo"
+            disabled={isBusy}
+          >
+            {demoSubmitting ? <ActivityIndicator color={colors.text} /> : null}
+            <Text allowFontScaling style={[styles.buttonText, styles.secondaryText]}>{t("login.demoButton")}</Text>
+          </Pressable>
 
-      <Text allowFontScaling style={styles.helper}>{t("login.demoHelper")}</Text>
+          <Text allowFontScaling style={styles.helper}>{t("login.demoHelper")}</Text>
+        </>
+      ) : null}
     </View>
   );
 }

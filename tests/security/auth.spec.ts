@@ -79,3 +79,28 @@ describe("auth session", () => {
     expect(afterLogout).toBeNull();
   });
 });
+
+
+describe('demo login hardening', () => {
+  it('blocks loginDemo in production when demo flag is absent', async () => {
+    const originalDev = (globalThis as any).__DEV__;
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalDemoFlag = process.env.EXPO_PUBLIC_ENABLE_DEMO;
+    const originalApiBaseUrl = process.env.API_BASE_URL;
+
+    (globalThis as any).__DEV__ = false;
+    process.env.NODE_ENV = 'production';
+    process.env.API_BASE_URL = 'http://localhost:3000';
+    delete process.env.EXPO_PUBLIC_ENABLE_DEMO;
+
+    vi.resetModules();
+    const { loginDemo } = await import('@/src/security/auth');
+
+    await expect(loginDemo()).rejects.toThrowError('DEMO_DISABLED');
+
+    (globalThis as any).__DEV__ = originalDev;
+    process.env.NODE_ENV = originalNodeEnv;
+    process.env.EXPO_PUBLIC_ENABLE_DEMO = originalDemoFlag;
+    process.env.API_BASE_URL = originalApiBaseUrl;
+  });
+});
