@@ -103,6 +103,21 @@ describe('capabilities cache TTL', () => {
     expect(stored.cachedAt).toBe(Date.now());
   });
 
+
+  it('invalida cache cuando /api/me/capabilities responde 403', async () => {
+    storage.set(
+      CAPABILITIES_KEY,
+      JSON.stringify({ capabilities: baseCapabilities, cachedAt: Date.now() - 10 * 60 * 1000 }),
+    );
+    apiGet.mockRejectedValue(new Error('403 Forbidden'));
+
+    const result = await fetchCapabilities();
+
+    expect(apiGet).toHaveBeenCalledWith('/api/me/capabilities');
+    expect(secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
+    expect(result).toBeNull();
+  });
+
   it('invalidación borra cache y fuerza fetch remoto', async () => {
     storage.set(
       CAPABILITIES_KEY,

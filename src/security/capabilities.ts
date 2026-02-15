@@ -159,7 +159,19 @@ export async function fetchCapabilities(
         // ✅ devuelve el fresh inmediatamente (evita null)
         return fresh;
       }
-    } catch {
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      const message = (error as { message?: string }).message ?? '';
+      const isAuthError =
+        status === 401 ||
+        status === 403 ||
+        /^401\b/.test(message) ||
+        /^403\b/.test(message);
+
+      if (isAuthError) {
+        await invalidateCapabilitiesCache();
+      }
+
       // keep cached capabilities if network fails
     } finally {
       inflight = null;
