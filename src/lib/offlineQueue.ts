@@ -1,4 +1,11 @@
-import * as SecureStore from 'expo-secure-store';
+import {
+  clearOfflineQueue,
+  deleteOfflineQueueItem,
+  enqueueOfflineQueueItem,
+  getOfflineQueue,
+  type QueuedBundle,
+  updateOfflineQueueItem,
+} from './queue';
 import { SENSITIVE_FIELDS, type SensitiveFieldPath } from '../security/sensitiveFields';
 import type { ValidationResult } from './fhir-validation';
 
@@ -19,11 +26,6 @@ export interface OfflineQueueItem {
   hash?: string;
   sensitiveFields?: SensitiveFieldPath[];
   validationErrors?: ValidationErrorDetail[];
-  /**
-   * Clave opcional de idempotencia/deduplicación.
-   * Si dos items tienen el mismo `type` y `dedupKey`, se considera
-   * que representan la misma operación lógica.
-   */
   dedupKey?: string;
   /** @deprecated usa `attempts` en su lugar */
   tries?: number;
@@ -42,34 +44,22 @@ export interface EnqueuePayload {
 
 export type SendFn = (tx: OfflineQueueItem) => Promise<Response | { ok: boolean; status: number }>;
 
+/** @deprecated kept for backwards compatibility with legacy tests/imports. */
 export const OFFLINE_QUEUE_KEY = 'handover_offline_queue_v1';
 
-// Storage helpers
-async function readStoredQueue(): Promise<OfflineQueue> {
-  const raw = await SecureStore.getItemAsync(OFFLINE_QUEUE_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeStoredItem).filter(Boolean) as OfflineQueue;
-  } catch {
-    // si hay datos corruptos, empezamos desde cola vacía
-    return [];
-  }
-}
+type StoredPayloadEnvelope = {
+  payload: unknown;
+  type?: string;
+  hash?: string;
+  dedupKey?: string;
+  sensitiveFields?: SensitiveFieldPath[];
+  validationErrors?: ValidationErrorDetail[];
+};
 
-async function writeStoredQueue(queue: OfflineQueue): Promise<void> {
-  const raw = JSON.stringify(queue.map(syncCompatibilityFields));
-  await SecureStore.setItemAsync(OFFLINE_QUEUE_KEY, raw);
-}
-
-async function clearStoredQueue(): Promise<void> {
-  await SecureStore.deleteItemAsync(OFFLINE_QUEUE_KEY);
-}
-
-// Domain helpers
-function generateId(): string {
-  return `tx_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+function nowMsFromIso(value?: string): number | undefined {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function hasPath(payload: unknown, path: SensitiveFieldPath): boolean {
@@ -86,30 +76,25 @@ function hasPath(payload: unknown, path: SensitiveFieldPath): boolean {
   return current !== undefined;
 }
 
-function findSensitiveFields(payload: unknown): SensitiveFieldPath[] {
-  if (payload == null || typeof payload !== 'object') return [];
-  return SENSITIVE_FIELDS.filter((field) => hasPath(payload, field));
-}
-
 function isValidationError(value: unknown): value is ValidationErrorDetail {
   return (
     !!value &&
     typeof value === 'object' &&
-    typeof (value as any).path === 'string' &&
-    typeof (value as any).message === 'string'
+    typeof (value as Record<string, unknown>).path === 'string' &&
+    typeof (value as Record<string, unknown>).message === 'string'
   );
 }
 
 function detectValidationErrors(payload: unknown): ValidationErrorDetail[] | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
-  const direct = (payload as any)._validationErrors;
+  const direct = (payload as Record<string, unknown>)._validationErrors;
   if (Array.isArray(direct)) {
     const cleaned = direct.filter(isValidationError);
     if (cleaned.length > 0) return cleaned;
   }
   const maybeBundle = (payload as Record<string, unknown>).bundle;
   if (maybeBundle && typeof maybeBundle === 'object') {
-    const nested = (maybeBundle as any)._validationErrors;
+    const nested = (maybeBundle as Record<string, unknown>)._validationErrors;
     if (Array.isArray(nested)) {
       const cleaned = nested.filter(isValidationError);
       if (cleaned.length > 0) return cleaned;
@@ -118,95 +103,76 @@ function detectValidationErrors(payload: unknown): ValidationErrorDetail[] | und
   return undefined;
 }
 
-function hasPendingDuplicate(queue: OfflineQueue, input: EnqueuePayload): boolean {
-  if (!input.dedupKey) return false;
-
-  return queue.some(
-    (item) => item.type === (input.type ?? 'generic') && item.dedupKey === input.dedupKey && !item.failedAt
-  );
+function findSensitiveFields(payload: unknown): SensitiveFieldPath[] {
+  if (payload == null || typeof payload !== 'object') return [];
+  return SENSITIVE_FIELDS.filter((field) => hasPath(payload, field));
 }
 
-function createQueueItem(input: EnqueuePayload): OfflineQueueItem {
-  const id = input.key ?? generateId();
-  const type = input.type ?? 'generic';
-  const createdAt = Date.now();
-  const attempts = 0;
-  const sensitiveFields =
-    input.sensitiveFields ?? (input.payload ? findSensitiveFields(input.payload) : []);
-  const validationErrors = detectValidationErrors(input.payload);
+function parseEnvelope(payload: unknown): StoredPayloadEnvelope {
+  if (!payload || typeof payload !== 'object') {
+    return { payload };
+  }
+  const input = payload as Record<string, unknown>;
+
+  if ('bundle' in input && input.bundle && typeof input.bundle === 'object') {
+    return parseEnvelope(input.bundle);
+  }
+
+  if ('payload' in input) {
+    return {
+      payload: input.payload,
+      type: typeof input.type === 'string' ? input.type : undefined,
+      hash: typeof input.hash === 'string' ? input.hash : undefined,
+      dedupKey: typeof input.dedupKey === 'string' ? input.dedupKey : undefined,
+      sensitiveFields: Array.isArray(input.sensitiveFields) ? (input.sensitiveFields as SensitiveFieldPath[]) : undefined,
+      validationErrors: Array.isArray(input.validationErrors)
+        ? (input.validationErrors as ValidationErrorDetail[]).filter(isValidationError)
+        : undefined,
+    };
+  }
+
+  return { payload };
+}
+
+function toOfflineItem(item: QueuedBundle): OfflineQueueItem {
+  const envelope = parseEnvelope(item.payload);
+  const createdAt = nowMsFromIso(item.createdAt) ?? Date.now();
+  const lastAttemptAt = nowMsFromIso(item.lastAttemptAt);
+  const failedAt = item.syncStatus === 'error' ? (lastAttemptAt ?? createdAt) : undefined;
 
   return {
-    id,
-    key: id,
-    type,
-    payload: input.payload ?? null,
+    id: item.id,
+    key: item.id,
+    type: envelope.type ?? 'generic',
+    payload: envelope.payload,
     createdAt,
-    attempts,
-    tries: attempts,
-    lastAttemptAt: undefined,
-    failedAt: undefined,
-    hash: input.hash,
-    sensitiveFields: sensitiveFields.length > 0 ? sensitiveFields : undefined,
-    dedupKey: input.dedupKey,
-    validationErrors,
+    attempts: item.attemptCount ?? item.attempts ?? 0,
+    tries: item.attemptCount ?? item.attempts ?? 0,
+    lastAttemptAt,
+    failedAt,
+    hash: envelope.hash,
+    sensitiveFields: envelope.sensitiveFields,
+    validationErrors: envelope.validationErrors,
+    dedupKey: envelope.dedupKey,
   };
 }
 
-function normalizeStoredItem(raw: unknown): OfflineQueueItem | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const item = raw as Partial<OfflineQueueItem> & Record<string, unknown>;
-
-  const attempts =
-    typeof item.attempts === 'number'
-      ? item.attempts
-      : typeof item.tries === 'number'
-      ? item.tries
-      : 0;
-
-  const createdAt = typeof item.createdAt === 'number' ? item.createdAt : Date.now();
-  const id = typeof item.id === 'string' ? item.id : typeof item.key === 'string' ? item.key : generateId();
-  const key = typeof item.key === 'string' ? item.key : id;
-  const type = typeof item.type === 'string' ? item.type : 'generic';
-
-  const normalized: OfflineQueueItem = {
-    id,
-    key,
-    type,
-    payload: item.payload,
-    createdAt,
-    attempts,
-    tries: attempts,
-    lastAttemptAt: typeof item.lastAttemptAt === 'number' ? item.lastAttemptAt : undefined,
-    failedAt: typeof item.failedAt === 'number' ? item.failedAt : undefined,
-    hash: typeof item.hash === 'string' ? item.hash : undefined,
-    sensitiveFields: Array.isArray(item.sensitiveFields)
-      ? (item.sensitiveFields as SensitiveFieldPath[])
-      : undefined,
-    dedupKey: typeof item.dedupKey === 'string' ? item.dedupKey : undefined,
-    validationErrors: Array.isArray(item.validationErrors)
-      ? (item.validationErrors as ValidationErrorDetail[]).filter(isValidationError)
-      : undefined,
-  };
-
-  return normalized;
+async function fromQueue(): Promise<OfflineQueue> {
+  const queue = await getOfflineQueue();
+  return queue.map(toOfflineItem).sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function syncCompatibilityFields(item: OfflineQueueItem): OfflineQueueItem {
-  return { ...item, tries: item.attempts };
-}
-
-type SyncErrorType = 'network' | 'server' | 'client' | 'unknown';
-
-interface SyncErrorInfo {
-  type: SyncErrorType;
-  status?: number;
-  message?: string;
+export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): boolean {
+  if (item.failedAt) return false;
+  if (item.attempts >= MAX_ATTEMPTS) return false;
+  if (!item.lastAttemptAt) return true;
+  const delayIndex = Math.min(item.attempts, RETRY_DELAYS_MS.length - 1);
+  return now - item.lastAttemptAt >= RETRY_DELAYS_MS[delayIndex];
 }
 
 function isSuccessfulResponse(res: Response | { ok: boolean; status: number }): boolean {
-  const status = 'status' in res ? res.status : (res as Response)?.status;
-  const okFlag = 'ok' in res ? res.ok : (res as Response)?.ok;
-
+  const status = 'status' in res ? res.status : (res as Response).status;
+  const okFlag = 'ok' in res ? res.ok : (res as Response).ok;
   return okFlag === true || status === 200 || status === 201 || status === 412;
 }
 
@@ -216,133 +182,80 @@ function getStatus(res: Response | { ok: boolean; status: number }): number {
   return 0;
 }
 
-async function performSync(item: OfflineQueueItem, sender: SendFn): Promise<SyncErrorInfo | null> {
-  try {
-    const res = await sender(item);
-
-    if (isSuccessfulResponse(res)) {
-      return null;
-    }
-
-    const status = getStatus(res);
-    const type: SyncErrorType = status >= 500 ? 'server' : status >= 400 ? 'client' : 'unknown';
-    const message = res instanceof Response ? res.statusText : undefined;
-
-    return { status, message, type };
-  } catch (e: any) {
-    return {
-      type: 'network',
-      message: e?.message ?? 'Network error',
-    };
-  }
-}
-
-export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): boolean {
-  if (item.failedAt) {
-    return false;
-  }
-
-  if (item.attempts >= MAX_ATTEMPTS) {
-    return false;
-  }
-
-  if (!item.lastAttemptAt) {
-    return true;
-  }
-
-  const delayIndex = Math.min(item.attempts, RETRY_DELAYS_MS.length - 1);
-  const requiredDelay = RETRY_DELAYS_MS[delayIndex];
-  const elapsed = now - item.lastAttemptAt;
-
-  return elapsed >= requiredDelay;
-}
-
-// Public API
 export async function enqueueTx(input: EnqueuePayload): Promise<OfflineQueueItem> {
-  const queue = await readStoredQueue();
+  const queue = await fromQueue();
 
-  if (hasPendingDuplicate(queue, input)) {
+  if (input.dedupKey) {
     const duplicate = queue.find(
       (entry) => entry.type === (input.type ?? 'generic') && entry.dedupKey === input.dedupKey && !entry.failedAt
     );
-    return duplicate ?? createQueueItem(input);
+    if (duplicate) return duplicate;
   }
 
-  const item = createQueueItem(input);
-  const existingIndex = queue.findIndex((entry) => entry.key === item.key);
-  if (existingIndex >= 0) {
-    queue[existingIndex] = item;
-  } else {
-    queue.push(item);
-  }
+  const payload = input.payload ?? null;
+  const item = await enqueueOfflineQueueItem({
+    id: input.key,
+    patientId: 'legacy',
+    payload: {
+      payload,
+      type: input.type ?? 'generic',
+      hash: input.hash,
+      dedupKey: input.dedupKey,
+      sensitiveFields: input.sensitiveFields ?? findSensitiveFields(payload),
+      validationErrors: detectValidationErrors(payload),
+    },
+    syncStatus: 'pending',
+  });
 
-  await writeStoredQueue(queue);
-  return item;
+  return toOfflineItem(item);
 }
 
 export async function readQueue(): Promise<OfflineQueue> {
-  const queue = await readStoredQueue();
-  return [...queue].sort((a, b) => a.createdAt - b.createdAt);
+  return fromQueue();
 }
 
 export async function removeItem(key: string): Promise<void> {
-  const queue = await readStoredQueue();
-  const next = queue.filter((item) => item.key !== key);
-  if (next.length === 0) {
-    await clearStoredQueue();
-    return;
-  }
-  if (next.length !== queue.length) {
-    await writeStoredQueue(next);
-  }
+  await deleteOfflineQueueItem(key);
 }
 
 export async function clearAll(): Promise<void> {
-  await clearStoredQueue();
+  await clearOfflineQueue();
 }
 
 export async function flushQueue(sender: SendFn): Promise<void> {
-  let queue = await readStoredQueue();
-  queue = [...queue].sort((a, b) => a.createdAt - b.createdAt);
+  const queue = await fromQueue();
 
-  let mutated = false;
+  for (const item of queue) {
+    if (!shouldAttemptNow(item)) continue;
 
-  for (const item of [...queue]) {
-    const index = queue.findIndex((entry) => entry.key === item.key);
-    if (index < 0) continue;
-    const current = queue[index];
+    try {
+      const response = await sender(item);
+      if (isSuccessfulResponse(response)) {
+        await deleteOfflineQueueItem(item.key);
+        continue;
+      }
 
-    if (!shouldAttemptNow(current)) {
-      continue;
+      const status = getStatus(response);
+      const attempts = item.attempts + 1;
+      const nowIso = new Date().toISOString();
+      const isFinalClientError = status >= 400 && status < 500;
+
+      await updateOfflineQueueItem(item.key, {
+        attemptCount: attempts,
+        attempts,
+        lastAttemptAt: nowIso,
+        syncStatus: isFinalClientError || attempts >= MAX_ATTEMPTS ? 'error' : 'pending',
+        errorStatus: status || undefined,
+      });
+    } catch (error: unknown) {
+      const attempts = item.attempts + 1;
+      await updateOfflineQueueItem(item.key, {
+        attemptCount: attempts,
+        attempts,
+        lastAttemptAt: new Date().toISOString(),
+        syncStatus: attempts >= MAX_ATTEMPTS ? 'error' : 'pending',
+        errorMessage: error instanceof Error ? error.message : 'Network error',
+      });
     }
-
-    const error = await performSync(current, sender);
-    if (!error) {
-      queue = queue.filter((entry) => entry.key !== current.key);
-      mutated = true;
-      continue;
-    }
-
-    const now = Date.now();
-    const attempts = (current.attempts ?? current.tries ?? 0) + 1;
-    const isFinalClientError = error.type === 'client';
-    const failedAt = isFinalClientError || attempts >= MAX_ATTEMPTS ? now : current.failedAt;
-    const updated: OfflineQueueItem = {
-      ...current,
-      attempts,
-      tries: attempts,
-      lastAttemptAt: now,
-      failedAt,
-    };
-    queue[index] = updated;
-    mutated = true;
-  }
-
-  if (!mutated) return;
-
-  if (queue.length === 0) {
-    await clearStoredQueue();
-  } else {
-    await writeStoredQueue(queue);
   }
 }
