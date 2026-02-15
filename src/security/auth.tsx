@@ -5,6 +5,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { Alert } from 'react-native';
 import { Buffer } from 'buffer';
 import { t } from '@/src/i18n';
+import { isDemoAccessEnabled } from '@/src/security/demo-access';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import type { Capabilities } from '@/src/security/capabilities';
@@ -448,6 +449,10 @@ export async function loginWithOAuth(
 
 // BEGIN HANDOVER: AUTH_DEMO_LOGIN
 export async function loginDemo(): Promise<SessionModel> {
+  if (!isDemoAccessEnabled()) {
+    throw new Error('DEMO_DISABLED');
+  }
+
   try {
     const session = ensureDemoSessionTemplate() ?? {
       accessToken: 'demo-token',

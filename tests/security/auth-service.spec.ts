@@ -41,3 +41,22 @@ describe('AuthService token storage', () => {
     await expect(loadTokens()).resolves.toBeNull();
   });
 });
+
+
+describe('AuthService local provider hardening', () => {
+  it('rejects demo credentials when demo access is disabled', async () => {
+    const originalDev = (globalThis as any).__DEV__;
+    const originalDemoFlag = process.env.EXPO_PUBLIC_ENABLE_DEMO;
+
+    (globalThis as any).__DEV__ = false;
+    delete process.env.EXPO_PUBLIC_ENABLE_DEMO;
+
+    const { createLocalAuthProvider } = await import('@/src/security/AuthService');
+    const provider = createLocalAuthProvider();
+
+    await expect(provider.login({ username: 'demo', password: 'demo' })).rejects.toThrowError('DEMO_DISABLED');
+
+    (globalThis as any).__DEV__ = originalDev;
+    process.env.EXPO_PUBLIC_ENABLE_DEMO = originalDemoFlag;
+  });
+});

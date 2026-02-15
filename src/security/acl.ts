@@ -64,18 +64,23 @@ function hasPrivilegedRole(roles: GuardRole[]): boolean {
   return roles.some((role) => PRIVILEGED_ROLES.has(role));
 }
 
-function parseBooleanEnv(name: string): boolean {
-  const value = process.env[`EXPO_PUBLIC_${name}`] ?? process.env[name];
+function parseBooleanEnv(name: string, allowPublic = true): boolean {
+  const value = allowPublic
+    ? (process.env[`EXPO_PUBLIC_${name}`] ?? process.env[name])
+    : process.env[name];
   if (typeof value !== 'string') return false;
   return ['1', 'true', 'yes'].includes(value.toLowerCase());
 }
 
 function isBypassEnabled(): boolean {
-  return parseBooleanEnv('BYPASS_SCOPE');
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+  return parseBooleanEnv('BYPASS_SCOPE', false);
 }
 
 function isAllowAllUnits(): boolean {
-  return parseBooleanEnv('ALLOW_ALL_UNITS');
+  return parseBooleanEnv('ALLOW_ALL_UNITS', false);
 }
 
 function getAllowedUnits(): string[] {

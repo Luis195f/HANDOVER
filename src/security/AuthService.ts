@@ -1,5 +1,6 @@
 import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/secure-storage';
 import type { UserRole } from '@/src/security/auth-types';
+import { isDemoAccessEnabled } from '@/src/security/demo-access';
 
 const AUTH0_DOMAIN =
   process.env.EXPO_PUBLIC_AUTH0_DOMAIN ?? process.env.AUTH0_DOMAIN ?? '';
@@ -229,6 +230,9 @@ export function createLocalAuthProvider(): AuthProvider {
       }
       if (!(normalizedUser === 'demo' && password === 'demo')) {
         throw new Error('INVALID_CREDENTIALS');
+      }
+      if (!isDemoAccessEnabled()) {
+        throw new Error('DEMO_DISABLED');
       }
 
       const expiresAt = new Date(Date.now() + DEFAULT_TOKEN_TTL_MS).toISOString();
