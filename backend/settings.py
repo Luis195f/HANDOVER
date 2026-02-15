@@ -34,8 +34,21 @@ HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").
 # -----------------------------
 # Auth0 config presence (para decidir defaults DRF en dev/tests)
 # -----------------------------
-AUTH0_ISSUER_BASE_URL = os.getenv("AUTH0_ISSUER_BASE_URL", "").rstrip("/")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
+# -----------------------------
+# Auth0 config presence (para decidir defaults DRF en dev/tests)
+# -----------------------------
+AUTH0_ISSUER_BASE_URL = (
+    os.getenv("AUTH0_ISSUER_BASE_URL")
+    or os.getenv("OIDC_ISSUER")
+    or ""
+).rstrip("/")
+
+AUTH0_AUDIENCE = (
+    os.getenv("AUTH0_AUDIENCE")
+    or os.getenv("OIDC_AUDIENCE")
+    or ""
+)
+
 AUTH0_CONFIGURED = bool(AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE)
 
 # -----------------------------
