@@ -98,6 +98,7 @@ export default defineConfig({
           "@testing-library/react-native",
           "@expo/vector-icons",
           "expo-av",
+          "expo-audio",
           "expo-modules-core",
           "expo-file-system",
         ],
@@ -181,6 +182,12 @@ export default defineConfig({
       {
         find: /^react-native-svg(\/.*)?$/,
         replacement: fromRoot("./tests/__mocks__/react-native-svg.ts"),
+      },
+
+      // Stub de expo-audio
+      {
+        find: "expo-audio",
+        replacement: fromRoot("./tests/__mocks__/expo-audio.ts"),
       },
 
       // Stub de expo-av

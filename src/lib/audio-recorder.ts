@@ -29,7 +29,8 @@ export const useAudioRecorderWithFallback = (options: RecordingOptions): AudioRe
 
     const stop = useCallback(async () => {
       await base.stop();
-      return uriRef.current ?? undefined;
+      const latestUri = base.uri ?? uriRef.current;
+      return latestUri ?? undefined;
     }, [base]);
 
     return {

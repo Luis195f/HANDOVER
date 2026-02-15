@@ -18,6 +18,7 @@ import {
   type SttStatus,
 } from "@/src/lib/stt";
 import { t } from "@/src/i18n";
+import * as FileSystem from 'expo-file-system';
 import { useThemeTokens } from "@/src/theme";
 import { useAudioRecorderWithFallback } from "@/src/lib/audio-recorder";
 
@@ -211,6 +212,12 @@ export default function AudioNote({ navigation, route }: Props) {
       return;
     }
 
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    if (!fileInfo.exists) {
+      setTranscriptionError(t('audioNote.noteRequired'));
+      return;
+    }
+
     setIsTranscribing(true);
     setTranscriptionError(null);
     try {
@@ -263,36 +270,48 @@ export default function AudioNote({ navigation, route }: Props) {
   };
 
   const onToggle = async () => {
-    if (recorder.isRecording) {
-      await stopRecording();
-      return;
+    try {
+      if (recorder.isRecording) {
+        await stopRecording();
+        return;
+      }
+      const granted = await ensurePermissionGranted();
+      if (!granted) {
+        setRecordingError(t('audioNote.recordPermissionHint'));
+        Alert.alert(t('permissions.microphoneDeniedTitle'), t('permissions.microphoneRequiredRecord'));
+        return;
+      }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      await startRecording();
+    } catch {
+      setRecordingError(t('audioNote.recordStartFailed'));
     }
-    const granted = await ensurePermissionGranted();
-    if (!granted) {
-      setRecordingError(t('audioNote.recordPermissionHint'));
-      Alert.alert(t('permissions.microphoneDeniedTitle'), t('permissions.microphoneRequiredRecord'));
-      return;
-    }
-    await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-    await startRecording();
   };
 
-  const accept = () => {
+  const accept = async () => {
     const uri = lastUri ?? recorder.uri;
-    if (uri) {
-      const onDoneRoute = route.params?.onDoneRoute ?? 'HandoverForm';
-      navigation.navigate({
-        name: onDoneRoute,
-        params: {
-          audioNote: {
-            uri,
-            transcription: transcription.trim() ? transcription : undefined,
-            uploadToFhir,
-          },
-        },
-        merge: true,
-      } as never);
+    if (!uri) {
+      return;
     }
+
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    if (!fileInfo.exists) {
+      setRecordingError(t('audioNote.noteRequired'));
+      return;
+    }
+
+    const onDoneRoute = route.params?.onDoneRoute ?? 'HandoverForm';
+    navigation.navigate({
+      name: onDoneRoute,
+      params: {
+        audioNote: {
+          uri,
+          transcription: transcription.trim() ? transcription : undefined,
+          uploadToFhir,
+        },
+      },
+      merge: true,
+    } as never);
   };
 
   const hasUri = useMemo(() => !!(lastUri ?? recorder.uri), [lastUri, recorder.uri]);
