@@ -1,12 +1,12 @@
 import { maybeUseDemoResponse } from "@/src/demo/net-interceptor";
 import { API_BASE_URL } from "@/src/config/env";
-import { ensureFreshAccessToken } from "@/src/security/auth";
+import { getToken } from "@/src/security/tokenSupplier";
 
 async function apiFetch(path: string, init?: RequestInit & { method?: string }) {
   const url = `${API_BASE_URL}${path}`;
 
   // Service name solo para trazabilidad/compat (no rompe nada si se ignora)
-  const freshToken = await ensureFreshAccessToken("api");
+  const freshToken = await getToken("api");
 
   const headers = new Headers(init?.headers ?? {});
   if (freshToken && !headers.has("Authorization")) {
