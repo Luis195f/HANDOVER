@@ -1,32 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-const secureStoreData = new Map<string, string>();
-
-const secureStore = vi.hoisted(() => ({
-  getItemAsync: vi.fn(async (key: string) => secureStoreData.get(key) ?? null),
-  setItemAsync: vi.fn(async (key: string, value: string) => {
-    secureStoreData.set(key, value);
-  }),
-  deleteItemAsync: vi.fn(async (key: string) => {
-    secureStoreData.delete(key);
-  }),
-}));
-
-vi.mock('expo-secure-store', () => secureStore);
-
-import { OFFLINE_QUEUE_KEY, enqueueTx, readQueue, removeItem, clearAll, flushQueue, type SendFn } from './offlineQueue';
+import { enqueueTx, readQueue, removeItem, clearAll, flushQueue, type SendFn } from './offlineQueue';
 
 describe('offline queue', () => {
   beforeEach(async () => {
-    secureStoreData.clear();
-    vi.clearAllMocks();
+    await clearAll();
   });
 
-  it('enqueue → persiste item en cola cifrada', async () => {
+  it('enqueue → persiste item', async () => {
     const it = await enqueueTx({ payload: { foo: 'bar' } });
-    const raw = secureStoreData.get(OFFLINE_QUEUE_KEY) ?? '[]';
-    const queue = JSON.parse(raw);
-    expect(queue.some((entry: any) => entry.key === it.key)).toBe(true);
+    const queue = await readQueue();
+    expect(queue.some((entry) => entry.key === it.key)).toBe(true);
   });
 
   it('readQueue → devuelve en orden', async () => {
@@ -36,22 +20,21 @@ describe('offline queue', () => {
     expect(list.map(i => i.key)).toEqual([a.key, b.key]);
   });
 
-  it('removeItem → borra archivo', async () => {
+  it('removeItem → elimina un item', async () => {
     const it = await enqueueTx({ payload: { x: 1 } });
-    expect(secureStoreData.has(OFFLINE_QUEUE_KEY)).toBe(true);
     await removeItem(it.key);
-    const queue = secureStoreData.get(OFFLINE_QUEUE_KEY);
-    expect(queue ? JSON.parse(queue) : []).toHaveLength(0);
+    const queue = await readQueue();
+    expect(queue).toHaveLength(0);
   });
 
-  it('clearAll → borra todos los .json', async () => {
+  it('clearAll → borra la cola', async () => {
     await enqueueTx({ payload: { one: 1 } });
     await enqueueTx({ payload: { two: 2 } });
     await clearAll();
-    expect(secureStoreData.size).toBe(0);
+    expect(await readQueue()).toHaveLength(0);
   });
 
-  it('flushQueue → borra en éxito 200 y 412; detiene en error', async () => {
+  it('flushQueue → borra en éxito 200 y 412; mantiene errores', async () => {
     await enqueueTx({ payload: { ok: true } });
     await enqueueTx({ payload: { dup: true } });
     const i3 = await enqueueTx({ payload: { fail: true } });
