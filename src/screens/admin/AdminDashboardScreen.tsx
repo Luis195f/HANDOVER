@@ -7,9 +7,8 @@ import { useAuth } from '../../security/auth';
 
 export function AdminDashboardScreen() {
   const { session, loading: authLoading } = useAuth();
-  const { data, loading, error, reload } = useAdminDashboardData();
-
   const canAdminister = hasRole(session, ['admin', 'supervisor']);
+  const { data, loading, error, reload } = useAdminDashboardData(canAdminister);
 
   if (authLoading) {
     return (

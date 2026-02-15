@@ -29,7 +29,7 @@ from backend.signature import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent
-from backend.security.permissions import ClinicianAuditPermission
+from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
 from backend.security.scope_permissions import (
@@ -788,6 +788,27 @@ class OAuthRefreshView(APIView):
                 "refresh_token": data.get("refresh_token"),
                 "expires_in": data.get("expires_in"),
                 "token_type": data.get("token_type"),
+            },
+            status=200,
+        )
+
+
+class DashboardView(AuthenticatedAPIView):
+    """Dashboard restringido por rol (admin/supervisor)."""
+
+    permission_classes = [IsAuthenticated, IsAdminOrSupervisor]
+
+    def get_permissions(self):
+        return [permission() for permission in self.permission_classes]
+
+    def get(self, request: HttpRequest) -> Response:
+        claims = _get_claims_from_request(request) or {}
+        roles = sorted(extract_roles(claims))
+        return Response(
+            {
+                "ok": True,
+                "message": "Dashboard access granted",
+                "roles": roles,
             },
             status=200,
         )
