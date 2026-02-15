@@ -8,8 +8,7 @@ import { t } from '@/src/i18n';
 import { isDemoAccessEnabled } from '@/src/security/demo-access';
 import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
-import type { Capabilities } from '@/src/security/capabilities';
-import { clearCapabilitiesCache, fetchCapabilities, getDemoCapabilities } from '@/src/security/capabilities';
+import { getToken, registerTokenSupplier } from '@/src/security/tokenSupplier';
 import { secureGetItem, secureSetItem, secureDeleteItem } from "@/src/security/secure-storage";
 import AuthService, {
   createLocalAuthProvider,
@@ -31,6 +30,36 @@ import {
   storeSession as storeOAuthSession,
 } from '@/src/security/OAuthService';
 import type { OAuthConfig } from '@/src/security/OAuthService';
+
+
+
+type CapabilityPermissions = {
+  canWriteHandover: boolean;
+  canSignHandover: boolean;
+  canViewAudit: boolean;
+  canSendAuditEvents: boolean;
+  isAdmin: boolean;
+};
+
+type FhirProfile = {
+  canonical: string;
+  version?: string;
+  title?: string;
+};
+
+type FhirCapabilities = {
+  version: string;
+  transaction: boolean;
+  profiles: FhirProfile[];
+};
+
+type Capabilities = {
+  userSub: string;
+  roles: string[];
+  scopes: string[];
+  permissions: CapabilityPermissions;
+  fhir?: FhirCapabilities;
+};
 
 type AuthWarnCode =
   | 'AUTH_RUNTIME_CONFIG'
@@ -672,22 +701,9 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   return refreshedSession?.accessToken ?? null;
 }
 
-let tokenSupplier: null | (() => Promise<string | null>) = null;
-
-export function registerTokenSupplier(fn: () => Promise<string | null>) {
-  tokenSupplier = fn;
-}
-
 export async function ensureFreshAccessToken(service?: string): Promise<string | null> {
-  try {
-    if (tokenSupplier) {
-      const supplied = await tokenSupplier();
-      if (supplied) return supplied;
-    }
-  } catch {
-    // si el supplier falla, caemos a ensureFreshToken
-  }
-  return ensureFreshToken(service);
+  const supplied = await getToken(service);
+  return supplied ?? ensureFreshToken(service);
 }
 
 export async function setCurrentSession(session: SessionModel | null): Promise<void> {
@@ -732,6 +748,22 @@ export async function login(params: {
   };
   await setSession(session);
   return session;
+}
+
+
+async function clearCapabilitiesCacheLazy(): Promise<void> {
+  const { clearCapabilitiesCache } = await import('@/src/security/capabilities');
+  await clearCapabilitiesCache();
+}
+
+async function fetchCapabilitiesLazy(options: { forceRefresh?: boolean; maxAgeMs?: number } = {}): Promise<Capabilities | null> {
+  const { fetchCapabilities } = await import('@/src/security/capabilities');
+  return fetchCapabilities(options);
+}
+
+async function getDemoCapabilitiesLazy(userSub?: string): Promise<Capabilities> {
+  const { getDemoCapabilities } = await import('@/src/security/capabilities');
+  return getDemoCapabilities(userSub);
 }
 
 interface AuthContextValue {
@@ -825,7 +857,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Nota: supplier debe ser estable y “fresh”; ensureFreshToken ya debe leer sesión actual internamente
-    registerTokenSupplier(async () => ensureFreshToken("fhir"));
+    registerTokenSupplier(async (service?: string) => ensureFreshToken(service ?? "fhir"));
   }, [session?.accessToken, session?.refreshToken, session?.expiresAt, session?.mode]);
 
   const previousUserIdRef = useRef<string | null>(null);
@@ -841,23 +873,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!session) {
         setCapabilitiesState(null);
-        await clearCapabilitiesCache();
+        await clearCapabilitiesCacheLazy();
         previousUserIdRef.current = null;
         return;
       }
 
       if (userChanged) {
-        await clearCapabilitiesCache();
+        await clearCapabilitiesCacheLazy();
       }
 
       previousUserIdRef.current = currentUserId;
 
       if (session.mode === "demo") {
-        setCapabilitiesState(getDemoCapabilities(session.userId));
+        setCapabilitiesState(await getDemoCapabilitiesLazy(session.userId));
         return;
       }
 
-      const caps = await fetchCapabilities();
+      const caps = await fetchCapabilitiesLazy();
       if (alive) setCapabilitiesState(caps);
     })();
 
@@ -905,11 +937,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
     if (session.mode === "demo") {
-      const demoCaps = getDemoCapabilities(session.userId);
+      const demoCaps = await getDemoCapabilitiesLazy(session.userId);
       setCapabilitiesState(demoCaps);
       return demoCaps;
     }
-    const caps = await fetchCapabilities({ forceRefresh: true });
+    const caps = await fetchCapabilitiesLazy({ forceRefresh: true });
     setCapabilitiesState(caps);
     return caps;
   }, [session]);
