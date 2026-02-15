@@ -197,6 +197,7 @@ export async function clearCapabilitiesCache(): Promise<void> {
 export function canAccess(route: RouteName, capabilities: Capabilities | null | undefined): boolean {
   if (!capabilities) return false;
   const perms = capabilities.permissions;
+  const roles = capabilities.roles;
 
   switch (route) {
     case 'HandoverMain':
@@ -210,12 +211,10 @@ export function canAccess(route: RouteName, capabilities: Capabilities | null | 
       return perms.canWriteHandover;
     case 'AuditLog':
       return perms.canViewAudit;
-    case 'SupervisorDashboard': {
-      const roles = capabilities.roles;
+    case 'SupervisorDashboard':
       return perms.canSignHandover && (roles.includes('supervisor') || roles.includes('admin'));
-    }
     case 'AdminDashboard':
-      return perms.isAdmin;
+      return roles.includes('admin') || roles.includes('supervisor');
     case 'Login':
     case 'Onboarding':
     case 'Unauthorized':
