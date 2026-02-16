@@ -145,6 +145,8 @@ export const AutocompleteSnomedCoding = <TFieldValues extends SnomedFormValues>(
           data={results}
           keyExtractor={(item) => `${item.code}-${item.display}`}
           style={styles.suggestions}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <Pressable
               onPress={() => handleSelect(item)}

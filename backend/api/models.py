@@ -32,3 +32,37 @@ class ClientAuditEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"ClientAuditEvent(type={self.type}, user_id={self.user_id})"
+
+
+class DemoPatient(models.Model):
+    external_id = models.CharField(max_length=64, unique=True)
+    given_name = models.CharField(max_length=128)
+    family_name = models.CharField(max_length=128)
+    gender = models.CharField(max_length=32, default="unknown")
+    birth_date = models.DateField(null=True, blank=True)
+    unit_id = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["family_name", "given_name"]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return f"DemoPatient(external_id={self.external_id})"
+
+    def to_fhir(self) -> dict:
+        payload = {
+            "resourceType": "Patient",
+            "id": self.external_id,
+            "name": [{"use": "official", "family": self.family_name, "given": [self.given_name]}],
+            "gender": (self.gender or "unknown").lower(),
+        }
+        if self.birth_date:
+            payload["birthDate"] = self.birth_date.isoformat()
+        if self.unit_id:
+            payload["extension"] = [
+                {
+                    "url": "https://handover.dev/fhir/StructureDefinition/unit-id",
+                    "valueString": self.unit_id,
+                }
+            ]
+        return payload

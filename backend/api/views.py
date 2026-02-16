@@ -28,7 +28,7 @@ from backend.signature import (
     verify_bundle_signature,
 )
 from backend.security.auth import Auth0JWTAuthentication
-from backend.api.models import ClientAuditEvent
+from backend.api.models import ClientAuditEvent, DemoPatient
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
@@ -97,6 +97,25 @@ class AuthenticatedAPIView(APIView):
 AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
+
+
+def _build_demo_patient_bundle(*, patient_id: str | None = None) -> dict:
+    queryset = DemoPatient.objects.all()
+    if patient_id:
+        queryset = queryset.filter(external_id=patient_id)
+
+    entries = [
+        {
+            "resource": patient.to_fhir(),
+        }
+        for patient in queryset
+    ]
+    return {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": len(entries),
+        "entry": entries,
+    }
 
 
 def _get_claims_from_request(request: HttpRequest) -> dict | None:
@@ -842,6 +861,9 @@ class PatientView(AuthenticatedAPIView):
             resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
         except httpx.HTTPError as exc:
             logger.error("Error al leer Patient desde FHIR (%s): %s", url, exc)
+            demo_bundle = _build_demo_patient_bundle(patient_id=patient_id)
+            if demo_bundle.get("total", 0) > 0:
+                return Response(demo_bundle, status=200)
             return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
 
         if resp.status_code >= 400:
