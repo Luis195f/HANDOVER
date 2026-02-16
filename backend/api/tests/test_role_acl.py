@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
+import httpx
+
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from backend.api.models import DemoPatient
 from backend.security.auth import Auth0User
 
 
@@ -203,3 +206,30 @@ class RoleAclTests(TestCase):
         response = client.get(url)
 
         self.assertEqual(response.status_code, 403)
+
+    def test_patients_endpoint_returns_demo_data_for_nurse_when_fhir_unavailable(self):
+        DemoPatient.objects.create(
+            external_id="demo-pat-999",
+            given_name="Elena",
+            family_name="Gómez",
+            gender="female",
+            unit_id="icu-a",
+        )
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-demo",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+            }
+        )
+        url = reverse("patients")
+
+        with patch("backend.api.views.httpx.get", autospec=True, side_effect=httpx.HTTPError("fhir-down")):
+            response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("resourceType"), "Bundle")
+        self.assertGreaterEqual(payload.get("total", 0), 1)
+        resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
+        self.assertIn("demo-pat-999", [resource.get("id") for resource in resources])
