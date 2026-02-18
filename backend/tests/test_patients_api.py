@@ -74,13 +74,18 @@ def test_get_patients_and_filter_unit_include_created_patient():
     )
 
     response_all = client.get("/api/patients/")
-    assert response_all.status_code == 200
-    all_items = response_all.json()
-    assert any(item["id"] == patient.id for item in all_items)
+assert response_all.status_code == 200
+bundle_all = response_all.json()
+assert bundle_all.get("resourceType") == "Bundle"
+all_resources = [e["resource"] for e in bundle_all.get("entry", [])]
+assert any(item["id"] == patient.id for item in all_resources)
 
-    response_filtered = client.get("/api/patients/?unit=icu-a")
-    assert response_filtered.status_code == 200
-    filtered_items = response_filtered.json()
-    assert len(filtered_items) == 1
-    assert filtered_items[0]["id"] == patient.id
-    assert filtered_items[0]["unit"] == "icu-a"
+response_filtered = client.get("/api/patients/?unit=icu-a")
+assert response_filtered.status_code == 200
+bundle_filtered = response_filtered.json()
+assert bundle_filtered.get("resourceType") == "Bundle"
+filtered_resources = [e["resource"] for e in bundle_filtered.get("entry", [])]
+assert len(filtered_resources) == 1
+assert filtered_resources[0]["id"] == patient.id
+assert filtered_resources[0]["unit"] == "icu-a"
+
