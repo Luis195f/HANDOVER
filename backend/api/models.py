@@ -76,6 +76,12 @@ class Patient(models.Model):
     service = models.CharField(max_length=128)
     room = models.CharField(max_length=64)
     active = models.BooleanField(default=True)
+    external_fhir_id = models.CharField(max_length=128, null=True, blank=True)
+    external_reference = models.CharField(max_length=255, null=True, blank=True)
+    fhir_sync_enabled = models.BooleanField(null=True, blank=True)
+    synced_to_fhir = models.BooleanField(null=True, blank=True)
+    last_fhir_sync_at = models.DateTimeField(null=True, blank=True)
+    fhir_sync_error = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
