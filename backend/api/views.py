@@ -954,6 +954,12 @@ class PatientsView(AuthenticatedAPIView):
             "service": patient.service,
             "room": patient.room,
             "active": patient.active,
+            "external_fhir_id": patient.external_fhir_id,
+            "external_reference": patient.external_reference,
+            "fhir_sync_enabled": patient.fhir_sync_enabled,
+            "synced_to_fhir": patient.synced_to_fhir,
+            "last_fhir_sync_at": patient.last_fhir_sync_at.isoformat() if patient.last_fhir_sync_at else None,
+            "fhir_sync_error": patient.fhir_sync_error,
         }
 
     @staticmethod
@@ -977,6 +983,24 @@ class PatientsView(AuthenticatedAPIView):
             errors["active"] = ["Must be a boolean."]
         else:
             cleaned["active"] = active
+
+        external_fhir_id = payload.get("external_fhir_id")
+        if external_fhir_id is not None and not isinstance(external_fhir_id, str):
+            errors["external_fhir_id"] = ["Must be a string."]
+        else:
+            cleaned["external_fhir_id"] = external_fhir_id.strip() if isinstance(external_fhir_id, str) else None
+
+        external_reference = payload.get("external_reference")
+        if external_reference is not None and not isinstance(external_reference, str):
+            errors["external_reference"] = ["Must be a string."]
+        else:
+            cleaned["external_reference"] = external_reference.strip() if isinstance(external_reference, str) else None
+
+        fhir_sync_enabled = payload.get("fhir_sync_enabled")
+        if fhir_sync_enabled is not None and not isinstance(fhir_sync_enabled, bool):
+            errors["fhir_sync_enabled"] = ["Must be a boolean."]
+        else:
+            cleaned["fhir_sync_enabled"] = fhir_sync_enabled
 
         return cleaned, errors
 
