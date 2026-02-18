@@ -32,6 +32,7 @@ import { computeAlerts } from "@/src/lib/alerts";
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
+import { apiGet } from "@/src/lib/api";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
@@ -269,10 +270,36 @@ export default function PatientList({ navigation }: Props) {
     ];
   }, [availableUnits, i18n.language, onUnitChange, selectedUnitId]);
 
-  const patients = useMemo(
-    () => filterPatients(PATIENTS_MOCK, UNITS_BY_ID, selectedSpecialtyId, selectedUnitId),
-    [selectedSpecialtyId, selectedUnitId]
-  );
+  const [patients, setPatients] = useState<PatientListItem[]>([]);
+
+useEffect(() => {
+  if (!selectedUnitId) {
+    setPatients([]);
+    return;
+  }
+
+  let cancelled = false;
+
+  apiGet(`/api/patients?unit=${encodeURIComponent(String(selectedUnitId ?? 'all'))}`)
+    .then((data) => {
+      if (cancelled) return;
+
+      const items = Array.isArray(data) ? data : (data?.results ?? []);
+      setPatients(items.map((p: any) => ({
+        id: String(p.id ?? p.patientId ?? ''),
+        name: String(p.name ?? p.displayName ?? p.fullName ?? 'Paciente'),
+        bedLabel: p.bedLabel ?? p.bed ?? '',
+        vitals: p.vitals ?? {},
+        devices: p.devices ?? [],
+        risks: p.risks ?? {},
+      })));
+    })
+    .catch(() => {
+      if (!cancelled) setPatients([]);
+    });
+
+  return () => { cancelled = true; };
+}, [selectedUnitId]);
 
   const priorityInputs = useMemo<PriorityInput[]>(
     () =>
