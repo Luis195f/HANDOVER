@@ -964,6 +964,7 @@ class PatientsView(AuthenticatedAPIView):
 
         required_fields = ["first_name", "last_name", "identifier", "unit", "service", "room"]
         cleaned: dict[str, object] = {}
+
         for field in required_fields:
             value = payload.get(field)
             if not isinstance(value, str) or not value.strip():
@@ -979,7 +980,7 @@ class PatientsView(AuthenticatedAPIView):
 
         return cleaned, errors
 
-        def get(self, request: HttpRequest) -> Response:
+    def get(self, request: HttpRequest) -> Response:
         # 1) Prefer local patients if present (pilot autonomous mode)
         queryset = LocalPatient.objects.all()
         unit = request.query_params.get("unit")
@@ -1003,12 +1004,17 @@ class PatientsView(AuthenticatedAPIView):
         url = f"{FHIR_BASE.rstrip('/')}/Patient"
         try:
             resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
-            if resp.status_code < 400:
-                return Response(resp.json(), status=resp.status_code)
-            return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
         except httpx.HTTPError:
             # 3) If FHIR is down, fallback to demo bundle (RoleAclTests expects Bundle)
             return Response(_build_demo_patient_bundle(patient_id=None), status=200)
+
+        if resp.status_code >= 400:
+            return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
+
+        try:
+            return Response(resp.json(), status=resp.status_code)
+        except Exception:
+            return Response({"errors": ["FHIR server response is not JSON."]}, status=502)
 
     def post(self, request: HttpRequest) -> Response:
         payload, errors = self._validate_payload(request.data)
