@@ -11,12 +11,13 @@ from .views import (
     MedicationStatementView,
     OAuthRefreshView,
     PatientView,
+    PatientsView,
 )
 
 urlpatterns = [
     path("fhir/patient", PatientView.as_view(), name="patient"),
-    path("patients", PatientView.as_view(), name="patients"),
-    path("patients/", PatientView.as_view(), name="patients-slash"),
+    path("patients", PatientsView.as_view(), name="patients-no-slash"),
+    path("patients/", PatientsView.as_view(), name="patients"),
     path("fhir/medicationstatement", MedicationStatementView.as_view(), name="medicationstatement"),
 
     # Endpoint principal (sin slash)
