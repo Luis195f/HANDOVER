@@ -33,47 +33,79 @@ const PATIENT_LIST_ROWS_DEFAULT = [
   },
 ];
 
-function mockGetAllSync(sql?: unknown) {
+function mockGetAll(sql?: unknown) {
   const q = (typeof sql === 'string' ? sql : '').toLowerCase();
 
   // Solo respondemos a selects (lo más seguro para no romper otras rutas).
   if (!q.includes('select')) return [];
 
-  // Si PatientList hace JOINs o consulta una "vista" de lista, devolvemos lo que el test necesita.
-  // (Esto cubre: select ... from patients, join handovers, etc.)
-  if (q.includes('patient') || q.includes('handover') || q.includes('join')) {
+  // Cubrimos consultas típicas de listado (patients, joins, vistas, etc.)
+  if (
+    q.includes('patient') ||
+    q.includes('handover') ||
+    q.includes('join') ||
+    q.includes('list') ||
+    q.includes('view')
+  ) {
     return PATIENT_LIST_ROWS_DEFAULT;
   }
 
-  return [];
+  // Si el SQL no contiene keywords pero igual es un SELECT, devolvemos fixture
+  // para evitar flakiness por nombres de tablas/vistas distintos.
+  return PATIENT_LIST_ROWS_DEFAULT;
 }
 
-vi.mock('expo-sqlite', () => {
-  const db = {
-    getAllSync: vi.fn((sql: any) => mockGetAllSync(sql)),
-    runSync: vi.fn(),
-    withTransactionSync: (fn: any) =>
-      fn({
-        getAllSync: vi.fn((sql: any) => mockGetAllSync(sql)),
-        runSync: vi.fn(),
-        withTransactionSync: (cb: any) =>
-          cb({
-            getAllSync: vi.fn((sql: any) => mockGetAllSync(sql)),
-            runSync: vi.fn(),
-          }),
-      }),
-  };
+/**
+ * ✅ Mock DB “universal”: soporta sync + async + context + transactions.
+ */
+const db = {
+  // sync
+  getAllSync: vi.fn((sql: any) => mockGetAll(sql)),
+  getFirstSync: vi.fn((sql: any) => (mockGetAll(sql)[0] ?? null)),
+  runSync: vi.fn(),
+  execSync: vi.fn(),
 
+  // async
+  getAllAsync: vi.fn(async (sql: any) => mockGetAll(sql)),
+  getFirstAsync: vi.fn(async (sql: any) => (mockGetAll(sql)[0] ?? null)),
+  runAsync: vi.fn(async () => undefined),
+  execAsync: vi.fn(async () => undefined),
+
+  // transactions
+  withTransactionSync: (fn: any) =>
+    fn({
+      ...db,
+      withTransactionSync: (cb: any) => cb(db),
+    }),
+  withTransactionAsync: async (fn: any) =>
+    fn({
+      ...db,
+      withTransactionAsync: async (cb: any) => cb(db),
+    }),
+};
+
+function makeExpoSqliteMock() {
   return {
+    // distintas APIs según versión
     openDatabaseSync: () => db,
+    openDatabaseAsync: async () => db,
+    openDatabase: () => db,
+
+    // provider/context (algunas apps usan esto)
     SQLiteProvider: ({ children }: any) => children,
+    useSQLiteContext: () => db,
   };
-});
+}
+
+// ✅ Mock principal
+vi.mock('expo-sqlite', () => makeExpoSqliteMock());
+
+// ✅ Muchísimas apps importan desde aquí
+vi.mock('expo-sqlite/next', () => makeExpoSqliteMock());
 
 vi.mock('@/src/security/acl', () => ({
   currentUser: () => ({ id: 'tester' }),
   hasUnitAccess: () => true,
-  // Evita edge-cases de UI (botón supervisor, etc.)
   hasRole: (_session: any, _roles: string[]) => false,
 }));
 
@@ -92,7 +124,7 @@ vi.mock('@/src/lib/otel', () => ({
 }));
 
 // ✅ helper: deja correr microtasks / effects
-const flushPromises = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 describe('PatientList – prioridad clínica', () => {
   const navigation: any = { navigate: vi.fn(), setOptions: vi.fn() };
@@ -100,13 +132,13 @@ describe('PatientList – prioridad clínica', () => {
   it('ordena por prioridad clínica y muestra el resumen', async () => {
     let renderer: ReturnType<typeof create>;
 
-    // 1) Render + primer flush (montaje + effects)
     await act(async () => {
       renderer = create(<PatientList navigation={navigation} />);
-      await flushPromises();
+      await flush();
+      await flush();
     });
 
-    // 2) Si el componente requiere “seleccionar filtros” para cargar, simulamos taps
+    // Si el componente requiere “seleccionar filtros” para cargar, simulamos los taps
     await act(async () => {
       const specialtyAll = renderer!
         .root
@@ -120,24 +152,13 @@ describe('PatientList – prioridad clínica', () => {
         .at(0);
       unitsAll?.props.onPress?.();
 
-      // deja correr el re-render si esos taps disparan estado/efectos
-      await flushPromises();
+      await flush();
+      await flush();
     });
 
-    // 3) Reintenta leer data (en RN+hooks puede tardar 1–2 ticks)
-    let initialData: Array<{ patientId: string }> = [];
-
-    for (let i = 0; i < 3; i++) {
-      // re-buscar la FlatList cada iteración (no reutilices referencias viejas)
-      const list = renderer!.root.findByType(FlatList);
-      initialData = (list.props.data ?? []) as Array<{ patientId: string }>;
-
-      if (Array.isArray(initialData) && initialData.length > 0) break;
-
-      await act(async () => {
-        await flushPromises();
-      });
-    }
+    // Releer FlatList tras los flush
+    const list = renderer!.root.findByType(FlatList);
+    const initialData = (list.props.data ?? []) as Array<{ patientId: string }>;
 
     expect(Array.isArray(initialData)).toBe(true);
     expect(initialData.length).toBeGreaterThan(0);
@@ -145,17 +166,19 @@ describe('PatientList – prioridad clínica', () => {
     // Orden “normal”
     expect(initialData[0].patientId).toBe('pat-002');
 
-    // 4) Toggle prioridad clínica + flush para re-render
     const toggle = renderer!.root.findByType(Switch);
     await act(async () => {
       toggle.props.onValueChange(true);
-      await flushPromises();
+      await flush();
+      await flush();
     });
 
-    const sorted = renderer!.root.findByType(FlatList).props.data as Array<{
+    const sorted = (renderer!.root.findByType(FlatList).props.data ?? []) as Array<{
       patientId: string;
       reasonSummary: string;
     }>;
+
+    expect(sorted.length).toBeGreaterThan(0);
 
     // Orden por prioridad clínica activado
     expect(sorted[0].patientId).toBe('pat-001');
