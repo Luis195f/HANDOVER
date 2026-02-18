@@ -91,18 +91,23 @@ vi.mock('@/src/lib/otel', () => ({
   mark: vi.fn(),
 }));
 
+// ✅ helper: deja correr microtasks / effects
+const flushPromises = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
 describe('PatientList – prioridad clínica', () => {
   const navigation: any = { navigate: vi.fn(), setOptions: vi.fn() };
 
-  it('ordena por prioridad clínica y muestra el resumen', () => {
+  it('ordena por prioridad clínica y muestra el resumen', async () => {
     let renderer: ReturnType<typeof create>;
 
-    act(() => {
+    // 1) Render + primer flush (montaje + effects)
+    await act(async () => {
       renderer = create(<PatientList navigation={navigation} />);
+      await flushPromises();
     });
 
-    // Si el componente requiere “seleccionar filtros” para cargar, simulamos los taps
-    act(() => {
+    // 2) Si el componente requiere “seleccionar filtros” para cargar, simulamos taps
+    await act(async () => {
       const specialtyAll = renderer!
         .root
         .findAll(node => node.props?.accessibilityLabel === 'Todas las especialidades')
@@ -114,21 +119,37 @@ describe('PatientList – prioridad clínica', () => {
         .findAll(node => node.props?.accessibilityLabel === 'Todas las unidades')
         .at(0);
       unitsAll?.props.onPress?.();
+
+      // deja correr el re-render si esos taps disparan estado/efectos
+      await flushPromises();
     });
 
-    const list = renderer!.root.findByType(FlatList);
-    const initialData = list.props.data as Array<{ patientId: string }>;
+    // 3) Reintenta leer data (en RN+hooks puede tardar 1–2 ticks)
+    let initialData: Array<{ patientId: string }> = [];
 
-    // ✅ ahora initialData debe existir y tener contenido
+    for (let i = 0; i < 3; i++) {
+      // re-buscar la FlatList cada iteración (no reutilices referencias viejas)
+      const list = renderer!.root.findByType(FlatList);
+      initialData = (list.props.data ?? []) as Array<{ patientId: string }>;
+
+      if (Array.isArray(initialData) && initialData.length > 0) break;
+
+      await act(async () => {
+        await flushPromises();
+      });
+    }
+
     expect(Array.isArray(initialData)).toBe(true);
     expect(initialData.length).toBeGreaterThan(0);
 
     // Orden “normal”
     expect(initialData[0].patientId).toBe('pat-002');
 
+    // 4) Toggle prioridad clínica + flush para re-render
     const toggle = renderer!.root.findByType(Switch);
-    act(() => {
+    await act(async () => {
       toggle.props.onValueChange(true);
+      await flushPromises();
     });
 
     const sorted = renderer!.root.findByType(FlatList).props.data as Array<{
