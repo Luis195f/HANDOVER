@@ -66,3 +66,27 @@ class DemoPatient(models.Model):
                 }
             ]
         return payload
+
+
+class Patient(models.Model):
+    first_name = models.CharField(max_length=128)
+    last_name = models.CharField(max_length=128)
+    identifier = models.CharField(max_length=64, db_index=True)
+    unit = models.CharField(max_length=64, db_index=True)
+    service = models.CharField(max_length=128)
+    room = models.CharField(max_length=64)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["identifier", "unit"], name="uniq_patient_identifier_unit"),
+        ]
+        indexes = [
+            models.Index(fields=["unit", "active"], name="idx_patient_unit_active"),
+        ]
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return f"Patient(identifier={self.identifier}, unit={self.unit})"
