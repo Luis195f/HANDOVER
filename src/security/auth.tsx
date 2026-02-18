@@ -387,7 +387,7 @@ async function performAuth0Login(options: {
       user: {
         id: 'nurse001',
         name: 'Luis Enfermero',
-        roles: ['admin'],
+        roles: ['nurse'],
         units: ['UCI'],
       },
       accessToken: 'local-dev-token',
@@ -489,7 +489,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: ["admin"],
+      roles: ["nurse"],
       units: ['UCI', 'Pediatría'],
       mode: 'demo',
     };

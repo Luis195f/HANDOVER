@@ -54,6 +54,7 @@ function CapabilityGuard(props: {
   if (isDemo) return <>{children}</>;
   if (!capabilities) return <UnauthorizedScreen />;
 
+
   const ok = canAccess(routeName, capabilities);
   return ok ? <>{children}</> : <UnauthorizedScreen />;
 }
@@ -154,19 +155,27 @@ function AuthGate() {
   }
 
   // ✅ Demo override
-  const isDemo = session?.mode === 'demo';
+const isDemo = session?.mode === 'demo';
 
-  // 2) ✅ Guard global temprano (mantiene tu intención original)
-  const allowedAppEntry = isDemo || Boolean(
-    capabilities && Object.values(capabilities.permissions).some((value) => value),
+// 2) ✅ Guard global temprano PERO sin race: espera capabilities
+if (!isDemo && !capabilities) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator size="large" />
+    </View>
   );
-  if (!allowedAppEntry) {
-    return <UnauthorizedScreen />;
-  }
+}
+
+const allowedAppEntry =
+  isDemo || Boolean(Object.values((capabilities ?? { permissions: {} as any }).permissions).some(Boolean));
+
+if (!allowedAppEntry) {
+  return <UnauthorizedScreen />;
+}
 
   // ✅ flags de features (sin romper tu lógica)
   // 🔧 Incluimos admin para que no quede bloqueado post-onboarding.
-  const canSubmitHandover = isDemo || Boolean(capabilities?.permissions.canWriteHandover);
+  const canSubmitHandover = Boolean(capabilities?.permissions.canWriteHandover);
   const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover
     ? 'PatientList'
     : (capabilities?.permissions.canViewAudit ? 'AuditLog' : 'Unauthorized');

@@ -102,14 +102,16 @@ async function hydrateCapabilitiesCache(): Promise<CapabilitiesCacheEntry | null
 export function getDemoCapabilities(userSub = 'demo-user'): Capabilities {
   return {
     userSub,
-    roles: ['admin'],
-    scopes: ['handover:write', 'audit:read', 'audit:write', 'fhir:transaction'],
+    roles: ['nurse'],
+    scopes: ['handover:write', 'fhir:transaction'],
     permissions: {
       canWriteHandover: true,
-      canSignHandover: true,
-      canViewAudit: true,
-      canSendAuditEvents: true,
-      isAdmin: true,
+      // ✅ Nurse NO firma entregas (reservado a supervisor/admin)
+      canSignHandover: false,
+      // ✅ si quieres que demo vea auditoría, déjalo true; si no, pon false
+      canViewAudit: false,
+      canSendAuditEvents: false,
+      isAdmin: false,
     },
     fhir: {
       version: 'R4',

@@ -1,3 +1,4 @@
+// app.config.ts (o app.config.js)
 require('dotenv/config');
 
 module.exports = ({ config }) => ({
@@ -59,6 +60,7 @@ module.exports = ({ config }) => ({
       backgroundColor: '#ffffff',
     },
 
+    // ✅ Incluye RECORD_AUDIO (lo que querías del snippet)
     permissions: [
       'android.permission.CAMERA',
       'android.permission.RECORD_AUDIO',
@@ -69,7 +71,6 @@ module.exports = ({ config }) => ({
     versionCode: 1,
     edgeToEdgeEnabled: true,
 
-    // Deep links (Auth + Dev Client) — soporta host y path
     intentFilters: [
       // PROD handover-pro://redirect  (host)
       {
@@ -146,8 +147,13 @@ module.exports = ({ config }) => ({
     bundleIdentifier: 'com.handover.app',
     supportsTablet: true,
     infoPlist: {
+      ...(config.ios?.infoPlist ?? {}),
+
       NSCameraUsageDescription: 'Se requiere la cámara para escanear códigos QR en Handover.',
+
+      // ✅ Lo del snippet + tu texto (dejamos el más completo)
       NSMicrophoneUsageDescription: 'Grabación de notas de audio del turno.',
+
       NSUserTrackingUsageDescription: 'Se usa para mejorar la experiencia del turno.',
     },
     buildNumber: '1.0.0',
@@ -191,7 +197,6 @@ module.exports = ({ config }) => ({
     checkAutomatically: 'ON_LOAD',
   },
 });
-
 
 
 
