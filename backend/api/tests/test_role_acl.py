@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from backend.api.models import DemoPatient
+from backend.api.models import DemoPatient, Patient
 from backend.security.auth import Auth0User
 
 
@@ -233,3 +233,83 @@ class RoleAclTests(TestCase):
         self.assertGreaterEqual(payload.get("total", 0), 1)
         resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
         self.assertIn("demo-pat-999", [resource.get("id") for resource in resources])
+
+    def test_patients_endpoint_returns_local_db_patients_first(self):
+        Patient.objects.create(
+            first_name="Ana",
+            last_name="Diaz",
+            identifier="pat-local-1",
+            unit="icu-a",
+            service="critical-care",
+            room="A-101",
+            active=True,
+        )
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-local",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+            }
+        )
+        url = reverse("patients")
+
+        with patch("backend.api.views.httpx.get", autospec=True) as mock_get:
+            response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("resourceType"), "Bundle")
+        self.assertEqual(payload.get("total"), 1)
+        resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
+        self.assertIn("pat-local-1", [resource.get("identifier") for resource in resources])
+        mock_get.assert_not_called()
+
+    def test_patients_endpoint_filters_by_unit_query_param(self):
+        Patient.objects.create(
+            first_name="Ana",
+            last_name="Diaz",
+            identifier="pat-local-icu",
+            unit="icu-a",
+            service="critical-care",
+            room="A-101",
+            active=True,
+        )
+        Patient.objects.create(
+            first_name="Luis",
+            last_name="Perez",
+            identifier="pat-local-ward",
+            unit="ward-b",
+            service="internal-medicine",
+            room="B-205",
+            active=True,
+        )
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-filter",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+            }
+        )
+        url = reverse("patients")
+
+        response = client.get(url, data={"unit": "icu-a"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("total"), 1)
+        resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
+        self.assertEqual(["pat-local-icu"], [resource.get("identifier") for resource in resources])
+
+    def test_patients_endpoint_requires_patients_read_scope(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-no-scope",
+                "roles": ["nurse"],
+                "permissions": ["handover:write"],
+            }
+        )
+        url = reverse("patients")
+
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 403)
