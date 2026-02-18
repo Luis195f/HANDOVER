@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -14,7 +15,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import Chip from "@/src/components/Chip";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
-import { PATIENTS_MOCK, type PatientListItem } from "@/src/data/mockPatients";
+import { type PatientListItem } from "@/src/data/mockPatients";
 import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { ensureUnitAccess, hasRole } from "@/src/security/acl";
@@ -33,6 +34,7 @@ import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
 import { apiGet } from "@/src/lib/api";
+import { createPatient } from "@/src/lib/patients";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
@@ -75,6 +77,24 @@ type PickerProps = {
   options: PickerOption[];
   onValueChange: (value: string) => void;
   disabled?: boolean;
+};
+
+type NewPatientFormState = {
+  firstName: string;
+  lastName: string;
+  nhc: string;
+  unit: string;
+  service: string;
+  room: string;
+};
+
+const NEW_PATIENT_INITIAL_STATE: NewPatientFormState = {
+  firstName: "",
+  lastName: "",
+  nhc: "",
+  unit: "",
+  service: "",
+  room: "",
 };
 
 function PickerSelect({ label, value, options, onValueChange, disabled }: PickerProps) {
@@ -150,6 +170,11 @@ export default function PatientList({ navigation }: Props) {
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriority, setSortByPriority] = useState(false);
   const [patientSyncStatuses, setPatientSyncStatuses] = useState<Record<string, SyncStatus>>({});
+  const [patients, setPatients] = useState<PatientListItem[]>([]);
+  const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+  const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
+  const [isSubmittingNewPatient, setIsSubmittingNewPatient] = useState(false);
+  const [newPatientForm, setNewPatientForm] = useState<NewPatientFormState>(NEW_PATIENT_INITIAL_STATE);
 
   const refreshSyncStatuses = useCallback(async () => {
     const queue = await listOfflineQueue();
@@ -167,6 +192,51 @@ export default function PatientList({ navigation }: Props) {
     setPatientSyncStatuses(nextStatuses);
   }, []);
 
+  const loadPatients = useCallback(async () => {
+    if (!selectedUnitId) {
+      setPatients([]);
+      return;
+    }
+
+    setIsLoadingPatients(true);
+    try {
+      const data = await apiGet(`/api/patients?unit=${encodeURIComponent(String(selectedUnitId ?? "all"))}`);
+      const items = Array.isArray(data) ? data : (data?.results ?? []);
+      setPatients(items.map((p: any) => ({
+        id: String(p.id ?? p.patientId ?? ""),
+        name: String(p.name ?? p.displayName ?? p.fullName ?? "Paciente"),
+        unitId: String(p.unitId ?? p.unit ?? selectedUnitId ?? ""),
+        bedLabel: p.bedLabel ?? p.bed ?? p.room ?? "",
+        vitals: p.vitals ?? {},
+        devices: p.devices ?? [],
+        risks: p.risks ?? {},
+      })));
+    } catch {
+      setPatients([]);
+    } finally {
+      setIsLoadingPatients(false);
+    }
+  }, [selectedUnitId]);
+
+  const resetNewPatientForm = useCallback(() => {
+    setNewPatientForm({
+      ...NEW_PATIENT_INITIAL_STATE,
+      unit: selectedUnitId !== ALL_UNITS_OPTION ? selectedUnitId : "",
+    });
+  }, [selectedUnitId]);
+
+  const openNewPatientForm = useCallback(() => {
+    resetNewPatientForm();
+    setIsNewPatientModalOpen(true);
+  }, [resetNewPatientForm]);
+
+  const closeNewPatientForm = useCallback(() => {
+    if (isSubmittingNewPatient) {
+      return;
+    }
+    setIsNewPatientModalOpen(false);
+  }, [isSubmittingNewPatient]);
+
   const onSpecialtyChange = useCallback((value: string) => {
     setSelectedSpecialtyId(value);
     setSelectedUnitId(ALL_UNITS_OPTION);
@@ -175,6 +245,37 @@ export default function PatientList({ navigation }: Props) {
   const onUnitChange = useCallback((value: string) => {
     setSelectedUnitId(value);
   }, []);
+
+  const handleNewPatientFormChange = useCallback((field: keyof NewPatientFormState, value: string) => {
+    setNewPatientForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleSubmitNewPatient = useCallback(async () => {
+    const payload = {
+      firstName: newPatientForm.firstName.trim(),
+      lastName: newPatientForm.lastName.trim(),
+      nhc: newPatientForm.nhc.trim(),
+      unit: newPatientForm.unit.trim(),
+      service: newPatientForm.service.trim(),
+      room: newPatientForm.room.trim(),
+    };
+
+    if (!payload.firstName || !payload.lastName || !payload.nhc || !payload.unit || !payload.service || !payload.room) {
+      Alert.alert("Campos obligatorios", "Completa todos los datos del paciente.");
+      return;
+    }
+
+    try {
+      setIsSubmittingNewPatient(true);
+      await createPatient(payload);
+      setIsNewPatientModalOpen(false);
+      await loadPatients();
+    } catch {
+      Alert.alert("No se pudo crear", "Revisa los datos e inténtalo de nuevo.");
+    } finally {
+      setIsSubmittingNewPatient(false);
+    }
+  }, [loadPatients, newPatientForm]);
 
   // BEGIN HANDOVER: ONBOARDING
   const handleShowOnboarding = useCallback(async () => {
@@ -209,6 +310,10 @@ export default function PatientList({ navigation }: Props) {
     const interval = setInterval(refreshSyncStatuses, 15_000);
     return () => clearInterval(interval);
   }, [refreshSyncStatuses]);
+
+  useEffect(() => {
+    void loadPatients();
+  }, [loadPatients]);
 
   const specialtyOptions = useMemo<PickerOption[]>(() => {
     const base: PickerOption[] = [
@@ -269,37 +374,6 @@ export default function PatientList({ navigation }: Props) {
       })),
     ];
   }, [availableUnits, i18n.language, onUnitChange, selectedUnitId]);
-
-  const [patients, setPatients] = useState<PatientListItem[]>([]);
-
-useEffect(() => {
-  if (!selectedUnitId) {
-    setPatients([]);
-    return;
-  }
-
-  let cancelled = false;
-
-  apiGet(`/api/patients?unit=${encodeURIComponent(String(selectedUnitId ?? 'all'))}`)
-    .then((data) => {
-      if (cancelled) return;
-
-      const items = Array.isArray(data) ? data : (data?.results ?? []);
-      setPatients(items.map((p: any) => ({
-        id: String(p.id ?? p.patientId ?? ''),
-        name: String(p.name ?? p.displayName ?? p.fullName ?? 'Paciente'),
-        bedLabel: p.bedLabel ?? p.bed ?? '',
-        vitals: p.vitals ?? {},
-        devices: p.devices ?? [],
-        risks: p.risks ?? {},
-      })));
-    })
-    .catch(() => {
-      if (!cancelled) setPatients([]);
-    });
-
-  return () => { cancelled = true; };
-}, [selectedUnitId]);
 
   const priorityInputs = useMemo<PriorityInput[]>(
     () =>
@@ -390,7 +464,7 @@ useEffect(() => {
         unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
       });
     },
-    [navigation, patientById, selectedUnitId]
+    [navigation, patientById, selectedUnitId, session]
   );
 
   const renderPriorityBadge = useCallback((level: PrioritizedPatient['level']) => {
@@ -414,8 +488,16 @@ useEffect(() => {
   }, [colors.danger, colors.success, colors.warning, i18n.language]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface }]}>
+    <View style={[styles.container, { backgroundColor: colors.surface }]}> 
       <View style={styles.filters}>
+        <Pressable
+          accessibilityRole="button"
+          style={[styles.newPatientButton, { backgroundColor: colors.primary }]}
+          onPress={openNewPatientForm}
+          testID="new-patient-button"
+        >
+          <Text style={styles.newPatientButtonText}>+ Nuevo paciente</Text>
+        </Pressable>
         <PickerSelect
           label={t("patientList.specialtyLabel")}
           value={selectedSpecialtyId}
@@ -429,28 +511,40 @@ useEffect(() => {
           onValueChange={onUnitChange}
           disabled={availableUnits.length === 0 && selectedSpecialtyId !== ALL_SPECIALTIES_OPTION}
         />
+
         <View style={styles.chipSection}>
-          <Text style={[styles.chipLabel, { color: colors.text }]}>{t("patientList.specialtiesLabel")}</Text>
+          <Text style={styles.chipLabel}>{t("patientList.specialtyLabel")}</Text>
           <View style={styles.chipGroup}>
             {specialtyChips.map((chip) => (
-              <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
+              <FilterChip
+                key={chip.id}
+                label={chip.label}
+                selected={chip.selected}
+                onPress={chip.onPress}
+              />
             ))}
           </View>
         </View>
+
         <View style={styles.chipSection}>
-          <Text style={[styles.chipLabel, { color: colors.text }]}>{t("patientList.unitsLabel")}</Text>
+          <Text style={styles.chipLabel}>{t("patientList.unitLabel")}</Text>
           <View style={styles.chipGroup}>
             {unitChips.map((chip) => (
-              <FilterChip key={chip.id} label={chip.label} selected={chip.selected} onPress={chip.onPress} />
+              <FilterChip
+                key={chip.id}
+                label={chip.label}
+                selected={chip.selected}
+                onPress={chip.onPress}
+              />
             ))}
           </View>
         </View>
+
         <View style={styles.priorityToggle}>
-          <Text style={[styles.priorityToggleLabel, { color: colors.text }]}>
-            {t("patientList.sortByPriority")}
-          </Text>
+          <Text style={styles.priorityToggleLabel}>{t("patientList.sortByPriority")}</Text>
           <Switch value={sortByPriority} onValueChange={setSortByPriority} />
         </View>
+
         {canViewSupervisorDashboard ? (
           <Pressable
             accessibilityRole="button"
@@ -469,7 +563,11 @@ useEffect(() => {
         data={patientsForList}
         keyExtractor={(item) => item.patientId}
         contentContainerStyle={patients.length === 0 ? styles.emptyContainer : undefined}
-        ListEmptyComponent={<Text style={styles.emptyText}>{t("patientList.emptyList")}</Text>}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>
+            {isLoadingPatients ? "Cargando pacientes…" : t("patientList.emptyList")}
+          </Text>
+        }
         renderItem={({ item }) => {
           const basePatient = patientById.get(item.patientId);
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
@@ -487,10 +585,9 @@ useEffect(() => {
               testID={`patient-card-${item.patientId}`}
             >
               <Text style={[styles.patientName, { color: colors.text }]}>{item.displayName}</Text>
-              <Text style={[styles.patientMeta, { color: colors.muted }]}>
+              <Text style={[styles.patientMeta, { color: colors.muted }]}> 
                 {unit?.name ?? basePatient?.unitId ?? t("patientList.unknownUnitFallback")}
               </Text>
-              {/* BEGIN HANDOVER_OFFLINE */}
               <View style={styles.syncRow}>
                 <Text
                   style={[
@@ -515,13 +612,12 @@ useEffect(() => {
                     onPress={() => navigation.navigate("SyncCenter")}
                     style={styles.syncLink}
                   >
-                    <Text style={[styles.syncLinkText, { color: colors.info }]}>
+                    <Text style={[styles.syncLinkText, { color: colors.info }]}> 
                       {t("patientList.syncDetails")}
                     </Text>
                   </Pressable>
                 ) : null}
               </View>
-              {/* END HANDOVER_OFFLINE */}
               <View style={styles.priorityRow}>
                 {renderPriorityBadge(item.level)}
                 <Text style={styles.reasonText}>{item.reasonSummary}</Text>
@@ -529,12 +625,12 @@ useEffect(() => {
               {alerts.length > 0 ? (
                 <View style={styles.alertChipRow}>
                   {hasCriticalAlert ? (
-                    <View style={[styles.alertChip, { backgroundColor: "#FEE2E2", borderColor: colors.danger }]}>
+                    <View style={[styles.alertChip, { backgroundColor: "#FEE2E2", borderColor: colors.danger }]}> 
                       <Text style={[styles.alertChipText, { color: colors.danger }]}>{t("patientList.alertCritical")}</Text>
                     </View>
                   ) : null}
                   {hasWarningAlert ? (
-                    <View style={[styles.alertChip, { backgroundColor: colors.surface, borderColor: colors.warning }]}>
+                    <View style={[styles.alertChip, { backgroundColor: colors.surface, borderColor: colors.warning }]}> 
                       <Text style={[styles.alertChipText, { color: colors.warning }]}>{t("patientList.alertWarning")}</Text>
                     </View>
                   ) : null}
@@ -554,6 +650,70 @@ useEffect(() => {
           );
         }}
       />
+
+      <Modal visible={isNewPatientModalOpen} animationType="slide" transparent onRequestClose={closeNewPatientForm}>
+        <View style={styles.newPatientModalBackdrop}>
+          <View style={[styles.newPatientModalCard, { backgroundColor: colors.background }]}> 
+            <Text style={[styles.newPatientModalTitle, { color: colors.text }]}>Nuevo paciente</Text>
+            <TextInput
+              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
+              placeholder="Nombre"
+              value={newPatientForm.firstName}
+              onChangeText={(value) => handleNewPatientFormChange("firstName", value)}
+            />
+            <TextInput
+              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
+              placeholder="Apellidos"
+              value={newPatientForm.lastName}
+              onChangeText={(value) => handleNewPatientFormChange("lastName", value)}
+            />
+            <TextInput
+              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
+              placeholder="NHC"
+              value={newPatientForm.nhc}
+              onChangeText={(value) => handleNewPatientFormChange("nhc", value)}
+            />
+            <TextInput
+              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
+              placeholder="Unidad"
+              value={newPatientForm.unit}
+              onChangeText={(value) => handleNewPatientFormChange("unit", value)}
+            />
+            <TextInput
+              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
+              placeholder="Servicio"
+              value={newPatientForm.service}
+              onChangeText={(value) => handleNewPatientFormChange("service", value)}
+            />
+            <TextInput
+              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
+              placeholder="Habitación"
+              value={newPatientForm.room}
+              onChangeText={(value) => handleNewPatientFormChange("room", value)}
+            />
+            <View style={styles.newPatientActions}>
+              <Pressable
+                accessibilityRole="button"
+                style={[styles.newPatientCancelButton, { borderColor: colors.border }]}
+                onPress={closeNewPatientForm}
+                disabled={isSubmittingNewPatient}
+              >
+                <Text style={[styles.newPatientCancelButtonText, { color: colors.text }]}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={[styles.newPatientSubmitButton, { backgroundColor: colors.primary }]}
+                onPress={handleSubmitNewPatient}
+                disabled={isSubmittingNewPatient}
+              >
+                <Text style={styles.newPatientSubmitButtonText}>
+                  {isSubmittingNewPatient ? "Guardando..." : "Guardar"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -572,6 +732,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 12,
+  },
+  newPatientButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  newPatientButtonText: {
+    color: "#fff",
+    fontWeight: "700",
   },
   chipSection: {
     gap: 8,
@@ -679,7 +851,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: "#4b5563",
   },
-  // BEGIN HANDOVER_OFFLINE
   syncRow: {
     marginTop: 6,
     flexDirection: "row",
@@ -693,18 +864,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 12,
   },
-  syncBadgePending: {
-    backgroundColor: "#fbbf24",
-    color: "#1f2937",
-  },
-  syncBadgeError: {
-    backgroundColor: "#fca5a5",
-    color: "#7f1d1d",
-  },
-  syncBadgeSynced: {
-    backgroundColor: "#a7f3d0",
-    color: "#064e3b",
-  },
   syncLink: {
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -713,7 +872,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
-  // END HANDOVER_OFFLINE
   priorityRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -746,14 +904,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
-  alertChipCritical: {
-    backgroundColor: '#fee2e2',
-    borderColor: '#fca5a5',
-  },
-  alertChipWarning: {
-    backgroundColor: '#fef3c7',
-    borderColor: '#fcd34d',
-  },
   alertChipText: {
     fontWeight: '700',
     color: '#1f2937',
@@ -785,5 +935,53 @@ const styles = StyleSheet.create({
   handoverButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  newPatientModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  newPatientModalCard: {
+    borderRadius: 12,
+    padding: 16,
+    gap: 10,
+  },
+  newPatientModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  newPatientInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    minHeight: 44,
+  },
+  newPatientActions: {
+    marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  newPatientCancelButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  newPatientCancelButtonText: {
+    fontWeight: '600',
+  },
+  newPatientSubmitButton: {
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  newPatientSubmitButtonText: {
+    color: '#fff',
+    fontWeight: '700',
   },
 });
