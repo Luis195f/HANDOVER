@@ -76,4 +76,27 @@ describe('createPatient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toEqual(demoResponseBody);
   });
+
+  it('preserves network error details for non-ApiClientError failures', async () => {
+    const apiPostMock = vi.fn(async () => {
+      throw new Error('Network request failed');
+    });
+
+    vi.doMock('@/src/lib/api', async () => {
+      const actual = await vi.importActual<typeof import('@/src/lib/api')>('@/src/lib/api');
+      return {
+        ...actual,
+        apiPost: apiPostMock,
+      };
+    });
+
+    const { createPatient, CreatePatientError } = await import('@/src/lib/patients');
+
+    await expect(createPatient(payload)).rejects.toMatchObject({
+      status: 0,
+      details: expect.stringContaining('Network request failed'),
+    });
+
+    await expect(createPatient(payload)).rejects.toBeInstanceOf(CreatePatientError);
+  });
 });
