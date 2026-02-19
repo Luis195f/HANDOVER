@@ -3,11 +3,10 @@ import renderer, { act } from "react-test-renderer";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Mock de react-native "estable" para CI:
- * - Pressable y Text se convierten en host components ("RNPressable"/"RNText")
- *   para que react-test-renderer preserve props (accessibility*, style fn, onPress).
- * - StyleSheet.create devuelve el objeto tal cual (sin IDs numéricos).
- * - useColorScheme es controlable por test.
+ * Mock estable de react-native:
+ * - Pressable/Text como host components para preservar props y estilos.
+ * - StyleSheet.create identity.
+ * - useColorScheme controlable.
  */
 vi.mock("react-native", async () => {
   const actual: any = await vi.importActual("react-native");
@@ -30,6 +29,15 @@ vi.mock("react-native", async () => {
 
 import * as RN from "react-native";
 import Chip from "../Chip";
+
+// Helpers TS-safe (sin findByType con string)
+function findHost(node: renderer.ReactTestInstance, hostType: string) {
+  const all = node.findAll((n) => (n as any).type === hostType);
+  if (!all.length) {
+    throw new Error(`Host element "${hostType}" not found`);
+  }
+  return all[0];
+}
 
 describe("Chip", () => {
   let tree: renderer.ReactTestRenderer | null = null;
@@ -57,7 +65,7 @@ describe("Chip", () => {
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
 
-    expect(pressable.type).toBe("RNPressable");
+    expect((pressable as any).type).toBe("RNPressable");
     expect(pressable.props.accessibilityRole).toBe("button");
     expect(pressable.props.accessibilityLabel).toBe("UCI Adulto");
     expect(pressable.props.accessibilityState).toEqual({ selected: false, disabled: undefined });
@@ -68,18 +76,13 @@ describe("Chip", () => {
     const pressedStyles = styleFn({ pressed: true });
     const notPressedStyles = styleFn({ pressed: false });
 
-    expect(Array.isArray(pressedStyles)).toBe(true);
-    expect(Array.isArray(notPressedStyles)).toBe(true);
-
-    // styles[0] = styles.base (de StyleSheet.create)
-    // styles[1] = objeto dinámico (bg/border/opacity)
     expect(pressedStyles[1].opacity).toBe(0.9);
     expect(notPressedStyles[1].opacity).toBe(1);
 
     expect(notPressedStyles[1].backgroundColor).toBe("#E5E7EB"); // light.bg
     expect(notPressedStyles[1].borderColor).toBe("#CBD5E1"); // light.border
 
-    const text = tree!.root.findByType("RNText");
+    const text = findHost(tree!.root, "RNText");
     const textStyles = text.props.style as any[];
     expect(textStyles[1].color).toBe("#111827"); // light.text
     expect(text.props.children).toBe("UCI Adulto");
@@ -100,7 +103,7 @@ describe("Chip", () => {
     expect(styles[1].backgroundColor).toBe("#1D4ED8"); // dark.bgSelected
     expect(styles[1].borderColor).toBe("#475569"); // dark.border
 
-    const text = tree!.root.findByType("RNText");
+    const text = findHost(tree!.root, "RNText");
     const textStyles = text.props.style as any[];
     expect(textStyles[1].color).toBe("#FFFFFF"); // selected => textSelected
     expect(text.props.children).toBe("Neuro UCI");
@@ -115,8 +118,6 @@ describe("Chip", () => {
     });
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
-
-    // En nuestro Chip: onPress se pasa directo si disabled no está activo
     expect(typeof pressable.props.onPress).toBe("function");
 
     act(() => {
@@ -126,7 +127,7 @@ describe("Chip", () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it("cuando disabled=true NO llama onPress aunque se provea callback", () => {
+  it("cuando disabled=true NO expone onPress", () => {
     (RN.useColorScheme as unknown as ReturnType<typeof vi.fn>).mockReturnValue("light");
     const onPress = vi.fn();
 
@@ -138,11 +139,9 @@ describe("Chip", () => {
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
 
-    // Lo importante (estable): el handler efectivo debe ser undefined
     expect(pressable.props.accessibilityState).toEqual({ selected: false, disabled: true });
     expect(pressable.props.onPress).toBeUndefined();
 
-    // Extra defensa: aunque “forzáramos” algo raro, no debe llamarse
     act(() => {
       pressable.props.onPress?.();
     });
@@ -164,16 +163,13 @@ describe("Chip", () => {
     });
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
+
     const styleFn = pressable.props.style as (s: { pressed: boolean }) => any[];
     const styles = styleFn({ pressed: false });
-
-    // override va como último elemento (style)
     expect(styles[2]).toEqual({ marginRight: 99 });
 
-    const text = tree!.root.findByType("RNText");
+    const text = findHost(tree!.root, "RNText");
     const textStyles = text.props.style as any[];
-
-    // override va como último elemento (textStyle)
     expect(textStyles[2]).toEqual({ fontSize: 20 });
   });
 });
