@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ComponentType } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   Alert,
   FlatList,
@@ -175,6 +175,7 @@ export default function PatientList({ navigation }: Props) {
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [isSubmittingNewPatient, setIsSubmittingNewPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState<NewPatientFormState>(NEW_PATIENT_INITIAL_STATE);
+  const loadPatientsRequestRef = useRef(0);
 
   const refreshSyncStatuses = useCallback(async () => {
     const queue = await listOfflineQueue();
@@ -198,25 +199,37 @@ export default function PatientList({ navigation }: Props) {
       return;
     }
 
+    const requestId = ++loadPatientsRequestRef.current;
     setIsLoadingPatients(true);
     try {
-      const data = await apiGet(`/api/patients?unit=${encodeURIComponent(String(selectedUnitId ?? "all"))}`);
-      const items = Array.isArray(data) ? data : (data?.results ?? []);
+      const path = selectedUnitId === ALL_UNITS_OPTION
+        ? '/api/patients'
+        : `/api/patients?unit=${encodeURIComponent(String(selectedUnitId))}`;
+      const data = await apiGet(path);
+      const items = Array.isArray(data) ? data : (data?.results ?? data?.entry?.map((entry: any) => entry?.resource) ?? []);
+      if (requestId !== loadPatientsRequestRef.current) {
+        return;
+      }
       setPatients(items.map((p: any) => ({
         id: String(p.id ?? p.patientId ?? ""),
-        name: String(p.name ?? p.displayName ?? p.fullName ?? "Paciente"),
-        unitId: String(p.unitId ?? p.unit ?? selectedUnitId ?? ""),
+        name: String(p.name ?? p.displayName ?? p.fullName ?? [p.first_name, p.last_name].filter(Boolean).join(' ') ?? "Paciente"),
+        unitId: String(p.unitId ?? p.unit_id ?? p.unit ?? (selectedUnitId !== ALL_UNITS_OPTION ? selectedUnitId : "") ?? ""),
         bedLabel: p.bedLabel ?? p.bed ?? p.room ?? "",
         vitals: p.vitals ?? {},
         devices: p.devices ?? [],
         risks: p.risks ?? {},
       })));
     } catch {
+      if (requestId !== loadPatientsRequestRef.current) {
+        return;
+      }
       setPatients([]);
     } finally {
-      setIsLoadingPatients(false);
+      if (requestId === loadPatientsRequestRef.current) {
+        setIsLoadingPatients(false);
+      }
     }
-  }, [selectedUnitId]);
+  }, [selectedUnitId, selectedSpecialtyId]);
 
   const resetNewPatientForm = useCallback(() => {
     setNewPatientForm({
@@ -270,8 +283,12 @@ export default function PatientList({ navigation }: Props) {
       await createPatient(payload);
       setIsNewPatientModalOpen(false);
       await loadPatients();
-    } catch {
-      Alert.alert("No se pudo crear", "Revisa los datos e inténtalo de nuevo.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Revisa los datos e inténtalo de nuevo.";
+      const description = __DEV__
+        ? `No se pudo crear el paciente. ${message}`
+        : "Revisa los datos e inténtalo de nuevo.";
+      Alert.alert("No se pudo crear", description);
     } finally {
       setIsSubmittingNewPatient(false);
     }
@@ -313,6 +330,9 @@ export default function PatientList({ navigation }: Props) {
 
   useEffect(() => {
     void loadPatients();
+    return () => {
+      loadPatientsRequestRef.current += 1;
+    };
   }, [loadPatients]);
 
   const specialtyOptions = useMemo<PickerOption[]>(() => {
@@ -513,7 +533,7 @@ export default function PatientList({ navigation }: Props) {
         />
 
         <View style={styles.chipSection}>
-          <Text style={styles.chipLabel}>{t("patientList.specialtyLabel")}</Text>
+          <Text style={[styles.chipLabel, { color: colors.text }]}>{t("patientList.specialtyLabel")}</Text>
           <View style={styles.chipGroup}>
             {specialtyChips.map((chip) => (
               <FilterChip
@@ -527,7 +547,7 @@ export default function PatientList({ navigation }: Props) {
         </View>
 
         <View style={styles.chipSection}>
-          <Text style={styles.chipLabel}>{t("patientList.unitLabel")}</Text>
+          <Text style={[styles.chipLabel, { color: colors.text }]}>{t("patientList.unitLabel")}</Text>
           <View style={styles.chipGroup}>
             {unitChips.map((chip) => (
               <FilterChip
@@ -640,7 +660,7 @@ export default function PatientList({ navigation }: Props) {
                 style={[styles.handoverButton, { backgroundColor: colors.info }]}
                 onPress={(event) => {
                   event.stopPropagation();
-                  navigation.navigate('HandoverForm', { patientId: item.patientId });
+                  onOpenPatient(item.patientId);
                 }}
                 accessibilityRole="button"
               >
@@ -673,11 +693,11 @@ export default function PatientList({ navigation }: Props) {
               value={newPatientForm.nhc}
               onChangeText={(value) => handleNewPatientFormChange("nhc", value)}
             />
-            <TextInput
-              style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
-              placeholder="Unidad"
+            <PickerSelect
+              label="Unidad"
               value={newPatientForm.unit}
-              onChangeText={(value) => handleNewPatientFormChange("unit", value)}
+              options={availableUnits.map((unit) => ({ label: unit.name, value: unit.id }))}
+              onValueChange={(value) => handleNewPatientFormChange("unit", value)}
             />
             <TextInput
               style={[styles.newPatientInput, { borderColor: colors.border, color: colors.text }]}
