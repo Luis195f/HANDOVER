@@ -2,70 +2,34 @@ import React from "react";
 import renderer, { act } from "react-test-renderer";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock parcial de react-native para controlar useColorScheme sin romper el resto
+/**
+ * Mock de react-native "estable" para CI:
+ * - Pressable y Text se convierten en host components ("RNPressable"/"RNText")
+ *   para que react-test-renderer preserve props (accessibility*, style fn, onPress).
+ * - StyleSheet.create devuelve el objeto tal cual (sin IDs numéricos).
+ * - useColorScheme es controlable por test.
+ */
 vi.mock("react-native", async () => {
   const actual: any = await vi.importActual("react-native");
+
+  const Pressable = (props: any) =>
+    React.createElement("RNPressable", props, props.children);
+  const Text = (props: any) => React.createElement("RNText", props, props.children);
+
   return {
     ...actual,
+    Pressable,
+    Text,
+    StyleSheet: {
+      ...(actual.StyleSheet ?? {}),
+      create: (styles: any) => styles,
+    },
     useColorScheme: vi.fn(),
   };
 });
 
 import * as RN from "react-native";
 import Chip from "../Chip";
-
-/**
- * Helpers para que los tests pasen tanto en RN "real" como en entornos web/mocks,
- * donde Pressable puede:
- * - no exponer accessibilityRole/accessibilityState
- * - normalizar style (función vs array/objeto)
- */
-function getRole(node: any) {
-  return node?.props?.accessibilityRole ?? node?.props?.role;
-}
-
-function getLabel(node: any) {
-  return node?.props?.accessibilityLabel ?? node?.props?.["aria-label"];
-}
-
-function getA11yState(node: any) {
-  // RN nativo: accessibilityState
-  // RN web/mocks: puede no existir, o expresar pressed/disabled vía ARIA
-  return (
-    node?.props?.accessibilityState ??
-    (typeof node?.props?.["aria-pressed"] !== "undefined"
-      ? { selected: !!node.props["aria-pressed"] }
-      : undefined) ??
-    undefined
-  );
-}
-
-function resolveStyleProp(styleProp: any, pressed: boolean) {
-  const resolved = typeof styleProp === "function" ? styleProp({ pressed }) : styleProp;
-  return Array.isArray(resolved) ? resolved : [resolved];
-}
-
-function flattenStyle(styleArr: any[]) {
-  // Flatten suave: mezcla sólo objetos (ignora números/registries)
-  return styleArr.reduce((acc, item) => {
-    if (!item) return acc;
-    if (typeof item === "object") return { ...acc, ...item };
-    return acc;
-  }, {} as Record<string, any>);
-}
-
-function getPressableStyles(pressable: any, pressed: boolean) {
-  const arr = resolveStyleProp(pressable.props.style, pressed);
-  return { arr, flat: flattenStyle(arr) };
-}
-
-function getTextColorFromRenderedTree(tree: renderer.ReactTestRenderer) {
-  const text = tree.root.findByType(RN.Text);
-  const styleProp = text.props.style;
-  const arr = Array.isArray(styleProp) ? styleProp : [styleProp];
-  const flat = flattenStyle(arr);
-  return { arr, flat, node: text };
-}
 
 describe("Chip", () => {
   let tree: renderer.ReactTestRenderer | null = null;
@@ -93,27 +57,32 @@ describe("Chip", () => {
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
 
-    // A11y: puede variar según runtime; valida lo que exista sin romper
-    expect(getRole(pressable)).toBe("button");
-    expect(getLabel(pressable)).toBe("UCI Adulto");
+    expect(pressable.type).toBe("RNPressable");
+    expect(pressable.props.accessibilityRole).toBe("button");
+    expect(pressable.props.accessibilityLabel).toBe("UCI Adulto");
+    expect(pressable.props.accessibilityState).toEqual({ selected: false, disabled: undefined });
 
-    const a11y = getA11yState(pressable);
-    if (a11y && typeof a11y === "object") {
-      // RN nativo: suele incluir selected/disabled
-      expect(a11y.selected ?? false).toBe(false);
-    }
+    const styleFn = pressable.props.style as (s: { pressed: boolean }) => any[];
+    expect(typeof styleFn).toBe("function");
 
-    const pressed = getPressableStyles(pressable, true).flat;
-    const notPressed = getPressableStyles(pressable, false).flat;
+    const pressedStyles = styleFn({ pressed: true });
+    const notPressedStyles = styleFn({ pressed: false });
 
-    expect(pressed.opacity).toBe(0.9);
-    expect(notPressed.opacity).toBe(1);
+    expect(Array.isArray(pressedStyles)).toBe(true);
+    expect(Array.isArray(notPressedStyles)).toBe(true);
 
-    expect(notPressed.backgroundColor).toBe("#E5E7EB"); // light.bg
-    expect(notPressed.borderColor).toBe("#CBD5E1"); // light.border
+    // styles[0] = styles.base (de StyleSheet.create)
+    // styles[1] = objeto dinámico (bg/border/opacity)
+    expect(pressedStyles[1].opacity).toBe(0.9);
+    expect(notPressedStyles[1].opacity).toBe(1);
 
-    const { flat: textFlat } = getTextColorFromRenderedTree(tree!);
-    expect(textFlat.color).toBe("#111827"); // light.text
+    expect(notPressedStyles[1].backgroundColor).toBe("#E5E7EB"); // light.bg
+    expect(notPressedStyles[1].borderColor).toBe("#CBD5E1"); // light.border
+
+    const text = tree!.root.findByType("RNText");
+    const textStyles = text.props.style as any[];
+    expect(textStyles[1].color).toBe("#111827"); // light.text
+    expect(text.props.children).toBe("UCI Adulto");
   });
 
   it("renderiza en modo dark y aplica estilos seleccionados", () => {
@@ -125,12 +94,16 @@ describe("Chip", () => {
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
 
-    const notPressed = getPressableStyles(pressable, false).flat;
-    expect(notPressed.backgroundColor).toBe("#1D4ED8"); // dark.bgSelected
-    expect(notPressed.borderColor).toBe("#475569"); // dark.border
+    const styleFn = pressable.props.style as (s: { pressed: boolean }) => any[];
+    const styles = styleFn({ pressed: false });
 
-    const { flat: textFlat } = getTextColorFromRenderedTree(tree!);
-    expect(textFlat.color).toBe("#FFFFFF"); // selected => textSelected
+    expect(styles[1].backgroundColor).toBe("#1D4ED8"); // dark.bgSelected
+    expect(styles[1].borderColor).toBe("#475569"); // dark.border
+
+    const text = tree!.root.findByType("RNText");
+    const textStyles = text.props.style as any[];
+    expect(textStyles[1].color).toBe("#FFFFFF"); // selected => textSelected
+    expect(text.props.children).toBe("Neuro UCI");
   });
 
   it("llama onPress cuando no está disabled", () => {
@@ -143,31 +116,37 @@ describe("Chip", () => {
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
 
+    // En nuestro Chip: onPress se pasa directo si disabled no está activo
+    expect(typeof pressable.props.onPress).toBe("function");
+
     act(() => {
-      pressable.props.onPress?.();
+      pressable.props.onPress();
     });
 
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it("no expone onPress cuando disabled=true", () => {
+  it("cuando disabled=true NO llama onPress aunque se provea callback", () => {
     (RN.useColorScheme as unknown as ReturnType<typeof vi.fn>).mockReturnValue("light");
     const onPress = vi.fn();
 
     act(() => {
-      tree = renderer.create(<Chip label="Urgencias" onPress={onPress} disabled testID="chip" />);
+      tree = renderer.create(
+        <Chip label="Urgencias" onPress={onPress} disabled testID="chip" />
+      );
     });
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
 
-    // Efecto observable: no hay handler
+    // Lo importante (estable): el handler efectivo debe ser undefined
+    expect(pressable.props.accessibilityState).toEqual({ selected: false, disabled: true });
     expect(pressable.props.onPress).toBeUndefined();
 
-    // Si accessibilityState existe, lo validamos; si no, no rompemos el test
-    const a11y = getA11yState(pressable);
-    if (a11y && typeof a11y === "object") {
-      expect(a11y.disabled ?? true).toBe(true);
-    }
+    // Extra defensa: aunque “forzáramos” algo raro, no debe llamarse
+    act(() => {
+      pressable.props.onPress?.();
+    });
+    expect(onPress).toHaveBeenCalledTimes(0);
   });
 
   it("respeta style y textStyle overrides", () => {
@@ -185,15 +164,16 @@ describe("Chip", () => {
     });
 
     const pressable = tree!.root.findByProps({ testID: "chip" });
+    const styleFn = pressable.props.style as (s: { pressed: boolean }) => any[];
+    const styles = styleFn({ pressed: false });
 
-    // Verifica que el override esté presente en el array de estilos (sin asumir índices)
-    const { arr: styleArr } = getPressableStyles(pressable, false);
-    expect(styleArr).toEqual(expect.arrayContaining([expect.objectContaining({ marginRight: 99 })]));
+    // override va como último elemento (style)
+    expect(styles[2]).toEqual({ marginRight: 99 });
 
-    // Text override (sin asumir índices)
-    const text = tree!.root.findByType(RN.Text);
-    const textStyleProp = text.props.style;
-    const textArr = Array.isArray(textStyleProp) ? textStyleProp : [textStyleProp];
-    expect(textArr).toEqual(expect.arrayContaining([expect.objectContaining({ fontSize: 20 })]));
+    const text = tree!.root.findByType("RNText");
+    const textStyles = text.props.style as any[];
+
+    // override va como último elemento (textStyle)
+    expect(textStyles[2]).toEqual({ fontSize: 20 });
   });
 });
