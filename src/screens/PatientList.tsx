@@ -507,8 +507,8 @@ export default function PatientList({ navigation }: Props) {
     );
   }, [colors.danger, colors.success, colors.warning, i18n.language]);
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.surface }]}> 
+  const listHeader = useMemo(
+    () => (
       <View style={styles.filters}>
         <Pressable
           accessibilityRole="button"
@@ -578,15 +578,40 @@ export default function PatientList({ navigation }: Props) {
           </Pressable>
         ) : null}
       </View>
+    ),
+    [
+      availableUnits.length,
+      canViewSupervisorDashboard,
+      colors.primary,
+      colors.text,
+      navigation,
+      onSpecialtyChange,
+      onUnitChange,
+      openNewPatientForm,
+      selectedSpecialtyId,
+      selectedUnitId,
+      sortByPriority,
+      specialtyChips,
+      specialtyOptions,
+      t,
+      unitChips,
+      unitOptions,
+    ]
+  );
 
+  return (
+    <View style={[styles.container, { backgroundColor: colors.surface }]}> 
       <FlatList
         data={patientsForList}
         keyExtractor={(item) => item.patientId}
-        contentContainerStyle={patients.length === 0 ? styles.emptyContainer : undefined}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            {isLoadingPatients ? "Cargando pacientes…" : t("patientList.emptyList")}
-          </Text>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>
+              {isLoadingPatients ? "Cargando pacientes…" : t("patientList.emptyList")}
+            </Text>
+          </View>
         }
         renderItem={({ item }) => {
           const basePatient = patientById.get(item.patientId);
@@ -928,8 +953,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1f2937',
   },
+  listContainer: {
+    paddingBottom: 32,
+  },
   emptyContainer: {
-    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 32,

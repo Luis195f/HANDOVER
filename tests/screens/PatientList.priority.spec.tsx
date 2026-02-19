@@ -123,6 +123,22 @@ vi.mock('@/src/lib/otel', () => ({
 describe('PatientList – prioridad clínica', () => {
   const navigation: any = { navigate: vi.fn(), setOptions: vi.fn() };
 
+  const findSwitchInElement = (node: any): any | null => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.type === Switch) return node;
+
+    const children = node.props?.children;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        const found = findSwitchInElement(child);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    return findSwitchInElement(children);
+  };
+
   it('ordena por prioridad clínica y muestra el resumen', async () => {
     let renderer: ReturnType<typeof create>;
 
@@ -162,7 +178,10 @@ describe('PatientList – prioridad clínica', () => {
     expect(initialData[0].patientId).toBe('pat-002');
 
     // 4) Activar prioridad clínica + esperar re-render
-    const toggle = renderer!.root.findByType(Switch);
+    const listAfterLoad = renderer!.root.findByType(FlatList);
+    const header = listAfterLoad.props.ListHeaderComponent;
+    const toggle = findSwitchInElement(header);
+    expect(toggle).toBeTruthy();
     await act(async () => {
       toggle.props.onValueChange(true);
       await flush();
@@ -179,4 +198,3 @@ describe('PatientList – prioridad clínica', () => {
     expect(sorted[0].reasonSummary).toContain('NEWS2');
   });
 });
-

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import pytest
+from django.db import OperationalError
 from rest_framework.test import APIClient
 
 from backend.api.models import Patient
@@ -154,3 +155,53 @@ def test_get_patients_serializes_optional_fhir_fields_when_present():
     assert entry["external_reference"] == "ehr:beta:555"
     assert entry["fhir_sync_enabled"] is True
     assert entry["synced_to_fhir"] is True
+
+
+@pytest.mark.django_db
+def test_get_patients_returns_503_when_local_registry_table_missing(monkeypatch):
+    client = APIClient()
+    client.force_authenticate(
+        user=DummyUser(claims={"permissions": ["patients:read"]}),
+        token={"permissions": ["patients:read"]},
+    )
+
+    def raise_missing_table(*args, **kwargs):
+        raise OperationalError("no such table: api_patient")
+
+    monkeypatch.setattr(Patient.objects, "all", raise_missing_table)
+
+    response = client.get("/api/patients/")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "local_registry_not_ready"
+
+
+@pytest.mark.django_db
+def test_post_patients_returns_503_when_local_registry_table_missing(monkeypatch):
+    client = APIClient()
+    client.force_authenticate(
+        user=DummyUser(claims={"permissions": ["patients:write", "patients:read"]}),
+        token={"permissions": ["patients:write", "patients:read"]},
+    )
+
+    payload = {
+        "first_name": "Ana",
+        "last_name": "García",
+        "identifier": "NHC777",
+        "unit": "icu-a",
+        "service": "cardio",
+        "room": "101",
+        "active": True,
+    }
+
+    def raise_missing_table(*args, **kwargs):
+        raise OperationalError("no such table: api_patient")
+
+    monkeypatch.setattr(Patient.objects, "create", raise_missing_table)
+
+    response = client.post("/api/patients/", payload, format="json")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "local_registry_not_ready"
