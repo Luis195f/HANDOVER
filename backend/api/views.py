@@ -11,7 +11,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, OperationalError
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied
@@ -98,6 +98,22 @@ class AuthenticatedAPIView(APIView):
 AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
+
+
+
+
+def _local_registry_not_ready_response() -> Response:
+    return Response(
+        {
+            "detail": "Local registry DB not initialized. Run migrations.",
+            "code": "local_registry_not_ready",
+        },
+        status=503,
+    )
+
+
+def _is_missing_local_registry_table(error: OperationalError) -> bool:
+    return "no such table" in str(error).lower()
 
 
 def _build_demo_patient_bundle(*, patient_id: str | None = None) -> dict:
@@ -1006,22 +1022,27 @@ class PatientsView(AuthenticatedAPIView):
 
     def get(self, request: HttpRequest) -> Response:
         # 1) Prefer local patients if present (pilot autonomous mode)
-        queryset = LocalPatient.objects.all()
-        unit = request.query_params.get("unit")
-        if unit not in (None, "", "all"):
-            queryset = queryset.filter(unit=unit)
+        try:
+            queryset = LocalPatient.objects.all()
+            unit = request.query_params.get("unit")
+            if unit not in (None, "", "all"):
+                queryset = queryset.filter(unit=unit)
 
-        if queryset.exists():
-            entries = [{"resource": self._serialize_patient(p)} for p in queryset]
-            return Response(
-                {
-                    "resourceType": "Bundle",
-                    "type": "searchset",
-                    "total": len(entries),
-                    "entry": entries,
-                },
-                status=200,
-            )
+            if queryset.exists():
+                entries = [{"resource": self._serialize_patient(p)} for p in queryset]
+                return Response(
+                    {
+                        "resourceType": "Bundle",
+                        "type": "searchset",
+                        "total": len(entries),
+                        "entry": entries,
+                    },
+                    status=200,
+                )
+        except OperationalError as exc:
+            if _is_missing_local_registry_table(exc):
+                return _local_registry_not_ready_response()
+            raise
 
         # 2) If no local patients yet, try remote FHIR (legacy behavior)
         params = dict(request.query_params.items())
@@ -1052,6 +1073,10 @@ class PatientsView(AuthenticatedAPIView):
                 {"errors": {"identifier": ["Identifier already exists for this unit."]}},
                 status=400,
             )
+        except OperationalError as exc:
+            if _is_missing_local_registry_table(exc):
+                return _local_registry_not_ready_response()
+            raise
 
         return Response(self._serialize_patient(patient), status=201)
 
