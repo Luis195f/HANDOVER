@@ -1,5 +1,11 @@
 import { ApiClientError, apiPost } from '@/src/lib/api';
 
+const CREATE_PATIENT_ERROR_DETAILS_MAX_LENGTH = 400;
+
+function toBoundedDetails(value: unknown) {
+  return String(value).slice(0, CREATE_PATIENT_ERROR_DETAILS_MAX_LENGTH);
+}
+
 export type CreatePatientPayload = {
   firstName: string;
   lastName: string;
@@ -34,9 +40,16 @@ export async function createPatient(payload: CreatePatientPayload) {
     });
   } catch (error) {
     if (error instanceof ApiClientError) {
-      throw new CreatePatientError(error.status, error.details || error.message);
+      throw new CreatePatientError(
+        error.status,
+        toBoundedDetails(error.details || error.message),
+      );
     }
 
-    throw new CreatePatientError(0, 'Unknown error');
+    if (error instanceof Error) {
+      throw new CreatePatientError(0, toBoundedDetails(error.message));
+    }
+
+    throw new CreatePatientError(0, toBoundedDetails(error));
   }
 }
