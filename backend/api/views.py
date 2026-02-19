@@ -1008,7 +1008,7 @@ class PatientsView(AuthenticatedAPIView):
         # 1) Prefer local patients if present (pilot autonomous mode)
         queryset = LocalPatient.objects.all()
         unit = request.query_params.get("unit")
-        if unit:
+        if unit not in (None, "", "all"):
             queryset = queryset.filter(unit=unit)
 
         if queryset.exists():

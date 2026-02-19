@@ -34,7 +34,14 @@ describe('createPatient', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/patients');
     expect(init.method).toBe('POST');
-    expect(init.body).toBe(JSON.stringify(payload));
+    expect(init.body).toBe(JSON.stringify({
+      first_name: payload.firstName,
+      last_name: payload.lastName,
+      identifier: payload.nhc,
+      unit: payload.unit,
+      service: payload.service,
+      room: payload.room,
+    }));
     expect(result).toEqual({ id: 'pat-999' });
   });
 });
