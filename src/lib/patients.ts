@@ -1,5 +1,4 @@
-import { API_BASE_URL } from '@/src/config/env';
-import { getToken } from '@/src/security/tokenSupplier';
+import { ApiClientError, apiPost } from '@/src/lib/api';
 
 export type CreatePatientPayload = {
   firstName: string;
@@ -22,44 +21,22 @@ export class CreatePatientError extends Error {
 }
 
 export async function createPatient(payload: CreatePatientPayload) {
-  const token = await getToken('api');
-  const headers = new Headers({
-    'Content-Type': 'application/json',
-  });
-
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const response = await fetch(`${API_BASE_URL}/api/patients`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      first_name: payload.firstName,
-      last_name: payload.lastName,
-      identifier: payload.nhc,
-      unit: payload.unit,
-      service: payload.service,
-      room: payload.room,
-    }),
-  });
-
-  let parsedBody: unknown = null;
-  if (typeof (response as Response & { text?: () => Promise<string> }).text === 'function') {
-    const responseText = await response.text();
-    try {
-      parsedBody = responseText ? JSON.parse(responseText) : null;
-    } catch {
-      parsedBody = responseText;
+  try {
+    return await apiPost('/api/patients', {
+      body: JSON.stringify({
+        first_name: payload.firstName,
+        last_name: payload.lastName,
+        identifier: payload.nhc,
+        unit: payload.unit,
+        service: payload.service,
+        room: payload.room,
+      }),
+    });
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      throw new CreatePatientError(error.status, error.details || error.message);
     }
-  } else if (typeof (response as Response & { json?: () => Promise<unknown> }).json === 'function') {
-    parsedBody = await response.json();
-  }
 
-  if (!response.ok) {
-    const details = typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody);
-    throw new CreatePatientError(response.status, details || response.statusText);
+    throw new CreatePatientError(0, 'Unknown error');
   }
-
-  return parsedBody;
 }
