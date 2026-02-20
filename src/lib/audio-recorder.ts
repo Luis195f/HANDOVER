@@ -10,6 +10,10 @@ export type AudioRecorderHook = {
 };
 
 const isE2E = process.env.EXPO_PUBLIC_E2E === "true";
+const STOP_URI_RETRIES = 10;
+const STOP_URI_RETRY_DELAY_MS = 50;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export const useAudioRecorderWithFallback = (options: RecordingOptions): AudioRecorderHook => {
   // ✅ Caso real: usamos el hook de expo, pero normalizamos stop() => uri
@@ -29,8 +33,14 @@ export const useAudioRecorderWithFallback = (options: RecordingOptions): AudioRe
 
     const stop = useCallback(async () => {
       await base.stop();
-      const latestUri = base.uri ?? uriRef.current;
-      return latestUri ?? undefined;
+      for (let attempt = 0; attempt < STOP_URI_RETRIES; attempt += 1) {
+        const latestUri = base.uri ?? uriRef.current;
+        if (latestUri) {
+          return latestUri;
+        }
+        await sleep(STOP_URI_RETRY_DELAY_MS);
+      }
+      return undefined;
     }, [base]);
 
     return {
