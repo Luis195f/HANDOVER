@@ -22,6 +22,19 @@ ASYNC_SUGGESTIONS_TIMEOUT = 90
 _client: Optional[OpenAI] = None
 
 
+def _env_flag_enabled(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_openai_enabled() -> bool:
+    ai_enabled = _env_flag_enabled("HANDOVER_AI_ENABLED", True)
+    openai_disabled = _env_flag_enabled("HANDOVER_OPENAI_DISABLED", False)
+    return ai_enabled and not openai_disabled
+
+
 def get_client() -> OpenAI:
     """
     Lazy init: evita crear el cliente OpenAI al importar el módulo (rompe tests si no hay OPENAI_API_KEY).
@@ -30,11 +43,18 @@ def get_client() -> OpenAI:
     if _client is not None:
         return _client
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    if not is_openai_enabled():
+        raise RuntimeError("OpenAI client is disabled by environment flags")
+
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
+    if api_key.lower() == "dummy":
+        raise RuntimeError("OPENAI_API_KEY uses a placeholder value")
 
-    _client = OpenAI(api_key=api_key)
+    base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
+
+    _client = OpenAI(api_key=api_key, base_url=base_url)
     return _client
 
 

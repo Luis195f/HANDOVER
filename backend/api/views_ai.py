@@ -20,6 +20,7 @@ from backend.ai_client import (
     generate_intervention_suggestions,
     generate_sbar,
     transcribe_audio,
+    is_openai_enabled,
 )
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
@@ -175,6 +176,9 @@ class TranscribeView(AuthenticatedAPIView):
             return Response({"detail": "Missing audio file (expected multipart form-data with 'file')"}, status=400)
 
         language = (request.data.get("language") or "es").strip()
+
+        if not is_openai_enabled():
+            return Response({"detail": "Servicio de IA deshabilitado por configuración"}, status=503)
 
         validation_error = _validate_audio_upload(upload)
         if validation_error:
