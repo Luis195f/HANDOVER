@@ -102,3 +102,16 @@ def test_audio_to_fhir_accepts_safe_inference_and_keeps_existing_flow(monkeypatc
 
     assert response.status_code == 201
     assert response.json()["resourceType"] == "DocumentReference"
+
+
+def test_transcribe_returns_503_when_openai_disabled(monkeypatch, api_client):
+    import backend.api.views_ai as views_ai
+
+    _allow_authenticated_only(monkeypatch)
+    monkeypatch.setattr(views_ai, "is_openai_enabled", lambda: False, raising=True)
+
+    upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
+    response = api_client.post("/api/ai/transcribe", data={"file": upload}, format="multipart")
+
+    assert response.status_code == 503
+    assert "deshabilitado" in response.json()["detail"]
