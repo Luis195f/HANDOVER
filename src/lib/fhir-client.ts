@@ -719,50 +719,17 @@ export async function uploadSignedHandoverPdf(
   }
 
   let signed;
+  let signedAt = pdf.createdAt;
+  let attachmentSourceUri = pdf.uri;
+  let signatureExtension: Array<{
+    url: string;
+    extension: Array<{ url: string; valueString?: string; valueDateTime?: string }>;
+  }> = [];
   try {
     signed = await signPdf(pdf, session);
-  } catch (error) {
-    console.warn('EIDAS_SIGN_FAILED', { error });
-    throw error;
-  }
-
-  let attachmentData: string;
-  try {
-    attachmentData = await FileSystem.readAsStringAsync(signed.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-  } catch (error) {
-    console.warn('EIDAS_READ_SIGNED_PDF_FAILED', { error });
-    throw error;
-  }
-
-  const documentReference = {
-    resourceType: 'DocumentReference',
-    status: 'current',
-    type: {
-      text: 'Signed handover PDF',
-    },
-    subject: {
-      reference: `Patient/${ctx.patientId}`,
-    },
-    date: signed.signedAt,
-    author: [
-      {
-        display: session.displayName ?? session.userId,
-      },
-    ],
-    description: `Signed handover PDF for ${ctx.handoverId}`,
-    content: [
-      {
-        attachment: {
-          contentType: 'application/pdf',
-          data: attachmentData,
-          title: pdf.name,
-          creation: pdf.createdAt,
-        },
-      },
-    ],
-    extension: [
+    attachmentSourceUri = signed.uri;
+    signedAt = signed.signedAt;
+    signatureExtension = [
       {
         url: 'http://ihe.net/fhir/StructureDefinition/ihe-xds-signature',
         extension: [
@@ -774,7 +741,54 @@ export async function uploadSignedHandoverPdf(
           { url: 'certificateValidTo', valueDateTime: signed.certificateInfo.validTo },
         ],
       },
+    ];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === 'EIDAS_API_URL_MISSING') {
+      console.warn('EIDAS_SIGNATURE_SKIPPED', { reason: message });
+    } else {
+      console.warn('EIDAS_SIGN_FAILED', { error });
+      throw error;
+    }
+  }
+
+  let attachmentData: string;
+  try {
+    attachmentData = await FileSystem.readAsStringAsync(attachmentSourceUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } catch (error) {
+    console.warn('EIDAS_READ_SIGNED_PDF_FAILED', { error });
+    throw error;
+  }
+
+  const documentReference = {
+    resourceType: 'DocumentReference',
+    status: 'current',
+    type: {
+      text: signatureExtension.length > 0 ? 'Signed handover PDF' : 'Handover PDF',
+    },
+    subject: {
+      reference: `Patient/${ctx.patientId}`,
+    },
+    date: signedAt,
+    author: [
+      {
+        display: session.displayName ?? session.userId,
+      },
     ],
+    description: `${signatureExtension.length > 0 ? 'Signed handover PDF' : 'Handover PDF'} for ${ctx.handoverId}`,
+    content: [
+      {
+        attachment: {
+          contentType: 'application/pdf',
+          data: attachmentData,
+          title: pdf.name,
+          creation: pdf.createdAt,
+        },
+      },
+    ],
+    extension: signatureExtension,
   };
 
   const response = await fetchFHIR({

@@ -90,4 +90,23 @@ describe("uploadSignedHandoverPdf", () => {
       uploadSignedHandoverPdf(pdf, { patientId: "patient-1", handoverId: "handover-1" }),
     ).rejects.toThrow("HTTP 500");
   });
+
+  it("sube PDF sin firma cuando no hay configuración eIDAS", async () => {
+    (signPdf as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("EIDAS_API_URL_MISSING"));
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
+      ok: true,
+      status: 201,
+      headers: new Headers({ "content-type": "application/fhir+json" }),
+      json: async () => ({}),
+    })) as any;
+    globalThis.fetch = fetchMock;
+
+    await uploadSignedHandoverPdf(pdf, { patientId: "patient-1", handoverId: "handover-1" });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    expect(body.type?.text).toBe("Handover PDF");
+    expect(body.extension).toEqual([]);
+  });
 });
