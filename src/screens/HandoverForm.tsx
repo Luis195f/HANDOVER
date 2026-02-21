@@ -121,6 +121,8 @@ import { HandoverFormActions } from './handover/HandoverFormActions';
 import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
+const isSignatureDisabled = () =>
+  (process.env.EXPO_PUBLIC_HANDOVER_SIGNATURE_DISABLED ?? process.env.HANDOVER_SIGNATURE_DISABLED) === 'true';
 
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
@@ -2022,7 +2024,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   const finalizeSubmission = async () => {
     form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
     const outgoing = form.getValues('signatures')?.outgoing;
-    if (!outgoing || !outgoing.imageBase64) {
+    if (!isSignatureDisabled() && (!outgoing || !outgoing.imageBase64)) {
       Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
       return;
     }

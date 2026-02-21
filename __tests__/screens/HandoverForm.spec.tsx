@@ -72,6 +72,8 @@ vi.mock('@/src/components/SignaturePad', () => ({
 }));
 
 describe('HandoverForm', () => {
+  const originalSignatureDisabled = process.env.HANDOVER_SIGNATURE_DISABLED;
+
   beforeEach(() => {
     buildHandoverBundleMock.mockReset();
     enqueueBundleMock.mockReset();
@@ -81,6 +83,11 @@ describe('HandoverForm', () => {
   });
 
   afterEach(() => {
+    if (originalSignatureDisabled === undefined) {
+      delete process.env.HANDOVER_SIGNATURE_DISABLED;
+    } else {
+      process.env.HANDOVER_SIGNATURE_DISABLED = originalSignatureDisabled;
+    }
     vi.restoreAllMocks();
   });
 
@@ -154,6 +161,29 @@ describe('HandoverForm', () => {
       );
     });
     expect(enqueueBundleMock).not.toHaveBeenCalled();
+  });
+
+
+  it('permite finalizar sin firma cuando HANDOVER_SIGNATURE_DISABLED=true', async () => {
+    process.env.HANDOVER_SIGNATURE_DISABLED = 'true';
+    buildHandoverBundleMock.mockReturnValue({ resourceType: 'Bundle', type: 'transaction' });
+    enqueueBundleMock.mockResolvedValue(undefined);
+
+    vi.spyOn(Alert, 'alert').mockImplementation((title, _message, buttons) => {
+      if (title === 'Cierre legal de entrega' && Array.isArray(buttons)) {
+        const confirm = buttons.find((btn) => btn.text === 'Confirmar cierre legal');
+        confirm?.onPress?.();
+      }
+      return undefined;
+    });
+
+    renderForm();
+
+    fireEvent.press(screen.getByText('Finalizar entrega'));
+
+    await waitFor(() => {
+      expect(enqueueBundleMock).toHaveBeenCalled();
+    });
   });
 
   it('permite el submit final con firma y confirmación legal', async () => {
