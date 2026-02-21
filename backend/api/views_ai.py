@@ -3,6 +3,7 @@ import datetime
 import logging
 import mimetypes
 import os
+import backend.ai_client as ai_client
 from typing import Any, Dict
 
 import httpx
@@ -182,8 +183,10 @@ class TranscribeView(AuthenticatedAPIView):
         if validation_error:
             return validation_error
 
-                # Allow tests to run with monkeypatched transcribe_audio even if OpenAI is disabled
-        if not is_openai_enabled() and os.getenv("PYTEST_CURRENT_TEST") is None:
+                        # If OpenAI is disabled, return 503 unless transcribe_audio has been monkeypatched in tests.
+        openai_enabled = is_openai_enabled()
+        transcribe_is_mocked = transcribe_audio is not ai_client.transcribe_audio
+        if not openai_enabled and not transcribe_is_mocked:
             return Response({"detail": "Servicio de IA deshabilitado por configuración"}, status=503)
 
         try:
