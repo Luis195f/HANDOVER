@@ -175,7 +175,7 @@ class TranscribeView(AuthenticatedAPIView):
         if not upload:
             return Response({"detail": "Missing audio file (expected multipart form-data with 'file')"}, status=400)
 
-                language = (request.data.get("language") or "es").strip()
+        language = (request.data.get("language") or "es").strip()
 
         # ✅ Validate upload BEFORE checking AI availability
         validation_error = _validate_audio_upload(upload)
