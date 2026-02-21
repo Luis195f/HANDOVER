@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system';
 import * as Print from 'expo-print';
+import { Platform } from 'react-native';
 
 import type { HandoverValues } from '../../types/handover';
 import type { HandoverSession } from '../../security/auth-types';
@@ -24,6 +25,10 @@ export async function generateHandoverPdf(
   handover: HandoverValues & { id?: string; sbar?: SbarSection | null },
   user: HandoverSession,
 ): Promise<GeneratedPdf> {
+  if (Platform.OS === 'web') {
+    throw new Error('PDF_EXPORT_UNSUPPORTED_ON_WEB');
+  }
+
   const createdAt = new Date().toISOString();
 
   const html = buildHandoverHtml({
@@ -33,6 +38,9 @@ export async function generateHandoverPdf(
   });
 
   const { uri } = await Print.printToFileAsync({ html });
+  if (!uri) {
+    throw new Error('PDF_EXPORT_FILE_URI_MISSING');
+  }
 
   const fallbackId = handover.id ?? handover.patientId ?? 'unknown';
   const fileName = `handover_${fallbackId}_${Date.now()}.pdf`;
