@@ -43,9 +43,14 @@ def get_client() -> OpenAI:
     if _client is not None:
         return _client
 
-        # Reject placeholder / dummy keys (tests rely on this behavior)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set")
+
+    # Reject placeholder / dummy keys (tests rely on this behavior)
     placeholder_values = {"dummy", "test", "changeme", "placeholder", "sk-your-key", "sk_test"}
-    if api_key.strip().lower() in placeholder_values or api_key.strip().lower().startswith("dummy"):
+    normalized = api_key.strip().lower()
+    if normalized in placeholder_values or normalized.startswith("dummy"):
         raise RuntimeError("OPENAI_API_KEY is a placeholder value; please set a real key")
 
     if not is_openai_enabled():
@@ -53,7 +58,7 @@ def get_client() -> OpenAI:
 
     _client = OpenAI(api_key=api_key)
     return _client
-    
+
 
 class ClinicalContext(BaseModel):
     language: str = "es"
