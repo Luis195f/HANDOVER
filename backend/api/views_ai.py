@@ -3,6 +3,7 @@ import datetime
 import logging
 import mimetypes
 import os
+import backend.ai_client as ai_client
 from typing import Any, Dict
 
 import httpx
@@ -20,6 +21,7 @@ from backend.ai_client import (
     generate_intervention_suggestions,
     generate_sbar,
     transcribe_audio,
+    is_openai_enabled,
 )
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
@@ -176,9 +178,16 @@ class TranscribeView(AuthenticatedAPIView):
 
         language = (request.data.get("language") or "es").strip()
 
+        # ✅ Validate upload BEFORE checking AI availability
         validation_error = _validate_audio_upload(upload)
         if validation_error:
             return validation_error
+
+                        # If OpenAI is disabled, return 503 unless transcribe_audio has been monkeypatched in tests.
+        openai_enabled = is_openai_enabled()
+        transcribe_is_mocked = transcribe_audio is not ai_client.transcribe_audio
+        if not openai_enabled and not transcribe_is_mocked:
+            return Response({"detail": "Servicio de IA deshabilitado por configuración"}, status=503)
 
         try:
             # Compatible con transcribe_audio(upload, language) y con transcribe_audio(file=..., language=...)

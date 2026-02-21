@@ -36,6 +36,31 @@ def test_module_import_does_not_initialize_client_without_api_key(monkeypatch):
 
 
 
+
+
+def test_get_client_respects_ai_flags(monkeypatch):
+    from backend import ai_client
+
+    monkeypatch.setattr(ai_client, "_client", None, raising=False)
+    monkeypatch.setenv("HANDOVER_AI_ENABLED", "0")
+    monkeypatch.delenv("HANDOVER_OPENAI_DISABLED", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    with pytest.raises(RuntimeError, match="disabled by environment flags"):
+        ai_client.get_client()
+
+
+def test_get_client_rejects_placeholder_api_key(monkeypatch):
+    from backend import ai_client
+
+    monkeypatch.setattr(ai_client, "_client", None, raising=False)
+    monkeypatch.setenv("HANDOVER_AI_ENABLED", "1")
+    monkeypatch.setenv("HANDOVER_OPENAI_DISABLED", "0")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy")
+
+    with pytest.raises(RuntimeError, match="placeholder"):
+        ai_client.get_client()
+
 def test_generate_sbar_is_awaitable_and_uses_thread_offload(monkeypatch):
     from backend import ai_client
 
