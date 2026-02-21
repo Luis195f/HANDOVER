@@ -175,14 +175,15 @@ class TranscribeView(AuthenticatedAPIView):
         if not upload:
             return Response({"detail": "Missing audio file (expected multipart form-data with 'file')"}, status=400)
 
-        language = (request.data.get("language") or "es").strip()
+                language = (request.data.get("language") or "es").strip()
 
-        if not is_openai_enabled():
-            return Response({"detail": "Servicio de IA deshabilitado por configuración"}, status=503)
-
+        # ✅ Validate upload BEFORE checking AI availability
         validation_error = _validate_audio_upload(upload)
         if validation_error:
             return validation_error
+
+        if not is_openai_enabled():
+            return Response({"detail": "Servicio de IA deshabilitado por configuración"}, status=503)
 
         try:
             # Compatible con transcribe_audio(upload, language) y con transcribe_audio(file=..., language=...)
