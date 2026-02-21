@@ -43,20 +43,16 @@ def get_client() -> OpenAI:
     if _client is not None:
         return _client
 
-        api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     if not is_openai_enabled():
         raise RuntimeError("OpenAI client is disabled by environment flags")
-    if api_key.lower() == "dummy":
-        raise RuntimeError("OPENAI_API_KEY uses a placeholder value")
 
-    base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
-
-    _client = OpenAI(api_key=api_key, base_url=base_url)
+    _client = OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL)
     return _client
-
+    
 
 class ClinicalContext(BaseModel):
     language: str = "es"
