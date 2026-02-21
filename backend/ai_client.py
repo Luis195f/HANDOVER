@@ -43,12 +43,12 @@ def get_client() -> OpenAI:
     if _client is not None:
         return _client
 
-    if not is_openai_enabled():
-        raise RuntimeError("OpenAI client is disabled by environment flags")
-
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
+
+    if not is_openai_enabled():
+        raise RuntimeError("OpenAI client is disabled by environment flags")
     if api_key.lower() == "dummy":
         raise RuntimeError("OPENAI_API_KEY uses a placeholder value")
 
