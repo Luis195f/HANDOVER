@@ -1895,7 +1895,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       if (features.showHandoverTimingMetrics) {
         await handoverTiming.flush({
           unitId: administrativeData.unit,
-          requestId: queuedTx.txId,
+          requestId: queuedTx.id,
         });
       }
 
