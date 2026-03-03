@@ -135,6 +135,38 @@ class HandoverTimingMetricsViewTests(TestCase):
         self.assertEqual(response.data['results'][0]['sectionId'], 'sbar')
         self.assertEqual(response.data['results'][0]['samples'], 1)
 
+
+    def test_get_normalizes_double_encoded_section_id_and_merges_same_unit(self):
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'sbar', 'durationMs': 1000, 'unitId': 'icu-a'}},
+        )
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': '""sbar""', 'durationMs': 2000, 'unitId': 'icu-a'}},
+        )
+
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['sectionId'], 'sbar')
+        self.assertEqual(response.data['results'][0]['samples'], 2)
+        self.assertEqual(response.data['results'][0]['avgDurationMs'], 1500)
+
+    def test_normalize_section_id_is_idempotent_for_escaped_and_quoted_values(self):
+        cases = ['""sbar""', '"sbar"', '\"sbar\"', '"\"sbar\""']
+
+        for raw in cases:
+            normalized = HandoverTimingMetricsView._normalize_section_id(raw)
+            normalized_again = HandoverTimingMetricsView._normalize_section_id(normalized)
+            self.assertEqual(normalized, 'sbar')
+            self.assertEqual(normalized_again, normalized)
+
     def test_get_merges_colliding_section_ids_after_normalization(self):
         AuditEvent.objects.create(
             event_type='handover_timing',
