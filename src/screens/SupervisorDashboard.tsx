@@ -5,6 +5,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 
 import { UNITS } from '@/src/config/units';
+import { resolveUnitFeatureFlags } from '@/src/config/unitsConfig';
+import type { HandoverTimingAggregate } from '@/src/lib/handover-timing-metrics';
 import {
   buildPrioritySnapshot,
   computeTurnMetrics,
@@ -54,6 +56,7 @@ export function SupervisorDashboardScreen() {
   const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [timingMetrics, setTimingMetrics] = useState<HandoverTimingAggregate[]>([]);
 
   const filter = useMemo<TurnFilter>(() => {
     const shift = SHIFT_OPTIONS.find(option => option.key === shiftKey) ?? SHIFT_OPTIONS[0];
@@ -72,6 +75,15 @@ export function SupervisorDashboardScreen() {
       const prioritized = buildPrioritySnapshot(inputs);
       setPatients(prioritized);
       setMetrics(computeTurnMetrics(prioritized));
+
+      const features = resolveUnitFeatureFlags(selectedUnitId);
+      if (features.showHandoverTimingMetrics) {
+        const metricsModule = await import('@/src/lib/handover-timing-metrics');
+        const timing = await metricsModule.getHandoverTimingAggregates(selectedUnitId);
+        setTimingMetrics(timing.results);
+      } else {
+        setTimingMetrics([]);
+      }
     } catch (err) {
       setError('No se pudieron cargar los datos del turno. Intenta nuevamente.');
       setPatients([]);
@@ -79,7 +91,7 @@ export function SupervisorDashboardScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [filter]);
+  }, [filter, selectedUnitId]);
 
   useEffect(() => {
     void loadData();
@@ -123,6 +135,8 @@ export function SupervisorDashboardScreen() {
         incidentsCount: 0,
       } satisfies TurnMetrics);
 
+    const timingBySection = timingMetrics;
+
     return (
       <View style={styles.metricsGrid}>
         <View style={styles.metricCard}>
@@ -148,9 +162,19 @@ export function SupervisorDashboardScreen() {
           <Text style={[styles.metricLabel, styles.incidentsLabel]}>Incidentes recientes</Text>
           <Text style={styles.metricValue}>{baseMetrics.incidentsCount}</Text>
         </View>
+        {timingBySection.length > 0 ? (
+          <View style={styles.metricCard}>
+            <Text style={styles.metricLabel}>Tiempo promedio por sección (ms)</Text>
+            {timingBySection.map((item) => (
+              <Text key={`${item.unitId}-${item.sectionId}`} style={styles.metricDetail}>
+                {item.sectionId}: {Math.round(item.avgDurationMs)} ms ({item.samples})
+              </Text>
+            ))}
+          </View>
+        ) : null}
       </View>
     );
-  }, [metrics]);
+  }, [metrics, timingMetrics]);
 
   const selectedUnit = useMemo(() => UNITS.find(unit => unit.id === selectedUnitId), [selectedUnitId]);
 
