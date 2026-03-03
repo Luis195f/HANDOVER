@@ -57,6 +57,10 @@ export function SupervisorDashboardScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timingMetrics, setTimingMetrics] = useState<HandoverTimingAggregate[]>([]);
+  const [timingError, setTimingError] = useState<string | null>(null);
+  const [isTimingLoading, setIsTimingLoading] = useState(false);
+
+  const selectedFeatures = useMemo(() => resolveUnitFeatureFlags(selectedUnitId), [selectedUnitId]);
 
   const filter = useMemo<TurnFilter>(() => {
     const shift = SHIFT_OPTIONS.find(option => option.key === shiftKey) ?? SHIFT_OPTIONS[0];
@@ -67,6 +71,28 @@ export function SupervisorDashboardScreen() {
     };
   }, [selectedUnitId, shiftKey]);
 
+  const loadTimingMetrics = useCallback(async () => {
+    if (!selectedFeatures.showHandoverTimingMetrics) {
+      setTimingMetrics([]);
+      setTimingError(null);
+      setIsTimingLoading(false);
+      return;
+    }
+
+    setIsTimingLoading(true);
+    setTimingError(null);
+    try {
+      const metricsModule = await import('@/src/lib/handover-timing-metrics');
+      const timing = await metricsModule.getHandoverTimingAggregates(selectedUnitId);
+      setTimingMetrics(timing.results);
+    } catch {
+      setTimingMetrics([]);
+      setTimingError('No disponible');
+    } finally {
+      setIsTimingLoading(false);
+    }
+  }, [selectedFeatures.showHandoverTimingMetrics, selectedUnitId]);
+
   const loadData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -76,14 +102,7 @@ export function SupervisorDashboardScreen() {
       setPatients(prioritized);
       setMetrics(computeTurnMetrics(prioritized));
 
-      const features = resolveUnitFeatureFlags(selectedUnitId);
-      if (features.showHandoverTimingMetrics) {
-        const metricsModule = await import('@/src/lib/handover-timing-metrics');
-        const timing = await metricsModule.getHandoverTimingAggregates(selectedUnitId);
-        setTimingMetrics(timing.results);
-      } else {
-        setTimingMetrics([]);
-      }
+      await loadTimingMetrics();
     } catch (err) {
       setError('No se pudieron cargar los datos del turno. Intenta nuevamente.');
       setPatients([]);
@@ -91,7 +110,7 @@ export function SupervisorDashboardScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [filter, selectedUnitId]);
+  }, [filter, loadTimingMetrics]);
 
   useEffect(() => {
     void loadData();
@@ -162,19 +181,30 @@ export function SupervisorDashboardScreen() {
           <Text style={[styles.metricLabel, styles.incidentsLabel]}>Incidentes recientes</Text>
           <Text style={styles.metricValue}>{baseMetrics.incidentsCount}</Text>
         </View>
-        {timingBySection.length > 0 ? (
+        {selectedFeatures.showHandoverTimingMetrics ? (
           <View style={styles.metricCard}>
             <Text style={styles.metricLabel}>Tiempo promedio por sección (ms)</Text>
-            {timingBySection.map((item) => (
-              <Text key={`${item.unitId}-${item.sectionId}`} style={styles.metricDetail}>
-                {item.sectionId}: {Math.round(item.avgDurationMs)} ms ({item.samples})
-              </Text>
-            ))}
+            {isTimingLoading ? <ActivityIndicator size="small" color="#1f6feb" /> : null}
+            {!isTimingLoading && timingBySection.length > 0
+              ? timingBySection.map((item) => (
+                  <Text key={`${item.unitId}-${item.sectionId}`} style={styles.metricDetail}>
+                    {item.sectionId}: {Math.round(item.avgDurationMs)} ms ({item.samples})
+                  </Text>
+                ))
+              : null}
+            {!isTimingLoading && timingBySection.length === 0 ? (
+              <Text style={styles.metricDetail}>{timingError ?? 'Sin datos'}</Text>
+            ) : null}
+            {timingError ? (
+              <Pressable style={styles.retryButton} onPress={() => void loadTimingMetrics()} accessibilityRole="button">
+                <Text style={styles.retryButtonText}>Reintentar</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
       </View>
     );
-  }, [metrics, timingMetrics]);
+  }, [isTimingLoading, loadTimingMetrics, metrics, selectedFeatures.showHandoverTimingMetrics, timingError, timingMetrics]);
 
   const selectedUnit = useMemo(() => UNITS.find(unit => unit.id === selectedUnitId), [selectedUnitId]);
 

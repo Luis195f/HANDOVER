@@ -12,6 +12,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.db import IntegrityError, OperationalError
+from django.db.models import Avg, CharField, Count, FloatField
+from django.db.models.functions import Cast, Lower
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied
@@ -970,31 +972,35 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
         if unit_filter:
             queryset = queryset.filter(meta__timing__unitId=unit_filter)
 
-        grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        for event in queryset[:5000]:
-            meta = event.meta if isinstance(event.meta, dict) else {}
-            timing = meta.get("timing") if isinstance(meta.get("timing"), dict) else {}
-            section_id = str(timing.get("sectionId") or "").strip().lower()
-            unit_id = str(timing.get("unitId") or "").strip() or "unknown"
-            duration_ms = timing.get("durationMs")
+        aggregates = (
+            queryset.annotate(
+                timing_unit_id=Cast("meta__timing__unitId", output_field=CharField()),
+                timing_section_id=Lower(Cast("meta__timing__sectionId", output_field=CharField())),
+                timing_duration_ms=Cast("meta__timing__durationMs", output_field=FloatField()),
+            )
+            .values("timing_unit_id", "timing_section_id")
+            .annotate(
+                avg_duration_ms=Avg("timing_duration_ms"),
+                samples=Count("id"),
+            )
+        )
+
+        for aggregate in aggregates:
+            section_id = str(aggregate.get("timing_section_id") or "").strip().lower()
+            unit_id = str(aggregate.get("timing_unit_id") or "").strip() or "unknown"
+            avg_duration_ms = aggregate.get("avg_duration_ms")
+            samples = int(aggregate.get("samples") or 0)
 
             if section_id not in self._allowed_sections:
                 continue
-            if not isinstance(duration_ms, int):
+            if avg_duration_ms is None or samples <= 0:
                 continue
 
-            key = (unit_id, section_id)
-            bucket = grouped.setdefault(key, {"sum": 0, "count": 0})
-            bucket["sum"] += duration_ms
-            bucket["count"] += 1
-
-        for (unit_id, section_id), bucket in grouped.items():
-            count = bucket["count"]
             rows.append({
                 "unitId": unit_id,
                 "sectionId": section_id,
-                "avgDurationMs": round(bucket["sum"] / count, 2),
-                "samples": count,
+                "avgDurationMs": round(float(avg_duration_ms), 2),
+                "samples": samples,
             })
 
         rows.sort(key=lambda item: (item["unitId"], item["sectionId"]))

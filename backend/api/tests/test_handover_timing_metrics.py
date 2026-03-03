@@ -79,6 +79,56 @@ class HandoverTimingMetricsViewTests(TestCase):
         self.assertEqual(response.data['results'][0]['samples'], 2)
 
 
+
+    def test_get_includes_all_events_without_silent_truncation(self):
+        bulk_events = [
+            AuditEvent(
+                event_type='handover_timing',
+                action='create',
+                status='success',
+                meta={'timing': {'sectionId': 'sbar', 'durationMs': 1000, 'unitId': 'icu-a'}},
+            )
+            for _ in range(5001)
+        ]
+        AuditEvent.objects.bulk_create(bulk_events)
+
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['results'][0]['sectionId'], 'sbar')
+        self.assertEqual(response.data['results'][0]['avgDurationMs'], 1000)
+        self.assertEqual(response.data['results'][0]['samples'], 5001)
+
+    def test_get_aggregates_by_section_and_unit(self):
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'sbar', 'durationMs': 500, 'unitId': 'icu-a'}},
+        )
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'vitals', 'durationMs': 2000, 'unitId': 'icu-a'}},
+        )
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'vitals', 'durationMs': 1000, 'unitId': 'icu-a'}},
+        )
+
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        result_by_section = {row['sectionId']: row for row in response.data['results']}
+        self.assertEqual(result_by_section['sbar']['samples'], 1)
+        self.assertEqual(result_by_section['sbar']['avgDurationMs'], 500)
+        self.assertEqual(result_by_section['vitals']['samples'], 2)
+        self.assertEqual(result_by_section['vitals']['avgDurationMs'], 1500)
+
+
 class HandoverTimingMetricsPermissionsTests(TestCase):
     def test_get_permissions_enforces_supervisor_or_admin(self):
         factory = APIRequestFactory()
