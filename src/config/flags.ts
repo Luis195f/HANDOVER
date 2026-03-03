@@ -19,6 +19,15 @@ export const flags = {
   ENABLE_ALERTS: (extra as any)?.FEATURES?.handover?.enableAlerts ?? process.env.EXPO_PUBLIC_ENABLE_ALERTS,
   AI_SUGGESTIONS_ENABLED:
     (extra as any)?.FEATURES?.handover?.aiSuggestions ?? process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED,
+  SHOW_NIC_CODING:
+    (extra as any)?.FEATURES?.handover?.showNicCoding ?? process.env.EXPO_PUBLIC_SHOW_NIC_CODING,
+  SHOW_NOC_OUTCOMES:
+    (extra as any)?.FEATURES?.handover?.showNocOutcomes ?? process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES,
+  SHOW_HANDOVER_TIMING_METRICS:
+    (extra as any)?.FEATURES?.handover?.showHandoverTimingMetrics ??
+    process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS,
+  HIDE_LEGACY_FIELDS:
+    (extra as any)?.FEATURES?.handover?.hideLegacyFields ?? process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS,
   REMOTE_CONFIG_DISABLED_FOR_NOW: (extra as any)?.FEATURES?.handover?.remoteConfigDisabled,
 } satisfies Record<string, FlagValue>;
 
