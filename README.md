@@ -222,6 +222,50 @@ El reporte HTML queda en `coverage/unit/index.html` y el `lcov.info` en `coverag
 
 El workflow `CI` usa Node 20 y pnpm 10. El job de Node está configurado como “non-blocking” (`continue-on-error: true`) para mitigar errores `403` intermitentes del registry de npm; revisa los logs del paso `Install` para confirmar si ocurrió la incidencia.
 
+
+El workflow también instala navegadores Playwright y ejecuta E2E (`pnpm -w test:e2e`), por lo que las referencias a Playwright/E2E en PRs son válidas para CI mientras ese job permanezca activo en `.github/workflows/ci.yml`.
+
+### Feature flags avanzadas por unidad (HANDOVER_UNITS_JSON)
+
+Puedes pilotar la visibilidad de funcionalidades por unidad sin redeploy usando defaults globales (`EXPO_PUBLIC_SHOW_*`) y overrides por unidad (`HANDOVER_UNITS_JSON`).
+
+Ejemplo:
+
+```bash
+export EXPO_PUBLIC_SHOW_NIC_CODING=false
+export EXPO_PUBLIC_SHOW_NOC_OUTCOMES=false
+export EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS=false
+export EXPO_PUBLIC_HIDE_LEGACY_FIELDS=false
+
+export EXPO_PUBLIC_HANDOVER_UNITS_JSON='[
+  {
+    "id": "uci-adulto",
+    "name": "UCI Adulto",
+    "specialty": "icu",
+    "default": true,
+    "features": {
+      "showNicCoding": true,
+      "showNocOutcomes": true,
+      "showHandoverTimingMetrics": true,
+      "hideLegacyFields": true
+    }
+  },
+  {
+    "id": "pediatria",
+    "name": "Pediatría",
+    "specialty": "ped",
+    "features": {
+      "showNicCoding": "0",
+      "showNocOutcomes": "1"
+    }
+  }
+]'
+```
+
+Notas de robustez:
+- Se aceptan valores booleanos y boolean-like (`true/false/1/0/on/off/yes/no`) en features por unidad.
+- Si `HANDOVER_UNITS_JSON` está vacío, malformado o no es un arreglo válido, la app hace fallback automático a la configuración estática por defecto.
+
 ### Seguridad de dependencias
 
 Se recomienda activar Dependabot para revisar automáticamente librerías frontend/backend y recibir PRs con actualizaciones de seguridad. El archivo de configuración vive en `.github/dependabot.yml` y está preparado para el ecosistema npm/pnpm.

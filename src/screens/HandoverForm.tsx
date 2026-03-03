@@ -23,6 +23,7 @@ import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
+import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
 import AudioAttach from '@/src/components/AudioAttach';
 import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
@@ -86,6 +87,7 @@ type HandoverFormValues = HandoverValues;
 
 // BEGIN HANDOVER D4 – Form imports
 import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
+import { resolveUnitFeatureFlags } from '@/src/config/unitsConfig';
 // END HANDOVER D4 – Form imports
 import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
 import { PatientBanner } from './components/PatientBanner';
@@ -279,7 +281,7 @@ export type DictationField =
   | 'closingSummary'
   | 'incidents';
 
-const sectionsInfo = [
+const ALL_SECTIONS_INFO = [
   { key: 'turno', title: 'Datos del turno' },
   { key: 'paciente', title: 'Paciente' },
   { key: 'sbar', title: 'SBAR' },
@@ -304,7 +306,7 @@ const sectionsInfo = [
   { key: 'firmas', title: 'Firmas' },
 ] as const satisfies readonly SectionInfo[];
 
-type SectionKey = (typeof sectionsInfo)[number]['key'];
+type SectionKey = (typeof ALL_SECTIONS_INFO)[number]['key'];
 
 const mergeDictationText = (currentValue: string | undefined, dictated: string) => {
   const addition = dictated.trim();
@@ -324,6 +326,7 @@ const mergeDictationText = (currentValue: string | undefined, dictated: string) 
 const findActiveSection = (
   offset: number,
   positions: Partial<Record<SectionKey, number>>,
+  sectionsInfo: readonly SectionInfo[],
 ): SectionKey | null => {
   const entries = sectionsInfo
     .map(({ key }) => ({ key, y: positions[key] }))
@@ -487,7 +490,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const isTablet = width >= 900;
   const sectionRefs = useMemo(
   () =>
-    sectionsInfo.reduce(
+    ALL_SECTIONS_INFO.reduce(
       (acc, { key }) => {
         acc[key] = React.createRef<View>();
         return acc;
@@ -498,9 +501,9 @@ export default function HandoverForm({ navigation, route }: Props) {
 );
   const [sectionPositions, setSectionPositions] = useState<Partial<Record<SectionKey, number>>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<SectionKey, boolean>>(() =>
-    sectionsInfo.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
+    ALL_SECTIONS_INFO.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
   );
-  const [activeSection, setActiveSection] = useState<SectionKey | null>(sectionsInfo[0]?.key ?? null);
+  const [activeSection, setActiveSection] = useState<SectionKey | null>(ALL_SECTIONS_INFO[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
   const [bedsideChecklistHighlightMissing, setBedsideChecklistHighlightMissing] = useState(false);
 
@@ -709,12 +712,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
-  const unitConfig = getUnitConfig(adminUnitId) ?? getDefaultUnitConfig();
-  const features = unitConfig.features ?? {};
+  const features = resolveUnitFeatureFlags(adminUnitId);
   const checklistItems = useMemo(
     () => features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
     [features.checklistItems],
   );
+  const visibleSections = useMemo(() => getHandoverVisibleSections(ALL_SECTIONS_INFO), []);
+
   // END HANDOVER D4 – Get active unit
   const signaturesValue = form.watch('signatures');
   const outgoingSignature = signaturesValue?.outgoing;
@@ -2070,7 +2074,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const yOffset = event.nativeEvent.contentOffset.y;
-    const current = findActiveSection(yOffset, sectionPositions);
+    const current = findActiveSection(yOffset, sectionPositions, visibleSections);
     setActiveSection(current);
   };
 
@@ -2124,7 +2128,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     <FormProvider {...form}>
       <View style={styles.screen}>
         <SidebarIndex
-          sectionsInfo={sectionsInfo}
+          sectionsInfo={visibleSections}
           sectionPositions={sectionPositions}
           scrollRef={scrollRef}
           activeSection={activeSection}
@@ -2494,6 +2498,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             <View style={{ marginTop: 24 }}>
               <TreatmentsSection control={control} />
             </View>
+            {!features.hideLegacyFields ? (
             <View style={[styles.field, { marginTop: 24 }]}>
               <Text style={styles.label}>Notas adicionales de medicación (texto libre, legado)</Text>
               <View style={styles.dictationRow}>
@@ -2529,6 +2534,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               {renderDictationStatus('meds')}
               {medsError ? <Text style={styles.error}>{medsError}</Text> : null}
             </View>
+            ) : null}
           </CollapsibleSection>
         </View>
       )}
@@ -2634,6 +2640,21 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             {renderDictationStatus('dxMedical')}
             {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
           </View>
+          {features.showNicCoding ? (
+            <View style={styles.field}>
+              <Text style={styles.helperText}>Clasificación NIC habilitada para esta unidad.</Text>
+            </View>
+          ) : null}
+          {features.showNocOutcomes ? (
+            <View style={styles.field}>
+              <Text style={styles.helperText}>Resultados NOC habilitados para esta unidad.</Text>
+            </View>
+          ) : null}
+          {features.showHandoverTimingMetrics ? (
+            <View style={styles.field}>
+              <Text style={styles.helperText}>Métricas de tiempo de entrega habilitadas para esta unidad.</Text>
+            </View>
+          ) : null}
           <View style={styles.field}>
             {/* BEGIN HANDOVER D3 – dxNursingStructured */}
             <DiagnosisAutocomplete
