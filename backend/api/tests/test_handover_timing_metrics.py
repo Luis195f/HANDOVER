@@ -159,13 +159,36 @@ class HandoverTimingMetricsViewTests(TestCase):
         self.assertEqual(response.data['results'][0]['avgDurationMs'], 1500)
 
     def test_normalize_section_id_is_idempotent_for_escaped_and_quoted_values(self):
-        cases = ['""sbar""', '"sbar"', '\"sbar\"', '"\"sbar\""']
+        cases = [
+            '""sbar""',
+            '"sbar"',
+            r'\"sbar\"',
+            '"\\\"sbar\\\""',
+            r'\"\"sbar\"\"',
+        ]
 
         for raw in cases:
             normalized = HandoverTimingMetricsView._normalize_section_id(raw)
             normalized_again = HandoverTimingMetricsView._normalize_section_id(normalized)
             self.assertEqual(normalized, 'sbar')
             self.assertEqual(normalized_again, normalized)
+            self.assertIn(normalized, HandoverTimingMetricsView._allowed_sections)
+
+    def test_get_normalizes_real_escaped_section_id_in_aggregates(self):
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': r'\"sbar\"', 'durationMs': 1200, 'unitId': 'icu-a'}},
+        )
+
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['sectionId'], 'sbar')
+        self.assertEqual(response.data['results'][0]['samples'], 1)
+        self.assertEqual(response.data['results'][0]['avgDurationMs'], 1200)
 
     def test_get_merges_colliding_section_ids_after_normalization(self):
         AuditEvent.objects.create(
