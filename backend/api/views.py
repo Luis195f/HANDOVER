@@ -30,6 +30,7 @@ from backend.signature import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, Patient as LocalPatient
+from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
@@ -828,6 +829,176 @@ class OAuthRefreshView(APIView):
             status=200,
         )
 
+
+
+
+class HandoverTimingMetricsView(AuthenticatedAPIView):
+    _allowed_sections = {"sbar", "vitals", "diagnostics", "treatments"}
+    _allowed_keys = {"sectionId", "durationMs", "unitId", "requestId"}
+    _forbidden_keys = {
+        "payload",
+        "patient",
+        "sbar",
+        "note",
+        "text",
+        "diagnosis",
+        "diagnostics",
+        "treatment",
+        "treatments",
+        "clinical",
+    }
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            permissions = [
+                IsAuthenticated(),
+                IsAdminOrSupervisor(),
+                HasAnyScope.required("audit:read", "handover:audit")(),
+            ]
+        else:
+            permissions = [
+                IsAuthenticated(),
+                HasAnyRole.required("nurse", "supervisor", "admin")(),
+                HasAnyScope.required("handover:write", "audit:write")(),
+            ]
+        return permissions
+
+    def _validate_post_payload(self, payload: Any) -> tuple[Optional[dict], Optional[Response]]:
+        if not isinstance(payload, dict):
+            return None, Response({"errors": ["Invalid payload"]}, status=400)
+
+        keys = set(payload.keys())
+        extra = keys - self._allowed_keys
+        if extra:
+            return None, Response({"errors": ["Invalid fields in payload"]}, status=400)
+
+        forbidden = [key for key in keys if key.lower() in self._forbidden_keys]
+        if forbidden:
+            return None, Response({"errors": ["Forbidden fields in payload"]}, status=400)
+
+        section_id = str(payload.get("sectionId") or "").strip().lower()
+        if section_id not in self._allowed_sections:
+            return None, Response({"errors": ["Invalid sectionId"]}, status=400)
+
+        duration_raw = payload.get("durationMs")
+        try:
+            duration_ms = int(duration_raw)
+        except (TypeError, ValueError):
+            return None, Response({"errors": ["Invalid durationMs"]}, status=400)
+
+        if duration_ms <= 0 or duration_ms > 60 * 60 * 1000:
+            return None, Response({"errors": ["Invalid durationMs"]}, status=400)
+
+        unit_id = str(payload.get("unitId") or "").strip()
+        request_id = str(payload.get("requestId") or "").strip()
+
+        if unit_id and len(unit_id) > 255:
+            return None, Response({"errors": ["Invalid unitId"]}, status=400)
+        if request_id and len(request_id) > 255:
+            return None, Response({"errors": ["Invalid requestId"]}, status=400)
+
+        return {
+            "sectionId": section_id,
+            "durationMs": duration_ms,
+            "unitId": unit_id,
+            "requestId": request_id,
+        }, None
+
+    def post(self, request: HttpRequest) -> Response:
+        validated, error_response = self._validate_post_payload(request.data)
+        if error_response is not None:
+            return error_response
+
+        user_sub = _get_authenticated_user_sub(request)
+        if not user_sub:
+            return Response({"errors": ["Unauthorized"]}, status=401)
+
+        section_id = str(validated.get("sectionId"))
+        duration_ms = int(validated.get("durationMs"))
+        unit_id = str(validated.get("unitId") or "")
+        request_id = str(validated.get("requestId") or "")
+
+        emit_audit_event(
+            event_type="handover_timing",
+            action="create",
+            status="success",
+            http_status=201,
+            request=request,
+            user_sub=user_sub,
+            resource_type="AuditEvent",
+            resource_id=request_id or section_id,
+            request_id=request_id or getattr(request, "audit_request_id", ""),
+            meta={
+                "fhir": {
+                    "resourceType": "AuditEvent",
+                    "type": {"code": "handover-timing"},
+                    "entity": [
+                        {
+                            "detail": [
+                                {"type": "sectionId", "valueString": section_id},
+                                {
+                                    "type": "durationMs",
+                                    "valueQuantity": {
+                                        "value": duration_ms,
+                                        "unit": "ms",
+                                        "system": "http://unitsofmeasure.org",
+                                        "code": "ms",
+                                    },
+                                },
+                                {"type": "unitId", "valueString": unit_id},
+                                {"type": "requestId", "valueString": request_id},
+                            ]
+                        }
+                    ],
+                },
+                "timing": {
+                    "sectionId": section_id,
+                    "durationMs": duration_ms,
+                    "unitId": unit_id,
+                    "requestId": request_id,
+                },
+            },
+        )
+
+        return Response({"status": "ok"}, status=201)
+
+    def get(self, request: HttpRequest) -> Response:
+        unit_filter = str(request.query_params.get("unitId") or "").strip()
+        rows = []
+        queryset = AuditEvent.objects.filter(event_type="handover_timing")
+
+        if unit_filter:
+            queryset = queryset.filter(meta__timing__unitId=unit_filter)
+
+        grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for event in queryset[:5000]:
+            meta = event.meta if isinstance(event.meta, dict) else {}
+            timing = meta.get("timing") if isinstance(meta.get("timing"), dict) else {}
+            section_id = str(timing.get("sectionId") or "").strip().lower()
+            unit_id = str(timing.get("unitId") or "").strip() or "unknown"
+            duration_ms = timing.get("durationMs")
+
+            if section_id not in self._allowed_sections:
+                continue
+            if not isinstance(duration_ms, int):
+                continue
+
+            key = (unit_id, section_id)
+            bucket = grouped.setdefault(key, {"sum": 0, "count": 0})
+            bucket["sum"] += duration_ms
+            bucket["count"] += 1
+
+        for (unit_id, section_id), bucket in grouped.items():
+            count = bucket["count"]
+            rows.append({
+                "unitId": unit_id,
+                "sectionId": section_id,
+                "avgDurationMs": round(bucket["sum"] / count, 2),
+                "samples": count,
+            })
+
+        rows.sort(key=lambda item: (item["unitId"], item["sectionId"]))
+        return Response({"results": rows}, status=200)
 
 class DashboardView(AuthenticatedAPIView):
     """Dashboard restringido por rol (admin/supervisor)."""

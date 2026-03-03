@@ -121,6 +121,7 @@ import { SbarSection } from './handover/SbarSection';
 import * as SecureStore from 'expo-secure-store';
 import { HandoverFormActions } from './handover/HandoverFormActions';
 import { uploadAudioToFhir } from '@/src/lib/audio-upload';
+import { useHandoverTiming } from '@/src/hooks/useHandoverTiming';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
 const isSignatureDisabled = () =>
@@ -307,6 +308,13 @@ const ALL_SECTIONS_INFO = [
 ] as const satisfies readonly SectionInfo[];
 
 type SectionKey = (typeof ALL_SECTIONS_INFO)[number]['key'];
+
+const TIMED_SECTIONS_BY_KEY: Partial<Record<SectionKey, 'sbar' | 'vitals' | 'diagnostics' | 'treatments'>> = {
+  sbar: 'sbar',
+  signos: 'vitals',
+  diagnosticos: 'diagnostics',
+  medicacion: 'treatments',
+};
 
 const mergeDictationText = (currentValue: string | undefined, dictated: string) => {
   const addition = dictated.trim();
@@ -506,6 +514,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [activeSection, setActiveSection] = useState<SectionKey | null>(ALL_SECTIONS_INFO[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
   const [bedsideChecklistHighlightMissing, setBedsideChecklistHighlightMissing] = useState(false);
+  const timingInitializedRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -713,11 +722,24 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = administrativeUnitValue || '';
   const features = resolveUnitFeatureFlags(adminUnitId);
+  const handoverTiming = useHandoverTiming({ enabled: Boolean(features.showHandoverTimingMetrics) });
   const checklistItems = useMemo(
     () => features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
     [features.checklistItems],
   );
   const visibleSections = useMemo(() => getHandoverVisibleSections(ALL_SECTIONS_INFO), []);
+
+  useEffect(() => {
+    if (!features.showHandoverTimingMetrics || timingInitializedRef.current) return;
+    timingInitializedRef.current = true;
+    (Object.keys(TIMED_SECTIONS_BY_KEY) as SectionKey[]).forEach((key) => {
+      const section = TIMED_SECTIONS_BY_KEY[key];
+      if (!section) return;
+      if (!collapsedSections[key]) {
+        handoverTiming.start(section);
+      }
+    });
+  }, [collapsedSections, features.showHandoverTimingMetrics, handoverTiming]);
 
   // END HANDOVER D4 – Get active unit
   const signaturesValue = form.watch('signatures');
@@ -1864,12 +1886,19 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       const activeSessionUser = getSessionUser(activeSession);
       const signerId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
 
-      await enqueueBundle(bundle, {
+      const queuedTx = await enqueueBundle(bundle, {
         patientId: values.patientId,
         unitId: administrativeData.unit,
         specialtyId,
         signerId,
       });
+      if (features.showHandoverTimingMetrics) {
+        await handoverTiming.flush({
+          unitId: administrativeData.unit,
+          requestId: queuedTx.txId,
+        });
+      }
+
       setHandoverSyncStatus('queued');
       setHandoverSyncError(null);
 
@@ -2058,12 +2087,26 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   };
 
   const toggleSection = (key: SectionKey) => {
-    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+    setCollapsedSections((prev) => {
+      const nextCollapsed = !prev[key];
+      const timedSection = TIMED_SECTIONS_BY_KEY[key];
+      if (timedSection) {
+        handoverTiming.syncSectionState(timedSection, !nextCollapsed);
+      }
+      return { ...prev, [key]: nextCollapsed };
+    });
   };
 
   const handleIndexSelect = (key: string) => {
     const sectionKey = key as SectionKey;
-    setCollapsedSections((prev) => (prev[sectionKey] ? { ...prev, [sectionKey]: false } : prev));
+    setCollapsedSections((prev) => {
+      if (!prev[sectionKey]) return prev;
+      const timedSection = TIMED_SECTIONS_BY_KEY[sectionKey];
+      if (timedSection) {
+        handoverTiming.syncSectionState(timedSection, true);
+      }
+      return { ...prev, [sectionKey]: false };
+    });
     const y = sectionPositions[sectionKey];
     if (typeof y !== 'number') return;
 
