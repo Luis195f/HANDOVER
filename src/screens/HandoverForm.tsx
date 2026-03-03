@@ -87,6 +87,7 @@ type HandoverFormValues = HandoverValues;
 
 // BEGIN HANDOVER D4 – Form imports
 import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
+import { flushHandoverTimingBestEffort } from '@/src/lib/handover-timing-submit';
 import { resolveUnitFeatureFlags } from '@/src/config/unitsConfig';
 // END HANDOVER D4 – Form imports
 import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
@@ -720,7 +721,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   );
   
   // BEGIN HANDOVER D4 – Get active unit
-  const adminUnitId = administrativeUnitValue || '';
+  const adminUnitId = typeof administrativeUnitValue === 'string' ? administrativeUnitValue.trim() || undefined : undefined;
   const features = resolveUnitFeatureFlags(adminUnitId);
   const handoverTiming = useHandoverTiming({ enabled: Boolean(features.showHandoverTimingMetrics) });
   const checklistItems = useMemo(
@@ -1892,12 +1893,13 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         specialtyId,
         signerId,
       });
-      if (features.showHandoverTimingMetrics) {
-        await handoverTiming.flush({
-          unitId: administrativeData.unit,
-          requestId: queuedTx.id,
-        });
-      }
+      const timingRequestId = typeof queuedTx?.id === 'string' ? queuedTx.id : '';
+      await flushHandoverTimingBestEffort({
+        enabled: Boolean(features.showHandoverTimingMetrics) && Boolean(timingRequestId),
+        flush: handoverTiming.flush,
+        unitId: administrativeData.unit,
+        requestId: timingRequestId,
+      });
 
       setHandoverSyncStatus('queued');
       setHandoverSyncError(null);
