@@ -11,8 +11,9 @@ from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
-from django.db import IntegrityError, OperationalError
+from django.db import IntegrityError, OperationalError, connection
 from django.db.models import Avg, CharField, Count, FloatField
+from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Lower
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -969,42 +970,112 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
         rows = []
         queryset = AuditEvent.objects.filter(event_type="handover_timing")
 
-        if unit_filter:
-            queryset = queryset.filter(meta__timing__unitId=unit_filter)
-
-        aggregates = (
-            queryset.annotate(
-                timing_unit_id=Cast("meta__timing__unitId", output_field=CharField()),
-                timing_section_id=Lower(Cast("meta__timing__sectionId", output_field=CharField())),
-                timing_duration_ms=Cast("meta__timing__durationMs", output_field=FloatField()),
+        if connection.vendor == "postgresql":
+            timing_path = KeyTextTransform("timing", "meta")
+            queryset = queryset.annotate(
+                timing_unit_id_raw=KeyTextTransform("unitId", timing_path),
+                timing_section_id_raw=KeyTextTransform("sectionId", timing_path),
+                timing_duration_ms_raw=KeyTextTransform("durationMs", timing_path),
             )
-            .values("timing_unit_id", "timing_section_id")
-            .annotate(
-                avg_duration_ms=Avg("timing_duration_ms"),
-                samples=Count("id"),
+
+            if unit_filter:
+                queryset = queryset.filter(timing_unit_id_raw=unit_filter)
+
+            aggregates = (
+                queryset.filter(timing_duration_ms_raw__regex=r"^\s*\d+(?:\.\d+)?\s*$")
+                .annotate(
+                    timing_unit_id=Cast("timing_unit_id_raw", output_field=CharField()),
+                    timing_section_id=Lower(Cast("timing_section_id_raw", output_field=CharField())),
+                    timing_duration_ms=Cast("timing_duration_ms_raw", output_field=FloatField()),
+                )
+                .values("timing_unit_id", "timing_section_id")
+                .annotate(
+                    avg_duration_ms=Avg("timing_duration_ms"),
+                    samples=Count("id"),
+                )
             )
-        )
 
-        for aggregate in aggregates:
-            section_id = str(aggregate.get("timing_section_id") or "").strip().lower()
-            unit_id = str(aggregate.get("timing_unit_id") or "").strip() or "unknown"
-            avg_duration_ms = aggregate.get("avg_duration_ms")
-            samples = int(aggregate.get("samples") or 0)
+            for aggregate in aggregates:
+                section_id = self._normalize_section_id(aggregate.get("timing_section_id"))
+                unit_id = str(aggregate.get("timing_unit_id") or "").strip() or "unknown"
+                avg_duration_ms = aggregate.get("avg_duration_ms")
+                samples = int(aggregate.get("samples") or 0)
 
-            if section_id not in self._allowed_sections:
-                continue
-            if avg_duration_ms is None or samples <= 0:
-                continue
+                if section_id not in self._allowed_sections:
+                    continue
+                if avg_duration_ms is None or samples <= 0:
+                    continue
 
-            rows.append({
-                "unitId": unit_id,
-                "sectionId": section_id,
-                "avgDurationMs": round(float(avg_duration_ms), 2),
-                "samples": samples,
-            })
+                rows.append({
+                    "unitId": unit_id,
+                    "sectionId": section_id,
+                    "avgDurationMs": round(float(avg_duration_ms), 2),
+                    "samples": samples,
+                })
+        else:
+            grouped: dict[tuple[str, str], dict[str, float | int]] = {}
+            for meta in queryset.values_list("meta", flat=True):
+                timing = meta.get("timing") if isinstance(meta, dict) else None
+                if not isinstance(timing, dict):
+                    continue
+
+                timing_unit_id_raw = timing.get("unitId")
+                timing_section_id_raw = timing.get("sectionId")
+                timing_duration_ms_raw = timing.get("durationMs")
+
+                if unit_filter and str(timing_unit_id_raw or "").strip() != unit_filter:
+                    continue
+
+                section_id = self._normalize_section_id(timing_section_id_raw)
+                if section_id not in self._allowed_sections:
+                    continue
+
+                duration_ms = self._parse_duration_ms(timing_duration_ms_raw)
+                if duration_ms is None:
+                    continue
+
+                unit_id = str(timing_unit_id_raw or "").strip() or "unknown"
+                key = (unit_id, section_id)
+                if key not in grouped:
+                    grouped[key] = {"total": 0.0, "samples": 0}
+
+                grouped[key]["total"] += duration_ms
+                grouped[key]["samples"] += 1
+
+            for (unit_id, section_id), stats in grouped.items():
+                samples = int(stats["samples"])
+                if samples <= 0:
+                    continue
+
+                avg_duration_ms = float(stats["total"]) / samples
+                rows.append({
+                    "unitId": unit_id,
+                    "sectionId": section_id,
+                    "avgDurationMs": round(avg_duration_ms, 2),
+                    "samples": samples,
+                })
 
         rows.sort(key=lambda item: (item["unitId"], item["sectionId"]))
         return Response({"results": rows}, status=200)
+
+    @staticmethod
+    def _normalize_section_id(value: Any) -> str:
+        section_id = str(value or "").strip().lower()
+        return section_id.strip('"')
+
+    @staticmethod
+    def _parse_duration_ms(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+
+        raw = str(value).strip()
+        if not raw:
+            return None
+
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
 
 class DashboardView(AuthenticatedAPIView):
     """Dashboard restringido por rol (admin/supervisor)."""
