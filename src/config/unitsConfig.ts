@@ -116,11 +116,17 @@ function resolveUnitsConfig(): HandoverUnitConfig[] {
 
 export const resolveUnitFeatureFlags = (unitId?: string | null): UnitFeatureFlags => {
   const base = { ...BASE_FEATURES };
-  if (!unitId) {
-    return base;
+  const normalizedUnitId = typeof unitId === 'string' ? unitId.trim() : '';
+  const defaultUnit = UNITS_CONFIG.find((entry) => entry.default) ?? UNITS_CONFIG[0];
+
+  if (!normalizedUnitId) {
+    return {
+      ...base,
+      ...(defaultUnit?.features ?? {}),
+    };
   }
 
-  const unit = UNITS_CONFIG.find((entry) => entry.id === unitId);
+  const unit = UNITS_CONFIG.find((entry) => entry.id === normalizedUnitId) ?? defaultUnit;
   return {
     ...base,
     ...(unit?.features ?? {}),

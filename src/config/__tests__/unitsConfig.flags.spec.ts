@@ -65,10 +65,53 @@ describe('unitsConfig advanced flags by unit', () => {
       hideLegacyFields: true,
     });
     expect(resolveUnitFeatureFlags('missing-unit')).toMatchObject({
-      showNicCoding: false,
-      showNocOutcomes: false,
-      showHandoverTimingMetrics: false,
-      hideLegacyFields: false,
+      showNicCoding: true,
+      showNocOutcomes: true,
+      showHandoverTimingMetrics: true,
+      hideLegacyFields: true,
+    });
+  });
+
+
+  it('uses default unit config when unitId is empty or whitespace', async () => {
+    process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'false';
+    process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'false';
+    process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS = 'false';
+    process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS = 'false';
+    process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
+      {
+        id: 'uci-default',
+        name: 'UCI Default',
+        specialty: 'icu',
+        default: true,
+        features: {
+          showNicCoding: true,
+          showNocOutcomes: true,
+          showHandoverTimingMetrics: true,
+          hideLegacyFields: true,
+        },
+      },
+    ]);
+
+    const { resolveUnitFeatureFlags } = await import('../unitsConfig');
+
+    expect(resolveUnitFeatureFlags(undefined)).toMatchObject({
+      showNicCoding: true,
+      showNocOutcomes: true,
+      showHandoverTimingMetrics: true,
+      hideLegacyFields: true,
+    });
+    expect(resolveUnitFeatureFlags('')).toMatchObject({
+      showNicCoding: true,
+      showNocOutcomes: true,
+      showHandoverTimingMetrics: true,
+      hideLegacyFields: true,
+    });
+    expect(resolveUnitFeatureFlags('   ')).toMatchObject({
+      showNicCoding: true,
+      showNocOutcomes: true,
+      showHandoverTimingMetrics: true,
+      hideLegacyFields: true,
     });
   });
 

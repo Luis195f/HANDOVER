@@ -12,7 +12,7 @@ Medir tiempo efectivo por sección para detectar fricción sin registrar conteni
 ## Flujo frontend
 - Hook: `useHandoverTiming` con `performance.now()`.
 - Inicio/fin por expansión/colapso de secciones.
-- Envío al backend en `flush` durante submit.
+- Envío al backend en `flush` durante submit (best-effort, no bloquea el encolado clínico).
 - Feature flag: `SHOW_HANDOVER_TIMING_METRICS` (off por defecto).
 
 ## Endpoint backend
@@ -21,7 +21,7 @@ Medir tiempo efectivo por sección para detectar fricción sin registrar conteni
   - guarda evento en auditoría como `AuditEvent` (`event_type=handover_timing`) con `meta.timing` y estructura FHIR-like en `meta.fhir`.
 - `GET /api/metrics/handover-time`
   - supervisor/admin only.
-  - retorna promedios por `unitId` y `section`.
+  - agrega en base de datos por `unitId` y `sectionId` sobre todos los eventos disponibles (sin truncado silencioso).
 
 ## Privacidad
 Nunca se guarda SBAR, notas ni payload clínico. Solo:
