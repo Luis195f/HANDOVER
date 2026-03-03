@@ -78,6 +78,47 @@ class HandoverTimingMetricsViewTests(TestCase):
         self.assertEqual(response.data['results'][0]['avgDurationMs'], 1500)
         self.assertEqual(response.data['results'][0]['samples'], 2)
 
+    def test_get_ignores_invalid_duration_values(self):
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'vitals', 'durationMs': 1000, 'unitId': 'icu-a'}},
+        )
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'vitals', 'durationMs': 2000, 'unitId': 'icu-a'}},
+        )
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': 'vitals', 'durationMs': '1O0', 'unitId': 'icu-a'}},
+        )
+
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['results'][0]['sectionId'], 'vitals')
+        self.assertEqual(response.data['results'][0]['samples'], 2)
+        self.assertEqual(response.data['results'][0]['avgDurationMs'], 1500)
+
+    def test_get_normalizes_quoted_section_id_in_aggregates(self):
+        AuditEvent.objects.create(
+            event_type='handover_timing',
+            action='create',
+            status='success',
+            meta={'timing': {'sectionId': '"sbar"', 'durationMs': 1000, 'unitId': 'icu-a'}},
+        )
+
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['results'][0]['sectionId'], 'sbar')
+        self.assertEqual(response.data['results'][0]['samples'], 1)
+
 
 
     def test_get_includes_all_events_without_silent_truncation(self):
