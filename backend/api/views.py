@@ -1076,9 +1076,23 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
     @staticmethod
     def _normalize_section_id(value: Any) -> str:
         section_id = str(value or "").strip().lower()
-        section_id = section_id.replace('\\"', '"').strip()
-        if len(section_id) >= 2 and section_id[0] == '"' and section_id[-1] == '"':
-            section_id = section_id[1:-1].strip()
+        max_passes = 5
+
+        for _ in range(max_passes):
+            previous = section_id
+            section_id = section_id.strip()
+
+            if len(section_id) >= 2 and section_id[0] == '"' and section_id[-1] == '"':
+                section_id = section_id[1:-1].strip()
+                continue
+
+            if section_id.startswith('\\"') and section_id.endswith('\\"') and len(section_id) >= 4:
+                section_id = section_id[2:-2].strip()
+                continue
+
+            if section_id == previous:
+                break
+
         return section_id
 
     @staticmethod
