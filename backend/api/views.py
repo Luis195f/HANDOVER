@@ -1,5 +1,6 @@
 import datetime
 import logging
+import math
 import os
 import sys
 import uuid
@@ -12,7 +13,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection
-from django.db.models import Avg, CharField, Count, FloatField
+from django.db.models import CharField, Count, FloatField, Sum
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Lower
 from rest_framework.parsers import JSONParser
@@ -990,26 +991,40 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
                 )
                 .values("timing_unit_id", "timing_section_id")
                 .annotate(
-                    avg_duration_ms=Avg("timing_duration_ms"),
+                    total_duration_ms=Sum("timing_duration_ms"),
                     samples=Count("id"),
                 )
             )
 
+            grouped: dict[tuple[str, str], dict[str, float | int]] = {}
             for aggregate in aggregates:
                 section_id = self._normalize_section_id(aggregate.get("timing_section_id"))
-                unit_id = str(aggregate.get("timing_unit_id") or "").strip() or "unknown"
-                avg_duration_ms = aggregate.get("avg_duration_ms")
-                samples = int(aggregate.get("samples") or 0)
-
                 if section_id not in self._allowed_sections:
                     continue
-                if avg_duration_ms is None or samples <= 0:
+
+                duration_ms = self._parse_duration_ms(aggregate.get("total_duration_ms"))
+                samples = int(aggregate.get("samples") or 0)
+                if duration_ms is None or samples <= 0:
                     continue
 
+                unit_id = str(aggregate.get("timing_unit_id") or "").strip() or "unknown"
+                key = (unit_id, section_id)
+                if key not in grouped:
+                    grouped[key] = {"total": 0.0, "samples": 0}
+
+                grouped[key]["total"] += duration_ms
+                grouped[key]["samples"] += samples
+
+            for (unit_id, section_id), stats in grouped.items():
+                samples = int(stats["samples"])
+                if samples <= 0:
+                    continue
+
+                avg_duration_ms = float(stats["total"]) / samples
                 rows.append({
                     "unitId": unit_id,
                     "sectionId": section_id,
-                    "avgDurationMs": round(float(avg_duration_ms), 2),
+                    "avgDurationMs": round(avg_duration_ms, 2),
                     "samples": samples,
                 })
         else:
@@ -1061,7 +1076,10 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
     @staticmethod
     def _normalize_section_id(value: Any) -> str:
         section_id = str(value or "").strip().lower()
-        return section_id.strip('"')
+        section_id = section_id.replace('\\"', '"').strip()
+        if len(section_id) >= 2 and section_id[0] == '"' and section_id[-1] == '"':
+            section_id = section_id[1:-1].strip()
+        return section_id
 
     @staticmethod
     def _parse_duration_ms(value: Any) -> Optional[float]:
@@ -1073,9 +1091,16 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
             return None
 
         try:
-            return float(raw)
+            duration_ms = float(raw)
         except (TypeError, ValueError):
             return None
+
+        if not math.isfinite(duration_ms):
+            return None
+        if duration_ms < 0:
+            return None
+
+        return duration_ms
 
 class DashboardView(AuthenticatedAPIView):
     """Dashboard restringido por rol (admin/supervisor)."""
