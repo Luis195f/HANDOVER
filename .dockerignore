@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.git
+.vscode
+.expo
+dist
+build
+coverage
+**/.turbo
+**/.cache
+.env
+.venv
+__pycache__
+*.pyc
