@@ -57,18 +57,18 @@ describe('Panel 85353-1 — hasMember incluye Glucemia cuando existe', () => {
     expect(refs).toContain(entryReference(gluEntry));
   });
 
-  it('si se desactiva la normalización, incluye 14743-9 (mmol/L)', () => {
+  it('mantiene mapeo consistente a mg/dL aunque existan opciones legacy', () => {
     const bundle = buildHandoverBundle(
       { patientId, vitals: { spo2: 97, bgMmolL: 6.0 } },
       { now, emitPanel: true, emitHasMember: true, normalizeGlucoseToMgDl: false }
     );
 
     const panel = findObsByLoinc(bundle, TEST_VITAL_CODES.VITAL_SIGNS_PANEL.code);
-    const gluMolEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code); // 14743-9
-    expect(panel && gluMolEntry).toBeTruthy();
+    const gluEntry = findEntryByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MASS_BLD.code);
+    expect(panel && gluEntry).toBeTruthy();
 
     const refs = (panel?.hasMember ?? []).map((m: any) => m.reference);
-    expect(refs).toContain(entryReference(gluMolEntry));
+    expect(refs).toContain(entryReference(gluEntry));
   });
 
   it('no incluye glucemia si no existe', () => {

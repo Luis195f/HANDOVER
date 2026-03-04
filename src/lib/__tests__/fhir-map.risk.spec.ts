@@ -18,7 +18,11 @@ describe('mapRiskConditions', () => {
     const bundle = buildHandoverBundle(
       {
         patientId: 'pat-risk-001',
-        risks: { fall: true, pressureUlcer: true, isolation: true },
+        risksStructured: [
+          { type: 'fall', present: true, actions: [] },
+          { type: 'pressureUlcer', present: true, actions: [] },
+          { type: 'isolation', present: true, actions: [] },
+        ],
       },
       { now: () => NOW },
     );
@@ -49,7 +53,7 @@ describe('mapRiskConditions', () => {
     const bundle = buildHandoverBundle(
       {
         patientId: 'pat-risk-002',
-        risks: { fall: false },
+        risksStructured: [{ type: 'fall', present: false, actions: [] }],
       },
       { now: () => NOW },
     );

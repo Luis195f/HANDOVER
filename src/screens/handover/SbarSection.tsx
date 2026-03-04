@@ -20,6 +20,7 @@ export type SbarSectionProps = {
   sbarAssessmentError?: string;
   sbarRecommendationError?: string;
   sbarFullTextError?: string;
+  hideLegacyFields?: boolean;
 };
 
 export const SbarSection: React.FC<SbarSectionProps> = ({
@@ -38,6 +39,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   sbarAssessmentError,
   sbarRecommendationError,
   sbarFullTextError,
+  hideLegacyFields,
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
   const aiUnavailableMessage =
@@ -148,24 +150,26 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         />
         {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
       </View>
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('handover.sbarFullTextLabel')}</Text>
-        <Controller
-          control={control}
-          name="sbarFullText"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              multiline
-              onBlur={onBlur}
-              value={value ?? ''}
-              onChangeText={onChange}
-              placeholder={t('handover.sbarFullTextPlaceholder')}
-            />
-          )}
-        />
-        {sbarFullTextError ? <Text style={styles.error}>{sbarFullTextError}</Text> : null}
-      </View>
+      {!hideLegacyFields ? (
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('handover.sbarFullTextLabel')}</Text>
+          <Controller
+            control={control}
+            name="sbarFullText"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                multiline
+                onBlur={onBlur}
+                value={value ?? ''}
+                onChangeText={onChange}
+                placeholder={t('handover.sbarFullTextPlaceholder')}
+              />
+            )}
+          />
+          {sbarFullTextError ? <Text style={styles.error}>{sbarFullTextError}</Text> : null}
+        </View>
+      ) : null}
     </>
   );
 };
