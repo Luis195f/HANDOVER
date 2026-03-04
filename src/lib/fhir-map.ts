@@ -775,10 +775,17 @@ type AttachmentInput = {
   data: string;
 };
 
+type FhirCodeDescriptor = {
+  system: string;
+  code: string;
+  display?: string;
+};
+
 type MedicationValues = {
   patientId: string;
   encounterId?: string;
   medications?: Array<MedicationStatementInput | MedicationItem>;
+  meds?: string | string[] | null;
 };
 
 type OxygenValues = {
@@ -870,6 +877,7 @@ export type HandoverValues = {
   status?: 'draft' | 'final';
   vitals?: VitalsValues;
   medications?: Array<MedicationStatementInput | MedicationItem>;
+  meds?: string | string[] | null;
   oxygenTherapy?: OxygenTherapyInput | null;
   audioAttachment?: AudioAttachmentInput | null;
   attachments?: AttachmentInput[];
