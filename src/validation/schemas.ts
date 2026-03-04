@@ -233,6 +233,23 @@ const zRequiredSnomedCoding = zSnomedCoding.nullable().superRefine((value, ctx) 
   }
 });
 
+const zLegacyNursingText = z.preprocess((value) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const display = typeof record.display === 'string' ? record.display.trim() : '';
+    if (display) return display;
+    const code = typeof record.code === 'string' ? record.code.trim() : '';
+    return code || undefined;
+  }
+
+  return undefined;
+}, z.string().min(1).max(500).optional());
+
 export const zBradenScale = z
   .object({
     sensoryPerception: zBradenSubscale,
@@ -599,7 +616,7 @@ export const zHandoverObject = z.object({
   vitals: zVitals.optional(),
 
   dxMedical: zRequiredSnomedCoding,
-  dxNursing: zRequiredSnomedCoding,
+  dxNursing: zLegacyNursingText,
   dxMedicalStructured: zHandoverStructuredDiagnosisArray,
   dxNursingStructured: zHandoverStructuredDiagnosisArray,
   evolution: optionalTrimmedString(1200).optional(),

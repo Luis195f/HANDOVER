@@ -274,4 +274,51 @@ describe("zHandover", () => {
     const messages = result.success ? [] : result.error.issues.map((i) => i.message);
     expect(messages).toContain("El puntaje total debe ser igual a la suma de las subescalas.");
   });
+
+
+  it('acepta payload legacy con solo dxNursing como texto libre', () => {
+    const payload = {
+      ...baseValidData,
+      dxNursing: 'Dolor agudo',
+      dxNursingStructured: [],
+    };
+
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dxNursing).toBe('Dolor agudo');
+      expect(result.data.dxNursingStructured ?? []).toHaveLength(0);
+    }
+  });
+
+  it('acepta payload legacy con dxNursing como objeto y lo normaliza a texto (display)', () => {
+    const payload = {
+      ...baseValidData,
+      dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
+      dxNursingStructured: [],
+    };
+
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dxNursing).toBe('Fiebre');
+    }
+  });
+
+  it('deriva dxNursing legacy desde el primer NANDA cuando solo hay diagnóstico estructurado', () => {
+    const payload = {
+      ...baseValidData,
+      dxNursing: '',
+      dxNursingStructured: [
+        { system: 'NANDA', code: '00030', display: 'Deterioro del intercambio gaseoso' },
+      ],
+    };
+
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dxNursing).toContain('Deterioro del intercambio gaseoso');
+    }
+  });
+
 });

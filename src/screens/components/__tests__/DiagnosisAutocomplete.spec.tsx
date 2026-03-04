@@ -9,6 +9,7 @@ import type { HandoverStructuredDiagnosis } from '@/src/types/handover';
 type FormValues = {
   dxMedicalStructured: HandoverStructuredDiagnosis[];
   dxNursingStructured: HandoverStructuredDiagnosis[];
+  dxNursing?: string;
 };
 
 function renderWithForm(
@@ -17,7 +18,7 @@ function renderWithForm(
   let methods: UseFormReturn<FormValues> | undefined;
   const Wrapper = () => {
     const form = useForm<FormValues>({
-      defaultValues: { dxMedicalStructured: [], dxNursingStructured: [] },
+      defaultValues: { dxMedicalStructured: [], dxNursingStructured: [], dxNursing: '' },
     });
     methods = form;
     return (
@@ -77,6 +78,23 @@ describe('DiagnosisAutocomplete', () => {
 
     await waitFor(() => {
       expect(methods.getValues('dxMedicalStructured')).toHaveLength(0);
+    });
+  });
+
+  it('autocompleta dxNursing legado al seleccionar el primer NANDA', async () => {
+    const { getByPlaceholderText, getByText, methods } = renderWithForm({
+      name: 'dxNursingStructured',
+      label: 'Diagnósticos enfermería (NANDA)',
+      systemsAllowed: ['NANDA'],
+    });
+
+    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'oxigenación');
+    await waitFor(() => getByText('Oxigenación alterada (00001) · NANDA'));
+    fireEvent.press(getByText('Oxigenación alterada (00001) · NANDA'));
+
+    await waitFor(() => {
+      expect(methods.getValues('dxNursingStructured')).toHaveLength(1);
+      expect(methods.getValues('dxNursing')).toBe('Oxigenación alterada');
     });
   });
 });
