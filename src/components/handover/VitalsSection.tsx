@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Button, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Controller, useFormContext, useWatch, type FieldPath } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { glucoseMgDlToMmolL } from '@/src/validation/normalization';
 import { VitalTrendsChart } from '@/src/screens/components/VitalTrendsChart';
 import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
 import type { SuggestionsResult } from '@/src/lib/ai-suggestions';
@@ -32,7 +33,6 @@ const VITAL_FIELDS = [
   'sbp',
   'dbp',
   'glucoseMgDl',
-  'glucoseMmolL',
 ] as const;
 
 type VitalField = (typeof VITAL_FIELDS)[number];
@@ -45,7 +45,6 @@ const VITAL_FIELD_PATHS = {
   sbp: 'vitals.sbp',
   dbp: 'vitals.dbp',
   glucoseMgDl: 'vitals.glucoseMgDl',
-  glucoseMmolL: 'vitals.glucoseMmolL',
 } as const satisfies Record<VitalField, FieldPath<HandoverFormValues>>;
 
 const VITAL_FIELD_CONFIG = [
@@ -55,8 +54,8 @@ const VITAL_FIELD_CONFIG = [
   { key: 'spo2', label: 'SpO₂ (%)', placeholder: '96', keyboard: 'numeric' },
   { key: 'sbp', label: 'TA sistólica (mmHg)', placeholder: '118', keyboard: 'numeric' },
   { key: 'dbp', label: 'TA diastólica (mmHg)', placeholder: '75', keyboard: 'numeric' },
+  // Política UI: una sola unidad de entrada (mg/dL); mmol/L se deriva automáticamente para compatibilidad.
   { key: 'glucoseMgDl', label: 'Glucemia (mg/dL)', placeholder: '110', keyboard: 'numeric' },
-  { key: 'glucoseMmolL', label: 'Glucemia (mmol/L)', placeholder: '6.1', keyboard: 'numeric' },
 ] as const satisfies ReadonlyArray<{
   key: VitalField;
   label: string;
@@ -73,6 +72,7 @@ const VitalsGroup = ({
 }) => {
   const {
     control,
+    setValue,
     formState: { errors },
   } = useFormContext<HandoverFormValues>();
 
@@ -106,7 +106,17 @@ const VitalsGroup = ({
                       placeholder={item.placeholder}
                       onBlur={onBlur}
                       value={value == null ? '' : String(value)}
-                      onChangeText={(text) => onChange(parseNumericInput(text))}
+                      onChangeText={(text) => {
+                        const parsed = parseNumericInput(text);
+                        onChange(parsed);
+                        if (item.key === 'glucoseMgDl') {
+                          setValue(
+                            'vitals.glucoseMmolL',
+                            typeof parsed === 'number' ? glucoseMgDlToMmolL(parsed) : undefined,
+                            { shouldDirty: true, shouldValidate: false },
+                          );
+                        }
+                      }}
                     />
                   )}
                 />

@@ -76,7 +76,7 @@ describe('FHIR terminology consistency checks', () => {
           safetyMeasuresApplied: false,
           questionsAnswered: false,
         },
-        risks: { fall: true },
+        risksStructured: [{ type: 'fall', present: true, actions: [] }],
       };
 
       const bundle = buildHandoverBundle(values, { now: () => FIXED_NOW });

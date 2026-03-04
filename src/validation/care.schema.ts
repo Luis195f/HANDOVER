@@ -1,9 +1,6 @@
-import { z } from 'zod';
-import { zHandover } from './schemas';
+import { zHandoverObject } from "./schemas";
 
-const baseSchema = zHandover instanceof z.ZodEffects ? zHandover.innerType() : zHandover;
-
-export const careSchema = baseSchema.pick({
+export const careSchema = zHandoverObject.pick({
   meds: true,
   medications: true,
   treatments: true,

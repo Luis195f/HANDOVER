@@ -7,6 +7,7 @@ import {
   MOBILITY_LEVELS,
   STOOL_PATTERNS,
 } from "../types/handover-constants";
+import { normalizeLegacyHandoverPayload } from "./normalization";
 
 const optionalTrimmedString = (maxLength: number) =>
   z
@@ -126,8 +127,8 @@ export const zVitals = z
       .optional(),
     glucoseMgDl: z
       .number()
-      .min(20, "Glucemia fuera de rango")
-      .max(600, "Glucemia fuera de rango")
+      .min(18, "Glucemia fuera de rango")
+      .max(1000, "Glucemia fuera de rango")
       .describe("Glucemia capilar mg/dL (LOINC 2339-0)")
       .optional(),
     glucoseMmolL: z
@@ -144,19 +145,11 @@ export const zVitals = z
     issuedAt: z.string().datetime().optional(),
   })
   .superRefine((value, ctx) => {
-    if (typeof value.glucoseMgDl === "number" && typeof value.glucoseMmolL === "number") {
-      const convertedMmol = value.glucoseMmolL * 18;
-      const tolerance = 15; // mg/dL de tolerancia
-      if (Math.abs(convertedMmol - value.glucoseMgDl) > tolerance) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Las glucemias en mg/dL y mmol/L deben ser coherentes",
-          path: ["glucoseMmolL"],
-        });
-      }
-    }
-
-    if (typeof value.sbp === "number" && typeof value.dbp === "number" && value.dbp >= value.sbp) {
+    if (
+      typeof value.sbp === "number" &&
+      typeof value.dbp === "number" &&
+      value.dbp >= value.sbp
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "La presión diastólica debe ser menor que la sistólica",
@@ -198,7 +191,12 @@ export const zPainAssessment = z
     }
   });
 
-const zBradenSubscale = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
+const zBradenSubscale = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
 
 const zSnomedCoding = z
   .object({
@@ -226,16 +224,14 @@ const zSnomedCoding = z
     }
   });
 
-const zRequiredSnomedCoding = zSnomedCoding
-  .nullable()
-  .superRefine((value, ctx) => {
-    if (!value) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Diagnóstico SNOMED requerido",
-      });
-    }
-  });
+const zRequiredSnomedCoding = zSnomedCoding.nullable().superRefine((value, ctx) => {
+  if (!value) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Diagnóstico SNOMED requerido",
+    });
+  }
+});
 
 export const zBradenScale = z
   .object({
@@ -281,7 +277,13 @@ export const zBradenScale = z
   });
 
 const zGlasgowEye = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
-const zGlasgowVerbal = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]);
+const zGlasgowVerbal = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+]);
 const zGlasgowMotor = z.union([
   z.literal(1),
   z.literal(2),
@@ -581,110 +583,121 @@ const zFileAttachment = z.object({
   data: z.string().min(1),
 });
 
-export const zHandover = z
-  .object({
-    administrativeData: zAdministrativeData,
+/**
+ * IMPORTANTE:
+ * - zHandoverObject: ZodObject puro (permite .pick/.omit en schemas parciales sin romper TS).
+ * - zHandoverBase: aplica reglas de negocio con superRefine (ZodEffects).
+ * - zHandover: aplica preprocess legacy→canónico + reglas.
+ */
+export const zHandoverObject = z.object({
+  administrativeData: zAdministrativeData,
 
-    status: z.enum(["draft", "final"]).default("draft"),
+  status: z.enum(["draft", "final"]).default("draft"),
 
-    patientId: z.string().min(1, "ID paciente requerido"),
+  patientId: z.string().min(1, "ID paciente requerido"),
 
-    vitals: zVitals.optional(),
+  vitals: zVitals.optional(),
 
-    dxMedical: zRequiredSnomedCoding,
-    dxNursing: zRequiredSnomedCoding,
-    dxMedicalStructured: zHandoverStructuredDiagnosisArray,
-    dxNursingStructured: zHandoverStructuredDiagnosisArray,
-    evolution: optionalTrimmedString(1200).optional(),
-    closingSummary: optionalTrimmedString(1500).optional(),
+  dxMedical: zRequiredSnomedCoding,
+  dxNursing: zRequiredSnomedCoding,
+  dxMedicalStructured: zHandoverStructuredDiagnosisArray,
+  dxNursingStructured: zHandoverStructuredDiagnosisArray,
+  evolution: optionalTrimmedString(1200).optional(),
+  closingSummary: optionalTrimmedString(2000).optional(),
 
-    sbarSituation: optionalTrimmedString(800).optional(),
-    sbarBackground: optionalTrimmedString(800).optional(),
-    sbarAssessment: optionalTrimmedString(800).optional(),
-    sbarRecommendation: optionalTrimmedString(800).optional(),
-    sbarFullText: optionalTrimmedString(2000).optional(),
+  sbarSituation: optionalTrimmedString(800).optional(),
+  sbarBackground: optionalTrimmedString(800).optional(),
+  sbarAssessment: optionalTrimmedString(800).optional(),
+  sbarRecommendation: optionalTrimmedString(800).optional(),
+  sbarFullText: optionalTrimmedString(2000).optional(),
 
-    meds: optionalTrimmedString(1000).optional(),
+  meds: optionalTrimmedString(1000).optional(),
 
-    medications: z.array(zMedicationItem).default([]),
-    treatments: z.array(zTreatmentItem).default([]),
-    exams: z.array(zExamItem).default([]),
-    procedures: z.array(zProcedureItem).default([]),
+  medications: z.array(zMedicationItem).default([]),
+  treatments: z.array(zTreatmentItem).default([]),
+  exams: z.array(zExamItem).default([]),
+  procedures: z.array(zProcedureItem).default([]),
 
-    oxygenTherapy: zOxygen.optional(),
-    devices: z.array(zDeviceItem).default([]),
+  oxygenTherapy: zOxygen.optional(),
+  devices: z.array(zDeviceItem).default([]),
 
-    nutrition: zNutritionInfo.optional(),
-    elimination: zEliminationInfo.optional(),
-    mobility: zMobilityInfo.optional(),
-    skin: zSkinInfo.optional(),
-    psychosocial: zPsychosocialCare.optional(),
-    fluidBalance: zFluidBalanceInfo.optional(),
-    painAssessment: zPainAssessment.optional(),
-    braden: zBradenScale.optional(),
-    glasgow: zGlasgowScale.optional(),
+  nutrition: zNutritionInfo.optional(),
+  elimination: zEliminationInfo.optional(),
+  mobility: zMobilityInfo.optional(),
+  skin: zSkinInfo.optional(),
+  psychosocial: zPsychosocialCare.optional(),
+  fluidBalance: zFluidBalanceInfo.optional(),
+  painAssessment: zPainAssessment.optional(),
+  braden: zBradenScale.optional(),
+  glasgow: zGlasgowScale.optional(),
 
-    // BEGIN HANDOVER D1 – BedsideChecklist
-    bedsideChecklist: zHandoverBedsideChecklist,
-    // END HANDOVER D1 – BedsideChecklist
+  // BEGIN HANDOVER D1 – BedsideChecklist
+  bedsideChecklist: zHandoverBedsideChecklist,
+  // END HANDOVER D1 – BedsideChecklist
 
-    risks: zRiskFlags.optional(),
-    risksStructured: z.array(zRiskItem).default([]),
+  risks: zRiskFlags.optional(),
+  risksStructured: z.array(zRiskItem).default([]),
 
-    signatures: z
-      .object({
-        outgoing: zHandoverSignature.optional(),
-        incoming: zHandoverSignature.optional(),
-      })
-      .optional(),
+  signatures: z
+    .object({
+      outgoing: zHandoverSignature.optional(),
+      incoming: zHandoverSignature.optional(),
+    })
+    .optional(),
 
-    audioUri: z.string().trim().min(1).max(500).optional(),
-    audioTranscription: optionalTrimmedString(2000).optional(),
-    attachments: z.array(zFileAttachment).default([]),
-  })
-  .superRefine((value, ctx) => {
-    // BEGIN HANDOVER D1 – BedsideChecklist rules
-    const checklist = value.bedsideChecklist ?? ({} as Record<string, unknown>);
+  audioUri: z.string().trim().min(1).max(500).optional(),
+  audioTranscription: optionalTrimmedString(2000).optional(),
+  attachments: z.array(zFileAttachment).default([]),
+});
 
-    // Keys efectivas: legacy + cualquier key booleana presente (dinámicas)
-    const dynamicBooleanKeys = Object.keys(checklist).filter((k) => {
-      if (k === "bedsideNotes") return false;
-      if (k.endsWith("_timestamp")) return false;
-      return typeof (checklist as Record<string, unknown>)[k] === "boolean";
-    });
+export const zHandoverBase = zHandoverObject.superRefine((value, ctx) => {
+  // BEGIN HANDOVER D1 – BedsideChecklist rules
+  const checklist = value.bedsideChecklist ?? ({} as Record<string, unknown>);
 
-    const effectiveKeys = Array.from(
-      new Set<string>([...LEGACY_BEDSIDE_KEYS, ...dynamicBooleanKeys]),
-    );
-
-    // Si falta una key, se considera no completada.
-    const checklistRecord = checklist as Record<string, unknown>;
-    const hasIncomplete = effectiveKeys.some((k) => checklistRecord[k] !== true);
-
-    if (effectiveKeys.length > 0 && hasIncomplete) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["bedsideChecklist"],
-        message: "Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.",
-      });
-    }
-    // END HANDOVER D1 – BedsideChecklist rules
-
-    if (value.status === "final" && !value.signatures?.outgoing) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["signatures", "outgoing"],
-        message: "La entrega final debe tener firma de enfermera saliente.",
-      });
-    }
-    if (value.status === "final" && value.signatures?.outgoing && !value.signatures.outgoing.imageBase64) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["signatures", "outgoing", "imageBase64"],
-        message: "La firma manuscrita es obligatoria para el cierre legal.",
-      });
-    }
+  // Keys efectivas: legacy + cualquier key booleana presente (dinámicas)
+  const dynamicBooleanKeys = Object.keys(checklist).filter((k) => {
+    if (k === "bedsideNotes") return false;
+    if (k.endsWith("_timestamp")) return false;
+    return typeof (checklist as Record<string, unknown>)[k] === "boolean";
   });
+
+  const effectiveKeys = Array.from(new Set<string>([...LEGACY_BEDSIDE_KEYS, ...dynamicBooleanKeys]));
+
+  // Si falta una key, se considera no completada.
+  const checklistRecord = checklist as Record<string, unknown>;
+  const hasIncomplete = effectiveKeys.some((k) => checklistRecord[k] !== true);
+
+  if (effectiveKeys.length > 0 && hasIncomplete) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["bedsideChecklist"],
+      message:
+        "Confirma la identidad del paciente y revisa las alergias antes de cerrar el pase de turno.",
+    });
+  }
+  // END HANDOVER D1 – BedsideChecklist rules
+
+  if (value.status === "final" && !value.signatures?.outgoing) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["signatures", "outgoing"],
+      message: "La entrega final debe tener firma de enfermera saliente.",
+    });
+  }
+  if (
+    value.status === "final" &&
+    value.signatures?.outgoing &&
+    !value.signatures.outgoing.imageBase64
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["signatures", "outgoing", "imageBase64"],
+      message: "La firma manuscrita es obligatoria para el cierre legal.",
+    });
+  }
+});
+
+export const zHandover = z.preprocess(normalizeLegacyHandoverPayload, zHandoverBase);
 
 export type HandoverValues = z.infer<typeof zHandover>;
 export type HandoverFormData = HandoverValues;

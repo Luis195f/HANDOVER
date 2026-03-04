@@ -240,16 +240,18 @@ describe("zHandover", () => {
     expect(messages).toContain("Código SNOMED no corresponde al término");
   });
 
-  it("detecta inconsistencias entre mg/dL y mmol/L", () => {
-    const invalidGlucose: HandoverFormData = {
+  it("prioriza mg/dL cuando ambos valores de glucosa están presentes", () => {
+    const payload: HandoverFormData = {
       ...baseValidData,
       vitals: { ...baseValidData.vitals, glucoseMgDl: 90, glucoseMmolL: 2 },
     };
 
-    const result = zHandover.safeParse(invalidGlucose);
-    expect(result.success).toBe(false);
-    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
-    expect(messages).toContain("Las glucemias en mg/dL y mmol/L deben ser coherentes");
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.vitals?.glucoseMgDl).toBe(90);
+      expect(result.data.vitals?.glucoseMmolL).toBeCloseTo(5, 1);
+    }
   });
 
   it("valida consistencia de Braden", () => {
