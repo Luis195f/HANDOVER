@@ -775,11 +775,7 @@ type AttachmentInput = {
   data: string;
 };
 
-type FhirCodeDescriptor = {
-  system: string;
-  code: string;
-  display?: string;
-};
+type FhirCodeDescriptor = typeof FHIR_CODES.RISK.FALL;
 
 type MedicationValues = {
   patientId: string;
