@@ -32,7 +32,10 @@ const LEGAL_NOTICE_BY_LANG: Record<'es' | 'en', string> = {
   en: 'Legal notice: Support assistant, not a diagnosis or prescription.',
 };
 
-const formatSbarText = (summary: Pick<SbarResult, 'situation' | 'background' | 'assessment' | 'recommendation'>, language: 'es' | 'en') => {
+const formatSbarText = (
+  summary: Pick<SbarResult, 'situation' | 'background' | 'assessment' | 'recommendation'>,
+  language: 'es' | 'en',
+) => {
   const labels =
     language === 'en'
       ? {
@@ -64,9 +67,8 @@ const appendLegalNotice = (text: string, language: 'es' | 'en') => {
 };
 
 function getAiSbarConfig(): AISBARConfig | null {
-  const baseUrl = typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim()
-    ? AI_SBAR_BASE_URL.trim()
-    : null;
+  const baseUrl =
+    typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim() ? AI_SBAR_BASE_URL.trim() : null;
   if (!baseUrl) return null;
   return { baseUrl, apiKey: AI_SBAR_API_KEY };
 }
@@ -91,6 +93,17 @@ function buildRefinedSbar(candidate: Partial<SBARSummary> | null | undefined, dr
   };
 }
 
+const safeDxText = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') {
+    const r = value as Record<string, unknown>;
+    const display = typeof r.display === 'string' ? r.display.trim() : '';
+    const code = typeof r.code === 'string' ? r.code.trim() : '';
+    return display || code || '';
+  }
+  return '';
+};
+
 export async function refineSBARWithAI(
   handover: HandoverFormData,
   draft: SBARSummary,
@@ -103,8 +116,9 @@ export async function refineSBARWithAI(
 
   const payload = {
     handover: {
-      dxMedical: handover.dxMedical?.display ?? '',
-      dxNursing: handover.dxNursing?.display ?? '',
+      dxMedical: safeDxText(handover.dxMedical),
+      // dxNursing es texto legacy (string), no objeto con display
+      dxNursing: safeDxText(handover.dxNursing),
       vitals: handover.vitals,
       oxygenTherapy: handover.oxygenTherapy,
       risks: handover.risks,
@@ -134,8 +148,7 @@ export async function refineSBARWithAI(
     }
 
     const data = (await response.json()) as RefineSbarResponse;
-    const refined = buildRefinedSbar(data?.sbar, draft);
-    return refined;
+    return buildRefinedSbar(data?.sbar, draft);
   } catch {
     return null;
   } finally {
