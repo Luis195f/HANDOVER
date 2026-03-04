@@ -17,7 +17,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, useWatch, type Path } from 'react-hook-form';
+import { Controller, FormProvider, useWatch, type Path, type Control } from 'react-hook-form';
 import type { FieldErrors } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
@@ -647,7 +647,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
       dxMedical: dxMedicalPrefill ? normalizedDxMedical : emptySnomedCoding,
-      dxNursing: emptySnomedCoding,
+      dxNursing: '',
       dxMedicalStructured: [],
       dxNursingStructured: [],
       evolution: '',
@@ -699,6 +699,8 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const form = useZodForm(zHandover, defaultValues);
   const { watch, reset, getValues } = form;
   const { control, formState } = form;
+  type SnomedFormValues = { dxMedical?: any };
+  const snomedControl = control as unknown as Control<SnomedFormValues>;
   const patientIdValue = form.watch('patientId');
   const administrativeUnitValue = form.watch('administrativeData.unit');
   const draftKey = useMemo(
@@ -869,8 +871,10 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       if (!data) return;
       const normalizedDxMedical =
         data.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(data.dxMedical);
+
+      // dxNursing es texto legacy -> normaliza a string (o undefined) sin SNOMED
       const normalizedDxNursing =
-        data.dxNursing === undefined ? undefined : normalizeLegacySnomedCoding(data.dxNursing);
+        data.dxNursing === undefined ? undefined : (dxText(data.dxNursing) || undefined);
 
       const normalizedData: Partial<HandoverFormValues> = normalizeLegacyFormSnapshot({
         ...data,
@@ -917,14 +921,27 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
         const draft = safeJsonParse<Partial<HandoverFormValues>>(raw);
         if (!draft) return;
 
+        const dxText = (value: unknown): string => {
+          if (typeof value === 'string') return value.trim();
+          if (value && typeof value === 'object') {
+            const r = value as Record<string, unknown>;
+            const display = typeof r.display === 'string' ? r.display.trim() : '';
+            const code = typeof r.code === 'string' ? r.code.trim() : '';
+            return display || code || '';
+          }
+          return '';
+        };
+
         // Importante: NO pisar si ya hay datos
         const current = getValues();
         const isEmpty = !current || Object.keys(current).length === 0;
         if (isEmpty) {
           const normalizedDxMedical =
             draft?.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxMedical);
+
           const normalizedDxNursing =
-            draft?.dxNursing === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxNursing);
+            draft?.dxNursing === undefined ? undefined : (dxText(draft.dxNursing) || undefined);
+
           const normalizedDraft: Partial<HandoverFormValues> = normalizeLegacyFormSnapshot({
             ...draft,
             ...(draft?.dxMedical !== undefined ? { dxMedical: normalizedDxMedical } : {}),
@@ -1060,9 +1077,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
           }),
       },
       dxNursing: {
-        get: () => form.getValues('dxNursing')?.display ?? '',
+        get: () => form.getValues('dxNursing') ?? '',
         set: (text: string) =>
-          form.setValue('dxNursing', buildDraftSnomedCoding(text), {
+          form.setValue('dxNursing', text, {
             shouldDirty: true,
             shouldValidate: true,
           }),
@@ -1364,7 +1381,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     patientId: values.patientId,
     administrativeData: values.administrativeData,
     dxMedical: values.dxMedical?.display ?? '',
-    dxNursing: values.dxNursing?.display ?? '',
+    dxNursing: values.dxNursing ?? '',
     vitals: values.vitals,
     medications: values.medications,
     medsFreeText: values.meds,
@@ -1675,8 +1692,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     if (watchedValues.dxMedical?.display) {
       diagnoses.push(watchedValues.dxMedical.display);
     }
-    if (watchedValues.dxNursing?.display) {
-      diagnoses.push(watchedValues.dxNursing.display);
+    if (typeof watchedValues.dxNursing === 'string' && watchedValues.dxNursing.trim()) {
+      diagnoses.push(watchedValues.dxNursing.trim());
     }
 
     const notes =
@@ -2402,7 +2419,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           isCollapsed={collapsedSections.seguridad}
           onToggle={() => toggleSection('seguridad')}
         >
-          <SafetySection control={control} watch={form.watch} />
+          <SafetySection control={snomedControl} watch={form.watch} /> 
         </CollapsibleSection>
       </View>
 
@@ -2688,12 +2705,19 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <View style={styles.field}>
             <View style={styles.dictationRow}>
               <View style={styles.flex}>
-                <AutocompleteSnomedCoding
+                <Controller
                   control={control}
-                  name="dxMedical"
-                  label="Diagnóstico médico (SNOMED)"
-                  placeholder="Buscar diagnóstico médico"
-                />
+                  name="dxNursing"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Diagnóstico de enfermería (texto libre, legado)"
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  )}
+                /> 
               </View>
               <DictationMicButton
                 active={activeDictationField === 'dxMedical' && sttStatus === 'listening'}
