@@ -13,13 +13,11 @@ interface Props {
 }
 
 function buildHandoverId(handover: HandoverValues): string {
-  // Usa campos existentes en HandoverValues -> id estable y reproducible
   const patientId = handover.patientId ?? 'unknown-patient';
   const shiftStart = handover.administrativeData?.shiftStart ?? 'unknown-start';
   const shiftEnd = handover.administrativeData?.shiftEnd ?? 'unknown-end';
   const shiftType = handover.administrativeData?.shiftType ?? 'unknown-shift';
 
-  // Evita caracteres problemáticos si esto termina en URLs/paths
   const raw = `${patientId}-${shiftType}-${shiftStart}-${shiftEnd}`;
   return raw.replace(/[^\w.-]+/g, '_');
 }
