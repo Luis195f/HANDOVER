@@ -30,10 +30,29 @@ function safeString(value: unknown, fallback: string): string {
   return trimmed.length ? trimmed : fallback;
 }
 
+function safeText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') {
+    const r = value as Record<string, unknown>;
+    const display = typeof r.display === 'string' ? r.display.trim() : '';
+    const code = typeof r.code === 'string' ? r.code.trim() : '';
+    return display || code || '';
+  }
+  return '';
+}
+
 function resolveDiagnosis(handover: HandoverFormData): string {
-  if (handover.dxMedical?.display) return handover.dxMedical.display;
-  if (handover.dxNursing?.display) return handover.dxNursing.display;
-  const fromStructured = handover.dxMedicalStructured?.[0]?.display || handover.dxNursingStructured?.[0]?.display;
+  const dxMedical = safeText(handover.dxMedical);
+  if (dxMedical) return dxMedical;
+
+  // dxNursing ahora es texto legacy (string | undefined)
+  const dxNursing = safeText(handover.dxNursing);
+  if (dxNursing) return dxNursing;
+
+  const fromStructured =
+    handover.dxMedicalStructured?.[0]?.display ||
+    handover.dxNursingStructured?.[0]?.display;
+
   return safeString(fromStructured, 'Diagnóstico no disponible');
 }
 
@@ -68,12 +87,14 @@ function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
         scale2: false,
       })
     : null;
+
   const newsText = news2 ? `NEWS2 ${news2.total} (${news2.band.toLowerCase()} riesgo)` : 'NEWS2 no disponible';
   const risks = buildRiskSummary(handover) ?? 'Riesgos: no reportados';
   const oxygen = handover.oxygenTherapy?.device ? `Oxígeno: ${handover.oxygenTherapy.device}` : null;
-  const recommendation = news2 && news2.total >= 5
-    ? 'Monitorizar de cerca y avisar a equipo médico'
-    : 'Vigilancia estándar y pasar visita según plan';
+  const recommendation =
+    news2 && news2.total >= 5
+      ? 'Monitorizar de cerca y avisar a equipo médico'
+      : 'Vigilancia estándar y pasar visita según plan';
 
   return {
     situation: `Paciente con ${diagnosis}. ${newsText}`.trim(),
@@ -85,7 +106,6 @@ function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
 
 function ensureSbar(summary: SBARSummary | null | undefined, fallback: SBARSummary): SBARSummary {
   if (!summary) return fallback;
-  const safe: SBARSummary = { ...fallback };
   return {
     situation: safeString(summary.situation, fallback.situation),
     background: safeString(summary.background, fallback.background),
@@ -99,10 +119,11 @@ export async function getBestAvailableSummary(
   options: DegradedSummaryOptions = {},
 ): Promise<SBARSummary> {
   const { aiProvider, useLocalRules = true, sbarOptions } = options;
+
   const draft = (() => {
     try {
       return generateSBARSummary(handover, sbarOptions);
-    } catch (error) {
+    } catch {
       return buildMinimalSummary(handover);
     }
   })();
@@ -110,17 +131,13 @@ export async function getBestAvailableSummary(
   if (aiProvider) {
     try {
       const aiSummary = await aiProvider(handover, draft);
-      const refined = ensureSbar(aiSummary, draft);
-      if (refined) return refined;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      return ensureSbar(aiSummary, draft);
+    } catch {
+      // no-op, fallback abajo
     }
   }
 
-  if (useLocalRules) {
-    return draft;
-  }
-
+  if (useLocalRules) return draft;
   return buildMinimalSummary(handover);
 }
 
