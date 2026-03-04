@@ -775,11 +775,11 @@ type AttachmentInput = {
   data: string;
 };
 
-const riskCodeMap: Partial<Record<RiskItem["type"], FhirCodeDescriptor>> = {
-  fall: FHIR_CODES.RISK.FALL,
-  pressureUlcer: FHIR_CODES.RISK.PRESSURE_ULCER,
-  isolation: FHIR_CODES.RISK.SOCIAL_ISOLATION,
-};
+type FhirCodeDescriptor = Readonly<{
+  system: TerminologySystem;
+  code: string;
+  display?: string;
+}>;
 
 type MedicationValues = {
   patientId: string;
