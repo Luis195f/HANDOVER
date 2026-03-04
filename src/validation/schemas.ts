@@ -7,6 +7,7 @@ import {
   MOBILITY_LEVELS,
   STOOL_PATTERNS,
 } from "../types/handover-constants";
+import { normalizeLegacyHandoverPayload } from "./normalization";
 
 const optionalTrimmedString = (maxLength: number) =>
   z
@@ -126,8 +127,8 @@ export const zVitals = z
       .optional(),
     glucoseMgDl: z
       .number()
-      .min(20, "Glucemia fuera de rango")
-      .max(600, "Glucemia fuera de rango")
+      .min(18, "Glucemia fuera de rango")
+      .max(1000, "Glucemia fuera de rango")
       .describe("Glucemia capilar mg/dL (LOINC 2339-0)")
       .optional(),
     glucoseMmolL: z
@@ -144,18 +145,6 @@ export const zVitals = z
     issuedAt: z.string().datetime().optional(),
   })
   .superRefine((value, ctx) => {
-    if (typeof value.glucoseMgDl === "number" && typeof value.glucoseMmolL === "number") {
-      const convertedMmol = value.glucoseMmolL * 18;
-      const tolerance = 15; // mg/dL de tolerancia
-      if (Math.abs(convertedMmol - value.glucoseMgDl) > tolerance) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Las glucemias en mg/dL y mmol/L deben ser coherentes",
-          path: ["glucoseMmolL"],
-        });
-      }
-    }
-
     if (typeof value.sbp === "number" && typeof value.dbp === "number" && value.dbp >= value.sbp) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -581,7 +570,7 @@ const zFileAttachment = z.object({
   data: z.string().min(1),
 });
 
-export const zHandover = z
+const zHandoverBase = z
   .object({
     administrativeData: zAdministrativeData,
 
@@ -596,7 +585,7 @@ export const zHandover = z
     dxMedicalStructured: zHandoverStructuredDiagnosisArray,
     dxNursingStructured: zHandoverStructuredDiagnosisArray,
     evolution: optionalTrimmedString(1200).optional(),
-    closingSummary: optionalTrimmedString(1500).optional(),
+    closingSummary: optionalTrimmedString(2000).optional(),
 
     sbarSituation: optionalTrimmedString(800).optional(),
     sbarBackground: optionalTrimmedString(800).optional(),
@@ -685,6 +674,8 @@ export const zHandover = z
       });
     }
   });
+
+export const zHandover = z.preprocess(normalizeLegacyHandoverPayload, zHandoverBase);
 
 export type HandoverValues = z.infer<typeof zHandover>;
 export type HandoverFormData = HandoverValues;

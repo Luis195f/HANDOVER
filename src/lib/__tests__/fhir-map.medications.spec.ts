@@ -36,11 +36,10 @@ describe('FHIR map — medicaciones estructuradas y tratamientos', () => {
     expect(meds[1].medicationCodeableConcept.text).toBe('Omeprazol');
   });
 
-  it('utiliza el campo de texto libre como fallback cuando no hay lista estructurada', () => {
+  it('no usa campo legacy meds como fallback (requiere lista canónica medications[])', () => {
     const bundle = buildHandoverBundle({ patientId, medications: [], meds: 'Metamizol 2 g IV' }, { now });
     const meds = listResources(bundle, 'MedicationStatement');
-    expect(meds.length).toBeGreaterThan(0);
-    expect(meds.some((item: any) => item.medicationCodeableConcept.text === 'Metamizol 2 g IV')).toBe(true);
+    expect(meds).toHaveLength(0);
   });
 
   it('genera MedicationAdministration para medicaciones no continuas con alertas', () => {

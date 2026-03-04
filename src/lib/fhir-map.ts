@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
+import { GLUCOSE_MMOL_TO_MGDL_FACTOR } from '@/src/validation/normalization';
 
 import type { AdministrativeData } from '../types/administrative';
 import type {
@@ -778,7 +779,6 @@ type MedicationValues = {
   patientId: string;
   encounterId?: string;
   medications?: Array<MedicationStatementInput | MedicationItem>;
-  meds?: string | string[] | null;
 };
 
 type OxygenValues = {
@@ -895,7 +895,6 @@ export type HandoverValues = {
   risks?: RiskFlags;
   risksStructured?: RiskItem[];
   treatments?: TreatmentItem[];
-  meds?: string | string[] | null;
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
@@ -1227,10 +1226,6 @@ export function mapObservationVitals(
   const { effective, issued } = ensureEffectiveDate(parsed, optionsMerged);
   const subject = patientReference(parsed.patientId);
   const encounter = encounterReference(parsed.encounterId);
-  const normalizeGlucoseToMgDl =
-    optionsMerged.normalizeGlucoseToMgDl ??
-    optionsMerged.normalizeGlucoseToMgdl ??
-    true;
   const glucoseDecimals = optionsMerged.glucoseDecimals ?? 0;
 
   const observations: Observation[] = [];
@@ -1323,7 +1318,13 @@ export function mapObservationVitals(
     });
   }
 
-  if (parsed.glucoseMgDl !== undefined) {
+  if (parsed.glucoseMgDl !== undefined || parsed.glucoseMmolL !== undefined) {
+    const factor = GLUCOSE_MMOL_TO_MGDL_FACTOR;
+    const valueMgDl =
+      parsed.glucoseMgDl !== undefined
+        ? parsed.glucoseMgDl
+        : Number((parsed.glucoseMmolL! * factor).toFixed(glucoseDecimals));
+
     observations.push({
       resourceType: 'Observation',
       meta: { profile: [PROFILE_OBSERVATION] },
@@ -1334,43 +1335,12 @@ export function mapObservationVitals(
       encounter,
       effectiveDateTime: effective,
       issued,
-      valueQuantity: quantity(parsed.glucoseMgDl, 'mg/dL', 'mg/dL'),
+      valueQuantity: quantity(valueMgDl, 'mg/dL', 'mg/dL'),
+      note:
+        parsed.glucoseMgDl === undefined && parsed.glucoseMmolL !== undefined
+          ? [{ text: `Convertido desde ${parsed.glucoseMmolL} mmol/L (factor ${factor}).` }]
+          : undefined,
     });
-  } else if (parsed.glucoseMmolL !== undefined) {
-    if (normalizeGlucoseToMgDl) {
-      const factor = 18.0182;
-      const converted = Number((parsed.glucoseMmolL * factor).toFixed(glucoseDecimals));
-      observations.push({
-        resourceType: 'Observation',
-        meta: { profile: [PROFILE_OBSERVATION] },
-        status: 'final',
-        category: [laboratoryCategoryConcept],
-        code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD),
-        subject,
-        encounter,
-        effectiveDateTime: effective,
-        issued,
-        valueQuantity: quantity(converted, 'mg/dL', 'mg/dL'),
-        note: [
-          {
-            text: `Convertido desde ${parsed.glucoseMmolL} mmol/L (factor ${factor}).`,
-          },
-        ],
-      });
-    } else {
-      observations.push({
-        resourceType: 'Observation',
-        meta: { profile: [PROFILE_OBSERVATION] },
-        status: 'final',
-        category: [laboratoryCategoryConcept],
-        code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MOLES_BLD),
-        subject,
-        encounter,
-        effectiveDateTime: effective,
-        issued,
-        valueQuantity: quantity(parsed.glucoseMmolL, 'mmol/L', 'mmol/L'),
-      });
-    }
   }
 
   if (parsed.avpu !== undefined) {
@@ -1845,25 +1815,7 @@ export function mapMedicationStatements(
     .map((item) => mapLegacyMedicationStatement(item, subject, encounter, assertedAt))
     .filter((value): value is MedicationStatement => value != null);
 
-  const hasStatements = structuredStatements.length > 0 || legacyStatements.length > 0;
-  const medsText = Array.isArray(values.meds) ? values.meds.join(', ') : values.meds;
-  const trimmedText = typeof medsText === 'string' ? medsText.trim() : '';
-
-  const textFallback: MedicationResource[] = !hasStatements && trimmedText
-    ? [
-        {
-          resourceType: 'MedicationStatement',
-          status: 'active',
-          medicationCodeableConcept: { coding: [], text: trimmedText },
-          subject,
-          encounter,
-          dateAsserted: assertedAt,
-          note: [{ text: 'Texto libre de medicación transcrito desde handover' }],
-        },
-      ]
-    : [];
-
-  return [...structuredStatements, ...legacyStatements, ...textFallback];
+  return [...structuredStatements, ...legacyStatements];
 }
 
 export function mapDeviceUse(
@@ -2828,30 +2780,33 @@ function mapGlasgowObservation(
 }
 
 export function mapRiskConditions(
-  risks: RiskFlags | undefined,
+  risksStructured: RiskItem[] | undefined,
   context: MappingContext,
 ): Condition[] {
-  if (!risks) return [];
+  const activeRisks = (risksStructured ?? []).filter((risk) => risk.present === true);
+  if (activeRisks.length === 0) return [];
 
   const { subject, encounter, effectiveDateTime } = context;
-  const definitions = [
-    { enabled: risks.fall, code: FHIR_CODES.RISK.FALL },
-    { enabled: risks.pressureUlcer, code: FHIR_CODES.RISK.PRESSURE_ULCER },
-    { enabled: risks.isolation, code: FHIR_CODES.RISK.SOCIAL_ISOLATION },
-  ];
+  const riskCodeMap: Partial<Record<RiskItem['type'], FhirCodeDescriptor>> = {
+    fall: FHIR_CODES.RISK.FALL,
+    pressureUlcer: FHIR_CODES.RISK.PRESSURE_ULCER,
+    isolation: FHIR_CODES.RISK.SOCIAL_ISOLATION,
+  };
 
-  return definitions
-    .filter((definition) => definition.enabled)
-    .map((definition) => ({
+  return activeRisks
+    .map((risk) => ({ risk, code: riskCodeMap[risk.type] }))
+    .filter((entry): entry is { risk: RiskItem; code: FhirCodeDescriptor } => Boolean(entry.code))
+    .map((entry) => ({
       resourceType: 'Condition',
       clinicalStatus: conditionClinicalStatusActive,
       verificationStatus: conditionVerificationStatusUnconfirmed,
       category: [conditionProblemListCategory],
-      code: codeableConceptFromCode(definition.code),
+      code: codeableConceptFromCode(entry.code),
       subject,
       encounter,
       onsetDateTime: effectiveDateTime,
       recordedDate: effectiveDateTime,
+      note: entry.risk.notes ? [{ text: entry.risk.notes }] : undefined,
     }));
 }
 
@@ -3610,14 +3565,13 @@ export function buildHandoverBundle(
   const evaObservation = mapEvaObservation(values.painAssessment, mappingContext);
   const bradenObservation = mapBradenObservation(values.braden, mappingContext);
   const glasgowObservation = mapGlasgowObservation(values.glasgow, mappingContext);
-  const riskConditions = mapRiskConditions(values.risks, mappingContext);
+  const riskConditions = mapRiskConditions(values.risksStructured, mappingContext);
 
   const medications = mapMedicationStatements(
     {
       patientId: values.patientId,
       encounterId,
       medications: values.medications,
-      meds: values.meds,
     },
     sharedOptions,
   ).map((medication) => replaceSubjectReference(medication, patientSubjectReference));
@@ -4404,7 +4358,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const evaObservation = mapEvaObservation(data.painAssessment, mappingContext);
   const bradenObservation = mapBradenObservation(data.braden, mappingContext);
   const glasgowObservation = mapGlasgowObservation(data.glasgow, mappingContext);
-  const riskConditions = mapRiskConditions(data.risks, mappingContext);
+  const riskConditions = mapRiskConditions(data.risksStructured, mappingContext);
   const detectedIssues = mapDetectedIssuesFromRisks(data.risksStructured, mappingContext);
   const administrativeObservation = mapAdministrativeObservation(
     { administrativeData: data.administrativeData } as CompositionValues,
@@ -4432,7 +4386,6 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
       patientId: data.patientId,
       encounterId,
       medications: data.medications,
-      meds: data.meds,
     },
     sharedOptions,
   );

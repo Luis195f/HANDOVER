@@ -49,7 +49,7 @@ describe('Bundle — coherencia Composition.section.entry ↔ entry reference', 
         hr: 88, rr: 20, sbp: 120, dbp: 70, temp: 37.2, spo2: 98,
         acvpu: 'A', bgMgDl: 104, o2: true
       },
-      meds: [{ text: 'Paracetamol 1 g v.o. c/8h' }],
+      medications: [{ id: 'med-1', name: 'Paracetamol 1 g v.o. c/8h' }],
       attachments: [
         {
           uri: 'file:///audio.mp3',

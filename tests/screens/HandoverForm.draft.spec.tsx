@@ -232,6 +232,47 @@ describe('HandoverForm drafts', () => {
     mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
   });
 
+
+  it('cuando HIDE_LEGACY_FIELDS=false deriva valores legacy visibles desde canónicos', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+
+    mockUseZodForm.mockImplementationOnce((_: unknown, defaultValues: HandoverFormData) =>
+      buildFormMock({
+        ...defaultValues,
+        closingSummary: 'Resumen canónico',
+        sbarFullText: '',
+        meds: '',
+        medications: [
+          { id: 'm1', name: 'Paracetamol' },
+          { id: 'm2', name: 'Heparina' },
+        ],
+      } as HandoverFormData),
+    );
+
+    await act(async () => {
+      render(
+        <HandoverForm
+          navigation={navigation}
+          route={{ key: '1', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any}
+        />,
+      );
+    });
+
+    const formInstance = mockUseZodForm.mock.results[0]?.value;
+    await waitFor(() => {
+      expect(formInstance.setValue).toHaveBeenCalledWith(
+        'sbarFullText',
+        'Resumen canónico',
+        expect.objectContaining({ shouldDirty: false, shouldValidate: false }),
+      );
+      expect(formInstance.setValue).toHaveBeenCalledWith(
+        'meds',
+        'Paracetamol, Heparina',
+        expect.objectContaining({ shouldDirty: false, shouldValidate: false }),
+      );
+    });
+  });
+
   it('guarda borrador y encola con status draft', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);

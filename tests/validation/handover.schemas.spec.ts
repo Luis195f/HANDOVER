@@ -106,6 +106,70 @@ const buildValidHandover = () => {
 };
 
 describe('zHandover schema', () => {
+
+  it('normaliza payload legacy (meds/risks/sbar/glucosa) hacia campos canónicos', () => {
+    const data = buildValidHandover() as Record<string, unknown>;
+    data.medications = [];
+    data.meds = 'Aspirina 100mg, Metformina 850mg';
+    data.risksStructured = [];
+    data.risks = ['caidas', 'aislamiento'];
+    data.closingSummary = '';
+    data.sbarFullText = 'Resumen SBAR legado';
+    data.vitals = { glucoseMmolL: 5.6 };
+
+    const parsed = zHandover.parse(data);
+
+    expect(parsed.medications.length).toBe(2);
+    expect(parsed.medications[0]?.name).toContain('Aspirina');
+    expect(parsed.risksStructured.map((risk) => risk.type)).toEqual(['fall', 'isolation']);
+    expect(parsed.closingSummary).toBe('Resumen SBAR legado');
+    expect(parsed.vitals?.glucoseMgDl).toBe(101);
+    expect(parsed.vitals?.glucoseMmolL).toBeCloseTo(5.6, 1);
+  });
+
+
+  it('acepta extremos legacy de glucosa mmol/L tras normalizar a mg/dL', () => {
+    const low = zHandover.parse({ ...buildValidHandover(), vitals: { glucoseMmolL: 1 } });
+    const high = zHandover.parse({ ...buildValidHandover(), vitals: { glucoseMmolL: 55 } });
+
+    expect(low.vitals?.glucoseMgDl).toBe(18);
+    expect(high.vitals?.glucoseMgDl).toBe(991);
+  });
+
+  it('migra sbarFullText legacy (>1500 chars) a closingSummary sin pérdida', () => {
+    const longSbar = 'A'.repeat(1800);
+    const parsed = zHandover.parse({
+      ...buildValidHandover(),
+      closingSummary: '',
+      sbarFullText: longSbar,
+    });
+
+    expect(parsed.closingSummary).toHaveLength(1800);
+    expect(parsed.closingSummary).toBe(longSbar);
+  });
+
+  it('deriva campos legacy desde canónicos cuando legacy está vacío', () => {
+    const parsed = zHandover.parse({
+      ...buildValidHandover(),
+      closingSummary: 'Cierre canónico',
+      sbarFullText: '',
+      meds: '',
+      medications: [
+        { id: 'm1', name: 'Paracetamol' },
+        { id: 'm2', name: 'Heparina' },
+      ],
+      risks: {},
+      risksStructured: [
+        { type: 'fall', present: true, actions: [] },
+        { type: 'pressureUlcer', present: false, actions: [] },
+      ],
+    });
+
+    expect(parsed.sbarFullText).toBe('Cierre canónico');
+    expect(parsed.meds).toBe('Paracetamol, Heparina');
+    expect(parsed.risks).toMatchObject({ fall: true, pressureUlcer: false, isolation: false });
+  });
+
   it('accepts a fully valid handover object', () => {
     const data = buildValidHandover();
     expect(() => zHandover.parse(data)).not.toThrowError();

@@ -17,7 +17,7 @@ const hasCategory = (obs: any, code: string) =>
     cat?.coding?.some((c: any) => c.system === TEST_SYSTEMS.OBSERVATION_CATEGORY && c.code === code)
   );
 
-describe('Glucemia capilar — normalización mmol/L → mg/dL y variantes', () => {
+describe('Glucemia capilar — normalización a mg/dL y variantes', () => {
   const ctx: Ctx = { patientId: 'pat-001' };
 
   it('por defecto normaliza mmol/L → mg/dL y deja nota de conversión', () => {
@@ -59,21 +59,6 @@ describe('Glucemia capilar — normalización mmol/L → mg/dL y variantes', () 
 
     const noteText = (glu.note?.[0]?.text ?? '') as string;
     expect(noteText).toContain('factor 18.0182');
-  });
-
-  it('si se desactiva la normalización, emite mmol/L con LOINC de SCnc (14743-9) y sin nota', () => {
-    const mmoll = 5.6;
-    const bundle = buildHandoverBundle({
-      patientId: ctx.patientId,
-      vitals: { bgMmolL: mmoll }
-    }, { normalizeGlucoseToMgDl: false });
-
-    // Debe salir 14743-9 con unidad mmol/L
-    const gluMol = findObsByLoinc(bundle, TEST_VITAL_CODES.GLUCOSE_MOLES_BLD.code);
-    expect(gluMol).toBeTruthy();
-    expect(gluMol.valueQuantity.unit).toBe('mmol/L');
-    expect(gluMol.valueQuantity.value).toBeCloseTo(mmoll, 6);
-    expect(gluMol.note).toBeUndefined();
   });
 
   it('cuando llegan ambas unidades, prevalece el valor en mg/dL sin nota', () => {

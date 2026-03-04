@@ -27,7 +27,7 @@ export const flags = {
     (extra as any)?.FEATURES?.handover?.showHandoverTimingMetrics ??
     process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS,
   HIDE_LEGACY_FIELDS:
-    (extra as any)?.FEATURES?.handover?.hideLegacyFields ?? process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS,
+    (extra as any)?.FEATURES?.handover?.hideLegacyFields ?? process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS ?? false,
   REMOTE_CONFIG_DISABLED_FOR_NOW: (extra as any)?.FEATURES?.handover?.remoteConfigDisabled,
 } satisfies Record<string, FlagValue>;
 

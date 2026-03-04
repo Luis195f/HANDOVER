@@ -11,6 +11,7 @@ const hasUnitAccessMock = vi.fn(() => true);
 const getSessionMock = vi.fn(async () => ({
   user: { id: 'nurse-1', name: 'Nurse Jane' },
 }));
+const hideLegacyFieldsMock = vi.fn(() => false);
 
 vi.mock('@/src/lib/fhir-map', () => ({
   buildHandoverBundle: (...args: unknown[]) => buildHandoverBundleMock(...args),
@@ -39,7 +40,11 @@ vi.mock('@/src/components/AudioAttach', () => ({
 }));
 
 vi.mock('@/src/config/flags', () => ({
-  isOn: (flag: string) => flag === 'SHOW_MEDS',
+  isOn: (flag: string) => {
+    if (flag === 'SHOW_MEDS') return true;
+    if (flag === 'HIDE_LEGACY_FIELDS') return hideLegacyFieldsMock();
+    return false;
+  },
 }));
 
 vi.mock('@/src/lib/news2', () => ({
@@ -79,6 +84,7 @@ describe('HandoverForm', () => {
     enqueueBundleMock.mockReset();
     hasUnitAccessMock.mockReturnValue(true).mockClear();
     getSessionMock.mockClear();
+    hideLegacyFieldsMock.mockReturnValue(false);
     vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   });
 
@@ -112,6 +118,18 @@ describe('HandoverForm', () => {
 
     return { view, navigation };
   };
+
+
+  it('oculta campos legacy duplicados cuando HIDE_LEGACY_FIELDS=true', async () => {
+    hideLegacyFieldsMock.mockReturnValue(true);
+    renderForm();
+
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Texto libre de medicación (opcional)')).toBeNull();
+      expect(screen.queryByPlaceholderText('Resumen SBAR completo')).toBeNull();
+      expect(screen.queryByText('Glucemia (mmol/L)')).toBeNull();
+    });
+  });
 
   it('envía bundle FHIR al hacer submit con datos válidos', async () => {
     const bundle = { resourceType: 'Bundle', type: 'transaction' } as const;

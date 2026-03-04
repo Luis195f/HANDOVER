@@ -76,6 +76,7 @@ import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues } from '@/src/validation/schemas';
+import { normalizeLegacyHandoverPayload } from '@/src/validation/normalization';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import AutocompleteSnomedCoding from '@/src/components/AutocompleteSnomedCoding';
 import { SignaturePad, type SignaturePadValue } from '@/src/components/SignaturePad';
@@ -125,6 +126,8 @@ import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 import { useHandoverTiming } from '@/src/hooks/useHandoverTiming';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
+const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
+  normalizeLegacyHandoverPayload(value) as T;
 const isSignatureDisabled = () =>
   (process.env.EXPO_PUBLIC_HANDOVER_SIGNATURE_DISABLED ?? process.env.HANDOVER_SIGNATURE_DISABLED) === 'true';
 
@@ -681,7 +684,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       attachments: [],
       audioTranscription: '',
     };
-    return { ...base, risksStructured: deriveInitialRisksStructured(base) };
+    return normalizeLegacyFormSnapshot({ ...base, risksStructured: deriveInitialRisksStructured(base) });
 }, [
   patientIdParam,
   patientSummaryParam,
@@ -757,6 +760,28 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   
   const bedsideChecklistRef = useRef<HandoverFormValues['bedsideChecklist'] | null>(null);
   const watchedValues = form.watch();
+
+  useEffect(() => {
+    if (features.hideLegacyFields) return;
+
+    const summary = form.getValues('closingSummary')?.trim() ?? '';
+    const sbarLegacy = form.getValues('sbarFullText')?.trim() ?? '';
+    if (summary && !sbarLegacy) {
+      form.setValue('sbarFullText', summary, { shouldDirty: false, shouldValidate: false });
+    }
+
+    const medsLegacy = form.getValues('meds')?.trim() ?? '';
+    const medications = form.getValues('medications') ?? [];
+    if (!medsLegacy && medications.length > 0) {
+      const derived = medications
+        .map((item) => item?.name?.trim() ?? '')
+        .filter(Boolean)
+        .join(', ');
+      if (derived) {
+        form.setValue('meds', derived, { shouldDirty: false, shouldValidate: false });
+      }
+    }
+  }, [features.hideLegacyFields, watchedValues.closingSummary, watchedValues.sbarFullText, watchedValues.medications, watchedValues.meds, form]);
 
   const buildOutgoingSignature = (payload: SignaturePadValue): HandoverSignature | null => {
     if (!signatureUser || !activeUnitId) return null;
@@ -847,11 +872,11 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       const normalizedDxNursing =
         data.dxNursing === undefined ? undefined : normalizeLegacySnomedCoding(data.dxNursing);
 
-      const normalizedData: Partial<HandoverFormValues> = {
+      const normalizedData: Partial<HandoverFormValues> = normalizeLegacyFormSnapshot({
         ...data,
         ...(data.dxMedical !== undefined ? { dxMedical: normalizedDxMedical } : {}),
         ...(data.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
-      };
+      });
 
       form.reset({ ...form.getValues(), ...normalizedData });
     },
@@ -900,11 +925,11 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
             draft?.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxMedical);
           const normalizedDxNursing =
             draft?.dxNursing === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxNursing);
-          const normalizedDraft: Partial<HandoverFormValues> = {
+          const normalizedDraft: Partial<HandoverFormValues> = normalizeLegacyFormSnapshot({
             ...draft,
             ...(draft?.dxMedical !== undefined ? { dxMedical: normalizedDxMedical } : {}),
             ...(draft?.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
-          };
+          });
           reset(normalizedDraft);
         }
       } catch {
@@ -1399,7 +1424,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
         form.setValue('sbarBackground', refined.background, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarAssessment', refined.assessment, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarRecommendation', refined.recommendation, { shouldDirty: true, shouldValidate: true });
-        form.setValue('sbarFullText', buildSbarFullText(refined), { shouldDirty: true, shouldValidate: true });
+        form.setValue('closingSummary', buildSbarFullText(refined), { shouldDirty: true, shouldValidate: true });
         setSbarHelperMessage(t('handover.sbarRefinedHelper'));
       } else {
         setSbarAiError(t('handover.sbarAiUnavailable'));
@@ -1424,7 +1449,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       form.setValue('sbarBackground', result.background, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarAssessment', result.assessment, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarRecommendation', result.recommendation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarFullText', result.fullText, { shouldDirty: true, shouldValidate: true });
+      form.setValue('closingSummary', result.fullText, { shouldDirty: true, shouldValidate: true });
       setSbarHelperMessage(t('handover.sbarGeneratedAiHelper'));
     } catch {
       setSbarAiError(t('handover.sbarAiGenerateError'));
@@ -1445,7 +1470,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarFullText', buildSbarFullText(summary), { shouldDirty: true, shouldValidate: true });
+      form.setValue('closingSummary', buildSbarFullText(summary), { shouldDirty: true, shouldValidate: true });
       setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
       setSbarAiError(null);
     } catch {
@@ -2300,6 +2325,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               sbarAssessmentError={sbarAssessmentError}
               sbarRecommendationError={sbarRecommendationError}
               sbarFullTextError={sbarFullTextError}
+              hideLegacyFields={features.hideLegacyFields === true}
             />
           </CollapsibleSection>
         </View>
