@@ -97,6 +97,8 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     control,
     setError,
     clearErrors,
+    getValues,
+    setValue,
     formState: { errors },
   } = useFormContext<HandoverValues>();
 
@@ -149,6 +151,25 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
       freeTextNote: '',
     };
     append(nextItem);
+
+    if (name === 'dxNursingStructured') {
+      const rawLegacyValue = getValues('dxNursing');
+      const currentLegacyText =
+        typeof rawLegacyValue === 'string'
+          ? rawLegacyValue.trim()
+          : rawLegacyValue && typeof rawLegacyValue === 'object' && 'display' in rawLegacyValue
+            ? String((rawLegacyValue as { display?: unknown }).display ?? '').trim()
+            : '';
+      const shouldAutofill = fields.length === 0 && code.system === 'NANDA' && currentLegacyText.length === 0;
+      if (shouldAutofill) {
+        setValue('dxNursing', code.display, {
+          shouldDirty: true,
+          shouldTouch: true,
+          shouldValidate: true,
+        });
+      }
+    }
+
     setQuery('');
   };
 

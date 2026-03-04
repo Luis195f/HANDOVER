@@ -42,6 +42,21 @@ const ensureObject = (value: unknown): Record<string, unknown> =>
 
 const hasText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
+const normalizeLegacyDxNursingText = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const display = typeof record.display === 'string' ? record.display.trim() : '';
+    if (display) return display;
+    const code = typeof record.code === 'string' ? record.code.trim() : '';
+    return code || undefined;
+  }
+  return undefined;
+};
+
 export const glucoseMmolLToMgDl = (value: number, decimals = 0): number =>
   Number((value * GLUCOSE_MMOL_TO_MGDL_FACTOR).toFixed(decimals));
 
@@ -141,6 +156,24 @@ export const normalizeLegacyHandoverPayload = (input: unknown): unknown => {
 
   if (!sbarFullText && hasText(payload.closingSummary)) {
     payload.sbarFullText = payload.closingSummary.trim();
+  }
+
+  const dxNursingStructured = Array.isArray(payload.dxNursingStructured) ? payload.dxNursingStructured : [];
+  const normalizedDxNursing = normalizeLegacyDxNursingText(payload.dxNursing);
+
+  if (normalizedDxNursing) {
+    payload.dxNursing = normalizedDxNursing;
+  } else if (dxNursingStructured.length > 0) {
+    const firstNanda = dxNursingStructured.find((item) =>
+      item && typeof item === 'object' && (item as { system?: unknown }).system === 'NANDA',
+    ) as { code?: unknown; display?: unknown } | undefined;
+
+    const display = typeof firstNanda?.display === 'string' ? firstNanda.display.trim() : '';
+    if (display) {
+      payload.dxNursing = display;
+    }
+  } else {
+    payload.dxNursing = undefined;
   }
 
   return payload;

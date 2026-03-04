@@ -5,6 +5,7 @@ import {
   buildFhirBundleFromFormData,
   buildHandoverBundle,
   mapObservationVitals,
+  NANDA_DIAGNOSIS_SYSTEM_URI,
   type HandoverData,
   type HandoverValues,
   validateBundle,
@@ -458,6 +459,128 @@ describe('buildHandoverBundle', () => {
 });
 
 describe('buildFhirBundleFromFormData', () => {
+
+
+  it('maps NANDA nursing diagnosis as Condition.code.coding using the NANDA URI', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 8,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      patientId: 'patient-nanda-1',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      dxNursing: '',
+      dxNursingStructured: [
+        { system: 'NANDA', code: '00030', display: 'Deterioro del intercambio gaseoso' },
+      ],
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const nandaCondition = bundle.entry
+      .map((entry) => entry.resource)
+      .find(
+        (resource) =>
+          resource.resourceType === 'Condition' &&
+          resource.code?.coding?.[0]?.system === NANDA_DIAGNOSIS_SYSTEM_URI,
+      ) as any;
+
+    expect(nandaCondition).toBeDefined();
+    expect(nandaCondition.code.coding[0]).toMatchObject({
+      system: NANDA_DIAGNOSIS_SYSTEM_URI,
+      code: '00030',
+      display: 'Deterioro del intercambio gaseoso',
+    });
+  });
+
+
+  it('maps dxNursing legacy text fallback without pressure-ulcer-risk categorization', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 8,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      patientId: 'patient-legacy-nursing-1',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      dxNursing: 'Dolor agudo',
+      dxNursingStructured: [],
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const legacyCondition = bundle.entry
+      .map((entry) => entry.resource)
+      .find((resource) => resource.resourceType === 'Condition' && resource.code?.text === 'Dolor agudo') as any;
+
+    expect(legacyCondition).toBeDefined();
+    const categoryCodings = (legacyCondition.category ?? []).flatMap((cat: any) => cat.coding ?? []);
+    expect(categoryCodings.some((coding: any) => coding.code === '714658008')).toBe(false);
+  });
+
+  it('does not classify dxMedical as fall risk in diagnosis mapping', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 8,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      patientId: 'patient-medical-dx-1',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      dxNursing: '',
+      dxNursingStructured: [],
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const medicalCondition = bundle.entry
+      .map((entry) => entry.resource)
+      .find(
+        (resource) =>
+          resource.resourceType === 'Condition' &&
+          resource.code?.coding?.[0]?.system === SNOMED_SYSTEM &&
+          resource.code?.coding?.[0]?.code === '195967001',
+      ) as any;
+
+    expect(medicalCondition).toBeDefined();
+    const categoryCodings = (medicalCondition.category ?? []).flatMap((cat: any) => cat.coding ?? []);
+    expect(categoryCodings.some((coding: any) => coding.code === '129839007')).toBe(false);
+  });
+
   it('creates a transaction bundle valid for handover data', () => {
     const handover: HandoverData = zHandover.parse({
       administrativeData: {
