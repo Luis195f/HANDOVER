@@ -478,6 +478,16 @@ async function buildAudioAttachment(uri: string | undefined) {
     return undefined;
   }
 }
+  const dxText = (value: unknown): string => {
+     if (typeof value === 'string') return value.trim();
+     if (value && typeof value === 'object') {
+       const r = value as Record<string, unknown>;
+       const display = typeof r.display === 'string' ? r.display.trim() : '';
+       const code = typeof r.code === 'string' ? r.code.trim() : '';
+       return display || code || '';
+     }
+     return '';
+  };    
 
 export default function HandoverForm({ navigation, route }: Props) {
   const {
@@ -699,8 +709,6 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const form = useZodForm(zHandover, defaultValues);
   const { watch, reset, getValues } = form;
   const { control, formState } = form;
-  type SnomedFormValues = { dxMedical?: any };
-  const snomedControl = control as unknown as Control<SnomedFormValues>;
   const patientIdValue = form.watch('patientId');
   const administrativeUnitValue = form.watch('administrativeData.unit');
   const draftKey = useMemo(
@@ -2419,7 +2427,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           isCollapsed={collapsedSections.seguridad}
           onToggle={() => toggleSection('seguridad')}
         >
-          <SafetySection control={snomedControl} watch={form.watch} /> 
+          <SafetySection control={control} watch={form.watch} /> 
         </CollapsibleSection>
       </View>
 
@@ -2762,11 +2770,18 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <View style={styles.field}>
             <View style={styles.dictationRow}>
               <View style={styles.flex}>
-                <AutocompleteSnomedCoding
+                <Controller
                   control={control}
                   name="dxNursing"
-                  label="Diagnóstico de enfermería (SNOMED)"
-                  placeholder="Buscar diagnóstico de enfermería"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Diagnóstico de enfermería (texto libre, legado)"
+                      onBlur={onBlur}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                    />
+                  )}
                 />
               </View>
               <DictationMicButton
