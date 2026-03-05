@@ -38,18 +38,8 @@ const formatSbarText = (
 ) => {
   const labels =
     language === 'en'
-      ? {
-          situation: 'S: Situation',
-          background: 'B: Background',
-          assessment: 'A: Assessment',
-          recommendation: 'R: Recommendation',
-        }
-      : {
-          situation: 'S: Situación',
-          background: 'B: Antecedentes',
-          assessment: 'A: Valoración',
-          recommendation: 'R: Recomendación',
-        };
+      ? { situation: 'S: Situation', background: 'B: Background', assessment: 'A: Assessment', recommendation: 'R: Recommendation' }
+      : { situation: 'S: Situación', background: 'B: Antecedentes', assessment: 'A: Valoración', recommendation: 'R: Recomendación' };
 
   return [
     `${labels.situation}: ${summary.situation}`,
@@ -67,33 +57,27 @@ const appendLegalNotice = (text: string, language: 'es' | 'en') => {
 };
 
 function getAiSbarConfig(): AISBARConfig | null {
-  const baseUrl =
-    typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim() ? AI_SBAR_BASE_URL.trim() : null;
+  const baseUrl = typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim() ? AI_SBAR_BASE_URL.trim() : null;
   if (!baseUrl) return null;
   return { baseUrl, apiKey: AI_SBAR_API_KEY };
 }
 
 function toSafeString(value: unknown, fallback: string): string {
-  if (typeof value === 'string' && value.trim().length > 0) {
-    return value;
-  }
+  if (typeof value === 'string' && value.trim().length > 0) return value;
   return fallback;
 }
 
 function buildRefinedSbar(candidate: Partial<SBARSummary> | null | undefined, draft: SBARSummary): SBARSummary {
-  const baseDraft: SBARSummary = { ...draft };
-  if (!candidate || typeof candidate !== 'object') {
-    return baseDraft;
-  }
+  if (!candidate || typeof candidate !== 'object') return { ...draft };
   return {
-    situation: toSafeString(candidate.situation, baseDraft.situation),
-    background: toSafeString(candidate.background, baseDraft.background),
-    assessment: toSafeString(candidate.assessment, baseDraft.assessment),
-    recommendation: toSafeString(candidate.recommendation, baseDraft.recommendation),
+    situation: toSafeString(candidate.situation, draft.situation),
+    background: toSafeString(candidate.background, draft.background),
+    assessment: toSafeString(candidate.assessment, draft.assessment),
+    recommendation: toSafeString(candidate.recommendation, draft.recommendation),
   };
 }
 
-const safeDxText = (value: unknown): string => {
+const legacyDxNursingText = (value: unknown): string => {
   if (typeof value === 'string') return value.trim();
   if (value && typeof value === 'object') {
     const r = value as Record<string, unknown>;
@@ -104,10 +88,7 @@ const safeDxText = (value: unknown): string => {
   return '';
 };
 
-export async function refineSBARWithAI(
-  handover: HandoverFormData,
-  draft: SBARSummary,
-): Promise<SBARSummary | null> {
+export async function refineSBARWithAI(handover: HandoverFormData, draft: SBARSummary): Promise<SBARSummary | null> {
   const config = getAiSbarConfig();
   if (!config?.baseUrl) {
     console.info('[ai-sbar] AI SBAR backend not configured');
@@ -116,15 +97,14 @@ export async function refineSBARWithAI(
 
   const payload = {
     handover: {
-      dxMedical: safeDxText(handover.dxMedical),
-      // dxNursing es texto legacy (string), no objeto con display
-      dxNursing: safeDxText(handover.dxNursing),
+      dxMedical: handover.dxMedical?.display ?? '',
+      dxNursing: legacyDxNursingText(handover.dxNursing),
       vitals: handover.vitals,
       oxygenTherapy: handover.oxygenTherapy,
-      risks: handover.risks,
+      risks: (handover as any).risks,
       evolution: handover.evolution,
-      mobility: handover.mobility,
-      nutrition: handover.nutrition,
+      mobility: (handover as any).mobility,
+      nutrition: (handover as any).nutrition,
     },
     draft: { ...draft },
   };
@@ -143,9 +123,7 @@ export async function refineSBARWithAI(
       signal: controller?.signal,
     });
 
-    if (!response.ok) {
-      return null;
-    }
+    if (!response.ok) return null;
 
     const data = (await response.json()) as RefineSbarResponse;
     return buildRefinedSbar(data?.sbar, draft);
@@ -162,27 +140,19 @@ export async function generateSbarViaBackend(
   language: 'es' | 'en' = 'es',
 ): Promise<SbarResult> {
   const trimmed = freeText.trim();
-  if (!trimmed) {
-    throw new Error('No se pudo generar el SBAR con IA');
-  }
-
-  if (!AI_BACKEND_BASE_URL) {
-    throw new Error('Módulo de IA no configurado');
-  }
+  if (!trimmed) throw new Error('No se pudo generar el SBAR con IA');
+  if (!AI_BACKEND_BASE_URL) throw new Error('Módulo de IA no configurado');
 
   const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/summarize-sbar`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ free_text: trimmed, context, language }),
   });
 
-  if (!response.ok) {
-    throw new Error('No se pudo generar el SBAR con IA');
-  }
+  if (!response.ok) throw new Error('No se pudo generar el SBAR con IA');
 
   const data = (await response.json()) as SbarBackendResponse;
+
   if (
     typeof data.situation !== 'string' ||
     typeof data.background !== 'string' ||
@@ -196,12 +166,7 @@ export async function generateSbarViaBackend(
   const baseText = rawText.trim()
     ? rawText
     : formatSbarText(
-        {
-          situation: data.situation,
-          background: data.background,
-          assessment: data.assessment,
-          recommendation: data.recommendation,
-        },
+        { situation: data.situation, background: data.background, assessment: data.assessment, recommendation: data.recommendation },
         language,
       );
 
