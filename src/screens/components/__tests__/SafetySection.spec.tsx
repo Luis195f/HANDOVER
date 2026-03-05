@@ -23,18 +23,11 @@ const defaultValues: HandoverValues = {
   patientId: 'pat-001',
   status: 'draft',
   dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
-
-  // ✅ dxNursing ahora es texto legado
-  dxNursing: 'Fiebre',
-
+  dxNursing: 'Fiebre', // ✅ legacy string
+  dxMedicalStructured: [],
+  dxNursingStructured: [],
   medications: [],
   treatments: [],
-  exams: [],
-  procedures: [],
-  devices: [],
-  meds: '',
-  risks: {},
-  risksStructured: [],
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
@@ -42,12 +35,28 @@ const defaultValues: HandoverValues = {
     medicationPlanReviewed: false,
     safetyMeasuresApplied: false,
     questionsAnswered: false,
+    bedsideNotes: '',
   },
+  risks: {},
+  risksStructured: [],
+  meds: '',
+  exams: [],
+  procedures: [],
+  devices: [],
+  vitals: {},
+  oxygenTherapy: {},
+  evolution: '',
+  closingSummary: '',
+  sbarSituation: '',
+  sbarBackground: '',
+  sbarAssessment: '',
+  sbarRecommendation: '',
+  sbarFullText: '',
 };
 
 function Wrapper() {
   const methods = useForm<HandoverValues>({ defaultValues });
-  const alerts = computeAlerts(methods.watch());
+  const alerts = computeAlerts(methods.watch() as any);
   return (
     <FormProvider {...methods}>
       <SafetySection control={methods.control} watch={methods.watch} />
