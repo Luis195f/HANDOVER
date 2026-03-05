@@ -428,8 +428,9 @@ export default function PatientList({ navigation }: Props) {
         },
         patientId: patient.id,
         status: 'draft',
-        dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
-        dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
+        dxMedical: '',
+        dxNursing: '',
+        attachments: [],
         medications: [],
         treatments: [],
         bedsideChecklist: {
