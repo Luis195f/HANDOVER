@@ -477,17 +477,7 @@ async function buildAudioAttachment(uri: string | undefined) {
   } catch {
     return undefined;
   }
-}
-  const dxText = (value: unknown): string => {
-     if (typeof value === 'string') return value.trim();
-     if (value && typeof value === 'object') {
-       const r = value as Record<string, unknown>;
-       const display = typeof r.display === 'string' ? r.display.trim() : '';
-       const code = typeof r.code === 'string' ? r.code.trim() : '';
-       return display || code || '';
-     }
-     return '';
-  };    
+}    
 
 export default function HandoverForm({ navigation, route }: Props) {
   const {
@@ -657,7 +647,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
       dxMedical: dxMedicalPrefill ? normalizedDxMedical : emptySnomedCoding,
-      dxNursing: '',
+      dxNursing: null,
       dxMedicalStructured: [],
       dxNursingStructured: [],
       evolution: '',
@@ -870,6 +860,17 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   form.setValue("bedsideChecklist", completed, { shouldDirty: true, shouldValidate: true });
 };
 
+  const dxText = (value: unknown): string => {
+    if (typeof value === 'string') return value.trim();
+    if (value && typeof value === 'object') {
+      const r = value as Record<string, unknown>;
+      const display = typeof r.display === 'string' ? r.display.trim() : '';
+      const code = typeof r.code === 'string' ? r.code.trim() : '';
+      return display || code || '';
+    }
+    return '';
+  };    
+
   const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
     patientId: patientIdValue,
     enabled: true,
@@ -928,17 +929,6 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
 
         const draft = safeJsonParse<Partial<HandoverFormValues>>(raw);
         if (!draft) return;
-
-        const dxText = (value: unknown): string => {
-          if (typeof value === 'string') return value.trim();
-          if (value && typeof value === 'object') {
-            const r = value as Record<string, unknown>;
-            const display = typeof r.display === 'string' ? r.display.trim() : '';
-            const code = typeof r.code === 'string' ? r.code.trim() : '';
-            return display || code || '';
-          }
-          return '';
-        };
 
         // Importante: NO pisar si ya hay datos
         const current = getValues();
@@ -1085,9 +1075,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
           }),
       },
       dxNursing: {
-        get: () => form.getValues('dxNursing') ?? '',
+        get: () => form.getValues('dxNursing')?.display ?? '',
         set: (text: string) =>
-          form.setValue('dxNursing', text, {
+          form.setValue('dxNursing', buildDraftSnomedCoding(text), {
             shouldDirty: true,
             shouldValidate: true,
           }),
@@ -1389,7 +1379,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     patientId: values.patientId,
     administrativeData: values.administrativeData,
     dxMedical: values.dxMedical?.display ?? '',
-    dxNursing: values.dxNursing ?? '',
+    dxNursing: values.dxNursing?.display ?? '',
     vitals: values.vitals,
     medications: values.medications,
     medsFreeText: values.meds,
