@@ -638,16 +638,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     };
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
-    const normalizedDxMedical = dxMedicalPrefill
-      ? normalizeLegacySnomedCoding(dxMedicalPrefill)
-      : null;
 
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
-      dxMedical: dxMedicalPrefill ? normalizedDxMedical : emptySnomedCoding,
-      dxNursing: null,
+      dxMedical: typeof dxMedicalPrefill === 'string' ? dxMedicalPrefill : '',
+      dxNursing: '',
       dxMedicalStructured: [],
       dxNursingStructured: [],
       evolution: '',
@@ -1067,12 +1064,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
-        get: () => form.getValues('dxMedical')?.display ?? '',
+        get: () => form.getValues('dxMedical') ?? '',
         set: (text: string) =>
-          form.setValue('dxMedical', buildDraftSnomedCoding(text), {
-            shouldDirty: true,
-            shouldValidate: true,
-          }),
+          form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
       },
       dxNursing: {
         get: () => form.getValues('dxNursing')?.display ?? '',
@@ -1378,8 +1372,8 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const buildSbarContext = (values: HandoverFormValues) => ({
     patientId: values.patientId,
     administrativeData: values.administrativeData,
-    dxMedical: values.dxMedical?.display ?? '',
-    dxNursing: values.dxNursing?.display ?? '',
+    dxMedical: values.dxMedical ?? '',
+    dxNursing: values.dxNursing ?? '',
     vitals: values.vitals,
     medications: values.medications,
     medsFreeText: values.meds,
@@ -1687,7 +1681,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     (watchedValues.dxNursingStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
-    if (watchedValues.dxMedical?.display) {
+    if (typeof watchedValues.dxMedical === 'string' ? watchedValues.dxMedical : '') {
       diagnoses.push(watchedValues.dxMedical.display);
     }
     if (typeof watchedValues.dxNursing === 'string' && watchedValues.dxNursing.trim()) {
