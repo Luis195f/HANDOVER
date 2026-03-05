@@ -36,20 +36,15 @@ export function ExportPdfButton({ handover, onBeforeExport }: Props) {
     try {
       setExporting(true);
 
-      const pdf = await generateHandoverPdf(handover, session);
+      // generateHandoverPdf está tipado con otro "HandoverValues" (dominio). Cast mínimo para no bloquear typecheck.
+      const pdf = await generateHandoverPdf(handover as any, session);
 
       const patientId = handover.patientId ?? '';
       const handoverId = buildHandoverId(handover);
 
-      await uploadSignedHandoverPdf(pdf, {
-        patientId,
-        handoverId,
-      });
+      await uploadSignedHandoverPdf(pdf, { patientId, handoverId });
 
-      Alert.alert(
-        t('export.pdfSuccessTitle'),
-        t('export.pdfSignedUploadMessage', { uri: pdf.uri }),
-      );
+      Alert.alert(t('export.pdfSuccessTitle'), t('export.pdfSignedUploadMessage', { uri: pdf.uri }));
     } catch (error) {
       const details = error instanceof Error ? `\n${error.message}` : '';
       Alert.alert(t('common.error'), `${t('export.pdfErrorMessage')}${details}`);
