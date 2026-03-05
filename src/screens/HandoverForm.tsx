@@ -639,12 +639,19 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
 
+    const dxMedicalValue: SnomedCoding =
+      typeof dxMedicalPrefill === 'string' && dxMedicalPrefill.trim()
+        ? normalizeLegacySnomedCoding(dxMedicalPrefill)
+        : { ...emptySnomedCoding };
+
+    const dxNursingValue: SnomedCoding = { ...emptySnomedCoding };
+
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
-      dxMedical: typeof dxMedicalPrefill === 'string' ? dxMedicalPrefill : '',
-      dxNursing: '',
+      dxMedical: dxMedicalValue,
+      dxNursing: dxNursingValue,
       dxMedicalStructured: [],
       dxNursingStructured: [],
       evolution: '',
@@ -1064,14 +1071,20 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
-        get: () => form.getValues('dxMedical') ?? '',
+        get: () => form.getValues('dxMedical')?.display ?? '',
         set: (text: string) =>
-          form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
+          form.setValue('dxMedical', buildDraftSnomedCoding(text), {
+            shouldDirty: true,
+            shouldValidate: true,
+          }),
       },
       dxNursing: {
-        get: () => form.getValues('dxNursing') ?? '',
+        get: () => form.getValues('dxNursing')?.display ?? '',
         set: (text: string) =>
-          form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
+          form.setValue('dxNursing', buildDraftSnomedCoding(text), {
+            shouldDirty: true,
+            shouldValidate: true,
+          }),
       },
       meds: {
         get: () => form.getValues('meds') ?? '',
@@ -1369,8 +1382,8 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const buildSbarContext = (values: HandoverFormValues) => ({
     patientId: values.patientId,
     administrativeData: values.administrativeData,
-    dxMedical: values.dxMedical ?? '',
-    dxNursing: values.dxNursing ?? '',
+    dxMedical: values.dxMedical?.display ?? '',
+    dxNursing: values.dxNursing?.display ?? '',
     vitals: values.vitals,
     medications: values.medications,
     medsFreeText: values.meds,
@@ -1678,11 +1691,13 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     (watchedValues.dxNursingStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
-    if (typeof watchedValues.dxMedical === 'string' && watchedValues.dxMedical.trim()) {
-      diagnoses.push(watchedValues.dxMedical.trim());
+      
+    if (watchedValues.dxMedical?.display?.trim()) {
+      diagnoses.push(watchedValues.dxMedical.display.trim());
     }
-    if (typeof watchedValues.dxNursing === 'string' && watchedValues.dxNursing.trim()) {
-      diagnoses.push(watchedValues.dxNursing.trim());
+
+    if (watchedValues.dxNursing?.display?.trim()) {
+      diagnoses.push(watchedValues.dxNursing.display.trim());
     }
 
     const notes =
@@ -2702,8 +2717,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
                       style={styles.input}
                       placeholder="Diagnóstico de enfermería (texto libre, legado)"
                       onBlur={onBlur}
-                      value={value ?? ''}
-                      onChangeText={onChange}
+                      value={value?.display ?? ''}
+                      onChangeText={(text) => onChange(buildDraftSnomedCoding(text))}
                     />
                   )}
                 /> 
