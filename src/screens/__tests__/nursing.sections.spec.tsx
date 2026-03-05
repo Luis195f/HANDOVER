@@ -25,8 +25,8 @@ const defaultValues: HandoverFormValues = {
   attachments: [],
   patientId: 'pat-001',
   status: 'draft',
-  dxMedical: 'Neumonía',
-  dxNursing: 'Fiebre',
+  dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
