@@ -665,9 +665,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
-        evaScore: null,
-        location: null,
-        actionsTaken: null,
+        evaScore: null,          
+        location: undefined,     
+        actionsTaken: undefined, 
       },
       // BEGIN HANDOVER D1 – BedsideChecklist
       bedsideChecklist: bedsideChecklistDefaults,
@@ -1069,12 +1069,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
           form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
       },
       dxNursing: {
-        get: () => form.getValues('dxNursing')?.display ?? '',
+        get: () => form.getValues('dxNursing') ?? '',
         set: (text: string) =>
-          form.setValue('dxNursing', buildDraftSnomedCoding(text), {
-            shouldDirty: true,
-            shouldValidate: true,
-          }),
+          form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
       },
       meds: {
         get: () => form.getValues('meds') ?? '',
@@ -1681,8 +1678,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     (watchedValues.dxNursingStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
-    if (typeof watchedValues.dxMedical === 'string' ? watchedValues.dxMedical : '') {
-      diagnoses.push(watchedValues.dxMedical.display);
+    if (typeof watchedValues.dxMedical === 'string' && watchedValues.dxMedical.trim()) {
+      diagnoses.push(watchedValues.dxMedical.trim());
     }
     if (typeof watchedValues.dxNursing === 'string' && watchedValues.dxNursing.trim()) {
       diagnoses.push(watchedValues.dxNursing.trim());
