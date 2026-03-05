@@ -30,7 +30,7 @@ function safeString(value: unknown, fallback: string): string {
   return trimmed.length ? trimmed : fallback;
 }
 
-function safeText(value: unknown): string {
+function getLegacyDxNursingText(value: unknown): string {
   if (typeof value === 'string') return value.trim();
   if (value && typeof value === 'object') {
     const r = value as Record<string, unknown>;
@@ -42,32 +42,37 @@ function safeText(value: unknown): string {
 }
 
 function resolveDiagnosis(handover: HandoverFormData): string {
-  const dxMedical = safeText(handover.dxMedical);
-  if (dxMedical) return dxMedical;
+  // 1) dxMedical (SNOMED) si existe
+  if (handover.dxMedical?.display) return handover.dxMedical.display;
 
-  // dxNursing ahora es texto legacy (string | undefined)
-  const dxNursing = safeText(handover.dxNursing);
-  if (dxNursing) return dxNursing;
+  // 2) NANDA estructurado (primario)
+  const nanda = handover.dxNursingStructured?.find((d) => d?.system === 'NANDA' && d.display)?.display;
+  if (nanda) return nanda;
 
+  // 3) Estructurados (fallback)
   const fromStructured =
-    handover.dxMedicalStructured?.[0]?.display ||
-    handover.dxNursingStructured?.[0]?.display;
+    handover.dxMedicalStructured?.[0]?.display || handover.dxNursingStructured?.[0]?.display;
+  if (fromStructured) return fromStructured;
 
-  return safeString(fromStructured, 'Diagnóstico no disponible');
+  // 4) Legacy texto
+  const legacy = getLegacyDxNursingText(handover.dxNursing);
+  if (legacy) return legacy;
+
+  return 'Diagnóstico no disponible';
 }
 
 function buildRiskSummary(handover: HandoverFormData): string | undefined {
-  const risks = handover.risks ?? {};
-  const structured = handover.risksStructured ?? [];
+  const risks = (handover as any).risks ?? {};
+  const structured = (handover as any).risksStructured ?? [];
   const labels = new Set<string>();
 
   Object.keys(risks)
     .filter((key) => (risks as Record<string, unknown>)[key])
     .forEach((key) => labels.add(RISK_LABELS[key] ?? key));
 
-  structured
-    .filter((item) => item.present)
-    .forEach((item) => labels.add(RISK_LABELS[item.type] ?? item.type));
+  (structured as Array<{ present?: boolean; type?: string }>)
+    .filter((item) => item?.present)
+    .forEach((item) => labels.add(RISK_LABELS[item.type ?? ''] ?? (item.type ?? '')));
 
   if (!labels.size) return undefined;
   return `Riesgos: ${Array.from(labels).join(', ')}`;
@@ -91,10 +96,9 @@ function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
   const newsText = news2 ? `NEWS2 ${news2.total} (${news2.band.toLowerCase()} riesgo)` : 'NEWS2 no disponible';
   const risks = buildRiskSummary(handover) ?? 'Riesgos: no reportados';
   const oxygen = handover.oxygenTherapy?.device ? `Oxígeno: ${handover.oxygenTherapy.device}` : null;
+
   const recommendation =
-    news2 && news2.total >= 5
-      ? 'Monitorizar de cerca y avisar a equipo médico'
-      : 'Vigilancia estándar y pasar visita según plan';
+    news2 && news2.total >= 5 ? 'Monitorizar de cerca y avisar a equipo médico' : 'Vigilancia estándar y pasar visita según plan';
 
   return {
     situation: `Paciente con ${diagnosis}. ${newsText}`.trim(),
@@ -133,7 +137,7 @@ export async function getBestAvailableSummary(
       const aiSummary = await aiProvider(handover, draft);
       return ensureSbar(aiSummary, draft);
     } catch {
-      // no-op, fallback abajo
+      // fallback below
     }
   }
 
