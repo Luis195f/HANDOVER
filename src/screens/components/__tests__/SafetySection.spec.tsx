@@ -23,9 +23,18 @@ const defaultValues: HandoverValues = {
   patientId: 'pat-001',
   status: 'draft',
   dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
-  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
+
+  // ✅ dxNursing ahora es texto legado
+  dxNursing: 'Fiebre',
+
   medications: [],
   treatments: [],
+  exams: [],
+  procedures: [],
+  devices: [],
+  meds: '',
+  risks: {},
+  risksStructured: [],
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
@@ -34,12 +43,6 @@ const defaultValues: HandoverValues = {
     safetyMeasuresApplied: false,
     questionsAnswered: false,
   },
-  risks: {},
-  risksStructured: [],
-  meds: '',
-  exams: [],
-  procedures: [],
-  devices: [],
 };
 
 function Wrapper() {
