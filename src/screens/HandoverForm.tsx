@@ -638,8 +638,8 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     };
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
-    const dxMedicalValue = typeof dxMedicalPrefill === 'string' ? dxMedicalPrefill.trim() : '';
-
+    const dxMedicalValue: SnomedCoding =
+      normalizeLegacySnomedCoding(dxMedicalPrefill) ?? { ...emptySnomedCoding };
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
@@ -1058,12 +1058,17 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
-        get: () => form.getValues('dxMedical') ?? '',
-        set: (text: string) => form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
+        get: () => form.getValues('dxMedical')?.display ?? '',
+        set: (text: string) =>
+          form.setValue('dxMedical', buildDraftSnomedCoding(text), {
+            shouldDirty: true,
+            shouldValidate: true,
+          }),
       },
       dxNursing: {
         get: () => form.getValues('dxNursing') ?? '',
-        set: (text: string) => form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
+        set: (text: string) =>
+          form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
       },
       meds: {
         get: () => form.getValues('meds') ?? '',
@@ -1648,6 +1653,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
     const vitals = watchedVitals ?? {};
     const oxygen = watchedOxygen ?? {};
+      
     const vitalSigns = compactObject({
       respiratoryRate: vitals.rr,
       heartRate: vitals.hr,
@@ -1664,15 +1670,17 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     });
 
     const diagnoses: string[] = [];
+      
     (watchedValues.dxMedicalStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
+      
     (watchedValues.dxNursingStructured ?? []).forEach((dx: HandoverStructuredDiagnosis) => {
       if (dx?.display) diagnoses.push(dx.display);
     });
       
-    const dxMedicalText = typeof watchedValues.dxMedical === 'string' ? watchedValues.dxMedical.trim() : '';
-    if (dxMedicalText) diagnoses.push(dxMedicalText);
+    const dxMedicalDisplay = watchedValues.dxMedical?.display?.trim() ?? '';
+    if (dxMedicalDisplay) diagnoses.push(dxMedicalDisplay);
 
     const dxNursingText = typeof watchedValues.dxNursing === 'string' ? watchedValues.dxNursing.trim() : '';
     if (dxNursingText) diagnoses.push(dxNursingText);
@@ -1681,6 +1689,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       truncateNote(watchedValues.evolution) ??
       truncateNote(watchedValues.audioTranscription) ??
       truncateNote(watchedValues.closingSummary);
+      
     const devices = oxygen.device ? [oxygen.device] : undefined;
 
     return {
