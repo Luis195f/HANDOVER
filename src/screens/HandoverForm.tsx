@@ -638,9 +638,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     };
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
-
-    const dxMedicalValue =
-      typeof dxMedicalPrefill === 'string' ? dxMedicalPrefill.trim() : '';
+    const dxMedicalValue = typeof dxMedicalPrefill === 'string' ? dxMedicalPrefill.trim() : '';
 
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
@@ -1061,13 +1059,11 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     () => ({
       dxMedical: {
         get: () => form.getValues('dxMedical') ?? '',
-        set: (text: string) =>
-          form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
+        set: (text: string) => form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
       },
       dxNursing: {
         get: () => form.getValues('dxNursing') ?? '',
-        set: (text: string) =>
-          form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
+        set: (text: string) => form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
       },
       meds: {
         get: () => form.getValues('meds') ?? '',
@@ -1687,7 +1683,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       truncateNote(watchedValues.closingSummary);
     const devices = oxygen.device ? [oxygen.device] : undefined;
 
-    const context: ClinicalContext = {
+    return {
       language: 'es',
       section,
       vitalSigns: Object.keys(vitalSigns).length ? vitalSigns : undefined,
@@ -1696,8 +1692,6 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       devices,
       notes,
     };
-
-    return context;
   };
 
   const requestSuggestions = async (section: 'vitals' | 'diagnosis') => {
