@@ -136,12 +136,12 @@ export interface HandoverAlert {
 
 // ✅ Entrada flexible: el form actual (HandoverFormData) + opcional clinicalScales legacy
 export type HandoverAlertsSource = {
-  vitals?: HandoverFormData['vitals'];
-  risks: HandoverFormData['risks'];
+  vitals?: unknown;
+  risks?: HandoverFormData['risks'];
   risksStructured?: RiskItem[];
-  bedsideChecklist?: HandoverFormData['bedsideChecklist'];
   braden?: unknown;
   clinicalScales?: unknown;
+  bedsideChecklist?: unknown;
 };
 
 const vitalsSchema = z
