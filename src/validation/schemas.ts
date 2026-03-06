@@ -628,7 +628,7 @@ export const zHandoverObject = z.object({
 
   vitals: zVitals.optional(),
 
-  dxMedical: zDxFreeText.optional().default(''),
+  dxMedical: zRequiredSnomedCoding,
   dxNursing: zDxFreeText.optional().default(''),
   dxMedicalStructured: zHandoverStructuredDiagnosisArray,
   dxNursingStructured: zHandoverStructuredDiagnosisArray,
