@@ -30,25 +30,49 @@ function safeString(value: unknown, fallback: string): string {
   return trimmed.length ? trimmed : fallback;
 }
 
+function getLegacyDxNursingText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') {
+    const r = value as Record<string, unknown>;
+    const display = typeof r.display === 'string' ? r.display.trim() : '';
+    const code = typeof r.code === 'string' ? r.code.trim() : '';
+    return display || code || '';
+  }
+  return '';
+}
+
 function resolveDiagnosis(handover: HandoverFormData): string {
+  // 1) dxMedical (SNOMED) si existe
   if (handover.dxMedical?.display) return handover.dxMedical.display;
-  if (handover.dxNursing?.display) return handover.dxNursing.display;
-  const fromStructured = handover.dxMedicalStructured?.[0]?.display || handover.dxNursingStructured?.[0]?.display;
-  return safeString(fromStructured, 'Diagnóstico no disponible');
+
+  // 2) NANDA estructurado (primario)
+  const nanda = handover.dxNursingStructured?.find((d) => d?.system === 'NANDA' && d.display)?.display;
+  if (nanda) return nanda;
+
+  // 3) Estructurados (fallback)
+  const fromStructured =
+    handover.dxMedicalStructured?.[0]?.display || handover.dxNursingStructured?.[0]?.display;
+  if (fromStructured) return fromStructured;
+
+  // 4) Legacy texto
+  const legacy = getLegacyDxNursingText(handover.dxNursing);
+  if (legacy) return legacy;
+
+  return 'Diagnóstico no disponible';
 }
 
 function buildRiskSummary(handover: HandoverFormData): string | undefined {
-  const risks = handover.risks ?? {};
-  const structured = handover.risksStructured ?? [];
+  const risks = (handover as any).risks ?? {};
+  const structured = (handover as any).risksStructured ?? [];
   const labels = new Set<string>();
 
   Object.keys(risks)
     .filter((key) => (risks as Record<string, unknown>)[key])
     .forEach((key) => labels.add(RISK_LABELS[key] ?? key));
 
-  structured
-    .filter((item) => item.present)
-    .forEach((item) => labels.add(RISK_LABELS[item.type] ?? item.type));
+  (structured as Array<{ present?: boolean; type?: string }>)
+    .filter((item) => item?.present)
+    .forEach((item) => labels.add(RISK_LABELS[item.type ?? ''] ?? (item.type ?? '')));
 
   if (!labels.size) return undefined;
   return `Riesgos: ${Array.from(labels).join(', ')}`;
@@ -68,12 +92,13 @@ function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
         scale2: false,
       })
     : null;
+
   const newsText = news2 ? `NEWS2 ${news2.total} (${news2.band.toLowerCase()} riesgo)` : 'NEWS2 no disponible';
   const risks = buildRiskSummary(handover) ?? 'Riesgos: no reportados';
   const oxygen = handover.oxygenTherapy?.device ? `Oxígeno: ${handover.oxygenTherapy.device}` : null;
-  const recommendation = news2 && news2.total >= 5
-    ? 'Monitorizar de cerca y avisar a equipo médico'
-    : 'Vigilancia estándar y pasar visita según plan';
+
+  const recommendation =
+    news2 && news2.total >= 5 ? 'Monitorizar de cerca y avisar a equipo médico' : 'Vigilancia estándar y pasar visita según plan';
 
   return {
     situation: `Paciente con ${diagnosis}. ${newsText}`.trim(),
@@ -85,7 +110,6 @@ function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
 
 function ensureSbar(summary: SBARSummary | null | undefined, fallback: SBARSummary): SBARSummary {
   if (!summary) return fallback;
-  const safe: SBARSummary = { ...fallback };
   return {
     situation: safeString(summary.situation, fallback.situation),
     background: safeString(summary.background, fallback.background),
@@ -99,10 +123,11 @@ export async function getBestAvailableSummary(
   options: DegradedSummaryOptions = {},
 ): Promise<SBARSummary> {
   const { aiProvider, useLocalRules = true, sbarOptions } = options;
+
   const draft = (() => {
     try {
       return generateSBARSummary(handover, sbarOptions);
-    } catch (error) {
+    } catch {
       return buildMinimalSummary(handover);
     }
   })();
@@ -110,17 +135,13 @@ export async function getBestAvailableSummary(
   if (aiProvider) {
     try {
       const aiSummary = await aiProvider(handover, draft);
-      const refined = ensureSbar(aiSummary, draft);
-      if (refined) return refined;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      return ensureSbar(aiSummary, draft);
+    } catch {
+      // fallback below
     }
   }
 
-  if (useLocalRules) {
-    return draft;
-  }
-
+  if (useLocalRules) return draft;
   return buildMinimalSummary(handover);
 }
 

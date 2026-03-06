@@ -23,7 +23,9 @@ const defaultValues: HandoverFormValues = {
   patientId: 'pat-001',
   status: 'draft',
   dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
-  dxNursing: { system: SNOMED_SYSTEM, code: '386661006', display: 'Fiebre' },
+  dxNursing: 'Fiebre', 
+  dxMedicalStructured: [],
+  dxNursingStructured: [],
   bedsideChecklist: {
     patientIdentityConfirmed: true,
     allergiesReviewed: true,
@@ -31,6 +33,7 @@ const defaultValues: HandoverFormValues = {
     medicationPlanReviewed: false,
     safetyMeasuresApplied: false,
     questionsAnswered: false,
+    bedsideNotes: '',
   },
   medications: [],
   treatments: [],
@@ -38,17 +41,28 @@ const defaultValues: HandoverFormValues = {
   procedures: [],
   meds: '',
   devices: [],
+  risks: {},
   risksStructured: [],
+  vitals: {},
+  oxygenTherapy: {},
+  evolution: '',
+  closingSummary: '',
+  sbarSituation: '',
+  sbarBackground: '',
+  sbarAssessment: '',
+  sbarRecommendation: '',
+  sbarFullText: '',
 };
 
 function renderWithForm<T extends { control: unknown }>(
   Component: React.ComponentType<T>,
-  defaultValues: HandoverFormValues,
+  defaults: HandoverFormValues,
   props?: Omit<T, 'control'>,
 ) {
   let methodsReturn: UseFormReturn<HandoverFormValues> | undefined;
+
   function Wrapper() {
-    const methods = useForm<HandoverFormValues>({ defaultValues });
+    const methods = useForm<HandoverFormValues>({ defaultValues: defaults });
     methodsReturn = methods;
     return (
       <FormProvider {...methods}>
@@ -56,6 +70,7 @@ function renderWithForm<T extends { control: unknown }>(
       </FormProvider>
     );
   }
+
   const result = render(<Wrapper />);
   return { ...result, methods: methodsReturn! };
 }
@@ -86,10 +101,7 @@ describe('MedicationSection', () => {
   });
 
   it('muestra campos de horario al activar infusión continua', async () => {
-    const { getAllByRole, getByPlaceholderText, getByText } = renderWithForm(
-      MedicationSection,
-      defaultValues,
-    );
+    const { getAllByRole, getByPlaceholderText, getByText } = renderWithForm(MedicationSection, defaultValues);
 
     fireEvent.press(getByText('Añadir medicación'));
     fireEvent(getAllByRole('switch')[0], 'valueChange', true);
@@ -147,9 +159,7 @@ describe('TreatmentsSection', () => {
     const { getByText, methods } = renderWithForm(TreatmentsSection, defaultValues);
 
     await act(async () => {
-      methods.setValue('treatments', [
-        { id: 'tx-1', type: 'woundCare', description: 'Cura diaria', done: false },
-      ]);
+      methods.setValue('treatments', [{ id: 'tx-1', type: 'woundCare', description: 'Cura diaria', done: false }]);
     });
 
     await waitFor(() => {

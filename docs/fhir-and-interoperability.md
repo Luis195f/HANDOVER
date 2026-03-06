@@ -4,6 +4,15 @@
 - Recursos utilizados: `Observation`, `Composition`, `MedicationStatement`, `MedicationRequest`, `Condition`, `Procedure`, `DiagnosticReport`, entre otros según el formulario.
 - `src/lib/fhir-map.ts` convierte los datos del formulario en bundles FHIR listos para envío. Cada entrada se transforma a recursos individuales y se empaqueta en un `Bundle` con referencias coherentes.
 
+
+
+## Diagnóstico de enfermería NANDA-I (canal primario)
+- `dxNursingStructured` se mapea como canal primario a `Condition.code.coding` cuando el sistema es `NANDA`.
+- `coding.system` usa por defecto `urn:handover:terminology:NANDA-I` para evitar declarar una URI oficial sin licencia de terminología.
+- `dxNursing` se mantiene como texto legado derivado/optativo para compatibilidad hacia atrás.
+- Si se adquiere licencia oficial NANDA-I, reemplaza `NANDA_DIAGNOSIS_SYSTEM_URI` en `src/lib/fhir-map.ts` por la URI contractual autorizada y conserva el resto del mapeo.
+- Nota de licencia: sin licencia completa, el sistema debe usar **texto sugerido** y codificación interna/URN; la **codificación oficial** solo debe habilitarse con el contrato de uso correspondiente.
+
 ## Cliente y configuración
 - Define `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` en `.env`/`app.json` (`expo.extra`) para apuntar al servidor FHIR.
 - El cliente en `src/lib/fhir-client.ts` agrega cabeceras de idempotencia, maneja respuestas `OperationOutcome` y reintentos seguros.

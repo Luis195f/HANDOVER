@@ -629,6 +629,9 @@ const conditionProblemListCategory: CodeableConcept = {
   text: 'Problem list item',
 };
 
+export const NANDA_DIAGNOSIS_SYSTEM_URI = 'urn:handover:terminology:NANDA-I';
+
+
 const AVPU_MAP = {
   A: { code: SNOMED.avpuAlert, display: 'Alert' },
   C: { code: SNOMED.avpuConfusion, display: 'New confusion' },
@@ -4243,10 +4246,52 @@ function mapDiagnoses(
     });
   };
 
-  addCondition(data.dxMedical, FHIR_CODES.RISK.FALL);
-  addCondition(data.dxNursing, FHIR_CODES.RISK.PRESSURE_ULCER);
+  addCondition(data.dxMedical);
 
-  const structured = [...(data.dxMedicalStructured ?? []), ...(data.dxNursingStructured ?? [])];
+  const nursingStructured = (data.dxNursingStructured ?? []).filter((item) => item.system === 'NANDA');
+  nursingStructured.forEach((item) => {
+    conditions.push({
+      resourceType: 'Condition',
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      code: {
+        coding: [
+          {
+            system: NANDA_DIAGNOSIS_SYSTEM_URI,
+            code: item.code,
+            display: item.display,
+          },
+        ],
+        text: item.display,
+      },
+      subject: context.subject,
+      encounter: context.encounter,
+      recordedDate: context.effectiveDateTime,
+    });
+  });
+
+  const legacyNursingText =
+    typeof data.dxNursing === 'string'
+      ? data.dxNursing.trim()
+      : data.dxNursing && typeof data.dxNursing === 'object' && 'display' in data.dxNursing
+        ? String((data.dxNursing as { display?: unknown }).display ?? '').trim()
+        : '';
+
+  if (legacyNursingText && nursingStructured.length === 0) {
+    conditions.push({
+      resourceType: 'Condition',
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      category: [conditionProblemListCategory],
+      code: { coding: [], text: legacyNursingText },
+      subject: context.subject,
+      encounter: context.encounter,
+      onsetDateTime: context.effectiveDateTime,
+      recordedDate: context.effectiveDateTime,
+    });
+  }
+
+  const structured = data.dxMedicalStructured ?? [];
   structured.forEach((item) => {
     conditions.push({
       resourceType: 'Condition',

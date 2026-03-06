@@ -233,6 +233,23 @@ const zRequiredSnomedCoding = zSnomedCoding.nullable().superRefine((value, ctx) 
   }
 });
 
+const zLegacyNursingText = z.preprocess((value) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const display = typeof record.display === 'string' ? record.display.trim() : '';
+    if (display) return display;
+    const code = typeof record.code === 'string' ? record.code.trim() : '';
+    return code || undefined;
+  }
+
+  return undefined;
+}, z.string().min(1).max(500).optional());
+
 export const zBradenScale = z
   .object({
     sensoryPerception: zBradenSubscale,
@@ -589,6 +606,19 @@ const zFileAttachment = z.object({
  * - zHandoverBase: aplica reglas de negocio con superRefine (ZodEffects).
  * - zHandover: aplica preprocess legacy→canónico + reglas.
  */
+// helper: acepta string o objeto legacy {display/code} y devuelve SIEMPRE string
+const zDxFreeText = z.preprocess((val) => {
+  if (typeof val === 'string') return val;
+
+  if (val && typeof val === 'object') {
+    const v = val as any;
+    if (typeof v.display === 'string') return v.display;
+    if (typeof v.code === 'string') return v.code;
+  }
+
+  return '';
+}, z.string());
+
 export const zHandoverObject = z.object({
   administrativeData: zAdministrativeData,
 
@@ -599,7 +629,7 @@ export const zHandoverObject = z.object({
   vitals: zVitals.optional(),
 
   dxMedical: zRequiredSnomedCoding,
-  dxNursing: zRequiredSnomedCoding,
+  dxNursing: zDxFreeText.optional().default(''),
   dxMedicalStructured: zHandoverStructuredDiagnosisArray,
   dxNursingStructured: zHandoverStructuredDiagnosisArray,
   evolution: optionalTrimmedString(1200).optional(),
