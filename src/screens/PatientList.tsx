@@ -29,7 +29,7 @@ import {
   useSelectedUnitId,
 } from "@/src/state/filterStore";
 import type { Handover } from "@/src/types/handover";
-import { computeAlerts, type HandoverAlertsSource } from '@/src/lib/alerts';
+import type { HandoverAlertsSource } from '@/src/lib/alerts';
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
