@@ -651,7 +651,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
       status: 'draft',
       dxMedical: dxMedicalValue,
-      dxNursing: dxNursingValue,
+      dxNursing: '',
       dxMedicalStructured: [],
       dxNursingStructured: [],
       evolution: '',
@@ -1073,18 +1073,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       dxMedical: {
         get: () => form.getValues('dxMedical')?.display ?? '',
         set: (text: string) =>
-          form.setValue('dxMedical', buildDraftSnomedCoding(text), {
-            shouldDirty: true,
-            shouldValidate: true,
-          }),
+          form.setValue('dxMedical', buildDraftSnomedCoding(text), { shouldDirty: true, shouldValidate: true }),
       },
+
       dxNursing: {
-        get: () => form.getValues('dxNursing')?.display ?? '',
+        get: () => form.getValues('dxNursing') ?? '',
         set: (text: string) =>
-          form.setValue('dxNursing', buildDraftSnomedCoding(text), {
-            shouldDirty: true,
-            shouldValidate: true,
-          }),
+          form.setValue('dxNursing', text, { shouldDirty: true, shouldValidate: true }),
       },
       meds: {
         get: () => form.getValues('meds') ?? '',
@@ -1383,7 +1378,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     patientId: values.patientId,
     administrativeData: values.administrativeData,
     dxMedical: values.dxMedical?.display ?? '',
-    dxNursing: values.dxNursing?.display ?? '',
+    dxNursing: values.dxNursing ?? '',
     vitals: values.vitals,
     medications: values.medications,
     medsFreeText: values.meds,
@@ -2717,8 +2712,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
                       style={styles.input}
                       placeholder="Diagnóstico de enfermería (texto libre, legado)"
                       onBlur={onBlur}
-                      value={value?.display ?? ''}
-                      onChangeText={(text) => onChange(buildDraftSnomedCoding(text))}
+                      value={value ?? ''}
+                      onChangeText={onChange}
                     />
                   )}
                 /> 
