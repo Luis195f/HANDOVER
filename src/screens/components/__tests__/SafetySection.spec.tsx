@@ -23,7 +23,7 @@ const defaultValues: HandoverValues = {
   patientId: 'pat-001',
   status: 'draft',
   dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
-  dxNursing: 'Fiebre', // ✅ legacy string
+  dxNursing: 'Fiebre', 
   dxMedicalStructured: [],
   dxNursingStructured: [],
   medications: [],
