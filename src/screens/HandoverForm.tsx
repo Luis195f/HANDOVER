@@ -1055,6 +1055,16 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
   const aiSuggestionsEnabled = isOn('AI_SUGGESTIONS_ENABLED');
+  const buildDraftSnomedCoding = (text: string): SnomedCoding => {
+    const display = (text ?? '').trim();
+
+    if (!display) {
+      return { system: SNOMED_SYSTEM, code: '', display: '' };
+    }
+
+    const resolved = resolveSnomedCoding(display);
+    return resolved ?? { system: SNOMED_SYSTEM, code: '', display };
+  };
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
