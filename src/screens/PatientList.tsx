@@ -29,7 +29,7 @@ import {
   useSelectedUnitId,
 } from "@/src/state/filterStore";
 import type { Handover } from "@/src/types/handover";
-import { computeAlerts } from "@/src/lib/alerts";
+import { computeAlerts, type HandoverAlertsSource } from '@/src/lib/alerts';
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
@@ -415,37 +415,15 @@ export default function PatientList({ navigation }: Props) {
   const sortedByPriority = useMemo<PrioritizedPatient[]>(() => computePriorityList(priorityInputs), [priorityInputs]);
   const alertsByPatient = useMemo(() => {
     return patients.reduce<Record<string, ReturnType<typeof computeAlerts>>>((acc, patient) => {
-      const handoverLike: Handover = {
-        administrativeData: {
-          unit: patient.unitId,
-          census: 0,
-          staffIn: [],
-          staffOut: [],
-          shiftStart: new Date().toISOString(),
-          shiftEnd: new Date().toISOString(),
-          shiftType: 'Mañana',
-          incidents: [],
-        },
-        patientId: patient.id,
-        status: 'draft',
-        dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
-        dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
-        attachments: [],
-        medications: [],
-        treatments: [],
-        bedsideChecklist: {
-          patientIdentityConfirmed: false,
-          allergiesReviewed: false,
-          linesAndDevicesChecked: false,
-          medicationPlanReviewed: false,
-          safetyMeasuresApplied: false,
-          questionsAnswered: false,
-        },
+      const source: HandoverAlertsSource = {
         vitals: patient.vitals,
-        risks: patient.risks,
+        risks: patient.risks ?? {},
         risksStructured: [],
+        braden: (patient as any).braden,
+        clinicalScales: (patient as any).clinicalScales,
       };
-      acc[patient.id] = computeAlerts(handoverLike);
+
+      acc[patient.id] = computeAlerts(source);
       return acc;
     }, {});
   }, [patients]);
