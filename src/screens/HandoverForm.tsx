@@ -639,12 +639,8 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
 
-    const dxMedicalValue: SnomedCoding =
-      typeof dxMedicalPrefill === 'string' && dxMedicalPrefill.trim()
-        ? normalizeLegacySnomedCoding(dxMedicalPrefill)
-        : { ...emptySnomedCoding };
-
-    const dxNursingValue: SnomedCoding = { ...emptySnomedCoding };
+    const dxMedicalValue =
+      typeof dxMedicalPrefill === 'string' ? dxMedicalPrefill.trim() : '';
 
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
@@ -1061,21 +1057,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
   const aiSuggestionsEnabled = isOn('AI_SUGGESTIONS_ENABLED');
-  const buildDraftSnomedCoding = (display: string): SnomedCoding => ({
-    ...(resolveSnomedCoding(display) ?? {
-      system: SNOMED_SYSTEM,
-      code: '',
-      display,
-    }),
-  });
   const dictationAdapters = useMemo(
     () => ({
       dxMedical: {
-        get: () => form.getValues('dxMedical')?.display ?? '',
+        get: () => form.getValues('dxMedical') ?? '',
         set: (text: string) =>
-          form.setValue('dxMedical', buildDraftSnomedCoding(text), { shouldDirty: true, shouldValidate: true }),
+          form.setValue('dxMedical', text, { shouldDirty: true, shouldValidate: true }),
       },
-
       dxNursing: {
         get: () => form.getValues('dxNursing') ?? '',
         set: (text: string) =>
@@ -1377,7 +1365,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const buildSbarContext = (values: HandoverFormValues) => ({
     patientId: values.patientId,
     administrativeData: values.administrativeData,
-    dxMedical: values.dxMedical?.display ?? '',
+    dxMedical: values.dxMedical ?? '',
     dxNursing: values.dxNursing ?? '',
     vitals: values.vitals,
     medications: values.medications,
@@ -1687,13 +1675,11 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       if (dx?.display) diagnoses.push(dx.display);
     });
       
-    if (watchedValues.dxMedical?.display?.trim()) {
-      diagnoses.push(watchedValues.dxMedical.display.trim());
-    }
+    const dxMedicalText = typeof watchedValues.dxMedical === 'string' ? watchedValues.dxMedical.trim() : '';
+    if (dxMedicalText) diagnoses.push(dxMedicalText);
 
-    if (watchedValues.dxNursing?.display?.trim()) {
-      diagnoses.push(watchedValues.dxNursing.display.trim());
-    }
+    const dxNursingText = typeof watchedValues.dxNursing === 'string' ? watchedValues.dxNursing.trim() : '';
+    if (dxNursingText) diagnoses.push(dxNursingText);
 
     const notes =
       truncateNote(watchedValues.evolution) ??
