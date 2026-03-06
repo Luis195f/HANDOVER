@@ -606,6 +606,19 @@ const zFileAttachment = z.object({
  * - zHandoverBase: aplica reglas de negocio con superRefine (ZodEffects).
  * - zHandover: aplica preprocess legacy→canónico + reglas.
  */
+// helper: acepta string o objeto legacy {display/code} y devuelve SIEMPRE string
+const zDxFreeText = z.preprocess((val) => {
+  if (typeof val === 'string') return val;
+
+  if (val && typeof val === 'object') {
+    const v = val as any;
+    if (typeof v.display === 'string') return v.display;
+    if (typeof v.code === 'string') return v.code;
+  }
+
+  return '';
+}, z.string());
+
 export const zHandoverObject = z.object({
   administrativeData: zAdministrativeData,
 
@@ -615,8 +628,8 @@ export const zHandoverObject = z.object({
 
   vitals: zVitals.optional(),
 
-  dxMedical: zRequiredSnomedCoding,
-  dxNursing: zLegacyNursingText,
+  dxMedical: zDxFreeText.optional().default(''),
+  dxNursing: zDxFreeText.optional().default(''),
   dxMedicalStructured: zHandoverStructuredDiagnosisArray,
   dxNursingStructured: zHandoverStructuredDiagnosisArray,
   evolution: optionalTrimmedString(1200).optional(),
