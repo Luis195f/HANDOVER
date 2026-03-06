@@ -135,7 +135,9 @@ export interface HandoverAlert {
 }
 
 // ✅ Entrada flexible: el form actual (HandoverFormData) + opcional clinicalScales legacy
-export type HandoverAlertsSource = HandoverFormData & { clinicalScales?: unknown };
+export type HandoverAlertsSource =
+  Pick<HandoverFormData, 'vitals' | 'risks' | 'risksStructured'> &
+  Partial<Pick<HandoverFormData, 'braden' | 'clinicalScales'>>;
 
 const vitalsSchema = z
   .object({
