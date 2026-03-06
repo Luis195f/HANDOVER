@@ -135,7 +135,7 @@ export interface HandoverAlert {
 }
 
 // ✅ Entrada flexible: el form actual (HandoverFormData) + opcional clinicalScales legacy
-export type HandoverAlertsSource =
+export type HandoverAlertsSource = {
   vitals?: unknown;
   risks?: Handover['risks'];
   risksStructured?: RiskItem[];
