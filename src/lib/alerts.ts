@@ -136,8 +136,12 @@ export interface HandoverAlert {
 
 // ✅ Entrada flexible: el form actual (HandoverFormData) + opcional clinicalScales legacy
 export type HandoverAlertsSource =
-  Pick<HandoverFormData, 'vitals' | 'risks' | 'risksStructured'> &
-  Partial<Pick<HandoverFormData, 'braden' | 'clinicalScales'>>;
+  vitals?: unknown;
+  risks?: Handover['risks'];
+  risksStructured?: RiskItem[];
+  braden?: unknown;
+  clinicalScales?: unknown;
+};
 
 const vitalsSchema = z
   .object({
@@ -162,11 +166,11 @@ function deriveRisksFromLegacy(risks?: HandoverFormData['risks']): RiskItem[] {
   return items;
 }
 
-function safeNews2Score(handover: HandoverAlertsSource): number | undefined {
-  const parsed = vitalsSchema.safeParse(handover.vitals);
+function safeNews2ScoreFromVitals(vitalsValue: unknown): number | undefined {
+  const parsed = vitalsSchema.safeParse(vitalsValue);
   if (!parsed.success) return undefined;
-
   const vitals = parsed.data;
+  
   const hasVitals = [vitals.rr, vitals.spo2, vitals.tempC, vitals.temp, vitals.sbp, vitals.hr].some(
     (value) => typeof value === 'number',
   );
@@ -198,20 +202,23 @@ function hasAnyAction(risk: RiskItem | undefined, allowed: readonly string[]): b
   return (risk.actions ?? []).some((action) => allowed.includes(action));
 }
 
-export function computeAlerts(handover: HandoverAlertsSource): HandoverAlert[] {
+export function computeAlerts(source: HandoverAlertsSource): HandoverAlert[] {
   const alerts: HandoverAlert[] = [];
 
-  const risks = normalizeRisks(handover);
-  const news2 = safeNews2Score(handover);
+  const risks =
+    Array.isArray(source.risksStructured) && source.risksStructured.length > 0
+      ? source.risksStructured
+      : deriveRisksFromLegacy(source.risks);
+
+  const news2 = safeNews2ScoreFromVitals(source.vitals);
 
   const bradenScore = (() => {
-    if (typeof (handover as any).braden?.totalScore === 'number') return (handover as any).braden.totalScore;
+    const bradenAny = source.braden as any;
+    if (typeof bradenAny?.totalScore === 'number') return bradenAny.totalScore;
 
-    const clinicalScales = (handover as any).clinicalScales;
-    if (!clinicalScales || typeof clinicalScales !== 'object') return undefined;
-    if (!('braden' in clinicalScales)) return undefined;
-    const braden = (clinicalScales as { braden?: { score?: unknown } }).braden;
-    return typeof braden?.score === 'number' ? braden.score : undefined;
+    const cs = source.clinicalScales as any;
+    const score = cs?.braden?.score;
+    return typeof score === 'number' ? score : undefined;
   })();
 
   const fallRisk = risks.find((risk) => risk.type === 'fall' && risk.present);
