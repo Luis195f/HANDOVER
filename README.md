@@ -28,6 +28,18 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 - [Matriz de trazabilidad MDR](docs/MDR_traceability_matrix.md)
 - [Integración ICEA+ webhook](docs/icea-integration.md)
 
+## QA clínico, rendimiento y MDR (NNN + ICEA+)
+
+Para ejecución de piloto clínico, auditoría interna y preparación regulatoria de NNN + ICEA+, usar este paquete documental:
+
+- [Plan de QA clínico + cumplimiento MDR](docs/qa-mdr-plan-nnn-icea.md): estrategia ejecutable de pruebas funcionales, integración, E2E, seguridad, rendimiento y estructura de evidencia para Anexo II.
+- [Matriz de trazabilidad NNN + ICEA+](docs/traceability-matrix-nnn-icea.md): tabla requisito → implementación → test → evidencia para control de cobertura regulatoria.
+- [Plantilla de informe de rendimiento por unidad](docs/performance-report-template-nnn-icea.md): formato baseline vs post con métricas mínimas (mediana, P90, abandono/error, IA ON/OFF) y criterio de aceptación.
+- [Plantilla de registro de decisiones clínicas de IA](docs/clinical-decision-log-template-nnn-icea.md): estructura para auditar sugerencia mostrada, aceptación/rechazo, contexto mínimo y timestamp.
+- [Checklist de ciberseguridad NNN + ICEA+](docs/cybersecurity-checklist-nnn-icea.md): verificación operativa de logs/PHI, secretos, HMAC, rate limits, replay, retry offline e idempotencia.
+
+Recomendación de uso: completar estos documentos por release candidate y enlazar sus evidencias en el expediente técnico/QMS antes de la aprobación Go/No-Go.
+
 ## Requisitos
 
 - Node.js 20
@@ -297,4 +309,3 @@ Explora la documentación técnica para conocer la arquitectura, configuración 
 - [Offline y cola](docs/offline-sync-and-queue.md)
 - [Pruebas y CI](docs/testing-and-ci.md)
 - [Guía de despliegue](docs/DEPLOY.md)
-
