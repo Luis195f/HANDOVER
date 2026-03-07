@@ -22,6 +22,7 @@ if respx is None:
 
 def test_transaction_resources_contract_and_audit(monkeypatch):
     monkeypatch.setattr(views.BundleView, 'permission_classes', [])
+    monkeypatch.setattr(views, '_persist_handover_bundle_record', lambda **kwargs: None)
     client = APIClient()
     sample_bundle = {'resourceType': 'Bundle', 'type': 'transaction', 'entry': [{'resource': {'resourceType': 'Encounter'}}]}
     with respx.mock(base_url=views.FHIR_BASE) as mock:

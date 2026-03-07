@@ -101,6 +101,12 @@ def test_ok_200_or_201(monkeypatch, api_client):
             return {"resourceType": "Bundle", "type": "transaction-response"}
 
     monkeypatch.setattr(api_views.httpx, "post", lambda *a, **k: _MockResp(), raising=True)
+    monkeypatch.setattr(
+        api_views,
+        "_persist_handover_bundle_record",
+        lambda **kwargs: None,
+        raising=True,
+    )
 
     res = _post_fhir(api_client, VALID_BUNDLE, token="test")
     assert res.status_code in (200, 201)
