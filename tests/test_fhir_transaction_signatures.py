@@ -22,6 +22,7 @@ if respx is None:
 
 def test_audit_event_with_dual_signatures(monkeypatch):
     monkeypatch.setattr(views.BundleView, 'permission_classes', [])
+    monkeypatch.setattr(views, '_persist_handover_bundle_record', lambda **kwargs: None)
     client = APIClient()
     bundle = {
         'resourceType': 'Bundle',
