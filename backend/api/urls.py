@@ -10,6 +10,7 @@ from .views import (
     DashboardView,
     HandoverTimingMetricsView,
     MedicationStatementView,
+    NandaCatalogView,
     OAuthRefreshView,
     PatientView,
     PatientsView,
@@ -19,6 +20,8 @@ urlpatterns = [
     path("fhir/patient", PatientView.as_view(), name="patient"),
     path("patients", PatientsView.as_view(), name="patients-no-slash"),
     path("patients/", PatientsView.as_view(), name="patients"),
+    path("catalogs/nanda", NandaCatalogView.as_view(), name="catalog-nanda"),
+    path("catalogs/nanda/", NandaCatalogView.as_view(), name="catalog-nanda-slash"),
     path("fhir/medicationstatement", MedicationStatementView.as_view(), name="medicationstatement"),
 
     # Endpoint principal (sin slash)
