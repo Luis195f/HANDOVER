@@ -29,6 +29,10 @@ RETRY_MAX_DELAY_SECONDS = 1800
 UNIT_ID_EXTENSION_SUFFIX = "/unit-id"
 
 
+def _post_to_icea(*args, **kwargs):
+    return httpx.post(*args, **kwargs)
+
+
 @dataclass(frozen=True)
 class IceaWebhookSettings:
     enabled: bool
@@ -409,7 +413,7 @@ def attempt_icea_outbound_delivery(event: IceaOutboundEvent, *, force: bool = Fa
     event.last_attempt_at = now
 
     try:
-        response = httpx.post(
+        response = _post_to_icea(
             config.url,
             content=raw_body,
             headers=headers,
@@ -551,5 +555,4 @@ def enqueue_icea_outbound_event_for_transaction(
             )
         )
     return event
-
 

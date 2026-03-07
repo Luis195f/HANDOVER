@@ -107,6 +107,10 @@ AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
 
+
+def _post_transaction_to_fhir(*args, **kwargs):
+    return httpx.post(*args, **kwargs)
+
 NANDA_LICENSE_WARNING = "Licencia NANDA-I requerida"
 NANDA_CATALOG_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
 NANDA_PLACEHOLDER_CODES: list[dict[str, Any]] = [
@@ -1751,7 +1755,7 @@ class BundleView(AuthenticatedAPIView):
 
         fhir_tx_url = FHIR_BASE.rstrip("/")
         try:
-            resp = httpx.post(fhir_tx_url, json=bundle, headers=headers, timeout=60)
+            resp = _post_transaction_to_fhir(fhir_tx_url, json=bundle, headers=headers, timeout=60)
         except httpx.HTTPError as exc:
             logger.error("No se pudo contactar FHIR server (tx) (%s): %s", fhir_tx_url, exc)
             _emit_bundle_audit(
@@ -1897,6 +1901,4 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-
-
 

@@ -214,8 +214,8 @@ class IceaWebhookIntegrationTests(TestCase):
         clear=False,
     )
     @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
-    @patch("backend.api.icea.httpx.post")
-    @patch("backend.api.views.httpx.post")
+    @patch("backend.api.icea._post_to_icea")
+    @patch("backend.api.views._post_transaction_to_fhir")
     def test_successful_transaction_creates_outbox_and_posts_webhook(
         self,
         mock_fhir_post,
@@ -259,8 +259,8 @@ class IceaWebhookIntegrationTests(TestCase):
         clear=False,
     )
     @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
-    @patch("backend.api.icea.httpx.post")
-    @patch("backend.api.views.httpx.post")
+    @patch("backend.api.icea._post_to_icea")
+    @patch("backend.api.views._post_transaction_to_fhir")
     def test_fhir_failure_does_not_create_or_send_webhook(
         self,
         mock_fhir_post,
@@ -289,7 +289,7 @@ class IceaWebhookIntegrationTests(TestCase):
         },
         clear=False,
     )
-    @patch("backend.api.icea.httpx.post")
+    @patch("backend.api.icea._post_to_icea")
     def test_retry_failure_marks_pending_and_flush_command_can_deliver(self, mock_icea_post):
         event = IceaOutboundEvent.objects.create(
             request_id="tx-icea-003",
@@ -339,7 +339,7 @@ class IceaWebhookIntegrationTests(TestCase):
         },
         clear=False,
     )
-    @patch("backend.api.icea.httpx.post")
+    @patch("backend.api.icea._post_to_icea")
     def test_delivery_logs_do_not_include_secret_or_clinical_payload(self, mock_icea_post):
         mock_icea_post.side_effect = httpx.ConnectTimeout("network down")
         event = IceaOutboundEvent.objects.create(
@@ -365,6 +365,3 @@ class IceaWebhookIntegrationTests(TestCase):
         self.assertNotIn("Sensitive Patient Narrative", joined)
         self.assertNotIn("super-secret-token", joined)
         self.assertIn("icea_webhook_delivery", joined)
-
-
-
