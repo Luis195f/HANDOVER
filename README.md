@@ -26,6 +26,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 - [Annex II (MDR)](docs/MDR_Anexo_II_HANDOVER.md)
 - [QMS](docs/QMS_HANDOVER.md)
 - [Matriz de trazabilidad MDR](docs/MDR_traceability_matrix.md)
+- [Integración ICEA+ webhook](docs/icea-integration.md)
 
 ## Requisitos
 
@@ -145,7 +146,7 @@ python manage.py transcribe_audio ./audio.m4a --language es
 
 ### Variables de entorno backend
 
-- FHIR y validación: `FHIR_BASE`, `HANDOVER_FHIR_VALIDATION_MODE`, `HANDOVER_VALIDATE_STRICT`, `HANDOVER_REQUIRE_RBAC_ON_FHIR`.
+- FHIR y validación: `FHIR_BASE`, `HANDOVER_FHIR_VALIDATION_MODE`, `HANDOVER_VALIDATE_STRICT`, `HANDOVER_REQUIRE_RBAC_ON_FHIR`.`r`n- ICEA+: `ICEA_WEBHOOK_ENABLED`, `ICEA_WEBHOOK_URL`, `ICEA_WEBHOOK_SECRET`, `ICEA_WEBHOOK_TIMEOUT_MS`, `ICEA_WEBHOOK_RETRY_MAX`, `ICEA_WEBHOOK_ANTI_REPLAY`, `ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS`.
 - Firma digital: `HANDOVER_PRIVATE_KEY_PATH`, `HANDOVER_PUBLIC_KEY_PATH`, `HANDOVER_SIGNATURE_DISABLED`.
 - IA: `OPENAI_API_KEY`, `OPENAI_MODEL_SBAR`, `OPENAI_MODEL_WHISPER`, `OPENAI_MODEL_SUGGESTIONS`, `AI_SUGGESTIONS_ENABLED`.
 - Uploads de audio: `HANDOVER_MAX_AUDIO_BYTES` (por defecto `26214400`, equivalente a 25 MB).
@@ -296,3 +297,4 @@ Explora la documentación técnica para conocer la arquitectura, configuración 
 - [Offline y cola](docs/offline-sync-and-queue.md)
 - [Pruebas y CI](docs/testing-and-ci.md)
 - [Guía de despliegue](docs/DEPLOY.md)
+

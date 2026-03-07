@@ -96,3 +96,36 @@ class Patient(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"Patient(identifier={self.identifier}, unit={self.unit})"
+
+
+class IceaOutboundEvent(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_SENT = "sent"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_ERROR, "Error"),
+    ]
+
+    request_id = models.CharField(max_length=255, unique=True)
+    bundle_id = models.CharField(max_length=255, db_index=True)
+    patient_id = models.CharField(max_length=255, db_index=True)
+    unit_id = models.CharField(max_length=255, db_index=True)
+    payload_json = models.JSONField()
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["status", "next_retry_at"], name="idx_icea_status_retry"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return f"IceaOutboundEvent(request_id={self.request_id}, status={self.status})"

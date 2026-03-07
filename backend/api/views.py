@@ -36,6 +36,7 @@ from backend.signature import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, Patient as LocalPatient
+from backend.api.icea import enqueue_icea_outbound_event_for_transaction
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
@@ -105,6 +106,10 @@ class AuthenticatedAPIView(APIView):
 AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
+
+
+def _post_transaction_to_fhir(*args, **kwargs):
+    return httpx.post(*args, **kwargs)
 
 NANDA_LICENSE_WARNING = "Licencia NANDA-I requerida"
 NANDA_CATALOG_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
@@ -1750,7 +1755,7 @@ class BundleView(AuthenticatedAPIView):
 
         fhir_tx_url = FHIR_BASE.rstrip("/")
         try:
-            resp = httpx.post(fhir_tx_url, json=bundle, headers=headers, timeout=60)
+            resp = _post_transaction_to_fhir(fhir_tx_url, json=bundle, headers=headers, timeout=60)
         except httpx.HTTPError as exc:
             logger.error("No se pudo contactar FHIR server (tx) (%s): %s", fhir_tx_url, exc)
             _emit_bundle_audit(
@@ -1801,6 +1806,7 @@ class BundleView(AuthenticatedAPIView):
             user_id=user_id,
             unit_id=unit_id,
         )
+        enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
         return Response(payload, status=resp.status_code)
 
 
