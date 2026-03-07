@@ -13,6 +13,12 @@
 - Si se adquiere licencia oficial NANDA-I, reemplaza `NANDA_DIAGNOSIS_SYSTEM_URI` en `src/lib/fhir-map.ts` por la URI contractual autorizada y conserva el resto del mapeo.
 - Nota de licencia: sin licencia completa, el sistema debe usar **texto sugerido** y codificación interna/URN; la **codificación oficial** solo debe habilitarse con el contrato de uso correspondiente.
 
+
+## Resultados esperados NOC (captura rápida)
+- `outcomes[]` es opcional y permite registrar de 1 a 3 resultados con `nocCode`, `nocDisplay`, `baseline`, `target` y `current` opcional.
+- Cada resultado se mapea a `Observation` con `category.code = "outcome"`.
+- `Observation.code.coding` preserva el código y display NOC usando `urn:handover:terminology:NOC`.
+- `baseline`, `target` y `current` se serializan en `Observation.component.valueInteger` con códigos explícitos (`baseline`, `target`, `current`) para mantener trazabilidad clínica y compatibilidad.
 ## Cliente y configuración
 - Define `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` en `.env`/`app.json` (`expo.extra`) para apuntar al servidor FHIR.
 - El cliente en `src/lib/fhir-client.ts` agrega cabeceras de idempotencia, maneja respuestas `OperationOutcome` y reintentos seguros.

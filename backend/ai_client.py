@@ -4,10 +4,11 @@ import json
 import logging
 import os
 import asyncio
+import re
 from typing import Any, Dict, Optional
 
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,19 @@ class ClinicalContext(BaseModel):
     notes: str | None = None
 
 
+class NocOutcomeSuggestion(BaseModel):
+    nocCode: str
+    nocDisplay: str
+    baseline: int = Field(ge=1, le=5)
+    target: int = Field(ge=1, le=5)
+    current: int | None = Field(default=None, ge=1, le=5)
+
+
 class SuggestionsResponse(BaseModel):
     interventions: list[str]
+    outcomes: list[NocOutcomeSuggestion] | None = None
     rationale: str | None = None
     section: str
-
 
 def _safe_length(value: Optional[str] | bytes) -> int:
     if value is None:
@@ -186,6 +195,20 @@ async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
 
 def _build_suggestions_prompt(ctx: ClinicalContext) -> str:
     context_json = json.dumps(ctx.model_dump(exclude_none=True), ensure_ascii=False)
+    if ctx.section == "outcomes":
+        return (
+            "Eres una enfermera clínica experta en un hospital de España. Te doy contexto "
+            "estructurado de un paciente (signos vitales, diagnósticos, escalas de riesgo).\n"
+            "A partir de estos datos, sugiere entre 1 y 3 resultados esperados NOC para captura rápida.\n"
+            "Cada resultado debe incluir: nocCode, nocDisplay, baseline (1-5), target (1-5) y current (1-5 opcional).\n"
+            "NO inventes datos que no estén en el contexto.\n"
+            "No des diagnóstico médico ni prescribas medicación nueva.\n"
+            "Responde en JSON con: outcomes (lista de objetos), interventions (lista corta de strings, 1-3) "
+            "y rationale (explicación breve).\n"
+            f"Idioma de salida: {ctx.language}.\n"
+            f"Contexto: {context_json}"
+        )
+
     return (
         "Eres una enfermera clínica experta en un hospital de España. Te doy contexto "
         "estructurado de un paciente (signos vitales, diagnósticos, escalas de riesgo).\n"
@@ -198,6 +221,79 @@ def _build_suggestions_prompt(ctx: ClinicalContext) -> str:
         f"Idioma de salida: {ctx.language}.\n"
         f"Contexto: {context_json}"
     )
+
+
+def _normalize_interventions(raw_payload: Any) -> list[str]:
+    if not isinstance(raw_payload, list):
+        return []
+
+    interventions: list[str] = []
+    for item in raw_payload:
+        if not isinstance(item, str):
+            continue
+        trimmed = item.strip()
+        if not trimmed:
+            continue
+        interventions.append(trimmed)
+
+    return interventions
+
+
+def _normalize_outcomes(raw_payload: Any) -> list[NocOutcomeSuggestion]:
+    if not isinstance(raw_payload, list):
+        return []
+
+    outcomes: list[NocOutcomeSuggestion] = []
+    for item in raw_payload:
+        if not isinstance(item, dict):
+            continue
+
+        try:
+            parsed = NocOutcomeSuggestion.model_validate(item)
+        except Exception:
+            continue
+
+        if not str(parsed.nocCode).strip() or not str(parsed.nocDisplay).strip():
+            continue
+
+        outcomes.append(
+            NocOutcomeSuggestion(
+                nocCode=str(parsed.nocCode).strip(),
+                nocDisplay=str(parsed.nocDisplay).strip(),
+                baseline=parsed.baseline,
+                target=parsed.target,
+                current=parsed.current,
+            )
+        )
+
+    return outcomes
+
+
+def _fallback_outcomes_from_interventions(interventions: list[str]) -> list[NocOutcomeSuggestion]:
+    outcomes: list[NocOutcomeSuggestion] = []
+
+    for idx, raw in enumerate(interventions):
+        normalized = raw.strip()
+        if not normalized:
+            continue
+
+        match = re.search(r"\bNOC\s*[-:#]?\s*([A-Za-z0-9.]+)\s*[:\-]?\s*(.+)$", normalized, re.IGNORECASE)
+        noc_code = (match.group(1).strip() if match else f"NOC-{idx + 1}")
+        noc_display = (match.group(2).strip() if match else normalized)
+        if not noc_display:
+            continue
+
+        outcomes.append(
+            NocOutcomeSuggestion(
+                nocCode=noc_code,
+                nocDisplay=noc_display,
+                baseline=2,
+                target=4,
+                current=None,
+            )
+        )
+
+    return outcomes
 
 
 async def generate_intervention_suggestions(ctx: ClinicalContext) -> SuggestionsResponse:
@@ -221,10 +317,27 @@ async def generate_intervention_suggestions(ctx: ClinicalContext) -> Suggestions
             raise RuntimeError("empty-response")
 
         payload = json.loads(content)
-        interventions = payload.get("interventions")
+        interventions = _normalize_interventions(payload.get("interventions"))
         rationale = payload.get("rationale") if isinstance(payload.get("rationale"), str) else None
-        if not isinstance(interventions, list) or not all(isinstance(item, str) for item in interventions):
-            raise ValueError("invalid-interventions")
+
+        if ctx.section == "outcomes":
+            outcomes = _normalize_outcomes(payload.get("outcomes"))
+            if len(outcomes) == 0:
+                outcomes = _fallback_outcomes_from_interventions(interventions)
+            if len(outcomes) == 0:
+                raise ValueError("empty-outcomes")
+
+            outcomes = outcomes[:3]
+            if len(interventions) == 0:
+                interventions = [f"NOC {item.nocCode}: {item.nocDisplay}" for item in outcomes]
+
+            return SuggestionsResponse(
+                interventions=interventions[:3],
+                outcomes=outcomes,
+                rationale=rationale,
+                section=ctx.section,
+            )
+
         if len(interventions) == 0:
             raise ValueError("empty-interventions")
 
@@ -234,3 +347,4 @@ async def generate_intervention_suggestions(ctx: ClinicalContext) -> Suggestions
     except Exception as exc:  # pragma: no cover - logged for observability
         logger.exception("[ai] suggestions failed section=%s error_type=%s", ctx.section, type(exc).__name__)
         raise
+

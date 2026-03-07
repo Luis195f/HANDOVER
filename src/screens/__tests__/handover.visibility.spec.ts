@@ -14,6 +14,7 @@ const sections = [
   { key: 'signos', title: 'Signos vitales' },
   { key: 'medicacion', title: 'Medicación y tratamientos' },
   { key: 'adjuntos', title: 'Adjuntos' },
+  { key: 'outcomes', title: 'Resultados esperados (NOC)' },
 ] as const;
 
 describe('handover visibility regression', () => {
@@ -41,7 +42,9 @@ describe('handover visibility regression', () => {
         "signos",
         "medicacion",
         "adjuntos",
+        "outcomes",
       ]
     `);
   });
 });
+

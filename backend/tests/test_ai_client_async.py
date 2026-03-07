@@ -130,3 +130,45 @@ def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
     assert transcription == "hola mundo"
     assert suggestions.interventions == ["Monitorizar constantes"]
     assert suggestions.section == "urgencias"
+
+
+def test_outcomes_suggestions_support_structured_noc_payload(monkeypatch):
+    from backend import ai_client
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    suggestions_payload = ai_client.json.dumps(
+        {
+            "outcomes": [
+                {
+                    "nocCode": "0402",
+                    "nocDisplay": "Estado respiratorio: permeabilidad de las vías aéreas",
+                    "baseline": 2,
+                    "target": 4,
+                    "current": 3,
+                }
+            ],
+            "rationale": "Prioriza objetivos respiratorios para el siguiente turno.",
+        }
+    )
+    suggestions_completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=suggestions_payload))]
+    )
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **_: suggestions_completion)
+        )
+    )
+
+    monkeypatch.setattr(ai_client, "get_client", lambda: fake_client)
+    monkeypatch.setattr(ai_client.asyncio, "to_thread", fake_to_thread)
+
+    ctx = ai_client.ClinicalContext(section="outcomes", notes="disnea en mejoría")
+    suggestions = asyncio.run(ai_client.generate_intervention_suggestions(ctx))
+
+    assert suggestions.section == "outcomes"
+    assert suggestions.outcomes is not None
+    assert suggestions.outcomes[0].nocCode == "0402"
+    assert suggestions.outcomes[0].baseline == 2
+    assert suggestions.interventions[0].startswith("NOC 0402")

@@ -1,8 +1,16 @@
 import { AI_BACKEND_BASE_URL } from '@/src/config/env';
 
+export interface NocOutcomeSuggestion {
+  nocCode: string;
+  nocDisplay: string;
+  baseline: number;
+  target: number;
+  current?: number;
+}
+
 export interface ClinicalContext {
   language: 'es' | 'en';
-  section: 'vitals' | 'diagnosis' | 'risk' | 'other';
+  section: 'vitals' | 'diagnosis' | 'risk' | 'other' | 'outcomes';
   patientAge?: number;
   vitalSigns?: {
     respiratoryRate?: number;
@@ -26,14 +34,52 @@ export interface ClinicalContext {
 export interface SuggestionsResult {
   section: ClinicalContext['section'];
   interventions: string[];
+  outcomes?: NocOutcomeSuggestion[];
   rationale?: string;
 }
 
 interface SuggestionsBackendResponse {
   interventions?: unknown;
+  outcomes?: unknown;
   rationale?: unknown;
   section?: unknown;
 }
+
+const asBoundedScore = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const rounded = Math.round(value);
+  if (rounded < 1 || rounded > 5) return undefined;
+  return rounded;
+};
+
+const parseOutcomes = (raw: unknown): NocOutcomeSuggestion[] => {
+  if (!Array.isArray(raw)) return [];
+
+  const outcomes: NocOutcomeSuggestion[] = [];
+
+  raw.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+
+    const record = item as Record<string, unknown>;
+    const nocCode = typeof record.nocCode === 'string' ? record.nocCode.trim() : '';
+    const nocDisplay = typeof record.nocDisplay === 'string' ? record.nocDisplay.trim() : '';
+    const baseline = asBoundedScore(record.baseline);
+    const target = asBoundedScore(record.target);
+    const current = asBoundedScore(record.current);
+
+    if (!nocCode || !nocDisplay || baseline == null || target == null) return;
+
+    outcomes.push({
+      nocCode,
+      nocDisplay,
+      baseline,
+      target,
+      ...(current != null ? { current } : {}),
+    });
+  });
+
+  return outcomes;
+};
 
 export async function fetchInterventionsSuggestions(
   ctx: ClinicalContext,
@@ -55,20 +101,24 @@ export async function fetchInterventionsSuggestions(
   }
 
   const data = (await response.json()) as SuggestionsBackendResponse;
-  if (
-    !data ||
-    typeof data.section !== 'string' ||
-    !Array.isArray(data.interventions) ||
-    !data.interventions.every((item) => typeof item === 'string')
-  ) {
+  const interventions =
+    Array.isArray(data?.interventions) && data.interventions.every((item) => typeof item === 'string')
+      ? data.interventions
+      : undefined;
+  const outcomes = parseOutcomes(data?.outcomes);
+
+  if (!data || typeof data.section !== 'string' || (!interventions && outcomes.length === 0)) {
     throw new Error('Respuesta de IA no válida');
   }
 
+  const fallbackInterventions = outcomes.map((item) => `NOC ${item.nocCode}: ${item.nocDisplay}`);
   const rationale = typeof data.rationale === 'string' ? data.rationale : undefined;
 
   return {
     section: data.section as ClinicalContext['section'],
-    interventions: data.interventions,
+    interventions: interventions ?? fallbackInterventions,
+    outcomes: outcomes.length > 0 ? outcomes : undefined,
     rationale,
   };
 }
+

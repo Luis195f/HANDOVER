@@ -119,5 +119,47 @@ describe('FHIR map — medicaciones estructuradas y tratamientos', () => {
     expect(nicCoding?.code).toBe('2210');
     expect(nicCoding?.display).toBe('Administracion de analgesicos');
   });
-});
+  it('maps NOC outcomes to Observation resources with category outcome and explicit scores', () => {
+    const bundle = buildHandoverBundle(
+      {
+        patientId,
+        outcomes: [
+          {
+            nocCode: '0402',
+            nocDisplay: 'Estado respiratorio: permeabilidad de las vías aéreas',
+            baseline: 2,
+            target: 4,
+            current: 3,
+          },
+        ],
+      },
+      { now },
+    );
 
+    const observations = listResources(bundle, 'Observation');
+    const outcomeObservation = observations.find(
+      (item) => item.category?.some((cat: any) => cat.coding?.some((coding: any) => coding.code === 'outcome')),
+    );
+
+    expect(outcomeObservation).toBeTruthy();
+    expect(outcomeObservation.code?.coding?.[0]?.system).toBe('urn:handover:terminology:NOC');
+    expect(outcomeObservation.code?.coding?.[0]?.code).toBe('0402');
+    expect(outcomeObservation.code?.coding?.[0]?.display).toBe(
+      'Estado respiratorio: permeabilidad de las vías aéreas',
+    );
+
+    const baselineComponent = outcomeObservation.component?.find(
+      (component: any) => component.code?.coding?.[0]?.code === 'baseline',
+    );
+    const targetComponent = outcomeObservation.component?.find(
+      (component: any) => component.code?.coding?.[0]?.code === 'target',
+    );
+    const currentComponent = outcomeObservation.component?.find(
+      (component: any) => component.code?.coding?.[0]?.code === 'current',
+    );
+
+    expect(baselineComponent?.valueInteger).toBe(2);
+    expect(targetComponent?.valueInteger).toBe(4);
+    expect(currentComponent?.valueInteger).toBe(3);
+  });
+});
