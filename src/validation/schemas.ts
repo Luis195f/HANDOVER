@@ -555,6 +555,13 @@ export const zTreatmentItem = z.object({
   description: z.string().trim().min(1).max(500),
   scheduledAt: z.string().datetime().optional(),
   done: z.boolean().optional(),
+  code: z
+    .object({
+      system: z.literal("NIC"),
+      code: z.string().trim().min(1).max(50),
+      display: z.string().trim().min(1).max(200),
+    })
+    .optional(),
 });
 
 // BEGIN HANDOVER: SIGNATURES_DUAL
@@ -731,3 +738,4 @@ export const zHandover = z.preprocess(normalizeLegacyHandoverPayload, zHandoverB
 
 export type HandoverValues = z.infer<typeof zHandover>;
 export type HandoverFormData = HandoverValues;
+

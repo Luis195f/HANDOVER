@@ -630,7 +630,7 @@ const conditionProblemListCategory: CodeableConcept = {
 };
 
 export const NANDA_DIAGNOSIS_SYSTEM_URI = 'urn:handover:terminology:NANDA-I';
-
+export const NIC_INTERVENTION_SYSTEM_URI = 'urn:handover:terminology:NIC';
 
 const AVPU_MAP = {
   A: { code: SNOMED.avpuAlert, display: 'Alert' },
@@ -2401,6 +2401,15 @@ export function mapTreatments(
   return values.treatments.map((treatment) => {
     const status: Procedure['status'] = treatment.done ? 'completed' : 'in-progress';
     const display = TREATMENT_TYPE_LABELS[treatment.type];
+    const nicCoding =
+      treatment.code?.system === 'NIC' && treatment.code.code.trim() && treatment.code.display.trim()
+        ? {
+            system: NIC_INTERVENTION_SYSTEM_URI,
+            code: treatment.code.code.trim(),
+            display: treatment.code.display.trim(),
+          }
+        : null;
+
     const procedure: Procedure = {
       resourceType: 'Procedure',
       identifier: [{ system: 'urn:handover-pro:treatment-item', value: treatment.id }],
@@ -2412,8 +2421,9 @@ export function mapTreatments(
             code: treatment.type,
             display,
           },
+          ...(nicCoding ? [nicCoding] : []),
         ],
-        text: display,
+        text: nicCoding?.display ?? display,
       },
       subject,
       encounter,
@@ -4838,3 +4848,4 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
+

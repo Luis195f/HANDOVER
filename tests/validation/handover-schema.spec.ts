@@ -321,4 +321,26 @@ describe("zHandover", () => {
     }
   });
 
+  it('acepta tratamientos con codificacion NIC opcional', () => {
+    const payload: HandoverFormData = {
+      ...baseValidData,
+      treatments: [
+        {
+          id: 'treat-nic-1',
+          type: 'other',
+          description: 'Control del dolor',
+          done: false,
+          code: {
+            system: 'NIC',
+            code: '2210',
+            display: 'Administracion de analgesicos',
+          },
+        },
+      ],
+    };
+
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(true);
+  });
 });
+
