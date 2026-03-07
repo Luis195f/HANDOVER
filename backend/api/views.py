@@ -36,6 +36,7 @@ from backend.signature import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, Patient as LocalPatient
+from backend.api.icea import enqueue_icea_outbound_event_for_transaction
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
@@ -1801,6 +1802,7 @@ class BundleView(AuthenticatedAPIView):
             user_id=user_id,
             unit_id=unit_id,
         )
+        enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
         return Response(payload, status=resp.status_code)
 
 
@@ -1895,4 +1897,6 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
+
 
