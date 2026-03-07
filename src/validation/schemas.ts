@@ -563,7 +563,13 @@ export const zTreatmentItem = z.object({
     })
     .optional(),
 });
-
+export const zNocOutcomeItem = z.object({
+  nocCode: z.string().trim().min(1, "Código NOC requerido").max(50),
+  nocDisplay: z.string().trim().min(1, "Resultado NOC requerido").max(200),
+  baseline: z.number().int().min(1, "Valor mínimo 1").max(5, "Valor máximo 5"),
+  target: z.number().int().min(1, "Valor mínimo 1").max(5, "Valor máximo 5"),
+  current: z.number().int().min(1, "Valor mínimo 1").max(5, "Valor máximo 5").optional(),
+});
 // BEGIN HANDOVER: SIGNATURES_DUAL
 const zHandoverSignatureBase = z.object({
   userId: z.string().min(1, "Falta identificador de usuario para la firma"),
@@ -652,6 +658,7 @@ export const zHandoverObject = z.object({
 
   medications: z.array(zMedicationItem).default([]),
   treatments: z.array(zTreatmentItem).default([]),
+  outcomes: z.array(zNocOutcomeItem).max(3, "Puedes registrar hasta 3 resultados NOC").optional(),
   exams: z.array(zExamItem).default([]),
   procedures: z.array(zProcedureItem).default([]),
 

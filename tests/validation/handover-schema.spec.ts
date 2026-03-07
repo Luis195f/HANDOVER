@@ -342,5 +342,33 @@ describe("zHandover", () => {
     const result = zHandover.safeParse(payload);
     expect(result.success).toBe(true);
   });
-});
+  it('mantiene compatibilidad cuando outcomes no está presente', () => {
+    const payload: HandoverFormData = {
+      ...baseValidData,
+    };
+    delete (payload as { outcomes?: unknown }).outcomes;
 
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(true);
+  });
+
+  it('valida que los resultados NOC usen escala 1-5', () => {
+    const payload = {
+      ...baseValidData,
+      outcomes: [
+        {
+          nocCode: '0402',
+          nocDisplay: 'Estado respiratorio: permeabilidad de las vías aéreas',
+          baseline: 0,
+          target: 6,
+        },
+      ],
+    };
+
+    const result = zHandover.safeParse(payload);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+    expect(messages).toContain('Valor mínimo 1');
+    expect(messages).toContain('Valor máximo 5');
+  });
+});

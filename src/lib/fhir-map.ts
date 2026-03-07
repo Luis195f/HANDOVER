@@ -16,6 +16,7 @@ import type {
   GlasgowScale,
   SkinInfo,
   TreatmentItem,
+  NocOutcomeItem,
   ExamItem,
   ProcedureItem,
   RiskFlags,
@@ -598,6 +599,17 @@ const surveyCategoryConcept: CodeableConcept = {
   text: 'Nursing care',
 };
 
+const outcomeCategoryConcept: CodeableConcept = {
+  coding: [
+    {
+      system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
+      code: 'outcome',
+      display: 'Outcome',
+    },
+  ],
+  text: 'Outcome',
+};
+
 const conditionClinicalStatusActive: CodeableConcept = {
   coding: [
     {
@@ -631,6 +643,7 @@ const conditionProblemListCategory: CodeableConcept = {
 
 export const NANDA_DIAGNOSIS_SYSTEM_URI = 'urn:handover:terminology:NANDA-I';
 export const NIC_INTERVENTION_SYSTEM_URI = 'urn:handover:terminology:NIC';
+export const NOC_OUTCOME_SYSTEM_URI = 'urn:handover:terminology:NOC';
 
 const AVPU_MAP = {
   A: { code: SNOMED.avpuAlert, display: 'Alert' },
@@ -805,6 +818,12 @@ type DocumentValues = {
   attachments?: AttachmentInput[] | null;
 };
 
+type OutcomeValues = {
+  patientId: string;
+  encounterId?: string;
+  outcomes?: NocOutcomeItem[];
+};
+
 type CompositionValues = {
   patientId: string;
   encounterId?: string;
@@ -846,6 +865,7 @@ type BundleReferenceIndex = {
   glasgow: string[];
   exams: string[];
   procedures: string[];
+  outcomes: string[];
   risks: string[];
   detectedIssues?: string[];
   diagnoses?: string[];
@@ -906,6 +926,7 @@ export type HandoverValues = {
   risks?: RiskFlags;
   risksStructured?: RiskItem[];
   treatments?: TreatmentItem[];
+  outcomes?: NocOutcomeItem[];
 };
 
 export type HandoverInput = HandoverValues | { values: HandoverValues };
@@ -2440,6 +2461,78 @@ export function mapTreatments(
   });
 }
 
+const NOC_SCORE_COMPONENT_SYSTEM = 'urn:handover-pro:noc-score';
+
+const normalizeNocScore = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const rounded = Math.round(value);
+  if (rounded < 1 || rounded > 5) return undefined;
+  return rounded;
+};
+
+export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): Observation[] {
+  if (!values.outcomes || values.outcomes.length === 0) return [];
+
+  const optionsMerged = resolveOptions(options);
+  const subject = patientReference(values.patientId);
+  const encounter = encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+
+  return values.outcomes.flatMap((item) => {
+    const nocCode = typeof item?.nocCode === 'string' ? item.nocCode.trim() : '';
+    const nocDisplay = typeof item?.nocDisplay === 'string' ? item.nocDisplay.trim() : '';
+    const baseline = normalizeNocScore(item?.baseline);
+    const target = normalizeNocScore(item?.target);
+    const current = normalizeNocScore(item?.current);
+
+    if (!nocCode || !nocDisplay || baseline == null || target == null) return [];
+
+    const component: ObservationComponent[] = [
+      {
+        code: {
+          coding: [{ system: NOC_SCORE_COMPONENT_SYSTEM, code: 'baseline', display: 'Baseline score' }],
+          text: 'Baseline score',
+        },
+        valueInteger: baseline,
+      },
+      {
+        code: {
+          coding: [{ system: NOC_SCORE_COMPONENT_SYSTEM, code: 'target', display: 'Target score' }],
+          text: 'Target score',
+        },
+        valueInteger: target,
+      },
+    ];
+
+    if (current != null) {
+      component.push({
+        code: {
+          coding: [{ system: NOC_SCORE_COMPONENT_SYSTEM, code: 'current', display: 'Current score' }],
+          text: 'Current score',
+        },
+        valueInteger: current,
+      });
+    }
+
+    return [
+      {
+        resourceType: 'Observation',
+        status: 'final',
+        category: [outcomeCategoryConcept],
+        code: {
+          coding: [{ system: NOC_OUTCOME_SYSTEM_URI, code: nocCode, display: nocDisplay }],
+          text: nocDisplay,
+        },
+        subject,
+        encounter,
+        effectiveDateTime,
+        valueString: `NOC ${nocCode}: ${nocDisplay}`,
+        component,
+      } satisfies Observation,
+    ];
+  });
+}
+
 export function mapExamObservations(
   values: CareValues & { exams?: ExamItem[]; examsPending?: unknown },
   options?: BuildOptions,
@@ -3168,6 +3261,13 @@ export function buildComposition(
       entry: refs.treatments.map((reference) => ({ reference })),
     });
   }
+  if (refs.outcomes.length > 0) {
+    sections.push({
+      title: 'Resultados esperados (NOC)',
+      code: compositionSectionConcept('outcomes', 'NOC outcomes'),
+      entry: refs.outcomes.map((reference) => ({ reference })),
+    });
+  }
 
   if (refs.exams.length > 0) {
     sections.push({
@@ -3602,6 +3702,11 @@ export function buildHandoverBundle(
     sharedOptions,
   ).map((procedure) => replaceSubjectReference(procedure, patientSubjectReference));
 
+  const outcomeObservations = mapNocOutcomes(
+    { patientId: values.patientId, encounterId, outcomes: values.outcomes },
+    sharedOptions,
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
+
   const oxygenResources = mapDeviceUse(
     {
       patientId: values.patientId,
@@ -3685,6 +3790,7 @@ export function buildHandoverBundle(
   const vitalsRefs: string[] = [];
   const medicationRefs: string[] = [];
   const treatmentRefs: string[] = [];
+  const outcomeRefs: string[] = [];
   const oxygenRefs: string[] = [];
   const deviceRefs: string[] = [];
   const attachmentRefs: string[] = [];
@@ -3995,6 +4101,19 @@ export function buildHandoverBundle(
     treatmentRefs.push(referenceStringFromResource(resource));
   });
 
+  outcomeObservations.forEach((observation) => {
+    const { resource, fullUrl } = assignStableIds(
+      applyProfiles(observation),
+      values.patientId,
+    );
+    resourceEntries.push({
+      fullUrl,
+      resource,
+      request: { method: 'POST', url: 'Observation' },
+    });
+    outcomeRefs.push(referenceStringFromResource(resource));
+  });
+
   procedureResources.forEach((procedure) => {
     const { resource, fullUrl } = assignStableIds(
       applyProfiles(procedure),
@@ -4061,6 +4180,7 @@ export function buildHandoverBundle(
     ...mobilitySkinRefs,
     ...fluidBalanceRefs,
     ...treatmentRefs,
+    ...outcomeRefs,
     ...oxygenRefs,
     ...deviceRefs,
   );
@@ -4083,6 +4203,7 @@ export function buildHandoverBundle(
         vitals: vitalsRefs,
         medications: medicationRefs,
         treatments: treatmentRefs,
+        outcomes: outcomeRefs,
         oxygen: oxygenRefs,
         devices: deviceRefs,
         attachments: attachmentRefs,
@@ -4456,6 +4577,10 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     { patientId: data.patientId, encounterId, treatments: data.treatments },
     sharedOptions,
   );
+  const outcomeObservations = mapNocOutcomes(
+    { patientId: data.patientId, encounterId, outcomes: data.outcomes },
+    sharedOptions,
+  );
   const oxygenDevices = mapDeviceUse(
     { patientId: data.patientId, encounterId, oxygenTherapy: oxygenTherapyInput },
     sharedOptions,
@@ -4527,6 +4652,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     vitals: [],
     medications: [],
     treatments: [],
+    outcomes: [],
     oxygen: [],
     devices: [],
     attachments: [],
@@ -4560,6 +4686,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.BRADEN.code) refs.braden.push(reference);
         else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.GLASGOW.code) refs.glasgow.push(reference);
         else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'vital-signs'))) refs.vitals.push(reference);
+        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'outcome'))) refs.outcomes.push(reference);
         else if (
           !resource.code?.coding?.length &&
           resource.category?.some((c) =>
@@ -4659,6 +4786,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   });
   medications.forEach(pushEntry);
   treatmentProcedures.forEach(pushEntry);
+  outcomeObservations.forEach(pushEntry);
   procedureResources.forEach((procedure) => {
     pushEntry(procedure);
   });
@@ -4678,6 +4806,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     ...refs.mobilitySkin,
     ...refs.fluidBalance,
     ...refs.treatments,
+    ...refs.outcomes,
     ...refs.oxygen,
     ...refs.devices,
   );

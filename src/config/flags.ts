@@ -22,7 +22,7 @@ export const flags = {
   SHOW_NIC_CODING:
     (extra as any)?.FEATURES?.handover?.showNicCoding ?? process.env.EXPO_PUBLIC_SHOW_NIC_CODING ?? false,
   SHOW_NOC_OUTCOMES:
-    (extra as any)?.FEATURES?.handover?.showNocOutcomes ?? process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES,
+    (extra as any)?.FEATURES?.handover?.showNocOutcomes ?? process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES ?? false,
   SHOW_HANDOVER_TIMING_METRICS:
     (extra as any)?.FEATURES?.handover?.showHandoverTimingMetrics ??
     process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS,

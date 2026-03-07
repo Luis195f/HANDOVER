@@ -107,6 +107,7 @@ import { SignaturesSection, type SignatureUser } from './components/SignaturesSe
 import MedicationSection from './components/MedicationSection';
 import ExamsProceduresSection from './components/ExamsProceduresSection';
 import TreatmentsSection from './components/TreatmentsSection';
+import OutcomesSection from './components/OutcomesSection';
 import SafetySection from './components/SafetySection';
 // END HANDOVER D2 – VitalTrends imports
 import { CollapsibleSection } from './components/CollapsibleSection';
@@ -305,6 +306,7 @@ const ALL_SECTIONS_INFO = [
   { key: 'medicacion', title: 'Medicación y tratamientos' },
   { key: 'adjuntos', title: 'Adjuntos' },
   { key: 'diagnosticos', title: 'Diagnósticos médicos/ enfermería' },
+  { key: 'outcomes', title: 'Resultados esperados (NOC)' },
   { key: 'evolucion', title: 'Evolución' },
   { key: 'resumen', title: 'Resumen / cierre de turno' },
   { key: 'bedsideChecklist', title: 'Bedside Checklist' },
@@ -653,6 +655,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       meds: '',
       medications: [],
       treatments: [],
+      outcomes: [],
       exams: [],
       procedures: [],
       sbarSituation: '',
@@ -729,7 +732,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     () => features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
     [features.checklistItems],
   );
-  const visibleSections = useMemo(() => getHandoverVisibleSections(ALL_SECTIONS_INFO), []);
+  const visibleSections = useMemo(
+    () =>
+      getHandoverVisibleSections(ALL_SECTIONS_INFO).filter(
+        (section) => section.key !== 'outcomes' || Boolean(features.showNocOutcomes),
+      ),
+    [features.showNocOutcomes],
+  );
 
   useEffect(() => {
     if (!features.showHandoverTimingMetrics || timingInitializedRef.current) return;
@@ -2738,11 +2747,6 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               <Text style={styles.helperText}>Clasificación NIC habilitada para esta unidad.</Text>
             </View>
           ) : null}
-          {features.showNocOutcomes ? (
-            <View style={styles.field}>
-              <Text style={styles.helperText}>Resultados NOC habilitados para esta unidad.</Text>
-            </View>
-          ) : null}
           {features.showHandoverTimingMetrics ? (
             <View style={styles.field}>
               <Text style={styles.helperText}>Métricas de tiempo de entrega habilitadas para esta unidad.</Text>
@@ -2811,6 +2815,25 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           ) : null}
         </CollapsibleSection>
       </View>
+
+      {features.showNocOutcomes ? (
+        <View
+          ref={sectionRefs.outcomes}
+          onLayout={handleSectionLayout('outcomes')}
+          style={styles.section}
+        >
+          <CollapsibleSection
+            title="Resultados esperados (NOC)"
+            isCollapsed={collapsedSections.outcomes}
+            onToggle={() => toggleSection('outcomes')}
+          >
+            <OutcomesSection
+              control={control}
+              enableAiSuggestions={aiSuggestionsEnabled}
+            />
+          </CollapsibleSection>
+        </View>
+      ) : null}
 
       <View
         ref={sectionRefs.evolucion}

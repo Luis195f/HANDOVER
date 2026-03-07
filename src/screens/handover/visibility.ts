@@ -9,6 +9,7 @@ export const getHandoverVisibleSections = <T extends HandoverSectionLike>(sectio
     oxigenoterapia: isOn('SHOW_OXY'),
     medicacion: isOn('SHOW_MEDS'),
     adjuntos: isOn('SHOW_ATTACH'),
+    outcomes: isOn('SHOW_NOC_OUTCOMES'),
   } as const;
 
   return sections.filter((section) => {

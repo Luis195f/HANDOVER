@@ -8,6 +8,7 @@ import type {
   zRiskItem,
   zRiskType,
   zTreatmentItem,
+  zNocOutcomeItem,
 } from '../validation/schemas';
 import type { SnomedCoding } from '../data/snomed-dict';
 // BEGIN HANDOVER D3 – StructuredDiagnosis types
@@ -198,6 +199,7 @@ export type MedicationItem = z.infer<typeof zMedicationItem> & {
 };
 // END HANDOVER D7 – MedicationModule
 export type TreatmentItem = z.infer<typeof zTreatmentItem>;
+export type NocOutcomeItem = z.infer<typeof zNocOutcomeItem>;
 export type ExamItem = z.infer<typeof zExamItem>;
 export type ProcedureItem = z.infer<typeof zProcedureItem>;
 
@@ -221,6 +223,7 @@ export type HandoverValues = {
   meds?: string;
   medications?: MedicationItem[];
   treatments?: TreatmentItem[];
+  outcomes?: NocOutcomeItem[];
   exams?: ExamItem[];
   procedures?: ProcedureItem[];
   oxygenTherapy?: OxygenTherapy;
