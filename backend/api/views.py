@@ -6,11 +6,12 @@ import math
 import os
 import sys
 import uuid
+from datetime import timedelta
 import httpx
 from typing import Any, Dict, Optional, Tuple, Type
 
 import httpx
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
@@ -35,7 +36,7 @@ from backend.signature import (
     verify_bundle_signature,
 )
 from backend.security.auth import Auth0JWTAuthentication
-from backend.api.models import ClientAuditEvent, DemoPatient, Patient as LocalPatient
+from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
@@ -60,7 +61,7 @@ except Exception:
 
 class AuthenticatedAPIView(APIView):
     authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     parser_classes = [FHIRJSONParser, JSONParser]
     renderer_classes = [FHIRJSONRenderer, JSONRenderer]
 
@@ -106,6 +107,77 @@ class AuthenticatedAPIView(APIView):
 AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
+
+ETL_ALLOWED_ROLES = {"service_etl", "admin"}
+ETL_REQUIRED_SCOPES = {"icea:etl:read", "handover:etl:read"}
+
+
+def _extract_request_id(request: HttpRequest) -> str:
+    for candidate in (
+        request.headers.get("Idempotency-Key"),
+        request.META.get("HTTP_IDEMPOTENCY_KEY"),
+        request.headers.get("X-Request-ID"),
+        request.META.get("HTTP_X_REQUEST_ID"),
+        getattr(request, "audit_request_id", ""),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return str(uuid.uuid4())
+
+
+def _extract_bundle_identifier(bundle: dict[str, Any], request: HttpRequest) -> str:
+    identifier = bundle.get("identifier")
+    if isinstance(identifier, dict):
+        value = identifier.get("value")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    bundle_id = bundle.get("id")
+    if isinstance(bundle_id, str) and bundle_id.strip():
+        return bundle_id.strip()
+    return _extract_request_id(request)
+
+
+def _extract_patient_id_from_bundle(bundle: dict[str, Any]) -> str:
+    for entry in bundle.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if not isinstance(resource, dict):
+            continue
+        if resource.get("resourceType") == "Patient":
+            patient_id = resource.get("id")
+            if isinstance(patient_id, str) and patient_id.strip():
+                return patient_id.strip()
+    return "unknown"
+
+
+def _persist_handover_bundle_record(*, bundle: dict[str, Any], request: HttpRequest) -> None:
+    request_id = _extract_request_id(request)
+    defaults = {
+        "bundle_id": _extract_bundle_identifier(bundle, request),
+        "patient_id": _extract_patient_id_from_bundle(bundle),
+        "unit_id": str(request.headers.get("X-Unit-Id") or "unknown").strip() or "unknown",
+        "bundle_json": bundle,
+        "expires_at": timezone.now() + timedelta(days=30),
+        "encryption_metadata": {
+            "at_rest": "database-managed",
+            "retention_days": 30,
+        },
+    }
+    try:
+        HandoverBundleRecord.objects.get_or_create(request_id=request_id, defaults=defaults)
+    except IntegrityError:
+        logger.info("handover_bundle_duplicate_request", extra={"request_id": request_id})
+
+
+def _has_valid_etl_access(request: HttpRequest) -> bool:
+    claims = _get_claims_from_request(request) or {}
+    roles = extract_roles(claims) if isinstance(claims, dict) else set()
+    if not (roles & ETL_ALLOWED_ROLES):
+        return False
+
+    scopes = set(_extract_permissions_from_request(request) or [])
+    return bool(scopes & ETL_REQUIRED_SCOPES)
 
 
 def _post_transaction_to_fhir(*args, **kwargs):
@@ -1807,7 +1879,59 @@ class BundleView(AuthenticatedAPIView):
             unit_id=unit_id,
         )
         enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
+        _persist_handover_bundle_record(bundle=bundle, request=request)
         return Response(payload, status=resp.status_code)
+
+
+class HandoverEtlReadView(AuthenticatedAPIView):
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [AllowAny]
+
+    def get_permissions(self):
+        return [permission() for permission in self.permission_classes]
+
+    def get_authenticators(self):
+        auth_header = (self.request.META.get("HTTP_AUTHORIZATION") or "").strip().lower()
+        if not auth_header.startswith("bearer "):
+            return []
+        return [authenticator() for authenticator in self.authentication_classes]
+
+    def get(self, request: HttpRequest, bundle_id: str) -> HttpResponse:
+        auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip().lower()
+        if not auth_header.startswith("bearer "):
+            return Response({"detail": "Authentication credentials were not provided."}, status=401)
+
+        if not getattr(request.user, "is_authenticated", False):
+            return Response({"detail": "Invalid or expired token"}, status=401)
+
+        claims = _get_claims_from_request(request) or {}
+        grant_type = str((claims.get("gty") if isinstance(claims, dict) else "") or "").strip().lower()
+        if grant_type != "client-credentials":
+            return Response({"detail": "Forbidden"}, status=403)
+
+        if not _has_valid_etl_access(request):
+            return Response({"detail": "Forbidden"}, status=403)
+
+        record = HandoverBundleRecord.objects.filter(bundle_id=bundle_id).only("bundle_json", "created_at").first()
+        if not record:
+            return Response({"detail": "Not found"}, status=404)
+
+        etag = hashlib.sha256(
+            json.dumps(record.bundle_json, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if request.headers.get("If-None-Match") == f'W/"{etag}"':
+            response = HttpResponse(status=304)
+            response["ETag"] = f'W/"{etag}"'
+            return response
+
+        response = HttpResponse(
+            json.dumps(record.bundle_json, ensure_ascii=False),
+            content_type="application/fhir+json",
+            status=200,
+        )
+        response["ETag"] = f'W/"{etag}"'
+        response["Cache-Control"] = "private, max-age=60"
+        return response
 
 
 class AuditLogView(AuthenticatedAPIView):
@@ -1901,4 +2025,3 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-

@@ -8,6 +8,7 @@ from .views import (
     BundleView,
     CapabilitiesView,
     DashboardView,
+    HandoverEtlReadView,
     HandoverTimingMetricsView,
     MedicationStatementView,
     NandaCatalogView,
@@ -28,6 +29,8 @@ urlpatterns = [
     path("fhir/transaction", BundleView.as_view(), name="fhir-transaction"),
     # (opcional) también aceptar con slash final
     path("fhir/transaction/", BundleView.as_view(), name="fhir-transaction-slash"),
+    path("handover/<str:bundle_id>", HandoverEtlReadView.as_view(), name="handover-etl-read"),
+    path("handover/<str:bundle_id>/", HandoverEtlReadView.as_view(), name="handover-etl-read-slash"),
 
     path("audit", AuditLogView.as_view(), name="audit-log"),
     path("audit/", AuditLogView.as_view(), name="audit-log-slash"),

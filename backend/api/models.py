@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db import models
 from django.utils import timezone
 
@@ -129,3 +131,30 @@ class IceaOutboundEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"IceaOutboundEvent(request_id={self.request_id}, status={self.status})"
+
+
+class HandoverBundleRecord(models.Model):
+    bundle_id = models.CharField(max_length=255, unique=True)
+    patient_id = models.CharField(max_length=255, db_index=True)
+    unit_id = models.CharField(max_length=255, db_index=True)
+    request_id = models.CharField(max_length=255, unique=True)
+    bundle_json = models.JSONField()
+    encryption_metadata = models.JSONField(null=True, blank=True)
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["bundle_id"], name="idx_handover_bundle_id"),
+            models.Index(fields=["unit_id", "created_at"], name="idx_handover_unit_created"),
+            models.Index(fields=["created_at"], name="idx_handover_created_at"),
+        ]
+
+    @staticmethod
+    def default_expiry(now=None) -> timezone.datetime:
+        current = now or timezone.now()
+        return current + timedelta(days=30)
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return f"HandoverBundleRecord(bundle_id={self.bundle_id}, request_id={self.request_id})"

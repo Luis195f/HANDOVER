@@ -23,6 +23,7 @@ if respx is None:
 
 def test_proxy_and_auditevent_ok(monkeypatch):
     monkeypatch.setattr(views.BundleView, 'permission_classes', [])
+    monkeypatch.setattr(views, '_persist_handover_bundle_record', lambda **kwargs: None)
     client = APIClient()
     with respx.mock(base_url=views.FHIR_BASE) as mock:
         tx_route = mock.post('/').mock(return_value=httpx.Response(200, json={'resourceType': 'Bundle'}))
