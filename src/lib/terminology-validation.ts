@@ -42,6 +42,9 @@ const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.LOINC]: 'Código LOINC desconocido',
   [TERMINOLOGY_SYSTEMS.UCUM]: 'Código UCUM desconocido',
   [TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY]: 'Código de categoría de observación desconocido',
+  [TERMINOLOGY_SYSTEMS.NANDA_I]: 'Código NANDA-I no reconocido',
+  [TERMINOLOGY_SYSTEMS.NIC]: 'Código NIC no reconocido',
+  [TERMINOLOGY_SYSTEMS.NOC]: 'Código NOC no reconocido',
 
   [TERMINOLOGY_SYSTEMS.HANDOVER_CARE]: 'Código de cuidado no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE]: 'Tipo de tratamiento no reconocido',
@@ -52,6 +55,7 @@ const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.HANDOVER_SBAR]: 'Código HANDOVER SBAR no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST]: 'Código HANDOVER Bedside Checklist no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN]: 'Valor booleano HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_NOC_SCORE]: 'Código de escala NOC no reconocido',
 };
 
 export const isLocalSnomedCode = (code: string | undefined | null): boolean => {
@@ -109,12 +113,16 @@ const isLocalHandoverUrnCode = (
   }
 
   const isHandoverSystem =
+    system === TERMINOLOGY_SYSTEMS.NANDA_I ||
+    system === TERMINOLOGY_SYSTEMS.NIC ||
+    system === TERMINOLOGY_SYSTEMS.NOC ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_CARE ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_SBAR ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST;
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_NOC_SCORE;
 
   if (!isHandoverSystem) return false;
   return true;
@@ -217,3 +225,4 @@ export async function validateSnomed(code: string, display?: string) {
 export async function validateLoinc(code: string, display?: string) {
   return validateTerminologyCode({ system: TERMINOLOGY_SYSTEMS.LOINC, code, display });
 }
+

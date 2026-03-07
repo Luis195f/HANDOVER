@@ -26,10 +26,17 @@ import type {
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
+import {
+  MINIMUM_VIABLE_NNN_MAPPING,
+  NOC_OUTCOME_CATEGORY,
+  NOC_SCORE_COMPONENT_CODES,
+} from './fhir-terminology';
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
 import { resolveSnomedCoding } from '../data/snomed-dict';
+
+export { NANDA_DIAGNOSIS_SYSTEM_URI, NIC_INTERVENTION_SYSTEM_URI, NOC_OUTCOME_SYSTEM_URI } from './fhir-terminology';
 
 export type HandoverData = z.infer<typeof zHandover>;
 
@@ -602,12 +609,12 @@ const surveyCategoryConcept: CodeableConcept = {
 const outcomeCategoryConcept: CodeableConcept = {
   coding: [
     {
-      system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
-      code: 'outcome',
-      display: 'Outcome',
+      system: NOC_OUTCOME_CATEGORY.system,
+      code: NOC_OUTCOME_CATEGORY.code,
+      display: NOC_OUTCOME_CATEGORY.display,
     },
   ],
-  text: 'Outcome',
+  text: NOC_OUTCOME_CATEGORY.display,
 };
 
 const conditionClinicalStatusActive: CodeableConcept = {
@@ -641,9 +648,8 @@ const conditionProblemListCategory: CodeableConcept = {
   text: 'Problem list item',
 };
 
-export const NANDA_DIAGNOSIS_SYSTEM_URI = 'urn:handover:terminology:NANDA-I';
-export const NIC_INTERVENTION_SYSTEM_URI = 'urn:handover:terminology:NIC';
-export const NOC_OUTCOME_SYSTEM_URI = 'urn:handover:terminology:NOC';
+
+
 
 const AVPU_MAP = {
   A: { code: SNOMED.avpuAlert, display: 'Alert' },
@@ -2422,10 +2428,14 @@ export function mapTreatments(
   return values.treatments.map((treatment) => {
     const status: Procedure['status'] = treatment.done ? 'completed' : 'in-progress';
     const display = TREATMENT_TYPE_LABELS[treatment.type];
+    // Minimum viable NIC mapping:
+    // - NIC lives in Procedure.code.coding with system urn:handover:terminology:NIC.
+    // - The generic Procedure profile still comes from meta.profile; NIC-specific profile URI is no especificado.
+    // - The local HANDOVER treatment code is preserved in the same CodeableConcept to avoid breaking existing bundles.
     const nicCoding =
       treatment.code?.system === 'NIC' && treatment.code.code.trim() && treatment.code.display.trim()
         ? {
-            system: NIC_INTERVENTION_SYSTEM_URI,
+            system: MINIMUM_VIABLE_NNN_MAPPING.nic.system,
             code: treatment.code.code.trim(),
             display: treatment.code.display.trim(),
           }
@@ -2461,8 +2471,6 @@ export function mapTreatments(
   });
 }
 
-const NOC_SCORE_COMPONENT_SYSTEM = 'urn:handover-pro:noc-score';
-
 const normalizeNocScore = (value: unknown): number | undefined => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const rounded = Math.round(value);
@@ -2487,18 +2495,23 @@ export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): O
 
     if (!nocCode || !nocDisplay || baseline == null || target == null) return [];
 
+    // Minimum viable NOC mapping:
+    // - NOC lives in Observation.code with system urn:handover:terminology:NOC.
+    // - Observation.category uses code outcome.
+    // - Score components stay in the local namespace urn:handover-pro:noc-score for backward compatibility.
+    // - The NOC-specific profile URI is no especificado; only the generic Observation profile is injected elsewhere.
     const component: ObservationComponent[] = [
       {
         code: {
-          coding: [{ system: NOC_SCORE_COMPONENT_SYSTEM, code: 'baseline', display: 'Baseline score' }],
-          text: 'Baseline score',
+          coding: [NOC_SCORE_COMPONENT_CODES.baseline],
+          text: NOC_SCORE_COMPONENT_CODES.baseline.display,
         },
         valueInteger: baseline,
       },
       {
         code: {
-          coding: [{ system: NOC_SCORE_COMPONENT_SYSTEM, code: 'target', display: 'Target score' }],
-          text: 'Target score',
+          coding: [NOC_SCORE_COMPONENT_CODES.target],
+          text: NOC_SCORE_COMPONENT_CODES.target.display,
         },
         valueInteger: target,
       },
@@ -2507,8 +2520,8 @@ export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): O
     if (current != null) {
       component.push({
         code: {
-          coding: [{ system: NOC_SCORE_COMPONENT_SYSTEM, code: 'current', display: 'Current score' }],
-          text: 'Current score',
+          coding: [NOC_SCORE_COMPONENT_CODES.current],
+          text: NOC_SCORE_COMPONENT_CODES.current.display,
         },
         valueInteger: current,
       });
@@ -2520,12 +2533,13 @@ export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): O
         status: 'final',
         category: [outcomeCategoryConcept],
         code: {
-          coding: [{ system: NOC_OUTCOME_SYSTEM_URI, code: nocCode, display: nocDisplay }],
+          coding: [{ system: MINIMUM_VIABLE_NNN_MAPPING.noc.system, code: nocCode, display: nocDisplay }],
           text: nocDisplay,
         },
         subject,
         encounter,
         effectiveDateTime,
+        issued: effectiveDateTime,
         valueString: `NOC ${nocCode}: ${nocDisplay}`,
         component,
       } satisfies Observation,
@@ -4381,14 +4395,19 @@ function mapDiagnoses(
 
   const nursingStructured = (data.dxNursingStructured ?? []).filter((item) => item.system === 'NANDA');
   nursingStructured.forEach((item) => {
+    // Minimum viable NANDA mapping:
+    // - NANDA lives in Condition.code with system urn:handover:terminology:NANDA-I.
+    // - The generic Condition profile still comes from meta.profile; the NANDA-specific profile URI is no especificado.
+    // - We keep the local urn:handover:* namespace until a licensed external NANDA URI is available.
     conditions.push({
       resourceType: 'Condition',
       clinicalStatus: conditionClinicalStatusActive,
       verificationStatus: conditionVerificationStatusUnconfirmed,
+      category: [conditionProblemListCategory],
       code: {
         coding: [
           {
-            system: NANDA_DIAGNOSIS_SYSTEM_URI,
+            system: MINIMUM_VIABLE_NNN_MAPPING.nanda.system,
             code: item.code,
             display: item.display,
           },
@@ -4397,6 +4416,7 @@ function mapDiagnoses(
       },
       subject: context.subject,
       encounter: context.encounter,
+      onsetDateTime: context.effectiveDateTime,
       recordedDate: context.effectiveDateTime,
     });
   });

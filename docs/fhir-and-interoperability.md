@@ -1,24 +1,38 @@
 # Interoperabilidad FHIR
 
 ## Recursos y mapeo
-- Recursos utilizados: `Observation`, `Composition`, `MedicationStatement`, `MedicationRequest`, `Condition`, `Procedure`, `DiagnosticReport`, entre otros según el formulario.
+- Recursos utilizados: `Observation`, `Composition`, `MedicationStatement`, `Condition`, `Procedure`, `DocumentReference`, entre otros según el formulario.
 - `src/lib/fhir-map.ts` convierte los datos del formulario en bundles FHIR listos para envío. Cada entrada se transforma a recursos individuales y se empaqueta en un `Bundle` con referencias coherentes.
+- `src/lib/fhir-terminology.ts` centraliza el mapping mínimo viable NNN, sus `system` locales y el estado de los perfiles específicos de interoperabilidad.
 
+## Minimum Viable Mapping
 
+| Concepto de enfermería | Recurso FHIR destino | Campo FHIR exacto | Sistema de codificación | Notas | Profile URI |
+| --- | --- | --- | --- | --- | --- |
+| NANDA-I diagnóstico de enfermería | `Condition` | `Condition.code` | `urn:handover:terminology:NANDA-I` | Se usa `Condition.code.coding` cuando `dxNursingStructured[].system = "NANDA"`. Si no hay URI licenciada externa, se mantiene namespace propio `urn:handover:*`. El texto legacy en `dxNursing` sigue siendo opcional y compatible hacia atrás. | no especificado |
+| NIC intervención de enfermería | `Procedure` | `Procedure.code` | `urn:handover:terminology:NIC` | El repositorio ya construye `Procedure`; se conserva esa decisión para no romper bundles existentes. La codificación NIC convive con el código local de tipo de tratamiento en el mismo `CodeableConcept`. | no especificado |
+| NOC resultado esperado/medido | `Observation` | `Observation.code` | `urn:handover:terminology:NOC` | `Observation.category` usa `http://terminology.hl7.org/CodeSystem/observation-category#outcome`. Los componentes `baseline`, `target` y `current` siguen usando el namespace local `urn:handover-pro:noc-score` por compatibilidad. | no especificado |
 
 ## Diagnóstico de enfermería NANDA-I (canal primario)
 - `dxNursingStructured` se mapea como canal primario a `Condition.code.coding` cuando el sistema es `NANDA`.
 - `coding.system` usa por defecto `urn:handover:terminology:NANDA-I` para evitar declarar una URI oficial sin licencia de terminología.
 - `dxNursing` se mantiene como texto legado derivado/optativo para compatibilidad hacia atrás.
-- Si se adquiere licencia oficial NANDA-I, reemplaza `NANDA_DIAGNOSIS_SYSTEM_URI` en `src/lib/fhir-map.ts` por la URI contractual autorizada y conserva el resto del mapeo.
-- Nota de licencia: sin licencia completa, el sistema debe usar **texto sugerido** y codificación interna/URN; la **codificación oficial** solo debe habilitarse con el contrato de uso correspondiente.
+- Si se adquiere licencia oficial NANDA-I, reemplaza la constante en [fhir-terminology.ts](/C:/h/HANDOVER/src/lib/fhir-terminology.ts) y conserva el resto del mapeo.
+- Nota de licencia: sin licencia completa, el sistema debe usar texto sugerido y codificación interna/URN; la codificación oficial solo debe habilitarse con el contrato de uso correspondiente.
 
+## Intervenciones NIC
+- `treatments[]` sigue siendo opcional y se mapea a `Procedure` para mantener el flujo y el bundle actuales.
+- Cuando `treatments[].code.system = "NIC"`, la codificación NIC se añade en `Procedure.code.coding` con `urn:handover:terminology:NIC`.
+- El código interno de tipo de tratamiento (`urn:handover-pro:care:treatment-type`) se conserva en paralelo para no romper lógica existente de composición, referencias y tests.
+- No se declara un profile URI específico para NIC: queda explícitamente como `no especificado` hasta disponer de uno real.
 
 ## Resultados esperados NOC (captura rápida)
 - `outcomes[]` es opcional y permite registrar de 1 a 3 resultados con `nocCode`, `nocDisplay`, `baseline`, `target` y `current` opcional.
 - Cada resultado se mapea a `Observation` con `category.code = "outcome"`.
 - `Observation.code.coding` preserva el código y display NOC usando `urn:handover:terminology:NOC`.
 - `baseline`, `target` y `current` se serializan en `Observation.component.valueInteger` con códigos explícitos (`baseline`, `target`, `current`) para mantener trazabilidad clínica y compatibilidad.
+- No se declara un profile URI específico para NOC: queda explícitamente como `no especificado` hasta disponer de uno real.
+
 ## Cliente y configuración
 - Define `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` en `.env`/`app.json` (`expo.extra`) para apuntar al servidor FHIR.
 - El cliente en `src/lib/fhir-client.ts` agrega cabeceras de idempotencia, maneja respuestas `OperationOutcome` y reintentos seguros.
@@ -35,9 +49,9 @@
 - `AI_SBAR_API_KEY`: token opcional para autenticar las llamadas al refinado SBAR.
 - `OPENAI_API_KEY`: clave del proveedor de IA (se configura en el backend para Whisper/SBAR).
 - Limitaciones actuales:
-   - El dictado y la grabación de audio solo están soportados en iOS/Android (en web se marca como no disponible).
-   - Si no hay backend configurado, los módulos de STT/SBAR se desactivan sin bloquear el flujo (preparados para proveedor externo).
-   - La subida de audio a FHIR depende de `API_BASE_URL` y el endpoint `/upload/audio-to-fhir`.
+  - El dictado y la grabación de audio solo están soportados en iOS/Android (en web se marca como no disponible).
+  - Si no hay backend configurado, los módulos de STT/SBAR se desactivan sin bloquear el flujo (preparados para proveedor externo).
+  - La subida de audio a FHIR depende de `API_BASE_URL` y el endpoint `/upload/audio-to-fhir`.
 
 Para obtener estas credenciales:
 - Solicita al equipo de infraestructura los endpoints y claves del entorno clínico (staging/producción).
@@ -47,25 +61,15 @@ Para obtener estas credenciales:
 - `HANDOVER_FHIR_VALIDATION_MODE` admite `off`, `local` y `remote` para controlar la validación previa al envío.
   - `off`: se encola y se envía sin validaciones adicionales.
   - `local`: aplica las reglas locales (`validateFHIRBundle` + `validateResource`) antes de encolar o reenviar.
-  - `remote`: tras la validación local se llama a `$validate` en el servidor FHIR por cada recurso del `Bundle` y el envío se
-    bloquea si hay issues `error`/`fatal`.
-- En modo offline la app encripta los bundles pendientes en la cola usando AES (`encryptPayload` / `decryptPayload`) y los
-  procesa en orden FIFO cuando vuelve la conectividad, respetando los reintentos con backoff y deteniendo los reenvíos si la
-  validación remota responde con `422`.
-- Configura la URL de `$validate` y de transacciones con `FHIR_BASE_URL`/`EXPO_PUBLIC_FHIR_BASE_URL`; el endpoint de bundles
-  transaccionales del backend queda expuesto en `/api/fhir/transaction` y reenvía el bundle al servidor FHIR con
-  `Prefer: return=representation` y token Bearer.
+  - `remote`: tras la validación local se llama a `$validate` en el servidor FHIR por cada recurso del `Bundle` y el envío se bloquea si hay issues `error`/`fatal`.
+- En modo offline la app encripta los bundles pendientes en la cola usando AES (`encryptPayload` / `decryptPayload`) y los procesa en orden FIFO cuando vuelve la conectividad, respetando los reintentos con backoff y deteniendo los reenvíos si la validación remota responde con `422`.
+- Configura la URL de `$validate` y de transacciones con `FHIR_BASE_URL`/`EXPO_PUBLIC_FHIR_BASE_URL`; el endpoint de bundles transaccionales del backend queda expuesto en `/api/fhir/transaction` y reenvía el bundle al servidor FHIR con `Prefer: return=representation` y token Bearer.
 
-## Validación de códigos SNOMED/LOINC
-- Los catálogos locales (`src/lib/codes.ts` y `src/catalogs/diagnosisCodes.ts`) se consolidan en conjuntos en memoria para
-  validar códigos SNOMED CT y LOINC sin llamadas externas. Esto cubre los vitales, escalas y riesgos más usados en la app.
-- La función `validateTerminologyCode` consulta `/ValueSet/$validate-code` del servidor FHIR cuando
-  `HANDOVER_FHIR_VALIDATION_MODE=remote` y el código no está en las listas locales. Se envían los parámetros `system`, `code`
-  y `display` y se interpreta `result=true` como éxito.
-- Los resultados se cachean por sesión para evitar invocar el endpoint repetidamente y se muestra al usuario un mensaje
-  claro si el servidor devuelve `result=false` o si no hay conectividad.
-- Los formularios de diagnósticos bloquean el envío cuando el código SNOMED ingresado no existe (local o remotamente) y
-  sugieren escoger uno del autocompletado.
+## Validación de códigos SNOMED/LOINC/NNN
+- Los catálogos locales (`src/lib/codes.ts`, `src/lib/fhir-terminology.ts` y `src/catalogs/diagnosisCodes.ts`) se consolidan en conjuntos en memoria para validar códigos SNOMED CT, LOINC y los `system` internos NNN sin llamadas externas.
+- La función `validateTerminologyCode` consulta `/ValueSet/$validate-code` del servidor FHIR cuando `HANDOVER_FHIR_VALIDATION_MODE=remote` y el código no está en las listas locales. Se envían los parámetros `system`, `code` y `display` y se interpreta `result=true` como éxito.
+- Los resultados se cachean por sesión para evitar invocar el endpoint repetidamente y se muestra al usuario un mensaje claro si el servidor devuelve `result=false` o si no hay conectividad.
+- Los formularios de diagnósticos bloquean el envío cuando el código SNOMED ingresado no existe (local o remotamente) y sugieren escoger uno del autocompletado.
 
 ## Firma digital y trazabilidad
 - Cuando se configuran `HANDOVER_PRIVATE_KEY_PATH` y `HANDOVER_PUBLIC_KEY_PATH`, el backend añade `bundle.signature` (FHIR Signature con ECDSA + SHA-256) antes de enviar el `Bundle` al servidor FHIR. Si el cliente ya envía `signature`, se valida y se rechaza con `400` si la verificación falla.
@@ -76,7 +80,6 @@ Para obtener estas credenciales:
 - Los bundles generados incluyen UUID y se pueden reenviar sin duplicar gracias a las cabeceras configuradas en el cliente y al soporte de la cola offline.
 - Para depurar esquemas FHIR se puede usar `scripts/validate-fhir.ts` y el comando `pnpm validate:fhir`.
 
-
 ## Ejemplo STT (endpoint único DRF)
 
 ```bash
@@ -85,3 +88,4 @@ curl -X POST "$API_BASE_URL/api/ai/transcribe" \
   -F "file=@./demo-audio.m4a;type=audio/m4a" \
   -F "language=es"
 ```
+

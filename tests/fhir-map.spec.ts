@@ -6,6 +6,8 @@ import {
   buildHandoverBundle,
   mapObservationVitals,
   NANDA_DIAGNOSIS_SYSTEM_URI,
+  NIC_INTERVENTION_SYSTEM_URI,
+  NOC_OUTCOME_SYSTEM_URI,
   type HandoverData,
   type HandoverValues,
   validateBundle,
@@ -506,6 +508,105 @@ describe('buildFhirBundleFromFormData', () => {
   });
 
 
+  it('maps minimum viable NNN concepts to Condition, Procedure and Observation resources in the same bundle', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 8,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      patientId: 'patient-nnn-1',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      dxNursing: '',
+      dxNursingStructured: [
+        { system: 'NANDA', code: '00030', display: 'Deterioro del intercambio gaseoso' },
+      ],
+      treatments: [
+        {
+          id: 'tx-nic-1',
+          type: 'other',
+          description: 'Control del dolor',
+          code: { system: 'NIC', code: '2210', display: 'Administración de analgésicos' },
+        },
+      ],
+      outcomes: [
+        {
+          nocCode: '0402',
+          nocDisplay: 'Estado respiratorio: permeabilidad de las vías aéreas',
+          baseline: 2,
+          target: 4,
+          current: 3,
+        },
+      ],
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const resources = bundle.entry.map((entry) => entry.resource as any);
+
+    const nandaCondition = resources.find(
+      (resource) =>
+        resource.resourceType === 'Condition' &&
+        resource.code?.coding?.some((coding: any) => coding.system === NANDA_DIAGNOSIS_SYSTEM_URI),
+    );
+    const nicProcedure = resources.find(
+      (resource) =>
+        resource.resourceType === 'Procedure' &&
+        resource.code?.coding?.some((coding: any) => coding.system === NIC_INTERVENTION_SYSTEM_URI),
+    );
+    const nocObservation = resources.find(
+      (resource) =>
+        resource.resourceType === 'Observation' &&
+        resource.code?.coding?.some((coding: any) => coding.system === NOC_OUTCOME_SYSTEM_URI),
+    );
+
+    expect(nandaCondition?.code?.coding).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ system: NANDA_DIAGNOSIS_SYSTEM_URI, code: '00030' }),
+      ]),
+    );
+    expect(nicProcedure?.code?.coding).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ system: NIC_INTERVENTION_SYSTEM_URI, code: '2210' }),
+      ]),
+    );
+    expect(nocObservation?.category).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          coding: expect.arrayContaining([
+            expect.objectContaining({ code: 'outcome' }),
+          ]),
+        }),
+      ]),
+    );
+    expect(nocObservation?.component).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: expect.objectContaining({
+            coding: expect.arrayContaining([expect.objectContaining({ code: 'baseline' })]),
+          }),
+          valueInteger: 2,
+        }),
+        expect.objectContaining({
+          code: expect.objectContaining({
+            coding: expect.arrayContaining([expect.objectContaining({ code: 'target' })]),
+          }),
+          valueInteger: 4,
+        }),
+      ]),
+    );
+  });
   it('maps dxNursing legacy text fallback without pressure-ulcer-risk categorization', () => {
     const handover: HandoverData = zHandover.parse({
       administrativeData: {
@@ -677,3 +778,4 @@ describe('buildFhirBundleFromFormData', () => {
     });
   });
 });
+
