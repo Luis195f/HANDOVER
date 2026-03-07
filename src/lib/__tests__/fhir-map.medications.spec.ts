@@ -22,7 +22,7 @@ describe('FHIR map — medicaciones estructuradas y tratamientos', () => {
             route: 'iv',
             frequency: 'cada 8h',
           },
-          { id: 'med-2', name: 'Omeprazol', frequency: '1 vez/día' },
+          { id: 'med-2', name: 'Omeprazol', frequency: '1 vez/dia' },
         ],
       },
       { now },
@@ -71,12 +71,12 @@ describe('FHIR map — medicaciones estructuradas y tratamientos', () => {
     expect(administrations[0].extension?.[0]?.valueBoolean).toBe(true);
   });
 
-  it('mapea tratamientos no farmacológicos a Procedure', () => {
+  it('mapea tratamientos no farmacologicos a Procedure', () => {
     const bundle = buildHandoverBundle(
       {
         patientId,
         treatments: [
-          { id: 'tx-1', type: 'woundCare', description: 'Cura de úlcera sacra', scheduledAt: '2024-01-02T10:00:00Z' },
+          { id: 'tx-1', type: 'woundCare', description: 'Cura de ulcera sacra', scheduledAt: '2024-01-02T10:00:00Z' },
         ],
       },
       { now },
@@ -86,6 +86,38 @@ describe('FHIR map — medicaciones estructuradas y tratamientos', () => {
     expect(procedures).toHaveLength(1);
     expect(procedures[0].status).toBe('in-progress');
     expect(procedures[0].code.coding?.[0]?.code).toBe('woundCare');
-    expect(procedures[0].note?.[0]?.text).toContain('Cura de úlcera sacra');
+    expect(procedures[0].note?.[0]?.text).toContain('Cura de ulcera sacra');
+  });
+
+  it('incluye codificacion NIC opcional en Procedure cuando treatments[].code esta presente', () => {
+    const bundle = buildHandoverBundle(
+      {
+        patientId,
+        treatments: [
+          {
+            id: 'tx-nic-1',
+            type: 'other',
+            description: 'Control del dolor',
+            code: {
+              system: 'NIC',
+              code: '2210',
+              display: 'Administracion de analgesicos',
+            },
+          },
+        ],
+      },
+      { now },
+    );
+
+    const procedures = listResources(bundle, 'Procedure');
+    expect(procedures).toHaveLength(1);
+
+    const nicCoding = procedures[0].code.coding?.find(
+      (coding: { system?: string; code?: string }) => coding.system === 'urn:handover:terminology:NIC',
+    );
+
+    expect(nicCoding?.code).toBe('2210');
+    expect(nicCoding?.display).toBe('Administracion de analgesicos');
   });
 });
+

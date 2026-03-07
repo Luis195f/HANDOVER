@@ -20,7 +20,7 @@ export const flags = {
   AI_SUGGESTIONS_ENABLED:
     (extra as any)?.FEATURES?.handover?.aiSuggestions ?? process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED,
   SHOW_NIC_CODING:
-    (extra as any)?.FEATURES?.handover?.showNicCoding ?? process.env.EXPO_PUBLIC_SHOW_NIC_CODING,
+    (extra as any)?.FEATURES?.handover?.showNicCoding ?? process.env.EXPO_PUBLIC_SHOW_NIC_CODING ?? false,
   SHOW_NOC_OUTCOMES:
     (extra as any)?.FEATURES?.handover?.showNocOutcomes ?? process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES,
   SHOW_HANDOVER_TIMING_METRICS:
@@ -32,3 +32,4 @@ export const flags = {
 } satisfies Record<string, FlagValue>;
 
 export const isOn = (k: keyof typeof flags) => truthy(flags[k]);
+

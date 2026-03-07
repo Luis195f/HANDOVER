@@ -2582,7 +2582,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           >
             <MedicationSection control={control} />
             <View style={{ marginTop: 24 }}>
-              <TreatmentsSection control={control} />
+              <TreatmentsSection control={control} enableNicCoding={Boolean(features.showNicCoding)} />
             </View>
             {!features.hideLegacyFields ? (
             <View style={[styles.field, { marginTop: 24 }]}>
@@ -3054,3 +3054,4 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     </FormProvider>
   );
 }
+
