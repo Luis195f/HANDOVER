@@ -3,6 +3,9 @@ export const TERMINOLOGY_SYSTEMS = {
   SNOMED: 'http://snomed.info/sct',
   UCUM: 'http://unitsofmeasure.org',
   OBSERVATION_CATEGORY: 'http://terminology.hl7.org/CodeSystem/observation-category',
+  NANDA_I: 'urn:handover:terminology:NANDA-I',
+  NIC: 'urn:handover:terminology:NIC',
+  NOC: 'urn:handover:terminology:NOC',
   HANDOVER_CARE: 'urn:handover-pro:care',
   HANDOVER_TREATMENT_TYPE: 'urn:handover-pro:care:treatment-type',
   HANDOVER_OBSERVATION_CODES: 'urn:handover-pro:observation-codes',
@@ -10,6 +13,7 @@ export const TERMINOLOGY_SYSTEMS = {
   HANDOVER_SBAR: 'urn:handover-pro:sbar',
   HANDOVER_BEDSIDE_CHECKLIST: 'urn:handover-pro:bedside-checklist',
   HANDOVER_BOOLEAN: 'urn:handover-pro:boolean',
+  HANDOVER_NOC_SCORE: 'urn:handover-pro:noc-score',
 } as const;
 
 export type TerminologySystem =
@@ -268,3 +272,4 @@ export const ALERT_CODES = {
   oxygenProlonged: 'alert.oxygen.prolonged',
 
 } as const;
+
