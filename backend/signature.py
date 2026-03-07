@@ -145,20 +145,26 @@ def _sign_with_openssl(payload: bytes, private_key_path: str) -> bytes:
 
 
 def _verify_with_openssl(payload: bytes, signature: bytes, public_key_path: str) -> None:
-    with tempfile.NamedTemporaryFile() as sig_file:
-        sig_file.write(signature)
-        sig_file.flush()
-        try:
-            subprocess.run(
-                ["openssl", "dgst", "-sha256", "-verify", public_key_path, "-signature", sig_file.name],
-                input=payload,
-                capture_output=True,
-                check=True,
-            )
-        except FileNotFoundError as exc:
-            raise SignatureOperationError("OpenSSL no está disponible para verificar firmas.") from exc
-        except subprocess.CalledProcessError as exc:
-            raise SignatureVerificationError("La firma no coincide con el contenido canónico del bundle.") from exc
+    sig_file_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as sig_file:
+            sig_file.write(signature)
+            sig_file.flush()
+            sig_file_path = sig_file.name
+
+        subprocess.run(
+            ["openssl", "dgst", "-sha256", "-verify", public_key_path, "-signature", sig_file_path],
+            input=payload,
+            capture_output=True,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise SignatureOperationError("OpenSSL no está disponible para verificar firmas.") from exc
+    except subprocess.CalledProcessError as exc:
+        raise SignatureVerificationError("La firma no coincide con el contenido canónico del bundle.") from exc
+    finally:
+        if sig_file_path and os.path.exists(sig_file_path):
+            os.unlink(sig_file_path)
 
 
 def _build_fhir_signature(user_id: Optional[str], signature_b64: str) -> Dict[str, Any]:
@@ -308,3 +314,4 @@ def record_signature_audit(
             meta={"signature": {"stored": True, "hash": bundle_hash}},
             timestamp=signed_at_value,
         )
+

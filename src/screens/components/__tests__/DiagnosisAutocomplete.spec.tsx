@@ -1,8 +1,10 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { UseFormReturn } from 'react-hook-form';
 import { FormProvider, useForm } from 'react-hook-form';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as nandaCatalogModule from '@/src/catalogs/nandaCodes';
 import DiagnosisAutocomplete from '../DiagnosisAutocomplete';
 import type { HandoverStructuredDiagnosis } from '@/src/types/handover';
 
@@ -39,6 +41,17 @@ function renderWithForm(
   return { methods, ...utils };
 }
 
+async function flushSearchDebounce() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(250);
+  });
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe('DiagnosisAutocomplete', () => {
   it('renderiza label e input', () => {
     const { getByText, getByPlaceholderText } = renderWithForm();
@@ -47,54 +60,103 @@ describe('DiagnosisAutocomplete', () => {
     expect(getByPlaceholderText('Buscar diagnóstico...')).toBeTruthy();
   });
 
-  it('muestra sugerencias según la búsqueda y añade diagnósticos', async () => {
-    const { getByPlaceholderText, getByText, methods } = renderWithForm();
-
-    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'asma');
-
-    await waitFor(() => {
-      expect(getByText('Asma (195967001) · SNOMED')).toBeTruthy();
+  it('muestra la advertencia de licencia antes de habilitar el catálogo NANDA completo', () => {
+    const { getByTestId, getByText } = renderWithForm({
+      name: 'dxNursingStructured',
+      label: 'Diagnósticos enfermería (NANDA)',
+      systemsAllowed: ['NANDA'],
     });
 
-    fireEvent.press(getByText('Asma (195967001) · SNOMED'));
-
-    await waitFor(() => {
-      expect(methods.getValues('dxMedicalStructured')).toHaveLength(1);
-    });
+    expect(getByTestId('nanda-license-warning')).toBeTruthy();
+    expect(getByText('Licencia NANDA-I requerida')).toBeTruthy();
+    expect(getByTestId('enable-full-nanda-button')).toBeTruthy();
   });
 
-  it('permite eliminar diagnósticos añadidos', async () => {
-    const { getByPlaceholderText, getByText, methods } = renderWithForm();
-
-    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'asma');
-    await waitFor(() => getByText('Asma (195967001) · SNOMED'));
-    fireEvent.press(getByText('Asma (195967001) · SNOMED'));
-
-    await waitFor(() => {
-      expect(methods.getValues('dxMedicalStructured')).toHaveLength(1);
-    });
-
-    fireEvent.press(getByText('Eliminar'));
-
-    await waitFor(() => {
-      expect(methods.getValues('dxMedicalStructured')).toHaveLength(0);
-    });
-  });
-
-  it('autocompleta dxNursing legado al seleccionar el primer NANDA', async () => {
-    const { getByPlaceholderText, getByText, methods } = renderWithForm({
+  it('aplica debounce antes de mostrar sugerencias', async () => {
+    vi.useFakeTimers();
+    const { getByPlaceholderText, queryByText, getByText } = renderWithForm({
       name: 'dxNursingStructured',
       label: 'Diagnósticos enfermería (NANDA)',
       systemsAllowed: ['NANDA'],
     });
 
     fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'oxigenación');
-    await waitFor(() => getByText('Oxigenación alterada (00001) · NANDA'));
-    fireEvent.press(getByText('Oxigenación alterada (00001) · NANDA'));
+    expect(queryByText('Oxigenación alterada (00001) · NANDA')).toBeNull();
+
+    await flushSearchDebounce();
+
+    expect(getByText('Oxigenación alterada (00001) · NANDA')).toBeTruthy();
+  });
+
+  it('muestra sugerencias según la búsqueda y añade diagnósticos', async () => {
+    vi.useFakeTimers();
+    const { getByPlaceholderText, getByTestId, methods } = renderWithForm();
+
+    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'asma');
+    await flushSearchDebounce();
+
+    await act(async () => {
+      fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-195967001'));
+    });
+
+    expect(methods.getValues('dxMedicalStructured')).toHaveLength(1);
+  });
+
+  it('permite eliminar diagnósticos añadidos', async () => {
+    vi.useFakeTimers();
+    const { getByPlaceholderText, getByTestId, getByText, methods } = renderWithForm();
+
+    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'asma');
+    await flushSearchDebounce();
+
+    await act(async () => {
+      fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-195967001'));
+    });
+
+    expect(methods.getValues('dxMedicalStructured')).toHaveLength(1);
+
+    fireEvent.press(getByText('Eliminar'));
+
+    expect(methods.getValues('dxMedicalStructured')).toHaveLength(0);
+  });
+
+  it('autocompleta dxNursing legado al seleccionar el primer NANDA', async () => {
+    vi.useFakeTimers();
+    const { getByPlaceholderText, getByTestId, methods } = renderWithForm({
+      name: 'dxNursingStructured',
+      label: 'Diagnósticos enfermería (NANDA)',
+      systemsAllowed: ['NANDA'],
+    });
+
+    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'oxigenación');
+    await flushSearchDebounce();
+    fireEvent.press(getByTestId('diagnosis-suggestion-NANDA-00001'));
 
     await waitFor(() => {
       expect(methods.getValues('dxNursingStructured')).toHaveLength(1);
       expect(methods.getValues('dxNursing')).toBe('Oxigenación alterada');
+    });
+  });
+
+  it('mantiene el catálogo local si el backend no ofrece un catálogo licenciado', async () => {
+    vi.spyOn(nandaCatalogModule, 'loadNandaCatalog').mockResolvedValue({
+      ...nandaCatalogModule.getNandaPlaceholderCatalog(),
+      source: 'backend-placeholder',
+      licensed: false,
+    });
+
+    const { getByTestId, getByText } = renderWithForm({
+      name: 'dxNursingStructured',
+      label: 'Diagnósticos enfermería (NANDA)',
+      systemsAllowed: ['NANDA'],
+    });
+
+    await act(async () => {
+      fireEvent.press(getByTestId('enable-full-nanda-button'));
+    });
+
+    await waitFor(() => {
+      expect(getByText('No hay un catálogo NANDA licenciado configurado; se mantiene el catálogo local.')).toBeTruthy();
     });
   });
 });

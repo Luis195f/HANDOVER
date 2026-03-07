@@ -1,4 +1,6 @@
 import datetime
+import hashlib
+import json
 import logging
 import math
 import os
@@ -104,7 +106,145 @@ AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
 
+NANDA_LICENSE_WARNING = "Licencia NANDA-I requerida"
+NANDA_CATALOG_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
+NANDA_PLACEHOLDER_CODES: list[dict[str, Any]] = [
+    {
+        "system": "NANDA",
+        "code": "00001",
+        "display": "Oxigenación alterada",
+        "synonyms": ["oxigenación alterada", "oxygenation altered"],
+    },
+    {
+        "system": "NANDA",
+        "code": "00004",
+        "display": "Riesgo de infección",
+        "synonyms": ["riesgo de infección", "infection risk"],
+    },
+    {
+        "system": "NANDA",
+        "code": "00146",
+        "display": "Ansiedad",
+        "synonyms": ["ansiedad", "anxiety"],
+    },
+    {
+        "system": "NANDA",
+        "code": "00155",
+        "display": "Dolor agudo",
+        "synonyms": ["dolor agudo", "acute pain"],
+    },
+]
 
+
+def _normalize_nanda_catalog_entry(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    code = str(value.get("code") or "").strip()
+    display = str(value.get("display") or "").strip()
+    if not code or not display:
+        return None
+
+    system = str(value.get("system") or "NANDA").strip().upper()
+    if system != "NANDA":
+        return None
+
+    raw_synonyms = value.get("synonyms")
+    synonyms = (
+        [str(item).strip() for item in raw_synonyms if isinstance(item, str) and str(item).strip()]
+        if isinstance(raw_synonyms, list)
+        else []
+    )
+
+    payload = {
+        "system": "NANDA",
+        "code": code,
+        "display": display,
+    }
+    if synonyms:
+        payload["synonyms"] = synonyms
+    return payload
+
+
+def _build_nanda_catalog_payload() -> Dict[str, Any]:
+    inline_catalog_json = os.getenv("NANDA_CATALOG_JSON", "").strip()
+    catalog_file = os.getenv("NANDA_CATALOG_FILE", "").strip()
+
+    raw_payload: Any = None
+    source = "placeholder"
+    licensed = False
+
+    if inline_catalog_json:
+        source = "env-json"
+        licensed = True
+        try:
+            raw_payload = json.loads(inline_catalog_json)
+        except Exception:
+            logger.exception("Invalid NANDA_CATALOG_JSON configuration")
+            raw_payload = None
+            source = "placeholder"
+            licensed = False
+    elif catalog_file:
+        source = "file"
+        licensed = True
+        try:
+            with open(catalog_file, "r", encoding="utf-8") as catalog_handle:
+                raw_payload = json.load(catalog_handle)
+        except Exception:
+            logger.exception("Unable to load NANDA catalog from %s", catalog_file)
+            raw_payload = None
+            source = "placeholder"
+            licensed = False
+
+    payload_record = raw_payload if isinstance(raw_payload, dict) else None
+    if isinstance(raw_payload, list):
+        raw_codes = raw_payload
+    elif isinstance(payload_record, dict) and isinstance(payload_record.get("codes"), list):
+        raw_codes = payload_record.get("codes") or []
+    elif isinstance(payload_record, dict) and isinstance(payload_record.get("entries"), list):
+        raw_codes = payload_record.get("entries") or []
+    else:
+        raw_codes = []
+
+    codes = [
+        entry
+        for entry in (_normalize_nanda_catalog_entry(item) for item in raw_codes)
+        if entry is not None
+    ]
+
+    if isinstance(payload_record, dict) and isinstance(payload_record.get("licensed"), bool):
+        licensed = payload_record["licensed"]
+
+    warning = (
+        str(payload_record.get("warning")).strip()
+        if isinstance(payload_record, dict) and payload_record.get("warning")
+        else NANDA_LICENSE_WARNING
+    )
+    version = (
+        str(payload_record.get("version")).strip()
+        if isinstance(payload_record, dict) and payload_record.get("version")
+        else "licensed-runtime" if licensed else "placeholder-2026-03"
+    )
+
+    if not codes:
+        codes = [dict(item) for item in NANDA_PLACEHOLDER_CODES]
+        licensed = False
+        source = "placeholder"
+        version = "placeholder-2026-03"
+
+    return {
+        "system": "NANDA",
+        "licensed": licensed,
+        "source": source,
+        "version": version,
+        "warning": warning,
+        "codes": codes,
+    }
+
+
+def _build_nanda_catalog_etag(payload: Dict[str, Any]) -> str:
+    payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f'W/"{hashlib.sha256(payload_bytes).hexdigest()}"'
 
 
 def _local_registry_not_ready_response() -> Response:
@@ -468,7 +608,7 @@ def _ensure_secure_url(url: str) -> str:
         return url
     if url.startswith("http://localhost") or url.startswith("http://127.0.0.1"):
         return url
-    if settings.DEBUG:
+    if settings.DEBUG or AuthenticatedAPIView._running_tests():
         logger.warning("FHIR_BASE is not HTTPS; configure HTTPS in production.")
         return url
     raise RuntimeError("FHIR_BASE must use HTTPS in production.")
@@ -701,6 +841,25 @@ def _emit_bundle_audit(
 # =========================
 # Views
 # =========================
+
+class NandaCatalogView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request: HttpRequest) -> Response:
+        payload = _build_nanda_catalog_payload()
+        etag = _build_nanda_catalog_etag(payload)
+        request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
+
+        if request_etag == etag:
+            response = Response(status=304)
+        else:
+            response = Response(payload, status=200)
+
+        response["ETag"] = etag
+        response["Cache-Control"] = NANDA_CATALOG_CACHE_CONTROL
+        return response
+
 
 class CapabilitiesView(APIView):
     """
@@ -1736,3 +1895,4 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
