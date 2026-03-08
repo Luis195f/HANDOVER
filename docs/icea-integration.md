@@ -189,3 +189,58 @@ Los logs usan `safe_icea_event_summary(...)` y exponen solo:
 - solo si FHIR responde con exito se persiste el Bundle y se encola ICEA;
 - cualquier problema de ICEA se maneja fuera del guardado clinico;
 - el error ICEA nunca bloquea ni revierte la transaccion clinica ya aceptada.
+
+## Orquestación y estado del pipeline
+
+HANDOVER expone ahora una capa propia de coordinación bajo `/api/icea/*` para que la app móvil y los dashboards consulten y operen el pipeline sin llamar directo a ICEA+.
+
+### Rutas nuevas
+
+- `GET /api/icea/status?requestId=<id>|bundleId=<id>|patientId=<id>[&unitId=<id>][&refresh=true]`
+  - Devuelve el snapshot persistido en HANDOVER y, si ICEA+ está configurado, intenta refrescar el estado remoto sin romper la UX si el upstream falla.
+- `GET /api/icea/events?unitId=<id>[&stage=<stage>][&limit=<n>]`
+  - Devuelve los últimos eventos persistidos por unidad para auditoría operativa.
+- `GET /api/icea/dashboard-summary[?unitId=<id>][&eventsLimit=<n>]`
+  - Devuelve un resumen local por unidad construido desde snapshots/eventos persistidos en HANDOVER.
+- `POST /api/icea/actions/normalize`
+- `POST /api/icea/actions/build-windows`
+- `POST /api/icea/actions/build-dataset`
+- `POST /api/icea/actions/refresh-dashboard-summary`
+- `POST /api/icea/actions/causal-report`
+
+### Permisos
+
+- Consultas agregadas y estado: `admin` o `supervisor`.
+- Acciones manuales: solo `admin`.
+- La app móvil consume siempre HANDOVER; no hay llamadas directas a ICEA+ desde React Native.
+
+### Qué es automático y qué es manual
+
+Automático:
+- tras un `POST /api/fhir/transaction` exitoso, HANDOVER persiste el `HandoverBundleRecord` clínico;
+- crea/actualiza un `IceaPipelineSnapshot` con etapa `handover=accepted`;
+- reutiliza el outbox existente para `ingest` y persiste cada transición (`queued`, `retry`, `delivered`, `failed`) como snapshot y evento.
+
+Manual/controlado:
+- `normalize`
+- `build-windows`
+- `build-dataset`
+- `refresh-dashboard-summary`
+- `causal-report`
+
+No se dispara entrenamiento automático por cada handover.
+
+### Persistencia mínima nueva
+
+- `IceaPipelineSnapshot`: último estado visible por `request_id` con `bundle_id`, `patient_id`, `unit_id`, `visible_status`, `last_stage`, `stage_statuses`, referencias remotas mínimas y caché mínima de `dashboardSummary`/`causalReport`.
+- `IceaPipelineEvent`: historial auditable por unidad/etapa/acción con `status`, `detail`, `http_status` y payload técnico reducido.
+
+HANDOVER no persiste secretos, tokens ni payloads clínicos crudos de ICEA+ en esta capa.
+
+### Servicio backend HANDOVER -> ICEA+
+
+`backend/api/icea_pipeline.py` encapsula:
+- autenticación S2S por Bearer estático o client credentials;
+- timeouts y validación básica de configuración HTTPS fuera de dev/tests;
+- llamadas a `status`, `normalize`, `build-windows`, `build-dataset`, `dashboard-summary` y `causal-report`;
+- parseo robusto de errores remotos y persistencia del último estado visible.

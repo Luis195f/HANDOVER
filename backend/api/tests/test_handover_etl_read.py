@@ -83,6 +83,24 @@ class HandoverEtlReadTests(TestCase):
         self.assertEqual(read_response["Content-Type"], "application/fhir+json")
         self.assertEqual(json.loads(read_response.content), record.bundle_json)
 
+    @patch("backend.api.views.ensure_pipeline_snapshot_from_bundle", side_effect=RuntimeError("snapshot down"))
+    @patch("backend.api.views._post_transaction_to_fhir")
+    def test_post_transaction_keeps_clinical_success_when_snapshot_persistence_fails(self, mock_post, _mock_snapshot):
+        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="")
+        mock_response = Mock()
+        mock_response.status_code = 201
+        mock_response.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
+        mock_post.return_value = mock_response
+
+        response = self.client.post(
+            self.tx_url,
+            data=self.bundle,
+            format="json",
+            HTTP_X_REQUEST_ID="req-snapshot-fail",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(HandoverBundleRecord.objects.filter(request_id="req-snapshot-fail").count(), 1)
 
     def test_get_without_bearer_token_returns_401(self):
         HandoverBundleRecord.objects.create(
@@ -200,3 +218,4 @@ class HandoverEtlReadTests(TestCase):
         for _ in range(100):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
+

@@ -5,10 +5,18 @@ import { useAdminDashboardData } from '../../hooks/useAdminDashboardData';
 import { hasRole } from '../../security/acl';
 import { useAuth } from '../../security/auth';
 
+function formatDate(value: string | null | undefined) {
+  if (!value) return 'Sin datos';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('es-ES');
+}
+
 export function AdminDashboardScreen() {
   const { session, loading: authLoading } = useAuth();
   const canAdminister = hasRole(session, ['admin', 'supervisor']);
-  const { data, loading, error, reload } = useAdminDashboardData(canAdminister);
+  const { data, loading, error, reload, refreshRemoteSummary, refreshingUnitId } = useAdminDashboardData(canAdminister);
+  const canTriggerActions = hasRole(session, ['admin']);
 
   if (authLoading) {
     return (
@@ -30,7 +38,7 @@ export function AdminDashboardScreen() {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Cargando dashboard...</Text>
+        <Text style={{ marginTop: 8 }}>Cargando dashboard ICEA...</Text>
       </View>
     );
   }
@@ -38,7 +46,7 @@ export function AdminDashboardScreen() {
   if (error) {
     return (
       <View style={{ flex: 1, padding: 16 }}>
-        <Text style={{ marginBottom: 8 }}>No se pudo cargar el dashboard.</Text>
+        <Text style={{ marginBottom: 8 }}>No se pudo cargar el dashboard ICEA.</Text>
         <TouchableOpacity onPress={reload}>
           <Text style={{ color: 'blue' }}>Reintentar</Text>
         </TouchableOpacity>
@@ -51,78 +59,76 @@ export function AdminDashboardScreen() {
   return (
     <ScrollView style={{ flex: 1, padding: 16 }}>
       <Text style={{ fontSize: 20, fontWeight: '600', marginBottom: 8 }}>
-        Dashboard administrativo
+        Orquestación ICEA+
       </Text>
       <Text style={{ marginBottom: 16 }}>
-        Resumen multi-unidad basado en datos de handovers.
+        Estado local del pipeline y últimos eventos persistidos en HANDOVER.
+      </Text>
+      <Text style={{ marginBottom: 16, color: '#475569' }}>
+        Generado: {formatDate(data.generatedAt)}
       </Text>
 
       <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
-        Unidades
+        Resumen por unidad
       </Text>
-      {data.units.map((u) => (
+      {data.units.map((unit) => (
         <View
-          key={u.unitId}
+          key={unit.unitId}
           style={{
             padding: 12,
-            marginBottom: 8,
+            marginBottom: 10,
             borderRadius: 8,
             borderWidth: 1,
             borderColor: '#ddd',
+            backgroundColor: '#fff',
           }}
         >
-          <Text style={{ fontWeight: '600' }}>{u.unitName}</Text>
-          <Text>Total handovers: {u.totalHandovers}</Text>
-          <Text>Completados: {u.completedHandovers}</Text>
-          <Text>Pendientes: {u.pendingHandovers}</Text>
-          <Text>Pacientes críticos: {u.criticalPatients}</Text>
+          <Text style={{ fontWeight: '600', marginBottom: 6 }}>{unit.unitId}</Text>
+          <Text>Total handovers: {unit.totalHandovers}</Text>
+          <Text>En cola: {unit.queued}</Text>
+          <Text>En ejecución: {unit.running}</Text>
+          <Text>Entregados a ICEA: {unit.delivered}</Text>
+          <Text>Completados: {unit.succeeded}</Text>
+          <Text>Reintento: {unit.retry}</Text>
+          <Text>Fallidos: {unit.failed}</Text>
+          <Text>Última actualización: {formatDate(unit.lastUpdatedAt)}</Text>
+          <Text>Último refresh remoto: {formatDate(unit.lastDashboardRefreshAt)}</Text>
+          {canTriggerActions ? (
+            <TouchableOpacity
+              onPress={() => void refreshRemoteSummary(unit.unitId)}
+              disabled={refreshingUnitId === unit.unitId}
+              style={{ marginTop: 10 }}
+            >
+              <Text style={{ color: refreshingUnitId === unit.unitId ? '#94a3b8' : '#2563eb' }}>
+                {refreshingUnitId === unit.unitId ? 'Actualizando...' : 'Refrescar dashboard summary'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ))}
 
       <Text style={{ fontSize: 16, fontWeight: '600', marginVertical: 8 }}>
-        Actividad de personal
+        Últimos eventos ICEA
       </Text>
-      {data.staff.map((s) => (
+      {data.recentEvents.map((event) => (
         <View
-          key={s.staffId}
+          key={event.id}
           style={{
             padding: 12,
             marginBottom: 8,
             borderRadius: 8,
             borderWidth: 1,
-            borderColor: '#ddd',
+            borderColor: event.status === 'failed' ? '#fca5a5' : '#ddd',
+            backgroundColor: event.status === 'failed' ? '#fef2f2' : '#fff',
           }}
         >
           <Text style={{ fontWeight: '600' }}>
-            {s.name} ({s.role})
+            {event.unitId ?? 'sin-unidad'} · {event.stage} · {event.status}
           </Text>
-          <Text>Unidad: {s.unitId}</Text>
-          <Text>Handovers completados: {s.handoversCompleted}</Text>
-          <Text>Handovers recibidos: {s.handoversReceived}</Text>
-          {s.lastHandoverAt && <Text>Último handover: {s.lastHandoverAt}</Text>}
-        </View>
-      ))}
-
-      <Text style={{ fontSize: 16, fontWeight: '600', marginVertical: 8 }}>
-        Alertas clínicas
-      </Text>
-      {data.alerts.map((a) => (
-        <View
-          key={a.id}
-          style={{
-            padding: 12,
-            marginBottom: 8,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderColor: '#f99',
-            backgroundColor: '#fee',
-          }}
-        >
-          <Text style={{ fontWeight: '600' }}>
-            [{a.type}] {a.patientDisplay ?? a.patientId}
-          </Text>
-          <Text>{a.message}</Text>
-          <Text style={{ fontSize: 12, marginTop: 4 }}>{a.createdAt}</Text>
+          <Text>Acción: {event.action ?? 'automática'}</Text>
+          {event.detail ? <Text>Detalle: {event.detail}</Text> : null}
+          {event.requestId ? <Text>requestId: {event.requestId}</Text> : null}
+          <Text style={{ fontSize: 12, marginTop: 4 }}>{formatDate(event.createdAt)}</Text>
         </View>
       ))}
     </ScrollView>

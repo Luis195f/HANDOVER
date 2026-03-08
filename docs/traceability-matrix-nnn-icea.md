@@ -31,3 +31,10 @@
 | Fecha | Release | Cambio | Autor | Aprobador |
 |---|---|---|---|---|
 | YYYY-MM-DD | vX.Y.Z | Alta/actualización inicial | TBD | TBD |
+## Actualizaciones recientes
+| ID requisito | Tipo req. | Requisito verificable | Implementación (módulo/endpoint/proceso) | Prueba asociada (unit/int/e2e/regresión) | Evidencia esperada | Estado | Responsable |
+|---|---|---|---|---|---|---|---|
+| ICEA-003 | Integración | HANDOVER expone endpoints propios para consultar y coordinar el pipeline ICEA+ | `/api/icea/status`, `/api/icea/events`, `/api/icea/dashboard-summary`, `/api/icea/actions/*`, `backend/api/icea_pipeline.py` | Integración + autorización + regresión | Reporte pytest backend + respuesta JSON contract | Aprobado | Backend |
+| ICEA-004 | Seguridad | La app móvil consume estado/orquestación ICEA solo a través de HANDOVER | `src/lib/admin-api.ts`, `src/hooks/useAdminDashboardData.ts`, `src/screens/admin/AdminDashboardScreen.tsx` | Regresión + typecheck | `pnpm typecheck` + suite Jest | Aprobado | Frontend |
+| ICEA-005 | Auditoría | HANDOVER persiste snapshots mínimos y eventos del pipeline sin secretos ni payload clínico crudo | `IceaPipelineSnapshot`, `IceaPipelineEvent`, docs ICEA | Unit/Integración | Migración + pytest backend + revisión documental | Aprobado | Backend + Security |
+

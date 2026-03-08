@@ -38,6 +38,7 @@ from backend.signature import (
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
+from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
@@ -1883,6 +1884,10 @@ class BundleView(AuthenticatedAPIView):
         except Exception:
             logger.exception("ICEA outbox enqueue failed after successful clinical transaction")
         _persist_handover_bundle_record(bundle=bundle, request=request)
+        try:
+            ensure_pipeline_snapshot_from_bundle(bundle=bundle, request=request)
+        except Exception:
+            logger.exception("ICEA pipeline snapshot persistence failed after successful clinical transaction")
         return Response(payload, status=resp.status_code)
 
 
@@ -2028,4 +2033,7 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
+
+
 

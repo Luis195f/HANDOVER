@@ -2,6 +2,12 @@ from django.urls import path
 
 from backend.audit.views import AuditEventsIngestView
 from .views_ai import AudioToFHIRView, SuggestInterventionsView, SummarizeSbarView, TranscribeView
+from .views_icea import (
+    IceaDashboardSummaryView,
+    IceaPipelineActionView,
+    IceaPipelineEventsView,
+    IceaPipelineStatusView,
+)
 
 from .views import (
     AuditLogView,
@@ -25,12 +31,19 @@ urlpatterns = [
     path("catalogs/nanda/", NandaCatalogView.as_view(), name="catalog-nanda-slash"),
     path("fhir/medicationstatement", MedicationStatementView.as_view(), name="medicationstatement"),
 
-    # Endpoint principal (sin slash)
     path("fhir/transaction", BundleView.as_view(), name="fhir-transaction"),
-    # (opcional) también aceptar con slash final
     path("fhir/transaction/", BundleView.as_view(), name="fhir-transaction-slash"),
     path("handover/<str:bundle_id>", HandoverEtlReadView.as_view(), name="handover-etl-read"),
     path("handover/<str:bundle_id>/", HandoverEtlReadView.as_view(), name="handover-etl-read-slash"),
+
+    path("icea/status", IceaPipelineStatusView.as_view(), name="icea-pipeline-status"),
+    path("icea/status/", IceaPipelineStatusView.as_view(), name="icea-pipeline-status-slash"),
+    path("icea/events", IceaPipelineEventsView.as_view(), name="icea-pipeline-events"),
+    path("icea/events/", IceaPipelineEventsView.as_view(), name="icea-pipeline-events-slash"),
+    path("icea/dashboard-summary", IceaDashboardSummaryView.as_view(), name="icea-dashboard-summary"),
+    path("icea/dashboard-summary/", IceaDashboardSummaryView.as_view(), name="icea-dashboard-summary-slash"),
+    path("icea/actions/<str:action>", IceaPipelineActionView.as_view(), name="icea-pipeline-action"),
+    path("icea/actions/<str:action>/", IceaPipelineActionView.as_view(), name="icea-pipeline-action-slash"),
 
     path("audit", AuditLogView.as_view(), name="audit-log"),
     path("audit/", AuditLogView.as_view(), name="audit-log-slash"),

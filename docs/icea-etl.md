@@ -88,3 +88,18 @@ curl -i \
   -H "If-None-Match: ${ETAG}" \
   "https://handover.example.com/api/handover/bundle-001"
 ```
+
+## Relación con la orquestación `/api/icea/*`
+
+El endpoint ETL `GET /api/handover/{bundle_id}` sigue siendo la fuente de lectura del Bundle clínico original y permanece desacoplado del estado del pipeline ICEA+.
+
+Con la nueva capa `/api/icea/*` en HANDOVER:
+- `HandoverBundleRecord` sigue siendo la copia FHIR usada por ETL;
+- `IceaPipelineSnapshot` guarda el último estado visible del pipeline para UX/auditoría;
+- `IceaPipelineEvent` guarda la traza operativa de entregas y acciones manuales;
+- ETL no necesita consultar directamente ICEA+ para leer el Bundle original.
+
+Esto mantiene el principio operativo:
+- lectura ETL desde HANDOVER;
+- coordinación y estado del pipeline desde HANDOVER;
+- ICEA+ como upstream orquestado, no como dependencia directa de la app móvil.
