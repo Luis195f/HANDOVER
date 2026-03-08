@@ -26,10 +26,19 @@ export const flags = {
   SHOW_HANDOVER_TIMING_METRICS:
     (extra as any)?.FEATURES?.handover?.showHandoverTimingMetrics ??
     process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS,
+  ENABLE_ICEA_BRIDGE:
+    (extra as any)?.FEATURES?.handover?.enableIceaBridge ?? process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE ?? false,
+  ENABLE_ICEA_IMMEDIATE_SCORING:
+    (extra as any)?.FEATURES?.handover?.enableIceaImmediateScoring ??
+    process.env.EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING ?? false,
+  ENABLE_ICEA_ENRICHED_SCORING:
+    (extra as any)?.FEATURES?.handover?.enableIceaEnrichedScoring ??
+    process.env.EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING ?? false,
   HIDE_LEGACY_FIELDS:
     (extra as any)?.FEATURES?.handover?.hideLegacyFields ?? process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS ?? false,
   REMOTE_CONFIG_DISABLED_FOR_NOW: (extra as any)?.FEATURES?.handover?.remoteConfigDisabled,
 } satisfies Record<string, FlagValue>;
 
 export const isOn = (k: keyof typeof flags) => truthy(flags[k]);
+
 

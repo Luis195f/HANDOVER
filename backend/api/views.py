@@ -38,6 +38,7 @@ from backend.signature import (
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
+from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
@@ -1888,6 +1889,10 @@ class BundleView(AuthenticatedAPIView):
             ensure_pipeline_snapshot_from_bundle(bundle=bundle, request=request)
         except Exception:
             logger.exception("ICEA pipeline snapshot persistence failed after successful clinical transaction")
+        try:
+            enqueue_icea_bridge_request_for_transaction(bundle=bundle, request=request)
+        except Exception:
+            logger.exception("ICEA bridge enqueue failed after successful clinical transaction")
         return Response(payload, status=resp.status_code)
 
 
@@ -2033,6 +2038,8 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
+
 
 
 

@@ -1,7 +1,9 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
+import { isOn } from '../../config/flags';
 import { useAdminDashboardData } from '../../hooks/useAdminDashboardData';
+import { useIceaBridgeRequests } from '../../hooks/useIceaBridgeRequests';
 import { hasRole } from '../../security/acl';
 import { useAuth } from '../../security/auth';
 
@@ -15,7 +17,9 @@ function formatDate(value: string | null | undefined) {
 export function AdminDashboardScreen() {
   const { session, loading: authLoading } = useAuth();
   const canAdminister = hasRole(session, ['admin', 'supervisor']);
+  const bridgeEnabled = isOn('ENABLE_ICEA_BRIDGE');
   const { data, loading, error, reload, refreshRemoteSummary, refreshingUnitId } = useAdminDashboardData(canAdminister);
+  const { data: bridgeData, loading: bridgeLoading, error: bridgeError } = useIceaBridgeRequests(canAdminister && bridgeEnabled, { limit: 10 });
   const canTriggerActions = hasRole(session, ['admin']);
 
   if (authLoading) {
@@ -110,6 +114,42 @@ export function AdminDashboardScreen() {
         </View>
       ))}
 
+      {bridgeEnabled ? (
+        <>
+          <Text style={{ fontSize: 16, fontWeight: '600', marginVertical: 8 }}>
+            Puente analítico ICEA+
+          </Text>
+          {bridgeLoading ? <Text style={{ marginBottom: 8 }}>Cargando bridge...</Text> : null}
+          {bridgeError ? <Text style={{ marginBottom: 8 }}>No se pudo cargar el bridge ICEA.</Text> : null}
+          {!bridgeLoading && !bridgeError && bridgeData.results.length === 0 ? (
+            <Text style={{ marginBottom: 8, color: '#475569' }}>Sin solicitudes bridge registradas.</Text>
+          ) : null}
+          {bridgeData.results.map((item) => (
+            <View
+              key={item.bridgeRequestId}
+              style={{
+                padding: 12,
+                marginBottom: 8,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: item.status === 'failed' ? '#fca5a5' : item.provisional ? '#fcd34d' : '#ddd',
+                backgroundColor: item.status === 'failed' ? '#fef2f2' : item.provisional ? '#fffbeb' : '#fff',
+              }}
+            >
+              <Text style={{ fontWeight: '600' }}>
+                {item.unitId || 'sin-unidad'} · {item.status} · {item.scoringMode}
+              </Text>
+              <Text>Handover: {item.handoverId}</Text>
+              <Text>Provisional: {item.provisional ? 'Sí' : 'No'}</Text>
+              <Text>Evidencia insuficiente: {item.insufficientEvidence ? 'Sí' : 'No'}</Text>
+              {item.scoreSummary?.score != null ? <Text>Score: {String(item.scoreSummary.score)}</Text> : null}
+              {item.warnings.length > 0 ? <Text>Warnings: {item.warnings.map((warning) => warning.code).join(', ')}</Text> : null}
+              <Text style={{ fontSize: 12, marginTop: 4 }}>{formatDate(item.updatedAt)}</Text>
+            </View>
+          ))}
+        </>
+      ) : null}
+
       <Text style={{ fontSize: 16, fontWeight: '600', marginVertical: 8 }}>
         Últimos eventos ICEA
       </Text>
@@ -137,4 +177,3 @@ export function AdminDashboardScreen() {
     </ScrollView>
   );
 }
-

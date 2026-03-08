@@ -244,3 +244,43 @@ HANDOVER no persiste secretos, tokens ni payloads clínicos crudos de ICEA+ en e
 - timeouts y validación básica de configuración HTTPS fuera de dev/tests;
 - llamadas a `status`, `normalize`, `build-windows`, `build-dataset`, `dashboard-summary` y `causal-report`;
 - parseo robusto de errores remotos y persistencia del último estado visible.
+
+## Puente analitico HANDOVER -> ICEA+
+
+Ademas del outbox tecnico de `ingest`, HANDOVER expone ahora un puente analitico dedicado para scoring ICEA+:
+
+- Mapper explicito: `backend/api/icea_payload_mapper.py`
+- Orquestacion S2S y persistencia visible: `backend/api/icea_bridge_service.py`
+- Estado auditable: `backend/api/models.py::IceaBridgeRequest`
+- Endpoints propios: `/api/icea/bridge/*`
+
+Diferencias frente al outbox tecnico existente:
+- `IceaOutboundEvent` sigue cubriendo la entrega tecnica minima hacia ICEA+;
+- `IceaBridgeRequest` cubre scoring mode, hash del payload analitico, warnings, resultado minimo y estado visible para UI/dashboard;
+- ambos flujos son desacoplados y no bloquean el guardado clinico.
+
+Semantica clinica aplicada:
+- `immediate_provisional`: scoring al cierre del turno con dato disponible, sin fingir conclusiones definitivas;
+- `enriched_followup`: recalculo posterior cuando existan mas datos downstream y se mantiene desactivado por defecto (`ENABLE_ICEA_ENRICHED_SCORING=false`) hasta habilitacion explicita.
+
+Persistencia minima del bridge:
+- `status`: `queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`;
+- `payload_hash` e `idempotency_key` para trazabilidad e idempotencia;
+- `contract_version` y `formula_version` si ICEA+ la devuelve;
+- `score_summary_json`, `warnings_json`, `insufficient_evidence`, `provisional`;
+- `last_error`, timestamps y referencias remotas reducidas;
+- errores de configuracion explicitos (`missing_icea_bridge_model_id`, `invalid_icea_bridge_model_id`) sin romper la persistencia clinica.
+
+Consumo frontend/dashboard:
+- el cliente movil sigue hablando solo con HANDOVER;
+- `AdminDashboardScreen` puede mostrar el listado mas reciente del bridge cuando `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE=true`;
+- para vistas clinicas prudentes, usar `GET /api/icea/bridge/status/<handoverId>` o `GET /api/icea/bridge/summary/<handoverId>`;
+- el bridge analitico usa `POST /api/v1/icea-plus/score/` del upstream real verificado y deja `ICEA_BRIDGE_STATUS_PATH` vacio por defecto, porque ese upstream no expone hoy un endpoint real de status para score;
+- en ese escenario, HANDOVER expone `remoteStatusSupported=false`, `remoteRefreshAttempted=false` y `localStatusIsAuthoritative=true`, manteniendo el estado local como fuente visible.
+
+Ver detalle clinico/analitico: [docs/icea-bridge.md](./icea-bridge.md).
+
+
+
+
+
