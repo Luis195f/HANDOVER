@@ -101,26 +101,30 @@ class Patient(models.Model):
 
 
 class IceaOutboundEvent(models.Model):
-    STATUS_PENDING = "pending"
-    STATUS_SENT = "sent"
-    STATUS_ERROR = "error"
+    STATUS_QUEUED = "queued"
+    STATUS_RETRY = "retry"
+    STATUS_DELIVERED = "delivered"
+    STATUS_FAILED = "failed"
     STATUS_CHOICES = [
-        (STATUS_PENDING, "Pending"),
-        (STATUS_SENT, "Sent"),
-        (STATUS_ERROR, "Error"),
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_RETRY, "Retry scheduled"),
+        (STATUS_DELIVERED, "Delivered"),
+        (STATUS_FAILED, "Failed"),
     ]
 
     request_id = models.CharField(max_length=255, unique=True)
+    idempotency_key = models.CharField(max_length=255, db_index=True)
     bundle_id = models.CharField(max_length=255, db_index=True)
     patient_id = models.CharField(max_length=255, db_index=True)
     unit_id = models.CharField(max_length=255, db_index=True)
     payload_json = models.JSONField()
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_QUEUED, db_index=True)
     attempts = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True)
+    last_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
     next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
-    sent_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -131,6 +135,10 @@ class IceaOutboundEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"IceaOutboundEvent(request_id={self.request_id}, status={self.status})"
+
+    @property
+    def sent_at(self):  # pragma: no cover - backwards-compatible alias
+        return self.delivered_at
 
 
 class HandoverBundleRecord(models.Model):
