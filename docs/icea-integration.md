@@ -1,8 +1,22 @@
-# Integracion ICEA+ webhook
+# Integracion ICEA+ service-to-service
 
-## Resumen
+## Resumen del flujo real
 
-Tras un `POST /api/fhir/transaction` exitoso, HANDOVER crea un evento técnico en outbox y dispara un `HTTP POST` best-effort hacia `ICEA_WEBHOOK_URL`. El guardado clínico en FHIR nunca se bloquea por fallos del webhook.
+Tras un `POST /api/fhir/transaction` exitoso, HANDOVER:
+
+1. confirma primero la transaccion clinica contra FHIR;
+2. genera un payload tecnico minimo para ICEA+;
+3. persiste un evento en `IceaOutboundEvent`;
+4. intenta la entrega S2S de forma best-effort y desacoplada.
+
+Si ICEA+ falla, la transaccion clinica **no se revierte**. El outbox queda auditable y recuperable mediante reintentos o `flush_icea_outbox`.
+
+## Capa dedicada ICEA
+
+El contrato S2S queda encapsulado en:
+
+- `backend/api/icea_client.py`: firma HMAC, JSON canonico, headers, validacion de configuracion, parseo de respuesta, errores tipados y politica de retryable status codes.
+- `backend/api/icea.py`: construccion del payload tecnico desde el Bundle FHIR, persistencia del outbox y orquestacion de entrega/reintentos.
 
 ## Variables de entorno
 
@@ -14,11 +28,22 @@ ICEA_WEBHOOK_TIMEOUT_MS=2500
 ICEA_WEBHOOK_RETRY_MAX=5
 ICEA_WEBHOOK_ANTI_REPLAY=false
 ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS=300
+ICEA_WEBHOOK_RETRYABLE_STATUS_CODES=408,409,425,429,500,502,503,504
 ```
 
-## Payload enviado
+## Validaciones de configuracion
 
-Payload mínimo:
+Cuando `ICEA_WEBHOOK_ENABLED=true`, HANDOVER exige:
+
+- `ICEA_WEBHOOK_URL` presente.
+- `ICEA_WEBHOOK_SECRET` presente y con longitud minima razonable.
+- HTTPS obligatorio fuera de `DEBUG` y tests.
+
+Si la configuracion es invalida, el guardado clinico sigue adelante, pero el outbox queda en `retry` o `failed` con `last_error` explicito para recovery posterior.
+
+## Payload enviado a ICEA+
+
+Payload minimo:
 
 ```json
 {
@@ -26,26 +51,30 @@ Payload mínimo:
   "patientId": "pat-001",
   "unitId": "icu-a",
   "timestamp": "2026-03-07T12:00:00Z",
-  "requestId": "tx-icea-001"
+  "requestId": "tx-icea-001",
+  "source": "HANDOVER"
 }
 ```
 
-Campos opcionales que HANDOVER añade cuando están disponibles:
+Campos opcionales cuando existen en el Bundle:
 
 ```json
 {
   "encounterId": "enc-001",
   "compositionId": "comp-001",
-  "bundleIdentifier": "bundle-tx-001",
-  "source": "HANDOVER"
+  "bundleIdentifier": "bundle-tx-001"
 }
 ```
 
-## Firma HMAC
+## Serializacion y firma
 
-HANDOVER serializa el body con JSON canónico (`sort_keys=True`, `separators=(",", ":")`) y firma el body crudo UTF-8.
+HANDOVER serializa el body con JSON canonico:
 
-Headers enviados:
+- `sort_keys=True`
+- `separators=(",", ":")`
+- UTF-8
+
+Headers S2S:
 
 ```http
 Content-Type: application/json
@@ -53,7 +82,7 @@ Idempotency-Key: <requestId>
 X-ICEA-Signature: sha256=<hexdigest>
 ```
 
-Si `ICEA_WEBHOOK_ANTI_REPLAY=true`, también envía:
+Si `ICEA_WEBHOOK_ANTI_REPLAY=true`, se anaden tambien:
 
 ```http
 X-ICEA-Timestamp: <epochSeconds>
@@ -66,24 +95,97 @@ En ese modo la firma se calcula sobre:
 timestamp + "." + nonce + "." + raw_body
 ```
 
-## Outbox y reintentos
+## Outbox local y estados
 
-- Modelo: `IceaOutboundEvent`
-- Estados: `pending`, `sent`, `error`
-- Idempotencia local: `request_id` único
-- Reintentos: backoff exponencial con máximo `ICEA_WEBHOOK_RETRY_MAX`
-- Flush manual: `python manage.py flush_icea_outbox`
+Modelo: `backend/api/models.py::IceaOutboundEvent`
 
-## Verificacion en ICEA
+Campos relevantes:
 
-Verificacion recomendada en el receptor:
+- `request_id`: identificador local unico de la operacion.
+- `idempotency_key`: valor enviado en header; hoy coincide con `request_id`.
+- `status`: `queued`, `retry`, `delivered`, `failed`.
+- `attempts`: numero de intentos HTTP reales.
+- `last_error`: ultimo error sanitizado.
+- `last_http_status`: ultimo status HTTP recibido.
+- `created_at`: creacion del evento.
+- `last_attempt_at`: ultimo intento de entrega.
+- `next_retry_at`: siguiente intento planificado.
+- `delivered_at`: confirmacion de entrega 2xx.
 
-1. Leer el body crudo exacto.
-2. Si anti-replay está activo, validar ventana temporal y unicidad del nonce dentro de `ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS`.
-3. Recalcular `HMAC-SHA256` con el secreto compartido.
-4. Comparar con `X-ICEA-Signature` en tiempo constante.
-5. Deduplicar por `Idempotency-Key`.
+Semantica:
 
-## Observabilidad
+- `queued`: pendiente inicial o listo para envio.
+- `retry`: fallo recuperable o bloqueo temporal de configuracion.
+- `delivered`: ICEA+ respondio 2xx.
+- `failed`: fallo terminal; requiere `flush_icea_outbox --force` o reproceso explicito.
 
-Los logs del emisor no incluyen PHI ni secretos. Solo registran `request_id`, hash de `bundleId`, estado, latencia y número de intentos.
+## Politica de reintentos
+
+- Backoff exponencial local: 30s, 60s, 120s... hasta 30 min maximo.
+- Status retryables por defecto: `408, 409, 425, 429, 500, 502, 503, 504`.
+- Errores de transporte `httpx` tambien se consideran retryables.
+- Los errores no retryables dejan el evento en `failed`.
+
+Comando operativo:
+
+```bash
+python manage.py flush_icea_outbox --limit 100
+python manage.py flush_icea_outbox --force --limit 100
+```
+
+`--force` incluye eventos en `failed`.
+
+## Idempotencia y deduplicacion
+
+Reglas actuales:
+
+- La deduplicacion local del outbox se hace por `request_id` unico.
+- El mismo valor se reutiliza como `Idempotency-Key` hacia ICEA+.
+- Si llega el mismo `request_id` otra vez, HANDOVER no crea un segundo evento outbox ni vuelve a disparar la entrega ICEA.
+- ICEA+ debe deduplicar por `Idempotency-Key` en receptor.
+
+## Errores tipados en la capa cliente
+
+`backend/api/icea_client.py` usa errores tipados:
+
+- `IceaClientConfigurationError`
+- `IceaTransportError`
+- `IceaHTTPStatusError`
+
+Eso permite distinguir:
+
+- error de configuracion local,
+- error de red/transporte,
+- rechazo HTTP de ICEA+.
+
+## Observabilidad y auditoria segura
+
+HANDOVER no registra:
+
+- PHI del Bundle clinico,
+- payload crudo a ICEA+,
+- secretos compartidos,
+- tokens.
+
+Los logs usan `safe_icea_event_summary(...)` y exponen solo:
+
+- `request_id`
+- `idempotency_key`
+- hashes truncados de `bundle_id`, `patient_id`, `unit_id`
+- `status`, `attempts`, `last_http_status`, `next_retry_at`
+- detalle sanitizado del error
+
+## Recovery path
+
+1. revisar eventos `retry` o `failed` en `IceaOutboundEvent`;
+2. corregir configuracion o disponibilidad del receptor;
+3. ejecutar `flush_icea_outbox`;
+4. usar `--force` si el evento ya quedo en `failed`.
+
+## Garantia de no bloqueo clinico
+
+`POST /api/fhir/transaction` mantiene esta regla:
+
+- solo si FHIR responde con exito se persiste el Bundle y se encola ICEA;
+- cualquier problema de ICEA se maneja fuera del guardado clinico;
+- el error ICEA nunca bloquea ni revierte la transaccion clinica ya aceptada.

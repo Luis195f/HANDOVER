@@ -2,7 +2,8 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 from django.utils import timezone
 
-from backend.api.icea import deliver_icea_outbound_event, load_icea_webhook_settings
+from backend.api.icea import deliver_icea_outbound_event
+from backend.api.icea_client import load_icea_webhook_settings
 from backend.api.models import IceaOutboundEvent
 
 
@@ -18,18 +19,16 @@ class Command(BaseCommand):
         if not config.enabled:
             self.stdout.write(self.style.WARNING("ICEA webhook disabled; nothing to flush."))
             return
-        if not config.configured:
-            self.stdout.write(self.style.WARNING("ICEA webhook not fully configured; nothing to flush."))
-            return
 
         now = timezone.now()
         limit = max(int(options.get("limit") or 100), 1)
         force = bool(options.get("force"))
 
-        queryset = IceaOutboundEvent.objects.filter(
-            status=IceaOutboundEvent.STATUS_PENDING,
-            attempts__lt=config.retry_max,
-        )
+        statuses = [IceaOutboundEvent.STATUS_QUEUED, IceaOutboundEvent.STATUS_RETRY]
+        if force:
+            statuses.append(IceaOutboundEvent.STATUS_FAILED)
+
+        queryset = IceaOutboundEvent.objects.filter(status__in=statuses)
         if not force:
             queryset = queryset.filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
 
@@ -41,7 +40,7 @@ class Command(BaseCommand):
             processed += 1
             if result.delivered:
                 delivered += 1
-            elif result.status in {IceaOutboundEvent.STATUS_PENDING, IceaOutboundEvent.STATUS_ERROR}:
+            elif result.status in {IceaOutboundEvent.STATUS_RETRY, IceaOutboundEvent.STATUS_FAILED}:
                 failed += 1
 
         self.stdout.write(

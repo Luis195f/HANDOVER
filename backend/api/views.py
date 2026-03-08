@@ -1878,7 +1878,10 @@ class BundleView(AuthenticatedAPIView):
             user_id=user_id,
             unit_id=unit_id,
         )
-        enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
+        try:
+            enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
+        except Exception:
+            logger.exception("ICEA outbox enqueue failed after successful clinical transaction")
         _persist_handover_bundle_record(bundle=bundle, request=request)
         return Response(payload, status=resp.status_code)
 
@@ -2025,3 +2028,4 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
