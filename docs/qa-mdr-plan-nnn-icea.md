@@ -136,3 +136,21 @@ Casos verificados en backend:
 - error remoto/timeout (`502 icea_transport_error` / `502 icea_remote_error`);
 - persistencia y consulta de snapshots/eventos por unidad;
 - refresh manual de `dashboard-summary` sin abrir acceso a usuarios no autorizados.
+
+## Cobertura añadida para el puente analitico
+
+Casos verificados en backend/frontend:
+- mapper analitico: payload completo y degradado, calculo minimo de `missingnessRate`, `structuredCompletenessRate` y warnings trazables;
+- trigger post-persistencia: el bridge se crea solo despues de `POST /api/fhir/transaction` exitoso y tras persistir `HandoverBundleRecord`;
+- resiliencia clinica: un timeout o fallo de ICEA+ deja `IceaBridgeRequest.status=failed` sin revertir el guardado clinico;
+- API bridge: permisos `nurse/supervisor/admin`, `403/404/400/200/202` y contrato JSON estable para `status`, `summary` y `retry`;
+- scoring modes: distincion visible entre `immediate_provisional` y `enriched_followup`, con `ENABLE_ICEA_ENRICHED_SCORING=false` por defecto hasta habilitacion explicita;
+- validacion operativa temprana: si falta `ICEA_BRIDGE_MODEL_ID` o es invalido, HANDOVER deja error explicito y no intenta entrega ambigua;
+- contrato prudente de status: `remoteStatusSupported`, `remoteRefreshAttempted` y `localStatusIsAuthoritative` cuando no existe endpoint remoto de score;
+- frontend: `pnpm typecheck` para nuevos tipos, hooks y visualizacion minima en dashboard admin.
+
+Evidencia ejecutada en este corte:
+- `pytest backend/api/tests/test_icea_bridge.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_webhook.py backend/api/tests/test_handover_etl_read.py -q`
+- `pnpm typecheck`
+
+

@@ -309,3 +309,31 @@ Explora la documentación técnica para conocer la arquitectura, configuración 
 - [Offline y cola](docs/offline-sync-and-queue.md)
 - [Pruebas y CI](docs/testing-and-ci.md)
 - [Guía de despliegue](docs/DEPLOY.md)
+
+## Puente analitico ICEA+
+
+HANDOVER incluye ahora un puente analitico dedicado hacia ICEA+ que se activa **solo despues** de una transaccion clinica FHIR exitosa.
+
+Que hace HANDOVER:
+- estructura y mapea el Bundle FHIR a un payload analitico v1;
+- envia la solicitud de scoring de forma desacoplada y no bloqueante;
+- persiste estado visible, hash, warnings, modo de scoring y resumen minimo del resultado;
+- expone endpoints `/api/icea/bridge/*` para UI y dashboards.
+
+Que no hace HANDOVER:
+- no ejecuta el motor matematico de ICEA+;
+- no afirma conclusiones clinicas definitivas en `immediate_provisional`;
+- no permite llamadas directas desde la app movil a ICEA+.
+
+Flags principales:
+- Backend: `ENABLE_ICEA_BRIDGE`, `ENABLE_ICEA_IMMEDIATE_SCORING`, `ENABLE_ICEA_ENRICHED_SCORING=false` por defecto, `ICEA_BRIDGE_MODEL_ID` obligatorio para score real, `ICEA_BRIDGE_SCORE_PATH=/api/v1/icea-plus/score/`, `ICEA_BRIDGE_STATUS_PATH` opcional
+- Frontend: `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE`, `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING`, `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING=false` por defecto
+
+Mientras el upstream ICEA+ no publique un endpoint real de status para score, HANDOVER no inventa polling: el estado local visible pasa a ser la fuente operativa y solo se intenta refresh remoto cuando el cliente pide `refresh=true` y existe `ICEA_BRIDGE_STATUS_PATH` configurado.
+
+Documentacion relacionada:
+- [Bridge analitico ICEA+](docs/icea-bridge.md)
+- [Integracion ICEA+](docs/icea-integration.md)
+
+
+

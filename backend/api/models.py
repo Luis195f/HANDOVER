@@ -167,6 +167,81 @@ class HandoverBundleRecord(models.Model):
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"HandoverBundleRecord(bundle_id={self.bundle_id}, request_id={self.request_id})"
 
+
+class IceaBridgeRequest(models.Model):
+    STATUS_QUEUED = "queued"
+    STATUS_SENT = "sent"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_PENDING = "pending"
+    STATUS_SCORED = "scored"
+    STATUS_FAILED = "failed"
+    STATUS_STALE = "stale"
+    STATUS_CHOICES = [
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SCORED, "Scored"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_STALE, "Stale"),
+    ]
+
+    SCORING_MODE_IMMEDIATE = "immediate_provisional"
+    SCORING_MODE_ENRICHED = "enriched_followup"
+    SCORING_MODE_CHOICES = [
+        (SCORING_MODE_IMMEDIATE, "Immediate / provisional"),
+        (SCORING_MODE_ENRICHED, "Enriched / follow-up"),
+    ]
+
+    bridge_request_id = models.CharField(max_length=255, unique=True)
+    request_id = models.CharField(max_length=255, db_index=True)
+    bundle_id = models.CharField(max_length=255, db_index=True)
+    patient_id = models.CharField(max_length=255, db_index=True)
+    unit_id = models.CharField(max_length=255, db_index=True)
+    encounter_id = models.CharField(max_length=255, blank=True, db_index=True)
+    composition_id = models.CharField(max_length=255, blank=True)
+    episode_id = models.CharField(max_length=255, blank=True, db_index=True)
+    shift = models.CharField(max_length=64, blank=True, db_index=True)
+    scoring_mode = models.CharField(
+        max_length=32,
+        choices=SCORING_MODE_CHOICES,
+        default=SCORING_MODE_IMMEDIATE,
+        db_index=True,
+    )
+    idempotency_key = models.CharField(max_length=255, db_index=True)
+    payload_hash = models.CharField(max_length=64, db_index=True)
+    payload_json = models.JSONField()
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_QUEUED, db_index=True)
+    provisional = models.BooleanField(default=True)
+    insufficient_evidence = models.BooleanField(default=False)
+    contract_version = models.CharField(max_length=64, blank=True)
+    formula_version = models.CharField(max_length=64, blank=True)
+    score_summary_json = models.JSONField(null=True, blank=True)
+    warnings_json = models.JSONField(default=list, blank=True)
+    remote_refs_json = models.JSONField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    last_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["unit_id", "updated_at"], name="idx_icea_bridge_unit_upd"),
+            models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_bridge_bundle_upd"),
+            models.Index(fields=["status", "scoring_mode"], name="idx_icea_bridge_status_mode"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return (
+            "IceaBridgeRequest("
+            f"bridge_request_id={self.bridge_request_id}, status={self.status}, scoring_mode={self.scoring_mode}"
+            ")"
+        )
+
 class IceaPipelineSnapshot(models.Model):
     STATUS_ACCEPTED = "accepted"
     STATUS_QUEUED = "queued"
@@ -252,4 +327,5 @@ class IceaPipelineEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"IceaPipelineEvent(stage={self.stage}, status={self.status})"
+
 

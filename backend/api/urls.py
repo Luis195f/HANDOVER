@@ -8,6 +8,12 @@ from .views_icea import (
     IceaPipelineEventsView,
     IceaPipelineStatusView,
 )
+from .views_icea_bridge import (
+    IceaBridgeRetryView,
+    IceaBridgeStatusDetailView,
+    IceaBridgeStatusQueryView,
+    IceaBridgeSummaryView,
+)
 
 from .views import (
     AuditLogView,
@@ -44,7 +50,14 @@ urlpatterns = [
     path("icea/dashboard-summary/", IceaDashboardSummaryView.as_view(), name="icea-dashboard-summary-slash"),
     path("icea/actions/<str:action>", IceaPipelineActionView.as_view(), name="icea-pipeline-action"),
     path("icea/actions/<str:action>/", IceaPipelineActionView.as_view(), name="icea-pipeline-action-slash"),
-
+    path("icea/bridge/status", IceaBridgeStatusQueryView.as_view(), name="icea-bridge-status-query"),
+    path("icea/bridge/status/", IceaBridgeStatusQueryView.as_view(), name="icea-bridge-status-query-slash"),
+    path("icea/bridge/status/<str:handover_id>", IceaBridgeStatusDetailView.as_view(), name="icea-bridge-status-detail"),
+    path("icea/bridge/status/<str:handover_id>/", IceaBridgeStatusDetailView.as_view(), name="icea-bridge-status-detail-slash"),
+    path("icea/bridge/summary/<str:handover_id>", IceaBridgeSummaryView.as_view(), name="icea-bridge-summary"),
+    path("icea/bridge/summary/<str:handover_id>/", IceaBridgeSummaryView.as_view(), name="icea-bridge-summary-slash"),
+    path("icea/bridge/retry/<int:bridge_id>", IceaBridgeRetryView.as_view(), name="icea-bridge-retry"),
+    path("icea/bridge/retry/<int:bridge_id>/", IceaBridgeRetryView.as_view(), name="icea-bridge-retry-slash"),
     path("audit", AuditLogView.as_view(), name="audit-log"),
     path("audit/", AuditLogView.as_view(), name="audit-log-slash"),
     path("audit/events", AuditEventsIngestView.as_view(), name="audit-events"),
@@ -66,3 +79,4 @@ urlpatterns = [
     path("upload/audio-to-fhir", AudioToFHIRView.as_view(), name="upload-audio-to-fhir"),
     path("upload/audio-to-fhir/", AudioToFHIRView.as_view(), name="upload-audio-to-fhir-slash"),
 ]
+
