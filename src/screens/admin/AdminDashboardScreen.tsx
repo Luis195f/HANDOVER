@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { useAdminDashboardData } from '../../hooks/useAdminDashboardData';
 import { hasRole } from '../../security/acl';
@@ -47,14 +47,17 @@ export function AdminDashboardScreen() {
     return (
       <View style={{ flex: 1, padding: 16 }}>
         <Text style={{ marginBottom: 8 }}>No se pudo cargar el dashboard ICEA.</Text>
-        <TouchableOpacity onPress={reload}>
+        <Pressable onPress={reload}>
           <Text style={{ color: 'blue' }}>Reintentar</Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
     );
   }
 
   if (!data) return null;
+
+  const units = data.units ?? [];
+  const recentEvents = data.recentEvents ?? [];
 
   return (
     <ScrollView style={{ flex: 1, padding: 16 }}>
@@ -71,7 +74,7 @@ export function AdminDashboardScreen() {
       <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
         Resumen por unidad
       </Text>
-      {data.units.map((unit) => (
+      {units.map((unit) => (
         <View
           key={unit.unitId}
           style={{
@@ -94,7 +97,7 @@ export function AdminDashboardScreen() {
           <Text>Última actualización: {formatDate(unit.lastUpdatedAt)}</Text>
           <Text>Último refresh remoto: {formatDate(unit.lastDashboardRefreshAt)}</Text>
           {canTriggerActions ? (
-            <TouchableOpacity
+            <Pressable
               onPress={() => void refreshRemoteSummary(unit.unitId)}
               disabled={refreshingUnitId === unit.unitId}
               style={{ marginTop: 10 }}
@@ -102,7 +105,7 @@ export function AdminDashboardScreen() {
               <Text style={{ color: refreshingUnitId === unit.unitId ? '#94a3b8' : '#2563eb' }}>
                 {refreshingUnitId === unit.unitId ? 'Actualizando...' : 'Refrescar dashboard summary'}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           ) : null}
         </View>
       ))}
@@ -110,7 +113,7 @@ export function AdminDashboardScreen() {
       <Text style={{ fontSize: 16, fontWeight: '600', marginVertical: 8 }}>
         Últimos eventos ICEA
       </Text>
-      {data.recentEvents.map((event) => (
+      {recentEvents.map((event) => (
         <View
           key={event.id}
           style={{
@@ -134,3 +137,4 @@ export function AdminDashboardScreen() {
     </ScrollView>
   );
 }
+

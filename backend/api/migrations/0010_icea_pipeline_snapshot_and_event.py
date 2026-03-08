@@ -49,9 +49,9 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["-updated_at"],
                 "indexes": [
-                    models.Index(fields=["unit_id", "updated_at"], name="idx_icea_snapshot_unit_updated"),
-                    models.Index(fields=["patient_id", "updated_at"], name="idx_icea_snapshot_patient_updated"),
-                    models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_snapshot_bundle_updated"),
+                    models.Index(fields=["unit_id", "updated_at"], name="idx_icea_ps_unit_upd"),
+                    models.Index(fields=["patient_id", "updated_at"], name="idx_icea_ps_patient_upd"),
+                    models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_ps_bundle_upd"),
                 ],
             },
         ),
@@ -92,3 +92,4 @@ class Migration(migrations.Migration):
             },
         ),
     ]
+

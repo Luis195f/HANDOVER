@@ -212,9 +212,9 @@ class IceaPipelineSnapshot(models.Model):
     class Meta:
         ordering = ["-updated_at"]
         indexes = [
-            models.Index(fields=["unit_id", "updated_at"], name="idx_icea_snapshot_unit_updated"),
-            models.Index(fields=["patient_id", "updated_at"], name="idx_icea_snapshot_patient_updated"),
-            models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_snapshot_bundle_updated"),
+            models.Index(fields=["unit_id", "updated_at"], name="idx_icea_ps_unit_upd"),
+            models.Index(fields=["patient_id", "updated_at"], name="idx_icea_ps_patient_upd"),
+            models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_ps_bundle_upd"),
         ]
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
@@ -252,3 +252,4 @@ class IceaPipelineEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"IceaPipelineEvent(stage={self.stage}, status={self.status})"
+
