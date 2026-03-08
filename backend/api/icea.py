@@ -21,6 +21,7 @@ from backend.api.icea_client import (
     send_icea_webhook,
 )
 from backend.api.models import IceaOutboundEvent
+from backend.api.icea_pipeline import sync_pipeline_snapshot_from_outbound_event
 
 
 logger = logging.getLogger(__name__)
@@ -289,6 +290,21 @@ def _save_event_fields(event: IceaOutboundEvent, *fields: str) -> None:
     event.save(update_fields=list(fields))
 
 
+def _safe_sync_pipeline_snapshot_from_outbound_event(
+    event: IceaOutboundEvent,
+    *,
+    source: str,
+    detail: str | None = None,
+) -> None:
+    try:
+        sync_pipeline_snapshot_from_outbound_event(event, source=source, detail=detail)
+    except Exception:
+        logger.exception(
+            "ICEA pipeline snapshot sync failed",
+            extra={"request_id": event.request_id, "source": source},
+        )
+
+
 def _log_delivery(event: IceaOutboundEvent, *, detail: str, latency_ms: int | None = None) -> None:
     payload = safe_icea_event_summary(event, detail=detail)
     if latency_ms is not None:
@@ -302,6 +318,7 @@ def _schedule_retry(event: IceaOutboundEvent, *, detail: str, http_status: int |
     event.last_http_status = http_status
     event.next_retry_at = _compute_next_retry_at(max(event.attempts, 1))
     _save_event_fields(event, "status", "last_error", "last_http_status", "next_retry_at")
+    _safe_sync_pipeline_snapshot_from_outbound_event(event, source="outbox-retry", detail=detail)
     _log_delivery(event, detail=detail)
     return IceaDeliveryResult(
         delivered=False,
@@ -317,6 +334,7 @@ def _mark_failed(event: IceaOutboundEvent, *, detail: str, http_status: int | No
     event.last_http_status = http_status
     event.next_retry_at = None
     _save_event_fields(event, "status", "last_error", "last_http_status", "next_retry_at")
+    _safe_sync_pipeline_snapshot_from_outbound_event(event, source="outbox-failed", detail=detail)
     _log_delivery(event, detail=detail)
     return IceaDeliveryResult(
         delivered=False,
@@ -384,6 +402,7 @@ def attempt_icea_outbound_delivery(event: IceaOutboundEvent, *, force: bool = Fa
         "next_retry_at",
         "delivered_at",
     )
+    _safe_sync_pipeline_snapshot_from_outbound_event(event, source="outbox-delivered", detail=response.safe_detail)
     _log_delivery(event, detail=response.safe_detail, latency_ms=response.latency_ms)
     return IceaDeliveryResult(
         delivered=True,
@@ -468,6 +487,7 @@ def enqueue_icea_outbound_event_for_transaction(
         return None
 
     if created:
+        _safe_sync_pipeline_snapshot_from_outbound_event(event, source="outbox-queued", detail="queued_for_delivery")
         schedule_icea_outbound_event_delivery(event.id)
     else:
         logger.info(
@@ -484,6 +504,12 @@ def enqueue_icea_outbound_event_for_transaction(
             )
         )
     return event
+
+
+
+
+
+
 
 
 

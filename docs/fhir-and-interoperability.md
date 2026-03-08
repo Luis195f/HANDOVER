@@ -89,3 +89,10 @@ curl -X POST "$API_BASE_URL/api/ai/transcribe" \
   -F "language=es"
 ```
 
+
+## Fuente backend única para ICEA+
+
+Además del `POST /api/fhir/transaction`, la app móvil usa ahora endpoints propios de HANDOVER bajo `/api/icea/*` para consultar estado de pipeline y operar acciones restringidas. Esto mantiene la arquitectura actual:
+- React Native/Expo nunca llama directo a ICEA+;
+- Django/DRF concentra autenticación OIDC/JWT, RBAC y trazabilidad;
+- FHIR transaction y ETL read siguen separados de la coordinación operativa ICEA+.

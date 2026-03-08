@@ -9,6 +9,7 @@ module.exports = [
       '**/.expo-shared/**',
       '**/.eslint-config-inspector/**',
       '**/.cache/**',
+      '**/.venv/**',
       '**/web-build/**',
       '**/android/**',
       '**/ios/**',
@@ -55,3 +56,4 @@ module.exports = [
     },
   },
 ];
+

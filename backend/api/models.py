@@ -166,3 +166,90 @@ class HandoverBundleRecord(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"HandoverBundleRecord(bundle_id={self.bundle_id}, request_id={self.request_id})"
+
+class IceaPipelineSnapshot(models.Model):
+    STATUS_ACCEPTED = "accepted"
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_RETRY = "retry"
+    STATUS_DELIVERED = "delivered"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_EMPTY = "empty"
+    STATUS_NOT_CONFIGURED = "not-configured"
+    STATUS_CHOICES = [
+        (STATUS_ACCEPTED, "Accepted by HANDOVER"),
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_RETRY, "Retry scheduled"),
+        (STATUS_DELIVERED, "Delivered to ICEA"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_EMPTY, "Empty"),
+        (STATUS_NOT_CONFIGURED, "Not configured"),
+    ]
+
+    request_id = models.CharField(max_length=255, unique=True)
+    bundle_id = models.CharField(max_length=255, db_index=True)
+    patient_id = models.CharField(max_length=255, db_index=True)
+    unit_id = models.CharField(max_length=255, db_index=True)
+    visible_status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACCEPTED,
+        db_index=True,
+    )
+    last_stage = models.CharField(max_length=64, default="handover")
+    stage_statuses = models.JSONField(default=dict, blank=True)
+    remote_refs = models.JSONField(null=True, blank=True)
+    dashboard_summary_json = models.JSONField(null=True, blank=True)
+    causal_report_json = models.JSONField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    last_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["unit_id", "updated_at"], name="idx_icea_ps_unit_upd"),
+            models.Index(fields=["patient_id", "updated_at"], name="idx_icea_ps_patient_upd"),
+            models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_ps_bundle_upd"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return f"IceaPipelineSnapshot(request_id={self.request_id}, last_stage={self.last_stage})"
+
+
+class IceaPipelineEvent(models.Model):
+    snapshot = models.ForeignKey(
+        IceaPipelineSnapshot,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="events",
+    )
+    request_id = models.CharField(max_length=255, blank=True, db_index=True)
+    bundle_id = models.CharField(max_length=255, blank=True, db_index=True)
+    patient_id = models.CharField(max_length=255, blank=True, db_index=True)
+    unit_id = models.CharField(max_length=255, blank=True, db_index=True)
+    stage = models.CharField(max_length=64, db_index=True)
+    action = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=32, db_index=True)
+    source = models.CharField(max_length=64, blank=True)
+    actor_sub = models.CharField(max_length=255, blank=True)
+    detail = models.CharField(max_length=255, blank=True)
+    http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    payload_json = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["unit_id", "created_at"], name="idx_icea_event_unit_created"),
+            models.Index(fields=["stage", "created_at"], name="idx_icea_event_stage_created"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return f"IceaPipelineEvent(stage={self.stage}, status={self.status})"
+

@@ -15,6 +15,7 @@ from django.utils import timezone
 from backend.api.icea import (
     attempt_icea_outbound_delivery,
     build_icea_webhook_payload,
+    enqueue_icea_outbound_event_for_transaction,
     safe_icea_event_summary,
 )
 from backend.api.icea_client import (
@@ -129,6 +130,159 @@ class IceaWebhookUnitTests(TestCase):
         self.assertNotEqual(summary["patient_hash"], "pat-sensitive")
         self.assertNotEqual(summary["unit_hash"], "icu-sensitive")
         self.assertEqual(summary["detail"], "http_503")
+
+    @patch.dict(
+        os.environ,
+        {
+            "ICEA_WEBHOOK_ENABLED": "true",
+            "ICEA_WEBHOOK_URL": "https://icea.example/api/v1/pipeline/ingest/",
+            "ICEA_WEBHOOK_SECRET": "shared-secret",
+        },
+        clear=False,
+    )
+    @patch("backend.api.icea.schedule_icea_outbound_event_delivery")
+    @patch("backend.api.icea.sync_pipeline_snapshot_from_outbound_event", side_effect=RuntimeError("snapshot down"))
+    def test_enqueue_keeps_event_queued_when_snapshot_sync_fails(self, _mock_sync, mock_schedule):
+        request = self.factory.post(
+            "/api/fhir/transaction",
+            data={},
+            HTTP_IDEMPOTENCY_KEY="tx-icea-queued",
+            HTTP_X_UNIT_ID="icu-a",
+        )
+        request.audit_request_id = "audit-queued"
+
+        event = enqueue_icea_outbound_event_for_transaction(bundle=self.bundle, request=request)
+
+        self.assertIsNotNone(event)
+        event = IceaOutboundEvent.objects.get(request_id="tx-icea-queued")
+        self.assertEqual(event.status, IceaOutboundEvent.STATUS_QUEUED)
+        self.assertEqual(event.request_id, "tx-icea-queued")
+        mock_schedule.assert_called_once_with(event.id)
+
+    @patch.dict(
+        os.environ,
+        {
+            "ICEA_WEBHOOK_ENABLED": "true",
+            "ICEA_WEBHOOK_URL": "https://icea.example/api/v1/pipeline/ingest/",
+            "ICEA_WEBHOOK_SECRET": "shared-secret",
+            "ICEA_WEBHOOK_RETRY_MAX": "5",
+        },
+        clear=False,
+    )
+    @patch("backend.api.icea.sync_pipeline_snapshot_from_outbound_event", side_effect=RuntimeError("snapshot down"))
+    @patch("backend.api.icea_client._post_to_icea")
+    def test_retry_status_survives_snapshot_sync_failure(self, mock_icea_post, _mock_sync):
+        response = Mock()
+        response.status_code = 503
+        response.text = '{"detail":"temporarily unavailable"}'
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {"detail": "temporarily unavailable"}
+        mock_icea_post.return_value = response
+        event = IceaOutboundEvent.objects.create(
+            request_id="tx-icea-retry-safe",
+            idempotency_key="tx-icea-retry-safe",
+            bundle_id="bundle-tx-retry-safe",
+            patient_id="pat-retry-safe",
+            unit_id="icu-a",
+            payload_json={
+                "bundleId": "bundle-tx-retry-safe",
+                "patientId": "pat-retry-safe",
+                "unitId": "icu-a",
+                "timestamp": "2026-03-07T12:00:00Z",
+                "requestId": "tx-icea-retry-safe",
+                "source": "HANDOVER",
+            },
+        )
+
+        result = attempt_icea_outbound_delivery(event, force=True)
+        event.refresh_from_db()
+
+        self.assertFalse(result.delivered)
+        self.assertEqual(event.status, IceaOutboundEvent.STATUS_RETRY)
+        self.assertIsNotNone(event.next_retry_at)
+
+    @patch.dict(
+        os.environ,
+        {
+            "ICEA_WEBHOOK_ENABLED": "true",
+            "ICEA_WEBHOOK_URL": "https://icea.example/api/v1/pipeline/ingest/",
+            "ICEA_WEBHOOK_SECRET": "shared-secret",
+            "ICEA_WEBHOOK_RETRY_MAX": "1",
+        },
+        clear=False,
+    )
+    @patch("backend.api.icea.sync_pipeline_snapshot_from_outbound_event", side_effect=RuntimeError("snapshot down"))
+    @patch("backend.api.icea_client._post_to_icea")
+    def test_failed_status_survives_snapshot_sync_failure(self, mock_icea_post, _mock_sync):
+        response = Mock()
+        response.status_code = 503
+        response.text = '{"detail":"temporarily unavailable"}'
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {"detail": "temporarily unavailable"}
+        mock_icea_post.return_value = response
+        event = IceaOutboundEvent.objects.create(
+            request_id="tx-icea-failed-safe",
+            idempotency_key="tx-icea-failed-safe",
+            bundle_id="bundle-tx-failed-safe",
+            patient_id="pat-failed-safe",
+            unit_id="icu-a",
+            payload_json={
+                "bundleId": "bundle-tx-failed-safe",
+                "patientId": "pat-failed-safe",
+                "unitId": "icu-a",
+                "timestamp": "2026-03-07T12:00:00Z",
+                "requestId": "tx-icea-failed-safe",
+                "source": "HANDOVER",
+            },
+        )
+
+        result = attempt_icea_outbound_delivery(event, force=True)
+        event.refresh_from_db()
+
+        self.assertFalse(result.delivered)
+        self.assertEqual(event.status, IceaOutboundEvent.STATUS_FAILED)
+        self.assertIsNone(event.next_retry_at)
+
+    @patch.dict(
+        os.environ,
+        {
+            "ICEA_WEBHOOK_ENABLED": "true",
+            "ICEA_WEBHOOK_URL": "https://icea.example/api/v1/pipeline/ingest/",
+            "ICEA_WEBHOOK_SECRET": "shared-secret",
+        },
+        clear=False,
+    )
+    @patch("backend.api.icea.sync_pipeline_snapshot_from_outbound_event", side_effect=RuntimeError("snapshot down"))
+    @patch("backend.api.icea_client._post_to_icea")
+    def test_delivered_status_survives_snapshot_sync_failure(self, mock_icea_post, _mock_sync):
+        response = Mock()
+        response.status_code = 202
+        response.text = '{"status":"accepted"}'
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {"status": "accepted"}
+        mock_icea_post.return_value = response
+        event = IceaOutboundEvent.objects.create(
+            request_id="tx-icea-delivered-safe",
+            idempotency_key="tx-icea-delivered-safe",
+            bundle_id="bundle-tx-delivered-safe",
+            patient_id="pat-delivered-safe",
+            unit_id="icu-a",
+            payload_json={
+                "bundleId": "bundle-tx-delivered-safe",
+                "patientId": "pat-delivered-safe",
+                "unitId": "icu-a",
+                "timestamp": "2026-03-07T12:00:00Z",
+                "requestId": "tx-icea-delivered-safe",
+                "source": "HANDOVER",
+            },
+        )
+
+        result = attempt_icea_outbound_delivery(event, force=True)
+        event.refresh_from_db()
+
+        self.assertTrue(result.delivered)
+        self.assertEqual(event.status, IceaOutboundEvent.STATUS_DELIVERED)
+        self.assertIsNotNone(event.delivered_at)
 
 
 class IceaWebhookIntegrationTests(TestCase):
@@ -464,6 +618,9 @@ class IceaWebhookIntegrationTests(TestCase):
         self.assertNotIn("super-secret-token", joined)
         self.assertNotIn("pat-007", joined)
         self.assertIn("icea_outbound_delivery", joined)
+
+
+
 
 
 

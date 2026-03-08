@@ -126,3 +126,13 @@ El plan se considera cerrado cuando existe:
 - informe de rendimiento por unidad revisado;
 - checklist de seguridad cerrada o con plan de acción aprobado;
 - evidencia MDR compilada y referenciada para auditoría.
+
+## Cobertura añadida para orquestación de pipeline
+
+Casos verificados en backend:
+- autorización en `/api/icea/status`, `/api/icea/events`, `/api/icea/dashboard-summary` y `/api/icea/actions/*`;
+- `200/4xx/5xx` con contrato JSON estable para consultas y acciones;
+- estado vacío (`404 icea_snapshot_not_found`);
+- error remoto/timeout (`502 icea_transport_error` / `502 icea_remote_error`);
+- persistencia y consulta de snapshots/eventos por unidad;
+- refresh manual de `dashboard-summary` sin abrir acceso a usuarios no autorizados.
