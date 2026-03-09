@@ -24,6 +24,8 @@ Casos mínimos:
 - `bundle identifier` estable bajo reintentos controlados.
 - `request_id` único por operación y reutilizado correctamente para deduplicación.
 - reintentos offline no duplican transacciones válidas ya confirmadas.
+- loaders gobernados NANDA/NIC/NOC hacen fallback a placeholder cuando no hay dataset licenciado válido.
+- búsquedas NANDA/NIC/NOC mantienen rendimiento razonable con catálogos grandes indexados.
 - no duplicación en:
   - servidor FHIR (Bundle/recursos derivados),
   - outbox/cola offline,
@@ -35,6 +37,7 @@ Casos mínimos:
 Cobertura mínima:
 - webhook ICEA+ (firma/HMAC, replay window, códigos de error, retry controlado);
 - `GET /api/handover/{id}` (consistencia de payload y estado tras eventos ICEA+);
+- endpoints `GET /api/catalogs/nanda|nic|noc` con `ETag`, `Cache-Control`, versionado y bandera `licensed`;
 - mapeo FHIR para elementos NNN (estructura, códigos, cardinalidades, trazabilidad).
 
 **Criterio de paso:** contrato de datos estable, validaciones sintácticas/semánticas en verde, sin ruptura de compatibilidad con handover base.
@@ -45,10 +48,10 @@ Escenarios obligatorios:
 - degradación controlada (latencia alta / servicio parcial);
 - IA caída con continuidad del flujo clínico sin bloqueo;
 - NIC/NOC opcionales (no bloquear guardado si no se aceptan);
+- gate/licensing explícito para NANDA/NIC/NOC sin degradar la continuidad del handover;
 - NNN visible pero no obligatoria.
 
 **Resultado esperado:** el profesional siempre puede completar el handover sin aceptar sugerencias.
-
 ### 3.4 Regresión
 - Verificar que el flujo de handover base (sin NNN/ICEA+) no se rompe.
 - Rejecutar suite crítica en cada release candidate y en cambios de configuración de seguridad.
@@ -161,3 +164,7 @@ Cobertura bedside añadida en este corte:
 - endpoint `/api/icea/patient-risk`: casos `no data`, `stale data`, `valid data`, `failed remote state`, `flag off` y permisos por rol.
 - UI prudente: banner de paciente y lista de pacientes muestran apoyo analitico como soporte, nunca como diagnostico autonomo.
 - flags de despliegue: `ENABLE_ICEA_PATIENT_RISK` y `ENABLE_ICEA_CAUSAL_SUMMARY` verificados como puertas de activacion separadas.
+
+
+
+

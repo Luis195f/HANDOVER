@@ -1,7 +1,9 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
+import { describe, expect, it, vi } from 'vitest';
 
+import * as nocCatalogModule from '@/src/catalogs/nocCodes';
 import OutcomesSection from '../OutcomesSection';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
@@ -72,6 +74,45 @@ function renderWithForm(props?: Partial<React.ComponentProps<typeof OutcomesSect
 }
 
 describe('OutcomesSection', () => {
+  it('muestra el gate de licencia NOC y permite añadir desde el catálogo placeholder', async () => {
+    const { getByTestId, getByText, methods } = renderWithForm();
+
+    expect(getByTestId('noc-license-warning')).toBeTruthy();
+    expect(getByText('Licencia NOC requerida')).toBeTruthy();
+
+    fireEvent.changeText(getByTestId('noc-catalog-search-input'), 'vias aereas');
+    fireEvent.press(getByTestId('noc-catalog-suggestion-NOC-0402'));
+
+    await waitFor(() => {
+      expect(methods.getValues('outcomes')).toEqual([
+        {
+          nocCode: '0402',
+          nocDisplay: 'Estado respiratorio: permeabilidad de las vías aéreas',
+          baseline: 2,
+          target: 4,
+        },
+      ]);
+    });
+  });
+
+  it('mantiene el catálogo local si no hay catálogo NOC licenciado', async () => {
+    vi.spyOn(nocCatalogModule, 'loadNocCatalog').mockResolvedValue({
+      ...nocCatalogModule.getNocPlaceholderCatalog(),
+      source: 'backend-placeholder',
+      licensed: false,
+    });
+
+    const { getByTestId, getByText } = renderWithForm();
+
+    await act(async () => {
+      fireEvent.press(getByTestId('enable-full-noc-button'));
+    });
+
+    await waitFor(() => {
+      expect(getByText('No hay un catálogo NOC licenciado configurado; se mantiene el catálogo local.')).toBeTruthy();
+    });
+  });
+
   it('create outcome flow captures noc code/display and scores', async () => {
     const { getByTestId, methods } = renderWithForm();
 
@@ -117,4 +158,3 @@ describe('OutcomesSection', () => {
     });
   });
 });
-

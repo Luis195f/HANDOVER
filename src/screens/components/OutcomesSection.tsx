@@ -7,10 +7,19 @@ import {
   type ClinicalContext,
   type NocOutcomeSuggestion,
 } from '@/src/lib/ai-suggestions';
+import {
+  getNocPlaceholderCatalog,
+  loadNocCatalog,
+  NOC_LICENSE_WARNING,
+  searchNocIndex,
+  type NocCatalogPayload,
+  type NocCode,
+} from '@/src/catalogs/nocCodes';
 import type { HandoverStructuredDiagnosis } from '@/src/types/handover';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
 const MAX_OUTCOMES = 3;
+const MAX_NOC_CATALOG_SUGGESTIONS = 8;
 const DEFAULT_BASELINE = 2;
 const DEFAULT_TARGET = 4;
 const SCORE_OPTIONS = [1, 2, 3, 4, 5] as const;
@@ -23,8 +32,6 @@ type Props = {
 };
 
 type OutcomeItem = NonNullable<HandoverFormValues['outcomes']>[number];
-
-type ScoreField = 'baseline' | 'target' | 'current';
 
 const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
@@ -90,6 +97,34 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: '#111827', fontWeight: '600' },
   errorText: { color: '#B91C1C', marginTop: 8 },
   mutedText: { color: '#6B7280' },
+  warningCard: {
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 8,
+    backgroundColor: '#FFF7ED',
+    padding: 12,
+    gap: 8,
+    marginBottom: 12,
+  },
+  warningTitle: { color: '#9A3412', fontSize: 14, fontWeight: '700' },
+  warningButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1E3A8A',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  warningButtonText: { color: '#fff', fontWeight: '600' },
+  catalogSuggestions: { gap: 8, marginBottom: 12 },
+  catalogSuggestion: {
+    borderColor: '#CBD5E1',
+    borderWidth: 1,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  catalogSuggestionText: { color: '#1F2937', fontSize: 14 },
 });
 
 const clampScore = (value: number): number => Math.min(5, Math.max(1, Math.round(value)));
@@ -227,6 +262,12 @@ export function OutcomesSection({
   const outcomes = useWatch({ control, name }) as HandoverFormValues['outcomes'];
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [nocCatalogQuery, setNocCatalogQuery] = useState('');
+  const placeholderNocCatalog = useMemo(() => getNocPlaceholderCatalog(), []);
+  const [nocCatalog, setNocCatalog] = useState<NocCatalogPayload>(placeholderNocCatalog);
+  const [fullNocCatalogEnabled, setFullNocCatalogEnabled] = useState(false);
+  const [nocCatalogLoading, setNocCatalogLoading] = useState(false);
+  const [nocCatalogError, setNocCatalogError] = useState<string | null>(null);
 
   const canAddMore = fields.length < MAX_OUTCOMES;
 
@@ -234,6 +275,16 @@ export function OutcomesSection({
     const count = outcomes?.length ?? 0;
     return `${count}/${MAX_OUTCOMES} resultados capturados`;
   }, [outcomes]);
+  const nocCatalogSuggestions = useMemo(
+    () =>
+      nocCatalogQuery.trim()
+        ? searchNocIndex(nocCatalog.index, nocCatalogQuery.trim(), MAX_NOC_CATALOG_SUGGESTIONS)
+        : [],
+    [nocCatalog, nocCatalogQuery],
+  );
+  const nocCatalogHelperText = fullNocCatalogEnabled
+    ? `Catálogo NOC licenciado cargado (${nocCatalog.codes.length} resultados)`
+    : `Sugerencias limitadas al catálogo local (${nocCatalog.codes.length} resultados)`;
 
   const addOutcome = () => {
     if (!canAddMore) return;
@@ -243,6 +294,54 @@ export function OutcomesSection({
       baseline: DEFAULT_BASELINE,
       target: DEFAULT_TARGET,
     });
+  };
+
+  const handleEnableFullNocCatalog = async () => {
+    if (nocCatalogLoading || fullNocCatalogEnabled) {
+      return;
+    }
+
+    setNocCatalogLoading(true);
+    setNocCatalogError(null);
+    try {
+      const loadedCatalog = await loadNocCatalog();
+      if (!loadedCatalog.licensed) {
+        setNocCatalogError('No hay un catálogo NOC licenciado configurado; se mantiene el catálogo local.');
+        return;
+      }
+
+      setNocCatalog(loadedCatalog);
+      setFullNocCatalogEnabled(true);
+    } catch {
+      setNocCatalogError('No se pudo cargar el catálogo NOC completo.');
+    } finally {
+      setNocCatalogLoading(false);
+    }
+  };
+
+  const addCatalogOutcome = (entry: NocCode) => {
+    const currentOutcomes = outcomes ?? [];
+    if (currentOutcomes.length >= MAX_OUTCOMES) {
+      setNocCatalogError('Máximo 3 resultados NOC.');
+      return;
+    }
+
+    const alreadyExists = currentOutcomes.some(
+      (item) => item.nocCode === entry.code || item.nocDisplay.trim().toLowerCase() === entry.display.trim().toLowerCase(),
+    );
+    if (alreadyExists) {
+      setNocCatalogError('El resultado NOC seleccionado ya existe.');
+      return;
+    }
+
+    append({
+      nocCode: entry.code,
+      nocDisplay: entry.display,
+      baseline: DEFAULT_BASELINE,
+      target: DEFAULT_TARGET,
+    });
+    setNocCatalogQuery('');
+    setNocCatalogError(null);
   };
 
   const suggestOutcomes = async () => {
@@ -277,6 +376,60 @@ export function OutcomesSection({
       <Text style={styles.sectionTitle}>Resultados esperados (NOC)</Text>
       <Text style={styles.helperText}>Opcional. Registra de 1 a 3 resultados con escala rápida 1-5.</Text>
       <Text style={styles.helperText}>{helperLabel}</Text>
+
+      {!fullNocCatalogEnabled ? (
+        <View style={styles.warningCard} testID="noc-license-warning">
+          <Text style={styles.warningTitle}>{NOC_LICENSE_WARNING}</Text>
+          <Text style={styles.helperText}>
+            El catálogo NOC completo solo se habilita bajo demanda desde una fuente licenciada configurada por entorno o backend.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Habilitar catálogo NOC completo"
+            onPress={() => void handleEnableFullNocCatalog()}
+            style={({ pressed }) => [styles.warningButton, pressed ? { opacity: 0.85 } : null]}
+            testID="enable-full-noc-button"
+          >
+            <Text style={styles.warningButtonText}>
+              {nocCatalogLoading ? 'Cargando catálogo completo...' : 'Habilitar catálogo completo'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <TextInput
+        style={styles.input}
+        placeholder="Buscar resultado NOC..."
+        value={nocCatalogQuery}
+        onChangeText={(text) => {
+          setNocCatalogQuery(text);
+          if (nocCatalogError) {
+            setNocCatalogError(null);
+          }
+        }}
+        testID="noc-catalog-search-input"
+      />
+
+      {nocCatalogQuery.trim() ? <Text style={styles.helperText}>{nocCatalogHelperText}</Text> : null}
+      {nocCatalogError ? <Text style={styles.errorText}>{nocCatalogError}</Text> : null}
+
+      {nocCatalogSuggestions.length > 0 ? (
+        <View style={styles.catalogSuggestions} testID="noc-catalog-suggestions-list">
+          {nocCatalogSuggestions.map((entry) => (
+            <Pressable
+              key={`${entry.system}-${entry.code}`}
+              style={styles.catalogSuggestion}
+              onPress={() => addCatalogOutcome(entry)}
+              accessibilityRole="button"
+              testID={`noc-catalog-suggestion-${entry.system}-${entry.code}`}
+            >
+              <Text style={styles.catalogSuggestionText}>{`${entry.display} (${entry.code}) · ${entry.system}`}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : nocCatalogQuery.trim() ? (
+        <Text style={styles.helperText}>No se encontraron resultados NOC en el catálogo activo.</Text>
+      ) : null}
 
       {enableAiSuggestions ? (
         <View style={styles.actionsRow}>
@@ -419,4 +572,3 @@ export function OutcomesSection({
 }
 
 export default OutcomesSection;
-

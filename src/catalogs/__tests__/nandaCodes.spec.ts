@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DiagnosisCode } from '../diagnosisCodes';
+import type { NandaDiagnosisCode } from '../nandaCodes';
 import {
   buildDiagnosisSearchIndex,
   getNandaPlaceholderCatalog,
@@ -8,7 +8,7 @@ import {
   searchDiagnosisIndex,
 } from '../nandaCodes';
 
-function buildLargeCatalog(size: number): DiagnosisCode[] {
+function buildLargeCatalog(size: number): NandaDiagnosisCode[] {
   return Array.from({ length: size }, (_, index) => ({
     system: 'NANDA',
     code: String(100000 + index),
