@@ -597,7 +597,7 @@ def _create_audit_event_for_transaction(
             "display": "transaction",
         }],
         "action": "C",
-        "recorded": timezone.now().astimezone(datetime.UTC).isoformat().replace("+00:00", "Z"),
+        "recorded": timezone.now().astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "outcome": "0",
         "agent": [{
             "type": {"text": "human/user"},
