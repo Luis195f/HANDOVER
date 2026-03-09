@@ -1,15 +1,29 @@
-# ICEA ETL read endpoint
+# ICEA ETL read endpoint (Bundle clinico persistido)
 
-## Source of truth actual
+> Estado revisado el 2026-03-09. Este endpoint si esta implementado y testeado. Su rol es servir el Bundle clinico persistido desde HANDOVER a un consumidor ETL autorizado; no depende del exito del webhook o del bridge ICEA+ para responder.
 
-El endpoint `GET /api/handover/{bundle_id}` lee `HandoverBundleRecord` persistidos por HANDOVER tras una transaccion FHIR exitosa. No depende del outbox ICEA para responder.
+## 1) Source of truth real
 
-Esto mantiene dos propiedades:
+`GET /api/handover/{bundle_id}` devuelve `bundle_json` desde `HandoverBundleRecord`.
 
-- la lectura ETL no queda bloqueada por la entrega S2S a ICEA+;
-- la copia del Bundle usada por ETL se conserva aunque ICEA falle o quede en retry.
+Eso deja tres propiedades utiles para piloto:
 
-## Endpoint
+1. el ETL lee la copia clinica persistida por HANDOVER;
+2. la lectura no queda bloqueada por `IceaOutboundEvent` o `IceaBridgeRequest`;
+3. un fallo ICEA+ no elimina la fuente ETL del handover ya aceptado.
+
+Implementacion:
+
+- `backend/api/views.py::HandoverEtlReadView`
+- `backend/api/icea_transaction.py`
+- `backend/api/models.py::HandoverBundleRecord`
+
+Tests:
+
+- `backend/api/tests/test_handover_etl_read.py`
+- `backend/api/tests/test_icea_transaction.py`
+
+## 2) Contrato HTTP
 
 ```http
 GET /api/handover/{bundle_id}
@@ -17,27 +31,15 @@ Accept: application/fhir+json
 Authorization: Bearer <s2s-token>
 ```
 
-## Requisitos AuthN/AuthZ
+Respuestas respaldadas por tests:
 
-Se exige Bearer token de `client_credentials` y, ademas:
+- `200 OK`
+- `304 Not Modified`
+- `401 Unauthorized`
+- `403 Forbidden`
+- `404 Not Found`
 
-- `gty=client-credentials`
-- role: `service_etl` o `admin`
-- scope: `icea:etl:read` o `handover:etl:read`
-
-## Respuestas
-
-- `200 OK`: devuelve el Bundle FHIR almacenado.
-- `304 Not Modified`: si `If-None-Match` coincide con el ETag.
-- `401 Unauthorized`: token ausente, invalido o expirado.
-- `403 Forbidden`: grant, rol o scope insuficiente.
-- `404 Not Found`: `bundle_id` inexistente.
-
-## ETag y cache
-
-HANDOVER calcula el ETag con SHA-256 sobre el JSON canonico del `bundle_json` persistido.
-
-Cabeceras de respuesta:
+Cabeceras:
 
 ```http
 Content-Type: application/fhir+json
@@ -45,61 +47,67 @@ ETag: W/"<sha256>"
 Cache-Control: private, max-age=60
 ```
 
-## Persistencia asociada al POST clinico
+## 3) AuthN/AuthZ real
 
-Cuando `POST /api/fhir/transaction` termina bien:
+El endpoint exige:
 
-- se crea o reutiliza `HandoverBundleRecord` por `request_id`;
-- se persiste `bundle_id`, `patient_id`, `unit_id`, `request_id`, `bundle_json`;
-- se conserva `expires_at` y `encryption_metadata` para operacion y retencion.
+- Bearer token;
+- `gty = client-credentials`;
+- rol `service_etl` o `admin`;
+- scope `icea:etl:read` o `handover:etl:read`.
 
-La persistencia ETL es idempotente por `request_id` y queda separada del outbox ICEA.
+Esto esta probado en:
 
-## Relacion con el outbox ICEA
+- `backend/api/tests/test_handover_etl_read.py`
 
-`HandoverBundleRecord` y `IceaOutboundEvent` cumplen roles distintos:
+## 4) Relacion con la transaccion clinica
 
-- `HandoverBundleRecord`: fuente de lectura ETL y retencion del Bundle fuente.
-- `IceaOutboundEvent`: telemetria y recuperacion de la entrega S2S HANDOVER -> ICEA+.
+Cuando `POST /api/fhir/transaction` termina con exito:
 
-Esto permite que un handover exitoso siga siendo legible por ETL aunque el webhook ICEA este en `retry` o `failed`.
+- se resuelve un `request_id`;
+- se persiste `HandoverBundleRecord` por `request_id`;
+- se guarda `bundle_id`, `patient_id`, `unit_id`, `bundle_json`, `expires_at`;
+- luego se disparan side effects ICEA.
 
-## Seguridad operativa
+Orden respaldado:
 
-- no registrar `Authorization` ni payloads clinicos crudos en logs;
-- limitar el token S2S a lectura ETL;
-- rotar credenciales de servicio;
-- usar HTTPS extremo a extremo en entornos no test;
-- mantener trazabilidad con `request_id` y `bundle_id` sin exponer PHI en observabilidad.
+1. outbox ICEA
+2. persistencia ETL
+3. snapshot pipeline
+4. bridge analitico
 
-## Ejemplos
+Evidencia:
 
-```bash
-curl -i \
-  -H "Authorization: Bearer ${S2S_TOKEN}" \
-  -H "Accept: application/fhir+json" \
-  "https://handover.example.com/api/handover/bundle-001"
-```
+- `backend/api/tests/test_icea_transaction.py`
 
-```bash
-ETAG='W/"abc123"'
-curl -i \
-  -H "Authorization: Bearer ${S2S_TOKEN}" \
-  -H "If-None-Match: ${ETAG}" \
-  "https://handover.example.com/api/handover/bundle-001"
-```
+## 5) Idempotencia y cache
 
-## Relación con la orquestación `/api/icea/*`
+- La persistencia local del Bundle es idempotente por `request_id`.
+- El endpoint ETL soporta `ETag` para `304 Not Modified`.
+- El repo prueba tambien lectura repetida estable.
 
-El endpoint ETL `GET /api/handover/{bundle_id}` sigue siendo la fuente de lectura del Bundle clínico original y permanece desacoplado del estado del pipeline ICEA+.
+Limitacion:
 
-Con la nueva capa `/api/icea/*` en HANDOVER:
-- `HandoverBundleRecord` sigue siendo la copia FHIR usada por ETL;
-- `IceaPipelineSnapshot` guarda el último estado visible del pipeline para UX/auditoría;
-- `IceaPipelineEvent` guarda la traza operativa de entregas y acciones manuales;
-- ETL no necesita consultar directamente ICEA+ para leer el Bundle original.
+- si el cliente cambia el `request_id`, HANDOVER interpreta una nueva operacion legitima.
 
-Esto mantiene el principio operativo:
-- lectura ETL desde HANDOVER;
-- coordinación y estado del pipeline desde HANDOVER;
-- ICEA+ como upstream orquestado, no como dependencia directa de la app móvil.
+## 6) Logging y PHI
+
+Evidencia disponible:
+
+- los tests validan que el flujo cubierto no vuelque Bearer ni `patient_id` sensible en logs de duplicado;
+- el endpoint devuelve PHI solo al servicio autorizado.
+
+Lo que debe quedar dicho:
+
+- este endpoint si devuelve datos clinicos por diseno;
+- la seguridad no depende solo del codigo, sino tambien de TLS, custodia de credenciales y despliegue del consumidor ETL.
+
+## 7) Limites del endpoint
+
+- Es un endpoint de lectura puntual por `bundle_id`, no un bulk export.
+- No reemplaza un data pipeline completo ni un lago de datos.
+- No consulta directamente ICEA+ para devolver el Bundle original.
+
+## 8) Riesgo residual
+
+El mayor riesgo residual no es de consistencia local, sino de operacion: una credencial S2S mal gestionada expone PHI. Por eso este endpoint debe mantenerse limitado a tokens de servicio con `client_credentials`, scopes acotados y TLS extremo a extremo.

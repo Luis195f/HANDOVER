@@ -39,6 +39,7 @@ Para ejecución de piloto clínico, auditoría interna y preparación regulatori
 - [Checklist de ciberseguridad NNN + ICEA+](docs/cybersecurity-checklist-nnn-icea.md): verificación operativa de logs/PHI, secretos, HMAC, rate limits, replay, retry offline e idempotencia.
 
 Recomendación de uso: completar estos documentos por release candidate y enlazar sus evidencias en el expediente técnico/QMS antes de la aprobación Go/No-Go.
+Importante: este paquete queda ahora en estado piloto-grade trazable; no declara cumplimiento MDR total ni sustituye la evidencia operativa/regulatoria específica del entorno.
 
 ## Requisitos
 
@@ -359,6 +360,7 @@ Mientras el upstream ICEA+ no publique un endpoint real de status para score, HA
 Documentacion relacionada:
 - [Bridge analitico ICEA+](docs/icea-bridge.md)
 - [Integracion ICEA+](docs/icea-integration.md)
+
 
 
 

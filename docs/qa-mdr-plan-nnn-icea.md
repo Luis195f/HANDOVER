@@ -1,170 +1,189 @@
-# Plan de QA clínico + cumplimiento MDR para NNN + ICEA+
+# Plan de QA clinico + paquete MDR piloto para NNN + ICEA+
 
-## 1) Objetivo y alcance
-Este plan define cómo verificar, validar y documentar los módulos **NNN** (NANDA/NIC/NOC) y la integración **ICEA+** para demostrar, de forma auditable, que:
+> Estado revisado contra el repo el 2026-03-09. Este paquete deja trazabilidad tecnica y limites operativos para un piloto serio, pero no declara cumplimiento MDR total ni cierre regulatorio completo.
 
-1. se mantiene el principio de **apoyo, no diagnóstico**;
-2. no se incrementa de forma clínicamente relevante el tiempo de registro;
-3. se preservan seguridad, trazabilidad y control documental alineados con MDR (Anexo II).
+## 1) Contexto real y arquitectura vigente
 
-> Declaración de uso previsto: NNN e ICEA+ son funcionalidades de apoyo a la documentación y coordinación clínica. No generan diagnóstico autónomo ni sustituyen el juicio profesional.
+- Cliente: React Native/Expo.
+- Backend unico: Django/DRF.
+- Transaccion clinica principal: `POST /api/fhir/transaction`.
+- Lectura ETL del Bundle clinico persistido: `GET /api/handover/{bundle_id}`.
+- NNN:
+  - captura estructurada opcional en formulario;
+  - catalogos gobernados `NANDA`/`NIC`/`NOC` con placeholders locales y carga BYO-license;
+  - mapeo FHIR a `Condition`, `Procedure` y `Observation`.
+- ICEA+:
+  - webhook tecnico desacoplado con outbox local;
+  - coordinacion de pipeline bajo `/api/icea/*`;
+  - bridge analitico bajo `/api/icea/bridge/*`;
+  - resumen bedside prudente bajo `/api/icea/patient-risk` solo si las flags estan activas.
 
-## 2) Criterios de aceptación globales (Go/No-Go)
-- **Clínico-regulatorio:** todas las pruebas de no-autonomía diagnóstica y de continuidad de flujo clínico en degradación deben pasar.
-- **Rendimiento operativo:** no incremento clínicamente relevante del tiempo de registro (definido por comité clínico/QMS); si hay incremento, debe existir beneficio compensatorio documentado y aprobado.
-- **Seguridad:** checklist de ciberseguridad completada sin hallazgos críticos abiertos.
-- **Evidencia MDR:** trazabilidad completa requisito→implementación→test→evidencia archivada.
+No existe en el estado actual del repo una arquitectura paralela para NNN + ICEA+. Todo el soporte documental debe referenciar esta arquitectura Django-only.
 
-## 3) Estrategia de QA funcional
+## 2) Objetivo del piloto
 
-### 3.1 Unit tests (idempotencia y consistencia)
-**Objetivo:** evitar duplicaciones y efectos secundarios en reintentos/offline.
+El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del repo actual, que HANDOVER puede entrar en conversacion seria de piloto para:
 
-Casos mínimos:
-- `bundle identifier` estable bajo reintentos controlados.
-- `request_id` único por operación y reutilizado correctamente para deduplicación.
-- reintentos offline no duplican transacciones válidas ya confirmadas.
-- loaders gobernados NANDA/NIC/NOC hacen fallback a placeholder cuando no hay dataset licenciado válido.
-- búsquedas NANDA/NIC/NOC mantienen rendimiento razonable con catálogos grandes indexados.
-- no duplicación en:
-  - servidor FHIR (Bundle/recursos derivados),
-  - outbox/cola offline,
-  - persistencia ETL vinculada a ICEA+.
+1. capturar NNN sin volver obligatoria la codificacion estructurada;
+2. intercambiar y persistir bundles FHIR con trazabilidad minima;
+3. integrar ICEA+ como soporte analitico no bloqueante y no autonomo;
+4. limitar exposicion de PHI en logs y canales tecnicos instrumentados;
+5. dejar visibles los vacios que siguen siendo operativos o regulatorios.
 
-**Evidencia esperada:** reporte de tests + logs técnicos sin PHI + hash de artefactos.
+## 3) Alcance del paquete
 
-### 3.2 Pruebas de integración
-Cobertura mínima:
-- webhook ICEA+ (firma/HMAC, replay window, códigos de error, retry controlado);
-- `GET /api/handover/{id}` (consistencia de payload y estado tras eventos ICEA+);
-- endpoints `GET /api/catalogs/nanda|nic|noc` con `ETag`, `Cache-Control`, versionado y bandera `licensed`;
-- mapeo FHIR para elementos NNN (estructura, códigos, cardinalidades, trazabilidad).
+### Dentro de alcance y respaldado por codigo/tests
 
-**Criterio de paso:** contrato de datos estable, validaciones sintácticas/semánticas en verde, sin ruptura de compatibilidad con handover base.
+- Catalogos NNN gobernados con placeholders, `ETag`, `Cache-Control` y carga bajo licencia externa.
+- Diagnosticos NANDA, intervenciones NIC y resultados NOC como campos opcionales y con mapeo FHIR.
+- Persistencia local del Bundle clinico por `request_id`.
+- Outbox ICEA+ con HMAC, idempotencia, retry y logging minimizado.
+- ETL read con `client_credentials`, roles/scopes y `ETag`.
+- Pipeline status/dashboard via HANDOVER.
+- Bridge analitico ICEA+ con modos `immediate_provisional` y `enriched_followup`.
+- Resumen bedside prudente para `patient-risk`, con filtros por unidad y mensajes de "no sustituye juicio clinico".
+- Metricas de timing por seccion (`sbar`, `vitals`, `diagnostics`, `treatments`) sin contenido clinico.
 
-### 3.3 E2E clínico-operativas
-Escenarios obligatorios:
-- happy path completo (captura→sugerencia→confirmación clínica→persistencia→auditoría);
-- degradación controlada (latencia alta / servicio parcial);
-- IA caída con continuidad del flujo clínico sin bloqueo;
-- NIC/NOC opcionales (no bloquear guardado si no se aceptan);
-- gate/licensing explícito para NANDA/NIC/NOC sin degradar la continuidad del handover;
-- NNN visible pero no obligatoria.
+### Fuera de alcance o no cerrado en el repo
 
-**Resultado esperado:** el profesional siempre puede completar el handover sin aceptar sugerencias.
-### 3.4 Regresión
-- Verificar que el flujo de handover base (sin NNN/ICEA+) no se rompe.
-- Rejecutar suite crítica en cada release candidate y en cambios de configuración de seguridad.
+- Demostracion de cumplimiento MDR integral.
+- Benchmark automatizado de mediana/P90 de time-to-complete por unidad.
+- Log persistente dedicado de aceptacion/rechazo clinico de sugerencias NNN/ICEA.
+- Evidencia automatizada de dependency scanning, pentest o restauracion de backups dentro de este paquete.
+- Suite E2E clinica completa que recorra todo NNN + ICEA+ de punta a punta en UI real.
 
-## 4) Plan de rendimiento (baseline vs post)
+## 4) Evidencia tecnica disponible hoy
 
-### 4.1 Diseño de medición
-- Baseline: referencia operacional definida en Prompt 1.
-- Post-implementación: medición equivalente, mismo tipo de usuarios, ventana temporal y carga comparable.
-- Segmentación obligatoria por unidad/servicio (ej. UCI, medicina interna, urgencias).
+| Area | Implementacion principal | Tests en repo | Estado |
+|---|---|---|---|
+| NNN opcional y no bloqueante | `src/validation/schemas.ts`, `src/screens/components/DiagnosisAutocomplete.tsx`, `src/screens/components/TreatmentsSection.tsx`, `src/screens/components/OutcomesSection.tsx`, `src/screens/handover/visibility.ts` | `tests/validation/handover-schema.spec.ts`, `src/screens/__tests__/handover.visibility.spec.ts`, `src/screens/__tests__/handover.sections.spec.tsx`, `src/screens/components/__tests__/DiagnosisAutocomplete.spec.tsx`, `src/screens/components/__tests__/TreatmentsSection.spec.tsx`, `src/screens/components/__tests__/OutcomesSection.spec.tsx` | Parcial: soporte real, sin E2E clinico completo |
+| Catalogos BYO-license | `src/catalogs/*.ts`, `src/catalogs/governedCatalog.ts`, `backend/api/views_catalogs.py` | `src/catalogs/__tests__/nandaCodes.spec.ts`, `src/catalogs/__tests__/nicCodes.spec.ts`, `src/catalogs/__tests__/nocCodes.spec.ts`, `backend/api/tests/test_governed_catalog_api.py`, `backend/api/tests/test_nanda_catalog_api.py` | Soportado |
+| FHIR NNN | `src/lib/fhir-map.ts`, `src/lib/fhir-map/nnn.ts`, `src/lib/fhir-terminology.ts` | `src/lib/__tests__/fhir-map.nnn.spec.ts`, `src/lib/__tests__/fhir-map.medications.spec.ts`, `tests/fhir-map.spec.ts` | Soportado con URNs locales y profiles no cerrados |
+| Persistencia ETL | `backend/api/icea_transaction.py`, `backend/api/views.py`, `backend/api/models.py::HandoverBundleRecord` | `backend/api/tests/test_handover_etl_read.py`, `backend/api/tests/test_icea_transaction.py` | Soportado |
+| Webhook ICEA+ | `backend/api/icea.py`, `backend/api/icea_client.py` | `backend/api/tests/test_icea_webhook.py` | Soportado, anti-replay opcional |
+| Pipeline ICEA+ | `backend/api/icea_pipeline.py`, `backend/api/views_icea.py`, `backend/api/dashboard_summary.py` | `backend/api/tests/test_icea_pipeline_api.py`, `backend/api/tests/test_icea_dashboard_summary.py` | Soportado |
+| Bridge analitico | `backend/api/icea_payload_mapper.py`, `backend/api/icea_bridge_service.py`, `backend/api/views_icea_bridge.py` | `backend/api/tests/test_icea_bridge.py` | Soportado, con limites explicitos de configuracion/status |
+| Bedside patient risk | `backend/api/icea_clinical_feedback.py`, `backend/api/views_icea_bridge.py`, `src/lib/icea-bridge-api.ts` | `backend/api/tests/test_icea_bridge.py` | Soportado bajo flags |
+| Timing por seccion | `src/hooks/useHandoverTiming.ts`, `src/lib/handover-timing-submit.ts`, `backend/api/views.py::HandoverTimingMetricsView` | `backend/api/tests/test_handover_timing_metrics.py`, `backend/api/tests/test_icea_dashboard_summary.py` | Parcial: no calcula mediana/P90 ni time-to-complete total |
 
-### 4.2 Métricas mínimas
-- mediana de time-to-complete;
-- percentil 90;
-- tasa de abandono/error del registro;
-- comparación con IA habilitada vs deshabilitada.
+## 5) Criterios piloto Go/No-Go
 
-### 4.3 Criterio de aceptación
-- No incremento clínicamente relevante de tiempo de registro; **o**
-- incremento justificado por beneficio compensatorio documentado (seguridad clínica, completitud, continuidad asistencial), con aprobación formal.
+### Go tecnico minimo
 
-## 5) Seguridad y ciberseguridad
-Controles mínimos a ejecutar y evidenciar:
-- OWASP Mobile (cliente) + controles backend API;
-- no registro de PHI/tokens en logs de app/backend/observabilidad;
-- validación de secretos (rotación, almacenamiento, exposición en CI/CD);
-- webhook ICEA+ con HMAC y anti-replay;
-- scopes/RBAC/S2S en endpoints críticos;
-- rate limiting, retry y protección ante replay/doble envío;
-- políticas de almacenamiento/retención/borrado seguro.
+- Suites criticas de NNN + ICEA+ en verde para el corte del piloto.
+- Variables de entorno del entorno piloto validadas:
+  - catalogos NNN licenciados si se pretende usar catalogo completo;
+  - `ICEA_WEBHOOK_*` para outbox tecnico;
+  - `ICEA_API_*` y `ICEA_BRIDGE_MODEL_ID` si se habilita bridge/patient-risk.
+- Capa `/api/icea/*` accesible solo via HANDOVER con roles/scopes esperados.
+- Resumen bedside, si se habilita, visible como soporte prudente y no como diagnostico autonomo.
+- Checklist de ciberseguridad cerrado al menos sin hallazgos criticos abiertos.
 
-Referenciar checklist operativa: `docs/cybersecurity-checklist-nnn-icea.md`.
+### Go operativo adicional
 
-## 6) Estructura documental MDR (Anexo II)
-Para cada requisito funcional y no funcional, capturar:
-1. función prevista;
-2. límites de uso;
-3. riesgo asociado;
-4. mitigación implementada;
-5. evidencia de verificación;
-6. evidencia de validación.
+- Acta clinica que acepte que NNN es opcional y que ICEA+ es soporte no bloqueante.
+- Evidencia de licencia BYO para NANDA/NIC/NOC si se despliega mas alla de placeholders.
+- Informe baseline/post completado fuera del repo con datos del centro piloto.
 
-Declaraciones obligatorias en expediente técnico:
-- NNN e ICEA+ apoyan documentación y coordinación clínica.
-- No realizan diagnóstico autónomo.
-- No sustituyen juicio clínico profesional.
+### No-Go explicito
 
-## 7) Paquete de evidencias para auditoría interna
-Conservar, versionado por release:
-- matriz de trazabilidad firmada por QA/Regulatorio;
-- informe de rendimiento por unidad (baseline vs post);
-- registro de decisiones clínicas de IA (aceptación/rechazo);
-- checklist de ciberseguridad y plan de remediación;
-- resultados de pruebas (unit/integration/E2E/regresión) y logs técnicos depurados;
-- acta de revisión clínica/regulatoria con decisión Go/No-Go.
+- `ICEA_BRIDGE_MODEL_ID` ausente o invalido cuando se exige score real.
+- Falta de filtros de unidad/rol para `patient-risk`.
+- Cualquier dependencia de llamada directa desde la app a ICEA+.
+- Documentacion que afirme cumplimiento regulatorio total o E2E clinico cerrado sin evidencia adicional.
 
-## 8) Ejecución operativa por fase
-1. **Preparación:** congelar alcance, identificar requisitos y asignar dueños de evidencia.
-2. **Ejecución técnica:** correr suites funcionales, integración, E2E y seguridad.
-3. **Rendimiento:** recopilar baseline/post por unidad, analizar diferencias.
-4. **Consolidación MDR:** completar trazabilidad y anexos de verificación/validación.
-5. **Revisión final:** comité clínico + QA + regulatorio; emisión de acta.
+## 6) Estrategia de verificacion y validacion
 
-## 9) Roles y responsabilidades
-- **QA líder:** coordina plan, ejecución y consolidación de evidencias.
-- **Líder clínico:** valida criterios de aceptabilidad clínica y no-autonomía diagnóstica.
-- **Seguridad:** ejecuta checklist y aprueba controles críticos.
-- **Regulatorio/QMS:** integra evidencias en expediente técnico MDR.
-- **Engineering:** remedia hallazgos y asegura trazabilidad técnica.
+### 6.1 NNN funcional
 
-## 10) Criterio de cierre
-El plan se considera cerrado cuando existe:
-- cobertura de pruebas obligatorias completada;
-- matriz de trazabilidad sin huecos críticos;
-- informe de rendimiento por unidad revisado;
-- checklist de seguridad cerrada o con plan de acción aprobado;
-- evidencia MDR compilada y referenciada para auditoría.
+Cobertura real disponible:
 
-## Cobertura añadida para orquestación de pipeline
+- opcionalidad de NIC/NOC y compatibilidad con payload legacy;
+- autocompletado NANDA y fallback a texto libre;
+- gate de licencia antes de habilitar catalogos completos;
+- mapeo FHIR de NANDA/NIC/NOC con namespaces locales.
 
-Casos verificados en backend:
-- autorización en `/api/icea/status`, `/api/icea/events`, `/api/icea/dashboard-summary` y `/api/icea/actions/*`;
-- `200/4xx/5xx` con contrato JSON estable para consultas y acciones;
-- estado vacío (`404 icea_snapshot_not_found`);
-- error remoto/timeout (`502 icea_transport_error` / `502 icea_remote_error`);
-- persistencia y consulta de snapshots/eventos por unidad;
-- refresh manual de `dashboard-summary` sin abrir acceso a usuarios no autorizados.
+Limitacion:
 
-## Cobertura añadida para el puente analitico
+- no hay una suite E2E completa que pruebe, en UI real, guardado final de handover con todas las variantes NNN.
 
-Casos verificados en backend/frontend:
-- mapper analitico: payload completo y degradado, calculo minimo de `missingnessRate`, `structuredCompletenessRate` y warnings trazables;
-- trigger post-persistencia: el bridge se crea solo despues de `POST /api/fhir/transaction` exitoso y tras persistir `HandoverBundleRecord`;
-- resiliencia clinica: un timeout o fallo de ICEA+ deja `IceaBridgeRequest.status=failed` sin revertir el guardado clinico;
-- API bridge: permisos `nurse/supervisor/admin`, `403/404/400/200/202` y contrato JSON estable para `status`, `summary` y `retry`;
-- scoring modes: distincion visible entre `immediate_provisional` y `enriched_followup`, con `ENABLE_ICEA_ENRICHED_SCORING=false` por defecto hasta habilitacion explicita;
-- validacion operativa temprana: si falta `ICEA_BRIDGE_MODEL_ID` o es invalido, HANDOVER deja error explicito y no intenta entrega ambigua;
-- contrato prudente de status: `remoteStatusSupported`, `remoteRefreshAttempted` y `localStatusIsAuthoritative` cuando no existe endpoint remoto de score;
-- frontend: `pnpm typecheck` para nuevos tipos, hooks y visualizacion minima en dashboard admin.
+### 6.2 ICEA+ tecnico y analitico
 
-Evidencia ejecutada en este corte:
-- `pytest backend/api/tests/test_icea_bridge.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_webhook.py backend/api/tests/test_handover_etl_read.py -q`
-- `pnpm typecheck`
+Cobertura real disponible:
 
+- side effects solo despues de transaccion FHIR exitosa;
+- fallo ICEA no revierte guardado clinico;
+- outbox con estados `queued/retry/delivered/failed`;
+- bridge con estados `queued/sent/accepted/pending/scored/failed/stale`;
+- resumen bedside prudente con filtros por rol/unidad.
 
+Limitacion:
 
+- el repo trata el estado local como fuente autoritativa cuando no existe `ICEA_BRIDGE_STATUS_PATH`; eso es intencionado, pero debe aceptarse como limite del piloto.
 
+### 6.3 Seguridad y PHI
 
-Cobertura bedside añadida en este corte:
-- endpoint `/api/icea/patient-risk`: casos `no data`, `stale data`, `valid data`, `failed remote state`, `flag off` y permisos por rol.
-- UI prudente: banner de paciente y lista de pacientes muestran apoyo analitico como soporte, nunca como diagnostico autonomo.
-- flags de despliegue: `ENABLE_ICEA_PATIENT_RISK` y `ENABLE_ICEA_CAUSAL_SUMMARY` verificados como puertas de activacion separadas.
+Cobertura real disponible:
 
+- hash de identificadores sensibles en logs ICEA;
+- pruebas de no exposicion de tokens/payload sensible en logs del outbox y ETL;
+- metrica de timing sin texto clinico;
+- control de acceso por rol/scope para ETL, dashboard y bridge.
 
+Limitacion:
 
+- la evidencia de "no PHI en logs" no cubre absolutamente todo el backend; cubre especificamente las superficies instrumentadas y testeadas de este paquete.
 
+### 6.4 Rendimiento operativo
+
+Cobertura real disponible:
+
+- instrumentacion por seccion y agregacion por unidad;
+- dashboard con `handoverTiming`.
+
+Limitacion:
+
+- el repo no calcula por si solo mediana, P90 ni abandono de handover completo;
+- esos datos siguen siendo una tarea operativa/BI del piloto.
+
+## 7) Riesgos residuales aceptados para piloto
+
+| Riesgo residual | Delimitacion actual | Mitigacion disponible |
+|---|---|---|
+| Interpretacion excesiva de ICEA+ | El bridge puede devolver resumen/provisional score, pero no existe writeback FHIR de un recurso clinico final ni una conciliacion downstream cerrada | copy prudente, flags, `patient-risk` con mensaje de "no sustituye juicio clinico", estado local autoritativo |
+| Uso de terminologia NNN sin licencia | El repo solo trae placeholders y no demuestra contrato de licencia | gate explicito, variables BYO-license, documentar licencia del operador |
+| Falta de log dedicado de decision clinica | No se persiste aun aceptacion/rechazo/modificacion de sugerencias | usar la plantilla `docs/clinical-decision-log-template-nnn-icea.md` como registro operativo separado |
+| Evidencia de rendimiento incompleta | Solo hay timing por seccion | completar baseline/post y percentiles fuera del repo antes del Go final |
+| Cierre regulatorio parcial | La trazabilidad tecnica esta disponible, pero no sustituye expediente, revision clinica ni aprobacion QMS | mantener este paquete como soporte a auditoria interna, no como declaracion de conformidad total |
+
+## 8) Evidencia a adjuntar por release/piloto
+
+- `docs/traceability-matrix-nnn-icea.md`
+- `docs/cybersecurity-checklist-nnn-icea.md`
+- `docs/performance-report-template-nnn-icea.md`
+- `docs/clinical-decision-log-template-nnn-icea.md`
+- reporte de tests frontend NNN
+- reporte de tests backend ICEA/ETL
+- evidencia de configuracion/licencia del entorno piloto
+- acta clinica/regulatoria de Go/No-Go
+
+## 9) Comandos recomendados para este paquete
+
+Frontend:
+
+- `pnpm exec vitest run src/screens/components/__tests__/DiagnosisAutocomplete.spec.tsx src/catalogs/__tests__/diagnosisCodes.spec.ts src/catalogs/__tests__/nandaCodes.spec.ts`
+- `pnpm exec vitest run src/screens/components/__tests__/TreatmentsSection.spec.tsx src/screens/__tests__/handover.sections.spec.tsx src/lib/__tests__/fhir-map.medications.spec.ts tests/validation/handover-schema.spec.ts`
+- `pnpm exec vitest run src/screens/components/__tests__/OutcomesSection.spec.tsx src/screens/__tests__/handover.visibility.spec.ts src/lib/__tests__/fhir-map.medications.spec.ts tests/validation/handover-schema.spec.ts`
+
+Backend:
+
+- `pytest backend/api/tests/test_icea_webhook.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py backend/api/tests/test_handover_etl_read.py backend/api/tests/test_handover_timing_metrics.py -q`
+
+## 10) Criterio de cierre de este paquete documental
+
+Este paquete se considera cerrado cuando:
+
+1. la trazabilidad documento -> codigo -> test -> limitacion queda completa;
+2. no quedan afirmaciones aspiracionales sin respaldo;
+3. los riesgos residuales siguen visibles y acotados;
+4. el material permite una conversacion seria de piloto sin fingir cierre regulatorio total.

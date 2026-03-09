@@ -1,301 +1,179 @@
-# Integracion ICEA+ service-to-service
+# Integracion ICEA+ service-to-service (estado real)
 
-## Resumen del flujo real
+> Estado revisado el 2026-03-09. HANDOVER integra ICEA+ de forma desacoplada y no bloqueante. La evidencia disponible es suficiente para un piloto tecnico serio, pero no para afirmar un cierre regulatorio total ni una reconciliacion clinica downstream completa.
+
+## 1) Principio operativo
 
 Tras un `POST /api/fhir/transaction` exitoso, HANDOVER:
 
 1. confirma primero la transaccion clinica contra FHIR;
-2. genera un payload tecnico minimo para ICEA+;
-3. persiste un evento en `IceaOutboundEvent`;
-4. intenta la entrega S2S de forma best-effort y desacoplada.
+2. persiste el Bundle local para ETL;
+3. crea/actualiza snapshot de pipeline;
+4. encola un webhook tecnico ICEA+;
+5. si el bridge esta habilitado, construye y envia el payload analitico.
 
-Si ICEA+ falla, la transaccion clinica **no se revierte**. El outbox queda auditable y recuperable mediante reintentos o `flush_icea_outbox`.
+Si ICEA+ falla, el guardado clinico no se revierte.
 
-## Capa dedicada ICEA
+Evidencia:
 
-El contrato S2S queda encapsulado en:
+- `backend/api/views.py`
+- `backend/api/icea_transaction.py`
+- `backend/api/icea.py`
+- `backend/api/icea_bridge_service.py`
+- `backend/api/tests/test_icea_webhook.py`
+- `backend/api/tests/test_icea_bridge.py`
+- `backend/api/tests/test_handover_etl_read.py`
 
-- `backend/api/icea_client.py`: firma HMAC, JSON canonico, headers, validacion de configuracion, parseo de respuesta, errores tipados y politica de retryable status codes.
-- `backend/api/icea.py`: construccion del payload tecnico desde el Bundle FHIR, persistencia del outbox y orquestacion de entrega/reintentos.
+## 2) Dos superficies S2S distintas
 
-## Variables de entorno
+| Superficie | Implementacion | Auth real | Persistencia local |
+|---|---|---|---|
+| Ingest tecnico | `backend/api/icea.py`, `backend/api/icea_client.py` | HMAC compartido + `Idempotency-Key`; anti-replay opcional | `IceaOutboundEvent` |
+| Pipeline y bridge | `backend/api/icea_pipeline.py`, `backend/api/icea_bridge_service.py` | Bearer estatico o `client_credentials` | `IceaPipelineSnapshot`, `IceaPipelineEvent`, `IceaBridgeRequest` |
 
-```env
-ICEA_WEBHOOK_ENABLED=true
-ICEA_WEBHOOK_URL=https://icea.example/api/v1/pipeline/ingest/
-ICEA_WEBHOOK_SECRET=<shared-secret>
-ICEA_WEBHOOK_TIMEOUT_MS=2500
-ICEA_WEBHOOK_RETRY_MAX=5
-ICEA_WEBHOOK_ANTI_REPLAY=false
-ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS=300
-ICEA_WEBHOOK_RETRYABLE_STATUS_CODES=408,409,425,429,500,502,503,504
-```
+Esto importa para el paquete documental:
 
-## Validaciones de configuracion
+- el webhook tecnico no usa OAuth;
+- las consultas/acciones/puntaje si pueden usar Bearer o `client_credentials`;
+- la app movil no llama directo a ICEA+.
 
-Cuando `ICEA_WEBHOOK_ENABLED=true`, HANDOVER exige:
+## 3) Outbox tecnico HANDOVER -> ICEA+
 
-- `ICEA_WEBHOOK_URL` presente.
-- `ICEA_WEBHOOK_SECRET` presente y con longitud minima razonable.
-- HTTPS obligatorio fuera de `DEBUG` y tests.
+### Implementado
 
-Si la configuracion es invalida, el guardado clinico sigue adelante, pero el outbox queda en `retry` o `failed` con `last_error` explicito para recovery posterior.
+- payload minimo con `bundleId`, `patientId`, `unitId`, `timestamp`, `requestId`, `source`;
+- firma HMAC sobre JSON canonico;
+- `Idempotency-Key` igual al `request_id`;
+- estados `queued`, `retry`, `delivered`, `failed`;
+- backoff exponencial local;
+- comando `flush_icea_outbox`.
 
-## Payload enviado a ICEA+
+### Tests
 
-Payload minimo:
+- `backend/api/tests/test_icea_webhook.py`
 
-```json
-{
-  "bundleId": "bundle-tx-001",
-  "patientId": "pat-001",
-  "unitId": "icu-a",
-  "timestamp": "2026-03-07T12:00:00Z",
-  "requestId": "tx-icea-001",
-  "source": "HANDOVER"
-}
-```
+### Limites explicitos
 
-Campos opcionales cuando existen en el Bundle:
+- `ICEA_WEBHOOK_ANTI_REPLAY` existe pero no esta activado por defecto;
+- la deduplicacion final del receptor ICEA+ sigue siendo una dependencia externa;
+- el payload clinico crudo no se loguea, pero el evento sigue conteniendo identificadores operativos internamente.
 
-```json
-{
-  "encounterId": "enc-001",
-  "compositionId": "comp-001",
-  "bundleIdentifier": "bundle-tx-001"
-}
-```
+## 4) Coordinacion del pipeline bajo HANDOVER
 
-## Serializacion y firma
+Rutas reales:
 
-HANDOVER serializa el body con JSON canonico:
-
-- `sort_keys=True`
-- `separators=(",", ":")`
-- UTF-8
-
-Headers S2S:
-
-```http
-Content-Type: application/json
-Idempotency-Key: <requestId>
-X-ICEA-Signature: sha256=<hexdigest>
-```
-
-Si `ICEA_WEBHOOK_ANTI_REPLAY=true`, se anaden tambien:
-
-```http
-X-ICEA-Timestamp: <epochSeconds>
-X-ICEA-Nonce: <uuid>
-```
-
-En ese modo la firma se calcula sobre:
-
-```text
-timestamp + "." + nonce + "." + raw_body
-```
-
-## Outbox local y estados
-
-Modelo: `backend/api/models.py::IceaOutboundEvent`
-
-Campos relevantes:
-
-- `request_id`: identificador local unico de la operacion.
-- `idempotency_key`: valor enviado en header; hoy coincide con `request_id`.
-- `status`: `queued`, `retry`, `delivered`, `failed`.
-- `attempts`: numero de intentos HTTP reales.
-- `last_error`: ultimo error sanitizado.
-- `last_http_status`: ultimo status HTTP recibido.
-- `created_at`: creacion del evento.
-- `last_attempt_at`: ultimo intento de entrega.
-- `next_retry_at`: siguiente intento planificado.
-- `delivered_at`: confirmacion de entrega 2xx.
-
-Semantica:
-
-- `queued`: pendiente inicial o listo para envio.
-- `retry`: fallo recuperable o bloqueo temporal de configuracion.
-- `delivered`: ICEA+ respondio 2xx.
-- `failed`: fallo terminal; requiere `flush_icea_outbox --force` o reproceso explicito.
-
-## Politica de reintentos
-
-- Backoff exponencial local: 30s, 60s, 120s... hasta 30 min maximo.
-- Status retryables por defecto: `408, 409, 425, 429, 500, 502, 503, 504`.
-- Errores de transporte `httpx` tambien se consideran retryables.
-- Los errores no retryables dejan el evento en `failed`.
-
-Comando operativo:
-
-```bash
-python manage.py flush_icea_outbox --limit 100
-python manage.py flush_icea_outbox --force --limit 100
-```
-
-`--force` incluye eventos en `failed`.
-
-## Idempotencia y deduplicacion
-
-Reglas actuales:
-
-- La deduplicacion local del outbox se hace por `request_id` unico.
-- El mismo valor se reutiliza como `Idempotency-Key` hacia ICEA+.
-- Si llega el mismo `request_id` otra vez, HANDOVER no crea un segundo evento outbox ni vuelve a disparar la entrega ICEA.
-- ICEA+ debe deduplicar por `Idempotency-Key` en receptor.
-
-## Errores tipados en la capa cliente
-
-`backend/api/icea_client.py` usa errores tipados:
-
-- `IceaClientConfigurationError`
-- `IceaTransportError`
-- `IceaHTTPStatusError`
-
-Eso permite distinguir:
-
-- error de configuracion local,
-- error de red/transporte,
-- rechazo HTTP de ICEA+.
-
-## Observabilidad y auditoria segura
-
-HANDOVER no registra:
-
-- PHI del Bundle clinico,
-- payload crudo a ICEA+,
-- secretos compartidos,
-- tokens.
-
-Los logs usan `safe_icea_event_summary(...)` y exponen solo:
-
-- `request_id`
-- `idempotency_key`
-- hashes truncados de `bundle_id`, `patient_id`, `unit_id`
-- `status`, `attempts`, `last_http_status`, `next_retry_at`
-- detalle sanitizado del error
-
-## Recovery path
-
-1. revisar eventos `retry` o `failed` en `IceaOutboundEvent`;
-2. corregir configuracion o disponibilidad del receptor;
-3. ejecutar `flush_icea_outbox`;
-4. usar `--force` si el evento ya quedo en `failed`.
-
-## Garantia de no bloqueo clinico
-
-`POST /api/fhir/transaction` mantiene esta regla:
-
-- solo si FHIR responde con exito se persiste el Bundle y se encola ICEA;
-- cualquier problema de ICEA se maneja fuera del guardado clinico;
-- el error ICEA nunca bloquea ni revierte la transaccion clinica ya aceptada.
-
-## Orquestación y estado del pipeline
-
-HANDOVER expone ahora una capa propia de coordinación bajo `/api/icea/*` para que la app móvil y los dashboards consulten y operen el pipeline sin llamar directo a ICEA+.
-
-### Rutas nuevas
-
-- `GET /api/icea/status?requestId=<id>|bundleId=<id>|patientId=<id>[&unitId=<id>][&refresh=true]`
-  - Devuelve el snapshot persistido en HANDOVER y, si ICEA+ está configurado, intenta refrescar el estado remoto sin romper la UX si el upstream falla.
-- `GET /api/icea/events?unitId=<id>[&stage=<stage>][&limit=<n>]`
-  - Devuelve los últimos eventos persistidos por unidad para auditoría operativa.
-- `GET /api/icea/dashboard-summary[?unitId=<id>][&eventsLimit=<n>]`
-  - Devuelve el contrato backend-driven del dashboard admin/supervisor desde datos persistidos en HANDOVER.
+- `GET /api/icea/status`
+- `GET /api/icea/events`
+- `GET /api/icea/dashboard-summary`
 - `POST /api/icea/actions/normalize`
 - `POST /api/icea/actions/build-windows`
 - `POST /api/icea/actions/build-dataset`
 - `POST /api/icea/actions/refresh-dashboard-summary`
 - `POST /api/icea/actions/causal-report`
 
-### Permisos
+Permisos reales:
 
-- Consultas agregadas y estado: `admin` o `supervisor`.
-- Acciones manuales: solo `admin`.
-- La app móvil consume siempre HANDOVER; no hay llamadas directas a ICEA+ desde React Native.
+- consultas agregadas: `supervisor` o `admin`;
+- acciones manuales: solo `admin`.
 
-### Contrato del dashboard admin/supervisor
+Evidencia:
 
-- El dashboard es **backend-driven por defecto**: frontend consume `GET /api/icea/dashboard-summary` y no cae a fixtures en modo live.
-- `demoMode` solo puede activarse de forma explícita (sesión/flag demo) y la UI debe etiquetar esos datos como demo.
-- El payload expone `units`, `alerts`, `outbox`, `pipeline` y `recentEvents`, además de `empty`, `stale`, `degraded`, `degradationReasons`, `generatedAt` y `latestActivityAt`.
-- `units[]` resume actividad operativa, outbox, bridge, timing de handover y alertas abiertas por unidad.
-- Si HANDOVER conserva el último dato útil pero falla el refresh remoto, la UI debe mostrarse como stale/degraded/error de forma honesta; no se permite fallback silencioso a mocks.
-- Si no hay actividad persistida, el backend responde `empty=true` con colecciones vacías en lugar de inventar datos.
+- `backend/api/views_icea.py`
+- `backend/api/tests/test_icea_pipeline_api.py`
+- `backend/api/tests/test_role_acl.py`
 
-### Qué es automático y qué es manual
+## 5) Bridge analitico y soporte prudente
 
-Automático:
-- tras un `POST /api/fhir/transaction` exitoso, HANDOVER persiste el `HandoverBundleRecord` clínico;
-- crea/actualiza un `IceaPipelineSnapshot` con etapa `handover=accepted`;
-- reutiliza el outbox existente para `ingest` y persiste cada transición (`queued`, `retry`, `delivered`, `failed`) como snapshot y evento.
+### Implementado
 
-Manual/controlado:
-- `normalize`
-- `build-windows`
-- `build-dataset`
-- `refresh-dashboard-summary`
-- `causal-report`
+- mapper explicito del Bundle a payload analitico:
+  - `backend/api/icea_payload_mapper.py`
+- persistencia visible por request:
+  - `backend/api/models.py::IceaBridgeRequest`
+- modos:
+  - `immediate_provisional`
+  - `enriched_followup`
+- errores de configuracion visibles:
+  - `missing_icea_bridge_model_id`
+  - `invalid_icea_bridge_model_id`
+- endpoints propios:
+  - `GET /api/icea/bridge/status/<handoverId>`
+  - `GET /api/icea/bridge/summary/<handoverId>`
+  - `POST /api/icea/bridge/retry/<bridgeId>`
 
-No se dispara entrenamiento automático por cada handover.
+### Que deja claro el codigo
 
-### Persistencia mínima nueva
+- HANDOVER no ejecuta el motor matematico de ICEA+;
+- el score puede ser provisional;
+- si no existe `ICEA_BRIDGE_STATUS_PATH`, el estado local visible pasa a ser la fuente autoritativa;
+- el bridge no bloquea el cierre clinico.
 
-- `IceaPipelineSnapshot`: último estado visible por `request_id` con `bundle_id`, `patient_id`, `unit_id`, `visible_status`, `last_stage`, `stage_statuses`, referencias remotas mínimas y caché mínima de `dashboardSummary`/`causalReport`.
-- `IceaPipelineEvent`: historial auditable por unidad/etapa/acción con `status`, `detail`, `http_status` y payload técnico reducido.
+### Tests
 
-HANDOVER no persiste secretos, tokens ni payloads clínicos crudos de ICEA+ en esta capa.
+- `backend/api/tests/test_icea_bridge.py`
 
-### Servicio backend HANDOVER -> ICEA+
+## 6) Logging y proteccion de PHI
 
-`backend/api/icea_pipeline.py` encapsula:
-- autenticación S2S por Bearer estático o client credentials;
-- timeouts y validación básica de configuración HTTPS fuera de dev/tests;
-- llamadas a `status`, `normalize`, `build-windows`, `build-dataset`, `dashboard-summary` y `causal-report`;
-- parseo robusto de errores remotos y persistencia del último estado visible.
+Evidencia concreta:
 
-## Puente analitico HANDOVER -> ICEA+
+- `backend/api/icea.py::safe_icea_event_summary`
+- `backend/api/tests/test_icea_webhook.py`
+- `backend/api/tests/test_handover_etl_read.py`
 
-Ademas del outbox tecnico de `ingest`, HANDOVER expone ahora un puente analitico dedicado para scoring ICEA+:
+Lo que hoy queda respaldado:
 
-- Mapper explicito: `backend/api/icea_payload_mapper.py`
-- Orquestacion S2S y persistencia visible: `backend/api/icea_bridge_service.py`
-- Estado auditable: `backend/api/models.py::IceaBridgeRequest`
-- Endpoints propios: `/api/icea/bridge/*`
+- no se vuelcan secretos compartidos en logs del outbox;
+- no se vuelca el payload clinico crudo;
+- los identificadores sensibles visibles en log se hash-an o se omiten en las superficies cubiertas.
 
-Diferencias frente al outbox tecnico existente:
-- `IceaOutboundEvent` sigue cubriendo la entrega tecnica minima hacia ICEA+;
-- `IceaBridgeRequest` cubre scoring mode, hash del payload analitico, warnings, resultado minimo y estado visible para UI/dashboard;
-- ambos flujos son desacoplados y no bloquean el guardado clinico.
+Lo que no debe afirmarse:
 
-Semantica clinica aplicada:
-- `immediate_provisional`: scoring al cierre del turno con dato disponible, sin fingir conclusiones definitivas;
-- `enriched_followup`: recalculo posterior cuando existan mas datos downstream y se mantiene desactivado por defecto (`ENABLE_ICEA_ENRICHED_SCORING=false`) hasta habilitacion explicita.
+- que todo el backend completo ya tiene evidencia exhaustiva de redaccion de PHI.
 
-Persistencia minima del bridge:
-- `status`: `queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`;
-- `payload_hash` e `idempotency_key` para trazabilidad e idempotencia;
-- `contract_version` y `formula_version` si ICEA+ la devuelve;
-- `score_summary_json`, `warnings_json`, `insufficient_evidence`, `provisional`;
-- `last_error`, timestamps y referencias remotas reducidas;
-- errores de configuracion explicitos (`missing_icea_bridge_model_id`, `invalid_icea_bridge_model_id`) sin romper la persistencia clinica.
+## 7) Uso bedside y limites clinicos
 
-Consumo frontend/dashboard:
-- el cliente movil sigue hablando solo con HANDOVER;
-- `AdminDashboardScreen` puede mostrar el listado mas reciente del bridge cuando `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE=true`;
-- para vistas clinicas prudentes, usar `GET /api/icea/bridge/status/<handoverId>` o `GET /api/icea/bridge/summary/<handoverId>`;
-- el bridge analitico usa `POST /api/v1/icea-plus/score/` del upstream real verificado y deja `ICEA_BRIDGE_STATUS_PATH` vacio por defecto, porque ese upstream no expone hoy un endpoint real de status para score;
-- en ese escenario, HANDOVER expone `remoteStatusSupported=false`, `remoteRefreshAttempted=false` y `localStatusIsAuthoritative=true`, manteniendo el estado local como fuente visible.
+`GET /api/icea/patient-risk`:
 
-Ver detalle clinico/analitico: [docs/icea-bridge.md](./icea-bridge.md).
+- solo funciona con `ENABLE_ICEA_BRIDGE=true` y `ENABLE_ICEA_PATIENT_RISK=true`;
+- restringe enfermeria por `unitId`;
+- devuelve mensajes prudentes de "no sustituye juicio clinico";
+- puede exponer `provisional`, `complete`, `insufficient_evidence`, `failed`, `stale`.
 
+Evidencia:
 
-Decision record:
-- en el estado actual del repo es mas limpio reutilizar la persistencia/proxy del bridge en HANDOVER para el retorno bedside; no se introduce writeback FHIR RiskAssessment nuevo porque hoy no existe una cadena real de consumo ni reconciliacion downstream para ese recurso en HANDOVER.
+- `backend/api/icea_clinical_feedback.py`
+- `backend/api/views_icea_bridge.py`
+- `backend/api/tests/test_icea_bridge.py`
 
+Limite clinico actual:
 
+- no existe writeback FHIR nuevo ni reconciliacion downstream cerrada del resultado ICEA;
+- el retorno bedside sigue siendo soporte operativo local de HANDOVER.
 
-### Cierre del loop clinico bedside
-- HANDOVER expone `GET /api/icea/patient-risk?patientId=<id>[&unitId=<id>]` y `GET /api/icea/patient-risk?unitId=<id>` para devolver el ultimo apoyo analitico prudente por paciente sin exigir `handoverId` en la app.
-- El contrato bedside distingue `pending`, `provisional`, `complete`, `insufficient_evidence` y `failed`, ademas de `stale=true`, provenance, warnings y `lastUpdatedAt`.
-- `ENABLE_ICEA_PATIENT_RISK` controla la exposicion del resumen analitico en backend/frontend y `ENABLE_ICEA_CAUSAL_SUMMARY` habilita solo el resumen causal resumido cuando exista.
+## 8) Criterios piloto Go/No-Go especificos de ICEA+
+
+### Go
+
+- `ICEA_WEBHOOK_*` validado para el entorno;
+- `ICEA_API_*` y `ICEA_BRIDGE_MODEL_ID` validos si se habilita bridge;
+- roles/scopes verificados en `/api/icea/*` y ETL;
+- mensajes prudentes visibles en superficies clinicas activas;
+- outbox/bridge sin estados fallidos persistentes no aceptados.
+
+### No-Go
+
+- app movil intentando acceso directo a ICEA+;
+- bridge activado con `ICEA_BRIDGE_MODEL_ID` vacio o invalido;
+- `patient-risk` habilitado sin control de unidad;
+- documentacion que trate el score como diagnostico autonomo o resultado clinico definitivo.
+
+## 9) Riesgos residuales aceptados
+
+| Riesgo | Delimitacion actual |
+|---|---|
+| Estado remoto no consultable para score | cuando no hay `ICEA_BRIDGE_STATUS_PATH`, el estado local es autoritativo |
+| Bridge provisional interpretado como definitivo | el soporte prudente depende tambien del entrenamiento operativo del piloto |
+| Anti-replay no forzado | queda a configuracion del entorno webhook |
+| Dependencia del upstream ICEA+ | disponibilidad, semantica final y deduplicacion remota no viven en este repo |
+
+Este documento refleja la integracion real y sus limites. No debe reescribirse como si ICEA+ estuviera clinicamente cerrado de punta a punta dentro de HANDOVER.

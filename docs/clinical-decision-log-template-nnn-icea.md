@@ -1,44 +1,91 @@
-# Plantilla de registro de decisiones clínicas de IA (NNN + ICEA+)
+# Registro operativo de decisiones clinicas de IA (NNN + ICEA+)
 
-> Finalidad: evidenciar uso real de sugerencias IA como soporte documental, preservando trazabilidad y minimización de datos.
+> Estado real del repo: HANDOVER no persiste todavia un log dedicado de `accepted/rejected/modified` para sugerencias NNN o ICEA+. Este documento es una plantilla operativa para el piloto, anclada a IDs tecnicos que el repo si genera.
 
-## 1) Reglas de uso
-- Registrar cada sugerencia relevante mostrada al profesional en flujo clínico.
-- No incluir PHI directa en texto libre; usar identificadores internos pseudonimizados.
-- Mantener integridad temporal (timestamp UTC y zona local si aplica).
-- Relacionar cada entrada con `request_id` o ID de evento técnico para auditoría.
+## 1) Que si existe hoy para correlacion
 
-## 2) Estructura mínima por registro
+| Campo operativo | Fuente real en repo |
+|---|---|
+| `handover_id` | `HandoverBundleRecord.bundle_id` |
+| `request_id` | `HandoverBundleRecord.request_id`, `AuditEvent.request_id`, `IceaBridgeRequest.request_id` |
+| `bridge_request_id` | `IceaBridgeRequest.bridge_request_id` |
+| `patient_id` | `HandoverBundleRecord.patient_id`, `IceaBridgeRequest.patient_id` |
+| `unit_id` | `HandoverBundleRecord.unit_id`, `IceaBridgeRequest.unit_id`, `AuditEvent.meta.timing.unitId` |
+| `timestamp_utc` | `AuditEvent.timestamp`, `IceaBridgeRequest.updated_at`, `IceaPipelineEvent.created_at` |
+| `icea_summary` | `GET /api/icea/bridge/status/<handoverId>`, `GET /api/icea/patient-risk` |
 
-| Campo | Obligatorio | Descripción |
+## 2) Que no existe hoy
+
+- No hay modelo backend dedicado a "decision clinica de sugerencia".
+- La UI NNN no guarda automaticamente si una sugerencia NIC/NOC/NANDA fue aceptada, rechazada o modificada.
+- ICEA+ expone estado y resumen, pero no una entidad de feedback clinico persistente en este repo.
+
+Por tanto, para un piloto:
+
+1. el registro debe mantenerse fuera de banda o en una exportacion controlada;
+2. cada fila debe enlazarse a `request_id` y, si aplica, `bridge_request_id`;
+3. no debe afirmarse que este log ya esta automatizado por HANDOVER.
+
+## 3) Estructura minima recomendada
+
+| Campo | Obligatorio | Como llenarlo hoy |
 |---|---|---|
-| `event_id` | Sí | ID único del evento de decisión |
-| `timestamp_utc` | Sí | Fecha/hora UTC de presentación/decisión |
-| `unit_id` | Sí | Unidad/servicio (código interno) |
-| `role` | Sí | Rol del profesional (ej. nurse/supervisor) |
-| `handover_id` | Sí | ID del handover asociado |
-| `request_id` | Sí | ID técnico correlacionable en logs |
-| `suggestion_type` | Sí | Tipo: NNN / NIC / NOC / resumen / otra |
-| `suggestion_shown` | Sí | Texto/código mostrado (redactado si aplica) |
-| `decision` | Sí | `accepted` / `rejected` / `modified` |
-| `minimal_context` | Sí | Contexto mínimo no identificable |
-| `reason_code` | No | Motivo estructurado (si se recoge) |
-| `notes` | No | Comentario adicional (sin PHI) |
+| `event_id` | Si | UUID del registro operativo |
+| `timestamp_utc` | Si | Hora del registro o de la accion observada |
+| `handover_id` | Si | `bundle_id` persistido en HANDOVER |
+| `request_id` | Si | `request_id` del handover |
+| `bridge_request_id` | No | Solo para eventos ICEA+ |
+| `patient_id` | Si | ID pseudonimizado o ID interno permitido |
+| `unit_id` | Si | Unidad del turno |
+| `role` | Si | `nurse`, `supervisor`, `admin` o equivalente local |
+| `suggestion_source` | Si | `nanda`, `nic`, `noc`, `icea_patient_risk`, `icea_bridge_summary` |
+| `suggestion_reference` | Si | Codigo mostrado, texto resumido o `bridge_request_id` |
+| `decision` | Si | `accepted`, `rejected`, `modified`, `viewed_only` |
+| `minimal_context` | Si | Contexto breve sin PHI directa |
+| `reason_code` | No | Motivo estructurado local |
+| `notes` | No | Solo si no contiene PHI |
 
-## 3) Formato recomendado (JSONL)
+## 4) Catalogos recomendados
+
+### `decision`
+
+- `accepted`
+- `rejected`
+- `modified`
+- `viewed_only`
+
+### `reason_code`
+
+- `CLINICAL_FIT`
+- `LOCAL_PROTOCOL`
+- `INSUFFICIENT_EVIDENCE`
+- `LICENSING_LIMIT`
+- `UI_FALLBACK`
+- `OTHER_STRUCTURED`
+
+## 5) Formato recomendado (JSONL)
+
 ```json
-{"event_id":"evt-0001","timestamp_utc":"2026-01-15T08:31:22Z","unit_id":"UCI-A","role":"nurse","handover_id":"h-abc123","request_id":"req-789","suggestion_type":"NNN","suggestion_shown":"NANDA: Riesgo de infección","decision":"accepted","minimal_context":"postoperatorio inmediato","reason_code":"CLINICAL_FIT","notes":""}
-{"event_id":"evt-0002","timestamp_utc":"2026-01-15T08:33:05Z","unit_id":"UCI-A","role":"nurse","handover_id":"h-abc123","request_id":"req-790","suggestion_type":"NIC","suggestion_shown":"NIC: Vigilancia de signos vitales","decision":"modified","minimal_context":"ajuste por protocolo local","reason_code":"LOCAL_PROTOCOL","notes":"frecuencia adaptada"}
+{"event_id":"8b6a7f5d-92c3-4f3f-a8b0-1d95c6a8a101","timestamp_utc":"2026-03-09T08:31:22Z","handover_id":"bundle-bridge-001","request_id":"req-bridge-001","bridge_request_id":"req-bridge-001:immediate_provisional","patient_id":"pat-risk-001","unit_id":"icu-a","role":"nurse","suggestion_source":"icea_patient_risk","suggestion_reference":"req-bridge-001:immediate_provisional","decision":"viewed_only","minimal_context":"cierre de turno UCI","reason_code":"INSUFFICIENT_EVIDENCE","notes":""}
+{"event_id":"c2e6e87a-fb6a-4c3c-8df4-9db6de315d30","timestamp_utc":"2026-03-09T08:33:05Z","handover_id":"bundle-bridge-001","request_id":"req-bridge-001","patient_id":"pat-risk-001","unit_id":"icu-a","role":"nurse","suggestion_source":"nic","suggestion_reference":"NIC 2210","decision":"modified","minimal_context":"ajuste segun protocolo local","reason_code":"LOCAL_PROTOCOL","notes":"frecuencia adaptada sin cambiar el objetivo clinico"}
 ```
 
-## 4) Controles de calidad del registro
-- [ ] Unicidad de `event_id`.
-- [ ] `timestamp_utc` válido y monotónico por sesión.
-- [ ] `decision` dentro de catálogo permitido.
-- [ ] `suggestion_shown` presente y trazable a la versión del modelo/regla.
-- [ ] Ausencia de PHI y secretos en `notes`.
+## 6) Controles de calidad
 
-## 5) Retención y acceso
-- Retención según política QMS/MDR y normativa local de protección de datos.
-- Acceso restringido por RBAC (QA, regulatorio, seguridad, responsables clínicos designados).
-- Cifrado en reposo y en tránsito; exportes con control de integridad.
+- [ ] `event_id` unico.
+- [ ] `request_id` existente en HANDOVER.
+- [ ] `bridge_request_id` presente solo cuando la entrada se refiere a ICEA+.
+- [ ] `decision` dentro del catalogo permitido.
+- [ ] `suggestion_reference` suficiente para volver a la evidencia tecnica.
+- [ ] `notes` sin PHI directa, secretos ni payload clinico crudo.
+
+## 7) Evidencia minima a archivar junto al log
+
+- export o captura del `handover_id`/`request_id` correspondiente;
+- si aplica, respuesta de `/api/icea/bridge/status/<handoverId>` o `/api/icea/patient-risk`;
+- version del catalogo NNN activo (`licensed`, `version`, `source`);
+- referencia a release/commit del piloto.
+
+## 8) Riesgo residual
+
+Hasta que exista una implementacion dedicada de feedback clinico en HANDOVER, este registro sigue siendo una evidencia operativa complementaria y no una auditoria automatica end-to-end.
