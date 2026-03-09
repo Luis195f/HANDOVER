@@ -26,11 +26,13 @@ import type {
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
 import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
+import { NOC_OUTCOME_CATEGORY } from './fhir-terminology';
 import {
-  MINIMUM_VIABLE_NNN_MAPPING,
-  NOC_OUTCOME_CATEGORY,
-  NOC_SCORE_COMPONENT_CODES,
-} from './fhir-terminology';
+  buildNicProcedure,
+  buildNocOutcomeObservation,
+  mapLegacyNursingCondition,
+  mapNandaConditions,
+} from './fhir-map/nnn';
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
@@ -2425,58 +2427,16 @@ export function mapTreatments(
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
 
-  return values.treatments.map((treatment) => {
-    const status: Procedure['status'] = treatment.done ? 'completed' : 'in-progress';
-    const display = TREATMENT_TYPE_LABELS[treatment.type];
-    // Minimum viable NIC mapping:
-    // - NIC lives in Procedure.code.coding with system urn:handover:terminology:NIC.
-    // - The generic Procedure profile still comes from meta.profile; NIC-specific profile URI is no especificado.
-    // - The local HANDOVER treatment code is preserved in the same CodeableConcept to avoid breaking existing bundles.
-    const nicCoding =
-      treatment.code?.system === 'NIC' && treatment.code.code.trim() && treatment.code.display.trim()
-        ? {
-            system: MINIMUM_VIABLE_NNN_MAPPING.nic.system,
-            code: treatment.code.code.trim(),
-            display: treatment.code.display.trim(),
-          }
-        : null;
-
-    const procedure: Procedure = {
-      resourceType: 'Procedure',
-      identifier: [{ system: 'urn:handover-pro:treatment-item', value: treatment.id }],
-      status,
-      code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE,
-            code: treatment.type,
-            display,
-          },
-          ...(nicCoding ? [nicCoding] : []),
-        ],
-        text: nicCoding?.display ?? display,
-      },
-      subject,
-      encounter,
-      note: treatment.description ? [{ text: treatment.description }] : undefined,
-    };
-
-    if (treatment.done && treatment.scheduledAt) {
-      procedure.performedDateTime = treatment.scheduledAt;
-    } else if (treatment.scheduledAt) {
-      procedure.performedPeriod = { start: treatment.scheduledAt };
-    }
-
-    return procedure;
-  });
+  return values.treatments.map(
+    (treatment) =>
+      buildNicProcedure(treatment, {
+        display: TREATMENT_TYPE_LABELS[treatment.type],
+        subject,
+        encounter,
+        localSystem: TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE,
+      }) as Procedure,
+  );
 }
-
-const normalizeNocScore = (value: unknown): number | undefined => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  const rounded = Math.round(value);
-  if (rounded < 1 || rounded > 5) return undefined;
-  return rounded;
-};
 
 export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): Observation[] {
   if (!values.outcomes || values.outcomes.length === 0) return [];
@@ -2487,63 +2447,13 @@ export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): O
   const effectiveDateTime = optionsMerged.now();
 
   return values.outcomes.flatMap((item) => {
-    const nocCode = typeof item?.nocCode === 'string' ? item.nocCode.trim() : '';
-    const nocDisplay = typeof item?.nocDisplay === 'string' ? item.nocDisplay.trim() : '';
-    const baseline = normalizeNocScore(item?.baseline);
-    const target = normalizeNocScore(item?.target);
-    const current = normalizeNocScore(item?.current);
-
-    if (!nocCode || !nocDisplay || baseline == null || target == null) return [];
-
-    // Minimum viable NOC mapping:
-    // - NOC lives in Observation.code with system urn:handover:terminology:NOC.
-    // - Observation.category uses code outcome.
-    // - Score components stay in the local namespace urn:handover-pro:noc-score for backward compatibility.
-    // - The NOC-specific profile URI is no especificado; only the generic Observation profile is injected elsewhere.
-    const component: ObservationComponent[] = [
-      {
-        code: {
-          coding: [NOC_SCORE_COMPONENT_CODES.baseline],
-          text: NOC_SCORE_COMPONENT_CODES.baseline.display,
-        },
-        valueInteger: baseline,
-      },
-      {
-        code: {
-          coding: [NOC_SCORE_COMPONENT_CODES.target],
-          text: NOC_SCORE_COMPONENT_CODES.target.display,
-        },
-        valueInteger: target,
-      },
-    ];
-
-    if (current != null) {
-      component.push({
-        code: {
-          coding: [NOC_SCORE_COMPONENT_CODES.current],
-          text: NOC_SCORE_COMPONENT_CODES.current.display,
-        },
-        valueInteger: current,
-      });
-    }
-
-    return [
-      {
-        resourceType: 'Observation',
-        status: 'final',
-        category: [outcomeCategoryConcept],
-        code: {
-          coding: [{ system: MINIMUM_VIABLE_NNN_MAPPING.noc.system, code: nocCode, display: nocDisplay }],
-          text: nocDisplay,
-        },
-        subject,
-        encounter,
-        effectiveDateTime,
-        issued: effectiveDateTime,
-        valueString: `NOC ${nocCode}: ${nocDisplay}`,
-        component,
-      } satisfies Observation,
-    ];
+    const observation = buildNocOutcomeObservation(item, {
+      subject,
+      encounter,
+      effectiveDateTime,
+      category: outcomeCategoryConcept,
+    });
+    return observation ? [observation as Observation] : [];
   });
 }
 
@@ -4394,32 +4304,16 @@ function mapDiagnoses(
   addCondition(data.dxMedical);
 
   const nursingStructured = (data.dxNursingStructured ?? []).filter((item) => item.system === 'NANDA');
-  nursingStructured.forEach((item) => {
-    // Minimum viable NANDA mapping:
-    // - NANDA lives in Condition.code with system urn:handover:terminology:NANDA-I.
-    // - The generic Condition profile still comes from meta.profile; the NANDA-specific profile URI is no especificado.
-    // - We keep the local urn:handover:* namespace until a licensed external NANDA URI is available.
-    conditions.push({
-      resourceType: 'Condition',
-      clinicalStatus: conditionClinicalStatusActive,
-      verificationStatus: conditionVerificationStatusUnconfirmed,
-      category: [conditionProblemListCategory],
-      code: {
-        coding: [
-          {
-            system: MINIMUM_VIABLE_NNN_MAPPING.nanda.system,
-            code: item.code,
-            display: item.display,
-          },
-        ],
-        text: item.display,
-      },
+  conditions.push(
+    ...mapNandaConditions(nursingStructured, {
       subject: context.subject,
       encounter: context.encounter,
-      onsetDateTime: context.effectiveDateTime,
-      recordedDate: context.effectiveDateTime,
-    });
-  });
+      effectiveDateTime: context.effectiveDateTime,
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      problemListCategory: conditionProblemListCategory,
+    }) as Condition[],
+  );
 
   const legacyNursingText =
     typeof data.dxNursing === 'string'
@@ -4428,20 +4322,19 @@ function mapDiagnoses(
         ? String((data.dxNursing as { display?: unknown }).display ?? '').trim()
         : '';
 
-  if (legacyNursingText && nursingStructured.length === 0) {
-    conditions.push({
-      resourceType: 'Condition',
-      clinicalStatus: conditionClinicalStatusActive,
-      verificationStatus: conditionVerificationStatusUnconfirmed,
-      category: [conditionProblemListCategory],
-      code: { coding: [], text: legacyNursingText },
+  if (nursingStructured.length === 0) {
+    const legacyCondition = mapLegacyNursingCondition(legacyNursingText, {
       subject: context.subject,
       encounter: context.encounter,
-      onsetDateTime: context.effectiveDateTime,
-      recordedDate: context.effectiveDateTime,
+      effectiveDateTime: context.effectiveDateTime,
+      clinicalStatus: conditionClinicalStatusActive,
+      verificationStatus: conditionVerificationStatusUnconfirmed,
+      problemListCategory: conditionProblemListCategory,
     });
+    if (legacyCondition) {
+      conditions.push(legacyCondition as Condition);
+    }
   }
-
   const structured = data.dxMedicalStructured ?? [];
   structured.forEach((item) => {
     conditions.push({

@@ -6,11 +6,9 @@ import math
 import os
 import sys
 import uuid
-from datetime import timedelta
 import httpx
 from typing import Any, Dict, Optional, Tuple, Type
 
-import httpx
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -25,7 +23,6 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.authentication import BaseAuthentication
 from backend.audit.service import emit_audit_event
 from backend.signature import (
     SignatureSettings,
@@ -37,9 +34,11 @@ from backend.signature import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
+from backend.api.views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
 from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
+from backend.api.icea_transaction import persist_handover_bundle_record, persist_successful_transaction_icea_side_effects
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
@@ -114,63 +113,7 @@ ETL_ALLOWED_ROLES = {"service_etl", "admin"}
 ETL_REQUIRED_SCOPES = {"icea:etl:read", "handover:etl:read"}
 
 
-def _extract_request_id(request: HttpRequest) -> str:
-    for candidate in (
-        request.headers.get("Idempotency-Key"),
-        request.META.get("HTTP_IDEMPOTENCY_KEY"),
-        request.headers.get("X-Request-ID"),
-        request.META.get("HTTP_X_REQUEST_ID"),
-        getattr(request, "audit_request_id", ""),
-    ):
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-    return str(uuid.uuid4())
-
-
-def _extract_bundle_identifier(bundle: dict[str, Any], request: HttpRequest) -> str:
-    identifier = bundle.get("identifier")
-    if isinstance(identifier, dict):
-        value = identifier.get("value")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    bundle_id = bundle.get("id")
-    if isinstance(bundle_id, str) and bundle_id.strip():
-        return bundle_id.strip()
-    return _extract_request_id(request)
-
-
-def _extract_patient_id_from_bundle(bundle: dict[str, Any]) -> str:
-    for entry in bundle.get("entry") or []:
-        if not isinstance(entry, dict):
-            continue
-        resource = entry.get("resource")
-        if not isinstance(resource, dict):
-            continue
-        if resource.get("resourceType") == "Patient":
-            patient_id = resource.get("id")
-            if isinstance(patient_id, str) and patient_id.strip():
-                return patient_id.strip()
-    return "unknown"
-
-
-def _persist_handover_bundle_record(*, bundle: dict[str, Any], request: HttpRequest) -> None:
-    request_id = _extract_request_id(request)
-    defaults = {
-        "bundle_id": _extract_bundle_identifier(bundle, request),
-        "patient_id": _extract_patient_id_from_bundle(bundle),
-        "unit_id": str(request.headers.get("X-Unit-Id") or "unknown").strip() or "unknown",
-        "bundle_json": bundle,
-        "expires_at": timezone.now() + timedelta(days=30),
-        "encryption_metadata": {
-            "at_rest": "database-managed",
-            "retention_days": 30,
-        },
-    }
-    try:
-        HandoverBundleRecord.objects.get_or_create(request_id=request_id, defaults=defaults)
-    except IntegrityError:
-        logger.info("handover_bundle_duplicate_request", extra={"request_id": request_id})
-
+_persist_handover_bundle_record = persist_handover_bundle_record
 
 def _has_valid_etl_access(request: HttpRequest) -> bool:
     claims = _get_claims_from_request(request) or {}
@@ -185,232 +128,6 @@ def _has_valid_etl_access(request: HttpRequest) -> bool:
 def _post_transaction_to_fhir(*args, **kwargs):
     return httpx.post(*args, **kwargs)
 
-CATALOG_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
-NANDA_LICENSE_WARNING = "Licencia NANDA-I requerida"
-NIC_LICENSE_WARNING = "Licencia NIC requerida"
-NOC_LICENSE_WARNING = "Licencia NOC requerida"
-NANDA_PLACEHOLDER_CODES: list[dict[str, Any]] = [
-    {
-        "system": "NANDA",
-        "code": "00001",
-        "display": "Oxigenación alterada",
-        "synonyms": ["oxigenación alterada", "oxygenation altered"],
-    },
-    {
-        "system": "NANDA",
-        "code": "00004",
-        "display": "Riesgo de infección",
-        "synonyms": ["riesgo de infección", "infection risk"],
-    },
-    {
-        "system": "NANDA",
-        "code": "00146",
-        "display": "Ansiedad",
-        "synonyms": ["ansiedad", "anxiety"],
-    },
-    {
-        "system": "NANDA",
-        "code": "00155",
-        "display": "Dolor agudo",
-        "synonyms": ["dolor agudo", "acute pain"],
-    },
-]
-NIC_PLACEHOLDER_CODES: list[dict[str, Any]] = [
-    {
-        "system": "NIC",
-        "code": "2210",
-        "display": "Administración de analgésicos",
-        "synonyms": ["manejo analgésico", "control del dolor"],
-    },
-    {
-        "system": "NIC",
-        "code": "3350",
-        "display": "Monitorización respiratoria",
-        "synonyms": ["vigilancia respiratoria", "seguimiento respiratorio"],
-    },
-    {
-        "system": "NIC",
-        "code": "6680",
-        "display": "Monitorización de signos vitales",
-        "synonyms": ["vigilancia de signos vitales", "signos vitales"],
-    },
-    {
-        "system": "NIC",
-        "code": "5602",
-        "display": "Enseñanza: proceso de enfermedad",
-        "synonyms": ["educación al paciente", "proceso de enfermedad"],
-    },
-]
-NOC_PLACEHOLDER_CODES: list[dict[str, Any]] = [
-    {
-        "system": "NOC",
-        "code": "0402",
-        "display": "Estado respiratorio: permeabilidad de las vías aéreas",
-        "synonyms": ["permeabilidad de vias aereas", "estado respiratorio"],
-    },
-    {
-        "system": "NOC",
-        "code": "0802",
-        "display": "Signos vitales",
-        "synonyms": ["constantes vitales", "monitorización de signos vitales"],
-    },
-    {
-        "system": "NOC",
-        "code": "1605",
-        "display": "Control del dolor",
-        "synonyms": ["manejo del dolor", "dolor controlado"],
-    },
-    {
-        "system": "NOC",
-        "code": "1813",
-        "display": "Conocimiento: régimen terapéutico",
-        "synonyms": ["educación terapéutica", "régimen terapéutico"],
-    },
-]
-
-GOVERNED_CATALOG_CONFIG: dict[str, dict[str, Any]] = {
-    "NANDA": {
-        "inline_env": "NANDA_CATALOG_JSON",
-        "file_env": "NANDA_CATALOG_FILE",
-        "warning": NANDA_LICENSE_WARNING,
-        "placeholder_codes": NANDA_PLACEHOLDER_CODES,
-        "placeholder_version": "placeholder-2026-03",
-    },
-    "NIC": {
-        "inline_env": "NIC_CATALOG_JSON",
-        "file_env": "NIC_CATALOG_FILE",
-        "warning": NIC_LICENSE_WARNING,
-        "placeholder_codes": NIC_PLACEHOLDER_CODES,
-        "placeholder_version": "placeholder-2026-03",
-    },
-    "NOC": {
-        "inline_env": "NOC_CATALOG_JSON",
-        "file_env": "NOC_CATALOG_FILE",
-        "warning": NOC_LICENSE_WARNING,
-        "placeholder_codes": NOC_PLACEHOLDER_CODES,
-        "placeholder_version": "placeholder-2026-03",
-    },
-}
-
-
-def _normalize_governed_catalog_entry(value: Any, system_name: str) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-
-    code = str(value.get("code") or "").strip()
-    display = str(value.get("display") or "").strip()
-    if not code or not display:
-        return None
-
-    system = str(value.get("system") or system_name).strip().upper()
-    if system != system_name:
-        return None
-
-    raw_synonyms = value.get("synonyms")
-    synonyms = (
-        [str(item).strip() for item in raw_synonyms if isinstance(item, str) and str(item).strip()]
-        if isinstance(raw_synonyms, list)
-        else []
-    )
-
-    payload = {
-        "system": system_name,
-        "code": code,
-        "display": display,
-    }
-    if synonyms:
-        payload["synonyms"] = synonyms
-    return payload
-
-
-def _build_governed_catalog_payload(system_name: str) -> Dict[str, Any]:
-    config = GOVERNED_CATALOG_CONFIG[system_name]
-    inline_catalog_json = os.getenv(config["inline_env"], "").strip()
-    catalog_file = os.getenv(config["file_env"], "").strip()
-
-    raw_payload: Any = None
-    source = "placeholder"
-    licensed = False
-
-    if inline_catalog_json:
-        source = "env-json"
-        licensed = True
-        try:
-            raw_payload = json.loads(inline_catalog_json)
-        except Exception:
-            logger.exception("Invalid %s configuration", config["inline_env"])
-            raw_payload = None
-            source = "placeholder"
-            licensed = False
-    elif catalog_file:
-        source = "file"
-        licensed = True
-        try:
-            with open(catalog_file, "r", encoding="utf-8") as catalog_handle:
-                raw_payload = json.load(catalog_handle)
-        except Exception:
-            logger.exception("Unable to load %s catalog from %s", system_name, catalog_file)
-            raw_payload = None
-            source = "placeholder"
-            licensed = False
-
-    payload_record = raw_payload if isinstance(raw_payload, dict) else None
-    if isinstance(raw_payload, list):
-        raw_codes = raw_payload
-    elif isinstance(payload_record, dict) and isinstance(payload_record.get("codes"), list):
-        raw_codes = payload_record.get("codes") or []
-    elif isinstance(payload_record, dict) and isinstance(payload_record.get("entries"), list):
-        raw_codes = payload_record.get("entries") or []
-    else:
-        raw_codes = []
-
-    codes = [
-        entry
-        for entry in (_normalize_governed_catalog_entry(item, system_name) for item in raw_codes)
-        if entry is not None
-    ]
-
-    if isinstance(payload_record, dict) and isinstance(payload_record.get("licensed"), bool):
-        licensed = payload_record["licensed"]
-
-    warning = (
-        str(payload_record.get("warning")).strip()
-        if isinstance(payload_record, dict) and payload_record.get("warning")
-        else config["warning"]
-    )
-    version = (
-        str(payload_record.get("version")).strip()
-        if isinstance(payload_record, dict) and payload_record.get("version")
-        else "licensed-runtime" if licensed else config["placeholder_version"]
-    )
-
-    if not codes:
-        codes = [dict(item) for item in config["placeholder_codes"]]
-        licensed = False
-        source = "placeholder"
-        version = config["placeholder_version"]
-
-    return {
-        "system": system_name,
-        "licensed": licensed,
-        "source": source,
-        "version": version,
-        "warning": warning,
-        "codes": codes,
-    }
-
-
-def _build_governed_catalog_etag(payload: Dict[str, Any]) -> str:
-    payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return f'W/"{hashlib.sha256(payload_bytes).hexdigest()}"'
-
-
-def _build_nanda_catalog_payload() -> Dict[str, Any]:
-    return _build_governed_catalog_payload("NANDA")
-
-
-def _build_nanda_catalog_etag(payload: Dict[str, Any]) -> str:
-    return _build_governed_catalog_etag(payload)
 def _local_registry_not_ready_response() -> Response:
     return Response(
         {
@@ -1005,62 +722,6 @@ def _emit_bundle_audit(
 # =========================
 # Views
 # =========================
-
-class NandaCatalogView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def get(self, request: HttpRequest) -> Response:
-        payload = _build_governed_catalog_payload("NANDA")
-        etag = _build_governed_catalog_etag(payload)
-        request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
-
-        if request_etag == etag:
-            response = Response(status=304)
-        else:
-            response = Response(payload, status=200)
-
-        response["ETag"] = etag
-        response["Cache-Control"] = CATALOG_CACHE_CONTROL
-        return response
-
-
-class NicCatalogView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def get(self, request: HttpRequest) -> Response:
-        payload = _build_governed_catalog_payload("NIC")
-        etag = _build_governed_catalog_etag(payload)
-        request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
-
-        if request_etag == etag:
-            response = Response(status=304)
-        else:
-            response = Response(payload, status=200)
-
-        response["ETag"] = etag
-        response["Cache-Control"] = CATALOG_CACHE_CONTROL
-        return response
-
-
-class NocCatalogView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def get(self, request: HttpRequest) -> Response:
-        payload = _build_governed_catalog_payload("NOC")
-        etag = _build_governed_catalog_etag(payload)
-        request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
-
-        if request_etag == etag:
-            response = Response(status=304)
-        else:
-            response = Response(payload, status=200)
-
-        response["ETag"] = etag
-        response["Cache-Control"] = CATALOG_CACHE_CONTROL
-        return response
 
 class CapabilitiesView(APIView):
     """
@@ -2002,19 +1663,14 @@ class BundleView(AuthenticatedAPIView):
             user_id=user_id,
             unit_id=unit_id,
         )
-        try:
-            enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
-        except Exception:
-            logger.exception("ICEA outbox enqueue failed after successful clinical transaction")
-        _persist_handover_bundle_record(bundle=bundle, request=request)
-        try:
-            ensure_pipeline_snapshot_from_bundle(bundle=bundle, request=request)
-        except Exception:
-            logger.exception("ICEA pipeline snapshot persistence failed after successful clinical transaction")
-        try:
-            enqueue_icea_bridge_request_for_transaction(bundle=bundle, request=request)
-        except Exception:
-            logger.exception("ICEA bridge enqueue failed after successful clinical transaction")
+        persist_successful_transaction_icea_side_effects(
+            bundle=bundle,
+            request=request,
+            outbox_callback=enqueue_icea_outbound_event_for_transaction,
+            persist_bundle_record=_persist_handover_bundle_record,
+            snapshot_callback=ensure_pipeline_snapshot_from_bundle,
+            bridge_callback=enqueue_icea_bridge_request_for_transaction,
+        )
         return Response(payload, status=resp.status_code)
 
 
@@ -2160,11 +1816,3 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-
-
-
-
-
-
-
-

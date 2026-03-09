@@ -24,13 +24,11 @@ from .views import (
     HandoverEtlReadView,
     HandoverTimingMetricsView,
     MedicationStatementView,
-    NandaCatalogView,
-    NicCatalogView,
-    NocCatalogView,
     OAuthRefreshView,
     PatientView,
     PatientsView,
 )
+from .views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
 
 urlpatterns = [
     path("fhir/patient", PatientView.as_view(), name="patient"),
