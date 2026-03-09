@@ -27,7 +27,7 @@ import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
 import AudioAttach from '@/src/components/AudioAttach';
 import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
-import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput } from '@/src/lib/fhir-map';
+import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type HandoverValues as FhirHandoverValues } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { generateSbarViaBackend, refineSBARWithAI } from '@/src/lib/ai-sbar';
@@ -54,7 +54,7 @@ import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
 import { validateBundle } from '@/src/lib/fhir-validation';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
-import { forceSync, getSyncSnapshot, subscribeSyncStatus } from '@/src/lib/sync';
+import { forceSync } from '@/src/lib/sync';
 import { getValidationErrorDetails } from '@/src/lib/sync-errors';
 import { AI_BACKEND_ENABLED, AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -126,6 +126,14 @@ import * as SecureStore from 'expo-secure-store';
 import { HandoverFormActions } from './handover/HandoverFormActions';
 import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 import { useHandoverTiming } from '@/src/hooks/useHandoverTiming';
+import {
+  buildHandoverInputPayload,
+  buildSubmissionAdministrativeData,
+  buildSubmissionOxygenTherapy,
+  normalizeOxygenTherapyInput,
+  normalizeUnitSelection,
+} from './handover/submission';
+import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
@@ -1139,9 +1147,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const [audioUploadToFhir, setAudioUploadToFhir] = useState(false);
   const [audioUploadStatus, setAudioUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
-  const [syncSnapshot, setSyncSnapshot] = useState(getSyncSnapshot());
-  const [handoverSyncStatus, setHandoverSyncStatus] = useState<'idle' | 'queued' | 'syncing' | 'synced' | 'error'>('idle');
-  const [handoverSyncError, setHandoverSyncError] = useState<string | null>(null);
+  const {
+    syncSnapshot,
+    handoverSyncStatus,
+    handoverSyncError,
+    setHandoverSyncStatus,
+    setHandoverSyncError,
+  } = useHandoverSyncStatus();
   const aiSbarAvailable = AI_SBAR_ENABLED;
   const aiSbarGenerationAvailable = AI_BACKEND_ENABLED;
 
@@ -1151,26 +1163,6 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       setAudioUploadError(null);
     }
   }, [audioUploadToFhir]);
-
-  useEffect(() => subscribeSyncStatus(setSyncSnapshot), []);
-
-  useEffect(() => {
-    if (handoverSyncStatus === 'idle') return;
-    if (syncSnapshot.lastError) {
-      setHandoverSyncStatus('error');
-      setHandoverSyncError(syncSnapshot.lastError);
-      return;
-    }
-    if (syncSnapshot.status === 'running' || syncSnapshot.pendingCount > 0) {
-      setHandoverSyncStatus('syncing');
-      setHandoverSyncError(null);
-      return;
-    }
-    if (syncSnapshot.status === 'idle' && syncSnapshot.pendingCount === 0) {
-      setHandoverSyncStatus('synced');
-      setHandoverSyncError(null);
-    }
-  }, [handoverSyncStatus, syncSnapshot]);
 
   useEffect(() => {
     activeFieldRef.current = activeDictationField;
@@ -1398,7 +1390,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     audioTranscription: values.audioTranscription,
     risks: values.risks,
     risksStructured: values.risksStructured,
-    oxygenTherapy: normalizeOxygenTherapy(values.oxygenTherapy),
+    oxygenTherapy: normalizeOxygenTherapyInput(values.oxygenTherapy),
     devices: values.devices,
     nutrition: values.nutrition,
     elimination: values.elimination,
@@ -1665,20 +1657,6 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   return out;
 };
 
-  const normalizeOxygenTherapy = (value: unknown) => {
-  if (value == null) return value; // null/undefined OK
-  if (typeof value !== "object") return value;
-
-  // Si ya trae status, no tocamos nada
-  if ("status" in (value as any)) return value;
-
-  // Si viene en formato antiguo (sin status), ponemos uno por defecto seguro
-  return {
-    status: "in-progress",
-    ...(value as any),
-  };
-};
-
   const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
     const vitals = watchedVitals ?? {};
     const oxygen = watchedOxygen ?? {};
@@ -1757,31 +1735,11 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     }
   };
 
-  const buildHandoverInput = useMemo(() => {
-  const normalizeOxygenTherapy = (value: unknown) => {
-    if (value == null) return value; // null/undefined OK
-    if (typeof value !== "object") return value;
-
-    // Si ya trae status, no tocamos nada
-    if ("status" in (value as any)) return value;
-
-    // Si viene en formato antiguo (sin status), ponemos uno por defecto seguro
-    return {
-      status: "in-progress",
-      ...(value as any),
-    };
-  };
-
-  return (
-    values: HandoverFormValues,
-    overrides: Partial<FhirHandoverInput>
-  ): FhirHandoverInput => ({
-    ...values,
-    oxygenTherapy: normalizeOxygenTherapy((values as any).oxygenTherapy) as any,
-    ...overrides,
-  });
-}, []);
-
+  const buildHandoverInput = useMemo(
+    () => (values: HandoverFormValues, overrides: Partial<FhirHandoverValues>): FhirHandoverInput =>
+      buildHandoverInputPayload(values, overrides),
+    [],
+  );
   const buildBundle = useCallback(
     async (handoverInput: FhirHandoverInput, nowIso: string) =>
       buildHandoverBundleAsync(handoverInput, { now: () => nowIso }),
@@ -1790,19 +1748,11 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
 
   const submitHandover = async (values: HandoverFormValues, attempt = 0): Promise<void> => {
     try {
-      const normalizeUnit = (value?: string | null) => {
-        if (typeof value !== 'string') return undefined;
-        const trimmed = value.trim();
-        if (!trimmed || trimmed === ALL_UNITS_OPTION) return undefined;
-        return trimmed;
-      };
-
       const status = values.status ?? 'draft';
-      const unitFromForm = normalizeUnit(values.administrativeData?.unit);
-      const unitFromNav = normalizeUnit(unitIdParam ?? route.params?.unitId);
-      const unitFromStore = normalizeUnit(selectedUnitId);
+      const unitFromForm = normalizeUnitSelection(values.administrativeData?.unit, ALL_UNITS_OPTION);
+      const unitFromNav = normalizeUnitSelection(unitIdParam ?? route.params?.unitId, ALL_UNITS_OPTION);
+      const unitFromStore = normalizeUnitSelection(selectedUnitId, ALL_UNITS_OPTION);
       const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
-
       const riskBeforeSubmit = deriveRiskEvaluationFromValues(
         values.vitals,
         values.braden,
@@ -1825,23 +1775,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       const medications = values.medications ?? [];
       const treatments = values.treatments ?? [];
       const medsText = values.meds;
-      const oxygenTherapyInput = values.oxygenTherapy ?? {};
-      const hasOxygenValues = Boolean(
-        oxygenTherapyInput.device ||
-        oxygenTherapyInput.flowLMin != null ||
-        oxygenTherapyInput.fio2 != null
-      );
-
-      const oxygenTherapy = hasOxygenValues
-        ? {
-            status: 'in-progress' as const,
-            device: oxygenTherapyInput.device,
-            deviceDisplay: oxygenTherapyInput.device,
-            flowLMin: oxygenTherapyInput.flowLMin,
-            fio2: oxygenTherapyInput.fio2,
-          }
-        : null;
-
+      const { hasOxygenValues, oxygenTherapy } = buildSubmissionOxygenTherapy(values.oxygenTherapy);
       if (audioUploadToFhir && values.audioUri) {
         setAudioUploadStatus('uploading');
         setAudioUploadError(null);
@@ -1866,17 +1800,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
 
       const audioAttachment = await buildAudioAttachment(values.audioUri);
 
-      const administrativeData: AdministrativeData = {
-        unit: unitEffective ?? values.administrativeData.unit,
-        census: values.administrativeData.census ?? 0,
-        staffIn: (values.administrativeData.staffIn ?? []).filter(Boolean),
-        staffOut: (values.administrativeData.staffOut ?? []).filter(Boolean),
-        shiftStart: values.administrativeData.shiftStart,
-        shiftEnd: values.administrativeData.shiftEnd,
-        shiftType: values.administrativeData.shiftType,
-        generalNotes: values.administrativeData.generalNotes,
-        incidents: values.administrativeData.incidents?.filter(Boolean),
-      };
+      const administrativeData: AdministrativeData = buildSubmissionAdministrativeData(values, unitEffective);
 
       const nowIso = new Date().toISOString();
       const handoverInput = buildHandoverInput(values, {
