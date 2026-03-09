@@ -1,59 +1,71 @@
-# Checklist de ciberseguridad para NNN + ICEA+
+# Checklist de ciberseguridad NNN + ICEA+ (basado en evidencia real)
 
-> Uso: completar por entorno (dev/staging/prod) y por release. Marcar N/A con justificación.
+> Corte documental: 2026-03-09. Estados: `Implementado`, `Parcial`, `Pendiente`.
 
 ## 1) Logging, PHI y observabilidad
-- [ ] Logs de app/backend excluyen PHI en texto claro.
-- [ ] Logs no contienen tokens JWT, API keys ni secretos.
-- [ ] Existe política de redacción/masking para campos sensibles.
-- [ ] Se definen niveles de log por entorno (sin debug sensible en producción).
-- [ ] Existe trazabilidad por `request_id` sin exponer datos clínicos identificables.
+
+| Control | Evidencia real | Tests | Estado | Riesgo residual |
+|---|---|---|---|---|
+| Logs ICEA no exponen payload clinico crudo ni secretos | `backend/api/icea.py::safe_icea_event_summary`, hashing de `bundle_id/patient_id/unit_id` | `backend/api/tests/test_icea_webhook.py` | Implementado | Cobertura centrada en outbox; otras rutas del backend requieren vigilancia continua |
+| ETL/logs no exponen Bearer ni `patient_id` en duplicados | `backend/api/views.py`, persistencia idempotente por `request_id` | `backend/api/tests/test_handover_etl_read.py` | Implementado | La prueba cubre el flujo documentado, no toda la aplicacion |
+| Timing metrics no guardan contenido clinico | `backend/api/views.py::HandoverTimingMetricsView`, `docs/metrics.md` | `backend/api/tests/test_handover_timing_metrics.py` | Implementado | El valor de `request_id` sigue siendo dato operativo sensible y debe tratarse como tal |
 
 ## 2) Tokens, secretos y credenciales
-- [ ] Secretos almacenados en gestor seguro (no hardcoded).
-- [ ] Rotación de secretos definida y probada.
-- [ ] Variables sensibles no se imprimen en CI/CD ni en excepciones.
-- [ ] Scopes mínimos (least privilege) para tokens S2S.
-- [ ] Revocación/expiración activa para tokens comprometidos.
 
-## 3) Webhook ICEA+ y HMAC
-- [ ] Firma HMAC obligatoria en webhook ICEA+.
-- [ ] Verificación de timestamp + ventana anti-replay implementada.
-- [ ] Rechazo explícito de firmas inválidas o ausentes (`401/403`).
-- [ ] Secret de webhook diferenciado por entorno.
-- [ ] Registros de fallo de verificación sin volcar payload sensible.
+| Control | Evidencia real | Tests | Estado | Riesgo residual |
+|---|---|---|---|---|
+| Secretos por variables de entorno y validacion minima | `backend/api/icea_client.py`, `backend/api/icea_pipeline.py`, `backend/api/icea_bridge_service.py` | `backend/api/tests/test_icea_webhook.py`, `backend/api/tests/test_icea_bridge.py` | Implementado | No hay evidencia en repo de rotacion automatica ni vault externo |
+| `ICEA_BRIDGE_MODEL_ID` invalido o ausente falla de forma explicita | `backend/api/icea_bridge_service.py` | `backend/api/tests/test_icea_bridge.py` | Implementado | Sigue siendo una validacion de arranque/logica, no una gestion de secretos completa |
+| Politica de rotacion de secretos | No hay automatizacion ni runbook en este paquete | No aplica | Pendiente | Riesgo operativo del entorno piloto |
 
-## 4) Rate limits, retry, replay e idempotencia
-- [ ] Rate limiting activo en endpoints críticos.
-- [ ] Política de retry con backoff exponencial y tope de intentos.
-- [ ] Protección frente a replay (nonce/timestamp/request_id).
-- [ ] Idempotencia verificada para reintentos offline.
-- [ ] No duplicación confirmada en FHIR, outbox y ETL.
+## 3) Service-to-service auth con ICEA
 
-## 5) RBAC, scopes y comunicaciones S2S
-- [ ] RBAC aplicado en endpoints de handover/IA/ICEA+.
-- [ ] Validación de scopes por operación crítica.
-- [ ] Integraciones S2S usan credenciales dedicadas y auditables.
-- [ ] Principio de mínimo privilegio documentado.
-- [ ] Revisión periódica de permisos y cuentas técnicas.
+| Superficie | Mecanismo real | Evidencia | Estado | Riesgo residual |
+|---|---|---|---|---|
+| Webhook tecnico HANDOVER -> ICEA+ | HMAC compartido + `Idempotency-Key`; anti-replay opcional | `backend/api/icea_client.py`, `backend/api/tests/test_icea_webhook.py` | Parcial | Anti-replay no esta forzado por defecto |
+| Pipeline/bridge HANDOVER -> ICEA+ | Bearer estatico o `client_credentials` | `backend/api/icea_pipeline.py`, `backend/api/tests/test_icea_pipeline_api.py`, `backend/api/tests/test_icea_bridge.py` | Implementado | La robustez final depende del proveedor ICEA+ y de la configuracion del entorno |
+| App movil -> ICEA+ | No permitido; la app habla con HANDOVER | `src/lib/admin-api.ts`, `src/lib/icea-bridge-api.ts`, `backend/api/urls.py` | Implementado | Cualquier integracion futura debe mantener este principio |
 
-## 6) Almacenamiento, retención y borrado
-- [ ] Cifrado en reposo para datos y colas offline.
-- [ ] Política de retención documentada para logs y evidencias.
-- [ ] Borrado seguro/expurgo probado según ventana definida.
-- [ ] Backups protegidos y con restauración validada.
-- [ ] Exportes de auditoría incluyen controles de integridad.
+## 4) HMAC, replay, retry e idempotencia
 
-## 7) OWASP Mobile + backend API
-- [ ] OWASP Mobile: almacenamiento seguro, protección de credenciales, TLS correcto.
-- [ ] OWASP API: authz por objeto/función, limitación de recursos, validación de entrada.
-- [ ] Gestión de errores sin fuga de información sensible.
-- [ ] Dependencias con escaneo de vulnerabilidades vigente.
-- [ ] Plan de respuesta a incidentes actualizado y ensayado.
+| Control | Evidencia real | Tests | Estado | Riesgo residual |
+|---|---|---|---|---|
+| Firma HMAC sobre JSON canonico | `backend/api/icea_client.py` | `backend/api/tests/test_icea_webhook.py` | Implementado | Depende de que el receptor valide la misma canonizacion |
+| Anti-replay con `timestamp` + `nonce` | Disponible por flag `ICEA_WEBHOOK_ANTI_REPLAY` | `backend/api/tests/test_icea_webhook.py` | Parcial | Debe activarse explicitamente en el piloto si el riesgo lo exige |
+| Reintentos con backoff y estados `retry/failed` | `backend/api/icea.py`, comando `flush_icea_outbox` | `backend/api/tests/test_icea_webhook.py` | Implementado | La recuperacion final sigue dependiendo del receptor remoto |
+| Idempotencia local por `request_id` | `HandoverBundleRecord` + `IceaOutboundEvent` | `backend/api/tests/test_handover_etl_read.py`, `backend/api/tests/test_icea_webhook.py`, `backend/api/tests/test_icea_transaction.py` | Implementado | Si el cliente cambia `request_id`, crea una nueva transaccion legitima |
 
-## 8) Resultado y remediación
-- Estado global: Aprobado / Aprobado con hallazgos / No aprobado
-- Hallazgos críticos:
-- Hallazgos mayores:
-- CAPA asociadas (ID/ticket/fecha objetivo):
-- Aprobadores (Seguridad / QA / Regulatorio):
+## 5) RBAC, scopes y accesos
+
+| Control | Evidencia real | Tests | Estado | Riesgo residual |
+|---|---|---|---|---|
+| ETL read requiere `client-credentials` + rol/scope | `backend/api/views.py::HandoverEtlReadView` | `backend/api/tests/test_handover_etl_read.py` | Implementado | El endpoint devuelve PHI a servicios autorizados; TLS y custodia de credenciales siguen siendo criticos |
+| Dashboard/pipeline requiere `supervisor/admin`; acciones solo `admin` | `backend/api/views_icea.py` | `backend/api/tests/test_icea_pipeline_api.py`, `backend/api/tests/test_role_acl.py` | Implementado | Cambios futuros en claims pueden abrir superficie si no se re-testan |
+| Bridge clinico y patient-risk limitados por rol/unidad | `backend/api/views_icea_bridge.py` | `backend/api/tests/test_icea_bridge.py` | Implementado | La asignacion de `unitIds` en el IdP debe ser correcta |
+
+## 6) Almacenamiento, retencion y borrado
+
+| Control | Evidencia real | Tests | Estado | Riesgo residual |
+|---|---|---|---|---|
+| Cola offline cifrada en cliente | `src/lib/queue.ts`, `src/lib/sync.ts` | `tests/queue/offline-queue.spec.ts` | Implementado | La custodia de la clave sigue siendo responsabilidad del entorno del cliente |
+| Retencion de bundles locales con expiracion por defecto | `backend/api/models.py::HandoverBundleRecord.default_expiry()` | `backend/api/tests/test_handover_etl_read.py` | Parcial | No hay prueba de expurgo/borrado seguro en este paquete |
+| Backup/restore y borrado seguro | No hay evidencia en repo | No aplica | Pendiente | Requiere procedimiento de infraestructura y validacion fuera del repo |
+
+## 7) Dependencias, hardening e incident response
+
+| Control | Evidencia real | Estado | Riesgo residual |
+|---|---|---|---|
+| Hardening documental general | `docs/SECURITY_HARDENING.md`, `docs/security-and-auth.md` | Parcial | No aporta por si solo reporte de escaneo actualizado |
+| Dependency scanning ejecutado para este paquete | No hay reporte adjunto en el repo para este corte | Pendiente | Queda fuera del cierre de este paquete documental |
+| Plan de respuesta a incidentes especifico para NNN + ICEA+ | No hay runbook especifico en los documentos objetivo | Pendiente | Debe completarse en operaciones/QMS |
+
+## 8) Resultado actual del checklist
+
+- Sin evidencia de hallazgo critico abierto en el codigo revisado para NNN + ICEA+.
+- Con pendientes reales antes de hablar de cierre regulatorio fuerte:
+  - anti-replay obligatorio por entorno;
+  - rotacion y custodia de secretos;
+  - dependency scanning documentado;
+  - backup/restore y borrado seguro.
+
+Resultado recomendado para este paquete: `Aprobado con hallazgos abiertos controlados para piloto`, no `Aprobado definitivo`.
