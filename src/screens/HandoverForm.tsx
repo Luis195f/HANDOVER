@@ -72,6 +72,7 @@ import {
   type SnomedCoding,
 } from '@/src/data/snomed-dict';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
+import { useIceaPatientRisk } from '@/src/hooks/useIceaPatientRisk';
 import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
@@ -1550,6 +1551,15 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     [patientSummary, patientSummaryParam],
   );
   const bannerLoading = loadingPatient && !patientSummaryParam;
+  const showIceaPatientRisk = isOn('ENABLE_ICEA_PATIENT_RISK') && Boolean(trimmedPatientId);
+  const showIceaCausalSummary = isOn('ENABLE_ICEA_CAUSAL_SUMMARY');
+  const { summary: iceaPatientRisk, loading: loadingIceaPatientRisk, error: iceaPatientRiskError } = useIceaPatientRisk(
+    trimmedPatientId,
+    {
+      unitId: unitIdParam ?? selectedUnitId ?? undefined,
+      enabled: showIceaPatientRisk,
+    },
+  );
   // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
@@ -2236,7 +2246,16 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           scrollEventThrottle={16}
         >
         {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
-        <PatientBanner summary={bannerSummary} loading={bannerLoading} error={patientSummaryError} />
+        <PatientBanner
+          summary={bannerSummary}
+          loading={bannerLoading}
+          error={patientSummaryError}
+          iceaRisk={iceaPatientRisk}
+          iceaRiskLoading={loadingIceaPatientRisk}
+          iceaRiskError={iceaPatientRiskError?.message ?? null}
+          showIceaRisk={showIceaPatientRisk}
+          showIceaCausalSummary={showIceaCausalSummary}
+        />
         {/* END HANDOVER D6 – HandoverForm PatientBanner */}
         {handoverSyncStatus !== 'idle' ? (
           <View
@@ -3077,4 +3096,3 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     </FormProvider>
   );
 }
-

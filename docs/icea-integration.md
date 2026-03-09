@@ -289,3 +289,13 @@ Consumo frontend/dashboard:
 
 Ver detalle clinico/analitico: [docs/icea-bridge.md](./icea-bridge.md).
 
+
+Decision record:
+- en el estado actual del repo es mas limpio reutilizar la persistencia/proxy del bridge en HANDOVER para el retorno bedside; no se introduce writeback FHIR RiskAssessment nuevo porque hoy no existe una cadena real de consumo ni reconciliacion downstream para ese recurso en HANDOVER.
+
+
+
+### Cierre del loop clinico bedside
+- HANDOVER expone `GET /api/icea/patient-risk?patientId=<id>[&unitId=<id>]` y `GET /api/icea/patient-risk?unitId=<id>` para devolver el ultimo apoyo analitico prudente por paciente sin exigir `handoverId` en la app.
+- El contrato bedside distingue `pending`, `provisional`, `complete`, `insufficient_evidence` y `failed`, ademas de `stale=true`, provenance, warnings y `lastUpdatedAt`.
+- `ENABLE_ICEA_PATIENT_RISK` controla la exposicion del resumen analitico en backend/frontend y `ENABLE_ICEA_CAUSAL_SUMMARY` habilita solo el resumen causal resumido cuando exista.

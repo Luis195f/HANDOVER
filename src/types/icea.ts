@@ -9,6 +9,8 @@ export type IceaBridgeStatus =
 
 export type IceaBridgeScoringMode = 'immediate_provisional' | 'enriched_followup';
 
+export type IceaClinicalRiskStatus = 'no_data' | 'pending' | 'provisional' | 'complete' | 'insufficient_evidence' | 'failed';
+
 export interface IceaBridgeWarning {
   code: string;
   message: string;
@@ -76,5 +78,50 @@ export interface IceaBridgeStatusResponse {
 
 export interface IceaBridgeListResponse {
   results: IceaBridgeRequest[];
+  count: number;
+}
+
+export interface IceaPatientRiskConfidence {
+  value?: number | null;
+  label?: string | null;
+}
+
+export interface IceaPatientRiskProvenance {
+  source: string;
+  provider: string;
+  scoringMode: IceaBridgeScoringMode;
+  contractVersion?: string | null;
+  formulaVersion?: string | null;
+  bridgeStatus?: IceaBridgeStatus | null;
+  localStatusIsAuthoritative: boolean;
+}
+
+export interface IceaPatientRiskCausalSummary {
+  available: boolean;
+  summary?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface IceaPatientRiskSummary {
+  patientId: string;
+  unitId: string;
+  handoverId: string;
+  requestId: string;
+  clinicalStatus: IceaClinicalRiskStatus;
+  stale: boolean;
+  score?: number | null;
+  scoreLabel?: string | null;
+  confidence?: IceaPatientRiskConfidence | null;
+  warnings: IceaBridgeWarning[];
+  message: string;
+  calculatedAt?: string | null;
+  lastUpdatedAt: string;
+  provenance: IceaPatientRiskProvenance;
+  causalSummary?: IceaPatientRiskCausalSummary | null;
+}
+
+export interface IceaPatientRiskListResponse {
+  enabled: boolean;
+  results: IceaPatientRiskSummary[];
   count: number;
 }

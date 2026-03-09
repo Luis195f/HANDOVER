@@ -14,6 +14,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import Chip from "@/src/components/Chip";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
+import { isOn } from '@/src/config/flags';
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { type PatientListItem } from "@/src/data/mockPatients";
 import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
@@ -29,11 +30,13 @@ import {
   useSelectedUnitId,
 } from "@/src/state/filterStore";
 import type { Handover } from "@/src/types/handover";
+import type { IceaPatientRiskSummary } from '@/src/types/icea';
 import { computeAlerts, type HandoverAlertsSource } from '@/src/lib/alerts';
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
 import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
 import { apiGet } from "@/src/lib/api";
+import { useIceaPatientRiskSummaries } from '@/src/hooks/useIceaPatientRisk';
 import { createPatient } from "@/src/lib/patients";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
@@ -70,6 +73,40 @@ type ChipItem = {
 };
 
 const FilterChip = Chip as unknown as ComponentType<any>;
+
+function getIceaRiskStatusLabel(status: IceaPatientRiskSummary['clinicalStatus']) {
+  switch (status) {
+    case 'pending':
+      return 'Pendiente';
+    case 'provisional':
+      return 'Provisional';
+    case 'complete':
+      return 'Disponible';
+    case 'insufficient_evidence':
+      return 'Evidencia insuficiente';
+    case 'failed':
+      return 'No disponible';
+    default:
+      return 'Sin dato';
+  }
+}
+
+function buildIceaRiskPreview(summary: IceaPatientRiskSummary) {
+  const parts: string[] = [];
+  if (typeof summary.score === 'number') {
+    parts.push(`score ${summary.score.toFixed(1)}`);
+  }
+  if (summary.confidence?.label) {
+    parts.push(`confianza ${summary.confidence.label}`);
+  }
+  if (summary.stale) {
+    parts.push('dato potencialmente desactualizado');
+  }
+  if (parts.length === 0) {
+    return summary.message;
+  }
+  return `${parts.join(' · ')}. ${summary.message}`;
+}
 
 type PickerProps = {
   label: string;
@@ -432,6 +469,16 @@ export default function PatientList({ navigation }: Props) {
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const { session } = useAuth();
   const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
+  const showIceaPatientRisk = isOn('ENABLE_ICEA_PATIENT_RISK');
+  const canQueryIceaPatientRisk = showIceaPatientRisk && (selectedUnitId !== ALL_UNITS_OPTION || canViewSupervisorDashboard);
+  const { data: iceaPatientRiskData } = useIceaPatientRiskSummaries(canQueryIceaPatientRisk, {
+    unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
+    limit: Math.max(patients.length, 20),
+  });
+  const iceaPatientRiskByPatientId = useMemo(
+    () => new Map(iceaPatientRiskData.results.map((item) => [item.patientId, item] as const)),
+    [iceaPatientRiskData.results],
+  );
 
   const onOpenPatient = useCallback(
     (patientId: string) => {
@@ -597,6 +644,7 @@ export default function PatientList({ navigation }: Props) {
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
           const syncState = patientSyncStatuses[item.patientId] ?? "synced";
           const alerts = alertsByPatient[item.patientId] ?? [];
+          const iceaRisk = iceaPatientRiskByPatientId.get(item.patientId);
           const hasCriticalAlert = alerts.some(alert => alert.severity === 'critical');
           const hasWarningAlert = alerts.some(alert => alert.severity === 'warning');
           return (
@@ -658,6 +706,32 @@ export default function PatientList({ navigation }: Props) {
                       <Text style={[styles.alertChipText, { color: colors.warning }]}>{t("patientList.alertWarning")}</Text>
                     </View>
                   ) : null}
+                </View>
+              ) : null}
+              {iceaRisk ? (
+                <View
+                  style={[
+                    styles.iceaRiskCard,
+                    iceaRisk.clinicalStatus === 'failed'
+                      ? { backgroundColor: '#FEF2F2', borderColor: colors.danger }
+                      : iceaRisk.stale || iceaRisk.clinicalStatus === 'insufficient_evidence'
+                      ? { backgroundColor: '#FFFBEB', borderColor: colors.warning }
+                      : { backgroundColor: '#EFF6FF', borderColor: colors.info },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.iceaRiskTitle,
+                      iceaRisk.clinicalStatus === 'failed'
+                        ? { color: colors.danger }
+                        : iceaRisk.stale || iceaRisk.clinicalStatus === 'insufficient_evidence'
+                        ? { color: '#92400E' }
+                        : { color: colors.info },
+                    ]}
+                  >
+                    Apoyo analítico ICEA+ · {getIceaRiskStatusLabel(iceaRisk.clinicalStatus)}
+                  </Text>
+                  <Text style={[styles.iceaRiskText, { color: colors.text }]}>{buildIceaRiskPreview(iceaRisk)}</Text>
                 </View>
               ) : null}
               <Pressable
@@ -931,6 +1005,21 @@ const styles = StyleSheet.create({
   alertChipText: {
     fontWeight: '700',
     color: '#1f2937',
+  },
+  iceaRiskCard: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+  },
+  iceaRiskTitle: {
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  iceaRiskText: {
+    fontSize: 12,
+    color: '#334155',
   },
   listContainer: {
     paddingBottom: 32,

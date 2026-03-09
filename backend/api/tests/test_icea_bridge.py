@@ -17,7 +17,7 @@ from backend.api.icea_bridge_service import (
     serialize_bridge_request,
 )
 from backend.api.icea_payload_mapper import build_icea_bridge_payload
-from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
+from backend.api.models import HandoverBundleRecord, IceaBridgeRequest, IceaPipelineSnapshot
 from backend.api.tests.icea_test_utils import build_authenticated_api_user, build_fhir_response, build_icea_bundle
 from backend.api.views import BundleView
 
@@ -685,6 +685,288 @@ class IceaBridgeTransactionFlowTests(TestCase):
 
 
 
+
+
+
+
+
+
+class IceaPatientRiskApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = reverse('icea-patient-risk')
+        self.bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-risk-001:immediate_provisional',
+            request_id='req-risk-001',
+            bundle_id='bundle-risk-001',
+            patient_id='pat-risk-001',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-risk-001:immediate_provisional:abcd',
+            payload_hash='abcd' * 16,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_SCORED,
+            provisional=True,
+            formula_version='icea_plus_v1',
+            contract_version='handover-icea-bridge-v1',
+            score_summary_json={
+                'score': 82.0,
+                'rowStatus': 'provisional',
+                'confidence': {'value': 0.81, 'label': 'high'},
+            },
+            warnings_json=[{'code': 'remote_warning', 'message': 'Analytic support only'}],
+        )
+
+    def _auth(self, *, roles, sub='auth0|risk-user', unit_ids=None):
+        claims = {'sub': sub, 'roles': roles, 'permissions': ['handover:write']}
+        if unit_ids is not None:
+            claims['unitIds'] = unit_ids
+        user = types.SimpleNamespace(is_authenticated=True, claims=claims, sub=sub, username=sub)
+        self.client.force_authenticate(user=user, token=claims)
+        self.client.credentials(HTTP_AUTHORIZATION='Bearer risk-token')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+            'ENABLE_ICEA_CAUSAL_SUMMARY': 'true',
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '1800',
+        },
+        clear=False,
+    )
+    def test_patient_risk_returns_provisional_summary_for_nurse(self):
+        IceaPipelineSnapshot.objects.create(
+            request_id='req-risk-001',
+            bundle_id='bundle-risk-001',
+            patient_id='pat-risk-001',
+            unit_id='icu-a',
+            visible_status='succeeded',
+            last_stage='causal-report',
+            stage_statuses={'causal-report': {'status': 'succeeded'}},
+            causal_report_json={'report': {'available': True, 'summary': 'Resumen causal prudente', 'updatedAt': '2026-03-09T09:00:00Z'}},
+        )
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001', 'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+        summary = response.json()['results'][0]
+        self.assertEqual(summary['clinicalStatus'], 'provisional')
+        self.assertEqual(summary['score'], 82.0)
+        self.assertEqual(summary['confidence']['label'], 'high')
+        self.assertEqual(summary['provenance']['formulaVersion'], 'icea_plus_v1')
+        self.assertEqual(summary['causalSummary']['summary'], 'Resumen causal prudente')
+        self.assertIn('juicio clinico', summary['message'].lower())
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
+        },
+        clear=False,
+    )
+    def test_patient_risk_marks_stale_data(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+        IceaBridgeRequest.objects.filter(id=self.bridge_request.id).update(
+            status=IceaBridgeRequest.STATUS_STALE,
+            updated_at=timezone.now() - datetime.timedelta(minutes=10),
+        )
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()['results'][0]
+        self.assertTrue(summary['stale'])
+        self.assertIn('desactualizado', summary['message'].lower())
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_returns_empty_when_no_data_exists(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'missing-patient'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 0)
+        self.assertEqual(response.json()['results'], [])
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_surfaces_failed_remote_state(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+        IceaBridgeRequest.objects.filter(id=self.bridge_request.id).update(
+            status=IceaBridgeRequest.STATUS_FAILED,
+            provisional=False,
+            last_error='upstream timeout',
+            score_summary_json=None,
+        )
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()['results'][0]
+        self.assertEqual(summary['clinicalStatus'], 'failed')
+        self.assertIsNone(summary['score'])
+        self.assertIn('no se pudo', summary['message'].lower())
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'false',
+        },
+        clear=False,
+    )
+    def test_patient_risk_respects_feature_flag(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_disabled')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_rejects_nurse_unit_outside_scope(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001', 'unitId': 'icu-b'})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_forbidden_unit')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_infers_single_unit_for_nurse_patient_query(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_rejects_nurse_global_query_without_filters(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_filter_required')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_requires_unit_when_nurse_has_multiple_units(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a', 'icu-b'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_unit_required')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_requires_unit_when_nurse_has_no_resolvable_unit(self):
+        self._auth(roles=['nurse'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_unit_required')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_allows_supervisor_global_query(self):
+        self._auth(roles=['supervisor'])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_allows_admin_global_query(self):
+        self._auth(roles=['admin'])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_requires_clinical_role(self):
+        self._auth(roles=['viewer'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 403)
 
 
 

@@ -6,6 +6,11 @@ import type {
   IceaBridgeScoringMode,
   IceaBridgeStatusResponse,
   IceaBridgeSummary,
+  IceaPatientRiskCausalSummary,
+  IceaPatientRiskConfidence,
+  IceaPatientRiskListResponse,
+  IceaPatientRiskProvenance,
+  IceaPatientRiskSummary,
 } from '@/src/types/icea';
 
 function normalizeWarnings(value: unknown) {
@@ -77,6 +82,58 @@ function normalizeBridgeSummary(payload: Partial<IceaBridgeSummary> | null | und
   };
 }
 
+function normalizePatientRiskConfidence(value: unknown): IceaPatientRiskConfidence | null {
+  if (!value || typeof value !== 'object') return null;
+  const normalizedValue = typeof (value as { value?: unknown }).value === 'number' ? (value as { value: number }).value : null;
+  const label = typeof (value as { label?: unknown }).label === 'string' ? (value as { label: string }).label : null;
+  if (normalizedValue === null && !label) return null;
+  return { value: normalizedValue, label };
+}
+
+function normalizePatientRiskProvenance(value: unknown): IceaPatientRiskProvenance {
+  const payload = value && typeof value === 'object' ? (value as Partial<IceaPatientRiskProvenance>) : {};
+  return {
+    source: typeof payload.source === 'string' ? payload.source : 'HANDOVER',
+    provider: typeof payload.provider === 'string' ? payload.provider : 'ICEA+',
+    scoringMode: (payload.scoringMode as IceaBridgeScoringMode) ?? 'immediate_provisional',
+    contractVersion: typeof payload.contractVersion === 'string' ? payload.contractVersion : null,
+    formulaVersion: typeof payload.formulaVersion === 'string' ? payload.formulaVersion : null,
+    bridgeStatus: payload.bridgeStatus ?? null,
+    localStatusIsAuthoritative:
+      typeof payload.localStatusIsAuthoritative === 'boolean' ? payload.localStatusIsAuthoritative : true,
+  };
+}
+
+function normalizePatientRiskCausalSummary(value: unknown): IceaPatientRiskCausalSummary | null {
+  if (!value || typeof value !== 'object') return null;
+  const payload = value as Partial<IceaPatientRiskCausalSummary>;
+  const available = Boolean(payload.available);
+  const summary = typeof payload.summary === 'string' ? payload.summary : null;
+  const updatedAt = typeof payload.updatedAt === 'string' ? payload.updatedAt : null;
+  if (!available && !summary && !updatedAt) return null;
+  return { available, summary, updatedAt };
+}
+
+function normalizePatientRiskSummary(payload: Partial<IceaPatientRiskSummary> | null | undefined): IceaPatientRiskSummary {
+  return {
+    patientId: typeof payload?.patientId === 'string' ? payload.patientId : '',
+    unitId: typeof payload?.unitId === 'string' ? payload.unitId : '',
+    handoverId: typeof payload?.handoverId === 'string' ? payload.handoverId : '',
+    requestId: typeof payload?.requestId === 'string' ? payload.requestId : '',
+    clinicalStatus: payload?.clinicalStatus ?? 'no_data',
+    stale: Boolean(payload?.stale),
+    score: typeof payload?.score === 'number' ? payload.score : null,
+    scoreLabel: typeof payload?.scoreLabel === 'string' ? payload.scoreLabel : null,
+    confidence: normalizePatientRiskConfidence(payload?.confidence),
+    warnings: normalizeWarnings(payload?.warnings),
+    message: typeof payload?.message === 'string' ? payload.message : 'Apoyo analitico ICEA+ no disponible.',
+    calculatedAt: typeof payload?.calculatedAt === 'string' ? payload.calculatedAt : null,
+    lastUpdatedAt: typeof payload?.lastUpdatedAt === 'string' ? payload.lastUpdatedAt : '',
+    provenance: normalizePatientRiskProvenance(payload?.provenance),
+    causalSummary: normalizePatientRiskCausalSummary(payload?.causalSummary),
+  };
+}
+
 export async function fetchIceaBridgeStatus(handoverId: string, options?: { scoringMode?: IceaBridgeScoringMode; refresh?: boolean }): Promise<IceaBridgeStatusResponse> {
   const params = new URLSearchParams();
   if (options?.scoringMode) params.set('scoringMode', options.scoringMode);
@@ -108,6 +165,20 @@ export async function fetchIceaBridgeRequests(filters?: { patientId?: string; un
   const payload = (await apiGet(`/api/icea/bridge/status${qs}`)) as Partial<IceaBridgeListResponse>;
   return {
     results: Array.isArray(payload?.results) ? payload.results.map((item) => normalizeBridgeRequest(item)) : [],
+    count: typeof payload?.count === 'number' ? payload.count : 0,
+  };
+}
+
+export async function fetchIceaPatientRiskSummaries(filters?: { patientId?: string; unitId?: string; limit?: number }): Promise<IceaPatientRiskListResponse> {
+  const params = new URLSearchParams();
+  if (filters?.patientId) params.set('patientId', filters.patientId);
+  if (filters?.unitId) params.set('unitId', filters.unitId);
+  if (typeof filters?.limit === 'number') params.set('limit', String(filters.limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const payload = (await apiGet(`/api/icea/patient-risk${qs}`)) as Partial<IceaPatientRiskListResponse>;
+  return {
+    enabled: typeof payload?.enabled === 'boolean' ? payload.enabled : true,
+    results: Array.isArray(payload?.results) ? payload.results.map((item) => normalizePatientRiskSummary(item)) : [],
     count: typeof payload?.count === 'number' ? payload.count : 0,
   };
 }

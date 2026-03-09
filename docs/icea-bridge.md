@@ -147,7 +147,3 @@ Frontend:
 - El modo `enriched_followup` requiere disponibilidad de datos posteriores; HANDOVER no los inventa.
 - La vista admin actual expone resumen del bridge, no un dashboard analitico completo.
 - Sigue existiendo una advertencia heredada no relacionada en `backend/api/views.py` por `datetime.utcnow()` usada en auditoria existente.
-
-
-
-

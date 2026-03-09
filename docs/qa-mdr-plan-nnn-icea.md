@@ -154,3 +154,10 @@ Evidencia ejecutada en este corte:
 - `pnpm typecheck`
 
 
+
+
+
+Cobertura bedside añadida en este corte:
+- endpoint `/api/icea/patient-risk`: casos `no data`, `stale data`, `valid data`, `failed remote state`, `flag off` y permisos por rol.
+- UI prudente: banner de paciente y lista de pacientes muestran apoyo analitico como soporte, nunca como diagnostico autonomo.
+- flags de despliegue: `ENABLE_ICEA_PATIENT_RISK` y `ENABLE_ICEA_CAUSAL_SUMMARY` verificados como puertas de activacion separadas.
