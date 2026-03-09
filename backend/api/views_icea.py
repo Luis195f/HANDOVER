@@ -146,6 +146,7 @@ class IceaPipelineEventsView(AuthenticatedAPIView):
             queryset = queryset.filter(unit_id=unit_id)
         if stage:
             queryset = queryset.filter(stage=stage)
+        queryset = queryset.order_by("-created_at", "-id")
         return Response({"results": [serialize_pipeline_event(event) for event in queryset[:limit]]}, status=200)
 
 
@@ -245,5 +246,4 @@ class IceaPipelineActionView(AuthenticatedAPIView):
         if snapshot is not None:
             response_payload["snapshot"] = serialize_pipeline_snapshot(snapshot)
         return Response(response_payload, status=200)
-
 

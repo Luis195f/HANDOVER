@@ -1,221 +1,90 @@
-// Dashboard de supervisión de turno basado en un TurnFilter de unidad y franja horaria.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { UNITS } from '@/src/config/units';
-import { resolveUnitFeatureFlags } from '@/src/config/unitsConfig';
-import type { HandoverTimingAggregate } from '@/src/lib/handover-timing-metrics';
-import {
-  buildPrioritySnapshot,
-  computeTurnMetrics,
-  getTurnData,
-  type TurnFilter,
-  type TurnMetrics,
-} from '@/src/lib/analytics';
-import type { PrioritizedPatient } from '@/src/lib/priority';
-import type { RootStackParamList } from '@/src/navigation/types';
+import { useAdminDashboardData } from '@/src/hooks/useAdminDashboardData';
+import { hasRole } from '@/src/security/acl';
+import { useAuth } from '@/src/security/auth';
 
-type ShiftKey = 'morning' | 'evening' | 'night';
-
-type ShiftOption = { key: ShiftKey; label: string; startHour: number; endHour: number };
-
-const SHIFT_OPTIONS: ShiftOption[] = [
-  { key: 'morning', label: 'Mañana', startHour: 7, endHour: 15 },
-  { key: 'evening', label: 'Tarde', startHour: 15, endHour: 23 },
-  { key: 'night', label: 'Noche', startHour: 23, endHour: 7 },
-];
-
-function resolveShiftRange(option: ShiftOption): { start: string; end: string } {
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(option.startHour, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setHours(option.endHour, 0, 0, 0);
-  if (option.endHour <= option.startHour) {
-    end.setDate(end.getDate() + 1);
-  }
-
-  return { start: start.toISOString(), end: end.toISOString() };
+function formatDate(value: string | null | undefined) {
+  if (!value) return 'Sin datos';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('es-ES');
 }
 
-const priorityLabels: Record<PrioritizedPatient['level'], string> = {
-  critical: 'CRÍTICO',
-  high: 'ALTO',
-  medium: 'MEDIO',
-  low: 'BAJO',
-};
+function UnitMetric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
+  return (
+    <View style={styles.metricCard}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={styles.metricValue}>{value}</Text>
+      {detail ? <Text style={styles.metricDetail}>{detail}</Text> : null}
+    </View>
+  );
+}
 
 export function SupervisorDashboardScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const [selectedUnitId, setSelectedUnitId] = useState<string>(UNITS[0]?.id ?? '');
-  const [shiftKey, setShiftKey] = useState<ShiftKey>('morning');
-  const [patients, setPatients] = useState<PrioritizedPatient[]>([]);
-  const [metrics, setMetrics] = useState<TurnMetrics | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [timingMetrics, setTimingMetrics] = useState<HandoverTimingAggregate[]>([]);
-  const [timingError, setTimingError] = useState<string | null>(null);
-  const [isTimingLoading, setIsTimingLoading] = useState(false);
+  const { session, loading: authLoading } = useAuth();
+  const canViewDashboard = hasRole(session, ['supervisor', 'admin']);
+  const isDemoSession = session?.mode === 'demo';
+  const [selectedUnitId, setSelectedUnitId] = useState<string>(session?.units?.[0] ?? UNITS[0]?.id ?? '');
+  const { data, loading, error, reload, stale } = useAdminDashboardData(canViewDashboard, {
+    unitId: selectedUnitId,
+    demoMode: isDemoSession,
+  });
 
-  const selectedFeatures = useMemo(() => resolveUnitFeatureFlags(selectedUnitId), [selectedUnitId]);
+  const selectedUnit = useMemo(() => data?.units.find((unit) => unit.unitId === selectedUnitId) ?? data?.units[0] ?? null, [data, selectedUnitId]);
 
-  const filter = useMemo<TurnFilter>(() => {
-    const shift = SHIFT_OPTIONS.find(option => option.key === shiftKey) ?? SHIFT_OPTIONS[0];
-    const range = resolveShiftRange(shift);
-    return {
-      unitId: selectedUnitId,
-      ...range,
-    };
-  }, [selectedUnitId, shiftKey]);
-
-  const loadTimingMetrics = useCallback(async () => {
-    if (!selectedFeatures.showHandoverTimingMetrics) {
-      setTimingMetrics([]);
-      setTimingError(null);
-      setIsTimingLoading(false);
-      return;
-    }
-
-    setIsTimingLoading(true);
-    setTimingError(null);
-    try {
-      const metricsModule = await import('@/src/lib/handover-timing-metrics');
-      const timing = await metricsModule.getHandoverTimingAggregates(selectedUnitId);
-      setTimingMetrics(timing.results);
-    } catch {
-      setTimingMetrics([]);
-      setTimingError('No disponible');
-    } finally {
-      setIsTimingLoading(false);
-    }
-  }, [selectedFeatures.showHandoverTimingMetrics, selectedUnitId]);
-
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const inputs = await getTurnData(filter);
-      const prioritized = buildPrioritySnapshot(inputs);
-      setPatients(prioritized);
-      setMetrics(computeTurnMetrics(prioritized));
-
-      await loadTimingMetrics();
-    } catch (err) {
-      setError('No se pudieron cargar los datos del turno. Intenta nuevamente.');
-      setPatients([]);
-      setMetrics(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filter, loadTimingMetrics]);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const renderPatient = useCallback(
-    ({ item }: { item: PrioritizedPatient }) => {
-      const priorityStyleKey = `priority_${item.level}` as keyof typeof styles;
-      return (
-        <Pressable
-          style={styles.patientCard as ViewStyle}
-          onPress={() => navigation.navigate('HandoverForm', { patientId: item.patientId })}
-          accessibilityRole="button"
-          testID={`patient-card-${item.patientId}`}
-        >
-          <View style={styles.cardHeader}>
-            <View>
-              <Text style={styles.patientName}>{item.displayName}</Text>
-              {item.bedLabel ? <Text style={styles.patientBed}>Cama {item.bedLabel}</Text> : null}
-            </View>
-            <View style={[styles.priorityBadge as ViewStyle, styles[priorityStyleKey] as ViewStyle]}>
-              <Text style={styles.priorityBadgeText}>{priorityLabels[item.level]}</Text>
-            </View>
-          </View>
-          <Text style={styles.reasonText}>{item.reasonSummary}</Text>
-          <Text style={styles.metaText}>NEWS2: {item.news2Score}</Text>
-          {/* Nota: añadir extracto SBAR compacto cuando esté disponible para esta vista. */}
-        </Pressable>
-      );
-    },
-    [navigation],
-  );
-
-  const renderMetrics = useCallback(() => {
-    const baseMetrics =
-      metrics ?? ({
-        totalPatients: 0,
-        byPriority: { critical: 0, high: 0, medium: 0, low: 0 },
-        averageNews2: null,
-        pendingCriticalTasks: 0,
-        incidentsCount: 0,
-      } satisfies TurnMetrics);
-
-    const timingBySection = timingMetrics;
-
+  if (authLoading) {
     return (
-      <View style={styles.metricsGrid}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Pacientes totales</Text>
-          <Text style={styles.metricValue}>{baseMetrics.totalPatients}</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Por prioridad</Text>
-          <Text style={styles.metricDetail}>
-            Críticos: {baseMetrics.byPriority.critical} · Altos: {baseMetrics.byPriority.high}
-          </Text>
-          <Text style={styles.metricDetail}>
-            Medios: {baseMetrics.byPriority.medium} · Bajos: {baseMetrics.byPriority.low}
-          </Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>NEWS2 promedio</Text>
-          <Text style={styles.metricValue}>{baseMetrics.averageNews2 ?? '—'}</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Tareas críticas pendientes</Text>
-          <Text style={styles.metricValue}>{baseMetrics.pendingCriticalTasks}</Text>
-          <Text style={[styles.metricLabel, styles.incidentsLabel]}>Incidentes recientes</Text>
-          <Text style={styles.metricValue}>{baseMetrics.incidentsCount}</Text>
-        </View>
-        {selectedFeatures.showHandoverTimingMetrics ? (
-          <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>Tiempo promedio por sección (ms)</Text>
-            {isTimingLoading ? <ActivityIndicator size="small" color="#1f6feb" /> : null}
-            {!isTimingLoading && timingBySection.length > 0
-              ? timingBySection.map((item) => (
-                  <Text key={`${item.unitId}-${item.sectionId}`} style={styles.metricDetail}>
-                    {item.sectionId}: {Math.round(item.avgDurationMs)} ms ({item.samples})
-                  </Text>
-                ))
-              : null}
-            {!isTimingLoading && timingBySection.length === 0 ? (
-              <Text style={styles.metricDetail}>{timingError ?? 'Sin datos'}</Text>
-            ) : null}
-            {timingError ? (
-              <Pressable style={styles.retryButton} onPress={() => void loadTimingMetrics()} accessibilityRole="button">
-                <Text style={styles.retryButtonText}>Reintentar</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
+      <View style={styles.centered}>
+        <ActivityIndicator />
       </View>
     );
-  }, [isTimingLoading, loadTimingMetrics, metrics, selectedFeatures.showHandoverTimingMetrics, timingError, timingMetrics]);
+  }
 
-  const selectedUnit = useMemo(() => UNITS.find(unit => unit.id === selectedUnitId), [selectedUnitId]);
+  if (!session || !canViewDashboard) {
+    return (
+      <View style={styles.centered}>
+        <Text>Acceso restringido. Solo supervisor o admin.</Text>
+      </View>
+    );
+  }
+
+  if (loading && !data) {
+    return (
+      <View style={styles.centered} testID="dashboard-loader">
+        <ActivityIndicator />
+        <Text style={styles.loaderText}>Cargando dashboard operativo...</Text>
+      </View>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <View style={styles.container} testID="dashboard-error">
+        <Text style={styles.errorText}>{error.message}</Text>
+        <Pressable style={styles.retryButton} onPress={reload} accessibilityRole="button">
+          <Text style={styles.retryButtonText}>Reintentar</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Dashboard de turno</Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Text style={styles.title}>Dashboard de supervisor</Text>
+      <Text style={styles.subtitle}>Vista backend-driven del estado operativo por unidad y del pipeline ICEA.</Text>
+
+      {data?.demoMode ? <Text style={styles.bannerInfo}>Modo demo explicito: datos ficticios etiquetados como demo.</Text> : null}
+      {stale ? <Text style={styles.bannerWarn}>El resumen puede estar stale; se muestra el ultimo dato persistido.</Text> : null}
+      {data?.degraded ? <Text style={styles.bannerWarn}>Estado degradado: {data.degradationReasons.join(', ')}</Text> : null}
+      {error && data ? <Text style={styles.bannerWarn}>No se pudo refrescar el backend; se conserva el ultimo resumen local.</Text> : null}
 
       <View style={styles.filters}>
         <Text style={styles.sectionLabel}>Unidad</Text>
         <View style={styles.chipRow}>
-          {UNITS.map(unit => (
+          {UNITS.map((unit) => (
             <Pressable
               key={unit.id}
               onPress={() => setSelectedUnitId(unit.id)}
@@ -223,90 +92,124 @@ export function SupervisorDashboardScreen() {
               accessibilityLabel={`Unidad ${unit.name}`}
               accessibilityRole="button"
             >
-              <Text style={[styles.chipText, selectedUnitId === unit.id && styles.chipTextSelected]}>
-                {unit.name}
-              </Text>
+              <Text style={[styles.chipText, selectedUnitId === unit.id && styles.chipTextSelected]}>{unit.name}</Text>
             </Pressable>
           ))}
         </View>
-
-        <Text style={styles.sectionLabel}>Turno</Text>
-        <View style={styles.chipRow}>
-          {SHIFT_OPTIONS.map(option => (
-            <Pressable
-              key={option.key}
-              onPress={() => setShiftKey(option.key)}
-              style={[styles.chip, shiftKey === option.key && styles.chipSelected]}
-              accessibilityLabel={`Turno ${option.label}`}
-              accessibilityRole="button"
-            >
-              <Text style={[styles.chipText, shiftKey === option.key && styles.chipTextSelected]}>
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        {selectedUnit ? (
-          <Text style={styles.filterHint}>
-            {selectedUnit.name} · {new Date(filter.start).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-            {' - '}
-            {new Date(filter.end).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-        ) : null}
+        <Text style={styles.filterHint}>Generado: {formatDate(data?.generatedAt)}</Text>
       </View>
 
-      {isLoading ? (
-        <View style={styles.loader} testID="dashboard-loader">
-          <ActivityIndicator />
-          <Text style={styles.loaderText}>Cargando dashboard...</Text>
-        </View>
-      ) : null}
-
-      {error ? (
-        <View style={styles.errorBox} testID="dashboard-error">
-          <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={styles.retryButton} onPress={loadData} accessibilityRole="button">
-            <Text style={styles.retryButtonText}>Reintentar</Text>
-          </Pressable>
+      {!selectedUnit ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>No hay actividad real para esta unidad.</Text>
         </View>
       ) : (
         <>
-          {renderMetrics()}
-          <FlatList
-            data={patients}
-            keyExtractor={item => item.patientId}
-            contentContainerStyle={patients.length === 0 ? styles.emptyContainer : styles.listContent}
-            ListEmptyComponent={!isLoading ? <Text style={styles.emptyText}>No hay pacientes en este turno.</Text> : null}
-            renderItem={renderPatient}
-          />
+          <View style={styles.metricsGrid}>
+            <UnitMetric label="Handovers" value={selectedUnit.totalHandovers} detail={`24h ${selectedUnit.activity.handoversLast24h}`} />
+            <UnitMetric label="Pipeline" value={selectedUnit.activity.activePipeline} detail={selectedUnit.activity.status} />
+            <UnitMetric label="Outbox" value={selectedUnit.outbox.delivered} detail={`retry ${selectedUnit.outbox.retry} · failed ${selectedUnit.outbox.failed}`} />
+            <UnitMetric label="Bridge" value={selectedUnit.bridge.scored} detail={`pending ${selectedUnit.bridge.pending} · stale ${selectedUnit.bridge.stale}`} />
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Estado operativo</Text>
+            <Text>Ultima actividad: {formatDate(selectedUnit.activity.lastActivityAt)}</Text>
+            <Text>Eventos 24h: {selectedUnit.activity.eventsLast24h}</Text>
+            <Text>Alertas abiertas: {selectedUnit.alertsOpen}</Text>
+            <Text>Refresh remoto: {formatDate(selectedUnit.lastDashboardRefreshAt)}</Text>
+            {selectedUnit.degradationReasons.length > 0 ? (
+              <Text style={styles.panelWarn}>Degradado por: {selectedUnit.degradationReasons.join(', ')}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Tiempo promedio por seccion</Text>
+            {selectedUnit.handoverTiming.length === 0 ? <Text style={styles.emptyText}>Sin datos de timing.</Text> : null}
+            {selectedUnit.handoverTiming.map((item) => (
+              <Text key={`${item.unitId}-${item.sectionId}`} style={styles.metricDetail}>
+                {item.sectionId}: {Math.round(item.avgDurationMs)} ms ({item.samples})
+              </Text>
+            ))}
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Alertas de la unidad</Text>
+            {data?.alerts.filter((alert) => alert.unitId === selectedUnit.unitId).length === 0 ? (
+              <Text style={styles.emptyText}>Sin alertas activas.</Text>
+            ) : null}
+            {data?.alerts
+              .filter((alert) => alert.unitId === selectedUnit.unitId)
+              .map((alert) => (
+                <View key={alert.id} style={styles.alertCard}>
+                  <Text style={styles.alertTitle}>{alert.title}</Text>
+                  <Text>{alert.message}</Text>
+                  <Text style={styles.alertMeta}>{formatDate(alert.createdAt)}</Text>
+                </View>
+              ))}
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Eventos recientes</Text>
+            {data?.recentEvents.filter((event) => event.unitId === selectedUnit.unitId).length === 0 ? (
+              <Text style={styles.emptyText}>Sin eventos recientes para esta unidad.</Text>
+            ) : null}
+            {data?.recentEvents
+              .filter((event) => event.unitId === selectedUnit.unitId)
+              .map((event) => (
+                <View key={event.id} style={styles.eventCard}>
+                  <Text style={styles.alertTitle}>{event.stage} · {event.status}</Text>
+                  {event.detail ? <Text>{event.detail}</Text> : null}
+                  <Text style={styles.alertMeta}>{formatDate(event.createdAt)}</Text>
+                </View>
+              ))}
+          </View>
         </>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f8fafc',
+  },
+  content: {
     padding: 16,
     gap: 12,
-    backgroundColor: '#f8fafc',
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
   },
   title: {
     fontSize: 22,
     fontWeight: '700',
     color: '#0f172a',
   },
+  subtitle: {
+    color: '#475569',
+  },
+  bannerInfo: {
+    color: '#1d4ed8',
+    backgroundColor: '#eff6ff',
+    borderRadius: 10,
+    padding: 10,
+  },
+  bannerWarn: {
+    color: '#92400e',
+    backgroundColor: '#fffbeb',
+    borderRadius: 10,
+    padding: 10,
+  },
   filters: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 12,
     gap: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
   sectionLabel: {
     fontWeight: '700',
@@ -347,15 +250,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
   metricLabel: {
-    color: '#0f172a',
-    fontWeight: '600',
+    color: '#475569',
   },
   metricValue: {
     fontSize: 20,
@@ -367,29 +264,59 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: '#334155',
   },
-  incidentsLabel: {
-    marginTop: 8,
+  panel: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
   },
-  loader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 8,
+  panelTitle: {
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 4,
+  },
+  panelWarn: {
+    color: '#92400e',
+  },
+  alertCard: {
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    backgroundColor: '#fffbeb',
+    borderRadius: 10,
+    padding: 10,
+  },
+  eventCard: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 10,
+  },
+  alertTitle: {
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  alertMeta: {
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  emptyBox: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  emptyText: {
+    color: '#64748b',
   },
   loaderText: {
     color: '#334155',
-  },
-  errorBox: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#f87171',
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    gap: 8,
+    marginTop: 8,
   },
   errorText: {
     color: '#991b1b',
     fontWeight: '600',
+    marginBottom: 8,
   },
   retryButton: {
     alignSelf: 'flex-start',
@@ -401,71 +328,6 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: '#fff',
     fontWeight: '700',
-  },
-  listContent: {
-    gap: 10,
-    paddingBottom: 80,
-  },
-  emptyContainer: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    color: '#475569',
-  },
-  patientCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  patientName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  patientBed: {
-    color: '#475569',
-  },
-  priorityBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  priorityBadgeText: {
-    color: '#fff',
-    fontWeight: '700',
-  },
-  priority_critical: {
-    backgroundColor: '#b91c1c',
-  },
-  priority_high: {
-    backgroundColor: '#ea580c',
-  },
-  priority_medium: {
-    backgroundColor: '#ca8a04',
-  },
-  priority_low: {
-    backgroundColor: '#16a34a',
-  },
-  reasonText: {
-    color: '#334155',
-    marginBottom: 4,
-  },
-  metaText: {
-    color: '#64748b',
-    fontSize: 12,
   },
 });
 

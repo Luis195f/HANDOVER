@@ -23,14 +23,23 @@ export async function buildDemoResponse(input: RequestInfo | URL, _init?: Reques
     return jsonResponse({ ok: true, mode: 'demo' });
   }
 
-  if (url.includes('/admin/units-summary')) {
-    return jsonResponse(DEMO_ADMIN_DASHBOARD.units);
+  if (url.includes('/api/icea/dashboard-summary')) {
+    return jsonResponse(DEMO_ADMIN_DASHBOARD);
   }
-  if (url.includes('/admin/staff-activity')) {
-    return jsonResponse(DEMO_ADMIN_DASHBOARD.staff);
-  }
-  if (url.includes('/admin/alerts')) {
-    return jsonResponse(DEMO_ADMIN_DASHBOARD.alerts);
+  if (url.includes('/api/icea/actions/refresh-dashboard-summary')) {
+    return jsonResponse({
+      action: 'refresh-dashboard-summary',
+      result: {
+        statusCode: 200,
+        payload: {
+          status: 'completed',
+          summary: {
+            unitId: 'icu-adult',
+            generatedAt: DEMO_ADMIN_DASHBOARD.generatedAt,
+          },
+        },
+      },
+    });
   }
 
   if (/\/Patient\//i.test(url)) {
