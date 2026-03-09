@@ -279,6 +279,31 @@ Notas de robustez:
 - Se aceptan valores booleanos y boolean-like (`true/false/1/0/on/off/yes/no`) en features por unidad.
 - Si `HANDOVER_UNITS_JSON` está vacío, malformado o no es un arreglo válido, la app hace fallback automático a la configuración estática por defecto.
 
+### Catálogos NNN gobernados (BYO-license)
+
+Los catálogos completos de `NANDA`, `NIC` y `NOC` se mantienen en modo **BYO-license**:
+- el repo solo incluye placeholders mínimos para búsqueda y pruebas;
+- los datasets completos se cargan bajo demanda desde variables de entorno, URL externa o endpoints backend cacheables;
+- la UI muestra un gate explícito antes de habilitar el catálogo completo.
+
+Frontend/Expo:
+
+```bash
+export EXPO_PUBLIC_NANDA_CATALOG_JSON='{"licensed":true,"version":"2026","codes":[{"system":"NANDA","code":"00001","display":"Oxigenación alterada"}]}'
+export EXPO_PUBLIC_NANDA_CATALOG_URL='https://terminology.example/nanda.json'
+export EXPO_PUBLIC_NIC_CATALOG_JSON='{"licensed":true,"version":"2026","codes":[{"system":"NIC","code":"2210","display":"Administración de analgésicos"}]}'
+export EXPO_PUBLIC_NIC_CATALOG_URL='https://terminology.example/nic.json'
+export EXPO_PUBLIC_NOC_CATALOG_JSON='{"licensed":true,"version":"2026","codes":[{"system":"NOC","code":"0402","display":"Estado respiratorio: permeabilidad de las vías aéreas"}]}'
+export EXPO_PUBLIC_NOC_CATALOG_URL='https://terminology.example/noc.json'
+```
+
+Backend/Django:
+- `GET /api/catalogs/nanda`
+- `GET /api/catalogs/nic`
+- `GET /api/catalogs/noc`
+- Variables opcionales: `NANDA_CATALOG_JSON`/`NANDA_CATALOG_FILE`, `NIC_CATALOG_JSON`/`NIC_CATALOG_FILE`, `NOC_CATALOG_JSON`/`NOC_CATALOG_FILE`
+- Respuestas versionadas con `licensed`, `version`, `warning`, `codes`, `ETag` y `Cache-Control`
+
 ### Seguridad de dependencias
 
 Se recomienda activar Dependabot para revisar automáticamente librerías frontend/backend y recibir PRs con actualizaciones de seguridad. El archivo de configuración vive en `.github/dependabot.yml` y está preparado para el ecosistema npm/pnpm.
@@ -334,6 +359,7 @@ Mientras el upstream ICEA+ no publique un endpoint real de status para score, HA
 Documentacion relacionada:
 - [Bridge analitico ICEA+](docs/icea-bridge.md)
 - [Integracion ICEA+](docs/icea-integration.md)
+
 
 
 

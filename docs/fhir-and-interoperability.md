@@ -33,6 +33,13 @@
 - `baseline`, `target` y `current` se serializan en `Observation.component.valueInteger` con códigos explícitos (`baseline`, `target`, `current`) para mantener trazabilidad clínica y compatibilidad.
 - No se declara un profile URI específico para NOC: queda explícitamente como `no especificado` hasta disponer de uno real.
 
+## Catálogos NNN gobernados
+- `src/catalogs/nandaCodes.ts`, `src/catalogs/nicCodes.ts` y `src/catalogs/nocCodes.ts` comparten el mismo runtime de gobernanza: placeholder mínimo, carga externa por `JSON` o `URL`, metadata versionada, `licensed`, `warning` y fallback seguro.
+- El backend expone `GET /api/catalogs/nanda`, `GET /api/catalogs/nic` y `GET /api/catalogs/noc` con `ETag` y `Cache-Control` para que el cliente pueda revalidar catálogos sin incrustar corpora comerciales en el repo.
+- Variables frontend soportadas: `EXPO_PUBLIC_NANDA_CATALOG_JSON|URL`, `EXPO_PUBLIC_NIC_CATALOG_JSON|URL`, `EXPO_PUBLIC_NOC_CATALOG_JSON|URL`.
+- Variables backend soportadas: `NANDA_CATALOG_JSON|FILE`, `NIC_CATALOG_JSON|FILE`, `NOC_CATALOG_JSON|FILE`.
+- La UI mantiene un gate explícito antes de habilitar el catálogo completo; sin licencia válida, la app sigue operativa con placeholders y texto libre.
+
 ## Cliente y configuración
 - Define `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` en `.env`/`app.json` (`expo.extra`) para apuntar al servidor FHIR.
 - El cliente en `src/lib/fhir-client.ts` agrega cabeceras de idempotencia, maneja respuestas `OperationOutcome` y reintentos seguros.
@@ -96,3 +103,4 @@ Además del `POST /api/fhir/transaction`, la app móvil usa ahora endpoints prop
 - React Native/Expo nunca llama directo a ICEA+;
 - Django/DRF concentra autenticación OIDC/JWT, RBAC y trazabilidad;
 - FHIR transaction y ETL read siguen separados de la coordinación operativa ICEA+.
+

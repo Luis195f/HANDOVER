@@ -12,6 +12,14 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { isOn } from '@/src/config/flags';
 import { fetchInterventionsSuggestions, type ClinicalContext } from '@/src/lib/ai-suggestions';
+import {
+  getNicPlaceholderCatalog,
+  loadNicCatalog,
+  NIC_LICENSE_WARNING,
+  searchNicIndex,
+  type NicCode,
+  type NicCatalogPayload,
+} from '@/src/catalogs/nicCodes';
 import type { HandoverStructuredDiagnosis, TreatmentItem } from '@/src/types/handover';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
@@ -24,6 +32,7 @@ const TREATMENT_LABELS: Record<TreatmentItem['type'], string> = {
 };
 
 const MAX_NIC_SUGGESTIONS = 6;
+const MAX_NIC_CATALOG_SUGGESTIONS = 8;
 const DEFAULT_PRESELECTED_SUGGESTIONS = 3;
 
 const treatmentOptions = Object.entries(TREATMENT_LABELS).map(([value, label]) => ({ value, label })) as Array<{
@@ -111,6 +120,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#EFF6FF',
   },
   suggestionText: { color: '#1F2937', fontSize: 14 },
+  warningCard: {
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 8,
+    backgroundColor: '#FFF7ED',
+    padding: 12,
+    gap: 8,
+  },
+  warningTitle: { color: '#9A3412', fontSize: 14, fontWeight: '700' },
+  warningButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1E3A8A',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  warningButtonText: { color: '#fff', fontWeight: '600' },
 });
 
 type Props = {
@@ -188,12 +214,28 @@ export function TreatmentsSection({
   const [selectedInterventions, setSelectedInterventions] = useState<string[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [nicCatalogQuery, setNicCatalogQuery] = useState('');
+  const placeholderNicCatalog = useMemo(() => getNicPlaceholderCatalog(), []);
+  const [nicCatalog, setNicCatalog] = useState<NicCatalogPayload>(placeholderNicCatalog);
+  const [fullNicCatalogEnabled, setFullNicCatalogEnabled] = useState(false);
+  const [nicCatalogLoading, setNicCatalogLoading] = useState(false);
+  const [nicCatalogError, setNicCatalogError] = useState<string | null>(null);
 
   const errorBag = formState.errors[name] as FieldErrors<TreatmentItem>[] | undefined;
   const nicCodingEnabled = enableNicCoding ?? isOn('SHOW_NIC_CODING');
 
   const canAddSelectedSuggestions = selectedInterventions.length > 0;
   const selectedInterventionSet = useMemo(() => new Set(selectedInterventions), [selectedInterventions]);
+  const nicCatalogSuggestions = useMemo(
+    () =>
+      nicCatalogQuery.trim()
+        ? searchNicIndex(nicCatalog.index, nicCatalogQuery.trim(), MAX_NIC_CATALOG_SUGGESTIONS)
+        : [],
+    [nicCatalog, nicCatalogQuery],
+  );
+  const nicCatalogHelperText = fullNicCatalogEnabled
+    ? `Catálogo NIC licenciado cargado (${nicCatalog.codes.length} intervenciones)`
+    : `Sugerencias limitadas al catálogo local (${nicCatalog.codes.length} intervenciones)`;
 
   const openEditor = (index: number) => setEditing({ index });
 
@@ -221,6 +263,57 @@ export function TreatmentsSection({
     if (!fieldErrors) return undefined;
     const maybeError = fieldErrors?.[field]?.message;
     return typeof maybeError === 'string' ? maybeError : undefined;
+  };
+
+  const handleEnableFullNicCatalog = async () => {
+    if (!nicCodingEnabled || nicCatalogLoading || fullNicCatalogEnabled) {
+      return;
+    }
+
+    setNicCatalogLoading(true);
+    setNicCatalogError(null);
+    try {
+      const loadedCatalog = await loadNicCatalog();
+      if (!loadedCatalog.licensed) {
+        setNicCatalogError('No hay un catálogo NIC licenciado configurado; se mantiene el catálogo local.');
+        return;
+      }
+
+      setNicCatalog(loadedCatalog);
+      setFullNicCatalogEnabled(true);
+    } catch {
+      setNicCatalogError('No se pudo cargar el catálogo NIC completo.');
+    } finally {
+      setNicCatalogLoading(false);
+    }
+  };
+
+  const addCatalogIntervention = (entry: NicCode) => {
+    const currentTreatments = treatments ?? [];
+    const alreadyExists = currentTreatments.some(
+      (item) =>
+        (item.code?.system === 'NIC' && item.code.code === entry.code) ||
+        normalizeForDedup(item.description) === normalizeForDedup(entry.display),
+    );
+
+    if (alreadyExists) {
+      setNicCatalogError('La intervención NIC seleccionada ya existe en tratamientos.');
+      return;
+    }
+
+    append({
+      id: uuidv4(),
+      type: 'other',
+      description: entry.display,
+      done: false,
+      code: {
+        system: 'NIC',
+        code: entry.code,
+        display: entry.display,
+      },
+    });
+    setNicCatalogQuery('');
+    setNicCatalogError(null);
   };
 
   const handleSuggestNic = async () => {
@@ -461,6 +554,61 @@ export function TreatmentsSection({
       {nicCodingEnabled ? (
         <View style={styles.suggestionsCard}>
           <Text style={styles.helperText}>Texto libre primero; codificación NIC opcional.</Text>
+
+          {!fullNicCatalogEnabled ? (
+            <View style={styles.warningCard} testID="nic-license-warning">
+              <Text style={styles.warningTitle}>{NIC_LICENSE_WARNING}</Text>
+              <Text style={styles.helperText}>
+                El catálogo NIC completo solo se habilita bajo demanda desde una fuente licenciada configurada por entorno o backend.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Habilitar catálogo NIC completo"
+                onPress={() => void handleEnableFullNicCatalog()}
+                style={({ pressed }) => [styles.warningButton, pressed ? { opacity: 0.85 } : null]}
+                testID="enable-full-nic-button"
+              >
+                <Text style={styles.warningButtonText}>
+                  {nicCatalogLoading ? 'Cargando catálogo completo...' : 'Habilitar catálogo completo'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <TextInput
+            style={styles.input}
+            placeholder="Buscar intervención NIC..."
+            value={nicCatalogQuery}
+            onChangeText={(text) => {
+              setNicCatalogQuery(text);
+              if (nicCatalogError) {
+                setNicCatalogError(null);
+              }
+            }}
+            testID="nic-catalog-search-input"
+          />
+
+          {nicCatalogQuery.trim() ? <Text style={styles.helperText}>{nicCatalogHelperText}</Text> : null}
+          {nicCatalogError ? <Text style={[styles.helperText, styles.errorText]}>{nicCatalogError}</Text> : null}
+
+          {nicCatalogSuggestions.length > 0 ? (
+            <View style={{ gap: 8 }} testID="nic-catalog-suggestions-list">
+              {nicCatalogSuggestions.map((entry) => (
+                <Pressable
+                  key={`${entry.system}-${entry.code}`}
+                  style={styles.suggestionOption}
+                  onPress={() => addCatalogIntervention(entry)}
+                  accessibilityRole="button"
+                  testID={`nic-catalog-suggestion-${entry.system}-${entry.code}`}
+                >
+                  <Text style={styles.suggestionText}>{`${entry.display} (${entry.code}) · ${entry.system}`}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : nicCatalogQuery.trim() ? (
+            <Text style={styles.helperText}>No se encontraron intervenciones NIC en el catálogo activo.</Text>
+          ) : null}
+
           <Pressable
             style={styles.button}
             onPress={() => void handleSuggestNic()}
@@ -517,4 +665,3 @@ export function TreatmentsSection({
 }
 
 export default TreatmentsSection;
-

@@ -185,8 +185,10 @@ def _has_valid_etl_access(request: HttpRequest) -> bool:
 def _post_transaction_to_fhir(*args, **kwargs):
     return httpx.post(*args, **kwargs)
 
+CATALOG_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
 NANDA_LICENSE_WARNING = "Licencia NANDA-I requerida"
-NANDA_CATALOG_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
+NIC_LICENSE_WARNING = "Licencia NIC requerida"
+NOC_LICENSE_WARNING = "Licencia NOC requerida"
 NANDA_PLACEHOLDER_CODES: list[dict[str, Any]] = [
     {
         "system": "NANDA",
@@ -213,9 +215,85 @@ NANDA_PLACEHOLDER_CODES: list[dict[str, Any]] = [
         "synonyms": ["dolor agudo", "acute pain"],
     },
 ]
+NIC_PLACEHOLDER_CODES: list[dict[str, Any]] = [
+    {
+        "system": "NIC",
+        "code": "2210",
+        "display": "Administración de analgésicos",
+        "synonyms": ["manejo analgésico", "control del dolor"],
+    },
+    {
+        "system": "NIC",
+        "code": "3350",
+        "display": "Monitorización respiratoria",
+        "synonyms": ["vigilancia respiratoria", "seguimiento respiratorio"],
+    },
+    {
+        "system": "NIC",
+        "code": "6680",
+        "display": "Monitorización de signos vitales",
+        "synonyms": ["vigilancia de signos vitales", "signos vitales"],
+    },
+    {
+        "system": "NIC",
+        "code": "5602",
+        "display": "Enseñanza: proceso de enfermedad",
+        "synonyms": ["educación al paciente", "proceso de enfermedad"],
+    },
+]
+NOC_PLACEHOLDER_CODES: list[dict[str, Any]] = [
+    {
+        "system": "NOC",
+        "code": "0402",
+        "display": "Estado respiratorio: permeabilidad de las vías aéreas",
+        "synonyms": ["permeabilidad de vias aereas", "estado respiratorio"],
+    },
+    {
+        "system": "NOC",
+        "code": "0802",
+        "display": "Signos vitales",
+        "synonyms": ["constantes vitales", "monitorización de signos vitales"],
+    },
+    {
+        "system": "NOC",
+        "code": "1605",
+        "display": "Control del dolor",
+        "synonyms": ["manejo del dolor", "dolor controlado"],
+    },
+    {
+        "system": "NOC",
+        "code": "1813",
+        "display": "Conocimiento: régimen terapéutico",
+        "synonyms": ["educación terapéutica", "régimen terapéutico"],
+    },
+]
+
+GOVERNED_CATALOG_CONFIG: dict[str, dict[str, Any]] = {
+    "NANDA": {
+        "inline_env": "NANDA_CATALOG_JSON",
+        "file_env": "NANDA_CATALOG_FILE",
+        "warning": NANDA_LICENSE_WARNING,
+        "placeholder_codes": NANDA_PLACEHOLDER_CODES,
+        "placeholder_version": "placeholder-2026-03",
+    },
+    "NIC": {
+        "inline_env": "NIC_CATALOG_JSON",
+        "file_env": "NIC_CATALOG_FILE",
+        "warning": NIC_LICENSE_WARNING,
+        "placeholder_codes": NIC_PLACEHOLDER_CODES,
+        "placeholder_version": "placeholder-2026-03",
+    },
+    "NOC": {
+        "inline_env": "NOC_CATALOG_JSON",
+        "file_env": "NOC_CATALOG_FILE",
+        "warning": NOC_LICENSE_WARNING,
+        "placeholder_codes": NOC_PLACEHOLDER_CODES,
+        "placeholder_version": "placeholder-2026-03",
+    },
+}
 
 
-def _normalize_nanda_catalog_entry(value: Any) -> dict[str, Any] | None:
+def _normalize_governed_catalog_entry(value: Any, system_name: str) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
 
@@ -224,8 +302,8 @@ def _normalize_nanda_catalog_entry(value: Any) -> dict[str, Any] | None:
     if not code or not display:
         return None
 
-    system = str(value.get("system") or "NANDA").strip().upper()
-    if system != "NANDA":
+    system = str(value.get("system") or system_name).strip().upper()
+    if system != system_name:
         return None
 
     raw_synonyms = value.get("synonyms")
@@ -236,7 +314,7 @@ def _normalize_nanda_catalog_entry(value: Any) -> dict[str, Any] | None:
     )
 
     payload = {
-        "system": "NANDA",
+        "system": system_name,
         "code": code,
         "display": display,
     }
@@ -245,9 +323,10 @@ def _normalize_nanda_catalog_entry(value: Any) -> dict[str, Any] | None:
     return payload
 
 
-def _build_nanda_catalog_payload() -> Dict[str, Any]:
-    inline_catalog_json = os.getenv("NANDA_CATALOG_JSON", "").strip()
-    catalog_file = os.getenv("NANDA_CATALOG_FILE", "").strip()
+def _build_governed_catalog_payload(system_name: str) -> Dict[str, Any]:
+    config = GOVERNED_CATALOG_CONFIG[system_name]
+    inline_catalog_json = os.getenv(config["inline_env"], "").strip()
+    catalog_file = os.getenv(config["file_env"], "").strip()
 
     raw_payload: Any = None
     source = "placeholder"
@@ -259,7 +338,7 @@ def _build_nanda_catalog_payload() -> Dict[str, Any]:
         try:
             raw_payload = json.loads(inline_catalog_json)
         except Exception:
-            logger.exception("Invalid NANDA_CATALOG_JSON configuration")
+            logger.exception("Invalid %s configuration", config["inline_env"])
             raw_payload = None
             source = "placeholder"
             licensed = False
@@ -270,7 +349,7 @@ def _build_nanda_catalog_payload() -> Dict[str, Any]:
             with open(catalog_file, "r", encoding="utf-8") as catalog_handle:
                 raw_payload = json.load(catalog_handle)
         except Exception:
-            logger.exception("Unable to load NANDA catalog from %s", catalog_file)
+            logger.exception("Unable to load %s catalog from %s", system_name, catalog_file)
             raw_payload = None
             source = "placeholder"
             licensed = False
@@ -287,7 +366,7 @@ def _build_nanda_catalog_payload() -> Dict[str, Any]:
 
     codes = [
         entry
-        for entry in (_normalize_nanda_catalog_entry(item) for item in raw_codes)
+        for entry in (_normalize_governed_catalog_entry(item, system_name) for item in raw_codes)
         if entry is not None
     ]
 
@@ -297,22 +376,22 @@ def _build_nanda_catalog_payload() -> Dict[str, Any]:
     warning = (
         str(payload_record.get("warning")).strip()
         if isinstance(payload_record, dict) and payload_record.get("warning")
-        else NANDA_LICENSE_WARNING
+        else config["warning"]
     )
     version = (
         str(payload_record.get("version")).strip()
         if isinstance(payload_record, dict) and payload_record.get("version")
-        else "licensed-runtime" if licensed else "placeholder-2026-03"
+        else "licensed-runtime" if licensed else config["placeholder_version"]
     )
 
     if not codes:
-        codes = [dict(item) for item in NANDA_PLACEHOLDER_CODES]
+        codes = [dict(item) for item in config["placeholder_codes"]]
         licensed = False
         source = "placeholder"
-        version = "placeholder-2026-03"
+        version = config["placeholder_version"]
 
     return {
-        "system": "NANDA",
+        "system": system_name,
         "licensed": licensed,
         "source": source,
         "version": version,
@@ -321,11 +400,17 @@ def _build_nanda_catalog_payload() -> Dict[str, Any]:
     }
 
 
-def _build_nanda_catalog_etag(payload: Dict[str, Any]) -> str:
+def _build_governed_catalog_etag(payload: Dict[str, Any]) -> str:
     payload_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f'W/"{hashlib.sha256(payload_bytes).hexdigest()}"'
 
 
+def _build_nanda_catalog_payload() -> Dict[str, Any]:
+    return _build_governed_catalog_payload("NANDA")
+
+
+def _build_nanda_catalog_etag(payload: Dict[str, Any]) -> str:
+    return _build_governed_catalog_etag(payload)
 def _local_registry_not_ready_response() -> Response:
     return Response(
         {
@@ -926,8 +1011,8 @@ class NandaCatalogView(APIView):
     authentication_classes = []
 
     def get(self, request: HttpRequest) -> Response:
-        payload = _build_nanda_catalog_payload()
-        etag = _build_nanda_catalog_etag(payload)
+        payload = _build_governed_catalog_payload("NANDA")
+        etag = _build_governed_catalog_etag(payload)
         request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
 
         if request_etag == etag:
@@ -936,9 +1021,46 @@ class NandaCatalogView(APIView):
             response = Response(payload, status=200)
 
         response["ETag"] = etag
-        response["Cache-Control"] = NANDA_CATALOG_CACHE_CONTROL
+        response["Cache-Control"] = CATALOG_CACHE_CONTROL
         return response
 
+
+class NicCatalogView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request: HttpRequest) -> Response:
+        payload = _build_governed_catalog_payload("NIC")
+        etag = _build_governed_catalog_etag(payload)
+        request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
+
+        if request_etag == etag:
+            response = Response(status=304)
+        else:
+            response = Response(payload, status=200)
+
+        response["ETag"] = etag
+        response["Cache-Control"] = CATALOG_CACHE_CONTROL
+        return response
+
+
+class NocCatalogView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request: HttpRequest) -> Response:
+        payload = _build_governed_catalog_payload("NOC")
+        etag = _build_governed_catalog_etag(payload)
+        request_etag = request.headers.get("If-None-Match") or request.META.get("HTTP_IF_NONE_MATCH")
+
+        if request_etag == etag:
+            response = Response(status=304)
+        else:
+            response = Response(payload, status=200)
+
+        response["ETag"] = etag
+        response["Cache-Control"] = CATALOG_CACHE_CONTROL
+        return response
 
 class CapabilitiesView(APIView):
     """
@@ -2038,6 +2160,8 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
+
 
 
 

@@ -4,6 +4,7 @@ import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as flagsModule from '@/src/config/flags';
+import * as nicCatalogModule from '@/src/catalogs/nicCodes';
 import TreatmentsSection from '../TreatmentsSection';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
@@ -84,6 +85,41 @@ describe('TreatmentsSection NIC suggestions', () => {
     expect(queryByTestId('nic-suggest-button')).toBeNull();
   });
 
+  it('muestra el gate de licencia NIC y permite añadir desde el catálogo placeholder', async () => {
+    const { getByTestId, getByText, methods } = renderWithForm({
+      enableNicCoding: true,
+    });
+
+    expect(getByTestId('nic-license-warning')).toBeTruthy();
+    expect(getByText('Licencia NIC requerida')).toBeTruthy();
+
+    fireEvent.changeText(getByTestId('nic-catalog-search-input'), 'analgesicos');
+    fireEvent.press(getByTestId('nic-catalog-suggestion-NIC-2210'));
+
+    await waitFor(() => {
+      expect(methods.getValues('treatments')).toHaveLength(1);
+      expect(methods.getValues('treatments')[0]?.code?.code).toBe('2210');
+    });
+  });
+
+  it('mantiene el catálogo local si no hay catálogo NIC licenciado', async () => {
+    vi.spyOn(nicCatalogModule, 'loadNicCatalog').mockResolvedValue({
+      ...nicCatalogModule.getNicPlaceholderCatalog(),
+      source: 'backend-placeholder',
+      licensed: false,
+    });
+
+    const { getByTestId, getByText } = renderWithForm({ enableNicCoding: true });
+
+    await act(async () => {
+      fireEvent.press(getByTestId('enable-full-nic-button'));
+    });
+
+    await waitFor(() => {
+      expect(getByText('No hay un catálogo NIC licenciado configurado; se mantiene el catálogo local.')).toBeTruthy();
+    });
+  });
+
   it('sugerir -> seleccionar -> prefill mantiene tratamientos editables', async () => {
     const suggestInterventions = vi.fn().mockResolvedValue({
       section: 'other' as const,
@@ -132,4 +168,3 @@ describe('TreatmentsSection NIC suggestions', () => {
     });
   });
 });
-
