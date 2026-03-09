@@ -35,6 +35,9 @@ from backend.signature import (
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
+from backend.api.icea import enqueue_icea_outbound_event_for_transaction
+from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
+from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.api.icea_transaction import persist_handover_bundle_record, persist_successful_transaction_icea_side_effects
 from backend.audit.models import AuditEvent
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
@@ -1663,7 +1666,10 @@ class BundleView(AuthenticatedAPIView):
         persist_successful_transaction_icea_side_effects(
             bundle=bundle,
             request=request,
+            outbox_callback=enqueue_icea_outbound_event_for_transaction,
             persist_bundle_record=_persist_handover_bundle_record,
+            snapshot_callback=ensure_pipeline_snapshot_from_bundle,
+            bridge_callback=enqueue_icea_bridge_request_for_transaction,
         )
         return Response(payload, status=resp.status_code)
 
@@ -1810,4 +1816,3 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-

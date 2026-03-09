@@ -88,16 +88,16 @@ class IceaTransactionFlowRegressionTests(TestCase):
             return _inner
 
         with patch(
-            'backend.api.icea_transaction.enqueue_icea_outbound_event_for_transaction',
+            'backend.api.views.enqueue_icea_outbound_event_for_transaction',
             side_effect=record('outbox'),
         ), patch(
             'backend.api.views._persist_handover_bundle_record',
             side_effect=record('persist'),
         ), patch(
-            'backend.api.icea_transaction.ensure_pipeline_snapshot_from_bundle',
+            'backend.api.views.ensure_pipeline_snapshot_from_bundle',
             side_effect=record('snapshot'),
         ), patch(
-            'backend.api.icea_transaction.enqueue_icea_bridge_request_for_transaction',
+            'backend.api.views.enqueue_icea_bridge_request_for_transaction',
             side_effect=record('bridge'),
         ):
             response = self.client.post(

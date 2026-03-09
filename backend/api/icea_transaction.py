@@ -83,10 +83,17 @@ def persist_successful_transaction_icea_side_effects(
     *,
     bundle: dict[str, Any],
     request: HttpRequest,
+    outbox_callback: Callable[..., None] | None = None,
     persist_bundle_record: Callable[..., None] | None = None,
+    snapshot_callback: Callable[..., None] | None = None,
+    bridge_callback: Callable[..., None] | None = None,
 ) -> None:
+    outbox_callback = outbox_callback or enqueue_icea_outbound_event_for_transaction
+    snapshot_callback = snapshot_callback or ensure_pipeline_snapshot_from_bundle
+    bridge_callback = bridge_callback or enqueue_icea_bridge_request_for_transaction
+
     try:
-        enqueue_icea_outbound_event_for_transaction(bundle=bundle, request=request)
+        outbox_callback(bundle=bundle, request=request)
     except Exception:
         logger.exception("ICEA outbox enqueue failed after successful clinical transaction")
 
@@ -94,11 +101,11 @@ def persist_successful_transaction_icea_side_effects(
         persist_bundle_record(bundle=bundle, request=request)
 
     try:
-        ensure_pipeline_snapshot_from_bundle(bundle=bundle, request=request)
+        snapshot_callback(bundle=bundle, request=request)
     except Exception:
         logger.exception("ICEA pipeline snapshot persistence failed after successful clinical transaction")
 
     try:
-        enqueue_icea_bridge_request_for_transaction(bundle=bundle, request=request)
+        bridge_callback(bundle=bundle, request=request)
     except Exception:
         logger.exception("ICEA bridge enqueue failed after successful clinical transaction")
