@@ -1,6 +1,6 @@
 import { PATIENTS_MOCK } from '@/src/data/mockPatients';
 import { UNITS } from '@/src/config/units';
-import { mockAlertSummaries, mockStaffActivity, mockUnitSummaries } from '@/src/mock/admin/dashboard-fixture';
+import { buildDemoAdminDashboardSummary } from '@/src/mock/admin/dashboard-fixture';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import type { HandoverSession } from '@/src/security/auth-types';
 
@@ -90,11 +90,7 @@ export const DEMO_FHIR_ALLERGY_BUNDLE = {
   ],
 };
 
-export const DEMO_ADMIN_DASHBOARD = {
-  units: mockUnitSummaries,
-  staff: mockStaffActivity,
-  alerts: mockAlertSummaries,
-};
+export const DEMO_ADMIN_DASHBOARD = buildDemoAdminDashboardSummary();
 
 export const DEMO_PATIENTS = PATIENTS_MOCK;
 

@@ -1,3 +1,42 @@
+export interface IceaDashboardTimingSummary {
+  unitId: string;
+  sectionId: string;
+  avgDurationMs: number;
+  samples: number;
+}
+
+export interface IceaDashboardOperationalActivity {
+  status: 'degraded' | 'attention' | 'active' | 'nominal' | 'empty' | string;
+  handoversLast24h: number;
+  eventsLast24h: number;
+  activePipeline: number;
+  lastActivityAt: string | null;
+}
+
+export interface IceaDashboardOutboxUnitSummary {
+  total: number;
+  queued: number;
+  retry: number;
+  delivered: number;
+  failed: number;
+  lastAttemptAt: string | null;
+  lastDeliveredAt: string | null;
+}
+
+export interface IceaDashboardBridgeUnitSummary {
+  total: number;
+  queued: number;
+  sent: number;
+  accepted: number;
+  pending: number;
+  scored: number;
+  failed: number;
+  stale: number;
+  provisional: number;
+  insufficientEvidence: number;
+  lastUpdatedAt: string | null;
+}
+
 export interface IceaDashboardUnitSummary {
   unitId: string;
   totalHandovers: number;
@@ -11,6 +50,13 @@ export interface IceaDashboardUnitSummary {
   lastUpdatedAt: string | null;
   lastDashboardRefreshAt: string | null;
   cachedSummary?: Record<string, unknown> | null;
+  activity: IceaDashboardOperationalActivity;
+  outbox: IceaDashboardOutboxUnitSummary;
+  bridge: IceaDashboardBridgeUnitSummary;
+  handoverTiming: IceaDashboardTimingSummary[];
+  alertsOpen: number;
+  degraded: boolean;
+  degradationReasons: string[];
 }
 
 export interface IceaPipelineEventSummary {
@@ -30,39 +76,68 @@ export interface IceaPipelineEventSummary {
   createdAt: string;
 }
 
+export interface IceaDashboardAlert {
+  id: string;
+  unitId: string | null;
+  source: 'outbox' | 'bridge' | 'pipeline' | string;
+  severity: 'high' | 'medium' | 'low' | string;
+  status: string;
+  title: string;
+  message: string;
+  requestId: string | null;
+  createdAt: string;
+}
+
+export interface IceaDashboardOutboxSummary {
+  enabled: boolean;
+  configured: boolean;
+  totals: {
+    queued: number;
+    retry: number;
+    delivered: number;
+    failed: number;
+  };
+  lastAttemptAt: string | null;
+  lastDeliveredAt: string | null;
+}
+
+export interface IceaDashboardPipelineSummary {
+  configured: boolean;
+  remoteActionsEnabled: boolean;
+  remoteStatusEnabled: boolean;
+  bridgeEnabled: boolean;
+  bridgeConfigured: boolean;
+  snapshots: number;
+  running: number;
+  retry: number;
+  failed: number;
+  bridge: {
+    queued: number;
+    sent: number;
+    accepted: number;
+    pending: number;
+    scored: number;
+    failed: number;
+    stale: number;
+    provisional: number;
+    insufficientEvidence: number;
+  };
+  lastEventAt: string | null;
+  degradationReasons: string[];
+}
+
 export interface IceaDashboardSummary {
   generatedAt: string;
+  source: 'live' | 'demo' | string;
+  demoMode: boolean;
+  empty: boolean;
+  stale: boolean;
+  degraded: boolean;
+  degradationReasons: string[];
+  latestActivityAt: string | null;
   units: IceaDashboardUnitSummary[];
+  alerts: IceaDashboardAlert[];
+  outbox: IceaDashboardOutboxSummary;
+  pipeline: IceaDashboardPipelineSummary;
   recentEvents: IceaPipelineEventSummary[];
-}
-
-export interface UnitSummary {
-  unitId: string;
-  unitName: string;
-  totalHandovers: number;
-  completedHandovers: number;
-  pendingHandovers: number;
-  criticalPatients: number;
-}
-
-export interface StaffActivity {
-  staffId: string;
-  name: string;
-  role: 'nurse' | 'supervisor' | 'admin' | 'other';
-  unitId: string;
-  handoversCompleted: number;
-  handoversReceived: number;
-  lastHandoverAt: string | null;
-}
-
-export type AlertType = 'NEWS2_HIGH' | 'PENDING_CRITICAL_TASKS' | 'INCIDENT_REPORTED';
-
-export interface AlertSummary {
-  id: string;
-  unitId: string;
-  patientId: string;
-  patientDisplay?: string;
-  type: AlertType;
-  message: string;
-  createdAt: string;
 }

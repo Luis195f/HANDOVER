@@ -201,7 +201,7 @@ HANDOVER expone ahora una capa propia de coordinación bajo `/api/icea/*` para q
 - `GET /api/icea/events?unitId=<id>[&stage=<stage>][&limit=<n>]`
   - Devuelve los últimos eventos persistidos por unidad para auditoría operativa.
 - `GET /api/icea/dashboard-summary[?unitId=<id>][&eventsLimit=<n>]`
-  - Devuelve un resumen local por unidad construido desde snapshots/eventos persistidos en HANDOVER.
+  - Devuelve el contrato backend-driven del dashboard admin/supervisor desde datos persistidos en HANDOVER.
 - `POST /api/icea/actions/normalize`
 - `POST /api/icea/actions/build-windows`
 - `POST /api/icea/actions/build-dataset`
@@ -213,6 +213,15 @@ HANDOVER expone ahora una capa propia de coordinación bajo `/api/icea/*` para q
 - Consultas agregadas y estado: `admin` o `supervisor`.
 - Acciones manuales: solo `admin`.
 - La app móvil consume siempre HANDOVER; no hay llamadas directas a ICEA+ desde React Native.
+
+### Contrato del dashboard admin/supervisor
+
+- El dashboard es **backend-driven por defecto**: frontend consume `GET /api/icea/dashboard-summary` y no cae a fixtures en modo live.
+- `demoMode` solo puede activarse de forma explícita (sesión/flag demo) y la UI debe etiquetar esos datos como demo.
+- El payload expone `units`, `alerts`, `outbox`, `pipeline` y `recentEvents`, además de `empty`, `stale`, `degraded`, `degradationReasons`, `generatedAt` y `latestActivityAt`.
+- `units[]` resume actividad operativa, outbox, bridge, timing de handover y alertas abiertas por unidad.
+- Si HANDOVER conserva el último dato útil pero falla el refresh remoto, la UI debe mostrarse como stale/degraded/error de forma honesta; no se permite fallback silencioso a mocks.
+- Si no hay actividad persistida, el backend responde `empty=true` con colecciones vacías en lugar de inventar datos.
 
 ### Qué es automático y qué es manual
 
@@ -279,8 +288,4 @@ Consumo frontend/dashboard:
 - en ese escenario, HANDOVER expone `remoteStatusSupported=false`, `remoteRefreshAttempted=false` y `localStatusIsAuthoritative=true`, manteniendo el estado local como fuente visible.
 
 Ver detalle clinico/analitico: [docs/icea-bridge.md](./icea-bridge.md).
-
-
-
-
 

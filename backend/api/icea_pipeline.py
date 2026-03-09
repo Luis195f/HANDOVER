@@ -605,64 +605,14 @@ def resolve_pipeline_snapshot(
 
 
 def build_dashboard_summary(*, unit_id: str | None = None, events_limit: int = 20) -> dict[str, Any]:
-    snapshots = IceaPipelineSnapshot.objects.all()
-    if unit_id:
-        snapshots = snapshots.filter(unit_id=unit_id)
+    from backend.api.dashboard_summary import build_dashboard_summary_payload
 
-    unit_rows = list(
-        snapshots.values("unit_id")
-        .annotate(
-            totalHandovers=Count("id"),
-            accepted=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_ACCEPTED)),
-            queued=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_QUEUED)),
-            running=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_RUNNING)),
-            delivered=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_DELIVERED)),
-            succeeded=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_SUCCEEDED)),
-            retry=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_RETRY)),
-            failed=Count("id", filter=Q(visible_status=IceaPipelineSnapshot.STATUS_FAILED)),
-            lastUpdatedAt=Max("updated_at"),
-        )
-        .order_by("unit_id")
+    return build_dashboard_summary_payload(
+        unit_id=unit_id,
+        events_limit=events_limit,
+        serialize_pipeline_event=serialize_pipeline_event,
+        load_pipeline_settings=load_icea_pipeline_settings,
     )
-
-    latest_summaries: dict[str, IceaPipelineEvent] = {}
-    summary_events = IceaPipelineEvent.objects.filter(stage="dashboard-summary")
-    if unit_id:
-        summary_events = summary_events.filter(unit_id=unit_id)
-    for event in summary_events.order_by("unit_id", "-created_at"):
-        if event.unit_id and event.unit_id not in latest_summaries:
-            latest_summaries[event.unit_id] = event
-
-    units: list[dict[str, Any]] = []
-    for row in unit_rows:
-        cached_event = latest_summaries.get(row["unit_id"])
-        units.append(
-            {
-                "unitId": row["unit_id"],
-                "totalHandovers": row["totalHandovers"],
-                "accepted": row["accepted"],
-                "queued": row["queued"],
-                "running": row["running"],
-                "delivered": row["delivered"],
-                "succeeded": row["succeeded"],
-                "retry": row["retry"],
-                "failed": row["failed"],
-                "lastUpdatedAt": row["lastUpdatedAt"].isoformat() if row["lastUpdatedAt"] else None,
-                "lastDashboardRefreshAt": cached_event.created_at.isoformat() if cached_event else None,
-                "cachedSummary": cached_event.payload_json if cached_event else None,
-            }
-        )
-
-    recent_events = IceaPipelineEvent.objects.all()
-    if unit_id:
-        recent_events = recent_events.filter(unit_id=unit_id)
-
-    return {
-        "generatedAt": timezone.now().isoformat(),
-        "units": units,
-        "recentEvents": [serialize_pipeline_event(event) for event in recent_events[: max(1, min(events_limit, 100))]],
-    }
-
 
 def serialize_pipeline_snapshot(snapshot: IceaPipelineSnapshot) -> dict[str, Any]:
     return {
