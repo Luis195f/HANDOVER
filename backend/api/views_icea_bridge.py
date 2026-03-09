@@ -15,6 +15,7 @@ from backend.api.icea_bridge_service import (
     serialize_bridge_request,
     serialize_bridge_summary,
 )
+from backend.api.icea_clinical_feedback import icea_patient_risk_enabled, list_patient_risk_summaries
 from backend.api.icea_pipeline import (
     IceaPipelineConfigurationError,
     IceaPipelineHTTPStatusError,
@@ -23,6 +24,7 @@ from backend.api.icea_pipeline import (
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
 from backend.api.views import AuthenticatedAPIView
 from backend.security.permissions_roles import HasAnyRole
+from backend.security.roles import extract_roles
 
 CLINICAL_ROLES = HasAnyRole.required('nurse', 'supervisor', 'admin')
 QUERY_ROLES = HasAnyRole.required('supervisor', 'admin')
@@ -43,6 +45,79 @@ def _latest_bridge_request(*, handover_id: str, scoring_mode: str | None = None)
     if scoring_mode:
         queryset = queryset.filter(scoring_mode=scoring_mode)
     return queryset.order_by('-updated_at').first()
+
+
+def _can_query_all_patient_risk(request) -> bool:
+    claims = getattr(request, 'auth', None)
+    if not isinstance(claims, dict):
+        claims = getattr(getattr(request, 'user', None), 'claims', None)
+    roles = extract_roles(claims) if isinstance(claims, dict) else set()
+    return bool(roles & {'supervisor', 'admin'})
+
+
+def _patient_risk_claims(request) -> dict[str, Any]:
+    claims = getattr(request, 'auth', None)
+    if isinstance(claims, dict):
+        return claims
+    user_claims = getattr(getattr(request, 'user', None), 'claims', None)
+    if isinstance(user_claims, dict):
+        return user_claims
+    return {}
+
+
+def _to_string_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace(',', ' ').split() if item.strip()]
+    return []
+
+
+def _extract_authorized_unit_ids(claims: dict[str, Any]) -> set[str]:
+    collected: set[str] = set()
+    for key in ('unitIds', 'units', 'https://handover/unitIds', 'https://handoverpro/unitIds'):
+        for value in _to_string_list(claims.get(key)):
+            collected.add(value)
+    return collected
+
+
+def _resolve_patient_risk_scope(request, *, patient_id: str | None, unit_id: str | None) -> tuple[str | None, Response | None]:
+    claims = _patient_risk_claims(request)
+    roles = extract_roles(claims)
+    if roles & {'supervisor', 'admin'}:
+        return unit_id, None
+
+    authorized_unit_ids = _extract_authorized_unit_ids(claims)
+
+    if unit_id:
+        if unit_id not in authorized_unit_ids:
+            return None, Response(
+                {
+                    'detail': 'Requested unit is outside your authorized scope.',
+                    'code': 'icea_patient_risk_forbidden_unit',
+                },
+                status=403,
+            )
+        return unit_id, None
+
+    if patient_id:
+        if len(authorized_unit_ids) == 1:
+            return next(iter(authorized_unit_ids)), None
+        return None, Response(
+            {
+                'detail': 'unitId is required to resolve patient risk for this user scope.',
+                'code': 'icea_patient_risk_unit_required',
+            },
+            status=400,
+        )
+
+    return None, Response(
+        {
+            'detail': 'unitId is required for this role.',
+            'code': 'icea_patient_risk_filter_required',
+        },
+        status=400,
+    )
 
 
 class IceaBridgeStatusDetailView(AuthenticatedAPIView):
@@ -141,6 +216,39 @@ class IceaBridgeSummaryView(AuthenticatedAPIView):
         return Response({'summary': serialize_bridge_summary(bridge_request)}, status=200)
 
 
+class IceaPatientRiskSummaryView(AuthenticatedAPIView):
+    permission_classes = [IsAuthenticated, CLINICAL_ROLES]
+
+    def get_permissions(self):
+        return [permission() for permission in self.permission_classes]
+
+    def get(self, request):
+        if not icea_patient_risk_enabled():
+            return Response(
+                {'detail': 'ICEA patient risk support is disabled.', 'code': 'icea_patient_risk_disabled'},
+                status=503,
+            )
+
+        patient_id = str(request.query_params.get('patientId') or '').strip() or None
+        unit_id = str(request.query_params.get('unitId') or '').strip() or None
+        try:
+            limit = int(request.query_params.get('limit') or 20)
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 100))
+
+        effective_unit_id, scope_error = _resolve_patient_risk_scope(
+            request,
+            patient_id=patient_id,
+            unit_id=unit_id,
+        )
+        if scope_error is not None:
+            return scope_error
+
+        results = list_patient_risk_summaries(patient_id=patient_id, unit_id=effective_unit_id, limit=limit)
+        return Response({'enabled': True, 'results': results, 'count': len(results)}, status=200)
+
+
 class IceaBridgeRetryView(AuthenticatedAPIView):
     permission_classes = [IsAuthenticated, ACTION_ROLES]
 
@@ -183,5 +291,4 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if retriggered is None:
             return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
         return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
-
 
