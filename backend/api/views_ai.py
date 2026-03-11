@@ -556,7 +556,7 @@ class AudioToFHIRView(ProtectedAIAPIView):
             return Response({"detail": "Audio inválido o formato no soportado"}, status=415)
 
         b64 = base64.b64encode(upload.read()).decode("utf-8")
-        now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
         doc = {
             "resourceType": "DocumentReference",
             "status": "current",
