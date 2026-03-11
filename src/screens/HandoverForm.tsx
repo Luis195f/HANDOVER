@@ -138,8 +138,7 @@ import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
   normalizeLegacyHandoverPayload(value) as T;
-const isSignatureDisabled = () =>
-  (process.env.EXPO_PUBLIC_HANDOVER_SIGNATURE_DISABLED ?? process.env.HANDOVER_SIGNATURE_DISABLED) === 'true';
+const isSignatureDisabled = () => process.env.HANDOVER_SIGNATURE_DISABLED === 'true';
 
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;

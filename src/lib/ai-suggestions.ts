@@ -1,4 +1,5 @@
 import { AI_BACKEND_BASE_URL } from '@/src/config/env';
+import { ensureFreshAccessToken } from '@/src/security/auth';
 
 export interface NocOutcomeSuggestion {
   nocCode: string;
@@ -81,18 +82,27 @@ const parseOutcomes = (raw: unknown): NocOutcomeSuggestion[] => {
   return outcomes;
 };
 
+async function buildJsonHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const token = await ensureFreshAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function fetchInterventionsSuggestions(
   ctx: ClinicalContext,
 ): Promise<SuggestionsResult> {
   if (!AI_BACKEND_BASE_URL) {
-    throw new Error('Módulo de IA no configurado');
+    throw new Error('Modulo de IA no configurado');
   }
 
   const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/suggest-interventions`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: await buildJsonHeaders(),
     body: JSON.stringify(ctx),
   });
 
@@ -108,7 +118,7 @@ export async function fetchInterventionsSuggestions(
   const outcomes = parseOutcomes(data?.outcomes);
 
   if (!data || typeof data.section !== 'string' || (!interventions && outcomes.length === 0)) {
-    throw new Error('Respuesta de IA no válida');
+    throw new Error('Respuesta de IA no valida');
   }
 
   const fallbackInterventions = outcomes.map((item) => `NOC ${item.nocCode}: ${item.nocDisplay}`);
@@ -121,4 +131,3 @@ export async function fetchInterventionsSuggestions(
     rationale,
   };
 }
-

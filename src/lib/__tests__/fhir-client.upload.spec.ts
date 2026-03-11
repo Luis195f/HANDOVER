@@ -91,8 +91,8 @@ describe("uploadSignedHandoverPdf", () => {
     ).rejects.toThrow("HTTP 500");
   });
 
-  it("sube PDF sin firma cuando no hay configuración eIDAS", async () => {
-    (signPdf as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("EIDAS_API_URL_MISSING"));
+  it("sube PDF sin firma cuando el flujo eIDAS cliente está deshabilitado", async () => {
+    (signPdf as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("EIDAS_CLIENT_FLOW_DISABLED"));
 
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
       ok: true,

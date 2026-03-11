@@ -100,13 +100,7 @@ async function deriveKeyBytes(): Promise<Uint8Array> {
     // ignore
   }
 
-  const rawKey = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
-  let keyBytes: Uint8Array;
-  if (rawKey) {
-    keyBytes = await sha256Bytes(rawKey);
-  } else {
-    keyBytes = await Crypto.getRandomBytesAsync(GCM_KEY_SIZE);
-  }
+  let keyBytes = await Crypto.getRandomBytesAsync(GCM_KEY_SIZE);
 
   if (keyBytes.length !== GCM_KEY_SIZE) {
     keyBytes = (await sha256Bytes(keyBytes)).slice(0, GCM_KEY_SIZE);

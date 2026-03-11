@@ -744,7 +744,7 @@ export async function uploadSignedHandoverPdf(
     ];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message === 'EIDAS_API_URL_MISSING') {
+    if (message === 'EIDAS_CLIENT_FLOW_DISABLED') {
       console.warn('EIDAS_SIGNATURE_SKIPPED', { reason: message });
     } else {
       console.warn('EIDAS_SIGN_FAILED', { error });

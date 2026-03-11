@@ -5,7 +5,6 @@ const envState = {
   AI_TRANSCRIBE_ENDPOINT: 'https://api.example/api/ai/transcribe',
   FHIR_BASE_URL: 'http://fhir.example',
   API_BASE: '',
-  API_TOKEN: '',
 };
 
 vi.mock('@/src/config/env', () => ({
@@ -20,9 +19,6 @@ vi.mock('@/src/config/env', () => ({
   },
   get API_BASE() {
     return envState.API_BASE;
-  },
-  get API_TOKEN() {
-    return envState.API_TOKEN;
   },
   ENV: envState,
 }));

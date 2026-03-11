@@ -98,7 +98,6 @@ describe('sync engine state machine', () => {
     isOnline.mockResolvedValue(true);
     postBundleMock.mockReset();
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
   });
 
   afterEach(async () => {
@@ -107,7 +106,6 @@ describe('sync engine state machine', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
-    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   });
 
   // ======================================================
@@ -333,12 +331,10 @@ describe('offline encryption integration', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
-    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   });
 
   it('encrypts stored payloads but sends decrypted JSON when encryption is enabled', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key-sync';
     postBundleMock.mockResolvedValue({ ok: true, status: 200 });
 
     await createOfflineQueueItem({ payload: { bundle, txId: 'enc-sync' }, patientId: 'pat-encrypted' });
@@ -373,7 +369,6 @@ describe('offline encryption integration', () => {
 
   it('sends decrypted JSON when encryption is disabled', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key-sync';
     postBundleMock.mockResolvedValue({ ok: true, status: 200 });
 
     await createOfflineQueueItem({ payload: { bundle, txId: 'plain-sync' }, patientId: 'pat-plain' });

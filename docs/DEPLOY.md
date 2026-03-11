@@ -17,12 +17,14 @@ Esta guía describe cómo generar builds para Android, iOS y Web, así como los 
 | App runtime | `EXPO_PUBLIC_ALLOWED_UNITS`, `EXPO_PUBLIC_ALLOW_ALL_UNITS`, `EXPO_PUBLIC_BYPASS_SCOPE` | Configuración RBAC/ACL consumida por `src/security/acl.ts`. |
 | App runtime | `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` | Activa la firma cliente (ECDSA P-256 + SHA-256) del Bundle FHIR; si no hay WebCrypto/clave, el envío sigue sin firma. |
 | App runtime | `EXPO_PUBLIC_STORAGE_NAMESPACE` | Namespacing de almacenamiento seguro/offline. |
-| Offline/Red | `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` | Ajustes de reintentos en la cola offline. |
+| Offline/Red | `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` | Ajustes de reintentos en la cola offline. La clave de cifrado offline se genera en runtime y no se inyecta por env público. |
 | Builds | `EXPO_TOKEN` | Necesario para `eas build` en CI o cuando no se usa login interactivo. |
 | Builds | `ANDROID_KEYSTORE_*` | Variables esperadas por Gradle si generas `.aab/.apk` firmados. |
 | Builds | `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `EAS_NO_VCS` | Variables requeridas por Expo/EAS para subir builds iOS. |
 
 > Nota: El workflow `CI` ejecuta el job de Node como bloqueante, por lo que fallos en dependencias o validaciones detendrán la pipeline. Si reproduces la pipeline en tu entorno de release, conserva esa configuración o usa un cache privado.
+
+> Seguridad: no publiques credenciales del proveedor de IA, tokens privilegiados ni credenciales eIDAS en `EXPO_PUBLIC_*`; el cliente solo debe conocer endpoints y flags no sensibles.
 
 ## Instalación común
 

@@ -20,6 +20,8 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { useThemeTokens } from '../theme';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { t } from '@/src/i18n';
+import { FHIR_BASE_URL } from '@/src/config/env';
+import { ensureFreshAccessToken } from '@/src/security/auth';
 
 type QueueItemMeta = {
   id: string;
@@ -33,32 +35,13 @@ type QueueItemMeta = {
 };
 
 function resolveSyncOpts(): SyncOpts | null {
-  const envFallback = (process?.env?.EXPO_PUBLIC_FHIR_BASE_URL as string) ?? '';
-  let base = envFallback;
+  if (!FHIR_BASE_URL) return null;
 
-  try {
-    // ENV tolerante
-    const env = require('@/src/config/env') as { ENV?: { FHIR_BASE?: string }; FHIR_BASE?: string };
-    base = env?.ENV?.FHIR_BASE ?? env?.FHIR_BASE ?? base;
-  } catch {
-    // ignore missing env module
-  }
-
-  if (!base) return null;
-
-  let getToken: SyncOpts['getToken'] = async () => null;
-  try {
-    // Auth tolerante
-    const auth = require('@/src/services/AuthService') as {
-      getToken?: SyncOpts['getToken'];
-      default?: { getToken?: SyncOpts['getToken'] };
-    };
-    getToken = auth?.getToken ?? auth?.default?.getToken ?? getToken;
-  } catch {
-    // ignore missing auth module
-  }
-
-  return { fhirBaseUrl: base, getToken, backoff: { retries: 5, minMs: 500, maxMs: 15000 } };
+  return {
+    fhirBaseUrl: FHIR_BASE_URL,
+    getToken: async () => (await ensureFreshAccessToken()) ?? null,
+    backoff: { retries: 5, minMs: 500, maxMs: 15000 },
+  };
 }
 
 export default function SyncCenter() {
@@ -149,9 +132,6 @@ export default function SyncCenter() {
       token = await opts.getToken?.();
     } catch {
       token = null;
-    }
-    if (!token && process.env.EXPO_PUBLIC_AUTH_TOKEN) {
-      token = process.env.EXPO_PUBLIC_AUTH_TOKEN;
     }
     if (!token) {
       setAuthRequired(true);
