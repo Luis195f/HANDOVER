@@ -146,26 +146,54 @@ def _normalize_audio_content_type(upload: Any) -> str | None:
 def _validate_audio_upload(upload: Any) -> Response | None:
     size = _get_upload_size_bytes(upload)
     if size is None:
-        return Response({"detail": "No se pudo determinar el tamaño del audio"}, status=400)
+        return Response({"detail": "No se pudo determinar el tamaño del audio", "code": "audio_size_unknown"}, status=400)
     if size > HANDOVER_MAX_AUDIO_BYTES:
-        return Response({"detail": "Payload Too Large"}, status=413)
+        return Response({"detail": "Payload Too Large", "code": "audio_payload_too_large"}, status=413)
 
     content_type = _normalize_audio_content_type(upload)
     if not content_type or content_type not in ALLOWED_AUDIO_MIME_TYPES:
-        return Response({"detail": "Audio inválido o formato no soportado"}, status=415)
+        return Response({"detail": "Audio inválido o formato no soportado", "code": "unsupported_audio_type"}, status=415)
     return None
 
 
-class TranscribeView(AuthenticatedAPIView):
+def _permission_instances(permission_classes: Any) -> list[Any]:
+    instances: list[Any] = []
+    for permission in permission_classes:
+        if permission is None:
+            continue
+        instances.append(permission() if isinstance(permission, type) else permission)
+    return instances
 
-    if settings.DEBUG:
-        permission_classes = []
-    else:
-        permission_classes = [
-            IsAuthenticated,
-            HasAnyRole.required("nurse", "supervisor", "admin"),
-            HasAnyScope.required("handover:write"),
-        ]
+
+def _safe_upstream_upload_error(status_code: int) -> Response:
+    return Response(
+        {
+            "detail": "El servidor FHIR rechazó la carga del audio",
+            "code": "fhir_upload_rejected",
+            "status": status_code,
+        },
+        status=status_code,
+    )
+
+
+class ProtectedAIAPIView(AuthenticatedAPIView):
+    """Sensitive AI/STT/upload endpoints never inherit DEBUG/test auth bypasses."""
+
+    def get_permissions(self):
+        return _permission_instances(self.permission_classes)
+
+    def get_authenticators(self):
+        authenticator_classes = [auth for auth in self.authentication_classes if auth is not None]
+        return [auth() for auth in authenticator_classes]
+
+
+class TranscribeView(ProtectedAIAPIView):
+
+    permission_classes = [
+        IsAuthenticated,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
+        HasAnyScope.required("handover:write"),
+    ]
 
     parser_classes = [MultiPartParser, FormParser]
 
@@ -174,7 +202,13 @@ class TranscribeView(AuthenticatedAPIView):
         upload = request.FILES.get("file") or request.data.get("file")
         upload = _coerce_test_upload(upload)
         if not upload:
-            return Response({"detail": "Missing audio file (expected multipart form-data with 'file')"}, status=400)
+            return Response(
+                {
+                    "detail": "Missing audio file (expected multipart form-data with 'file')",
+                    "code": "missing_audio_file",
+                },
+                status=400,
+            )
 
         language = (request.data.get("language") or "es").strip()
 
@@ -183,11 +217,11 @@ class TranscribeView(AuthenticatedAPIView):
         if validation_error:
             return validation_error
 
-                        # If OpenAI is disabled, return 503 unless transcribe_audio has been monkeypatched in tests.
+        # If OpenAI is disabled, return 503 unless transcribe_audio has been monkeypatched in tests.
         openai_enabled = is_openai_enabled()
         transcribe_is_mocked = transcribe_audio is not ai_client.transcribe_audio
         if not openai_enabled and not transcribe_is_mocked:
-            return Response({"detail": "Servicio de IA deshabilitado por configuración"}, status=503)
+            return Response({"detail": "Servicio de IA deshabilitado por configuración", "code": "ai_disabled"}, status=503)
 
         try:
             # Compatible con transcribe_audio(upload, language) y con transcribe_audio(file=..., language=...)
@@ -196,7 +230,7 @@ class TranscribeView(AuthenticatedAPIView):
             except TypeError:
                 text = async_to_sync(transcribe_audio)(upload, language)
         except Exception:
-            return Response({"detail": "Error al procesar el audio con el servicio de IA"}, status=502)
+            return Response({"detail": "Error al procesar el audio con el servicio de IA", "code": "ai_transcription_failed"}, status=502)
 
         return Response(
             {"text": text, "language": language or "es", "durationSeconds": None},
@@ -204,7 +238,7 @@ class TranscribeView(AuthenticatedAPIView):
         )
 
 
-class SummarizeSbarView(AuthenticatedAPIView):
+class SummarizeSbarView(ProtectedAIAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
@@ -323,7 +357,7 @@ class SummarizeSbarView(AuthenticatedAPIView):
 
 
 
-class RefineSbarView(AuthenticatedAPIView):
+class RefineSbarView(ProtectedAIAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
@@ -473,7 +507,7 @@ class RefineSbarView(AuthenticatedAPIView):
             status=200,
         )
 
-class SuggestInterventionsView(AuthenticatedAPIView):
+class SuggestInterventionsView(ProtectedAIAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
@@ -496,7 +530,7 @@ class SuggestInterventionsView(AuthenticatedAPIView):
         return Response(payload.model_dump(), status=200)
 
 
-class AudioToFHIRView(AuthenticatedAPIView):
+class AudioToFHIRView(ProtectedAIAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
@@ -511,7 +545,7 @@ class AudioToFHIRView(AuthenticatedAPIView):
         encounter_ref = request.data.get("encounterRef")
 
         if not upload or not patient_id:
-            return Response({"detail": "patientId y file son obligatorios"}, status=400)
+            return Response({"detail": "patientId y file son obligatorios", "code": "missing_upload_fields"}, status=400)
 
         validation_error = _validate_audio_upload(upload)
         if validation_error:
@@ -541,12 +575,12 @@ class AudioToFHIRView(AuthenticatedAPIView):
                 timeout=60,
             )
         except httpx.HTTPError:
-            return Response({"detail": "No se pudo contactar el servidor FHIR"}, status=503)
+            return Response({"detail": "No se pudo contactar el servidor FHIR", "code": "fhir_unavailable"}, status=503)
 
         if resp.status_code >= 400:
-            return Response({"detail": resp.text}, status=resp.status_code)
+            return _safe_upstream_upload_error(resp.status_code)
 
         try:
             return Response(resp.json(), status=resp.status_code)
         except Exception:
-            return Response({"detail": "Respuesta del servidor FHIR no es JSON"}, status=502)
+            return Response({"detail": "Respuesta del servidor FHIR no es JSON", "code": "fhir_invalid_response"}, status=502)
