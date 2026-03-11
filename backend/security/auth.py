@@ -175,6 +175,9 @@ class Auth0JWTAuthentication(BaseAuthentication):
         # ✅ devolvemos claims como request.auth para scopes/roles
         return (user, claims)
 
+    def authenticate_header(self, request) -> str:
+        return "Bearer"
+
 
 def verify_jwt(token: str):
     """
@@ -184,5 +187,4 @@ def verify_jwt(token: str):
     if "verify_token" in globals():
         return verify_token(token)  # type: ignore[name-defined]
     raise NotImplementedError("verify_jwt is not wired to a real implementation")
-
 

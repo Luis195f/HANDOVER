@@ -7,21 +7,25 @@ import sys
 sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 from rest_framework.test import APIClient
+from backend.security.auth import Auth0User
 from backend.api import views_ai
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 
-def _client(monkeypatch):
-    c = APIClient()
-    monkeypatch.setattr(views_ai.TranscribeView, 'permission_classes', [])
-    monkeypatch.setattr(views_ai.SummarizeSbarView, 'permission_classes', [])
-    monkeypatch.setattr(views_ai.RefineSbarView, 'permission_classes', [])
-    monkeypatch.setattr(views_ai.SuggestInterventionsView, 'permission_classes', [])
-    return c
+def _client():
+    claims = {
+        'sub': 'auth0|ai-test-user',
+        'roles': ['nurse'],
+        'permissions': ['handover:write'],
+    }
+    client = APIClient()
+    client.force_authenticate(user=Auth0User(sub=claims['sub'], claims=claims), token=claims)
+    client.credentials(HTTP_AUTHORIZATION='Bearer test-access-token')
+    return client
 
 
 def test_ai_transcribe_success(monkeypatch):
-    client = _client(monkeypatch)
+    client = _client()
 
     async def fake_transcribe(*_args, **_kwargs):
         return "texto IA"
@@ -43,7 +47,7 @@ def test_ai_transcribe_success(monkeypatch):
 
 
 def test_summarize_sbar_success(monkeypatch):
-    client = _client(monkeypatch)
+    client = _client()
 
     async def fake_generate(*_args, **_kwargs):
         return {'situation': 'S', 'background': 'B', 'assessment': 'A', 'recommendation': 'R', 'full_text': 'Full'}
@@ -54,7 +58,7 @@ def test_summarize_sbar_success(monkeypatch):
 
 
 def test_refine_sbar_success(monkeypatch):
-    client = _client(monkeypatch)
+    client = _client()
 
     async def fake_generate(*_args, **_kwargs):
         return {'situation': 'S2', 'background': 'B2', 'assessment': 'A2', 'recommendation': 'R2', 'full_text': 'Full'}

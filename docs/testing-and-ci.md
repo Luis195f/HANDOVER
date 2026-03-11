@@ -42,3 +42,9 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 
 ## Resultado esperado
 - CI valida calidad backend (tests + cobertura) sin exponer PHI ni depender de infra de terceros.
+
+## Cobertura mínima AI/STT/uploads
+- Verificar `401` sin credenciales para `transcribe`, `summarize-sbar`, `refine-sbar`, `suggest-interventions` y `audio-to-fhir`.
+- Verificar `403` con token autenticado pero sin rol o scope suficiente.
+- Verificar regresión feliz de `transcribe` y `upload/audio-to-fhir` con credenciales válidas.
+- Verificar que la protección no depende de `DEBUG=true`.
