@@ -4,13 +4,13 @@ import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
 const envState = {
-  AI_SBAR_BASE_URL: 'https://ai-sbar.example',
+  AI_BACKEND_BASE_URL: 'https://ai-backend.example/api',
   AI_SBAR_ENABLED: true,
 };
 
 vi.mock('@/src/config/env', () => ({
-  get AI_SBAR_BASE_URL() {
-    return envState.AI_SBAR_BASE_URL;
+  get AI_BACKEND_BASE_URL() {
+    return envState.AI_BACKEND_BASE_URL;
   },
   get AI_SBAR_ENABLED() {
     return envState.AI_SBAR_ENABLED;
@@ -161,7 +161,7 @@ describe('HandoverForm AI SBAR integration', () => {
 
   it('deshabilita el botón IA cuando no está disponible y permite generar SBAR local', async () => {
     envState.AI_SBAR_ENABLED = false;
-    envState.AI_SBAR_BASE_URL = null as unknown as string;
+    envState.AI_BACKEND_BASE_URL = null as unknown as string;
 
     generateLocalSbar(mockUseZodForm());
 

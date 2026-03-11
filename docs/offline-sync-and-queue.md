@@ -47,8 +47,7 @@
   - In all cases, `queue.ts` and `sync.ts` operate on plaintext JSON after loading.
 - Security notes:
   - Offline encryption protects data at rest (aligned with GDPR/HIPAA best practices, without implying compliance).
-  - The derived key from `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` is the true secret and must be managed securely.
-
+  - The offline AES-GCM key is generated at runtime and persisted in secure storage; the client no longer accepts an operational encryption secret via public env.
 ## WebCrypto and polyfills
 - The client uses `expo-crypto` for hashing and random bytes; no global `crypto` polyfill is added at runtime.
 - FHIR bundle ECDSA signing (if `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) depends on `globalThis.crypto.subtle` when available.
@@ -60,7 +59,6 @@
 ## Related environment variables
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: maximum number of retries.
 - `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`: base value for exponential backoff.
-- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY`: seed for deriving the 256-bit offline encryption key. Must be at least 32 characters and stored as a secret (vault/CI/CD), not in plaintext.
 - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`: feature flag to disable offline encryption (local debugging only). Values `true/1/TRUE` disable it; any other value keeps encryption enabled.
 
 ## Fast validation before enqueue

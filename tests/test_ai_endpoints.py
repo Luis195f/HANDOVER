@@ -15,6 +15,7 @@ def _client(monkeypatch):
     c = APIClient()
     monkeypatch.setattr(views_ai.TranscribeView, 'permission_classes', [])
     monkeypatch.setattr(views_ai.SummarizeSbarView, 'permission_classes', [])
+    monkeypatch.setattr(views_ai.RefineSbarView, 'permission_classes', [])
     monkeypatch.setattr(views_ai.SuggestInterventionsView, 'permission_classes', [])
     return c
 
@@ -50,3 +51,23 @@ def test_summarize_sbar_success(monkeypatch):
     monkeypatch.setattr(views_ai, 'generate_sbar', fake_generate)
     response = client.post('/api/ai/summarize-sbar', data={'free_text': 'nota', 'language': 'es'}, format='json')
     assert response.status_code == 200
+
+
+def test_refine_sbar_success(monkeypatch):
+    client = _client(monkeypatch)
+
+    async def fake_generate(*_args, **_kwargs):
+        return {'situation': 'S2', 'background': 'B2', 'assessment': 'A2', 'recommendation': 'R2', 'full_text': 'Full'}
+
+    monkeypatch.setattr(views_ai, 'generate_sbar', fake_generate)
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={
+            'draft': {'situation': 'S', 'background': 'B', 'assessment': 'A', 'recommendation': 'R'},
+            'handover': {'evolution': 'estable'},
+            'language': 'es',
+        },
+        format='json',
+    )
+    assert response.status_code == 200
+    assert response.json()['sbar']['assessment'] == 'A2'

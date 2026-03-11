@@ -2,8 +2,10 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 
 vi.mock('@/src/config/env', () => ({
   AI_BACKEND_BASE_URL: 'https://example.com',
-  AI_SBAR_BASE_URL: null,
-  AI_SBAR_API_KEY: undefined,
+}));
+
+vi.mock('@/src/security/auth', () => ({
+  ensureFreshAccessToken: vi.fn(async () => 'tok-test-456'),
 }));
 
 import { generateSbarViaBackend } from '../ai-sbar';
@@ -16,9 +18,9 @@ describe('generateSbarViaBackend', () => {
   it('includes all sections and legal notice in fullText', async () => {
     const mockResponse = {
       situation: 'Paciente estable',
-      background: 'Ingreso por neumonía',
-      assessment: 'Mejora clínica',
-      recommendation: 'Continuar antibiótico',
+      background: 'Ingreso por neumonia',
+      assessment: 'Mejora clinica',
+      recommendation: 'Continuar antibiotico',
     };
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({

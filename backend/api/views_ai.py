@@ -322,6 +322,157 @@ class SummarizeSbarView(AuthenticatedAPIView):
         return Response(payload, status=200)
 
 
+
+class RefineSbarView(AuthenticatedAPIView):
+    permission_classes = [
+        IsAuthenticated,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
+        HasAnyScope.required("handover:write"),
+    ]
+    parser_classes = [JSONParser]
+
+    @staticmethod
+    def _truncate_for_audit(text: str) -> str:
+        if len(text) <= MAX_NOTES_LENGTH:
+            return text
+        return text[:MAX_NOTES_LENGTH].rstrip() + "…"
+
+    @staticmethod
+    def _format_context_value(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        return canonical_json(value).decode("utf-8")
+
+    @classmethod
+    def _build_refine_input(cls, draft: Dict[str, Any], handover: Dict[str, Any]) -> tuple[str, dict, str]:
+        normalized_draft = {
+            "situation": (draft.get("situation") or "").strip(),
+            "background": (draft.get("background") or "").strip(),
+            "assessment": (draft.get("assessment") or "").strip(),
+            "recommendation": (draft.get("recommendation") or "").strip(),
+        }
+
+        lines = [
+            "Refina el siguiente SBAR usando solo el contexto clínico disponible.",
+            "No inventes datos ni prescripciones.",
+            "SBAR actual:",
+            f"S: {normalized_draft['situation'] or 'dato no disponible'}",
+            f"B: {normalized_draft['background'] or 'dato no disponible'}",
+            f"A: {normalized_draft['assessment'] or 'dato no disponible'}",
+            f"R: {normalized_draft['recommendation'] or 'dato no disponible'}",
+        ]
+
+        context_lines = []
+        if isinstance(handover, dict):
+            for key, value in handover.items():
+                formatted = cls._format_context_value(value)
+                if formatted is None:
+                    continue
+                context_lines.append(f"{key}: {formatted}")
+
+        if context_lines:
+            lines.extend(["", "Contexto clínico estructurado:", *context_lines])
+
+        audit_payload = {"draft": normalized_draft, "handover": handover}
+        audit_notes = cls._truncate_for_audit(" ".join(value for value in normalized_draft.values() if value))
+        return "\n".join(lines), audit_payload, audit_notes
+
+    def _audit_ai_refine(
+        self,
+        *,
+        status: str,
+        http_status: int,
+        user_sub: str | None,
+        notes: str,
+        payload: dict,
+        language: str,
+    ) -> None:
+        payload_obj = {"notes": notes, "payload": payload, "language": language}
+        try:
+            payload_hash = hash_payload(payload_obj, settings.AUDIT_HASH_SECRET)
+            payload_size = len(canonical_json(payload_obj))
+            emit_audit_event(
+                event_type="ai_summary_generated",
+                action="execute",
+                status=status,
+                http_status=http_status,
+                user_sub=user_sub,
+                resource_type="SBAR",
+                resource_id="",
+                payload_hash=payload_hash,
+                payload_size=payload_size,
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar"},
+            )
+        except Exception:
+            logger.exception("No se pudo registrar auditoria de refinado SBAR")
+
+    def post(self, request: HttpRequest) -> Response:
+        req = request.data if isinstance(request.data, dict) else {}
+        draft = req.get("draft") if isinstance(req.get("draft"), dict) else {}
+        handover = req.get("handover") if isinstance(req.get("handover"), dict) else {}
+        language = req.get("language") or "es"
+        user_sub = _get_authenticated_user_sub(request)
+
+        combined_text, audit_payload, audit_notes = self._build_refine_input(draft, handover)
+        if len(combined_text) > MAX_FREE_TEXT_LENGTH:
+            self._audit_ai_refine(
+                status="fail",
+                http_status=400,
+                user_sub=user_sub,
+                notes=audit_notes,
+                payload=audit_payload,
+                language=language,
+            )
+            return Response({"detail": "Texto demasiado largo para refinar"}, status=400)
+
+        try:
+            payload = async_to_sync(generate_sbar)(combined_text, language=language)
+        except Exception:
+            self._audit_ai_refine(
+                status="fail",
+                http_status=502,
+                user_sub=user_sub,
+                notes=audit_notes,
+                payload=audit_payload,
+                language=language,
+            )
+            return Response({"detail": "Error al refinar SBAR con el servicio de IA"}, status=502)
+
+        required_keys = ["situation", "background", "assessment", "recommendation"]
+        if not all(isinstance(payload.get(key), str) for key in required_keys):
+            self._audit_ai_refine(
+                status="fail",
+                http_status=502,
+                user_sub=user_sub,
+                notes=audit_notes,
+                payload=audit_payload,
+                language=language,
+            )
+            return Response({"detail": "Formato de respuesta de IA inesperado"}, status=502)
+
+        self._audit_ai_refine(
+            status="success",
+            http_status=200,
+            user_sub=user_sub,
+            notes=audit_notes,
+            payload=audit_payload,
+            language=language,
+        )
+        return Response(
+            {
+                "sbar": {
+                    "situation": payload["situation"],
+                    "background": payload["background"],
+                    "assessment": payload["assessment"],
+                    "recommendation": payload["recommendation"],
+                }
+            },
+            status=200,
+        )
+
 class SuggestInterventionsView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,

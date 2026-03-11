@@ -20,7 +20,7 @@
 ## IA
 - `HANDOVER_AI_ENABLED`: flag utilizado en CI para desactivar flujos AI externos.
 - `HANDOVER_OPENAI_DISABLED`: flag de compatibilidad usado en CI para garantizar ejecución offline.
-- `OPENAI_API_KEY`: credencial API para proveedor compatible OpenAI.
+- `OPENAI_API_KEY`: credencial API para proveedor compatible OpenAI. Solo backend; el cliente Expo no admite equivalente público.
 - `OPENAI_BASE_URL`: URL base del proveedor LLM/STT (en CI se usa dummy local inválido).
 - `OPENAI_MODEL_WHISPER`: modelo de transcripción.
 - `OPENAI_MODEL_SBAR`: modelo para resumen clínico SBAR.

@@ -18,14 +18,6 @@ export type HandoverFeatureFlags = {
 export type AppConfigExtra = {
   ALLOW_ALL_UNITS?: Boolish;
   FEATURES?: HandoverFeatureFlags;
-  EXPO_PUBLIC_EIDAS_API_URL?: string;
-  EIDAS_API_URL?: string;
-  EXPO_PUBLIC_EIDAS_CLIENT_ID?: string;
-  EIDAS_CLIENT_ID?: string;
-  EXPO_PUBLIC_EIDAS_CLIENT_SECRET?: string;
-  EIDAS_CLIENT_SECRET?: string;
-  EXPO_PUBLIC_EIDAS_API_KEY?: string;
-  EIDAS_API_KEY?: string;
 } & Record<string, unknown>;
 
 type ExpoConfigLike = { extra?: AppConfigExtra | null };

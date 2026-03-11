@@ -42,7 +42,6 @@ vi.mock('expo-secure-store', () => {
 
 const resetEnv = () => {
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
-  delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY;
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
   delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
 };
@@ -149,7 +148,6 @@ describe('tx queue (sqlite + fallback)', () => {
 
   it('stores encrypted payloads when encryption flag is off and decrypts on read', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
     const queue = await loadQueue();
 
     const bundle = { resourceType: 'Bundle', id: 'test' };
@@ -170,7 +168,6 @@ describe('tx queue (sqlite + fallback)', () => {
 
   it('stores plaintext payloads when encryption is disabled and reads them back', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
     const queue = await loadQueue();
 
     const bundle = { resourceType: 'Bundle', id: 'plain' };
@@ -225,7 +222,6 @@ describe('tx queue (sqlite + fallback)', () => {
 
   it('reads legacy plaintext entries without errors even when encryption is enabled', async () => {
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY = 'test-key';
     const queue = await loadQueue();
 
     const bundle = { resourceType: 'Bundle', id: 'legacy' };

@@ -8,8 +8,8 @@ import { t } from '@/src/i18n';
 
 const listOfflineQueue = vi.fn();
 const flushQueue = vi.fn();
+const getTokenMock = vi.fn(async () => 'token');
 
-// ✅ Declare before vi.mock (hoisting)
 const navigationMock = {
   navigate: vi.fn(),
   goBack: vi.fn(),
@@ -19,7 +19,6 @@ const navigationMock = {
   push: vi.fn(),
 };
 
-// ✅ Full mock (no importActual) to avoid the real NavigationContainer and useBackButton
 vi.mock('@react-navigation/native', () => ({
   useIsFocused: () => true,
   useNavigation: () => navigationMock,
@@ -36,14 +35,19 @@ vi.mock('@/src/lib/sync/index', () => ({
   flushQueue: (...args: unknown[]) => flushQueue(...args),
 }));
 
-vi.mock('@/src/services/AuthService', () => ({
-  getToken: vi.fn(async () => 'token'),
-  default: { getToken: vi.fn(async () => 'token') },
+const authModuleMock = {
+  getToken: (...args: unknown[]) => getTokenMock(...args),
+  default: { getToken: (...args: unknown[]) => getTokenMock(...args) },
+};
+
+vi.mock('@/src/services/AuthService', () => authModuleMock);
+vi.mock('@/src/security/AuthService', () => authModuleMock);
+vi.mock('@/src/security/auth', () => ({
+  ensureFreshAccessToken: (...args: unknown[]) => getTokenMock(...args),
 }));
 
 vi.mock('@/src/config/env', () => ({
-  ENV: { FHIR_BASE: 'https://example.test' },
-  FHIR_BASE: 'https://example.test',
+  FHIR_BASE_URL: 'https://example.test',
 }));
 
 const queueItems = [
@@ -58,7 +62,7 @@ const queueItems = [
     createdAt: '2024-01-02T00:00:00Z',
     attempts: 2,
     syncStatus: 'error',
-    errorMessage: 'Fallo de sincronización',
+    errorMessage: 'Fallo de sincronizacion',
     errorStatus: 500,
   },
 ];
@@ -67,10 +71,11 @@ describe('SyncCenter', () => {
   beforeEach(() => {
     listOfflineQueue.mockReset();
     flushQueue.mockReset();
+    getTokenMock.mockReset();
+    getTokenMock.mockResolvedValue('token');
 
-    // Optional, but harmless in tests.
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://example.test';
-    process.env.EXPO_PUBLIC_AUTH_TOKEN = 'token';
+    delete process.env.EXPO_PUBLIC_AUTH_TOKEN;
 
     listOfflineQueue.mockResolvedValue(queueItems);
     flushQueue.mockResolvedValue({ processed: 2, remaining: 0 });
@@ -147,10 +152,29 @@ describe('SyncCenter', () => {
 
     expect(alertSpy).toHaveBeenCalledWith(
       'Error del servidor',
-      'Fallo de sincronización',
+      'Fallo de sincronizacion',
       expect.any(Array),
     );
 
+    alertSpy.mockRestore();
+  });
+
+  it('ignora EXPO_PUBLIC_AUTH_TOKEN y exige token real de sesion', async () => {
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    process.env.EXPO_PUBLIC_AUTH_TOKEN = 'public-token';
+    getTokenMock.mockResolvedValue(null);
+
+    const view = render(<SyncCenter />);
+    await waitFor(() => {
+      expect(listOfflineQueue).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId('sync-flush'));
+    });
+
+    expect(flushQueue).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledWith(t('sync.syncTitle'), t('sync.authRequiredMessage'));
     alertSpy.mockRestore();
   });
 });

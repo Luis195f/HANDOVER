@@ -68,9 +68,8 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 2. Variables adicionales leídas desde Expo (`app.json > expo.extra`) o el entorno:
    - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`: `off | local | remote` controla la validación del cliente (por defecto `off` en desarrollo; en producción se recomienda `remote` para validar contra el servidor FHIR antes de enviar). Requiere que el backend tenga `HANDOVER_FHIR_VALIDATION_MODE=remote` para que el servidor valide.
    - `EXPO_PUBLIC_API_BASE_URL` (o `API_BASE_URL`) apunta al backend REST si se usa el servidor Django.
-   - `EXPO_PUBLIC_API_TOKEN` agrega un token para llamadas autenticadas contra APIs complementarias.
    - `EXPO_PUBLIC_STORAGE_NAMESPACE` personaliza el espacio de almacenamiento seguro y el aislamiento de datos offline.
-   - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_KEY` es la base para derivar la clave AES-256-GCM que cifra los bundles en la cola offline (usa al menos 32 caracteres, gestiona el valor como un secreto real).
+   - La clave de cifrado offline se genera en runtime y se persiste en almacenamiento seguro del dispositivo; no se acepta una semilla secreta desde el bundle cliente.
    - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS` y `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` afinan la cola offline y el backoff exponencial.
    - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo; `true/1/TRUE` lo deshabilitan, cualquier otro valor lo deja activo por defecto).
    - `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` habilita la firma ECDSA P-256 de los Bundles FHIR en el cliente antes de encolarlos (por defecto `false`; si no hay WebCrypto o clave, continúa enviando sin firma).
@@ -78,12 +77,9 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
    - Voz + IA:
      - `EXPO_PUBLIC_API_BASE_URL`/`API_BASE_URL`: base única del backend Django/DRF.
      - STT usa siempre `POST /api/ai/transcribe` (derivado como `${API_BASE_URL}/api/ai/transcribe`).
-     - `EXPO_PUBLIC_AI_BACKEND_BASE_URL`/`AI_BACKEND_BASE_URL`: backend IA para endpoints no STT (p. ej. `/ai/summarize-sbar`). Si no se define, la app usa `API_BASE_URL/api` por defecto.
-     - `EXPO_PUBLIC_AI_SBAR_URL`/`AI_SBAR_URL` (expone `AI_SBAR_BASE_URL`): backend de refinado SBAR.
-     - `EXPO_PUBLIC_AI_SBAR_API_KEY`/`AI_SBAR_API_KEY`: token opcional para el refinado.
-     - `EXPO_PUBLIC_OPENAI_API_KEY`/`OPENAI_API_KEY`: credencial del proveedor de IA (configurada en el backend).
-   - `EXPO_PUBLIC_EIDAS_API_URL` apunta al proveedor eIDAS homologado (firma cualificada PAdES).
-   - `EXPO_PUBLIC_EIDAS_CLIENT_ID`, `EXPO_PUBLIC_EIDAS_CLIENT_SECRET` y/o `EXPO_PUBLIC_EIDAS_API_KEY` son credenciales del proveedor (gestionarlas como secretos).
+     - `EXPO_PUBLIC_AI_BACKEND_BASE_URL`/`AI_BACKEND_BASE_URL`: backend Django/DRF para generación y refinado SBAR, STT y sugerencias. Si no se define, la app usa `API_BASE_URL/api` por defecto.
+     - Las claves reales del proveedor de IA viven solo en el backend (`OPENAI_API_KEY` y compañía); el cliente no acepta claves del proveedor.
+   - La firma eIDAS cliente queda degradada: la app no acepta credenciales ni llamadas directas al proveedor desde Expo. Hasta disponer de un endpoint backend-mediated, solo se mantiene un mock local en desarrollo.
 3. Define `EXPO_TOKEN` o credenciales EAS en CI/CD cuando generes binarios firmados con Expo Application Services.
 
 ## Login y permisos
@@ -116,8 +112,8 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 - Dictado STT y transcripción IA usan un único endpoint DRF: `${API_BASE_URL}/api/ai/transcribe`.
 - El frontend centraliza esta URL en `AI_TRANSCRIBE_ENDPOINT` (derivada de `resolveApiBaseUrl`) y normaliza errores HTTP (401/413/415/5xx) sin loguear PHI.
 - SBAR con IA:
-  - Generación y refinado usan `AI_BACKEND_BASE_URL` (`/ai/summarize-sbar`) y/o `AI_SBAR_BASE_URL` (`/api/sbar/refine`).
-  - Si no hay credenciales, los botones de IA se deshabilitan y se mantiene la generación local determinística.
+  - Generación y refinado usan `AI_BACKEND_BASE_URL` (`/ai/summarize-sbar` y `/ai/refine-sbar`) y envían el bearer token real de sesión al backend Django/DRF.
+  - Si el backend no está configurado o no responde, los botones de IA se degradan con honestidad y se mantiene la generación local determinística.
 - TTS usa `expo-speech` y solo está disponible en iOS/Android; en web se muestra como no disponible.
 - Subida de audio a FHIR (opcional) requiere `API_BASE_URL` con el endpoint `/upload/audio-to-fhir`.
 
@@ -133,10 +129,9 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 
 ## Firma eIDAS de PDFs (entrega clínica)
 
-- El flujo de firma cualificada eIDAS se integra en `src/lib/eidas-signature.ts` y genera PDFs firmados en formato PAdES, con metadatos de auditoría (certificado, timestamp) anexados al `DocumentReference` FHIR.
-- En producción configura `EXPO_PUBLIC_EIDAS_API_URL` y credenciales (`EXPO_PUBLIC_EIDAS_CLIENT_ID`, `EXPO_PUBLIC_EIDAS_CLIENT_SECRET`, `EXPO_PUBLIC_EIDAS_API_KEY`) mediante secretos o almacenamiento seguro; nunca hardcodear certificados o claves.
-- En desarrollo, si no hay proveedor configurado, se genera un mock local para no bloquear la UI. Antes de usar en un entorno real, valida el flujo con el proveedor eIDAS homologado y actualiza las políticas internas de trazabilidad (IEC 62304, MDR, eIDAS).
-
+- La app ya no intenta firmar contra un proveedor eIDAS directamente desde el cliente.
+- En desarrollo se conserva un mock local para no bloquear la UI. En producción, hasta disponer de un endpoint backend-mediated, la subida continúa como PDF no firmado y se registra la degradación de capacidad.
+- La firma criptográfica autoritativa de Bundles FHIR sigue viviendo en el backend Django/DRF (`HANDOVER_PRIVATE_KEY_PATH`, `HANDOVER_PUBLIC_KEY_PATH`, `HANDOVER_SIGNATURE_DISABLED`).
 
 ## Arquitectura backend unificada (Django/DRF)
 
@@ -159,7 +154,8 @@ python manage.py transcribe_audio ./audio.m4a --language es
 
 ### Variables de entorno backend
 
-- FHIR y validación: `FHIR_BASE`, `HANDOVER_FHIR_VALIDATION_MODE`, `HANDOVER_VALIDATE_STRICT`, `HANDOVER_REQUIRE_RBAC_ON_FHIR`.`r`n- ICEA+: `ICEA_WEBHOOK_ENABLED`, `ICEA_WEBHOOK_URL`, `ICEA_WEBHOOK_SECRET`, `ICEA_WEBHOOK_TIMEOUT_MS`, `ICEA_WEBHOOK_RETRY_MAX`, `ICEA_WEBHOOK_ANTI_REPLAY`, `ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS`.
+- FHIR y validación: `FHIR_BASE`, `HANDOVER_FHIR_VALIDATION_MODE`, `HANDOVER_VALIDATE_STRICT`, `HANDOVER_REQUIRE_RBAC_ON_FHIR`.
+- ICEA+: `ICEA_WEBHOOK_ENABLED`, `ICEA_WEBHOOK_URL`, `ICEA_WEBHOOK_SECRET`, `ICEA_WEBHOOK_TIMEOUT_MS`, `ICEA_WEBHOOK_RETRY_MAX`, `ICEA_WEBHOOK_ANTI_REPLAY`, `ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS`.
 - Firma digital: `HANDOVER_PRIVATE_KEY_PATH`, `HANDOVER_PUBLIC_KEY_PATH`, `HANDOVER_SIGNATURE_DISABLED`.
 - IA: `OPENAI_API_KEY`, `OPENAI_MODEL_SBAR`, `OPENAI_MODEL_WHISPER`, `OPENAI_MODEL_SUGGESTIONS`, `AI_SUGGESTIONS_ENABLED`.
 - Uploads de audio: `HANDOVER_MAX_AUDIO_BYTES` (por defecto `26214400`, equivalente a 25 MB).
@@ -360,8 +356,3 @@ Mientras el upstream ICEA+ no publique un endpoint real de status para score, HA
 Documentacion relacionada:
 - [Bridge analitico ICEA+](docs/icea-bridge.md)
 - [Integracion ICEA+](docs/icea-integration.md)
-
-
-
-
-

@@ -1,11 +1,7 @@
-import { AI_BACKEND_BASE_URL, AI_SBAR_API_KEY, AI_SBAR_BASE_URL } from '@/src/config/env';
+import { AI_BACKEND_BASE_URL } from '@/src/config/env';
+import { ensureFreshAccessToken } from '@/src/security/auth';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
-
-export interface AISBARConfig {
-  baseUrl: string;
-  apiKey?: string;
-}
 
 export interface SbarResult {
   situation: string;
@@ -56,10 +52,23 @@ const appendLegalNotice = (text: string, language: 'es' | 'en') => {
   return `${trimmed}\n\n${notice}`;
 };
 
-function getAiSbarConfig(): AISBARConfig | null {
-  const baseUrl = typeof AI_SBAR_BASE_URL === 'string' && AI_SBAR_BASE_URL.trim() ? AI_SBAR_BASE_URL.trim() : null;
-  if (!baseUrl) return null;
-  return { baseUrl, apiKey: AI_SBAR_API_KEY };
+function getAiBackendBaseUrl(): string | null {
+  const baseUrl = typeof AI_BACKEND_BASE_URL === 'string' && AI_BACKEND_BASE_URL.trim() ? AI_BACKEND_BASE_URL.trim() : null;
+  if (!baseUrl) {
+    console.info('[ai-sbar] AI backend is not configured');
+  }
+  return baseUrl;
+}
+
+async function buildJsonHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const token = await ensureFreshAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 function toSafeString(value: unknown, fallback: string): string {
@@ -89,9 +98,8 @@ const legacyDxNursingText = (value: unknown): string => {
 };
 
 export async function refineSBARWithAI(handover: HandoverFormData, draft: SBARSummary): Promise<SBARSummary | null> {
-  const config = getAiSbarConfig();
-  if (!config?.baseUrl) {
-    console.info('[ai-sbar] AI SBAR backend not configured');
+  const baseUrl = getAiBackendBaseUrl();
+  if (!baseUrl) {
     return null;
   }
 
@@ -101,24 +109,22 @@ export async function refineSBARWithAI(handover: HandoverFormData, draft: SBARSu
       dxNursing: legacyDxNursingText(handover.dxNursing),
       vitals: handover.vitals,
       oxygenTherapy: handover.oxygenTherapy,
-      risks: (handover as any).risks,
+      risks: (handover as Record<string, unknown>).risks,
       evolution: handover.evolution,
-      mobility: (handover as any).mobility,
-      nutrition: (handover as any).nutrition,
+      mobility: (handover as Record<string, unknown>).mobility,
+      nutrition: (handover as Record<string, unknown>).nutrition,
     },
     draft: { ...draft },
+    language: 'es' as const,
   };
 
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
 
   try {
-    const response = await fetch(`${config.baseUrl}/api/sbar/refine`, {
+    const response = await fetch(`${baseUrl}/ai/refine-sbar`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
-      },
+      headers: await buildJsonHeaders(),
       body: JSON.stringify(payload),
       signal: controller?.signal,
     });
@@ -141,11 +147,13 @@ export async function generateSbarViaBackend(
 ): Promise<SbarResult> {
   const trimmed = freeText.trim();
   if (!trimmed) throw new Error('No se pudo generar el SBAR con IA');
-  if (!AI_BACKEND_BASE_URL) throw new Error('Módulo de IA no configurado');
 
-  const response = await fetch(`${AI_BACKEND_BASE_URL}/ai/summarize-sbar`, {
+  const baseUrl = getAiBackendBaseUrl();
+  if (!baseUrl) throw new Error('Módulo de IA no configurado');
+
+  const response = await fetch(`${baseUrl}/ai/summarize-sbar`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await buildJsonHeaders(),
     body: JSON.stringify({ free_text: trimmed, context, language }),
   });
 
