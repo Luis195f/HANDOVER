@@ -12,6 +12,7 @@ from django.db import close_old_connections
 from django.http import HttpRequest
 from django.utils import timezone
 
+from backend.api.clinical_storage import decrypt_bundle_document
 from backend.api.icea_payload_mapper import CONTRACT_VERSION, SOURCE, build_icea_bridge_payload, compute_payload_hash
 from backend.api.icea_pipeline import (
     IceaPipelineConfigurationError,
@@ -185,7 +186,7 @@ def enqueue_icea_bridge_request_for_bundle_record(
     if not settings.enabled or not settings.allows_mode(scoring_mode):
         return None
     payload = build_icea_bridge_payload(
-        record.bundle_json,
+        decrypt_bundle_document(record.bundle_json),
         request_id=record.request_id,
         scoring_mode=scoring_mode,
         unit_id=record.unit_id,
@@ -777,6 +778,7 @@ def serialize_bridge_summary(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'lastUpdated': bridge_request.updated_at.isoformat(),
         'source': SOURCE,
     }
+
 
 
 

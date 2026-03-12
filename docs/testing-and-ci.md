@@ -48,3 +48,7 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 - Verificar `403` con token autenticado pero sin rol o scope suficiente.
 - Verificar regresión feliz de `transcribe` y `upload/audio-to-fhir` con credenciales válidas.
 - Verificar que la protección no depende de `DEBUG=true`.
+
+## Storage sensible
+- Ejecuta también `pytest backend/api/tests/test_handover_etl_read.py backend/api/tests/test_icea_transaction.py backend/api/tests/test_icea_bridge.py` cuando cambies retención, ETL readback o persistencia clínica.
+- Las regresiones de retención/cifrado del Bundle clínico y pruning de artefactos sensibles deben cubrirse en tests backend focalizados.

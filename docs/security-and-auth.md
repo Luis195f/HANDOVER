@@ -68,3 +68,13 @@
 - Aplicar defense-in-depth (authn + authz + validación + auditoría + firma).
 - Mantener trazabilidad de cambios, evidencia de test y registro auditable de eventos críticos.
 - Diseñar documentación y controles para facilitar expediente técnico y actividades de vigilancia post-mercado.
+
+## Retención y cifrado en reposo
+- Los Bundles clínicos persistidos para ETL ya no se guardan en claro en nuevas escrituras: se conservan con retención explícita (`HANDOVER_BUNDLE_RETENTION_DAYS`) y se cifran en reposo a nivel de aplicación antes de guardarse en base de datos.
+- Los artefactos técnicos ICEA (`IceaOutboundEvent`, snapshots/eventos pipeline y bridge requests terminales) deben expurgarse con `prune_sensitive_records` según `HANDOVER_TECHNICAL_RETENTION_DAYS`.
+- El endpoint `GET /api/handover/{bundle_id}` descifra el Bundle persistido solo para la respuesta autorizada, bloquea bundles expirados y responde con `Cache-Control: private, no-store` para reducir reexposición por caché.
+
+## Límites del endurecimiento actual
+- El cifrado fuerte en reposo del Bundle clínico depende de `HANDOVER_BUNDLE_ENCRYPTION_KEY`; si no se configura, HANDOVER deriva la clave desde `SECRET_KEY` como fallback de endurecimiento compatible con la arquitectura actual.
+- Ese fallback mejora confidencialidad frente a lectura accidental de base de datos, pero no sustituye KMS/HSM, rotación de claves ni separación fuerte de secretos.
+- Los modelos técnicos ICEA siguen guardando identificadores operativos mínimos (`request_id`, `bundle_id`, `patient_id`, `unit_id`) para trazabilidad y correlación clínica.

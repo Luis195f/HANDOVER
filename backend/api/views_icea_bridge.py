@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -281,9 +282,15 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
             bridge_request.refresh_from_db()
             return Response({'bridgeRequest': serialize_bridge_request(bridge_request)}, status=202)
 
-        record = HandoverBundleRecord.objects.filter(request_id=bridge_request.request_id).first()
+        record = HandoverBundleRecord.objects.filter(
+            request_id=bridge_request.request_id,
+            expires_at__gt=timezone.now(),
+        ).first()
         if record is None:
-            record = HandoverBundleRecord.objects.filter(bundle_id=bridge_request.bundle_id).first()
+            record = HandoverBundleRecord.objects.filter(
+                bundle_id=bridge_request.bundle_id,
+                expires_at__gt=timezone.now(),
+            ).first()
         if record is None:
             return Response({'detail': 'Local handover bundle not found.', 'code': 'handover_bundle_not_found'}, status=404)
 
@@ -291,4 +298,5 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if retriggered is None:
             return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
         return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
+
 

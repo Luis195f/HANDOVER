@@ -33,6 +33,7 @@ from backend.signature import (
     verify_bundle_signature,
 )
 from backend.security.auth import Auth0JWTAuthentication
+from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
@@ -116,6 +117,16 @@ FHIR_TRANSACTION_REQUIRED_SCOPES = ("fhir:transaction", "handover:write")
 
 
 _persist_handover_bundle_record = persist_handover_bundle_record
+
+def _resolve_persisted_handover_bundle(record: HandoverBundleRecord) -> dict[str, Any]:
+    try:
+        return decrypt_bundle_document(record.bundle_json)
+    except ClinicalBundleStorageError:
+        logger.warning(
+            "Persisted handover bundle could not be decrypted",
+            extra={"bundle_id": record.bundle_id, "request_id": record.request_id},
+        )
+        raise
 
 def _has_valid_etl_access(request: HttpRequest) -> bool:
     claims = _get_claims_from_request(request) or {}
@@ -1657,25 +1668,41 @@ class HandoverEtlReadView(AuthenticatedAPIView):
         if not _has_valid_etl_access(request):
             return Response({"detail": "Forbidden"}, status=403)
 
-        record = HandoverBundleRecord.objects.filter(bundle_id=bundle_id).only("bundle_json", "created_at").first()
+        record = (
+            HandoverBundleRecord.objects.filter(bundle_id=bundle_id)
+            .only("id", "bundle_id", "request_id", "bundle_json", "expires_at", "created_at")
+            .first()
+        )
         if not record:
             return Response({"detail": "Not found"}, status=404)
+        if record.expires_at <= timezone.now():
+            HandoverBundleRecord.objects.filter(id=record.id).delete()
+            return Response({"detail": "Not found"}, status=404)
+
+        try:
+            bundle_json = _resolve_persisted_handover_bundle(record)
+        except ClinicalBundleStorageError:
+            return Response({"detail": "Stored bundle is unavailable."}, status=503)
 
         etag = hashlib.sha256(
-            json.dumps(record.bundle_json, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            json.dumps(bundle_json, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         if request.headers.get("If-None-Match") == f'W/"{etag}"':
             response = HttpResponse(status=304)
             response["ETag"] = f'W/"{etag}"'
+            response["Cache-Control"] = "private, no-store"
+            response["Vary"] = "Authorization"
             return response
 
         response = HttpResponse(
-            json.dumps(record.bundle_json, ensure_ascii=False),
+            json.dumps(bundle_json, ensure_ascii=False),
             content_type="application/fhir+json",
             status=200,
         )
         response["ETag"] = f'W/"{etag}"'
-        response["Cache-Control"] = "private, max-age=60"
+        response["Cache-Control"] = "private, no-store"
+        response["Pragma"] = "no-cache"
+        response["Vary"] = "Authorization"
         return response
 
 
@@ -1770,3 +1797,8 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
+
+
+
+

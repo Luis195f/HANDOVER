@@ -415,7 +415,6 @@ def _diagnoses(conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 'type': 'nursing' if system in NANDA_SYSTEMS else 'medical',
                 'system': system,
                 'code': code_value,
-                'display': display,
             }
         )
     return results
@@ -439,9 +438,8 @@ def _risk_flags(conditions: list[dict[str, Any]]) -> list[str]:
                 break
         if not risk_like:
             continue
-        label = _safe(((condition.get('code') or {}) if isinstance(condition.get('code'), dict) else {}).get('text'))
-        if label:
-            results.append(label)
+        code = _code_value((condition.get('code') or {}) if isinstance(condition.get('code'), dict) else {})
+        results.append(code or 'risk-condition')
     return results
 
 
@@ -698,4 +696,6 @@ def _is_stale(window_end: str | None) -> bool:
 def _ts(now: datetime.datetime | None = None) -> str:
     current = now or timezone.now()
     return current.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
 
