@@ -63,7 +63,7 @@ export function createSessionTimeoutController(options: SessionTimeoutOptions): 
     }
 
     if (state === 'active') {
-      const elapsed = backgroundAt ? now() - backgroundAt : 0;
+      const elapsed = backgroundAt !== null ? now() - backgroundAt : 0;
       backgroundAt = null;
       if (Number.isFinite(elapsed) && elapsed >= idleMs) {
         onTimeout('background');

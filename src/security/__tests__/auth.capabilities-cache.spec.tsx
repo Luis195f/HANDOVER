@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('expo-auth-session', () => ({
   makeRedirectUri: () => 'handover://redirect',
@@ -22,12 +22,29 @@ vi.mock('@/src/security/secure-cleanup', () => ({
 vi.mock('@/src/navigation/navigation', () => ({
   resetTo: vi.fn(),
 }));
-vi.mock('@/src/security/AuthService', () => ({
-  storeTokens: vi.fn(async () => undefined),
-  clearTokens: vi.fn(async () => undefined),
-  loadTokens: vi.fn(async () => null),
-  getAccessToken: vi.fn(async () => null),
-}));
+vi.mock('@/src/security/AuthService', async () => {
+  const actual = await vi.importActual<typeof import('@/src/security/AuthService')>(
+    '@/src/security/AuthService',
+  );
+  const storeTokens = vi.fn(async () => undefined);
+  const clearTokens = vi.fn(async () => undefined);
+  const loadTokens = vi.fn(async () => null);
+  const getAccessToken = vi.fn(async () => null);
+  return {
+    ...actual,
+    default: {
+      ...actual.default,
+      storeTokens,
+      clearTokens,
+      loadTokens,
+      getAccessToken,
+    },
+    storeTokens,
+    clearTokens,
+    loadTokens,
+    getAccessToken,
+  };
+});
 vi.mock('@/src/security/OAuthService', async () => {
   const actual = await vi.importActual<typeof import('@/src/security/OAuthService')>(
     '@/src/security/OAuthService',
@@ -40,23 +57,25 @@ vi.mock('@/src/security/OAuthService', async () => {
   };
 });
 
-const clearCapabilitiesCache = vi.fn(async () => undefined);
-const fetchCapabilities = vi.fn(async () => ({
-  userSub: 'auth0|u1',
-  roles: ['nurse'],
-  scopes: ['handover:write'],
-  permissions: {
-    canWriteHandover: true,
-    canSignHandover: false,
-    canViewAudit: false,
-    canSendAuditEvents: true,
-    isAdmin: false,
-  },
+const capabilityMocks = vi.hoisted(() => ({
+  clearCapabilitiesCache: vi.fn(async () => undefined),
+  fetchCapabilities: vi.fn(async () => ({
+    userSub: 'auth0|u1',
+    roles: ['nurse'],
+    scopes: ['handover:write'],
+    permissions: {
+      canWriteHandover: true,
+      canSignHandover: false,
+      canViewAudit: false,
+      canSendAuditEvents: true,
+      isAdmin: false,
+    },
+  })),
 }));
 
 vi.mock('@/src/security/capabilities', () => ({
-  clearCapabilitiesCache,
-  fetchCapabilities,
+  clearCapabilitiesCache: capabilityMocks.clearCapabilitiesCache,
+  fetchCapabilities: capabilityMocks.fetchCapabilities,
   getDemoCapabilities: vi.fn(),
 }));
 
@@ -82,13 +101,12 @@ describe('AuthProvider capabilities cache invalidation', () => {
   });
 
   it('limpia cache al cambiar session.userId', async () => {
-    create(
-      <AuthProvider>
-        <></>
-      </AuthProvider>,
-    );
-
     await act(async () => {
+      create(
+        <AuthProvider>
+          <></>
+        </AuthProvider>,
+      );
       await flush();
     });
 
@@ -103,7 +121,7 @@ describe('AuthProvider capabilities cache invalidation', () => {
       await flush();
     });
 
-    const callsBeforeSwitch = clearCapabilitiesCache.mock.calls.length;
+    const callsBeforeSwitch = capabilityMocks.clearCapabilitiesCache.mock.calls.length;
 
     await act(async () => {
       await setCurrentSession({
@@ -116,7 +134,8 @@ describe('AuthProvider capabilities cache invalidation', () => {
       await flush();
     });
 
-    expect(clearCapabilitiesCache.mock.calls.length).toBe(callsBeforeSwitch + 1);
-    expect(fetchCapabilities).toHaveBeenCalledTimes(2);
+    expect(capabilityMocks.clearCapabilitiesCache.mock.calls.length).toBe(callsBeforeSwitch + 1);
+    expect(capabilityMocks.fetchCapabilities).toHaveBeenCalledTimes(2);
   });
 });
+

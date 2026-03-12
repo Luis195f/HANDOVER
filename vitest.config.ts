@@ -25,7 +25,6 @@ export default defineConfig({
       "**/node_modules/**",
       "**/.pnpm/**",
       "src/validation/**",
-      "src/security/**",
       "tests/e2e/**",
       "src/**/__tests__/**/fhir-map.test.ts",
       "src/**/__tests__/**/news2.test.ts",
@@ -47,6 +46,9 @@ export default defineConfig({
     "src/lib/net.ts",
     "src/lib/queue.ts",
     "src/lib/sync.ts",
+    "src/security/auth.tsx",
+    "src/security/capabilities.ts",
+    "src/security/OAuthService.ts",
     "src/screens/HandoverForm.tsx",
     "src/screens/QRScan.tsx",
     "src/validation/schemas.ts",
@@ -260,3 +262,4 @@ export default defineConfig({
     ],
   },
 });
+

@@ -1,23 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const storage = new Map<string, string>();
-
-const secureGetItem = vi.fn(async (key: string) => storage.get(key) ?? null);
-const secureSetItem = vi.fn(async (key: string, value: string) => {
-  storage.set(key, value);
+const mockState = vi.hoisted(() => {
+  const storage = new Map<string, string>();
+  return {
+    storage,
+    secureGetItem: vi.fn(async (key: string) => storage.get(key) ?? null),
+    secureSetItem: vi.fn(async (key: string, value: string) => {
+      storage.set(key, value);
+    }),
+    secureDeleteItem: vi.fn(async (key: string) => {
+      storage.delete(key);
+    }),
+    apiGet: vi.fn(),
+  };
 });
-const secureDeleteItem = vi.fn(async (key: string) => {
-  storage.delete(key);
-});
-
-const apiGet = vi.fn();
 
 vi.mock('@/src/security/secure-storage', () => ({
-  secureGetItem,
-  secureSetItem,
-  secureDeleteItem,
+  secureGetItem: mockState.secureGetItem,
+  secureSetItem: mockState.secureSetItem,
+  secureDeleteItem: mockState.secureDeleteItem,
 }));
-vi.mock('@/src/lib/api', () => ({ apiGet }));
+vi.mock('@/src/lib/api', () => ({ apiGet: mockState.apiGet }));
 
 import {
   fetchCapabilities,
@@ -58,7 +61,7 @@ const refreshedCapabilities: Capabilities = {
 
 describe('capabilities cache TTL', () => {
   beforeEach(async () => {
-    storage.clear();
+    mockState.storage.clear();
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2024-01-01T00:00:00Z'));
@@ -70,7 +73,7 @@ describe('capabilities cache TTL', () => {
   });
 
   it('devuelve cache fresh sin llamar API', async () => {
-    storage.set(
+    mockState.storage.set(
       CAPABILITIES_KEY,
       JSON.stringify({ capabilities: baseCapabilities, cachedAt: Date.now() }),
     );
@@ -78,24 +81,24 @@ describe('capabilities cache TTL', () => {
     const result = await fetchCapabilities();
 
     expect(result).toEqual(baseCapabilities);
-    expect(apiGet).not.toHaveBeenCalled();
+    expect(mockState.apiGet).not.toHaveBeenCalled();
   });
 
   it('con cache stale refresca y actualiza cache', async () => {
-    storage.set(
+    mockState.storage.set(
       CAPABILITIES_KEY,
       JSON.stringify({
         capabilities: baseCapabilities,
         cachedAt: Date.now() - 10 * 60 * 1000,
       }),
     );
-    apiGet.mockResolvedValue(refreshedCapabilities);
+    mockState.apiGet.mockResolvedValue(refreshedCapabilities);
 
     const result = await fetchCapabilities();
 
-    expect(apiGet).toHaveBeenCalledWith('/api/me/capabilities');
+    expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
     expect(result).toEqual(refreshedCapabilities);
-    const stored = JSON.parse(storage.get(CAPABILITIES_KEY) ?? '{}') as {
+    const stored = JSON.parse(mockState.storage.get(CAPABILITIES_KEY) ?? '{}') as {
       cachedAt?: number;
       capabilities?: Capabilities;
     };
@@ -103,33 +106,32 @@ describe('capabilities cache TTL', () => {
     expect(stored.cachedAt).toBe(Date.now());
   });
 
-
   it('invalida cache cuando /api/me/capabilities responde 403', async () => {
-    storage.set(
+    mockState.storage.set(
       CAPABILITIES_KEY,
       JSON.stringify({ capabilities: baseCapabilities, cachedAt: Date.now() - 10 * 60 * 1000 }),
     );
-    apiGet.mockRejectedValue(new Error('403 Forbidden'));
+    mockState.apiGet.mockRejectedValue(new Error('403 Forbidden'));
 
     const result = await fetchCapabilities();
 
-    expect(apiGet).toHaveBeenCalledWith('/api/me/capabilities');
-    expect(secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
+    expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
+    expect(mockState.secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
     expect(result).toBeNull();
   });
 
   it('invalidación borra cache y fuerza fetch remoto', async () => {
-    storage.set(
+    mockState.storage.set(
       CAPABILITIES_KEY,
       JSON.stringify({ capabilities: baseCapabilities, cachedAt: Date.now() }),
     );
     await invalidateCapabilitiesCache();
-    apiGet.mockResolvedValue(refreshedCapabilities);
+    mockState.apiGet.mockResolvedValue(refreshedCapabilities);
 
     const result = await fetchCapabilities();
 
-    expect(secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
-    expect(apiGet).toHaveBeenCalledWith('/api/me/capabilities');
+    expect(mockState.secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
+    expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
     expect(result).toEqual(refreshedCapabilities);
   });
 });
