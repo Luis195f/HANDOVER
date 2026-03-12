@@ -67,6 +67,8 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 - Verificar `403` con token autenticado pero sin rol o scope suficiente.
 - Verificar regresión feliz de `transcribe` y `upload/audio-to-fhir` con credenciales válidas.
 - Verificar que la protección no depende de `DEBUG=true`.
+- Verificar que `POST /api/ai/refine-sbar` responde `400` con `invalid_refine_draft` cuando `draft` no es objeto o cuando sus campos tipados llegan con tipos no válidos.
+- Verificar que `POST /api/ai/refine-sbar` responde `400` con `invalid_refine_handover` cuando `handover` llega explícitamente con tipo no objeto.
 
 ## Estado actual de confianza
 - Las suites top-level de FHIR sensible (`tests/test_fhir_transaction_validation.py`, `tests/test_fhir_transaction_signatures.py`, `tests/test_transaction_audit.py`, `tests/test_resources_contract.py`) deben ejecutarse sin depender de `respx`.
@@ -77,3 +79,5 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 ## Storage sensible
 - Ejecuta también `pytest backend/api/tests/test_handover_etl_read.py backend/api/tests/test_icea_transaction.py backend/api/tests/test_icea_bridge.py` cuando cambies retención, ETL readback o persistencia clínica.
 - Las regresiones de retención/cifrado del Bundle clínico y pruning de artefactos sensibles deben cubrirse en tests backend focalizados.
+- La batería sensible debe cubrir compatibilidad backward de descifrado usando `encryption_metadata.key_source`, incluyendo bundles legacy `secret_key_derived` leídos después de activar `HANDOVER_BUNDLE_ENCRYPTION_KEY`.
+- En bridge retry/requeue, los tests deben distinguir `stored_bundle_unavailable` (bundle presente pero ilegible) de `handover_bundle_not_found` (bundle ausente/expirado/no localizable).

@@ -3,7 +3,7 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -80,6 +80,29 @@ class SensitiveBundleStorageTests(TestCase):
         self.assertEqual(json.loads(read_response.content), decrypt_bundle_document(record.bundle_json))
         self.assertEqual(read_response['Cache-Control'], 'private, no-store')
         self.assertIn('Authorization', [value.strip() for value in read_response['Vary'].split(',')])
+
+
+    @override_settings(SECRET_KEY='legacy-secret-key', HANDOVER_BUNDLE_ENCRYPTION_KEY='')
+    def test_legacy_secret_key_bundle_remains_readable_after_env_key_is_enabled(self):
+        encrypted_bundle, metadata = encrypt_bundle_document(self.bundle)
+
+        self.assertEqual(metadata['key_source'], 'secret_key_derived')
+
+        with override_settings(SECRET_KEY='legacy-secret-key', HANDOVER_BUNDLE_ENCRYPTION_KEY='env-bundle-key'):
+            self.assertEqual(
+                decrypt_bundle_document(encrypted_bundle, encryption_metadata=metadata),
+                self.bundle,
+            )
+
+    @override_settings(SECRET_KEY='legacy-secret-key', HANDOVER_BUNDLE_ENCRYPTION_KEY='env-bundle-key')
+    def test_env_key_bundle_round_trips_with_metadata(self):
+        encrypted_bundle, metadata = encrypt_bundle_document(self.bundle)
+
+        self.assertEqual(metadata['key_source'], 'env')
+        self.assertEqual(
+            decrypt_bundle_document(encrypted_bundle, encryption_metadata=metadata),
+            self.bundle,
+        )
 
     def test_expired_bundle_is_deleted_before_etl_read(self):
         encrypted_bundle, metadata = encrypt_bundle_document(self.bundle)
@@ -229,5 +252,4 @@ class IceaBridgePayloadMinimizationTests(TestCase):
         self.assertNotIn('display', payload['caseMix']['diagnoses'][0])
         self.assertEqual(payload['caseMix']['riskFlags'], ['248244005'])
         self.assertNotIn('Fall risk', json.dumps(payload, ensure_ascii=False))
-
 

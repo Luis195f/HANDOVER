@@ -12,7 +12,7 @@ from django.db import close_old_connections
 from django.http import HttpRequest
 from django.utils import timezone
 
-from backend.api.clinical_storage import decrypt_bundle_document
+from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
 from backend.api.icea_payload_mapper import CONTRACT_VERSION, SOURCE, build_icea_bridge_payload, compute_payload_hash
 from backend.api.icea_pipeline import (
     IceaPipelineConfigurationError,
@@ -21,6 +21,8 @@ from backend.api.icea_pipeline import (
     IceaPipelineTransportError,
 )
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
+
+STORED_BUNDLE_UNAVAILABLE_ERROR = 'stored_bundle_unavailable'
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,28 @@ def _idempotency_key(request_id: str, scoring_mode: str, payload_hash: str) -> s
     return f'{request_id}:{scoring_mode}:{payload_hash[:16]}'
 
 
+
+def _bundle_unavailable_payload(record: HandoverBundleRecord) -> dict[str, Any]:
+    return {
+        'contractVersion': CONTRACT_VERSION,
+        'identity': {
+            'bundleId': record.bundle_id,
+            'patientId': record.patient_id,
+            'requestId': record.request_id,
+        },
+        'context': {'unitId': record.unit_id},
+    }
+
+
+def _mark_bundle_unavailable(record: HandoverBundleRecord, *, scoring_mode: str) -> IceaBridgeRequest:
+    bridge_request = _upsert_bridge_request(
+        request_id=record.request_id,
+        scoring_mode=scoring_mode,
+        payload=_bundle_unavailable_payload(record),
+    )
+    _mark_failed(bridge_request, detail=STORED_BUNDLE_UNAVAILABLE_ERROR)
+    return bridge_request
+
 def enqueue_icea_bridge_request_for_transaction(
     *,
     bundle: dict[str, Any],
@@ -185,8 +209,13 @@ def enqueue_icea_bridge_request_for_bundle_record(
     settings = load_icea_bridge_settings()
     if not settings.enabled or not settings.allows_mode(scoring_mode):
         return None
+    try:
+        bundle = decrypt_bundle_document(record.bundle_json, encryption_metadata=record.encryption_metadata)
+    except ClinicalBundleStorageError:
+        return _mark_bundle_unavailable(record, scoring_mode=scoring_mode)
+
     payload = build_icea_bridge_payload(
-        decrypt_bundle_document(record.bundle_json),
+        bundle,
         request_id=record.request_id,
         scoring_mode=scoring_mode,
         unit_id=record.unit_id,
@@ -203,7 +232,6 @@ def enqueue_icea_bridge_request_for_bundle_record(
     if bridge_request.status == IceaBridgeRequest.STATUS_QUEUED:
         schedule_icea_bridge_delivery(bridge_request.id, force=True)
     return bridge_request
-
 
 def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[str, Any]) -> IceaBridgeRequest:
     payload_hash = compute_payload_hash(payload)
@@ -778,7 +806,5 @@ def serialize_bridge_summary(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'lastUpdated': bridge_request.updated_at.isoformat(),
         'source': SOURCE,
     }
-
-
 
 

@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from backend.api.icea_bridge_service import (
+    STORED_BUNDLE_UNAVAILABLE_ERROR,
     enqueue_icea_bridge_request_for_bundle_record,
     load_icea_bridge_settings,
     refresh_icea_bridge_request,
@@ -47,6 +48,29 @@ def _latest_bridge_request(*, handover_id: str, scoring_mode: str | None = None)
         queryset = queryset.filter(scoring_mode=scoring_mode)
     return queryset.order_by('-updated_at').first()
 
+
+def _stored_bundle_unavailable_response(bridge_request: IceaBridgeRequest) -> Response:
+    return Response(
+        {
+            'detail': 'Stored bundle is unavailable.',
+            'code': STORED_BUNDLE_UNAVAILABLE_ERROR,
+            'bridgeRequest': serialize_bridge_request(bridge_request),
+        },
+        status=503,
+    )
+
+
+def _active_handover_record_for_bridge_request(bridge_request: IceaBridgeRequest) -> HandoverBundleRecord | None:
+    record = HandoverBundleRecord.objects.filter(
+        request_id=bridge_request.request_id,
+        expires_at__gt=timezone.now(),
+    ).first()
+    if record is None:
+        record = HandoverBundleRecord.objects.filter(
+            bundle_id=bridge_request.bundle_id,
+            expires_at__gt=timezone.now(),
+        ).first()
+    return record
 
 def _can_query_all_patient_risk(request) -> bool:
     claims = getattr(request, 'auth', None)
@@ -277,26 +301,27 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if configuration_error not in (None, 'icea_bridge_disabled'):
             return Response({'detail': score_configuration_error_detail(configuration_error), 'code': configuration_error}, status=503)
 
-        if requested_mode == bridge_request.scoring_mode:
-            schedule_icea_bridge_delivery(bridge_request.id, force=True)
-            bridge_request.refresh_from_db()
-            return Response({'bridgeRequest': serialize_bridge_request(bridge_request)}, status=202)
-
-        record = HandoverBundleRecord.objects.filter(
-            request_id=bridge_request.request_id,
-            expires_at__gt=timezone.now(),
-        ).first()
-        if record is None:
-            record = HandoverBundleRecord.objects.filter(
-                bundle_id=bridge_request.bundle_id,
-                expires_at__gt=timezone.now(),
-            ).first()
+        record = _active_handover_record_for_bridge_request(bridge_request)
         if record is None:
             return Response({'detail': 'Local handover bundle not found.', 'code': 'handover_bundle_not_found'}, status=404)
+
+        if requested_mode == bridge_request.scoring_mode:
+            retriggered = enqueue_icea_bridge_request_for_bundle_record(record=record, scoring_mode=requested_mode)
+            if retriggered is None:
+                return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
+            if retriggered.status == IceaBridgeRequest.STATUS_FAILED and retriggered.last_error == STORED_BUNDLE_UNAVAILABLE_ERROR:
+                return _stored_bundle_unavailable_response(retriggered)
+            schedule_icea_bridge_delivery(retriggered.id, force=True)
+            retriggered.refresh_from_db()
+            return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
 
         retriggered = enqueue_icea_bridge_request_for_bundle_record(record=record, scoring_mode=requested_mode)
         if retriggered is None:
             return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
+        if retriggered.status == IceaBridgeRequest.STATUS_FAILED and retriggered.last_error == STORED_BUNDLE_UNAVAILABLE_ERROR:
+            return _stored_bundle_unavailable_response(retriggered)
         return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
+
+
 
 

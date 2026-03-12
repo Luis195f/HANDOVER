@@ -1,3 +1,4 @@
+import copy
 # backend/api/tests/test_security_and_validation.py
 import json
 from types import SimpleNamespace
@@ -167,4 +168,32 @@ def test_valid_payload_returns_200_with_valid_auth(
 
     assert response.status_code == 200
     assert response.json()["type"] == "transaction-response"
+
+
+
+def test_later_final_composition_still_requires_clinician_signature():
+    client = _authorized_client()
+    unsigned_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    unsigned_final['signature'] = []
+    unsigned_final['entry'].insert(
+        1,
+        {
+            'request': {'method': 'POST', 'url': 'Composition'},
+            'resource': {
+                'resourceType': 'Composition',
+                'id': 'comp-test-preliminary',
+                'status': 'preliminary',
+                'author': [{'reference': 'Practitioner/nurse-1'}],
+                'subject': {'reference': 'Patient/pat-test-001'},
+                'type': {'text': 'handover'},
+                'date': '2026-03-10T10:50:00Z',
+                'title': 'Draft handover summary',
+            },
+        },
+    )
+
+    response = _post_fhir(client, unsigned_final)
+
+    assert response.status_code == 400
+    assert response.json()['errors'] == ['Final handover bundle requires an outgoing clinical signature.']
 

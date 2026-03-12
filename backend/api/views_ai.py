@@ -380,23 +380,31 @@ class RefineSbarView(ProtectedAIAPIView):
             return trimmed or None
         return canonical_json(value).decode("utf-8")
 
-    @classmethod
-    def _build_refine_input(cls, draft: Dict[str, Any], handover: Dict[str, Any]) -> tuple[str, dict, str]:
-        normalized_draft = {
-            "situation": (draft.get("situation") or "").strip(),
-            "background": (draft.get("background") or "").strip(),
-            "assessment": (draft.get("assessment") or "").strip(),
-            "recommendation": (draft.get("recommendation") or "").strip(),
-        }
+    @staticmethod
+    def _normalize_draft_field(value: Any, *, field_name: str) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        raise ValueError(field_name)
 
+    @classmethod
+    def _normalize_refine_draft(cls, draft: Dict[str, Any]) -> Dict[str, str]:
+        normalized: Dict[str, str] = {}
+        for field_name in ("situation", "background", "assessment", "recommendation"):
+            normalized[field_name] = cls._normalize_draft_field(draft.get(field_name), field_name=field_name)
+        return normalized
+
+    @classmethod
+    def _build_refine_input(cls, draft: Dict[str, str], handover: Dict[str, Any]) -> tuple[str, dict, str]:
         lines = [
             "Refina el siguiente SBAR usando solo el contexto clínico disponible.",
             "No inventes datos ni prescripciones.",
             "SBAR actual:",
-            f"S: {normalized_draft['situation'] or 'dato no disponible'}",
-            f"B: {normalized_draft['background'] or 'dato no disponible'}",
-            f"A: {normalized_draft['assessment'] or 'dato no disponible'}",
-            f"R: {normalized_draft['recommendation'] or 'dato no disponible'}",
+            f"S: {draft['situation'] or 'dato no disponible'}",
+            f"B: {draft['background'] or 'dato no disponible'}",
+            f"A: {draft['assessment'] or 'dato no disponible'}",
+            f"R: {draft['recommendation'] or 'dato no disponible'}",
         ]
 
         context_lines = []
@@ -410,8 +418,8 @@ class RefineSbarView(ProtectedAIAPIView):
         if context_lines:
             lines.extend(["", "Contexto clínico estructurado:", *context_lines])
 
-        audit_payload = {"draft": normalized_draft, "handover": handover}
-        audit_notes = cls._truncate_for_audit(" ".join(value for value in normalized_draft.values() if value))
+        audit_payload = {"draft": draft, "handover": handover}
+        audit_notes = cls._truncate_for_audit(" ".join(value for value in draft.values() if value))
         return "\n".join(lines), audit_payload, audit_notes
 
     def _audit_ai_refine(
@@ -445,12 +453,32 @@ class RefineSbarView(ProtectedAIAPIView):
 
     def post(self, request: HttpRequest) -> Response:
         req = request.data if isinstance(request.data, dict) else {}
-        draft = req.get("draft") if isinstance(req.get("draft"), dict) else {}
-        handover = req.get("handover") if isinstance(req.get("handover"), dict) else {}
+        raw_draft = req.get("draft")
+        if "draft" in req and not isinstance(raw_draft, dict):
+            return Response({"detail": "draft must be an object.", "code": "invalid_refine_draft"}, status=400)
+
+        raw_handover = req.get("handover")
+        if "handover" in req and not isinstance(raw_handover, dict):
+            return Response({"detail": "handover must be an object.", "code": "invalid_refine_handover"}, status=400)
+
+        draft = raw_draft if isinstance(raw_draft, dict) else {}
+        handover = raw_handover if isinstance(raw_handover, dict) else {}
         language = req.get("language") or "es"
         user_sub = _get_authenticated_user_sub(request)
 
-        combined_text, audit_payload, audit_notes = self._build_refine_input(draft, handover)
+        try:
+            normalized_draft = self._normalize_refine_draft(draft)
+        except ValueError as exc:
+            field_name = str(exc) or "draft"
+            return Response(
+                {
+                    "detail": f"draft.{field_name} must be a string or null.",
+                    "code": "invalid_refine_draft",
+                },
+                status=400,
+            )
+
+        combined_text, audit_payload, audit_notes = self._build_refine_input(normalized_draft, handover)
         if len(combined_text) > MAX_FREE_TEXT_LENGTH:
             self._audit_ai_refine(
                 status="fail",
@@ -584,3 +612,5 @@ class AudioToFHIRView(ProtectedAIAPIView):
             return Response(resp.json(), status=resp.status_code)
         except Exception:
             return Response({"detail": "Respuesta del servidor FHIR no es JSON", "code": "fhir_invalid_response"}, status=502)
+
+
