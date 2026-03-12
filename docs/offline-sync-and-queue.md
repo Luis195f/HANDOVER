@@ -50,8 +50,8 @@
   - The offline AES-GCM key is generated at runtime and persisted in secure storage; the client no longer accepts an operational encryption secret via public env.
 ## WebCrypto and polyfills
 - The client uses `expo-crypto` for hashing and random bytes; no global `crypto` polyfill is added at runtime.
-- FHIR bundle ECDSA signing (if `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) depends on `globalThis.crypto.subtle` when available.
-- If WebCrypto is missing (e.g., web/restricted environments), client signing is skipped and the queue continues without signatures, with structured logs.
+- FHIR bundle ECDSA signing (`EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) is limited to development/demo/test and depends on `globalThis.crypto.subtle` when available.
+- If WebCrypto is missing, client transport signing is skipped and the queue continues unsigned; that fallback is not a valid pilot/production path, which must rely on backend signature enforcement.
 
 ## UI
 - `src/screens/SyncCenter.tsx` lets users inspect, retry, or clear the queue. Items with `syncStatus="error"` show an “Error” badge, differentiate `422 FHIR validation errors`, and allow viewing server-provided details (`expression` + `diagnostics`).
@@ -76,3 +76,6 @@
 - `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of `flushQueue`.
 - `postBundleSmart` (alias of `postBundle` in `src/lib/fhir-client.ts`) is deprecated. Prefer `postBundle`.
 - These aliases remain for compatibility but will be removed in a future major release. Update imports to the canonical names when migrating.
+
+
+

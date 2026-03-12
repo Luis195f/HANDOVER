@@ -22,7 +22,7 @@ HANDOVER commits to consistent software quality by enforcing controlled changes,
 ## Verification & Validation
 
 - **Frontend tests** validate offline queue behavior, encryption, and validation logic. (`src/lib/__tests__/queue.encryption.spec.ts`, `src/lib/__tests__/sync.offline.spec.ts`, `src/lib/__tests__/sync.validation.spec.ts`)
-- **Backend tests** validate role/scope ACLs and audit behavior. (`backend/api/tests/test_role_acl.py`, `backend/audit/tests/test_audit.py`)
+- **Backend tests** validate role/scope ACLs, signature enforcement, and audit behavior. (`backend/api/tests/test_role_acl.py`, `backend/api/tests/test_security_and_validation.py`, `backend/audit/tests/test_audit.py`)
 - **CI workflows** run automated checks on both frontend and backend. (`.github/workflows/ci.yml`, `.github/workflows/django.yml`)
 
 ## Incident & Error Handling
@@ -34,6 +34,7 @@ HANDOVER commits to consistent software quality by enforcing controlled changes,
 
 - **Authentication** is enforced through Auth0 JWT validation, including JWKS-based signature checks. (`backend/security/auth.py`)
 - **Authorization** uses role-based and scope-based permissions for all protected endpoints. (`backend/security/permissions.py`, `backend/security/permissions_roles.py`, `backend/security/scope_permissions.py`, `backend/api/views.py`)
+- **Signature controls** require mandatory outgoing clinical signatures for final handovers and fail-closed backend cryptographic settings in `pilot/production`. (`backend/settings.py`, `backend/signature.py`, `backend/api/views.py`)
 - **Client-side data protection** encrypts offline payloads and stores keys in platform secure storage. (`src/lib/crypto.ts`, `src/security/secure-storage.ts`)
 
 ## Audit & Traceability
@@ -45,3 +46,6 @@ HANDOVER commits to consistent software quality by enforcing controlled changes,
 
 - Documentation is version-controlled in the repository and updated via PRs, ensuring traceability and review. (`docs/`, `.github/PULL_REQUEST_TEMPLATE.md`)
 - Regulatory documentation is maintained alongside implementation references to ensure consistency between software and MDR artifacts. (`docs/MDR_Anexo_II_HANDOVER.md`, `docs/MDR_traceability_matrix.md`)
+
+
+

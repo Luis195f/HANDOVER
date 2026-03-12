@@ -26,6 +26,7 @@ from rest_framework.views import APIView
 from backend.audit.service import emit_audit_event
 from backend.signature import (
     SignatureSettings,
+    SignatureOperationError,
     SignatureVerificationError,
     load_settings,
     record_signature_audit,
@@ -459,35 +460,79 @@ def _create_audit_event_for_transaction(
         logger.exception("No se pudo emitir AuditEvent para transacción FHIR")
 
 
+def _bundle_signature_list(bundle: Dict[str, Any]) -> list[Dict[str, Any]]:
+    signature_node = bundle.get("signature")
+    if not isinstance(signature_node, list):
+        return []
+    return [item for item in signature_node if isinstance(item, dict)]
+
+
+def _bundle_has_clinician_signature(bundle: Dict[str, Any]) -> bool:
+    return any(isinstance(item.get("data"), str) and item.get("data").strip() for item in _bundle_signature_list(bundle))
+
+
+def _bundle_has_transport_signature(bundle: Dict[str, Any]) -> bool:
+    return isinstance(bundle.get("signature"), dict)
+
+
+def _strip_transport_signature(bundle: Dict[str, Any]) -> None:
+    if _bundle_has_transport_signature(bundle):
+        bundle.pop("signature", None)
+
+
+def _bundle_is_final_handover(bundle: Dict[str, Any]) -> bool:
+    for entry in bundle.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if not isinstance(resource, dict):
+            continue
+        if resource.get("resourceType") != "Composition":
+            continue
+        return str(resource.get("status") or "").strip().lower() == "final"
+    return False
+
+
 def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Optional[Response]:
+    if _bundle_is_final_handover(bundle) and not _bundle_has_clinician_signature(bundle):
+        return Response({"errors": ["Final handover bundle requires an outgoing clinical signature."]}, status=400)
+
+    if _bundle_has_transport_signature(bundle):
+        try:
+            verification = verify_bundle_signature(bundle, settings=SIGNATURE_SETTINGS)
+        except SignatureVerificationError:
+            return Response({"errors": ["Invalid signature"]}, status=400)
+        except SignatureOperationError:
+            return Response({"errors": ["Signature service unavailable"]}, status=503)
+        except Exception:
+            return Response({"errors": ["Invalid signature"]}, status=400)
+
+        if verification:
+            record_signature_audit(
+                user_id=user_id,
+                bundle_hash=verification.bundle_hash,
+                signature_b64=verification.signature_b64,
+                signed_at=_parse_signature_when(
+                    bundle.get("signature", {}).get("when") if isinstance(bundle.get("signature"), dict) else None
+                ),
+            )
+            _strip_transport_signature(bundle)
+        return None
+
     if not SIGNATURE_SETTINGS.enabled:
         logger.info("Firma digital de Bundle deshabilitada; se reenvía sin firma/validación criptográfica.")
-        return None
-    try:
-        verification = verify_bundle_signature(bundle, settings=SIGNATURE_SETTINGS)
-    except SignatureVerificationError:
-        return Response({"errors": ["Invalid signature"]}, status=400)
-    except Exception as exc:
-        return Response({"errors": [str(exc)]}, status=400)
-
-    if verification:
-        record_signature_audit(
-            user_id=user_id,
-            bundle_hash=verification.bundle_hash,
-            signature_b64=verification.signature_b64,
-            signed_at=_parse_signature_when(
-                bundle.get("signature", {}).get("when") if isinstance(bundle.get("signature"), dict) else None
-            ),
-        )
         return None
 
     if not user_id:
         logger.warning("Skipping bundle signing because authenticated actor is missing.")
         return Response({"errors": ["Unknown authenticated actor for signature"]}, status=401)
 
-    signature = sign_bundle(bundle, user_id=user_id, settings=SIGNATURE_SETTINGS)
+    try:
+        signature = sign_bundle(bundle, user_id=user_id, settings=SIGNATURE_SETTINGS)
+    except SignatureOperationError:
+        return Response({"errors": ["Signature service unavailable"]}, status=503)
+
     if signature:
-        bundle["signature"] = signature.fhir_signature
         record_signature_audit(
             user_id=user_id,
             bundle_hash=signature.bundle_hash,
@@ -495,7 +540,6 @@ def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Opt
             signed_at=_parse_signature_when(signature.fhir_signature.get("when")),
         )
     return None
-
 
 def _ensure_secure_url(url: str) -> str:
     if url.startswith("https://"):
@@ -1797,6 +1841,7 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
+
 
 
 

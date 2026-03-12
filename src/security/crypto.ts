@@ -219,7 +219,10 @@ function logSigningWarning(
 }
 
 export function isClientSigningEnabled(): boolean {
-  return isTruthyFlag(process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED);
+  if (!isTruthyFlag(process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED)) {
+    return false;
+  }
+  return process.env.NODE_ENV !== 'production';
 }
 
 function parseStoredKeypair(raw: string | null): { privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null {
@@ -386,3 +389,4 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(
     return { bundle, signed: false };
   }
 }
+

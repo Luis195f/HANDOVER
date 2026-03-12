@@ -25,7 +25,7 @@ No existe en el estado actual del repo una arquitectura paralela para NNN + ICEA
 El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del repo actual, que HANDOVER puede entrar en conversacion seria de piloto para:
 
 1. capturar NNN sin volver obligatoria la codificacion estructurada;
-2. intercambiar y persistir bundles FHIR con trazabilidad minima;
+2. intercambiar y persistir bundles FHIR con trazabilidad minima y firma obligatoria en cierres finales;
 3. integrar ICEA+ como soporte analitico no bloqueante y no autonomo;
 4. limitar exposicion de PHI en logs y canales tecnicos instrumentados;
 5. dejar visibles los vacios que siguen siendo operativos o regulatorios.
@@ -78,6 +78,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 - Capa `/api/icea/*` accesible solo via HANDOVER con roles/scopes esperados.
 - Resumen bedside, si se habilita, visible como soporte prudente y no como diagnostico autonomo.
 - Checklist de ciberseguridad cerrado al menos sin hallazgos criticos abiertos.
+- Evidencia de que el cierre final devuelve `400` si falta firma clínica o si la firma criptográfica de transporte es inválida.
 
 ### Go operativo adicional
 
@@ -90,6 +91,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 - `ICEA_BRIDGE_MODEL_ID` ausente o invalido cuando se exige score real.
 - Falta de filtros de unidad/rol para `patient-risk`.
 - Cualquier dependencia de llamada directa desde la app a ICEA+.
+- Cualquier despliegue piloto que dependa de `HANDOVER_SIGNATURE_DISABLED=true`, de firma cliente opcional o de cierre final sin firma clínica.
 - Documentacion que afirme cumplimiento regulatorio total o E2E clinico cerrado sin evidencia adicional.
 
 ## 6) Estrategia de verificacion y validacion
@@ -187,3 +189,6 @@ Este paquete se considera cerrado cuando:
 2. no quedan afirmaciones aspiracionales sin respaldo;
 3. los riesgos residuales siguen visibles y acotados;
 4. el material permite una conversacion seria de piloto sin fingir cierre regulatorio total.
+
+
+

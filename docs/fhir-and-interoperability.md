@@ -5,7 +5,7 @@
 ## 1) Arquitectura real
 
 - La app envia bundles a `POST /api/fhir/transaction`.
-- Django/DRF concentra validacion, firma opcional, auditoria y side effects ICEA.
+- Django/DRF concentra validación, enforcement de firma según entorno, auditoría y side effects ICEA.
 - La lectura ETL del Bundle clinico persistido ocurre via `GET /api/handover/{bundle_id}`.
 - La app no necesita hablar directo con ICEA+ para interoperabilidad operativa.
 
@@ -110,8 +110,9 @@ Lo que no hace el repo:
   - reintentos y cabeceras de idempotencia.
 - Backend:
   - `HANDOVER_FHIR_VALIDATION_MODE = off | remote`
-  - firma opcional de `bundle.signature`
-  - reenvio a FHIR con `Prefer: return=representation`
+  - cierres finales requieren firma clínica saliente en el Bundle
+  - `pilot/production` requieren firma criptográfica fuerte backend-managed (`HANDOVER_PRIVATE_KEY_PATH` + `HANDOVER_PUBLIC_KEY_PATH`) y no aceptan `HANDOVER_SIGNATURE_DISABLED=true`
+- reenvio a FHIR con `Prefer: return=representation`
 
 Notas de alcance:
 
@@ -134,3 +135,5 @@ Notas de alcance:
 | Consumo externo mas estricto | un tercero puede requerir ValueSets/profiles adicionales no presentes aqui |
 
 Este documento sirve para trazabilidad tecnica de piloto, no como declaracion de conformidad interoperable completa frente a un perfil externo especifico.
+
+

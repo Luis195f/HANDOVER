@@ -5,12 +5,13 @@
 ## Backend core
 - `DJANGO_SETTINGS_MODULE`: módulo de settings (normalmente `backend.settings`).
 - `SECRET_KEY`: clave secreta de Django (obligatoria en producción).
+- `HANDOVER_DEPLOYMENT_MODE`: `development` | `demo` | `test` | `pilot` | `production`.
 - `FHIR_BASE`: base URL del servidor FHIR para reenvío/interoperabilidad.
 - `HANDOVER_FHIR_VALIDATION_MODE`: `off` | `remote` | `strict`.
 - `HANDOVER_REQUIRE_RBAC_ON_FHIR`: fuerza contexto de usuario autorizado para llamadas FHIR.
-- `HANDOVER_SIGNATURE_DISABLED`: desactiva firma digital (útil sólo en dev/test controlado).
-- `HANDOVER_PRIVATE_KEY_PATH`: ruta a clave privada para firma.
-- `HANDOVER_PUBLIC_KEY_PATH`: ruta a clave pública para verificación.
+- `HANDOVER_PRIVATE_KEY_PATH`: ruta a clave privada para firma criptográfica fuerte.
+- `HANDOVER_PUBLIC_KEY_PATH`: ruta a clave pública para verificación criptográfica.
+- `HANDOVER_SIGNATURE_DISABLED`: solo válido en `development`/`demo`/`test` controlado; `pilot`/`production` fallan al arrancar si se activa.
 - `HANDOVER_MAX_AUDIO_BYTES`: límite de tamaño de audio para `/api/ai/transcribe`.
 
 ## Auth / OIDC
@@ -38,16 +39,19 @@ En GitHub Actions se usan valores dummy para asegurar que CI **no realiza llamad
 # Django
 DJANGO_SETTINGS_MODULE=backend.settings
 SECRET_KEY=change-me-in-prod
+DJANGO_DEBUG=false
+HANDOVER_DEPLOYMENT_MODE=production
 
 # FHIR
-FHIR_BASE=http://localhost:8080/fhir
+FHIR_BASE=https://fhir.example.com
 HANDOVER_FHIR_VALIDATION_MODE=off
 HANDOVER_REQUIRE_RBAC_ON_FHIR=true
 
-# Firma digital
-HANDOVER_SIGNATURE_DISABLED=true
-HANDOVER_PRIVATE_KEY_PATH=
-HANDOVER_PUBLIC_KEY_PATH=
+# Firma digital fuerte backend
+HANDOVER_PRIVATE_KEY_PATH=/secure/path/handover-private.pem
+HANDOVER_PUBLIC_KEY_PATH=/secure/path/handover-public.pem
+# Solo dev/demo/test controlado
+# HANDOVER_SIGNATURE_DISABLED=true
 
 # AI
 HANDOVER_AI_ENABLED=1
