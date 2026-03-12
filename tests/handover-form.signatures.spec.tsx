@@ -73,12 +73,11 @@ vi.mock('@/src/lib/fhir-map', () => ({
   buildHandoverBundleAsync: (...args: unknown[]) => buildHandoverBundleAsync(...args),
 }));
 
-// ✅ FIX: agregar sendAuditEvent para evitar unhandled rejections
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(),
   makeAuditEvent: vi.fn(),
-  sendAuditEvent: vi.fn(), // 👈 necesario
+  sendAuditEvent: vi.fn(),
 }));
 
 vi.mock('@/src/lib/stt', () => ({
@@ -237,5 +236,44 @@ describe('HandoverForm signatures', () => {
     expect(buildHandoverBundleAsync).not.toHaveBeenCalled();
 
     alertSpy.mockRestore();
+  });
+
+  it('ignora HANDOVER_SIGNATURE_DISABLED y mantiene la firma obligatoria', async () => {
+    const originalFlag = process.env.HANDOVER_SIGNATURE_DISABLED;
+    process.env.HANDOVER_SIGNATURE_DISABLED = 'true';
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => 0);
+
+    const { getByText } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '4', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    formValues.bedsideChecklist = {
+      patientIdentityConfirmed: true,
+      allergiesReviewed: true,
+      linesAndDevicesChecked: true,
+      medicationPlanReviewed: true,
+      safetyMeasuresApplied: true,
+      questionsAnswered: true,
+    };
+
+    fireEvent.press(getByText('Finalizar entrega'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Falta firma',
+        'Para finalizar la entrega falta la firma de enfermera saliente.',
+      );
+    });
+    expect(buildHandoverBundleAsync).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+    if (originalFlag === undefined) {
+      delete process.env.HANDOVER_SIGNATURE_DISABLED;
+    } else {
+      process.env.HANDOVER_SIGNATURE_DISABLED = originalFlag;
+    }
   });
 });

@@ -52,7 +52,7 @@ pytest --cov=backend
 - `FHIR_BASE`
 - `HANDOVER_FHIR_VALIDATION_MODE`
 - `HANDOVER_REQUIRE_RBAC_ON_FHIR`
-- `HANDOVER_SIGNATURE_DISABLED`
+- `HANDOVER_DEPLOYMENT_MODE`
 - `HANDOVER_PRIVATE_KEY_PATH`
 - `HANDOVER_PUBLIC_KEY_PATH`
 - `HANDOVER_MAX_AUDIO_BYTES`
@@ -81,7 +81,8 @@ FHIR_BASE=http://localhost:8080/fhir
 HANDOVER_FHIR_VALIDATION_MODE=off
 HANDOVER_REQUIRE_RBAC_ON_FHIR=true
 
-HANDOVER_SIGNATURE_DISABLED=true
+HANDOVER_DEPLOYMENT_MODE=development
+# HANDOVER_SIGNATURE_DISABLED=true
 HANDOVER_PRIVATE_KEY_PATH=
 HANDOVER_PUBLIC_KEY_PATH=
 
@@ -102,7 +103,7 @@ OPENAI_MODEL_SBAR=gpt-4.1-mini
 ### Controles implementados
 - Validación FHIR (`off`/`remote`/`strict`) con tratamiento de `OperationOutcome`.
 - RBAC + scopes para operaciones clínicas.
-- Firma digital de bundles con control por flags.
+- Firma digital de bundles con contrato por entorno: `pilot/production` requieren claves backend y no aceptan `HANDOVER_SIGNATURE_DISABLED=true`.
 - Auditoría de eventos relevantes con minimización de datos.
 - Protección anti-spoofing: identidad clínica basada en `sub` del token validado (no en cabeceras cliente como `X-User-Id`).
 
@@ -132,3 +133,5 @@ pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost 
 2. Expandir paneles de auditoría clínica y operativa.
 3. Fortalecer evidencias para expediente técnico regulatorio.
 4. Extender automatización de pruebas de regresión clínica.
+
+

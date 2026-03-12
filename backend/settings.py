@@ -27,10 +27,49 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 # DEBUG controlable por env (default True para dev)
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 
+
+def _resolve_handover_deployment_mode() -> str:
+    raw_mode = (os.getenv("HANDOVER_DEPLOYMENT_MODE") or "").strip().lower()
+    aliases = {
+        "dev": "development",
+        "prod": "production",
+        "stage": "pilot",
+        "staging": "pilot",
+    }
+    normalized = aliases.get(raw_mode, raw_mode)
+    if not normalized:
+        if RUNNING_TESTS:
+            return "test"
+        if DEBUG:
+            return "development"
+        return "production"
+    allowed = {"development", "demo", "test", "pilot", "production"}
+    if normalized not in allowed:
+        raise RuntimeError(
+            "HANDOVER_DEPLOYMENT_MODE must be one of: development, demo, test, pilot, production."
+        )
+    return normalized
+
+
+HANDOVER_DEPLOYMENT_MODE = _resolve_handover_deployment_mode()
+HANDOVER_STRICT_SECURITY_MODE = HANDOVER_DEPLOYMENT_MODE in {"pilot", "production"}
+
 HANDOVER_PRIVATE_KEY_PATH = os.getenv("HANDOVER_PRIVATE_KEY_PATH")
 HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
 HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").lower() == "true"
 
+if HANDOVER_STRICT_SECURITY_MODE and HANDOVER_SIGNATURE_DISABLED:
+    raise RuntimeError(
+        "HANDOVER_SIGNATURE_DISABLED cannot be enabled in pilot/production. "
+        "Use HANDOVER_DEPLOYMENT_MODE=development|demo|test for controlled insecure runs."
+    )
+
+if HANDOVER_STRICT_SECURITY_MODE and (
+    not HANDOVER_PRIVATE_KEY_PATH or not HANDOVER_PUBLIC_KEY_PATH
+):
+    raise RuntimeError(
+        "HANDOVER_PRIVATE_KEY_PATH and HANDOVER_PUBLIC_KEY_PATH are required in pilot/production."
+    )
 # -----------------------------
 # Auth0 config presence (para decidir defaults DRF en dev/tests)
 # -----------------------------
@@ -338,4 +377,5 @@ LOGGING = {
         },
     },
 }
+
 

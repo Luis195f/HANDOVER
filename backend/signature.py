@@ -77,15 +77,21 @@ def validate_signature_runtime_requirements(settings: Optional[SignatureSettings
         )
 
 
-def _deep_copy_without_signature(bundle: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a deep copy of bundle without the `signature` field."""
+def _transport_signature_from_bundle(bundle: Dict[str, Any]) -> Dict[str, Any] | None:
+    signature_node = bundle.get("signature")
+    return signature_node if isinstance(signature_node, dict) else None
+
+
+def _deep_copy_without_transport_signature(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a deep copy of bundle without transport-level `signature` objects."""
     try:
         clone = json.loads(json.dumps(bundle))
     except (TypeError, ValueError) as exc:  # pragma: no cover - defensive guard
         raise ValueError("El Bundle FHIR no se pudo serializar para firmar.") from exc
-    clone.pop("signature", None)
-    return clone
 
+    if _transport_signature_from_bundle(clone):
+        clone.pop("signature", None)
+    return clone
 
 def canonical_bundle_payload(bundle: Dict[str, Any]) -> tuple[str, bytes, str]:
     """
@@ -93,7 +99,7 @@ def canonical_bundle_payload(bundle: Dict[str, Any]) -> tuple[str, bytes, str]:
 
     Returns (canonical_json, digest_bytes, digest_hex)
     """
-    unsigned = _deep_copy_without_signature(bundle)
+    unsigned = _deep_copy_without_transport_signature(bundle)
     canonical_json = json.dumps(unsigned, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
     digest = hashlib.sha256(canonical_json.encode("utf-8")).digest()
     return canonical_json, digest, digest.hex()
@@ -314,4 +320,6 @@ def record_signature_audit(
             meta={"signature": {"stored": True, "hash": bundle_hash}},
             timestamp=signed_at_value,
         )
+
+
 

@@ -174,6 +174,30 @@ def test_canonicalization_is_stable():
     assert digest_hex_a == digest_hex_b
 
 
+def test_canonicalization_preserves_clinician_signature_lists():
+    bundle = {
+        "resourceType": "Bundle",
+        "type": "transaction",
+        "signature": [
+            {
+                "type": [{"code": "signature"}],
+                "when": "2026-03-10T11:00:00Z",
+                "who": {"identifier": {"value": "nurse-1"}},
+                "data": "clinician-signature-base64",
+            }
+        ],
+        "entry": [
+            {
+                "request": {"method": "POST", "url": "Patient"},
+                "resource": {"resourceType": "Patient", "id": "pat-1"},
+            }
+        ],
+    }
+
+    canonical_json, _, _ = sig.canonical_bundle_payload(bundle)
+
+    assert "clinician-signature-base64" in canonical_json
+
 def test_production_requires_cryptography(monkeypatch, tmp_path):
     settings = generate_ec_keypair(tmp_path)
 
@@ -275,3 +299,4 @@ def test_openssl_fallback_roundtrip(tmp_path):
 
     signature_bytes = sig._sign_with_openssl(payload, settings.private_key_path)
     sig._verify_with_openssl(payload, signature_bytes, settings.public_key_path)
+

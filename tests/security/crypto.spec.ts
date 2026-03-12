@@ -156,4 +156,29 @@ describe('security/crypto', () => {
       process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = originalFlag;
     }
   });
+  it('ignora la firma cliente en production aunque la flag esté activa', async () => {
+    const originalFlag = process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'true';
+    process.env.NODE_ENV = 'production';
+
+    const { signBundleIfEnabled } = await loadModule();
+    const bundle = { resourceType: 'Bundle', entry: [] as unknown[] };
+    const result = await signBundleIfEnabled(bundle, { signerId: 'practitioner-1' });
+
+    expect(result.signed).toBe(false);
+    expect((result.bundle as any).signature).toBeUndefined();
+
+    if (originalFlag === undefined) {
+      delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
+    } else {
+      process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = originalFlag;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
 });
+

@@ -13,7 +13,7 @@
 - Requiere `Authorization: Bearer <access-token>` válido.
 - Requiere rol clínico `nurse`, `supervisor` o `admin`.
 - Requiere ambos scopes `fhir:transaction` y `handover:write`.
-- Responde `401` sin credenciales válidas, `403` con rol/scope insuficiente y `422` cuando el Bundle es inválido.
+- Responde `400` cuando un cierre final no trae firma clínica requerida o la firma criptográfica es inválida, `401` sin credenciales válidas, `403` con rol/scope insuficiente y `422` cuando el Bundle es inválido.
 - No existe bypass silencioso por `DEBUG` ni por ausencia de configuración Auth0 para este endpoint.
 
 ## Endpoints AI/STT/uploads protegidos
@@ -42,11 +42,14 @@
 - `HANDOVER_REQUIRE_RBAC_ON_FHIR=true` obliga a reenviar solicitudes FHIR sólo con contexto de usuario autorizado.
 
 ## Firma digital y trazabilidad
-- Firma digital de `Bundle` controlada por:
-  - `HANDOVER_SIGNATURE_DISABLED`
-  - `HANDOVER_PRIVATE_KEY_PATH`
-  - `HANDOVER_PUBLIC_KEY_PATH`
-- Se registra evidencia de firma para auditoría y trazabilidad clínica.
+- `HANDOVER_DEPLOYMENT_MODE` delimita el contrato operativo:
+  - `development`, `demo`, `test`: pueden ejecutar flujos inseguros solo con delimitación explícita.
+  - `pilot`, `production`: exigen defaults cerrados y no aceptan `HANDOVER_SIGNATURE_DISABLED=true`.
+- En cierres finales, la firma clínica saliente es obligatoria en el Bundle antes de reenviar la transacción.
+- La firma criptográfica fuerte del backend requiere `HANDOVER_PRIVATE_KEY_PATH` y `HANDOVER_PUBLIC_KEY_PATH` en `pilot/production`.
+- Si llega una firma criptográfica de transporte inválida, la API responde `400` y no reenvía el Bundle.
+- Si la firma fuerte del backend no está disponible en un entorno serio, el despliegue debe fallar en startup; no existe fallback silencioso a unsigned.
+- La evidencia criptográfica se registra en auditoría sin sobreescribir la firma clínica del handover dentro del payload clínico.
 
 ## PHI y Seguridad (política formal)
 ### Prohibiciones operativas

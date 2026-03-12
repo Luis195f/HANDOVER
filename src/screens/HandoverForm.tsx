@@ -138,7 +138,6 @@ import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
   normalizeLegacyHandoverPayload(value) as T;
-const isSignatureDisabled = () => process.env.HANDOVER_SIGNATURE_DISABLED === 'true';
 
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
@@ -2041,7 +2040,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   const finalizeSubmission = async () => {
     form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
     const outgoing = form.getValues('signatures')?.outgoing;
-    if (!isSignatureDisabled() && (!outgoing || !outgoing.imageBase64)) {
+    if (!outgoing || !outgoing.imageBase64) {
       Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
       return;
     }
@@ -3019,3 +3018,4 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     </FormProvider>
   );
 }
+

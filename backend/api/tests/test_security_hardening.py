@@ -18,6 +18,9 @@ class SecurityHardeningSettingsTests(TestCase):
         env["DJANGO_SETTINGS_MODULE"] = "backend.settings"
         env["SECRET_KEY"] = "test-secret"
         env["DJANGO_DEBUG"] = "false"
+        env["HANDOVER_SIGNATURE_DISABLED"] = "false"
+        env["HANDOVER_PRIVATE_KEY_PATH"] = "C:/keys/private.pem"
+        env["HANDOVER_PUBLIC_KEY_PATH"] = "C:/keys/public.pem"
         env.pop("PYTEST_CURRENT_TEST", None)
         env["HANDOVER_ALLOWED_ORIGINS"] = ""
 
@@ -46,6 +49,30 @@ class SecurityHardeningSettingsTests(TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("only accepts absolute http(s) origins", result.stderr)
+
+    def test_pilot_rejects_signature_disabled_flag(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_SIGNATURE_DISABLED": "true",
+            "HANDOVER_PRIVATE_KEY_PATH": "C:/keys/private.pem",
+            "HANDOVER_PUBLIC_KEY_PATH": "C:/keys/public.pem",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HANDOVER_SIGNATURE_DISABLED cannot be enabled in pilot/production", result.stderr)
+
+    def test_pilot_requires_signature_key_paths(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_SIGNATURE_DISABLED": "false",
+            "HANDOVER_PRIVATE_KEY_PATH": None,
+            "HANDOVER_PUBLIC_KEY_PATH": None,
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HANDOVER_PRIVATE_KEY_PATH and HANDOVER_PUBLIC_KEY_PATH are required in pilot/production", result.stderr)
 
 
 class SecurityHardeningCORSTests(TestCase):
