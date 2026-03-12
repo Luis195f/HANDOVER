@@ -1,7 +1,11 @@
 # backend/api/tests/test_security_and_validation.py
 import json
+from unittest.mock import patch
 
-import backend.security.auth as jwt_auth
+from django.test.utils import override_settings
+from rest_framework.test import APIClient
+
+from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response
 
 
 FHIR_TX_URL = "/api/fhir/transaction"
@@ -24,89 +28,67 @@ VALID_BUNDLE = {
 
 INVALID_BUNDLE = {
     "resourceType": "Bundle",
-    "type": "collection",  # fuerza 422 por tu lógica
+    "type": "collection",
     "entry": [{"resource": {}}],
 }
 
 
-def _post_fhir(api_client, payload, token: str | None = None):
-    headers = {}
-    if token:
-        headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
-
-    # DRF APIClient: NO uses format+content_type juntos. Sólo content_type.
+def _post_fhir(api_client, payload):
     return api_client.post(
         FHIR_TX_URL,
         data=json.dumps(payload),
         content_type="application/fhir+json",
-        **headers,
     )
 
 
-def test_no_token_401_or_403(client):
-    # Aquí usamos el client estándar (sin auth) para verificar que protege algo real.
-    # Si tu endpoint no requiere auth, ajusta esto.
-    res = client.post(
-        FHIR_TX_URL,
-        data=json.dumps(VALID_BUNDLE),
-        content_type="application/fhir+json",
-    )
-    assert res.status_code in (401, 403)
+def _authorized_client(*, roles=("nurse",), scopes=("fhir:transaction", "handover:write")):
+    client = APIClient()
+    authenticate_api_client(client, roles=list(roles), scopes=list(scopes))
+    return client
 
 
-def test_invalid_payload_422(monkeypatch, api_client):
-    """
-    Queremos llegar a la validación (422) SIN que nos bloquee RequireRolesPermission.
-    PERO BundleView probablemente sobreescribe get_permissions(), así que parchamos ese método.
-    """
-    import backend.api.views as api_views  # noqa: E402
+def test_no_token_returns_401():
+    response = _post_fhir(APIClient(), VALID_BUNDLE)
 
-    # ✅ Bypass definitivo: ignora RequireRolesPermission aunque get_permissions esté sobrescrito.
-    monkeypatch.setattr(
-        api_views.BundleView,
-        "get_permissions",
-        lambda self: [api_views.IsAuthenticated()],
-        raising=False,
-    )
-
-    # Si tu código mira verify_jwt en algún sitio, lo dejamos estable para tests
-    monkeypatch.setattr(jwt_auth, "verify_jwt", lambda token: {"scope": "handover:write"}, raising=False)
-
-    res = _post_fhir(api_client, INVALID_BUNDLE, token="test")
-    assert res.status_code == 422
-    data = res.json()
-    assert data.get("code") == "INVALID_BUNDLE"
+    assert response.status_code == 401
 
 
-def test_ok_200_or_201(monkeypatch, api_client):
-    """
-    Igual que arriba, pero simulando respuesta OK del proxy httpx.post.
-    """
-    import backend.api.views as api_views  # noqa: E402
+@override_settings(DEBUG=True)
+def test_no_token_returns_401_even_in_debug():
+    response = _post_fhir(APIClient(), VALID_BUNDLE)
 
-    monkeypatch.setattr(
-        api_views.BundleView,
-        "get_permissions",
-        lambda self: [api_views.IsAuthenticated()],
-        raising=False,
-    )
+    assert response.status_code == 401
 
-    monkeypatch.setattr(jwt_auth, "verify_jwt", lambda token: {"scope": "handover:write"}, raising=False)
 
-    class _MockResp:
-        status_code = 201
-        text = '{"resourceType":"Bundle","type":"transaction-response"}'
+def test_insufficient_scope_returns_403():
+    client = _authorized_client(scopes=("fhir:transaction",))
 
-        def json(self):
-            return {"resourceType": "Bundle", "type": "transaction-response"}
+    response = _post_fhir(client, VALID_BUNDLE)
 
-    monkeypatch.setattr(api_views.httpx, "post", lambda *a, **k: _MockResp(), raising=True)
-    monkeypatch.setattr(
-        api_views,
-        "_persist_handover_bundle_record",
-        lambda **kwargs: None,
-        raising=True,
-    )
+    assert response.status_code == 403
 
-    res = _post_fhir(api_client, VALID_BUNDLE, token="test")
-    assert res.status_code in (200, 201)
+
+def test_invalid_payload_returns_422_with_valid_auth():
+    client = _authorized_client()
+
+    response = _post_fhir(client, INVALID_BUNDLE)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_BUNDLE"
+
+
+@patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
+@patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_valid_payload_returns_200_with_valid_auth(
+    mock_fhir_post,
+    _mock_audit,
+    _mock_side_effects,
+):
+    client = _authorized_client()
+    mock_fhir_post.return_value = build_fhir_response(status_code=200)
+
+    response = _post_fhir(client, VALID_BUNDLE)
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "transaction-response"

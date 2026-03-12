@@ -11,6 +11,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from backend.api import views
+from backend.api.tests.icea_test_utils import authenticate_api_client
 
 try:
     import respx
@@ -22,9 +23,9 @@ if respx is None:
 
 
 def test_proxy_and_auditevent_ok(monkeypatch):
-    monkeypatch.setattr(views.BundleView, 'permission_classes', [])
     monkeypatch.setattr(views, '_persist_handover_bundle_record', lambda **kwargs: None)
     client = APIClient()
+    authenticate_api_client(client)
     with respx.mock(base_url=views.FHIR_BASE) as mock:
         tx_route = mock.post('/').mock(return_value=httpx.Response(200, json={'resourceType': 'Bundle'}))
         ae_route = mock.post('/AuditEvent').mock(return_value=httpx.Response(201, json={'resourceType': 'AuditEvent'}))

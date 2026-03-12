@@ -10,6 +10,7 @@ import httpx
 import pytest
 from rest_framework.test import APIClient
 from backend.api import views
+from backend.api.tests.icea_test_utils import authenticate_api_client
 
 try:
     import respx
@@ -21,9 +22,9 @@ if respx is None:
 
 
 def test_audit_event_with_dual_signatures(monkeypatch):
-    monkeypatch.setattr(views.BundleView, 'permission_classes', [])
     monkeypatch.setattr(views, '_persist_handover_bundle_record', lambda **kwargs: None)
     client = APIClient()
+    authenticate_api_client(client)
     bundle = {
         'resourceType': 'Bundle',
         'type': 'transaction',

@@ -1,6 +1,8 @@
 import types
 from unittest.mock import Mock
 
+from rest_framework.test import APIClient
+
 
 def build_icea_bundle(*, bundle_id: str = "bundle-tx-001", patient_id: str = "pat-001", unit_id: str = "icu-a"):
     encounter_id = bundle_id.replace("bundle", "enc")
@@ -58,6 +60,24 @@ def build_authenticated_api_user(*, sub: str, roles: list[str], scopes: list[str
         sub=sub,
         username=sub,
     ), claims
+
+
+def authenticate_api_client(
+    client: APIClient,
+    *,
+    sub: str = "auth0|test-user",
+    roles: list[str] | None = None,
+    scopes: list[str] | None = None,
+    token: str = "test-access-token",
+):
+    user, claims = build_authenticated_api_user(
+        sub=sub,
+        roles=roles or ["nurse"],
+        scopes=scopes or ["fhir:transaction", "handover:write"],
+    )
+    client.force_authenticate(user=user, token=claims)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    return user, claims
 
 
 def build_fhir_response(status_code: int = 201):

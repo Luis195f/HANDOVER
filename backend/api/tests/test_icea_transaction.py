@@ -4,12 +4,10 @@ from unittest.mock import patch
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
-from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient
 
 from backend.api import icea_transaction
-from backend.api.tests.icea_test_utils import build_authenticated_api_user, build_fhir_response, build_icea_bundle
-from backend.api.views import BundleView
+from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response, build_icea_bundle
 
 
 class IceaTransactionHelperTests(TestCase):
@@ -60,19 +58,7 @@ class IceaTransactionFlowRegressionTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse('fhir-transaction')
-        auth_user, claims = build_authenticated_api_user(
-            sub='auth0|nurse-order',
-            roles=['nurse'],
-            scopes=['fhir:transaction', 'handover:write'],
-        )
-        self.client.force_authenticate(user=auth_user, token=claims)
-        self.client.credentials(HTTP_AUTHORIZATION='Bearer test-access-token')
-        self._perm_patcher = patch.object(BundleView, 'permission_classes', [AllowAny])
-        self._auth_patcher = patch.object(BundleView, 'authentication_classes', [])
-        self._perm_patcher.start()
-        self._auth_patcher.start()
-        self.addCleanup(self._perm_patcher.stop)
-        self.addCleanup(self._auth_patcher.stop)
+        authenticate_api_client(self.client, sub='auth0|nurse-order')
 
     @patch('backend.api.views._create_audit_event_for_transaction', autospec=True)
     @patch('backend.api.views._post_transaction_to_fhir')

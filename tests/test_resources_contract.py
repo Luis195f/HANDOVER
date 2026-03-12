@@ -10,6 +10,7 @@ import httpx
 import pytest
 from rest_framework.test import APIClient
 from backend.api import views
+from backend.api.tests.icea_test_utils import authenticate_api_client
 
 try:
     import respx
@@ -21,9 +22,9 @@ if respx is None:
 
 
 def test_transaction_resources_contract_and_audit(monkeypatch):
-    monkeypatch.setattr(views.BundleView, 'permission_classes', [])
     monkeypatch.setattr(views, '_persist_handover_bundle_record', lambda **kwargs: None)
     client = APIClient()
+    authenticate_api_client(client)
     sample_bundle = {'resourceType': 'Bundle', 'type': 'transaction', 'entry': [{'resource': {'resourceType': 'Encounter'}}]}
     with respx.mock(base_url=views.FHIR_BASE) as mock:
         tx_route = mock.post('/').mock(return_value=httpx.Response(200, json={'resourceType': 'Bundle'}))
