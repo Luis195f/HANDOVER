@@ -121,7 +121,7 @@ _persist_handover_bundle_record = persist_handover_bundle_record
 
 def _resolve_persisted_handover_bundle(record: HandoverBundleRecord) -> dict[str, Any]:
     try:
-        return decrypt_bundle_document(record.bundle_json)
+        return decrypt_bundle_document(record.bundle_json, encryption_metadata=record.encryption_metadata)
     except ClinicalBundleStorageError:
         logger.warning(
             "Persisted handover bundle could not be decrypted",
@@ -489,7 +489,8 @@ def _bundle_is_final_handover(bundle: Dict[str, Any]) -> bool:
             continue
         if resource.get("resourceType") != "Composition":
             continue
-        return str(resource.get("status") or "").strip().lower() == "final"
+        if str(resource.get("status") or "").strip().lower() == "final":
+            return True
     return False
 
 
@@ -1714,7 +1715,7 @@ class HandoverEtlReadView(AuthenticatedAPIView):
 
         record = (
             HandoverBundleRecord.objects.filter(bundle_id=bundle_id)
-            .only("id", "bundle_id", "request_id", "bundle_json", "expires_at", "created_at")
+            .only("id", "bundle_id", "request_id", "bundle_json", "encryption_metadata", "expires_at", "created_at")
             .first()
         )
         if not record:
@@ -1841,9 +1842,4 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-
-
-
-
-
 

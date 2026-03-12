@@ -13,6 +13,7 @@
 - `HANDOVER_PUBLIC_KEY_PATH`: ruta a clave pública para verificación criptográfica.
 - `HANDOVER_SIGNATURE_DISABLED`: solo válido en `development`/`demo`/`test` controlado; `pilot`/`production` fallan al arrancar si se activa.
 - `HANDOVER_MAX_AUDIO_BYTES`: límite de tamaño de audio para `/api/ai/transcribe`.
+- `HANDOVER_BUNDLE_ENCRYPTION_KEY`: clave opcional de cifrado en reposo para Bundles clínicos persistidos. Si falta, HANDOVER mantiene compatibilidad usando una clave derivada de `SECRET_KEY`.
 
 ## Auth / OIDC
 - `AUTH0_ISSUER_BASE_URL`: issuer base de Auth0/OIDC.
@@ -61,8 +62,14 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL_WHISPER=whisper-1
 OPENAI_MODEL_SBAR=gpt-4.1-mini
 HANDOVER_MAX_AUDIO_BYTES=26214400
+HANDOVER_BUNDLE_ENCRYPTION_KEY=
 
 # Auth0 / OIDC
 AUTH0_ISSUER_BASE_URL=
 AUTH0_AUDIENCE=
 ```
+
+## Compatibilidad operativa de descifrado
+- La lectura de Bundles persistidos prioriza `encryption_metadata.key_source` cuando el registro lo incluye.
+- Existe fallback controlado entre `HANDOVER_BUNDLE_ENCRYPTION_KEY` (`env`) y la clave derivada de `SECRET_KEY` (`secret_key_derived`) para mantener legibles registros legacy retenidos.
+- Este mecanismo mejora compatibilidad backward; no implementa rotación formal de claves ni reescritura automática de registros ya guardados.

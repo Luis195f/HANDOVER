@@ -2,11 +2,11 @@ import json
 import types
 from unittest.mock import Mock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from backend.api.clinical_storage import decrypt_bundle_document
+from backend.api.clinical_storage import decrypt_bundle_document, encrypt_bundle_document
 from backend.api.models import HandoverBundleRecord
 
 
@@ -220,4 +220,27 @@ class HandoverEtlReadTests(TestCase):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
 
+
+
+
+    def test_get_reads_legacy_encrypted_bundle_after_env_key_is_enabled(self):
+        with override_settings(SECRET_KEY='legacy-secret-key', HANDOVER_BUNDLE_ENCRYPTION_KEY=''):
+            encrypted_bundle, metadata = encrypt_bundle_document(self.bundle)
+
+        with override_settings(SECRET_KEY='legacy-secret-key', HANDOVER_BUNDLE_ENCRYPTION_KEY='env-bundle-key'):
+            HandoverBundleRecord.objects.create(
+                bundle_id='bundle-001',
+                patient_id='patient-001',
+                unit_id='uci-1',
+                request_id='req-legacy-env-read',
+                bundle_json=encrypted_bundle,
+                encryption_metadata=metadata,
+                expires_at=HandoverBundleRecord.default_expiry(),
+            )
+            self._auth(roles=['service_etl'], scopes=['handover:etl:read'])
+
+            response = self.client.get(reverse('handover-etl-read', kwargs={'bundle_id': 'bundle-001'}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), self.bundle)
 

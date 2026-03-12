@@ -206,3 +206,191 @@ def test_transcribe_returns_503_when_openai_disabled(monkeypatch):
     assert response.status_code == 503
     assert "deshabilitado" in response.json()["detail"]
     assert response.json()["code"] == "ai_disabled"
+
+def test_refine_rejects_integer_draft_fields(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client()
+    monkeypatch.setattr(views_ai, 'generate_sbar', lambda *args, **kwargs: None, raising=False)
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={
+            'draft': {
+                'situation': 1,
+                'background': 'Ingreso reciente',
+                'assessment': 'Sin cambios',
+                'recommendation': 'Continuar vigilancia',
+            },
+            'handover': {},
+            'language': 'es',
+        },
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json()['code'] == 'invalid_refine_draft'
+    assert response.json()['detail'] == 'draft.situation must be a string or null.'
+
+
+def test_refine_rejects_object_draft_fields(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client()
+    monkeypatch.setattr(views_ai, 'generate_sbar', lambda *args, **kwargs: None, raising=False)
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={
+            'draft': {
+                'situation': 'Paciente estable',
+                'background': {'ward': 'ICU-A'},
+                'assessment': 'Sin cambios',
+                'recommendation': 'Continuar vigilancia',
+            },
+            'handover': {},
+            'language': 'es',
+        },
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json()['code'] == 'invalid_refine_draft'
+    assert response.json()['detail'] == 'draft.background must be a string or null.'
+
+
+def test_refine_treats_null_and_missing_draft_fields_as_empty_strings(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client()
+
+    async def _fake_generate(combined_text, **_kwargs):
+        assert 'S: dato no disponible' in combined_text
+        assert 'B: dato no disponible' in combined_text
+        assert 'A: dato no disponible' in combined_text
+        assert 'R: dato no disponible' in combined_text
+        return {
+            'situation': 'S2',
+            'background': 'B2',
+            'assessment': 'A2',
+            'recommendation': 'R2',
+            'full_text': 'Full',
+        }
+
+    monkeypatch.setattr(views_ai, 'generate_sbar', _fake_generate, raising=True)
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={
+            'draft': {
+                'situation': None,
+                'assessment': None,
+            },
+            'handover': {'evolution': 'estable'},
+            'language': 'es',
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200
+    assert response.json()['sbar']['recommendation'] == 'R2'
+
+
+def test_refine_returns_200_for_valid_string_draft(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client()
+
+    async def _fake_generate(*_args, **_kwargs):
+        return {
+            'situation': 'S2',
+            'background': 'B2',
+            'assessment': 'A2',
+            'recommendation': 'R2',
+            'full_text': 'Full',
+        }
+
+    monkeypatch.setattr(views_ai, 'generate_sbar', _fake_generate, raising=True)
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={
+            'draft': {
+                'situation': 'Paciente estable',
+                'background': 'Ingreso reciente',
+                'assessment': 'Sin cambios',
+                'recommendation': 'Continuar vigilancia',
+            },
+            'handover': {},
+            'language': 'es',
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200
+    assert response.json()['sbar']['assessment'] == 'A2'
+
+
+def test_refine_rejects_list_draft():
+    client = _auth_client()
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={'draft': ['unexpected'], 'handover': {}, 'language': 'es'},
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {'detail': 'draft must be an object.', 'code': 'invalid_refine_draft'}
+
+
+def test_refine_rejects_string_draft():
+    client = _auth_client()
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={'draft': 'unexpected', 'handover': {}, 'language': 'es'},
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {'detail': 'draft must be an object.', 'code': 'invalid_refine_draft'}
+
+
+def test_refine_rejects_boolean_draft():
+    client = _auth_client()
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={'draft': True, 'handover': {}, 'language': 'es'},
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {'detail': 'draft must be an object.', 'code': 'invalid_refine_draft'}
+
+
+def test_refine_rejects_list_handover():
+    client = _auth_client()
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={'draft': {}, 'handover': ['unexpected'], 'language': 'es'},
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {'detail': 'handover must be an object.', 'code': 'invalid_refine_handover'}
+
+
+def test_refine_rejects_string_handover():
+    client = _auth_client()
+
+    response = client.post(
+        '/api/ai/refine-sbar',
+        data={'draft': {}, 'handover': 'unexpected', 'language': 'es'},
+        format='json',
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {'detail': 'handover must be an object.', 'code': 'invalid_refine_handover'}

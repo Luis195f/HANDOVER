@@ -8,8 +8,10 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
+from backend.api.clinical_storage import ENCRYPTED_BUNDLE_MARKER
 
 from backend.api.icea_bridge_service import (
+    STORED_BUNDLE_UNAVAILABLE_ERROR,
     _normalize_remote_payload,
     enqueue_icea_bridge_request_for_bundle_record,
     load_icea_bridge_settings,
@@ -28,6 +30,15 @@ NOC_SYSTEM = 'urn:handover:terminology:NOC'
 LOINC_SYSTEM = 'http://loinc.org'
 MODEL_ID = '11111111-1111-4111-8111-111111111111'
 
+
+def build_unreadable_encrypted_bundle() -> dict:
+    return {
+        '_storage': ENCRYPTED_BUNDLE_MARKER,
+        'v': 1,
+        'alg': 'AES-256-GCM',
+        'nonce': 'AA==',
+        'ciphertext': 'AA==',
+    }
 
 def build_bridge_bundle(*, complete: bool = True) -> dict:
     bundle = build_icea_bundle(bundle_id='bundle-bridge-001', patient_id='pat-bridge-001', unit_id='icu-a')
@@ -424,6 +435,34 @@ class IceaBridgeServiceTests(TestCase):
         self.assertGreaterEqual(bridge_request.attempts, 1)
         self.assertEqual(bridge_request.last_error, 'ConnectTimeout')
 
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    def test_enqueue_marks_failed_when_bundle_cannot_be_decrypted(self, mock_request):
+        self.record.bundle_json = build_unreadable_encrypted_bundle()
+        self.record.encryption_metadata = {'key_source': 'secret_key_derived'}
+        self.record.save(update_fields=['bundle_json', 'encryption_metadata'])
+
+        bridge_request = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        bridge_request.refresh_from_db()
+
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_FAILED)
+        self.assertEqual(bridge_request.last_error, STORED_BUNDLE_UNAVAILABLE_ERROR)
+        self.assertEqual(bridge_request.bundle_id, 'bundle-bridge-001')
+        mock_request.assert_not_called()
+
     def test_normalize_remote_payload_marks_stale_without_name_error(self):
         bridge_request = IceaBridgeRequest.objects.create(
             bridge_request_id='req-bridge-stale:immediate_provisional',
@@ -606,6 +645,59 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.json()['bridgeRequest']['scoringMode'], 'enriched_followup')
         mock_schedule.assert_not_called()
 
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    def test_retry_same_mode_returns_controlled_response_when_bundle_is_unavailable(self):
+        self._auth(roles=['admin'])
+        HandoverBundleRecord.objects.filter(request_id='req-bridge-001').update(
+            bundle_json=build_unreadable_encrypted_bundle(),
+            encryption_metadata={'key_source': 'secret_key_derived'},
+        )
+
+        response = self.client.post(self.retry_url, format='json')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], STORED_BUNDLE_UNAVAILABLE_ERROR)
+        self.assertEqual(response.json()['detail'], 'Stored bundle is unavailable.')
+        self.assertEqual(response.json()['bridgeRequest']['status'], IceaBridgeRequest.STATUS_FAILED)
+        self.assertEqual(response.json()['bridgeRequest']['lastError'], STORED_BUNDLE_UNAVAILABLE_ERROR)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ENABLE_ICEA_ENRICHED_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    def test_retry_returns_controlled_response_when_stored_bundle_is_unavailable(self):
+        self._auth(roles=['admin'])
+        HandoverBundleRecord.objects.filter(request_id='req-bridge-001').update(
+            bundle_json=build_unreadable_encrypted_bundle(),
+            encryption_metadata={'key_source': 'secret_key_derived'},
+        )
+
+        response = self.client.post(self.retry_url, data={'scoringMode': 'enriched_followup'}, format='json')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], STORED_BUNDLE_UNAVAILABLE_ERROR)
+        self.assertEqual(response.json()['detail'], 'Stored bundle is unavailable.')
+        self.assertEqual(response.json()['bridgeRequest']['status'], IceaBridgeRequest.STATUS_FAILED)
+        self.assertEqual(response.json()['bridgeRequest']['lastError'], STORED_BUNDLE_UNAVAILABLE_ERROR)
 
 class IceaBridgeTransactionFlowTests(TestCase):
     def setUp(self):

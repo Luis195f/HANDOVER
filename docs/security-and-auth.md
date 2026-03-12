@@ -30,6 +30,9 @@
 - No existe fallback cliente mediante variables públicas de token ni secretos expuestos al bundle para estas rutas.
 - Si faltan credenciales, la API responde `401`.
 - Si el token no trae rol/scope suficiente, la API responde `403`.
+- `POST /api/ai/refine-sbar` exige que `draft` sea un objeto JSON; si llega como lista, string, bool u otro tipo no objeto responde `400` con `code=invalid_refine_draft` y `detail=draft must be an object.`.
+- En `POST /api/ai/refine-sbar`, los campos `draft.situation`, `draft.background`, `draft.assessment` y `draft.recommendation` sólo aceptan `string` o `null`; tipos no válidos responden `400` con `code=invalid_refine_draft`.
+- En `POST /api/ai/refine-sbar`, `handover` también debe ser un objeto JSON si viene explícitamente; otros tipos responden `400` con `code=invalid_refine_handover` y `detail=handover must be an object.`.
 
 ## Identidad clínica y anti-spoofing
 - La identidad de usuario usada para firma/auditoría se deriva del claim `sub` del JWT validado.
@@ -76,8 +79,15 @@
 - Los Bundles clínicos persistidos para ETL ya no se guardan en claro en nuevas escrituras: se conservan con retención explícita (`HANDOVER_BUNDLE_RETENTION_DAYS`) y se cifran en reposo a nivel de aplicación antes de guardarse en base de datos.
 - Los artefactos técnicos ICEA (`IceaOutboundEvent`, snapshots/eventos pipeline y bridge requests terminales) deben expurgarse con `prune_sensitive_records` según `HANDOVER_TECHNICAL_RETENTION_DAYS`.
 - El endpoint `GET /api/handover/{bundle_id}` descifra el Bundle persistido solo para la respuesta autorizada, bloquea bundles expirados y responde con `Cache-Control: private, no-store` para reducir reexposición por caché.
+- La lectura prioriza `encryption_metadata.key_source` cuando existe y mantiene fallback controlado entre `env` y `secret_key_derived` para compatibilidad backward de bundles retenidos.
+- Ese fallback mejora la lectura operativa de registros legacy y de registros nuevos cifrados con `HANDOVER_BUNDLE_ENCRYPTION_KEY`, pero no equivale a una rotación formal de claves.
+- Cuando un bundle persistido existe pero no puede descifrarse tras agotar candidatos válidos, ETL y bridge responden con un estado controlado de bundle almacenado no disponible; no deben degradar a `500` opaco.
 
 ## Límites del endurecimiento actual
 - El cifrado fuerte en reposo del Bundle clínico depende de `HANDOVER_BUNDLE_ENCRYPTION_KEY`; si no se configura, HANDOVER deriva la clave desde `SECRET_KEY` como fallback de endurecimiento compatible con la arquitectura actual.
 - Ese fallback mejora confidencialidad frente a lectura accidental de base de datos, pero no sustituye KMS/HSM, rotación de claves ni separación fuerte de secretos.
 - Los modelos técnicos ICEA siguen guardando identificadores operativos mínimos (`request_id`, `bundle_id`, `patient_id`, `unit_id`) para trazabilidad y correlación clínica.
+
+## Contratos controlados de bridge
+- `stored_bundle_unavailable` significa que el bundle persistido sigue presente localmente pero es ilegible o no puede descifrarse con las claves disponibles.
+- `handover_bundle_not_found` significa que el bundle local ya no existe, expiró o no pudo localizarse para retry/requeue.
