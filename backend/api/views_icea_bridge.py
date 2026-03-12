@@ -11,7 +11,6 @@ from backend.api.icea_bridge_service import (
     enqueue_icea_bridge_request_for_bundle_record,
     load_icea_bridge_settings,
     refresh_icea_bridge_request,
-    schedule_icea_bridge_delivery,
     score_configuration_error_code,
     score_configuration_error_detail,
     serialize_bridge_request,
@@ -311,7 +310,6 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
                 return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
             if retriggered.status == IceaBridgeRequest.STATUS_FAILED and retriggered.last_error == STORED_BUNDLE_UNAVAILABLE_ERROR:
                 return _stored_bundle_unavailable_response(retriggered)
-            schedule_icea_bridge_delivery(retriggered.id, force=True)
             retriggered.refresh_from_db()
             return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
 
