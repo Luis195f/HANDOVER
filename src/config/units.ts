@@ -1,20 +1,23 @@
+import type { UnitProfileId } from '../types/profile';
+
 export type Unit = {
   id: string;
   name: string;
   specialtyId: string;
+  profileId?: UnitProfileId;
 };
 
 export const UNITS: Unit[] = [
-  { id: 'icu-a', name: 'UCI Adulto · Ala A', specialtyId: 'icu' },
-  { id: 'icu-b', name: 'UCI Adulto · Ala B', specialtyId: 'icu' },
-  { id: 'ed-main', name: 'Urgencias Central', specialtyId: 'ed' },
-  { id: 'ed-obs', name: 'Urgencias Observación', specialtyId: 'ed' },
-  { id: 'onc-ward', name: 'Hospital de Día Oncología', specialtyId: 'onc' },
+  { id: 'icu-a', name: 'UCI Adulto · Ala A', specialtyId: 'icu', profileId: 'critical-care' },
+  { id: 'icu-b', name: 'UCI Adulto · Ala B', specialtyId: 'icu', profileId: 'critical-care' },
+  { id: 'ed-main', name: 'Urgencias Central', specialtyId: 'ed', profileId: 'emergency' },
+  { id: 'ed-obs', name: 'Urgencias Observación', specialtyId: 'ed', profileId: 'emergency' },
+  { id: 'onc-ward', name: 'Hospital de Día Oncología', specialtyId: 'onc', profileId: 'oncology' },
   { id: 'neph-hd', name: 'Hemodiálisis', specialtyId: 'neph' },
-  { id: 'ped-ward', name: 'Pediatría Piso', specialtyId: 'ped' },
-  { id: 'ob-labor', name: 'Sala de Parto', specialtyId: 'ob' },
-  { id: 'neuroicu-1', name: 'Neuro UCI · Sala 1', specialtyId: 'neuroicu' },
-  { id: 'cvicu-1', name: 'Cardio UCI · Sala 1', specialtyId: 'cvicu' },
+  { id: 'ped-ward', name: 'Pediatría Piso', specialtyId: 'ped', profileId: 'pediatrics' },
+  { id: 'ob-labor', name: 'Sala de Parto', specialtyId: 'ob', profileId: 'maternal-perinatal' },
+  { id: 'neuroicu-1', name: 'Neuro UCI · Sala 1', specialtyId: 'neuroicu', profileId: 'critical-care' },
+  { id: 'cvicu-1', name: 'Cardio UCI · Sala 1', specialtyId: 'cvicu', profileId: 'critical-care' },
 ];
 
 export const UNITS_BY_SPECIALTY: Record<string, string[]> = UNITS.reduce((acc, unit) => {
@@ -63,3 +66,4 @@ export function guessSpecialtyFromLocation(locationText?: string): string | null
   if (!unitId) return null;
   return UNITS_BY_ID[unitId]?.specialtyId ?? null;
 }
+

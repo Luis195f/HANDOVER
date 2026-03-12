@@ -4,6 +4,12 @@ import Constants from 'expo-constants';
 
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS, type BedsideChecklistItem } from './bedsideChecklist';
 import { isOn } from './flags';
+import {
+  isSpecialtyOverlayId,
+  isUnitProfileId,
+  type SpecialtyOverlayId,
+  type UnitProfileId,
+} from '../types/profile';
 
 export interface UnitFeatureFlags {
   enablePediatricScales?: boolean;
@@ -17,6 +23,15 @@ export interface UnitFeatureFlags {
   // Puedes añadir más banderas en el futuro
 }
 
+export interface HandoverUnitConfig {
+  id: string;
+  name: string;
+  specialty: string;
+  default?: boolean;
+  features?: UnitFeatureFlags;
+  profileId?: UnitProfileId;
+  specialtyOverlayIds?: SpecialtyOverlayId[];
+}
 
 type BooleanLike = boolean | number | string | null | undefined;
 
@@ -35,13 +50,11 @@ const parseBooleanLike = (value: BooleanLike): boolean | undefined => {
   return undefined;
 };
 
-export interface HandoverUnitConfig {
-  id: string;
-  name: string;
-  specialty: string;
-  default?: boolean;
-  features?: UnitFeatureFlags;
-}
+const normalizeOverlayIds = (value: unknown): SpecialtyOverlayId[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value.filter(isSpecialtyOverlayId);
+  return normalized.length > 0 ? normalized : undefined;
+};
 
 const BASE_FEATURES: UnitFeatureFlags = {
   checklistItems: DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
@@ -58,18 +71,23 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     name: 'UCI Adulto',
     specialty: 'icu',
     default: true,
+    profileId: 'critical-care',
     features: BASE_FEATURES,
   },
   {
     id: 'oncologia',
     name: 'Oncología',
     specialty: 'onc',
+    profileId: 'oncology',
+    specialtyOverlayIds: ['onc'],
     features: { ...BASE_FEATURES, enableOncoFields: true },
   },
   {
     id: 'pediatria',
     name: 'Pediatría',
     specialty: 'ped',
+    profileId: 'pediatrics',
+    specialtyOverlayIds: ['ped'],
     features: { ...BASE_FEATURES, enablePediatricScales: true },
   },
 ] as const;
@@ -79,6 +97,8 @@ function normalizeUnitConfig(unit: HandoverUnitConfig): HandoverUnitConfig {
 
   return {
     ...unit,
+    profileId: isUnitProfileId(unit.profileId) ? unit.profileId : undefined,
+    specialtyOverlayIds: normalizeOverlayIds(unit.specialtyOverlayIds),
     features: {
       ...BASE_FEATURES,
       ...unitFeatures,

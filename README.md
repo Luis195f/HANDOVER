@@ -275,6 +275,7 @@ export EXPO_PUBLIC_HANDOVER_UNITS_JSON='[
 Notas de robustez:
 - Se aceptan valores booleanos y boolean-like (`true/false/1/0/on/off/yes/no`) en features por unidad.
 - Si `HANDOVER_UNITS_JSON` está vacío, malformado o no es un arreglo válido, la app hace fallback automático a la configuración estática por defecto.
+- La activación productiva de perfiles y overlays se controla aparte con `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON` o `HANDOVER_PROFILE_ACTIVATION_JSON`; el catálogo maestro queda centralizado en `src/config/profiles/index.ts` y un overlay no se activa sin un UPP compatible ya activo.
 
 ### Catálogos NNN gobernados (BYO-license)
 
@@ -325,6 +326,7 @@ Consulta `docs/DEPLOY.md` para builds Android/iOS/Web. Las notas de la versión 
 Explora la documentación técnica para conocer la arquitectura, configuración y flujos clave antes de contribuir al proyecto.
 
 - [Arquitectura general](docs/overview-architecture.md)
+- [Contrato base de perfiles clínicos](docs/profile-architecture.md)
 - [Guía de onboarding](docs/dev-onboarding.md)
 - [Interoperabilidad FHIR](docs/fhir-and-interoperability.md)
 - [Seguridad y autenticación](docs/security-and-auth.md)

@@ -7,6 +7,7 @@ HANDOVER mantiene una arquitectura **Django-only** en backend: no existe depende
 - **Backend**: Django + Django REST Framework (DRF) como única capa API.
 - **Interoperabilidad**: FHIR R4 mediante transacciones `Bundle` y recursos clínicos.
 - **Seguridad**: autenticación JWT OIDC (Auth0), RBAC por rol, scopes por operación, firma digital opcional y auditoría.
+- **Perfiles clínicos**: contrato base tipado para HANDOVER Core, Unit Profile Packs y Specialty Overlay Packs documentado en docs/profile-architecture.md, con activación separada del catálogo maestro y overlays bloqueados si no existe un UPP activo compatible.
 
 ## Backend clínico (100% Django + DRF)
 - `BundleView` en `/api/fhir/transaction` recibe `Bundle` tipo transacción y reenvía al servidor FHIR.

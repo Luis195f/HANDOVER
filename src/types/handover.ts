@@ -253,3 +253,12 @@ export type HandoverValues = {
 export type Handover = HandoverValues;
 
 export { DIET_TYPES, MOBILITY_LEVELS, STOOL_PATTERNS };
+export type {
+  ContextualPrioritySignal,
+  IceaContextVector,
+  ProfileContext,
+  ProfileRegistry,
+  SpecialtyOverlayId,
+  UnitProfileId,
+} from './profile';
+
