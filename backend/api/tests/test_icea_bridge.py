@@ -615,8 +615,9 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()['code'], 'missing_icea_bridge_model_id')
 
-    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery')
-    def test_retry_requires_admin_and_can_trigger_enriched_followup(self, mock_schedule):
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_requires_admin_and_can_trigger_enriched_followup(self, mock_service_schedule, mock_view_schedule):
         self._auth(roles=['admin'])
 
         with patch.dict(
@@ -624,27 +625,36 @@ class IceaBridgeApiTests(TestCase):
             {'ENABLE_ICEA_BRIDGE': 'true', 'ENABLE_ICEA_ENRICHED_SCORING': 'true', 'ICEA_BRIDGE_MODEL_ID': MODEL_ID},
             clear=False,
         ):
-            with patch('backend.api.views_icea_bridge.enqueue_icea_bridge_request_for_bundle_record') as mock_enqueue:
-                enriched = IceaBridgeRequest.objects.create(
-                    bridge_request_id='req-bridge-001:enriched_followup',
-                    request_id='req-bridge-001',
-                    bundle_id='bundle-bridge-001',
-                    patient_id='pat-bridge-001',
-                    unit_id='icu-a',
-                    episode_id='enc-bridge-001',
-                    scoring_mode=IceaBridgeRequest.SCORING_MODE_ENRICHED,
-                    idempotency_key='req-bridge-001:enriched_followup:efgh',
-                    payload_hash='efgh' * 16,
-                    payload_json={'contractVersion': 'handover-icea-bridge-v1'},
-                    status=IceaBridgeRequest.STATUS_QUEUED,
-                )
-                mock_enqueue.return_value = enriched
-                response = self.client.post(self.retry_url, data={'scoringMode': 'enriched_followup'}, format='json')
+            response = self.client.post(self.retry_url, data={'scoringMode': 'enriched_followup'}, format='json')
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.json()['bridgeRequest']['scoringMode'], 'enriched_followup')
-        mock_schedule.assert_not_called()
+        enriched = IceaBridgeRequest.objects.get(bridge_request_id='req-bridge-001:enriched_followup')
+        mock_service_schedule.assert_called_once_with(enriched.id, force=True)
+        mock_view_schedule.assert_not_called()
 
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_same_mode_schedules_delivery_once_via_helper(self, mock_service_schedule, mock_view_schedule):
+        self._auth(roles=['admin'])
+
+        with patch.dict(
+            os.environ,
+            {
+                'ENABLE_ICEA_BRIDGE': 'true',
+                'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+                'ICEA_API_BASE_URL': 'https://icea.example',
+                'ICEA_API_BEARER_TOKEN': 'svc-token',
+                'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            },
+            clear=False,
+        ):
+            response = self.client.post(self.retry_url, format='json')
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()['bridgeRequest']['scoringMode'], IceaBridgeRequest.SCORING_MODE_IMMEDIATE)
+        mock_service_schedule.assert_called_once_with(self.bridge_request.id, force=True)
+        mock_view_schedule.assert_not_called()
 
     @patch.dict(
         os.environ,
@@ -657,7 +667,13 @@ class IceaBridgeApiTests(TestCase):
         },
         clear=False,
     )
-    def test_retry_same_mode_returns_controlled_response_when_bundle_is_unavailable(self):
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_same_mode_returns_controlled_response_when_bundle_is_unavailable(
+        self,
+        mock_service_schedule,
+        mock_view_schedule,
+    ):
         self._auth(roles=['admin'])
         HandoverBundleRecord.objects.filter(request_id='req-bridge-001').update(
             bundle_json=build_unreadable_encrypted_bundle(),
@@ -671,6 +687,8 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.json()['detail'], 'Stored bundle is unavailable.')
         self.assertEqual(response.json()['bridgeRequest']['status'], IceaBridgeRequest.STATUS_FAILED)
         self.assertEqual(response.json()['bridgeRequest']['lastError'], STORED_BUNDLE_UNAVAILABLE_ERROR)
+        mock_service_schedule.assert_not_called()
+        mock_view_schedule.assert_not_called()
 
     @patch.dict(
         os.environ,
@@ -684,7 +702,13 @@ class IceaBridgeApiTests(TestCase):
         },
         clear=False,
     )
-    def test_retry_returns_controlled_response_when_stored_bundle_is_unavailable(self):
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_returns_controlled_response_when_stored_bundle_is_unavailable(
+        self,
+        mock_service_schedule,
+        mock_view_schedule,
+    ):
         self._auth(roles=['admin'])
         HandoverBundleRecord.objects.filter(request_id='req-bridge-001').update(
             bundle_json=build_unreadable_encrypted_bundle(),
@@ -698,6 +722,44 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.json()['detail'], 'Stored bundle is unavailable.')
         self.assertEqual(response.json()['bridgeRequest']['status'], IceaBridgeRequest.STATUS_FAILED)
         self.assertEqual(response.json()['bridgeRequest']['lastError'], STORED_BUNDLE_UNAVAILABLE_ERROR)
+        mock_service_schedule.assert_not_called()
+        mock_view_schedule.assert_not_called()
+
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_returns_503_when_bridge_is_disabled(self, mock_service_schedule, mock_view_schedule):
+        self._auth(roles=['admin'])
+
+        response = self.client.post(self.retry_url, format='json')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'icea_bridge_disabled')
+        mock_service_schedule.assert_not_called()
+        mock_view_schedule.assert_not_called()
+
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_returns_404_when_local_bundle_is_not_found(self, mock_service_schedule, mock_view_schedule):
+        self._auth(roles=['admin'])
+        HandoverBundleRecord.objects.filter(request_id='req-bridge-001').delete()
+
+        with patch.dict(
+            os.environ,
+            {
+                'ENABLE_ICEA_BRIDGE': 'true',
+                'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+                'ICEA_API_BASE_URL': 'https://icea.example',
+                'ICEA_API_BEARER_TOKEN': 'svc-token',
+                'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            },
+            clear=False,
+        ):
+            response = self.client.post(self.retry_url, format='json')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['code'], 'handover_bundle_not_found')
+        mock_service_schedule.assert_not_called()
+        mock_view_schedule.assert_not_called()
 
 class IceaBridgeTransactionFlowTests(TestCase):
     def setUp(self):
