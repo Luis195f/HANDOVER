@@ -7,7 +7,6 @@ import httpx
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
-from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient
 
 from backend.api.icea_bridge_service import (
@@ -18,8 +17,7 @@ from backend.api.icea_bridge_service import (
 )
 from backend.api.icea_payload_mapper import build_icea_bridge_payload
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest, IceaPipelineSnapshot
-from backend.api.tests.icea_test_utils import build_authenticated_api_user, build_fhir_response, build_icea_bundle
-from backend.api.views import BundleView
+from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response, build_icea_bundle
 
 
 OBS_CODE_SYSTEM = 'urn:handover-pro:observation-codes'
@@ -613,19 +611,7 @@ class IceaBridgeTransactionFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse('fhir-transaction')
-        auth_user, claims = build_authenticated_api_user(
-            sub='auth0|nurse-1',
-            roles=['nurse'],
-            scopes=['fhir:transaction', 'handover:write'],
-        )
-        self.client.force_authenticate(user=auth_user, token=claims)
-        self.client.credentials(HTTP_AUTHORIZATION='Bearer test-access-token')
-        self._perm_patcher = patch.object(BundleView, 'permission_classes', [AllowAny])
-        self._auth_patcher = patch.object(BundleView, 'authentication_classes', [])
-        self._perm_patcher.start()
-        self._auth_patcher.start()
-        self.addCleanup(self._perm_patcher.stop)
-        self.addCleanup(self._auth_patcher.stop)
+        authenticate_api_client(self.client, sub='auth0|nurse-1')
 
     @patch.dict(
         os.environ,

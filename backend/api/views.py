@@ -111,6 +111,8 @@ logger = logging.getLogger(__name__)
 
 ETL_ALLOWED_ROLES = {"service_etl", "admin"}
 ETL_REQUIRED_SCOPES = {"icea:etl:read", "handover:etl:read"}
+FHIR_TRANSACTION_ALLOWED_ROLES = ("nurse", "supervisor", "admin")
+FHIR_TRANSACTION_REQUIRED_SCOPES = ("fhir:transaction", "handover:write")
 
 
 _persist_handover_bundle_record = persist_handover_bundle_record
@@ -1452,64 +1454,21 @@ class MedicationStatementView(AuthenticatedAPIView):
 
 
 class BundleView(AuthenticatedAPIView):
-    # Importante:
-    # - No ponemos IsAuthenticated/roles/scopes aquí porque DRF cortaría con 403
-    #   ANTES de llegar a la lógica que permite pasar tests (422/201/200).
-    # - La autorización real se aplica dentro de post().
-    permission_classes = [AllowAny]
-    authentication_classes = []  # evita SessionAuth/CSRF en tests
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [
+        IsAuthenticated,
+        HasAnyRole.required(*FHIR_TRANSACTION_ALLOWED_ROLES),
+        HasAllScopes.required(*FHIR_TRANSACTION_REQUIRED_SCOPES),
+    ]
+
+    def get_permissions(self):
+        return [permission() for permission in self.permission_classes]
+
+    def get_authenticators(self):
+        classes = [authenticator for authenticator in self.authentication_classes if authenticator is not None]
+        return [authenticator() for authenticator in classes]
 
     def post(self, request: HttpRequest) -> Response:
-        # -------------------------
-        # ACL interna (defense-in-depth) SIN romper tests
-        #
-        # Regla clave:
-        # - Si pytest + el test explicitamente “deshabilitó” permisos (permission_classes = []),
-        #   entonces NO aplicamos ACL interna (ni exigimos bearer).
-        # -------------------------
-        is_test = (
-            ("PYTEST_CURRENT_TEST" in os.environ)
-            or ("pytest" in sys.argv)
-            or ("test" in sys.argv)
-        )
-
-        # Si un test monkeypatchea permission_classes = [], respétalo: bypass total de ACL
-        bypass_acl_for_tests = is_test and (getattr(self, "permission_classes", None) == [])
-
-        auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip()
-        has_bearer = auth_header.lower().startswith("bearer ")
-
-        if not bypass_acl_for_tests:
-            claims = _get_claims_from_request(request) or {}
-            roles = extract_roles(claims) if isinstance(claims, dict) else set()
-
-            scopes: set[str] = set()
-            if has_bearer or roles:
-                scopes = set(_extract_permissions_from_request(request) or [])
-
-            # Requiere bearer salvo bypass explícito en tests (permission_classes = [])
-            if not has_bearer:
-                return Response(
-                    {"detail": "Authentication credentials were not provided."},
-                    status=401,
-                )
-
-            # ✅ TESTS: ENFORCE SOLO si llegaron roles/scopes reales
-            should_enforce = bool(roles or scopes) if is_test else has_bearer
-
-            if should_enforce:
-                allowed_roles = {"nurse", "supervisor", "admin"}
-                required_scopes = {"fhir:transaction", "handover:write"}
-
-                if not (roles & allowed_roles):
-                    return Response({"detail": "Forbidden"}, status=403)
-
-                if not required_scopes.issubset(scopes):
-                    return Response({"detail": "Forbidden"}, status=403)
-
-        # -------------------------
-        # Validación / ejecución normal (SIEMPRE llega aquí si no hubo 401/403)
-        # -------------------------
         if Bundle is None:
             return Response(
                 {"errors": ["Dependencia fhir.resources no disponible."], "code": "FHIR_DEPENDENCY"},
@@ -1519,13 +1478,8 @@ class BundleView(AuthenticatedAPIView):
         user_id = _get_authenticated_user_sub(request)
         unit_id = request.headers.get("X-Unit-Id")
 
-        if has_bearer and user_id is None:
-            req_user = getattr(request, "user", None)
-            user_claims = getattr(req_user, "claims", None)
-            if is_test and (not getattr(req_user, "is_authenticated", False) or not user_claims):
-                user_id = "test-user"
-            else:
-                return Response({"detail": "Invalid token: missing subject"}, status=401)
+        if user_id is None:
+            return Response({"detail": "Invalid token: missing subject"}, status=401)
 
         payload_obj = request.data
         invalid_payload = _ensure_json_object(payload_obj)

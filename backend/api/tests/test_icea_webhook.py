@@ -25,7 +25,7 @@ from backend.api.icea_client import (
 )
 from backend.api.models import IceaOutboundEvent
 from backend.api.tests.icea_test_utils import (
-    build_authenticated_api_user,
+    authenticate_api_client,
     build_fhir_response,
     build_icea_bundle,
 )
@@ -287,29 +287,14 @@ class IceaWebhookUnitTests(TestCase):
 
 class IceaWebhookIntegrationTests(TestCase):
     def setUp(self):
-        from rest_framework.permissions import AllowAny
         from rest_framework.test import APIClient
-        from backend.api.views import BundleView
 
         self.client = APIClient()
         self.url = reverse("fhir-transaction")
 
         User = get_user_model()
         self.user = User.objects.create_user(username="icea-user", password="testpass")
-        auth_user, claims = build_authenticated_api_user(
-            sub="auth0|icea-user",
-            roles=["nurse"],
-            scopes=["fhir:transaction", "handover:write"],
-        )
-        self.client.force_authenticate(user=auth_user, token=claims)
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer test-access-token")
-
-        self._perm_patcher = patch.object(BundleView, "permission_classes", [AllowAny])
-        self._auth_patcher = patch.object(BundleView, "authentication_classes", [])
-        self._perm_patcher.start()
-        self._auth_patcher.start()
-        self.addCleanup(self._perm_patcher.stop)
-        self.addCleanup(self._auth_patcher.stop)
+        authenticate_api_client(self.client, sub="auth0|icea-user")
 
         self.valid_bundle = build_icea_bundle()
 

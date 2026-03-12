@@ -8,6 +8,14 @@
   - **Scopes** por operación (ej. `handover:write`, `fhir:transaction`).
 - Las rutas sensibles de IA/STT/uploads nunca deben relajarse por `DEBUG` ni por falta de configuración local.
 
+## Endpoint FHIR transaction protegido
+- `POST /api/fhir/transaction` usa autenticación JWT OIDC estándar de DRF mediante `Auth0JWTAuthentication`.
+- Requiere `Authorization: Bearer <access-token>` válido.
+- Requiere rol clínico `nurse`, `supervisor` o `admin`.
+- Requiere ambos scopes `fhir:transaction` y `handover:write`.
+- Responde `401` sin credenciales válidas, `403` con rol/scope insuficiente y `422` cuando el Bundle es inválido.
+- No existe bypass silencioso por `DEBUG` ni por ausencia de configuración Auth0 para este endpoint.
+
 ## Endpoints AI/STT/uploads protegidos
 - `POST /api/ai/transcribe`
 - `POST /api/ai/summarize-sbar`

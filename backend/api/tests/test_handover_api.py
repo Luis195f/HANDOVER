@@ -1,10 +1,11 @@
 # backend/api/tests/test_handover_api.py
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 from unittest.mock import Mock, patch
 import types
+
+from backend.api.tests.icea_test_utils import authenticate_api_client
 
 
 class HandoverApiTests(TestCase):
@@ -18,56 +19,8 @@ class HandoverApiTests(TestCase):
         self.client = APIClient() if APIClient else None
         self.url = reverse("fhir-transaction")
 
-        User = get_user_model()
-        self.user = User.objects.create_user(username="testuser", password="testpass")
-
         if self.client:
-            # Usuario autenticado con subject para tests base del endpoint
-            base_claims = {
-                "sub": "auth0|base-test-user",
-                "permissions": ["fhir:transaction", "handover:write"],
-                "scope": "fhir:transaction handover:write",
-                "roles": ["nurse"],
-            }
-            base_user = types.SimpleNamespace(
-                is_authenticated=True,
-                claims=base_claims,
-                sub="auth0|base-test-user",
-                username="auth0|base-test-user",
-            )
-            self.client.force_authenticate(user=base_user, token=base_claims)
-
-            # ✅ IMPORTANTE: el backend exige token de usuario para reenviar a FHIR
-            self.client.credentials(HTTP_AUTHORIZATION="Bearer test-access-token")
-
-        # ✅ BYPASS auth/permissions SOLO para estos tests del endpoint fhir-transaction
-        from backend.api import views as api_views
-
-        try:
-            from rest_framework.permissions import AllowAny  # type: ignore
-        except Exception:
-            AllowAny = None  # noqa: N806
-
-        # Si existe BundleView, la parchamos; si no, parchamos base AuthenticatedAPIView
-        target_cls = getattr(api_views, "BundleView", None) or getattr(api_views, "AuthenticatedAPIView", None)
-        if target_cls is None:
-            raise RuntimeError("No se encontró BundleView ni AuthenticatedAPIView en backend.api.views")
-
-        self._perm_patcher = patch.object(
-            target_cls,
-            "permission_classes",
-            [AllowAny] if AllowAny else [],
-        )
-        self._auth_patcher = patch.object(
-            target_cls,
-            "authentication_classes",
-            [],  # importantísimo: evita authenticators reales (Auth0/scopes) en estos tests
-        )
-
-        self._perm_patcher.start()
-        self._auth_patcher.start()
-        self.addCleanup(self._perm_patcher.stop)
-        self.addCleanup(self._auth_patcher.stop)
+            authenticate_api_client(self.client, sub="auth0|base-test-user")
 
         self.valid_bundle = {
             "resourceType": "Bundle",
