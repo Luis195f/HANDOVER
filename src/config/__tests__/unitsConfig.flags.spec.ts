@@ -158,4 +158,30 @@ describe('unitsConfig advanced flags by unit', () => {
       hideLegacyFields: false,
     });
   });
+
+  it('normalizes profile metadata without breaking feature flags fallback', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
+      {
+        id: 'profiled-unit',
+        name: 'Profiled Unit',
+        specialty: 'ped',
+        profileId: 'pediatrics',
+        specialtyOverlayIds: ['ped', 'unknown-overlay'],
+        features: {
+          showNicCoding: true,
+        },
+      },
+    ]);
+
+    const { UNITS_CONFIG, resolveUnitFeatureFlags } = await import('../unitsConfig');
+
+    expect(UNITS_CONFIG[0]).toMatchObject({
+      profileId: 'pediatrics',
+      specialtyOverlayIds: ['ped'],
+    });
+    expect(resolveUnitFeatureFlags('profiled-unit')).toMatchObject({
+      showNicCoding: true,
+    });
+  });
 });
+

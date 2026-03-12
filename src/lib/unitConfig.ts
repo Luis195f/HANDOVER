@@ -1,5 +1,6 @@
 // BEGIN HANDOVER D4 – UnitConfig helpers
 
+import { resolveProfileContext, type ProfileContextInput } from '../config/profiles';
 import { UNITS_CONFIG, type HandoverUnitConfig } from '../config/unitsConfig';
 
 /** Obtiene la configuración de una unidad por ID. */
@@ -13,6 +14,8 @@ export function getDefaultUnitConfig(): HandoverUnitConfig {
   const found = UNITS_CONFIG.find((u) => u.default);
   return found ?? UNITS_CONFIG[0];
 }
+
+export const getUnitProfileContext = (input: ProfileContextInput) => resolveProfileContext(input);
 
 export type { UnitFeatureFlags } from '../config/unitsConfig';
 
