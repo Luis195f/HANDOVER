@@ -4,9 +4,11 @@ import logging
 import uuid
 from typing import Any, Callable
 
+from django.conf import settings
 from django.db import IntegrityError
 from django.http import HttpRequest
 
+from backend.api.clinical_storage import encrypt_bundle_document
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
 from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
@@ -62,15 +64,16 @@ def _extract_patient_id_from_bundle(bundle: dict[str, Any]) -> str:
 
 def persist_handover_bundle_record(*, bundle: dict[str, Any], request: HttpRequest) -> None:
     request_id = _extract_request_id(request)
+    encrypted_bundle, encryption_metadata = encrypt_bundle_document(bundle)
     defaults = {
         "bundle_id": _extract_bundle_identifier(bundle, request, request_id=request_id),
         "patient_id": _extract_patient_id_from_bundle(bundle),
         "unit_id": str(request.headers.get("X-Unit-Id") or "unknown").strip() or "unknown",
-        "bundle_json": bundle,
+        "bundle_json": encrypted_bundle,
         "expires_at": HandoverBundleRecord.default_expiry(),
         "encryption_metadata": {
-            "at_rest": "database-managed",
-            "retention_days": 30,
+            **encryption_metadata,
+            "retention_days": settings.HANDOVER_BUNDLE_RETENTION_DAYS,
         },
     }
     try:
@@ -109,3 +112,6 @@ def persist_successful_transaction_icea_side_effects(
         bridge_callback(bundle=bundle, request=request)
     except Exception:
         logger.exception("ICEA bridge enqueue failed after successful clinical transaction")
+
+
+

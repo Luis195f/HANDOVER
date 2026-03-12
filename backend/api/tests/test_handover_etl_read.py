@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from backend.api.clinical_storage import decrypt_bundle_document
 from backend.api.models import HandoverBundleRecord
 
 
@@ -81,7 +82,7 @@ class HandoverEtlReadTests(TestCase):
         read_response = self.client.get(read_url)
         self.assertEqual(read_response.status_code, 200)
         self.assertEqual(read_response["Content-Type"], "application/fhir+json")
-        self.assertEqual(json.loads(read_response.content), record.bundle_json)
+        self.assertEqual(json.loads(read_response.content), decrypt_bundle_document(record.bundle_json))
 
     @patch("backend.api.views.ensure_pipeline_snapshot_from_bundle", side_effect=RuntimeError("snapshot down"))
     @patch("backend.api.views._post_transaction_to_fhir")
@@ -218,4 +219,5 @@ class HandoverEtlReadTests(TestCase):
         for _ in range(100):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
+
 

@@ -111,3 +111,13 @@ El contenido estático queda en `dist/`. Puedes desplegarlo en cualquier hosting
    git push origin v0.4.0-rc.1
    ```
 5. Publicar el release en GitHub con enlaces a los artefactos y resaltar cambios de seguridad/permisos, nuevas pruebas y validaciones FHIR.
+
+## Variables de storage sensible
+- `HANDOVER_BUNDLE_RETENTION_DAYS`: retención explícita de bundles clínicos persistidos para ETL.
+- `HANDOVER_TECHNICAL_RETENTION_DAYS`: retención de artefactos técnicos ICEA terminales.
+- `HANDOVER_BUNDLE_ENCRYPTION_KEY`: secreto solo backend para Django; aparece en ambos `.env.example` porque el archivo raíz documenta el despliegue del stack, pero nunca debe exponerse en `EXPO_PUBLIC_*`.
+
+## Operación de pruning
+- Programa `python manage.py prune_sensitive_records` en el scheduler operativo con una frecuencia al menos diaria.
+- El comando elimina bundles clínicos expirados y artefactos técnicos ICEA terminales antiguos según la retención configurada.
+- Mantén el mismo calendario para `python manage.py prune_audit` si el despliegue ya conserva auditoría en la misma base de datos.

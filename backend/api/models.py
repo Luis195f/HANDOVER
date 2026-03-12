@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -162,7 +163,7 @@ class HandoverBundleRecord(models.Model):
     @staticmethod
     def default_expiry(now=None) -> timezone.datetime:
         current = now or timezone.now()
-        return current + timedelta(days=30)
+        return current + timedelta(days=settings.HANDOVER_BUNDLE_RETENTION_DAYS)
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"HandoverBundleRecord(bundle_id={self.bundle_id}, request_id={self.request_id})"
@@ -327,5 +328,6 @@ class IceaPipelineEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"IceaPipelineEvent(stage={self.stage}, status={self.status})"
+
 
 
