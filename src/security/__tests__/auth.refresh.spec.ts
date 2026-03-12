@@ -18,12 +18,29 @@ vi.mock('@/src/security/secure-cleanup', () => ({
 vi.mock('@/src/navigation/navigation', () => ({
   resetTo: vi.fn(),
 }));
-vi.mock('@/src/security/AuthService', () => ({
-  storeTokens: vi.fn(async () => undefined),
-  clearTokens: vi.fn(async () => undefined),
-  loadTokens: vi.fn(async () => null),
-  getAccessToken: vi.fn(async () => null),
-}));
+vi.mock('@/src/security/AuthService', async () => {
+  const actual = await vi.importActual<typeof import('@/src/security/AuthService')>(
+    '@/src/security/AuthService',
+  );
+  const storeTokens = vi.fn(async () => undefined);
+  const clearTokens = vi.fn(async () => undefined);
+  const loadTokens = vi.fn(async () => null);
+  const getAccessToken = vi.fn(async () => null);
+  return {
+    ...actual,
+    default: {
+      ...actual.default,
+      storeTokens,
+      clearTokens,
+      loadTokens,
+      getAccessToken,
+    },
+    storeTokens,
+    clearTokens,
+    loadTokens,
+    getAccessToken,
+  };
+});
 vi.mock('@/src/security/capabilities', () => ({
   clearCapabilitiesCache: vi.fn(async () => undefined),
   fetchCapabilities: vi.fn(async () => null),
