@@ -72,7 +72,7 @@ Shape soportado:
 
 ```json
 {
-  "unitProfiles": ["critical-care", "pediatrics"],
+  "unitProfiles": ["critical-care", "general-inpatient"],
   "specialtyOverlays": ["neuroicu"]
 }
 ```
@@ -90,17 +90,25 @@ Tambien se acepta un mapa booleano por id:
 }
 ```
 
+Compatibilidad legacy relevante en PRE-02:
+
+- `oncology` ya no significa `ambulatory` de forma fija;
+- en activacion, `oncology` se expande a los UPP base compatibles con el SOP `onc`: `general-inpatient`, `ambulatory`, `emergency` y `home-care`;
+- en configuracion unitaria, `profileId: 'oncology'` se resuelve segun el metadato de la unidad cuando hay pistas suficientes y, si no las hay, cae prudentemente a `general-inpatient`;
+- la resolucion contextual oncológica sigue siendo una compatibilidad de catalogo/configuracion, no una implementacion completa de EOPROP-IA.
+
 Comportamiento por defecto si la variable no existe o es invalida:
 
 - no se activa ningun UPP ni SOP;
 - el sistema resuelve `ProfileContext` con fallback al Core;
-- un SOP no puede activarse por si solo en PRE-01: requiere un UPP activo y compatible segun `allowedUnitProfiles`;
+- un SOP no puede activarse por si solo en PRE-02: requiere un UPP activo y compatible segun `allowedUnitProfiles`;
 - los catalogos siguen presentes para futuras activaciones y configuracion.
 
 ## 5. Relacion con los catalogos reales del repo
 
 La resolucion contextual se apoya en los catalogos reales ya existentes:
 
+- `src/config/profile-catalog.ts`
 - `src/config/units.ts`
 - `src/config/specialties.ts`
 - `src/config/unitsConfig.ts`
@@ -115,7 +123,9 @@ Se anadieron campos aditivos de metadatos para enlazar esos catalogos con el con
 
 Estos campos no rompen los consumidores actuales y permiten que futuros cambios se hagan en configuracion, no con `if/else` clinicos dispersos.
 
-Regla de activacion segura en PRE-01:
+El inventario canonico UPP/SOP y las traducciones legacy explicitas viven en `src/config/profile-catalog.ts` y `src/types/profile.ts`.
+
+Regla de activacion segura en PRE-02:
 
 - un overlay solo puede activarse si el overlay esta habilitado;
 - existe un unit profile activo;
@@ -137,5 +147,5 @@ No se hace en esta fase:
 - no se serializa `ProfileContext` dentro del handover clinico;
 - no se cambia el contrato contextual FHIR;
 - no se emiten nuevos vectores ICEA+ en runtime;
-- no se activan todos los perfiles por defecto.
-
+- no se activan todos los perfiles por defecto;
+- no se implementa todavia la logica EOPROP-IA ni una estratificacion oncológica avanzada por hospital de dia, urgencias oncológicas, planta o paliativos.

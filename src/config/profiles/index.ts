@@ -3,16 +3,24 @@ import { SPECIALTIES_BY_ID } from '../specialties';
 import { UNITS_BY_ID } from '../units';
 import { UNITS_CONFIG } from '../unitsConfig';
 import {
+  SPECIALTY_OVERLAY_CATALOG_BY_ID,
+  UNIT_PROFILE_CATALOG_BY_ID,
+} from '../profile-catalog';
+import {
   HANDOVER_CORE_PROFILE_ID,
-  isSpecialtyOverlayId,
-  isUnitProfileId,
+  expandUnitProfileIdsForActivation,
+  normalizeSpecialtyOverlayId,
+  normalizeUnitProfileId,
   type ContextualPrioritySignal,
   type IceaContextVector,
+  type ProfileCatalogReadiness,
   type ProfileContext,
   type ProfileContextInput,
   type ProfileRegistry,
   type ProfileRegistryActivation,
+  type SpecialtyOverlayDefinition,
   type SpecialtyOverlayId,
+  type UnitProfileDefinition,
   type UnitProfileId,
 } from '../../types/profile';
 
@@ -69,6 +77,57 @@ const overlaySignal = (
   weight: 1,
 });
 
+const activationStageForReadiness = (readiness: ProfileCatalogReadiness): 'catalog' | 'pilot' =>
+  readiness === 'wave-1' ? 'pilot' : 'catalog';
+
+const createUnitProfileDefinition = (
+  profileId: UnitProfileId,
+  config: Omit<UnitProfileDefinition, 'id' | 'kind' | 'label' | 'description' | 'aliases' | 'readiness' | 'activation'>,
+): UnitProfileDefinition => {
+  const meta = UNIT_PROFILE_CATALOG_BY_ID[profileId];
+
+  return {
+    id: profileId,
+    kind: 'unit-profile',
+    label: meta.label,
+    description: meta.clinicalFocus,
+    aliases: meta.aliases,
+    readiness: meta.readiness,
+    activation: {
+      enabledByDefault: false,
+      stage: activationStageForReadiness(meta.readiness),
+    },
+    ...config,
+  };
+};
+
+const createOverlayDefinition = (
+  overlayId: SpecialtyOverlayId,
+  config: Omit<
+    SpecialtyOverlayDefinition,
+    'id' | 'kind' | 'label' | 'description' | 'aliases' | 'readiness' | 'activation' | 'allowedUnitProfiles'
+  > & {
+    allowedUnitProfiles?: readonly UnitProfileId[];
+  },
+): SpecialtyOverlayDefinition => {
+  const meta = SPECIALTY_OVERLAY_CATALOG_BY_ID[overlayId];
+
+  return {
+    id: overlayId,
+    kind: 'specialty-overlay',
+    label: meta.label,
+    description: meta.clinicalFocus,
+    aliases: meta.aliases,
+    readiness: meta.readiness,
+    activation: {
+      enabledByDefault: false,
+      stage: activationStageForReadiness(meta.readiness),
+    },
+    allowedUnitProfiles: config.allowedUnitProfiles ?? meta.allowedUnitProfiles,
+    ...config,
+  };
+};
+
 export const PROFILE_REGISTRY: ProfileRegistry = {
   core: {
     id: HANDOVER_CORE_PROFILE_ID,
@@ -98,29 +157,7 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
     },
   },
   unitProfiles: {
-    'critical-care': {
-      id: 'critical-care',
-      kind: 'unit-profile',
-      label: 'Cuidados criticos',
-      description: 'Perfil base para UCI y otras camas de vigilancia intensiva.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      enabledSections: ['signos', 'dispositivos', 'seguridad', 'escalas', 'medicacion'],
-      prioritySignals: [
-        unitSignal('critical-care', 'critical-care-instability', 'Microvigilancia fisiologica', 'instability'),
-        unitSignal('critical-care', 'critical-care-time', 'Criticidad temporal continua', 'time-critical'),
-      ],
-      iceaContextDefaults: {
-        surveillanceIntensity: 1,
-        temporalCriticality: 1,
-        caseMixHints: ['critical-care'],
-      },
-    },
-    emergency: {
-      id: 'emergency',
-      kind: 'unit-profile',
-      label: 'Urgencias',
-      description: 'Perfil base para flujos de triage, boxes y observacion.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
+    emergency: createUnitProfileDefinition('emergency', {
       enabledSections: ['signos', 'seguridad', 'alertas', 'medicacion', 'resumen'],
       prioritySignals: [
         unitSignal('emergency', 'emergency-time', 'Reevaluacion obligatoria', 'time-critical'),
@@ -131,13 +168,8 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
         coordinationComplexity: 1,
         caseMixHints: ['emergency'],
       },
-    },
-    'general-inpatient': {
-      id: 'general-inpatient',
-      kind: 'unit-profile',
-      label: 'Hospitalizacion general',
-      description: 'Perfil base para plantas y continuidad de cuidados no criticos.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
+    }),
+    'general-inpatient': createUnitProfileDefinition('general-inpatient', {
       enabledSections: ['seguridad', 'medicacion', 'mobilitySkin', 'resumen'],
       prioritySignals: [
         unitSignal('general-inpatient', 'general-inpatient-dependency', 'Dependencia funcional', 'dependency'),
@@ -148,142 +180,140 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
         dependencyLoad: 1,
         caseMixHints: ['general-inpatient'],
       },
-    },
-    oncology: {
-      id: 'oncology',
-      kind: 'unit-profile',
-      label: 'Oncologia',
-      description: 'Perfil base para hospital de dia y hospitalizacion oncologica.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      enabledSections: ['signos', 'medicacion', 'seguridad', 'resumen'],
+    }),
+    'critical-care': createUnitProfileDefinition('critical-care', {
+      enabledSections: ['signos', 'dispositivos', 'seguridad', 'escalas', 'medicacion'],
       prioritySignals: [
-        unitSignal('oncology', 'oncology-symptom-load', 'Carga sintomatica y terapeutica', 'therapeutic-load'),
-        unitSignal('oncology', 'oncology-deterioration', 'Riesgo infeccioso y deterioro', 'deterioration-risk'),
-      ],
-      iceaContextDefaults: {
-        baselineComplexity: 1,
-        therapeuticLoad: 1,
-        caseMixHints: ['oncology'],
-      },
-    },
-    pediatrics: {
-      id: 'pediatrics',
-      kind: 'unit-profile',
-      label: 'Pediatria',
-      description: 'Perfil base para pacientes pediatricos y apoyo a cuidadores.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      enabledSections: ['signos', 'seguridad', 'escalas', 'resumen'],
-      prioritySignals: [
-        unitSignal('pediatrics', 'pediatrics-surveillance', 'Variabilidad por edad y peso', 'dependency'),
-        unitSignal('pediatrics', 'pediatrics-coordination', 'Necesidad de coordinacion con cuidadores', 'coordination'),
+        unitSignal('critical-care', 'critical-care-instability', 'Microvigilancia fisiologica', 'instability'),
+        unitSignal('critical-care', 'critical-care-time', 'Criticidad temporal continua', 'time-critical'),
       ],
       iceaContextDefaults: {
         surveillanceIntensity: 1,
-        coordinationComplexity: 1,
-        caseMixHints: ['pediatrics'],
+        temporalCriticality: 1,
+        caseMixHints: ['critical-care'],
       },
-    },
-    'maternal-perinatal': {
-      id: 'maternal-perinatal',
-      kind: 'unit-profile',
-      label: 'Materno-perinatal',
-      description: 'Perfil base para obstetricia, parto y continuidad madre-hijo.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
+    }),
+    'pediatric-critical-care': createUnitProfileDefinition('pediatric-critical-care', {
+      enabledSections: ['signos', 'seguridad', 'escalas', 'medicacion', 'resumen'],
+      prioritySignals: [
+        unitSignal('pediatric-critical-care', 'pediatric-critical-care-age-weight', 'Variabilidad por edad, peso y termorregulacion', 'dependency'),
+        unitSignal('pediatric-critical-care', 'pediatric-critical-care-family', 'Necesidad de soporte y coordinacion familiar', 'coordination'),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        dependencyLoad: 1,
+        caseMixHints: ['pediatric-critical-care'],
+      },
+    }),
+    'specialized-critical-care': createUnitProfileDefinition('specialized-critical-care', {
+      enabledSections: ['signos', 'dispositivos', 'seguridad', 'escalas', 'medicacion', 'resumen'],
+      prioritySignals: [
+        unitSignal('specialized-critical-care', 'specialized-critical-care-support', 'Soporte critico especifico dominante', 'unit-modifier'),
+        unitSignal('specialized-critical-care', 'specialized-critical-care-sentinel', 'Eventos centinela de subunidad critica', 'time-critical'),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        therapeuticLoad: 1,
+        caseMixHints: ['specialized-critical-care'],
+      },
+    }),
+    'maternal-perinatal': createUnitProfileDefinition('maternal-perinatal', {
       enabledSections: ['signos', 'seguridad', 'resumen'],
       prioritySignals: [
-        unitSignal('maternal-perinatal', 'maternal-perinatal-time', 'Eventos de vigilancia tiempo-dependientes', 'time-critical'),
-        unitSignal('maternal-perinatal', 'maternal-perinatal-coordination', 'Continuidad materno-fetal', 'coordination'),
+        unitSignal(
+          'maternal-perinatal',
+          'maternal-perinatal-time',
+          'Eventos de vigilancia tiempo-dependientes',
+          'time-critical',
+        ),
+        unitSignal(
+          'maternal-perinatal',
+          'maternal-perinatal-coordination',
+          'Continuidad materno-fetal',
+          'coordination',
+        ),
       ],
       iceaContextDefaults: {
         temporalCriticality: 1,
         continuityRisk: 1,
         caseMixHints: ['maternal-perinatal'],
       },
-    },
-  },
-  specialtyOverlays: {
-    onc: {
-      id: 'onc',
-      kind: 'specialty-overlay',
-      label: 'Overlay oncologico',
-      description: 'Ajusta foco a toxicidad, neutropenia y carga sintomatica.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      allowedUnitProfiles: ['general-inpatient', 'oncology'],
+    }),
+    perioperative: createUnitProfileDefinition('perioperative', {
+      enabledSections: ['seguridad', 'signos', 'dispositivos', 'medicacion', 'resumen'],
       prioritySignals: [
-        overlaySignal('onc', 'overlay-onc-infection', 'Riesgo infeccioso', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        baselineComplexity: 1,
-        caseMixHints: ['specialty-onc'],
-      },
-    },
-    neph: {
-      id: 'neph',
-      kind: 'specialty-overlay',
-      label: 'Overlay nefrologia',
-      description: 'Ajusta foco a balance, accesos y vigilancia renal.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      allowedUnitProfiles: ['general-inpatient'],
-      prioritySignals: [
-        overlaySignal('neph', 'overlay-neph-balance', 'Balance y acceso vascular', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        therapeuticLoad: 1,
-        caseMixHints: ['specialty-neph'],
-      },
-    },
-    ped: {
-      id: 'ped',
-      kind: 'specialty-overlay',
-      label: 'Overlay pediatrico',
-      description: 'Ajusta foco a subespecialidades pediatricas sin romper el perfil base.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      allowedUnitProfiles: ['pediatrics'],
-      prioritySignals: [
-        overlaySignal('ped', 'overlay-ped-safety', 'Seguridad por edad y dosificacion', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        surveillanceIntensity: 1,
-        caseMixHints: ['specialty-ped'],
-      },
-    },
-    ob: {
-      id: 'ob',
-      kind: 'specialty-overlay',
-      label: 'Overlay obstetrico',
-      description: 'Ajusta foco a sangrado, binomio madre-hijo y eventos perinatales.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      allowedUnitProfiles: ['maternal-perinatal'],
-      prioritySignals: [
-        overlaySignal('ob', 'overlay-ob-bleeding', 'Vigilancia de sangrado y bienestar perinatal', 'specialty-modifier'),
+        unitSignal('perioperative', 'perioperative-bleeding', 'Vigilancia postoperatoria de sangrado y via aerea', 'time-critical'),
+        unitSignal('perioperative', 'perioperative-transition', 'Seguridad de traslado y alta de recuperacion', 'coordination'),
       ],
       iceaContextDefaults: {
         temporalCriticality: 1,
-        caseMixHints: ['specialty-ob'],
+        therapeuticLoad: 1,
+        caseMixHints: ['perioperative'],
       },
-    },
-    neuroicu: {
-      id: 'neuroicu',
-      kind: 'specialty-overlay',
-      label: 'Overlay neurocritico',
-      description: 'Ajusta foco a cambios neurologicos y deterioro subito.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      allowedUnitProfiles: ['critical-care'],
+    }),
+    ambulatory: createUnitProfileDefinition('ambulatory', {
+      enabledSections: ['medicacion', 'seguridad', 'resumen'],
       prioritySignals: [
-        overlaySignal('neuroicu', 'overlay-neuroicu-change', 'Cambio neurologico nuevo', 'specialty-modifier'),
+        unitSignal('ambulatory', 'ambulatory-adherence', 'Adherencia y autocuidado fuera del ingreso', 'omission-risk'),
+        unitSignal('ambulatory', 'ambulatory-education', 'Educacion critica antes del egreso ambulatorio', 'coordination'),
+      ],
+      iceaContextDefaults: {
+        continuityRisk: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['ambulatory'],
+      },
+    }),
+    rehabilitation: createUnitProfileDefinition('rehabilitation', {
+      enabledSections: ['mobilitySkin', 'seguridad', 'resumen'],
+      prioritySignals: [
+        unitSignal('rehabilitation', 'rehabilitation-function', 'Tolerancia funcional y metas de autonomia', 'dependency'),
+        unitSignal('rehabilitation', 'rehabilitation-fall-risk', 'Seguridad de movilizacion y caidas', 'omission-risk'),
+      ],
+      iceaContextDefaults: {
+        dependencyLoad: 1,
+        continuityRisk: 1,
+        caseMixHints: ['rehabilitation'],
+      },
+    }),
+    'long-term-care': createUnitProfileDefinition('long-term-care', {
+      enabledSections: ['seguridad', 'mobilitySkin', 'resumen'],
+      prioritySignals: [
+        unitSignal('long-term-care', 'long-term-care-fragility', 'Fragilidad, piel y nutricion longitudinal', 'dependency'),
+        unitSignal('long-term-care', 'long-term-care-continuity', 'Cambios respecto al basal y continuidad familiar', 'coordination'),
+      ],
+      iceaContextDefaults: {
+        baselineComplexity: 1,
+        dependencyLoad: 1,
+        caseMixHints: ['long-term-care'],
+      },
+    }),
+    'behavioral-health': createUnitProfileDefinition('behavioral-health', {
+      enabledSections: ['seguridad', 'alertas', 'resumen'],
+      prioritySignals: [
+        unitSignal('behavioral-health', 'behavioral-health-observation', 'Necesidad de observacion conductual intensiva', 'dependency'),
+        unitSignal('behavioral-health', 'behavioral-health-alliance', 'Riesgo de ruptura terapeutica u omision relacional', 'coordination'),
       ],
       iceaContextDefaults: {
         surveillanceIntensity: 1,
-        caseMixHints: ['specialty-neurocritical'],
+        coordinationComplexity: 1,
+        caseMixHints: ['behavioral-health'],
       },
-    },
-    cvicu: {
-      id: 'cvicu',
-      kind: 'specialty-overlay',
-      label: 'Overlay cardio-critico',
-      description: 'Ajusta foco a perfusion, ritmo y dispositivos cardiovasculares.',
-      activation: { enabledByDefault: false, stage: 'catalog' },
-      allowedUnitProfiles: ['critical-care'],
+    }),
+    'home-care': createUnitProfileDefinition('home-care', {
+      enabledSections: ['seguridad', 'medicacion', 'resumen'],
+      prioritySignals: [
+        unitSignal('home-care', 'home-care-support', 'Riesgo por cuidador, insumos y soporte social', 'coordination'),
+        unitSignal('home-care', 'home-care-rehospitalization', 'Riesgo de deterioro no detectado en domicilio', 'deterioration-risk'),
+      ],
+      iceaContextDefaults: {
+        continuityRisk: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['home-care'],
+      },
+    }),
+  },
+  specialtyOverlays: {
+    cvicu: createOverlayDefinition('cvicu', {
       prioritySignals: [
         overlaySignal('cvicu', 'overlay-cvicu-perfusion', 'Perfusion y soporte hemodinamico', 'specialty-modifier'),
       ],
@@ -292,26 +322,163 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
         therapeuticLoad: 1,
         caseMixHints: ['specialty-cvicu'],
       },
-    },
+    }),
+    neuroicu: createOverlayDefinition('neuroicu', {
+      prioritySignals: [
+        overlaySignal('neuroicu', 'overlay-neuroicu-change', 'Cambio neurologico nuevo', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        caseMixHints: ['specialty-neurocritical'],
+      },
+    }),
+    onc: createOverlayDefinition('onc', {
+      prioritySignals: [
+        overlaySignal('onc', 'overlay-onc-infection', 'Riesgo infeccioso y carga sintomatica', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        baselineComplexity: 1,
+        caseMixHints: ['specialty-onc'],
+      },
+    }),
+    trauma: createOverlayDefinition('trauma', {
+      prioritySignals: [
+        overlaySignal('trauma', 'overlay-trauma-neurovascular', 'Movilizacion segura y control neurovascular distal', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        dependencyLoad: 1,
+        caseMixHints: ['specialty-trauma'],
+      },
+    }),
+    neph: createOverlayDefinition('neph', {
+      prioritySignals: [
+        overlaySignal('neph', 'overlay-neph-balance', 'Balance y acceso vascular', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        therapeuticLoad: 1,
+        caseMixHints: ['specialty-neph'],
+      },
+    }),
+    gastro: createOverlayDefinition('gastro', {
+      prioritySignals: [
+        overlaySignal('gastro', 'overlay-gastro-bleeding', 'Sangrado digestivo y encefalopatia', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        therapeuticLoad: 1,
+        caseMixHints: ['specialty-gastro'],
+      },
+    }),
+    endo: createOverlayDefinition('endo', {
+      prioritySignals: [
+        overlaySignal('endo', 'overlay-endo-metabolic', 'Seguridad metabolica y dosificacion de insulina', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        temporalCriticality: 1,
+        caseMixHints: ['specialty-endo'],
+      },
+    }),
+    pulm: createOverlayDefinition('pulm', {
+      prioritySignals: [
+        overlaySignal('pulm', 'overlay-pulm-respiratory', 'Deterioro respiratorio y soporte activo', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        caseMixHints: ['specialty-pulm'],
+      },
+    }),
+    infect: createOverlayDefinition('infect', {
+      prioritySignals: [
+        overlaySignal('infect', 'overlay-infect-isolation', 'Aislamiento, sepsis y reevaluacion infecciosa', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        baselineComplexity: 1,
+        caseMixHints: ['specialty-infect'],
+      },
+    }),
+    ped: createOverlayDefinition('ped', {
+      prioritySignals: [
+        overlaySignal('ped', 'overlay-ped-safety', 'Seguridad por edad, peso y dosificacion', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        caseMixHints: ['specialty-ped'],
+      },
+    }),
+    ob: createOverlayDefinition('ob', {
+      prioritySignals: [
+        overlaySignal('ob', 'overlay-ob-bleeding', 'Sangrado, vigilancia gineco-obstetrica y continuidad perinatal', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        temporalCriticality: 1,
+        caseMixHints: ['specialty-gyn-ob'],
+      },
+    }),
+    ent: createOverlayDefinition('ent', {
+      prioritySignals: [
+        overlaySignal('ent', 'overlay-ent-airway', 'Complicaciones precoces de via aerea, dolor y sangrado localizado', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        continuityRisk: 1,
+        caseMixHints: ['specialty-ent'],
+      },
+    }),
+    burns: createOverlayDefinition('burns', {
+      prioritySignals: [
+        overlaySignal('burns', 'overlay-burns-fluid', 'Balance, injertos y dolor en quemados', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        therapeuticLoad: 1,
+        caseMixHints: ['specialty-burns'],
+      },
+    }),
+    'critical-emergency': createOverlayDefinition('critical-emergency', {
+      prioritySignals: [
+        overlaySignal('critical-emergency', 'overlay-critical-emergency-abcde', 'ABCDE, soporte avanzado y reevaluacion inmediata', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        temporalCriticality: 1,
+        caseMixHints: ['specialty-critical-emergency'],
+      },
+    }),
+    transplant: createOverlayDefinition('transplant', {
+      prioritySignals: [
+        overlaySignal('transplant', 'overlay-transplant-graft', 'Vigilancia de rechazo, injerto e inmunosupresion', 'specialty-modifier'),
+      ],
+      iceaContextDefaults: {
+        baselineComplexity: 1,
+        continuityRisk: 1,
+        caseMixHints: ['specialty-transplant'],
+      },
+    }),
   },
 };
 
 const normalizeIdList = <T extends string>(
   value: unknown,
-  guard: (candidate: unknown) => candidate is T,
+  normalizer: (candidate: unknown) => readonly T[],
 ): T[] => {
+  const resolved: T[] = [];
+
+  const appendNormalized = (candidate: unknown) => {
+    resolved.push(...normalizer(candidate));
+  };
+
   if (Array.isArray(value)) {
-    return value.filter(guard);
+    for (const candidate of value) {
+      appendNormalized(candidate);
+    }
+    return resolved;
   }
 
   if (value && typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>)
-      .filter(([, enabled]) => enabled === true)
-      .map(([candidate]) => candidate)
-      .filter(guard);
+    for (const [candidate, enabled] of Object.entries(value as Record<string, unknown>)) {
+      if (enabled !== true) continue;
+      appendNormalized(candidate);
+    }
   }
 
-  return [];
+  return resolved;
 };
 
 const unique = <T extends string>(values: readonly T[]): T[] => Array.from(new Set(values));
@@ -337,8 +504,13 @@ const resolveProfileActivationConfig = (): ProfileRegistryActivation => {
       specialtyOverlays?: unknown;
     };
     return {
-      unitProfiles: unique(normalizeIdList(parsed.unitProfiles, isUnitProfileId)),
-      specialtyOverlays: unique(normalizeIdList(parsed.specialtyOverlays, isSpecialtyOverlayId)),
+      unitProfiles: unique(normalizeIdList(parsed.unitProfiles, expandUnitProfileIdsForActivation)),
+      specialtyOverlays: unique(
+        normalizeIdList(parsed.specialtyOverlays, (candidate) => {
+          const normalized = normalizeSpecialtyOverlayId(candidate);
+          return normalized ? [normalized] : [];
+        }),
+      ),
     };
   } catch {
     return {
@@ -409,7 +581,9 @@ const resolveCatalogOverlayIds = (
   const overlays = [
     ...(configuredUnit?.specialtyOverlayIds ?? []),
     ...(knownSpecialty?.overlayId ? [knownSpecialty.overlayId] : []),
-  ].filter(isSpecialtyOverlayId);
+  ]
+    .map((overlayId) => normalizeSpecialtyOverlayId(overlayId))
+    .filter((overlayId): overlayId is SpecialtyOverlayId => Boolean(overlayId));
 
   return unique(overlays);
 };
@@ -490,5 +664,4 @@ export type {
   ProfileContextInput,
   ProfileRegistryActivation,
 } from '../../types/profile';
-
 

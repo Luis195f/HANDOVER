@@ -72,7 +72,6 @@ describe('unitsConfig advanced flags by unit', () => {
     });
   });
 
-
   it('uses default unit config when unitId is empty or whitespace', async () => {
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'false';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'false';
@@ -159,14 +158,66 @@ describe('unitsConfig advanced flags by unit', () => {
     });
   });
 
-  it('normalizes profile metadata without breaking feature flags fallback', async () => {
+  it('normalizes legacy oncology profile ids contextually across compatible base units', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
+      {
+        id: 'onc-day',
+        name: 'Hospital de Dia Oncologico',
+        specialty: 'onc',
+        profileId: 'oncology',
+        specialtyOverlayIds: ['onc'],
+      },
+      {
+        id: 'onc-floor',
+        name: 'Oncologia Piso',
+        specialty: 'onc',
+        profileId: 'oncology',
+        specialtyOverlayIds: ['onc'],
+      },
+      {
+        id: 'onc-ed',
+        name: 'Urgencias Oncologicas',
+        specialty: 'onc',
+        profileId: 'oncology',
+        specialtyOverlayIds: ['onc'],
+      },
+      {
+        id: 'onc-home',
+        name: 'Paliativos Domicilio',
+        specialty: 'onc',
+        profileId: 'oncology',
+        specialtyOverlayIds: ['onc'],
+      },
+    ]);
+
+    const { UNITS_CONFIG } = await import('../unitsConfig');
+
+    expect(UNITS_CONFIG.find((entry) => entry.id === 'onc-day')).toMatchObject({
+      profileId: 'ambulatory',
+      specialtyOverlayIds: ['onc'],
+    });
+    expect(UNITS_CONFIG.find((entry) => entry.id === 'onc-floor')).toMatchObject({
+      profileId: 'general-inpatient',
+      specialtyOverlayIds: ['onc'],
+    });
+    expect(UNITS_CONFIG.find((entry) => entry.id === 'onc-ed')).toMatchObject({
+      profileId: 'emergency',
+      specialtyOverlayIds: ['onc'],
+    });
+    expect(UNITS_CONFIG.find((entry) => entry.id === 'onc-home')).toMatchObject({
+      profileId: 'home-care',
+      specialtyOverlayIds: ['onc'],
+    });
+  });
+
+  it('normalizes legacy pediatric and gyn ids without breaking feature flags fallback', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
       {
         id: 'profiled-unit',
         name: 'Profiled Unit',
         specialty: 'ped',
         profileId: 'pediatrics',
-        specialtyOverlayIds: ['ped', 'unknown-overlay'],
+        specialtyOverlayIds: ['ped', 'gyn', 'unknown-overlay'],
         features: {
           showNicCoding: true,
         },
@@ -176,12 +227,11 @@ describe('unitsConfig advanced flags by unit', () => {
     const { UNITS_CONFIG, resolveUnitFeatureFlags } = await import('../unitsConfig');
 
     expect(UNITS_CONFIG[0]).toMatchObject({
-      profileId: 'pediatrics',
-      specialtyOverlayIds: ['ped'],
+      profileId: 'general-inpatient',
+      specialtyOverlayIds: ['ped', 'ob'],
     });
     expect(resolveUnitFeatureFlags('profiled-unit')).toMatchObject({
       showNicCoding: true,
     });
   });
 });
-

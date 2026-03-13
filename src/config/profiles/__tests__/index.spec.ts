@@ -27,7 +27,7 @@ describe('profile registry activation and fallback', () => {
       unitProfiles: [],
       specialtyOverlays: [],
     });
-    expect(context.catalogUnitProfileId).toBe('critical-care');
+    expect(context.catalogUnitProfileId).toBe('specialized-critical-care');
     expect(context.unitProfileId).toBeNull();
     expect(context.catalogSpecialtyOverlayIds).toEqual(['neuroicu']);
     expect(context.specialtyOverlayIds).toEqual([]);
@@ -44,7 +44,7 @@ describe('profile registry activation and fallback', () => {
 
     const context = resolveProfileContext({ unitId: 'neuroicu-1', specialtyId: 'neuroicu' });
 
-    expect(context.catalogUnitProfileId).toBe('critical-care');
+    expect(context.catalogUnitProfileId).toBe('specialized-critical-care');
     expect(context.unitProfileId).toBeNull();
     expect(context.catalogSpecialtyOverlayIds).toEqual(['neuroicu']);
     expect(context.specialtyOverlayIds).toEqual([]);
@@ -54,27 +54,27 @@ describe('profile registry activation and fallback', () => {
 
   it('ignores an active overlay when it is incompatible with the active unit profile', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
-      unitProfiles: ['pediatrics'],
-      specialtyOverlays: ['neuroicu'],
+      unitProfiles: ['general-inpatient'],
+      specialtyOverlays: ['critical-emergency'],
     });
 
     const { resolveProfileContext, isSpecialtyOverlayActive, isUnitProfileActive } = await import('../index');
 
-    const context = resolveProfileContext({ unitId: 'pediatria', specialtyId: 'neuroicu' });
+    const context = resolveProfileContext({ unitId: 'pediatria', specialtyId: 'ed' });
 
-    expect(isUnitProfileActive('pediatrics')).toBe(true);
-    expect(isSpecialtyOverlayActive('neuroicu')).toBe(true);
-    expect(context.catalogUnitProfileId).toBe('pediatrics');
-    expect(context.unitProfileId).toBe('pediatrics');
-    expect(context.catalogSpecialtyOverlayIds).toEqual(['ped', 'neuroicu']);
+    expect(isUnitProfileActive('general-inpatient')).toBe(true);
+    expect(isSpecialtyOverlayActive('critical-emergency')).toBe(true);
+    expect(context.catalogUnitProfileId).toBe('general-inpatient');
+    expect(context.unitProfileId).toBe('general-inpatient');
+    expect(context.catalogSpecialtyOverlayIds).toEqual(['ped', 'critical-emergency']);
     expect(context.specialtyOverlayIds).toEqual([]);
     expect(context.usesCoreFallback).toBe(false);
-    expect(context.activeProfileIds).toEqual(['handover-core', 'pediatrics']);
+    expect(context.activeProfileIds).toEqual(['handover-core', 'general-inpatient']);
   });
 
   it('activates a compatible overlay only when the base unit profile is also active', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
-      unitProfiles: ['critical-care'],
+      unitProfiles: ['specialized-critical-care'],
       specialtyOverlays: ['neuroicu'],
     });
 
@@ -82,26 +82,29 @@ describe('profile registry activation and fallback', () => {
 
     const context = resolveProfileContext({ unitId: 'neuroicu-1', specialtyId: 'neuroicu' });
 
-    expect(isUnitProfileActive('critical-care')).toBe(true);
+    expect(isUnitProfileActive('specialized-critical-care')).toBe(true);
     expect(isSpecialtyOverlayActive('neuroicu')).toBe(true);
-    expect(context.unitProfileId).toBe('critical-care');
+    expect(context.unitProfileId).toBe('specialized-critical-care');
     expect(context.specialtyOverlayIds).toEqual(['neuroicu']);
     expect(context.usesCoreFallback).toBe(false);
-    expect(context.activeProfileIds).toEqual(['handover-core', 'critical-care', 'neuroicu']);
-    expect(context.prioritySignals.some((signal) => signal.profileId === 'critical-care')).toBe(true);
+    expect(context.activeProfileIds).toEqual(['handover-core', 'specialized-critical-care', 'neuroicu']);
+    expect(context.prioritySignals.some((signal) => signal.profileId === 'specialized-critical-care')).toBe(true);
     expect(context.prioritySignals.some((signal) => signal.profileId === 'neuroicu')).toBe(true);
-    expect(context.iceaContext.caseMixHints ?? []).toContain('critical-care');
+    expect(context.iceaContext.caseMixHints ?? []).toContain('specialized-critical-care');
     expect(context.iceaContext.caseMixHints ?? []).toContain('specialty-neurocritical');
   });
 
-  it('filters unknown ids and keeps safe activation behavior', async () => {
+  it('expands legacy oncology activation ids without collapsing them blindly to ambulatory', async () => {
     process.env.HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: {
         pediatrics: true,
+        oncology: true,
         unknown: true,
       },
       specialtyOverlays: {
         ped: true,
+        gyn: true,
+        onc: true,
         bogus: true,
       },
     });
@@ -109,14 +112,26 @@ describe('profile registry activation and fallback', () => {
     const { PROFILE_REGISTRY_ACTIVATION, resolveProfileContext } = await import('../index');
 
     expect(PROFILE_REGISTRY_ACTIVATION).toEqual({
-      unitProfiles: ['pediatrics'],
-      specialtyOverlays: ['ped'],
+      unitProfiles: ['general-inpatient', 'ambulatory', 'emergency', 'home-care'],
+      specialtyOverlays: ['ped', 'ob', 'onc'],
     });
 
-    const context = resolveProfileContext({ unitId: 'pediatria' });
-    expect(context.catalogUnitProfileId).toBe('pediatrics');
-    expect(context.unitProfileId).toBe('pediatrics');
-    expect(context.specialtyOverlayIds).toEqual(['ped']);
-    expect(context.activeProfileIds).toEqual(['handover-core', 'pediatrics', 'ped']);
+    const pediatricContext = resolveProfileContext({ unitId: 'pediatria' });
+    expect(pediatricContext.catalogUnitProfileId).toBe('general-inpatient');
+    expect(pediatricContext.unitProfileId).toBe('general-inpatient');
+    expect(pediatricContext.specialtyOverlayIds).toEqual(['ped']);
+
+    const oncologyDefaultContext = resolveProfileContext({ specialtyId: 'onc' });
+    expect(oncologyDefaultContext.catalogUnitProfileId).toBe('general-inpatient');
+    expect(oncologyDefaultContext.unitProfileId).toBe('general-inpatient');
+    expect(oncologyDefaultContext.specialtyOverlayIds).toEqual(['onc']);
+
+    const oncologyDayHospitalContext = resolveProfileContext({ unitId: 'onc-ward', specialtyId: 'onc' });
+    expect(oncologyDayHospitalContext.catalogUnitProfileId).toBe('ambulatory');
+    expect(oncologyDayHospitalContext.unitProfileId).toBe('ambulatory');
+    expect(oncologyDayHospitalContext.specialtyOverlayIds).toEqual(['onc']);
+
+    const obstetricContext = resolveProfileContext({ specialtyId: 'ob' });
+    expect(obstetricContext.catalogSpecialtyOverlayIds).toEqual(['ob']);
   });
 });
