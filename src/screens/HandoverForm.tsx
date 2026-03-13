@@ -127,6 +127,7 @@ import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 import { useHandoverTiming } from '@/src/hooks/useHandoverTiming';
 import {
   buildHandoverInputPayload,
+  buildProfileTraceInput,
   buildSubmissionAdministrativeData,
   buildSubmissionOxygenTherapy,
   normalizeOxygenTherapyInput,
@@ -1735,10 +1736,11 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     }
   };
 
+  const profileTraceInput = useMemo(() => buildProfileTraceInput(profileRuntime), [profileRuntime]);
   const buildHandoverInput = useMemo(
     () => (values: HandoverFormValues, overrides: Partial<FhirHandoverValues>): FhirHandoverInput =>
-      buildHandoverInputPayload(values, overrides),
-    [],
+      buildHandoverInputPayload(values, overrides, profileTraceInput),
+    [profileTraceInput],
   );
   const buildBundle = useCallback(
     async (handoverInput: FhirHandoverInput, nowIso: string) =>
@@ -1874,6 +1876,10 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         patientId: values.patientId,
         unitId: administrativeData.unit,
         specialtyId,
+        unitProfileId: profileRuntime.context.unitProfileId ?? undefined,
+        specialtyOverlayIds: profileRuntime.context.specialtyOverlayIds,
+        activeProfileIds: profileRuntime.context.activeProfileIds,
+        hasHumanSpecialtyOverride: profileRuntime.context.hasHumanSpecialtyOverride,
         signerId,
       });
       const timingRequestId = typeof queuedTx?.id === 'string' ? queuedTx.id : '';
@@ -2230,13 +2236,28 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <Text style={styles.profileCardTitle}>
             {profileRuntime.context.usesCoreFallback
               ? 'HANDOVER Core activo'
-              : `Perfil de unidad activo: ${profileRuntime.pack.label}`}
+              : `Perfil de unidad activo: ${profileRuntime.basePack.label}`}
           </Text>
           <Text style={styles.profileCardMeta}>
             {profileRuntime.context.usesCoreFallback
               ? 'No hay un UPP activo para esta unidad; el formulario cae al Core sin abrir una pantalla paralela.'
-              : `Unidad resuelta: ${profileRuntime.pack.label}.`}
+              : `Unidad resuelta: ${profileRuntime.basePack.label}.`}
           </Text>
+          {profileRuntime.activeOverlays.length > 0 ? (
+            <Text style={styles.profileCardMeta}>
+              {`SOP activos: ${profileRuntime.activeOverlays.map((overlay) => overlay.label).join(' · ')}`}
+            </Text>
+          ) : null}
+          {profileRuntime.context.hasHumanSpecialtyOverride ? (
+            <Text style={styles.profileCardMeta}>
+              {`Override humano de especialidad activo: ${profileRuntime.context.requestedSpecialtyId ?? profileRuntime.context.specialtyId ?? 'sin especialidad'}.`}
+            </Text>
+          ) : null}
+          {profileRuntime.focusAreas.length > 0 ? (
+            <Text style={styles.profileCardMeta}>
+              {`Foco clinico: ${profileRuntime.focusAreas.join(' · ')}`}
+            </Text>
+          ) : null}
           {profileRuntime.requiredExtraFields.length > 0 ? (
             <Text style={styles.profileCardMeta}>
               {`Campos extra minimos: ${profileRuntime.requiredExtraFields.join(' · ')}`}
@@ -2247,6 +2268,14 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               {`Eventos criticos: ${profileRuntime.sentinelEvents.join(' · ')}`}
             </Text>
           ) : null}
+          {profileRuntime.explanations.length > 0 ? (
+            <Text style={styles.profileCardMeta}>
+              {`Explicacion visible: ${profileRuntime.explanations.join(' · ')}`}
+            </Text>
+          ) : null}
+          <Text style={styles.profileCardMeta}>
+            {`Merge aplicado: ${profileRuntime.mergeTrace.map((entry) => entry.label).join(' -> ')}`}
+          </Text>
           {profileRuntime.visibleOutputs.length > 0 ? (
             <Text style={styles.profileCardMeta}>
               {`Salidas visibles: ${profileRuntime.visibleOutputs.join(' · ')}`}
@@ -3064,4 +3093,5 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     </FormProvider>
   );
 }
+
 

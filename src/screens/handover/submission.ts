@@ -1,8 +1,10 @@
 import type { AdministrativeData } from '@/src/types/administrative';
 import type {
   HandoverInput as FhirHandoverInput,
+  HandoverProfileTraceInput,
   HandoverValues as FhirHandoverValues,
 } from '@/src/lib/fhir-map';
+import type { HandoverProfileRuntime } from '@/src/lib/profile-runtime';
 import type { HandoverValues as FormHandoverValues } from '@/src/validation/schemas';
 
 export function normalizeUnitSelection(
@@ -28,16 +30,58 @@ export function normalizeOxygenTherapyInput(value: unknown) {
   };
 }
 
+export function buildProfileTraceInput(
+  profileRuntime: Pick<HandoverProfileRuntime, 'context' | 'mergeTrace'>,
+): HandoverProfileTraceInput {
+  return {
+    unitId: profileRuntime.context.unitId,
+    requestedSpecialtyId: profileRuntime.context.requestedSpecialtyId,
+    specialtyId: profileRuntime.context.specialtyId,
+    specialtySource: profileRuntime.context.specialtySource,
+    catalogUnitProfileId: profileRuntime.context.catalogUnitProfileId,
+    unitProfileId: profileRuntime.context.unitProfileId,
+    overlaySelections: profileRuntime.context.overlaySelections,
+    catalogSpecialtyOverlayIds: profileRuntime.context.catalogSpecialtyOverlayIds,
+    specialtyOverlayIds: profileRuntime.context.specialtyOverlayIds,
+    activeProfileIds: profileRuntime.context.activeProfileIds,
+    hasHumanSpecialtyOverride: profileRuntime.context.hasHumanSpecialtyOverride,
+    mergeTrace: profileRuntime.mergeTrace.map(({ source, profileId, label }) => ({
+      source,
+      profileId,
+      label,
+    })),
+  };
+}
+
 export function buildHandoverInputPayload(
   values: FormHandoverValues,
   overrides: Partial<FhirHandoverValues>,
-): FhirHandoverValues {
-  return {
+): FhirHandoverValues;
+export function buildHandoverInputPayload(
+  values: FormHandoverValues,
+  overrides: Partial<FhirHandoverValues>,
+  profileTrace: HandoverProfileTraceInput,
+): Extract<FhirHandoverInput, { values: FhirHandoverValues }>;
+export function buildHandoverInputPayload(
+  values: FormHandoverValues,
+  overrides: Partial<FhirHandoverValues>,
+  profileTrace?: HandoverProfileTraceInput,
+): FhirHandoverInput {
+  const normalizedValues: FhirHandoverValues = {
     ...(values as unknown as FhirHandoverValues),
     oxygenTherapy: normalizeOxygenTherapyInput(
       (values as { oxygenTherapy?: unknown }).oxygenTherapy,
     ) as FhirHandoverValues['oxygenTherapy'],
     ...overrides,
+  };
+
+  if (!profileTrace) {
+    return normalizedValues;
+  }
+
+  return {
+    values: normalizedValues,
+    profileTrace,
   };
 }
 
@@ -81,3 +125,4 @@ export function buildSubmissionOxygenTherapy(
       : null,
   };
 }
+
