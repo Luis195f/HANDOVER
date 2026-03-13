@@ -110,6 +110,11 @@ const FIELD_IDS: readonly ProfileRuntimeFieldId[] = [
   'noc-outcomes',
 ];
 
+const HIDE_LEGACY_FIELDS_GUARDED_FIELD_IDS = [
+  'legacy-sbar-narrative',
+  'legacy-medication-text',
+] as const satisfies readonly ProfileRuntimeFieldId[];
+
 const unique = <T,>(values: readonly T[]): T[] => Array.from(new Set(values));
 
 const mergeText = (...values: ReadonlyArray<readonly string[] | undefined>): string[] =>
@@ -305,6 +310,12 @@ const resolveFieldVisibility = (pack: UnitProfileRuntimePack, features: UnitFeat
   base['handover-timing-hint'] = base['handover-timing-hint'] && Boolean(features.showHandoverTimingMetrics);
   base['noc-outcomes'] = base['noc-outcomes'] && Boolean(features.showNocOutcomes);
 
+  if (features.hideLegacyFields) {
+    for (const fieldId of HIDE_LEGACY_FIELDS_GUARDED_FIELD_IDS) {
+      base[fieldId] = false;
+    }
+  }
+
   return base;
 };
 
@@ -429,6 +440,7 @@ export const resolveHandoverProfileRuntime = ({
     treatmentQuickPicks: pack.quickPicks?.treatments ?? [],
   };
 };
+
 
 
 
