@@ -70,6 +70,41 @@ export type LegacyContextualUnitProfileAlias = keyof typeof LEGACY_CONTEXTUAL_UN
 export type LegacySpecialtyOverlayAlias = keyof typeof LEGACY_SPECIALTY_OVERLAY_ALIASES;
 export type ProfileSelectorId = HandoverCoreProfileId | UnitProfileId | SpecialtyOverlayId;
 export type ProfileCatalogReadiness = 'wave-1' | 'scaffold';
+export const HANDOVER_SECTION_KEYS = [
+  'turno',
+  'paciente',
+  'sbar',
+  'signos',
+  'oxigenoterapia',
+  'dispositivos',
+  'seguridad',
+  'alertas',
+  'nutrition',
+  'elimination',
+  'fluidBalance',
+  'mobilitySkin',
+  'psychosocial',
+  'escalas',
+  'examenes',
+  'medicacion',
+  'adjuntos',
+  'diagnosticos',
+  'outcomes',
+  'evolucion',
+  'resumen',
+  'bedsideChecklist',
+  'firmas',
+] as const;
+export type HandoverSectionKey = (typeof HANDOVER_SECTION_KEYS)[number];
+export const PROFILE_RUNTIME_FIELD_IDS = [
+  'legacy-sbar-narrative',
+  'legacy-medication-text',
+  'legacy-nursing-diagnosis-text',
+  'nic-coding-hint',
+  'handover-timing-hint',
+  'noc-outcomes',
+] as const;
+export type ProfileRuntimeFieldId = (typeof PROFILE_RUNTIME_FIELD_IDS)[number];
 
 export type ContextualPriorityDimension =
   | 'instability'
@@ -181,6 +216,44 @@ export interface ProfileContextInput {
   specialtyId?: string | null;
 }
 
+export interface ProfileRuntimeMedicationQuickPick {
+  id: string;
+  name: string;
+  code?: {
+    system: string;
+    code: string;
+    display?: string;
+  };
+}
+
+export interface ProfileRuntimeTreatmentQuickPick {
+  id: string;
+  type: 'woundCare' | 'respiratory' | 'mobilization' | 'education' | 'other';
+  description: string;
+  code?: {
+    system: 'NIC';
+    code: string;
+    display: string;
+  };
+}
+
+export interface UnitProfileRuntimePack {
+  id: HandoverCoreProfileId | UnitProfileId;
+  label: string;
+  enabledSections?: readonly HandoverSectionKey[];
+  hiddenSections?: readonly HandoverSectionKey[];
+  requiredExtraFields?: readonly string[];
+  optionalExtraFields?: readonly string[];
+  scales?: readonly string[];
+  sentinelEvents?: readonly string[];
+  visibility?: Readonly<Partial<Record<ProfileRuntimeFieldId, boolean>>>;
+  quickPicks?: Readonly<{
+    medications?: readonly ProfileRuntimeMedicationQuickPick[];
+    treatments?: readonly ProfileRuntimeTreatmentQuickPick[];
+  }>;
+  visibleOutputs?: readonly string[];
+  notes?: readonly string[];
+}
 export const isUnitProfileId = (value: unknown): value is UnitProfileId =>
   typeof value === 'string' && UNIT_PROFILE_ID_SET.has(value);
 
@@ -241,3 +314,4 @@ export const normalizeSpecialtyOverlayId = (value: unknown): SpecialtyOverlayId 
   if (typeof value !== 'string') return null;
   return LEGACY_SPECIALTY_OVERLAY_ALIASES[value as LegacySpecialtyOverlayAlias] ?? null;
 };
+

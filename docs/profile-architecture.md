@@ -149,3 +149,12 @@ No se hace en esta fase:
 - no se emiten nuevos vectores ICEA+ en runtime;
 - no se activan todos los perfiles por defecto;
 - no se implementa todavia la logica EOPROP-IA ni una estratificacion oncológica avanzada por hospital de dia, urgencias oncológicas, planta o paliativos.
+
+
+## 7. Runtime UPP PRE-03
+
+La PRE-03 agrega una capa runtime aditiva para el formulario unico:
+
+- `resolveHandoverProfileRuntime` resuelve la unidad activa y mantiene fallback seguro al Core.
+- `src/config/profiles/units/core.ts` y `src/config/profiles/units/index.ts` declaran secciones visibles, campos legacy, escalas sugeridas, eventos centinela, quick-picks y salidas visibles por UPP.
+- `src/lib/profile-runtime.ts` entrega un mapa puro de visibilidad y ayudas contextuales para `HandoverForm`, sin abrir pantallas paralelas ni cambiar el payload clinico runtime.

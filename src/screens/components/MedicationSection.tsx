@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { MEDICATIONS_QUICKPICK_ICU } from '@/src/lib/codes';
 import type { MedicationItem } from '@/src/types/handover';
+import type { ProfileRuntimeMedicationQuickPick } from '@/src/types/profile';
 import { zMedicationRoute, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
 const routeOptions = zMedicationRoute.options.map((value) => ({
@@ -115,6 +116,7 @@ const styles = StyleSheet.create({
 type Props = {
   control: Control<HandoverFormValues>;
   name?: 'medications';
+  quickPicks?: readonly ProfileRuntimeMedicationQuickPick[];
 };
 
 type EditingState = { index: number; isNew?: boolean } | null;
@@ -133,13 +135,14 @@ type MedicationSectionFormField = keyof Pick<
   | 'endTime'
 >;
 
-export function MedicationSection({ control, name = 'medications' }: Props) {
+export function MedicationSection({ control, name = 'medications', quickPicks }: Props) {
   const { setValue, trigger, formState } = useFormContext<HandoverFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name });
   const medications = useWatch({ control, name }) as MedicationItem[] | undefined;
   const medsText = useWatch({ control, name: 'meds' }) as string | undefined;
   const [editing, setEditing] = useState<EditingState>(null);
   const errorBag = formState.errors[name] as FieldErrors<MedicationItem>[] | undefined;
+  const availableQuickPicks = quickPicks ?? MEDICATIONS_QUICKPICK_ICU;
 
   const openEditor = (index: number) => setEditing({ index });
 
@@ -199,11 +202,18 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
   };
 
   const quickPickApply = (index: number, itemId: string) => {
-    const selected = MEDICATIONS_QUICKPICK_ICU.find((item) => item.id === itemId);
+    const selected = availableQuickPicks.find((item) => item.id === itemId);
     if (!selected) return;
     setValue(`${name}.${index}.name`, selected.name, { shouldDirty: true, shouldValidate: true });
     if (selected.code) {
-      setValue(`${name}.${index}.code`, selected.code, { shouldDirty: true, shouldValidate: true });
+      setValue(
+        `${name}.${index}.code`,
+        {
+          ...selected.code,
+          display: selected.code.display ?? selected.name,
+        },
+        { shouldDirty: true, shouldValidate: true },
+      );
     }
   };
 
@@ -222,8 +232,9 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
           <Pressable style={styles.modalContent} onPress={(event) => event.stopPropagation()}>
             <ScrollView>
               <Text style={styles.sectionTitle}>Medicamento</Text>
-              <View style={styles.quickPickRow}>
-                {MEDICATIONS_QUICKPICK_ICU.map((item) => (
+              {availableQuickPicks.length > 0 ? (
+                <View style={styles.quickPickRow}>
+                  {availableQuickPicks.map((item) => (
                   <Pressable
                     key={item.id}
                     style={styles.quickPickChip}
@@ -232,8 +243,9 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
                   >
                     <Text style={styles.quickPickText}>{item.name}</Text>
                   </Pressable>
-                ))}
-              </View>
+                  ))}
+                </View>
+              ) : null}
               <Controller
                 control={control}
                 name={`${name}.${index}.code` as const}
@@ -511,3 +523,4 @@ export function MedicationSection({ control, name = 'medications' }: Props) {
 }
 
 export default MedicationSection;
+

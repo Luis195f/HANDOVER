@@ -21,6 +21,7 @@ import {
   type NicCatalogPayload,
 } from '@/src/catalogs/nicCodes';
 import type { HandoverStructuredDiagnosis, TreatmentItem } from '@/src/types/handover';
+import type { ProfileRuntimeTreatmentQuickPick } from '@/src/types/profile';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
 const TREATMENT_LABELS: Record<TreatmentItem['type'], string> = {
@@ -144,6 +145,7 @@ type Props = {
   name?: 'treatments';
   enableNicCoding?: boolean;
   suggestInterventions?: typeof fetchInterventionsSuggestions;
+  quickPicks?: readonly ProfileRuntimeTreatmentQuickPick[];
 };
 
 type EditingState = { index: number; isNew?: boolean } | null;
@@ -205,6 +207,7 @@ export function TreatmentsSection({
   name = 'treatments',
   enableNicCoding,
   suggestInterventions = fetchInterventionsSuggestions,
+  quickPicks = [],
 }: Props) {
   const { trigger, formState, getValues, setValue } = useFormContext<HandoverFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name });
@@ -237,6 +240,10 @@ export function TreatmentsSection({
     ? `Catálogo NIC licenciado cargado (${nicCatalog.codes.length} intervenciones)`
     : `Sugerencias limitadas al catálogo local (${nicCatalog.codes.length} intervenciones)`;
 
+  const quickPickDescriptions = useMemo(
+    () => new Set((treatments ?? []).map((item) => normalizeForDedup(item.description))),
+    [treatments],
+  );
   const openEditor = (index: number) => setEditing({ index });
 
   const handleAdd = () => {
@@ -286,6 +293,30 @@ export function TreatmentsSection({
     } finally {
       setNicCatalogLoading(false);
     }
+  };
+
+  const addQuickPickTreatment = (quickPick: ProfileRuntimeTreatmentQuickPick) => {
+    const quickPickSignature = normalizeForDedup(quickPick.description);
+    const existsByDescription = quickPickDescriptions.has(quickPickSignature);
+    const existsByCode =
+      quickPick.code &&
+      (treatments ?? []).some(
+        (item) => item.code?.system === quickPick.code?.system && item.code?.code === quickPick.code?.code,
+      );
+
+    if (existsByDescription || existsByCode) {
+      setSuggestionsError('El quick-pick seleccionado ya existe en tratamientos.');
+      return;
+    }
+
+    append({
+      id: uuidv4(),
+      type: quickPick.type,
+      description: quickPick.description,
+      done: false,
+      ...(quickPick.code ? { code: quickPick.code } : {}),
+    });
+    setSuggestionsError(null);
   };
 
   const addCatalogIntervention = (entry: NicCode) => {
@@ -551,6 +582,24 @@ export function TreatmentsSection({
     <View>
       <Text style={styles.sectionTitle}>Tratamientos no farmacológicos</Text>
 
+      {quickPicks.length > 0 ? (
+        <View style={styles.suggestionsCard}>
+          <Text style={styles.helperText}>Quick-picks del perfil activo.</Text>
+          <View style={{ gap: 8 }}>
+            {quickPicks.map((quickPick) => (
+              <Pressable
+                key={quickPick.id}
+                style={styles.suggestionOption}
+                onPress={() => addQuickPickTreatment(quickPick)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.suggestionText}>{quickPick.description}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
       {nicCodingEnabled ? (
         <View style={styles.suggestionsCard}>
           <Text style={styles.helperText}>Texto libre primero; codificación NIC opcional.</Text>
@@ -665,3 +714,4 @@ export function TreatmentsSection({
 }
 
 export default TreatmentsSection;
+
