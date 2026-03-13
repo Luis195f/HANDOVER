@@ -1,12 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CryptoJS from 'crypto-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
-// 1) Mock de expo-sqlite: así `queue.ts` usa el fallback in-memory
+// 1) Mock de expo-sqlite: asi `queue.ts` usa el fallback in-memory
 vi.mock('expo-sqlite', () => {
   return {
-    
     openDatabaseSync: undefined,
     openDatabase: undefined,
+  };
+});
+
+vi.mock('@react-native-async-storage/async-storage', () => {
+  const store = new Map<string, string>();
+  const api = {
+    getItem: vi.fn(async (key: string) => store.get(key) ?? null),
+    setItem: vi.fn(async (key: string, value: string) => {
+      store.set(key, value);
+    }),
+    removeItem: vi.fn(async (key: string) => {
+      store.delete(key);
+    }),
+    __reset: () => {
+      store.clear();
+      api.getItem.mockClear();
+      api.setItem.mockClear();
+      api.removeItem.mockClear();
+    },
+  };
+  return {
+    default: api,
   };
 });
 
@@ -25,11 +48,11 @@ vi.mock('expo-modules-core', () => {
   };
 });
 
-// 3) Mock de expo-secure-store para cifrado legacy
+// 3) Mock de expo-secure-store para cifrado legacy y tests de hardening
 vi.mock('expo-secure-store', () => {
   const store = new Map<string, string>();
-
-  return {
+  const api = {
+    isAvailableAsync: vi.fn(async () => true),
     setItemAsync: vi.fn(async (key: string, value: string) => {
       store.set(key, value);
     }),
@@ -37,10 +60,24 @@ vi.mock('expo-secure-store', () => {
     deleteItemAsync: vi.fn(async (key: string) => {
       store.delete(key);
     }),
+    __reset: () => {
+      store.clear();
+      api.isAvailableAsync.mockReset();
+      api.isAvailableAsync.mockResolvedValue(true);
+      api.setItemAsync.mockClear();
+      api.getItemAsync.mockClear();
+      api.deleteItemAsync.mockClear();
+    },
   };
+
+  return api;
 });
 
+const secureStore = SecureStore as typeof SecureStore & { __reset?: () => void };
+const asyncStorage = AsyncStorage as typeof AsyncStorage & { __reset?: () => void };
+
 const resetEnv = () => {
+  process.env.NODE_ENV = 'test';
   delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
   delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
@@ -56,6 +93,9 @@ describe('tx queue (sqlite + fallback)', () => {
   beforeEach(() => {
     vi.resetModules();
     resetEnv();
+    secureStore.__reset?.();
+    asyncStorage.__reset?.();
+    vi.stubGlobal('__DEV__', true);
   });
 
   afterEach(async () => {
@@ -63,6 +103,8 @@ describe('tx queue (sqlite + fallback)', () => {
     await queue.clearTxQueue();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    secureStore.__reset?.();
+    asyncStorage.__reset?.();
     resetEnv();
   });
 
@@ -227,7 +269,6 @@ describe('tx queue (sqlite + fallback)', () => {
     const bundle = { resourceType: 'Bundle', id: 'legacy' };
     await queue.enqueueTx({ key: 'legacy-item', payload: bundle });
 
-    // Activar cifrado para la lectura
     process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
 
     const snapshot = await queue.getQueueSnapshot();
@@ -244,7 +285,6 @@ describe('tx queue (sqlite + fallback)', () => {
     const bundle = { resourceType: 'Bundle', id: 'legacy-encrypted' };
     const legacyKey = 'legacy-key-for-tests';
 
-    // Persistir la clave legacy para que el módulo la recupere
     await secureSetItem('handover_offline_queue_key', legacyKey);
 
     const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(bundle), legacyKey).toString();
@@ -254,5 +294,33 @@ describe('tx queue (sqlite + fallback)', () => {
 
     const snapshot = await queue.getQueueSnapshot();
     expect(snapshot[0]?.payload).toEqual(bundle);
+  });
+
+  it('throws SecureStorageUnavailableError in production when SecureStore is unavailable', async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = 'production';
+    vi.stubGlobal('__DEV__', false);
+
+    const secureStoreModule = await import('expo-secure-store');
+    const asyncStorageModule = await import('@react-native-async-storage/async-storage');
+    const secureStoreMock = secureStoreModule as typeof SecureStore & { __reset?: () => void };
+    const asyncStorageMock = asyncStorageModule.default as typeof AsyncStorage & { __reset?: () => void };
+
+    secureStoreMock.__reset?.();
+    asyncStorageMock.__reset?.();
+    vi.mocked(secureStoreMock.isAvailableAsync!).mockResolvedValue(false);
+
+    const secureStorage = await import('@/src/security/secure-storage');
+
+    await expect(secureStorage.secureSetItem('phi-key', 'value')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
+    await expect(secureStorage.secureGetItem('phi-key')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
+    await expect(secureStorage.secureDeleteItem('phi-key')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
+
+    expect(asyncStorageMock.setItem).not.toHaveBeenCalled();
+    expect(asyncStorageMock.getItem).not.toHaveBeenCalled();
+    expect(asyncStorageMock.removeItem).not.toHaveBeenCalled();
+    expect(secureStoreMock.setItemAsync).not.toHaveBeenCalled();
+    expect(secureStoreMock.getItemAsync).not.toHaveBeenCalled();
+    expect(secureStoreMock.deleteItemAsync).not.toHaveBeenCalled();
   });
 });

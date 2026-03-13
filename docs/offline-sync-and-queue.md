@@ -5,8 +5,8 @@
 
 ## Queue and synchronization
 - `src/lib/queue.ts` persists bundles in SQLite alongside retry metadata.
-- `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses.
-- Storage can be encrypted; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` can disable encryption in development.
+- `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses and treats `409/412` as already-delivered duplicates.
+- Storage can be encrypted; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` can disable encryption in development, but the queue now emits an explicit warning when plaintext storage is enabled.
   - Each item keeps `firstEnqueuedAt`, `lastAttemptAt`, and `attemptCount`/`attempts` to compute retry windows.
   - A maximum number of attempts is enforced (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Items that exceed the limit are marked with `syncStatus="error"`.
 
@@ -47,6 +47,8 @@
   - In all cases, `queue.ts` and `sync.ts` operate on plaintext JSON after loading.
 - Security notes:
   - Offline encryption protects data at rest (aligned with GDPR/HIPAA best practices, without implying compliance).
+  - Non-auth 4xx responses are marked as final queue errors; 5xx/network failures keep retry/backoff semantics.
+  - SecureStore fallbacks for sensitive queue material are explicitly limited to dev/test paths; production refuses insecure fallback instead of silently using weaker storage.
   - The offline AES-GCM key is generated at runtime and persisted in secure storage; the client no longer accepts an operational encryption secret via public env.
 ## WebCrypto and polyfills
 - The client uses `expo-crypto` for hashing and random bytes; no global `crypto` polyfill is added at runtime.
@@ -76,6 +78,7 @@
 - `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of `flushQueue`.
 - `postBundleSmart` (alias of `postBundle` in `src/lib/fhir-client.ts`) is deprecated. Prefer `postBundle`.
 - These aliases remain for compatibility but will be removed in a future major release. Update imports to the canonical names when migrating.
+
 
 
 

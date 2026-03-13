@@ -122,9 +122,17 @@ export function getNextDelayMs(attempts = 0): number {
   return OFFLINE_MAX_BACKOFF_MS;
 }
 
-type QueueSendResult =
-  | { ok: true }
-  | { ok: false; status?: number; message?: string; recoverable?: boolean; errorIssuesJson?: string };
+type QueueFailureKind = 'auth' | 'client' | 'server' | 'network' | 'validation' | 'duplicate' | 'unknown';
+type QueueSendSuccess = { ok: true; status?: number; message?: string; duplicate?: boolean };
+type QueueSendFailure = {
+  ok: false;
+  kind: QueueFailureKind;
+  status?: number;
+  message?: string;
+  recoverable?: boolean;
+  errorIssuesJson?: string;
+};
+type QueueSendResult = QueueSendSuccess | QueueSendFailure;
 type QueueSendHandler = (item: OfflineQueueItem) => Promise<QueueSendResult>;
 type OfflineQueuePayload = {
   bundle?: Bundle;
@@ -230,11 +238,30 @@ function isRecoverableStatus(status?: number): boolean {
   return status >= 500;
 }
 
+function isDuplicateStatus(status?: number): status is 409 | 412 {
+  return status === 409 || status === 412;
+}
+
+function isAuthStatus(status?: number): boolean {
+  return status === 401 || status === 403;
+}
+
+function classifyQueueFailureKind(status?: number): QueueFailureKind {
+  if (isDuplicateStatus(status)) return 'duplicate';
+  if (isAuthStatus(status)) return 'auth';
+  if (status === 422) return 'validation';
+  if (typeof status === 'number' && status >= 400 && status < 500) return 'client';
+  if (typeof status === 'number' && status >= 500) return 'server';
+  if (status === 0 || status == null) return 'network';
+  return 'unknown';
+}
+
 function buildFailureOutcome(error: unknown): QueueSendResult {
   if (typeof error === 'object' && error && 'ok' in (error as Record<string, unknown>)) {
     const candidate = error as { ok?: boolean; status?: number; message?: string; recoverable?: boolean };
     return {
       ok: false,
+      kind: classifyQueueFailureKind(candidate.status),
       status: candidate.status,
       message: candidate.message ?? (candidate.status ? `HTTP ${candidate.status}` : undefined),
       recoverable: candidate.recoverable,
@@ -242,9 +269,19 @@ function buildFailureOutcome(error: unknown): QueueSendResult {
   }
 
   if (error instanceof Error) {
-    return { ok: false, message: error.message };
+    return { ok: false, kind: 'network', recoverable: true, message: error.message };
   }
-  return { ok: false, message: typeof error === 'string' ? error : 'Unknown error' };
+  return { ok: false, kind: 'unknown', message: typeof error === 'string' ? error : 'Unknown error' };
+}
+
+function normalizeQueueSendResult(result: QueueSendResult): QueueSendResult {
+  if (result.ok || result.kind) {
+    return result;
+  }
+  return {
+    ...result,
+    kind: classifyQueueFailureKind(result.status),
+  };
 }
 
 function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
@@ -322,13 +359,13 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
     try {
       token = await options.getToken();
     } catch (error) {
-      return { ok: false, recoverable: true, message: (error as Error)?.message };
+      return { ok: false, kind: 'auth', recoverable: true, message: (error as Error)?.message };
     }
 
     if (!token) {
       pauseSync('Autenticación requerida');
       options.onAuthError?.(new Error('unauthorized'));
-      return { ok: false, status: 401, recoverable: false, message: 'Token requerido' };
+      return { ok: false, kind: 'auth', status: 401, recoverable: false, message: 'Token requerido' };
     }
 
     try {
@@ -361,14 +398,24 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         (response.body as { error?: string } | undefined)?.error ??
         response.message;
 
-      if (response.status === 401 || response.status === 403) {
+      if (isAuthStatus(response.status)) {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(new Error('unauthorized'));
         return {
           ok: false,
+          kind: 'auth',
           status: response.status,
           recoverable: false,
           message: message ?? 'Unauthorized',
+        };
+      }
+
+      if (isDuplicateStatus(response.status)) {
+        return {
+          ok: true,
+          status: response.status,
+          duplicate: true,
+          message: message ?? `HTTP ${response.status}`,
         };
       }
 
@@ -376,6 +423,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         const formatted = formatIssuesForUser(issues, { max: 5 });
         return {
           ok: false,
+          kind: 'validation',
           status: response.status,
           recoverable: false,
           message: formatted.message,
@@ -386,6 +434,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
       if (!response.ok) {
         return {
           ok: false,
+          kind: classifyQueueFailureKind(response.status),
           status: response.status,
           recoverable: fatal ? false : undefined,
           message: message ?? `HTTP ${response.status}`,
@@ -393,12 +442,12 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         };
       }
 
-      return { ok: true };
+      return { ok: true, status: response.status };
     } catch (error) {
       if (error instanceof Error && error.message === 'unauthorized') {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(error);
-        return { ok: false, status: 401, recoverable: false, message: error.message };
+        return { ok: false, kind: 'auth', status: 401, recoverable: false, message: error.message };
       }
 
       // If the error comes from Zod/local validation, treat it as a non-recoverable 422.
@@ -408,6 +457,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         const formatted = formatIssuesForUser(issues, { max: 5 });
         return {
           ok: false,
+          kind: 'validation',
           status: 422,
           recoverable: false,
           message: formatted.message,
@@ -415,9 +465,11 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         };
       }
 
+      const status = error instanceof HTTPError ? error.status : undefined;
       return {
         ok: false,
-        status: error instanceof HTTPError ? error.status : undefined,
+        kind: classifyQueueFailureKind(status),
+        status,
         recoverable: true,
         message: error instanceof Error ? error.message : 'Network error',
       };
@@ -483,7 +535,7 @@ export async function processQueueOnce(): Promise<void> {
         throw new Error('Offline payload could not be extracted');
       }
       preparedPayload = { ...extracted, patientId: extracted.patientId ?? item.patientId };
-    } catch (error) {
+    } catch {
       await updateOfflineQueueStatus(item.id, 'error', {
         attemptCount,
         lastAttemptAt: startedAt,
@@ -500,7 +552,7 @@ export async function processQueueOnce(): Promise<void> {
           throw new Error('Offline bundle could not be decrypted');
         }
         normalizedPayload.bundle = resolved;
-      } catch (error) {
+      } catch {
         await updateOfflineQueueStatus(item.id, 'error', {
           attemptCount,
           lastAttemptAt: startedAt,
@@ -515,12 +567,13 @@ export async function processQueueOnce(): Promise<void> {
 
     let result: QueueSendResult;
     try {
-      result = await queueSendHandler(itemWithPayload);
+      result = normalizeQueueSendResult(await queueSendHandler(itemWithPayload));
     } catch (error) {
       result = buildFailureOutcome(error);
     }
 
-    if (result.ok) {
+    const duplicateDelivered = !result.ok && isDuplicateStatus(result.status);
+    if (result.ok || duplicateDelivered) {
       await updateOfflineQueueStatus(item.id, 'synced', {
         attemptCount,
         lastAttemptAt: startedAt,
@@ -530,12 +583,13 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
-    const isAuthError = result.status === 401 || result.status === 403;
+    const isAuthError = result.kind === 'auth' || isAuthStatus(result.status);
     const status = result.status;
     const recoverable = result.recoverable ?? isRecoverableStatus(status);
     const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
+    const isNonRetryableClientError = result.kind === 'client' || result.kind === 'validation';
 
-    if (status && status >= 400 && status < 500 && !isAuthError) {
+    if (isNonRetryableClientError) {
       const errorMessage = resolveSyncErrorMessage(status, result.message);
       await updateOfflineQueueStatus(item.id, 'error', {
         attemptCount,
@@ -548,7 +602,9 @@ export async function processQueueOnce(): Promise<void> {
       if (status === 422) {
         void notifySyncStopped(status);
       }
-      console.warn(`Offline sync: item ${item.id} failed with HTTP ${status}. No se reintentará.`);
+      console.warn(
+        `Offline sync: item ${item.id} failed with non-retryable ${status ? `HTTP ${status}` : result.kind}. Marked as error.`,
+      );
       continue;
     }
 
@@ -1790,3 +1846,4 @@ export function validateHandoverInput(input: unknown) {
 export const __test__ = {
   ensureBundleTx,
 };
+
