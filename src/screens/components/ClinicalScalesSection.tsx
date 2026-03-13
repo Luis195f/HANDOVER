@@ -140,7 +140,12 @@ function GlasgowField({
   );
 }
 
-export default function ClinicalScalesSection() {
+type Props = {
+  suggestedScales?: readonly string[];
+  notes?: readonly string[];
+};
+
+export default function ClinicalScalesSection({ suggestedScales = [], notes = [] }: Props) {
   const { control, formState, setValue } = useFormContext<HandoverValues>();
   const { hasPain } = usePainAssessmentState();
   const errors = formState.errors ?? {};
@@ -314,6 +319,26 @@ export default function ClinicalScalesSection() {
 
   return (
     <View>
+      {suggestedScales.length > 0 ? (
+        <View style={styles.field}>
+          <Text style={styles.sectionSubtitle}>Escalas sugeridas por la unidad</Text>
+          <View style={styles.optionRow}>
+            {suggestedScales.map((scale) => (
+              <View key={scale} style={styles.optionButton}>
+                <Text style={styles.optionText}>{scale}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {notes.length > 0
+        ? notes.map((note) => (
+            <Text key={note} style={styles.helperText}>
+              {note}
+            </Text>
+          ))
+        : null}
       <Text style={styles.sectionSubtitle}>Dolor / EVA</Text>
       <Controller
         control={control}
@@ -523,3 +548,4 @@ const styles = StyleSheet.create({
   },
   summaryValue: { fontSize: 16, fontWeight: '600' },
 });
+

@@ -24,6 +24,7 @@ import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from '
 
 import { isOn } from '@/src/config/flags';
 import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
+import { HANDOVER_SECTIONS_INFO, resolveHandoverProfileRuntime } from '@/src/lib/profile-runtime';
 import AudioAttach from '@/src/components/AudioAttach';
 import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
@@ -88,9 +89,7 @@ import { t } from '@/src/i18n';
 type HandoverFormValues = HandoverValues;
 
 // BEGIN HANDOVER D4 – Form imports
-import { getUnitConfig, getDefaultUnitConfig } from '@/src/lib/unitConfig';
 import { flushHandoverTimingBestEffort } from '@/src/lib/handover-timing-submit';
-import { resolveUnitFeatureFlags } from '@/src/config/unitsConfig';
 // END HANDOVER D4 – Form imports
 import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
 import { PatientBanner } from './components/PatientBanner';
@@ -233,6 +232,17 @@ const styles = StyleSheet.create({
   },
   e2eTitle: { fontWeight: '700', marginBottom: 8, color: '#1F2937' },
   e2eActions: { flexDirection: 'row', gap: 12 },
+  profileCard: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#CBD5F5',
+    backgroundColor: '#F8FAFF',
+    gap: 6,
+  },
+  profileCardTitle: { fontWeight: '700', color: '#1F2937' },
+  profileCardMeta: { color: '#4B5563', fontSize: 13 },
   signaturePadSection: { marginBottom: 16 },
   signaturePadHint: { marginTop: 6, color: '#4B5563', fontSize: 12 },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -294,33 +304,9 @@ export type DictationField =
   | 'closingSummary'
   | 'incidents';
 
-const ALL_SECTIONS_INFO = [
-  { key: 'turno', title: 'Datos del turno' },
-  { key: 'paciente', title: 'Paciente' },
-  { key: 'sbar', title: 'SBAR' },
-  { key: 'signos', title: 'Signos vitales' },
-  { key: 'oxigenoterapia', title: 'Oxigenoterapia' },
-  { key: 'dispositivos', title: 'Dispositivos Médicos' },
-  { key: 'seguridad', title: 'Seguridad y riesgos' },
-  { key: 'alertas', title: 'Alertas' },
-  { key: 'nutrition', title: 'Nutrición' },
-  { key: 'elimination', title: 'Eliminación' },
-  { key: 'fluidBalance', title: 'Balance hídrico' },
-  { key: 'mobilitySkin', title: 'Movilidad y piel' },
-  { key: 'psychosocial', title: 'Psicosocial' },
-  { key: 'escalas', title: 'Escalas clínicas' },
-  { key: 'examenes', title: 'Exámenes y procedimientos' },
-  { key: 'medicacion', title: 'Medicación y tratamientos' },
-  { key: 'adjuntos', title: 'Adjuntos' },
-  { key: 'diagnosticos', title: 'Diagnósticos médicos/ enfermería' },
-  { key: 'outcomes', title: 'Resultados esperados (NOC)' },
-  { key: 'evolucion', title: 'Evolución' },
-  { key: 'resumen', title: 'Resumen / cierre de turno' },
-  { key: 'bedsideChecklist', title: 'Bedside Checklist' },
-  { key: 'firmas', title: 'Firmas' },
-] as const satisfies readonly SectionInfo[];
+const ALL_SECTIONS_INFO = HANDOVER_SECTIONS_INFO;
 
-type SectionKey = (typeof ALL_SECTIONS_INFO)[number]['key'];
+type SectionKey = (typeof HANDOVER_SECTIONS_INFO)[number]['key'];
 
 const TIMED_SECTIONS_BY_KEY: Partial<Record<SectionKey, 'sbar' | 'vitals' | 'diagnostics' | 'treatments'>> = {
   sbar: 'sbar',
@@ -612,13 +598,12 @@ const buildChecklistDefaults = (
 };
 
 const defaultValues = useMemo<HandoverFormValues>(() => {
-  const initialUnitConfig =
-    getUnitConfig(unitIdParam ?? selectedUnitId) ?? getDefaultUnitConfig();
+  const initialProfileRuntime = resolveHandoverProfileRuntime({
+    unitId: unitIdParam ?? selectedUnitId,
+    specialtyId,
+  });
 
-  const rawItems =
-    initialUnitConfig.features?.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
-
-  const checklistItems = normalizeChecklistItems(rawItems);
+  const checklistItems = normalizeChecklistItems(initialProfileRuntime.checklistItems);
 
   const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults)
 
@@ -699,6 +684,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   unitIdParam,
   administrativeDataParam,
   selectedUnitId,
+  specialtyId,
   prefilledValuesParam,
   prefilledVitals,
   prefillMeta,
@@ -733,19 +719,37 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   
   // BEGIN HANDOVER D4 – Get active unit
   const adminUnitId = typeof administrativeUnitValue === 'string' ? administrativeUnitValue.trim() || undefined : undefined;
-  const features = resolveUnitFeatureFlags(adminUnitId);
+  const profileRuntime = useMemo(
+    () =>
+      resolveHandoverProfileRuntime({
+        unitId: adminUnitId,
+        specialtyId,
+      }),
+    [adminUnitId, specialtyId],
+  );
+  const { features } = profileRuntime;
   const handoverTiming = useHandoverTiming({ enabled: Boolean(features.showHandoverTimingMetrics) });
   const checklistItems = useMemo(
-    () => features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
-    [features.checklistItems],
+    () => profileRuntime.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
+    [profileRuntime.checklistItems],
   );
   const visibleSections = useMemo(
-    () =>
-      getHandoverVisibleSections(ALL_SECTIONS_INFO).filter(
-        (section) => section.key !== 'outcomes' || Boolean(features.showNocOutcomes),
-      ),
-    [features.showNocOutcomes],
+    () => getHandoverVisibleSections(ALL_SECTIONS_INFO, profileRuntime.sectionVisibility),
+    [profileRuntime.sectionVisibility],
   );
+  const visibleSectionKeys = useMemo(
+    () => new Set(visibleSections.map((section) => section.key)),
+    [visibleSections],
+  );
+  const isSectionVisible = useCallback(
+    (sectionKey: SectionKey) => visibleSectionKeys.has(sectionKey),
+    [visibleSectionKeys],
+  );
+  const showLegacySbarNarrative = profileRuntime.fieldVisibility['legacy-sbar-narrative'];
+  const showLegacyMedicationText = profileRuntime.fieldVisibility['legacy-medication-text'];
+  const showLegacyNursingDiagnosisText = profileRuntime.fieldVisibility['legacy-nursing-diagnosis-text'];
+  const showNicCodingHint = profileRuntime.fieldVisibility['nic-coding-hint'];
+  const showHandoverTimingHint = profileRuntime.fieldVisibility['handover-timing-hint'];
 
   useEffect(() => {
     if (!features.showHandoverTimingMetrics || timingInitializedRef.current) return;
@@ -753,11 +757,11 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     (Object.keys(TIMED_SECTIONS_BY_KEY) as SectionKey[]).forEach((key) => {
       const section = TIMED_SECTIONS_BY_KEY[key];
       if (!section) return;
-      if (!collapsedSections[key]) {
+      if (!collapsedSections[key] && isSectionVisible(key)) {
         handoverTiming.start(section);
       }
     });
-  }, [collapsedSections, features.showHandoverTimingMetrics, handoverTiming]);
+  }, [collapsedSections, features.showHandoverTimingMetrics, handoverTiming, isSectionVisible]);
 
   // END HANDOVER D4 – Get active unit
   const signaturesValue = form.watch('signatures');
@@ -776,26 +780,28 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const watchedValues = form.watch();
 
   useEffect(() => {
-    if (features.hideLegacyFields) return;
-
-    const summary = form.getValues('closingSummary')?.trim() ?? '';
-    const sbarLegacy = form.getValues('sbarFullText')?.trim() ?? '';
-    if (summary && !sbarLegacy) {
-      form.setValue('sbarFullText', summary, { shouldDirty: false, shouldValidate: false });
-    }
-
-    const medsLegacy = form.getValues('meds')?.trim() ?? '';
-    const medications = form.getValues('medications') ?? [];
-    if (!medsLegacy && medications.length > 0) {
-      const derived = medications
-        .map((item) => item?.name?.trim() ?? '')
-        .filter(Boolean)
-        .join(', ');
-      if (derived) {
-        form.setValue('meds', derived, { shouldDirty: false, shouldValidate: false });
+    if (showLegacySbarNarrative) {
+      const summary = form.getValues('closingSummary')?.trim() ?? '';
+      const sbarLegacy = form.getValues('sbarFullText')?.trim() ?? '';
+      if (summary && !sbarLegacy) {
+        form.setValue('sbarFullText', summary, { shouldDirty: false, shouldValidate: false });
       }
     }
-  }, [features.hideLegacyFields, watchedValues.closingSummary, watchedValues.sbarFullText, watchedValues.medications, watchedValues.meds, form]);
+
+    if (showLegacyMedicationText) {
+      const medsLegacy = form.getValues('meds')?.trim() ?? '';
+      const medications = form.getValues('medications') ?? [];
+      if (!medsLegacy && medications.length > 0) {
+        const derived = medications
+          .map((item) => item?.name?.trim() ?? '')
+          .filter(Boolean)
+          .join(', ');
+        if (derived) {
+          form.setValue('meds', derived, { shouldDirty: false, shouldValidate: false });
+        }
+      }
+    }
+  }, [showLegacyMedicationText, showLegacySbarNarrative, watchedValues.closingSummary, watchedValues.sbarFullText, watchedValues.medications, watchedValues.meds, form]);
 
   const buildOutgoingSignature = (payload: SignaturePadValue): HandoverSignature | null => {
     if (!signatureUser || !activeUnitId) return null;
@@ -853,11 +859,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const currentChecklist =
     (form.getValues("bedsideChecklist") ?? {}) as Partial<BedsideChecklistValue>;
 
-  const rawItems =
-    getUnitConfig(unitIdParam ?? selectedUnitId)?.features?.checklistItems ??
-    DEFAULT_BEDSIDE_CHECKLIST_ITEMS;
-
-  const checklistItems = normalizeChecklistItems(rawItems);
+  const checklistItems = normalizeChecklistItems(profileRuntime.checklistItems);
 
   const completed: BedsideChecklistValue = { ...baseChecklistDefaults };
 
@@ -2224,6 +2226,33 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             </View>
           </View>
         ) : null}
+        <View style={styles.profileCard} testID="handover-profile-runtime">
+          <Text style={styles.profileCardTitle}>
+            {profileRuntime.context.usesCoreFallback
+              ? 'HANDOVER Core activo'
+              : `Perfil de unidad activo: ${profileRuntime.pack.label}`}
+          </Text>
+          <Text style={styles.profileCardMeta}>
+            {profileRuntime.context.usesCoreFallback
+              ? 'No hay un UPP activo para esta unidad; el formulario cae al Core sin abrir una pantalla paralela.'
+              : `Unidad resuelta: ${profileRuntime.pack.label}.`}
+          </Text>
+          {profileRuntime.requiredExtraFields.length > 0 ? (
+            <Text style={styles.profileCardMeta}>
+              {`Campos extra minimos: ${profileRuntime.requiredExtraFields.join(' · ')}`}
+            </Text>
+          ) : null}
+          {profileRuntime.sentinelEvents.length > 0 ? (
+            <Text style={styles.profileCardMeta}>
+              {`Eventos criticos: ${profileRuntime.sentinelEvents.join(' · ')}`}
+            </Text>
+          ) : null}
+          {profileRuntime.visibleOutputs.length > 0 ? (
+            <Text style={styles.profileCardMeta}>
+              {`Salidas visibles: ${profileRuntime.visibleOutputs.join(' · ')}`}
+            </Text>
+          ) : null}
+        </View>
         <View
           ref={sectionRefs.turno}
           onLayout={handleSectionLayout('turno')}
@@ -2263,7 +2292,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           </CollapsibleSection>
         </View>
 
-      {isOn('SHOW_SBAR') && (
+      {isOn('SHOW_SBAR') && isSectionVisible('sbar') && (
         <View
           ref={sectionRefs.sbar}
           onLayout={handleSectionLayout('sbar')}
@@ -2290,13 +2319,13 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               sbarAssessmentError={sbarAssessmentError}
               sbarRecommendationError={sbarRecommendationError}
               sbarFullTextError={sbarFullTextError}
-              hideLegacyFields={features.hideLegacyFields === true}
+              hideLegacyFields={!showLegacySbarNarrative}
             />
           </CollapsibleSection>
         </View>
       )}
 
-      {isOn('SHOW_VITALS') && (
+      {isOn('SHOW_VITALS') && isSectionVisible('signos') && (
         <View
           ref={sectionRefs.signos}
           onLayout={handleSectionLayout('signos')}
@@ -2327,7 +2356,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         </View>
       )}
 
-      {isOn('SHOW_OXY') && (
+      {isOn('SHOW_OXY') && isSectionVisible('oxigenoterapia') && (
         <View
           ref={sectionRefs.oxigenoterapia}
           onLayout={handleSectionLayout('oxigenoterapia')}
@@ -2371,7 +2400,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         </CollapsibleSection>
       </View>
 
-      {computedAlerts.length > 0 && (
+      {isSectionVisible('alertas') && computedAlerts.length > 0 && (
         <View
           ref={sectionRefs.alertas}
           onLayout={handleSectionLayout('alertas')}
@@ -2410,6 +2439,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         </View>
       )}
 
+      {isSectionVisible('nutrition') ? (
       <View
         ref={sectionRefs.nutrition}
         onLayout={handleSectionLayout('nutrition')}
@@ -2423,7 +2453,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <NutritionSection parseNumber={parseNumericInput} />
         </CollapsibleSection>
       </View>
+      ) : null}
 
+      {isSectionVisible('elimination') ? (
       <View
         ref={sectionRefs.elimination}
         onLayout={handleSectionLayout('elimination')}
@@ -2437,7 +2469,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <EliminationSection parseNumber={parseNumericInput} />
         </CollapsibleSection>
       </View>
+      ) : null}
 
+      {isSectionVisible('fluidBalance') ? (
       <View
         ref={sectionRefs.fluidBalance}
         onLayout={handleSectionLayout('fluidBalance')}
@@ -2451,7 +2485,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <FluidBalanceSection parseNumber={parseNumericInput} />
         </CollapsibleSection>
       </View>
+      ) : null}
 
+      {isSectionVisible('mobilitySkin') ? (
       <View
         ref={sectionRefs.mobilitySkin}
         onLayout={handleSectionLayout('mobilitySkin')}
@@ -2465,7 +2501,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <MobilitySkinSection />
         </CollapsibleSection>
       </View>
+      ) : null}
 
+      {isSectionVisible('psychosocial') ? (
       <View
         ref={sectionRefs.psychosocial}
         onLayout={handleSectionLayout('psychosocial')}
@@ -2479,8 +2517,10 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <PsychosocialSection />
         </CollapsibleSection>
       </View>
+      ) : null}
 
       {/* BEGIN HANDOVER D4 – Conditional sections */}
+      {isSectionVisible('escalas') ? (
       <View
         ref={sectionRefs.escalas}
         onLayout={handleSectionLayout('escalas')}
@@ -2494,17 +2534,16 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           unmountOnCollapse
           sectionKey="clinicalScales"
         >
-          <ClinicalScalesSection />
-          {features.enablePediatricScales && (
-            <Text style={{ marginVertical: 8 }}>Escalas pediátricas próximamente.</Text>
-          )}
-          {features.enableOncoFields && (
-            <Text style={{ marginVertical: 8 }}>Campos oncológicos adicionales próximamente.</Text>
-          )}
+          <ClinicalScalesSection
+            suggestedScales={profileRuntime.suggestedScales}
+            notes={profileRuntime.notes}
+          />
         </CollapsibleSection>
       </View>
+      ) : null}
       {/* END HANDOVER D4 – Conditional sections */}
 
+      {isSectionVisible('examenes') ? (
       <View
         ref={sectionRefs.examenes}
         onLayout={handleSectionLayout('examenes')}
@@ -2518,8 +2557,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           <ExamsProceduresSection />
         </CollapsibleSection>
       </View>
+      ) : null}
 
-      {isOn('SHOW_MEDS') && (
+      {isOn('SHOW_MEDS') && isSectionVisible('medicacion') && (
         <View
           ref={sectionRefs.medicacion}
           onLayout={handleSectionLayout('medicacion')}
@@ -2530,11 +2570,15 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             isCollapsed={collapsedSections.medicacion}
             onToggle={() => toggleSection('medicacion')}
           >
-            <MedicationSection control={control} />
+            <MedicationSection control={control} quickPicks={profileRuntime.medicationQuickPicks} />
             <View style={{ marginTop: 24 }}>
-              <TreatmentsSection control={control} enableNicCoding={Boolean(features.showNicCoding)} />
+              <TreatmentsSection
+                control={control}
+                enableNicCoding={Boolean(features.showNicCoding)}
+                quickPicks={profileRuntime.treatmentQuickPicks}
+              />
             </View>
-            {!features.hideLegacyFields ? (
+            {showLegacyMedicationText ? (
             <View style={[styles.field, { marginTop: 24 }]}>
               <Text style={styles.label}>Notas adicionales de medicación (texto libre, legado)</Text>
               <View style={styles.dictationRow}>
@@ -2575,7 +2619,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         </View>
       )}
 
-      {isOn('SHOW_ATTACH') && (
+      {isOn('SHOW_ATTACH') && isSectionVisible('adjuntos') && (
         <View
           ref={sectionRefs.adjuntos}
           onLayout={handleSectionLayout('adjuntos')}
@@ -2683,12 +2727,12 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             {renderDictationStatus('dxMedical')}
             {dxMedicalError ? <Text style={styles.error}>{dxMedicalError}</Text> : null}
           </View>
-          {features.showNicCoding ? (
+          {showNicCodingHint ? (
             <View style={styles.field}>
               <Text style={styles.helperText}>Clasificación NIC habilitada para esta unidad.</Text>
             </View>
           ) : null}
-          {features.showHandoverTimingMetrics ? (
+          {showHandoverTimingHint ? (
             <View style={styles.field}>
               <Text style={styles.helperText}>Métricas de tiempo de entrega habilitadas para esta unidad.</Text>
             </View>
@@ -2702,6 +2746,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
             />
             {/* END HANDOVER D3 – dxNursingStructured */}
           </View>
+          {showLegacyNursingDiagnosisText ? (
           <View style={styles.field}>
             <View style={styles.dictationRow}>
               <View style={styles.flex}>
@@ -2737,6 +2782,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               <Text style={[styles.error, tokenErrorTextStyle]}>{dxNursingError}</Text>
             ) : null}
           </View>
+          ) : null}
           {aiSuggestionsEnabled ? (
             <View style={styles.inlineActions}>
               <BotonPrimario
@@ -2757,7 +2803,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         </CollapsibleSection>
       </View>
 
-      {features.showNocOutcomes ? (
+      {isSectionVisible('outcomes') ? (
         <View
           ref={sectionRefs.outcomes}
           onLayout={handleSectionLayout('outcomes')}

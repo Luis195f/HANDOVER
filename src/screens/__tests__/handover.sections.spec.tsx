@@ -23,7 +23,7 @@ const defaultValues: HandoverFormValues = {
   patientId: 'pat-001',
   status: 'draft',
   dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
-  dxNursing: 'Fiebre', 
+  dxNursing: 'Fiebre',
   dxMedicalStructured: [],
   dxNursingStructured: [],
   bedsideChecklist: {
@@ -143,6 +143,18 @@ describe('MedicationSection', () => {
     });
   });
 
+  it('usa quick-picks inyectados por runtime para medicacion', async () => {
+    const { getByText } = renderWithForm(MedicationSection, defaultValues, {
+      quickPicks: [{ id: 'custom-med', name: 'Dobutamina' }],
+    } as any);
+
+    fireEvent.press(getByText('Añadir medicación'));
+
+    await waitFor(() => {
+      expect(getByText('Dobutamina')).toBeTruthy();
+    });
+  });
+
   it('mantiene el control de alto riesgo disponible', async () => {
     const { getByText } = renderWithForm(MedicationSection, defaultValues);
 
@@ -166,5 +178,16 @@ describe('TreatmentsSection', () => {
       expect(getByText('Curación de heridas')).toBeTruthy();
       expect(getByText(/Estado: En progreso/)).toBeTruthy();
     });
+  });
+
+  it('aplica quick-picks del perfil activo en tratamientos', async () => {
+    const { getByText, findByText } = renderWithForm(TreatmentsSection, defaultValues, {
+      quickPicks: [{ id: 'tx-quick', type: 'education', description: 'Educacion de signos de alarma' }],
+    } as any);
+
+    fireEvent.press(getByText('Educacion de signos de alarma'));
+
+    expect(await findByText('Educación')).toBeTruthy();
+    expect(await findByText('Educacion de signos de alarma')).toBeTruthy();
   });
 });

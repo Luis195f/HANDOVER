@@ -12,7 +12,7 @@ const sections = [
   { key: 'turno', title: 'Datos del turno' },
   { key: 'sbar', title: 'SBAR' },
   { key: 'signos', title: 'Signos vitales' },
-  { key: 'medicacion', title: 'Medicación y tratamientos' },
+  { key: 'medicacion', title: 'Medicacion y tratamientos' },
   { key: 'adjuntos', title: 'Adjuntos' },
   { key: 'outcomes', title: 'Resultados esperados (NOC)' },
 ] as const;
@@ -26,6 +26,7 @@ describe('handover visibility regression', () => {
     expect(visible.map((item) => item.key)).toMatchInlineSnapshot(`
       [
         "turno",
+        "outcomes",
       ]
     `);
   });
@@ -46,5 +47,19 @@ describe('handover visibility regression', () => {
       ]
     `);
   });
-});
 
+  it('honors runtime section visibility over broad flag defaults', () => {
+    isOn.mockReturnValue(true);
+
+    const visible = getHandoverVisibleSections(sections, {
+      turno: true,
+      sbar: false,
+      signos: false,
+      medicacion: true,
+      adjuntos: false,
+      outcomes: false,
+    });
+
+    expect(visible.map((item) => item.key)).toEqual(['turno', 'medicacion']);
+  });
+});
