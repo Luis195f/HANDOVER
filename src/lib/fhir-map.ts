@@ -4,6 +4,14 @@ import { GLUCOSE_MMOL_TO_MGDL_FACTOR } from '@/src/validation/normalization';
 
 import type { AdministrativeData } from '../types/administrative';
 import type {
+  ProfileContext,
+  ProfileOverlaySelection,
+  ProfileRuntimeMergeTraceEntry,
+  ProfileSelectorId,
+  SpecialtyOverlayId,
+  UnitProfileId,
+} from '../types/profile';
+import type {
   EliminationInfo,
   FluidBalanceInfo,
   HandoverBedsideChecklist,
@@ -935,9 +943,25 @@ export type HandoverValues = {
   risksStructured?: RiskItem[];
   treatments?: TreatmentItem[];
   outcomes?: NocOutcomeItem[];
+  profileTrace?: HandoverProfileTraceInput;
 };
 
-export type HandoverInput = HandoverValues | { values: HandoverValues };
+export interface HandoverProfileTraceInput {
+  unitId?: string;
+  requestedSpecialtyId?: string;
+  specialtyId?: string;
+  specialtySource: ProfileContext['specialtySource'];
+  catalogUnitProfileId: UnitProfileId | null;
+  unitProfileId: UnitProfileId | null;
+  overlaySelections: readonly ProfileOverlaySelection[];
+  catalogSpecialtyOverlayIds: readonly SpecialtyOverlayId[];
+  specialtyOverlayIds: readonly SpecialtyOverlayId[];
+  activeProfileIds: readonly ProfileSelectorId[];
+  hasHumanSpecialtyOverride: boolean;
+  mergeTrace?: readonly Pick<ProfileRuntimeMergeTraceEntry, 'source' | 'profileId' | 'label'>[];
+}
+
+export type HandoverInput = HandoverValues | { values: HandoverValues; profileTrace?: HandoverProfileTraceInput };
 
 type MappingContext = {
   subject: Reference;

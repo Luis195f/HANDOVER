@@ -64,4 +64,34 @@ describe('handover submission helpers', () => {
       ).oxygenTherapy,
     ).toEqual({ status: 'in-progress', device: 'Mask' });
   });
+
+  it('keeps draft payload flat when profile trace is present', () => {
+    const profileTrace = {
+      specialtySource: 'explicit' as const,
+      catalogUnitProfileId: 'general-inpatient' as const,
+      unitProfileId: 'general-inpatient' as const,
+      overlaySelections: [],
+      catalogSpecialtyOverlayIds: ['infect'] as const,
+      specialtyOverlayIds: ['infect'] as const,
+      activeProfileIds: ['general-inpatient', 'infect'] as const,
+      hasHumanSpecialtyOverride: true,
+      mergeTrace: [
+        { source: 'core' as const, profileId: 'handover-core' as const, label: 'HANDOVER Core' },
+        {
+          source: 'unit-profile' as const,
+          profileId: 'general-inpatient' as const,
+          label: 'Hospitalizacion general',
+        },
+        { source: 'specialty-overlay' as const, profileId: 'infect' as const, label: 'Infectologia' },
+      ],
+    };
+
+    const payload = buildHandoverInputPayload(baseValues as any, { status: 'draft' }, profileTrace);
+
+    expect(payload.status).toBe('draft');
+    expect(payload.profileTrace).toEqual(profileTrace);
+    expect('values' in payload).toBe(false);
+  });
 });
+
+

@@ -200,12 +200,16 @@ export interface ProfileRegistryActivation {
 export interface ProfileContext {
   coreProfileId: HandoverCoreProfileId;
   unitId?: string;
+  requestedSpecialtyId?: string;
   specialtyId?: string;
+  specialtySource: 'explicit' | 'unit' | 'unit-config' | 'none';
   catalogUnitProfileId: UnitProfileId | null;
   unitProfileId: UnitProfileId | null;
+  overlaySelections: readonly ProfileOverlaySelection[];
   catalogSpecialtyOverlayIds: readonly SpecialtyOverlayId[];
   specialtyOverlayIds: readonly SpecialtyOverlayId[];
   activeProfileIds: readonly ProfileSelectorId[];
+  hasHumanSpecialtyOverride: boolean;
   usesCoreFallback: boolean;
   prioritySignals: readonly ContextualPrioritySignal[];
   iceaContext: Readonly<Partial<IceaContextVector>>;
@@ -237,13 +241,21 @@ export interface ProfileRuntimeTreatmentQuickPick {
   };
 }
 
-export interface UnitProfileRuntimePack {
-  id: HandoverCoreProfileId | UnitProfileId;
+export interface ProfileOverlaySelection {
+  overlayId: SpecialtyOverlayId;
+  source: 'unit-config' | 'specialty';
+  specialtyId?: string;
+  isHumanOverride: boolean;
+}
+
+interface ProfileRuntimePackShape {
   label: string;
   enabledSections?: readonly HandoverSectionKey[];
   hiddenSections?: readonly HandoverSectionKey[];
   requiredExtraFields?: readonly string[];
   optionalExtraFields?: readonly string[];
+  focusAreas?: readonly string[];
+  explanations?: readonly string[];
   scales?: readonly string[];
   sentinelEvents?: readonly string[];
   visibility?: Readonly<Partial<Record<ProfileRuntimeFieldId, boolean>>>;
@@ -253,6 +265,36 @@ export interface UnitProfileRuntimePack {
   }>;
   visibleOutputs?: readonly string[];
   notes?: readonly string[];
+}
+
+export type ProfileRuntimeMergeKey =
+  | 'enabledSections'
+  | 'hiddenSections'
+  | 'requiredExtraFields'
+  | 'optionalExtraFields'
+  | 'focusAreas'
+  | 'explanations'
+  | 'scales'
+  | 'sentinelEvents'
+  | 'visibility'
+  | 'quickPicks'
+  | 'visibleOutputs'
+  | 'notes';
+
+export interface ProfileRuntimeMergeTraceEntry {
+  source: 'core' | 'unit-profile' | 'specialty-overlay';
+  profileId: ProfileSelectorId;
+  label: string;
+  additiveKeys: readonly ProfileRuntimeMergeKey[];
+  overrideKeys: readonly ProfileRuntimeMergeKey[];
+}
+
+export interface UnitProfileRuntimePack extends ProfileRuntimePackShape {
+  id: HandoverCoreProfileId | UnitProfileId;
+}
+
+export interface SpecialtyOverlayRuntimePack extends ProfileRuntimePackShape {
+  id: SpecialtyOverlayId;
 }
 export const isUnitProfileId = (value: unknown): value is UnitProfileId =>
   typeof value === 'string' && UNIT_PROFILE_ID_SET.has(value);
@@ -314,4 +356,5 @@ export const normalizeSpecialtyOverlayId = (value: unknown): SpecialtyOverlayId 
   if (typeof value !== 'string') return null;
   return LEGACY_SPECIALTY_OVERLAY_ALIASES[value as LegacySpecialtyOverlayAlias] ?? null;
 };
+
 

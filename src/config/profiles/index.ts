@@ -17,6 +17,7 @@ import {
   type ProfileContext,
   type ProfileContextInput,
   type ProfileRegistry,
+  type ProfileOverlaySelection,
   type ProfileRegistryActivation,
   type SpecialtyOverlayDefinition,
   type SpecialtyOverlayId,
@@ -572,20 +573,50 @@ const resolveCatalogUnitProfileId = (
   return knownSpecialty?.defaultUnitProfileId ?? null;
 };
 
-const resolveCatalogOverlayIds = (
+const resolveCatalogOverlaySelections = (
   specialtyId: string | undefined,
   unitId: string | undefined,
-): SpecialtyOverlayId[] => {
+  specialtySource: ProfileContext['specialtySource'],
+): ProfileOverlaySelection[] => {
   const configuredUnit = unitId ? UNITS_CONFIG.find((entry) => entry.id === unitId) : undefined;
   const knownSpecialty = specialtyId ? SPECIALTIES_BY_ID[specialtyId] : undefined;
-  const overlays = [
-    ...(configuredUnit?.specialtyOverlayIds ?? []),
-    ...(knownSpecialty?.overlayId ? [knownSpecialty.overlayId] : []),
-  ]
-    .map((overlayId) => normalizeSpecialtyOverlayId(overlayId))
-    .filter((overlayId): overlayId is SpecialtyOverlayId => Boolean(overlayId));
+  const selections: ProfileOverlaySelection[] = [];
 
-  return unique(overlays);
+  const appendSelection = (
+    candidate: unknown,
+    source: ProfileOverlaySelection['source'],
+  ) => {
+    const normalized = normalizeSpecialtyOverlayId(candidate);
+    if (!normalized) {
+      return;
+    }
+
+    const nextSelection: ProfileOverlaySelection = {
+      overlayId: normalized,
+      source,
+      specialtyId: source === 'specialty' ? specialtyId : undefined,
+      isHumanOverride: source === 'specialty' && specialtySource === 'explicit',
+    };
+    const existingIndex = selections.findIndex((selection) => selection.overlayId === normalized);
+
+    if (existingIndex === -1) {
+      selections.push(nextSelection);
+      return;
+    }
+
+    if (nextSelection.isHumanOverride && !selections[existingIndex].isHumanOverride) {
+      selections[existingIndex] = nextSelection;
+    }
+  };
+
+  for (const overlayId of configuredUnit?.specialtyOverlayIds ?? []) {
+    appendSelection(overlayId, 'unit-config');
+  }
+  if (knownSpecialty?.overlayId) {
+    appendSelection(knownSpecialty.overlayId, 'specialty');
+  }
+
+  return selections;
 };
 
 const isOverlayCompatibleWithUnitProfile = (
@@ -604,21 +635,32 @@ const isOverlayCompatibleWithUnitProfile = (
 
 export const resolveProfileContext = ({ unitId, specialtyId }: ProfileContextInput): ProfileContext => {
   const normalizedUnitId = normalizeId(unitId);
+  const requestedSpecialtyId = normalizeId(specialtyId);
   const inferredSpecialtyId = normalizedUnitId ? UNITS_BY_ID[normalizedUnitId]?.specialtyId : undefined;
   const configuredUnitSpecialty = normalizedUnitId
     ? UNITS_CONFIG.find((entry) => entry.id === normalizedUnitId)?.specialty
     : undefined;
-  const normalizedSpecialtyId = normalizeId(specialtyId) ?? inferredSpecialtyId ?? configuredUnitSpecialty;
+  const specialtySource: ProfileContext['specialtySource'] = requestedSpecialtyId
+    ? 'explicit'
+    : inferredSpecialtyId
+      ? 'unit'
+      : configuredUnitSpecialty
+        ? 'unit-config'
+        : 'none';
+  const normalizedSpecialtyId = requestedSpecialtyId ?? inferredSpecialtyId ?? configuredUnitSpecialty;
   const catalogUnitProfileId = resolveCatalogUnitProfileId(normalizedUnitId, normalizedSpecialtyId);
-  const catalogSpecialtyOverlayIds = resolveCatalogOverlayIds(normalizedSpecialtyId, normalizedUnitId);
+  const overlaySelections = resolveCatalogOverlaySelections(normalizedSpecialtyId, normalizedUnitId, specialtySource);
+  const catalogSpecialtyOverlayIds = overlaySelections.map((selection) => selection.overlayId);
   const unitProfileId =
     catalogUnitProfileId && isUnitProfileActive(catalogUnitProfileId) ? catalogUnitProfileId : null;
   const specialtyOverlayIds = unitProfileId
-    ? catalogSpecialtyOverlayIds.filter(
-        (overlayId) =>
-          isSpecialtyOverlayActive(overlayId) &&
-          isOverlayCompatibleWithUnitProfile(overlayId, unitProfileId),
-      )
+    ? overlaySelections
+        .map((selection) => selection.overlayId)
+        .filter(
+          (overlayId) =>
+            isSpecialtyOverlayActive(overlayId) &&
+            isOverlayCompatibleWithUnitProfile(overlayId, unitProfileId),
+        )
     : [];
 
   const prioritySignals = [
@@ -642,12 +684,16 @@ export const resolveProfileContext = ({ unitId, specialtyId }: ProfileContextInp
   return {
     coreProfileId: HANDOVER_CORE_PROFILE_ID,
     unitId: normalizedUnitId,
+    requestedSpecialtyId,
     specialtyId: normalizedSpecialtyId,
+    specialtySource,
     catalogUnitProfileId,
     unitProfileId,
+    overlaySelections,
     catalogSpecialtyOverlayIds,
     specialtyOverlayIds,
     activeProfileIds,
+    hasHumanSpecialtyOverride: specialtySource === 'explicit',
     usesCoreFallback: unitProfileId == null,
     prioritySignals,
     iceaContext,
@@ -664,4 +710,5 @@ export type {
   ProfileContextInput,
   ProfileRegistryActivation,
 } from '../../types/profile';
+
 

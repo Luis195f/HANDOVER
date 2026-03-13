@@ -831,6 +831,10 @@ type BundleMeta = {
   patientId?: string;
   unitId?: string;
   specialtyId?: string;
+  unitProfileId?: string;
+  specialtyOverlayIds?: readonly string[];
+  activeProfileIds?: readonly string[];
+  hasHumanSpecialtyOverride?: boolean;
   signerId?: string;
   bundleId?: string;
 };
@@ -904,6 +908,10 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
       patientId,
       unitId: meta.unitId,
       specialtyId: meta.specialtyId,
+      unitProfileId: meta.unitProfileId,
+      specialtyOverlayIds: meta.specialtyOverlayIds,
+      activeProfileIds: meta.activeProfileIds,
+      hasHumanSpecialtyOverride: meta.hasHumanSpecialtyOverride,
     },
     enqueuedAt: new Date().toISOString(),
   };
@@ -943,3 +951,5 @@ export async function __getRawOfflineQueueRows(): Promise<QueueItemRow[]> {
     patient_id: item.patientId,
   }));
 }
+
+

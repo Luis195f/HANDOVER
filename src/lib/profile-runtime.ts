@@ -1,5 +1,10 @@
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '../config/bedsideChecklist';
-import { getUnitProfileDefinition, resolveProfileContext } from '../config/profiles';
+import {
+  getSpecialtyOverlayDefinition,
+  getUnitProfileDefinition,
+  resolveProfileContext,
+} from '../config/profiles';
+import { SPECIALTY_OVERLAY_RUNTIME_PACKS } from '../config/profiles/overlays';
 import { HANDOVER_CORE_RUNTIME_PACK, UNIT_PROFILE_RUNTIME_PACKS } from '../config/profiles/units';
 import { UNITS_BY_ID } from '../config/units';
 import { getDefaultUnitConfig, getUnitConfig } from './unitConfig';
@@ -10,8 +15,12 @@ import type {
   HandoverSectionKey,
   ProfileContext,
   ProfileRuntimeFieldId,
+  ProfileRuntimeMergeKey,
+  ProfileRuntimeMergeTraceEntry,
   ProfileRuntimeMedicationQuickPick,
   ProfileRuntimeTreatmentQuickPick,
+  SpecialtyOverlayId,
+  SpecialtyOverlayRuntimePack,
   UnitProfileId,
   UnitProfileRuntimePack,
 } from '../types/profile';
@@ -46,15 +55,44 @@ export type HandoverSectionInfo = (typeof HANDOVER_SECTIONS_INFO)[number];
 export type HandoverSectionVisibility = Record<HandoverSectionKey, boolean>;
 export type HandoverFieldVisibility = Record<ProfileRuntimeFieldId, boolean>;
 
+export const PROFILE_RUNTIME_ADDITIVE_KEYS = [
+  'enabledSections',
+  'requiredExtraFields',
+  'optionalExtraFields',
+  'focusAreas',
+  'explanations',
+  'scales',
+  'sentinelEvents',
+  'quickPicks',
+  'visibleOutputs',
+  'notes',
+] as const satisfies readonly ProfileRuntimeMergeKey[];
+
+export const PROFILE_RUNTIME_OVERRIDE_KEYS = ['hiddenSections', 'visibility'] as const satisfies readonly ProfileRuntimeMergeKey[];
+
+export interface ActiveSpecialtyOverlayRuntime {
+  id: SpecialtyOverlayId;
+  label: string;
+  source: 'unit-config' | 'specialty';
+  isHumanOverride: boolean;
+  explanations: readonly string[];
+}
+
 export interface HandoverProfileRuntime {
   context: ProfileContext;
   pack: UnitProfileRuntimePack;
+  basePack: UnitProfileRuntimePack;
+  overlayPacks: readonly SpecialtyOverlayRuntimePack[];
+  activeOverlays: readonly ActiveSpecialtyOverlayRuntime[];
+  mergeTrace: readonly ProfileRuntimeMergeTraceEntry[];
   sectionVisibility: HandoverSectionVisibility;
   fieldVisibility: HandoverFieldVisibility;
   features: UnitFeatureFlags;
   checklistItems: BedsideChecklistItem[];
   requiredExtraFields: readonly string[];
   optionalExtraFields: readonly string[];
+  focusAreas: readonly string[];
+  explanations: readonly string[];
   suggestedScales: readonly string[];
   sentinelEvents: readonly string[];
   visibleOutputs: readonly string[];
@@ -77,36 +115,101 @@ const unique = <T,>(values: readonly T[]): T[] => Array.from(new Set(values));
 const mergeText = (...values: ReadonlyArray<readonly string[] | undefined>): string[] =>
   unique(values.flatMap((value) => value ?? []).filter((value) => value.trim().length > 0));
 
+const mergeQuickPickList = <T extends { id: string }>(
+  ...values: ReadonlyArray<readonly T[] | undefined>
+): T[] => {
+  const merged = new Map<string, T>();
+
+  for (const value of values) {
+    for (const item of value ?? []) {
+      if (merged.has(item.id)) {
+        merged.delete(item.id);
+      }
+      merged.set(item.id, item);
+    }
+  }
+
+  return Array.from(merged.values());
+};
+
 const normalizeUnitId = (value?: string | null): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
 };
 
-const mergeRuntimePack = (pack: UnitProfileRuntimePack): UnitProfileRuntimePack => ({
-  ...HANDOVER_CORE_RUNTIME_PACK,
-  ...pack,
-  enabledSections: unique([
-    ...(HANDOVER_CORE_RUNTIME_PACK.enabledSections ?? []),
-    ...(pack.enabledSections ?? []),
-  ]),
-  requiredExtraFields: mergeText(HANDOVER_CORE_RUNTIME_PACK.requiredExtraFields, pack.requiredExtraFields),
-  optionalExtraFields: mergeText(HANDOVER_CORE_RUNTIME_PACK.optionalExtraFields, pack.optionalExtraFields),
-  scales: mergeText(HANDOVER_CORE_RUNTIME_PACK.scales, pack.scales),
-  sentinelEvents: mergeText(HANDOVER_CORE_RUNTIME_PACK.sentinelEvents, pack.sentinelEvents),
-  visibleOutputs: mergeText(HANDOVER_CORE_RUNTIME_PACK.visibleOutputs, pack.visibleOutputs),
-  notes: mergeText(HANDOVER_CORE_RUNTIME_PACK.notes, pack.notes),
+const hasRuntimeKey = (
+  pack: Pick<UnitProfileRuntimePack | SpecialtyOverlayRuntimePack, ProfileRuntimeMergeKey>,
+  key: ProfileRuntimeMergeKey,
+): boolean => {
+  switch (key) {
+    case 'hiddenSections':
+      return pack.hiddenSections !== undefined;
+    case 'quickPicks':
+      return Boolean(pack.quickPicks?.medications?.length || pack.quickPicks?.treatments?.length);
+    case 'visibility':
+      return Boolean(pack.visibility && Object.keys(pack.visibility).length > 0);
+    default: {
+      const value = pack[key as keyof typeof pack];
+      return Array.isArray(value) ? value.length > 0 : Boolean(value);
+    }
+  }
+};
+
+const buildMergeTraceEntry = (
+  source: ProfileRuntimeMergeTraceEntry['source'],
+  pack: UnitProfileRuntimePack | SpecialtyOverlayRuntimePack,
+): ProfileRuntimeMergeTraceEntry => ({
+  source,
+  profileId: pack.id,
+  label: pack.label,
+  additiveKeys: PROFILE_RUNTIME_ADDITIVE_KEYS.filter((key) => hasRuntimeKey(pack, key)),
+  overrideKeys: PROFILE_RUNTIME_OVERRIDE_KEYS.filter((key) => hasRuntimeKey(pack, key)),
+});
+
+const mergeIntoRuntimePack = (
+  basePack: UnitProfileRuntimePack,
+  layer: UnitProfileRuntimePack | SpecialtyOverlayRuntimePack,
+): UnitProfileRuntimePack => ({
+  ...basePack,
+  enabledSections: unique([...(basePack.enabledSections ?? []), ...(layer.enabledSections ?? [])]),
+  hiddenSections:
+    layer.hiddenSections !== undefined
+      ? unique(layer.hiddenSections)
+      : basePack.hiddenSections,
+  requiredExtraFields: mergeText(basePack.requiredExtraFields, layer.requiredExtraFields),
+  optionalExtraFields: mergeText(basePack.optionalExtraFields, layer.optionalExtraFields),
+  focusAreas: mergeText(basePack.focusAreas, layer.focusAreas),
+  explanations: mergeText(basePack.explanations, layer.explanations),
+  scales: mergeText(basePack.scales, layer.scales),
+  sentinelEvents: mergeText(basePack.sentinelEvents, layer.sentinelEvents),
+  visibleOutputs: mergeText(basePack.visibleOutputs, layer.visibleOutputs),
+  notes: mergeText(basePack.notes, layer.notes),
   visibility: {
-    ...(HANDOVER_CORE_RUNTIME_PACK.visibility ?? {}),
-    ...(pack.visibility ?? {}),
+    ...(basePack.visibility ?? {}),
+    ...(layer.visibility ?? {}),
   },
   quickPicks: {
-    medications: pack.quickPicks?.medications ?? [],
-    treatments: pack.quickPicks?.treatments ?? [],
+    medications: mergeQuickPickList(basePack.quickPicks?.medications, layer.quickPicks?.medications),
+    treatments: mergeQuickPickList(basePack.quickPicks?.treatments, layer.quickPicks?.treatments),
   },
 });
 
-const resolvePackForProfileId = (profileId?: UnitProfileId | null): UnitProfileRuntimePack | null => {
+const mergeBasePackWithCore = (pack: UnitProfileRuntimePack): UnitProfileRuntimePack =>
+  mergeIntoRuntimePack(
+    {
+      ...HANDOVER_CORE_RUNTIME_PACK,
+      id: pack.id,
+      label: pack.label,
+      quickPicks: {
+        medications: HANDOVER_CORE_RUNTIME_PACK.quickPicks?.medications ?? [],
+        treatments: HANDOVER_CORE_RUNTIME_PACK.quickPicks?.treatments ?? [],
+      },
+    },
+    pack,
+  );
+
+const resolveUnitRuntimePack = (profileId?: UnitProfileId | null): UnitProfileRuntimePack | null => {
   if (!profileId) {
     return null;
   }
@@ -114,30 +217,55 @@ const resolvePackForProfileId = (profileId?: UnitProfileId | null): UnitProfileR
   const pack = UNIT_PROFILE_RUNTIME_PACKS[profileId];
   const definition = getUnitProfileDefinition(profileId);
   if (!pack) {
-    return {
-      ...HANDOVER_CORE_RUNTIME_PACK,
-      label: definition?.label ?? HANDOVER_CORE_RUNTIME_PACK.label,
-    };
+    return definition
+      ? {
+          ...HANDOVER_CORE_RUNTIME_PACK,
+          id: profileId,
+          label: definition.label,
+        }
+      : null;
   }
 
-  return mergeRuntimePack({
+  return {
     ...pack,
     label: definition?.label ?? pack.label,
-  });
+  };
 };
 
-const resolvePack = (
+const resolveOverlayRuntimePack = (overlayId?: SpecialtyOverlayId | null): SpecialtyOverlayRuntimePack | null => {
+  if (!overlayId) {
+    return null;
+  }
+
+  const pack = SPECIALTY_OVERLAY_RUNTIME_PACKS[overlayId];
+  const definition = getSpecialtyOverlayDefinition(overlayId);
+  if (!pack) {
+    return definition
+      ? {
+          id: overlayId,
+          label: definition.label,
+        }
+      : null;
+  }
+
+  return {
+    ...pack,
+    label: definition?.label ?? pack.label,
+  };
+};
+
+const resolveBasePack = (
   context: ProfileContext,
   compatibilityProfileId?: UnitProfileId | null,
 ): UnitProfileRuntimePack => {
-  const activePack = resolvePackForProfileId(context.unitProfileId);
+  const activePack = resolveUnitRuntimePack(context.unitProfileId);
   if (activePack) {
-    return activePack;
+    return mergeBasePackWithCore(activePack);
   }
 
-  const compatibilityPack = resolvePackForProfileId(compatibilityProfileId);
+  const compatibilityPack = resolveUnitRuntimePack(compatibilityProfileId);
   if (compatibilityPack) {
-    return compatibilityPack;
+    return mergeBasePackWithCore(compatibilityPack);
   }
 
   return HANDOVER_CORE_RUNTIME_PACK;
@@ -252,20 +380,47 @@ export const resolveHandoverProfileRuntime = ({
   const features = resolveUnitFeatureFlags(effectiveUnitId);
   const compatibilityProfileId =
     context.unitProfileId == null && effectiveUnitConfig?.profileId ? effectiveUnitConfig.profileId : null;
-  const pack = resolvePack(context, compatibilityProfileId);
+  const basePack = resolveBasePack(context, compatibilityProfileId);
+  const overlayPacks = context.specialtyOverlayIds
+    .map((overlayId) => resolveOverlayRuntimePack(overlayId))
+    .filter((pack): pack is SpecialtyOverlayRuntimePack => Boolean(pack));
+  const pack = overlayPacks.reduce((currentPack, overlayPack) => mergeIntoRuntimePack(currentPack, overlayPack), basePack);
   const fieldVisibility = resolveFieldVisibility(pack, features);
   const notes = resolveNotes(pack, features);
   const sectionVisibility = resolveSectionVisibility(pack, fieldVisibility);
+  const mergeTrace = [
+    buildMergeTraceEntry('core', HANDOVER_CORE_RUNTIME_PACK),
+    ...(basePack.id !== HANDOVER_CORE_RUNTIME_PACK.id ? [buildMergeTraceEntry('unit-profile', basePack)] : []),
+    ...overlayPacks.map((overlayPack) => buildMergeTraceEntry('specialty-overlay', overlayPack)),
+  ];
+  const activeOverlays = context.specialtyOverlayIds.map((overlayId) => {
+    const overlayPack = overlayPacks.find((candidate) => candidate.id === overlayId);
+    const overlaySelection = context.overlaySelections.find((selection) => selection.overlayId === overlayId);
+
+    return {
+      id: overlayId,
+      label: overlayPack?.label ?? overlayId,
+      source: overlaySelection?.source ?? 'specialty',
+      isHumanOverride: overlaySelection?.isHumanOverride ?? false,
+      explanations: overlayPack?.explanations ?? [],
+    };
+  });
 
   return {
     context,
     pack,
+    basePack,
+    overlayPacks,
+    activeOverlays,
+    mergeTrace,
     sectionVisibility,
     fieldVisibility,
     features,
     checklistItems: features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
     requiredExtraFields: pack.requiredExtraFields ?? [],
     optionalExtraFields: pack.optionalExtraFields ?? [],
+    focusAreas: pack.focusAreas ?? [],
+    explanations: pack.explanations ?? [],
     suggestedScales: pack.scales ?? [],
     sentinelEvents: pack.sentinelEvents ?? [],
     visibleOutputs: pack.visibleOutputs ?? [],

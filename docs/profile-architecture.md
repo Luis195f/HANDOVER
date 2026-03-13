@@ -158,3 +158,15 @@ La PRE-03 agrega una capa runtime aditiva para el formulario unico:
 - `resolveHandoverProfileRuntime` resuelve la unidad activa y mantiene fallback seguro al Core.
 - `src/config/profiles/units/core.ts` y `src/config/profiles/units/index.ts` declaran secciones visibles, campos legacy, escalas sugeridas, eventos centinela, quick-picks y salidas visibles por UPP.
 - `src/lib/profile-runtime.ts` entrega un mapa puro de visibilidad y ayudas contextuales para `HandoverForm`, sin abrir pantallas paralelas ni cambiar el payload clinico runtime.
+
+## 8. Runtime SOP PRE-04
+
+La PRE-04 extiende el runtime del formulario unico con Specialty Overlay Packs sin multiplicar pantallas:
+
+- `src/config/profiles/overlays/index.ts` declara el runtime de cada SOP como capa separada del catalogo maestro y de la activacion productiva.
+- `src/lib/profile-runtime.ts` aplica merge determinista `Core < UPP < SOP...` en el orden resuelto por contexto, con precedencia final del ultimo overlay activo para claves sobrescribibles.
+- Partes solo aditivas: `enabledSections`, `requiredExtraFields`, `optionalExtraFields`, `focusAreas`, `explanations`, `scales`, `sentinelEvents`, `quickPicks`, `visibleOutputs` y `notes`.
+- Partes sobrescribibles: `hiddenSections` y `visibility`; cuando un layer define `hiddenSections`, reemplaza el set oculto previo completo, y `visibility` mantiene merge por ultima escritura. En ambos casos el ultimo SOP activo gana en colision y la traza de merge queda expuesta para UI y payload interno.
+- La trazabilidad visible incluye UPP base, SOP activos, origen del specialty (`explicit`, `unit`, `unit-config`, `none`) y si hubo override humano.
+- El payload FHIR no cambia en esta fase; la traza se adjunta solo como metadata interna backward compatible para consumidores futuros de FHIR/ICEA/outbox.
+
