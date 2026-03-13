@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { FHIR_CODES } from '../codes';
+import {
+  CATEGORY,
+  CONDITION_CODES,
+  EXAM_CODES,
+  FHIR_CODES,
+  MEDICATION_ROUTE_CODES,
+  TERMINOLOGY_SYSTEMS,
+} from '../codes';
 import { buildHandoverBundle, type HandoverValues } from '../fhir-map';
 
 type SimpleCode = { system: string; code: string };
@@ -8,6 +15,9 @@ type SimpleCode = { system: string; code: string };
 type CodedResource = {
   resourceType?: string;
   code?: { coding?: Array<{ system?: string; code?: string }> };
+  category?: Array<{ coding?: Array<{ system?: string; code?: string }> }>;
+  dosage?: Array<{ route?: { coding?: Array<{ system?: string; code?: string }> } }>;
+  medicationCodeableConcept?: { coding?: Array<{ system?: string; code?: string }>; text?: string };
 };
 
 const FIXED_NOW = '2024-05-01T10:00:00Z';
@@ -25,9 +35,16 @@ const findResourceByCode = (
       ),
   );
 
+const findMedicationByName = (resources: CodedResource[], name: string) =>
+  resources.find(
+    (resource) =>
+      resource?.resourceType === 'MedicationStatement' &&
+      resource?.medicationCodeableConcept?.text === name,
+  );
+
 describe('FHIR terminology consistency checks', () => {
   describe('dictionary definitions', () => {
-    it('pins LOINC entries for temperature and heart rate and SNOMED for fall risk', () => {
+    it('pins canonical codes for vitals, conditions, exams, and medication routes', () => {
       expect(FHIR_CODES.VITALS.TEMPERATURE).toEqual({
         system: 'http://loinc.org',
         code: '8310-5',
@@ -40,16 +57,28 @@ describe('FHIR terminology consistency checks', () => {
         display: 'Heart rate',
       });
 
-      expect(FHIR_CODES.RISK.FALL).toEqual({
-        system: 'http://snomed.info/sct',
-        code: '129839007',
-        display: 'At risk for falls (finding)',
+      expect(CONDITION_CODES.ACTIVE).toEqual({
+        system: TERMINOLOGY_SYSTEMS.CONDITION_CLINICAL_STATUS,
+        code: 'active',
+        display: 'Active',
+      });
+
+      expect(EXAM_CODES.LABORATORY).toEqual({
+        system: TERMINOLOGY_SYSTEMS.HANDOVER_EXAM,
+        code: 'lab',
+        display: 'Laboratory result',
+      });
+
+      expect(MEDICATION_ROUTE_CODES.iv).toEqual({
+        system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+        code: 'IV',
+        display: 'Intravenous',
       });
     });
   });
 
   describe('mapping output', () => {
-    it('reuses the dictionary codes for vitals, EVA scale, and fall-risk condition', () => {
+    it('reuses centralized codes for vitals, scales, risks, exams, and medication routes', () => {
       const values: HandoverValues = {
         patientId: 'patient-123',
         encounterId: 'encounter-001',
@@ -68,6 +97,25 @@ describe('FHIR terminology consistency checks', () => {
           total: 15,
           severity: 'leve',
         },
+        nutrition: {
+          dietType: 'oral',
+          intakeMl: 800,
+        },
+        exams: [{ type: 'laboratory', state: 'result', description: 'Hemograma completo' }],
+        medications: [
+          {
+            id: 'med-1',
+            name: 'Paracetamol',
+            code: {
+              system: TERMINOLOGY_SYSTEMS.ATC,
+              code: 'N02BE01',
+              display: 'Paracetamol',
+            },
+            route: 'iv',
+            dose: '1 g',
+            frequency: 'cada 8h',
+          },
+        ],
         bedsideChecklist: {
           patientIdentityConfirmed: true,
           allergiesReviewed: true,
@@ -80,7 +128,7 @@ describe('FHIR terminology consistency checks', () => {
       };
 
       const bundle = buildHandoverBundle(values, { now: () => FIXED_NOW });
-      const resources = bundle.entry.map((entry) => entry.resource);
+      const resources = bundle.entry.map((entry) => entry.resource) as CodedResource[];
 
       const temperatureObservation = findResourceByCode(
         resources,
@@ -108,6 +156,19 @@ describe('FHIR terminology consistency checks', () => {
 
       const fallCondition = findResourceByCode(resources, 'Condition', FHIR_CODES.RISK.FALL);
       expect(fallCondition?.code?.coding?.[0]).toEqual(FHIR_CODES.RISK.FALL);
+      expect((fallCondition as { clinicalStatus?: { coding?: Array<{ code?: string }> } })?.clinicalStatus?.coding?.[0]?.code).toBe(
+        CONDITION_CODES.ACTIVE.code,
+      );
+
+      const laboratoryExam = findResourceByCode(resources, 'Observation', EXAM_CODES.LABORATORY);
+      expect(laboratoryExam?.code?.coding?.[0]).toEqual(EXAM_CODES.LABORATORY);
+      expect(laboratoryExam?.category?.[0]?.coding?.[0]).toEqual(CATEGORY.laboratory);
+
+      const nutritionObservation = findResourceByCode(resources, 'Observation', FHIR_CODES.CARE.NUTRITION);
+      expect(nutritionObservation?.code?.coding?.[0]).toEqual(FHIR_CODES.CARE.NUTRITION);
+
+      const medication = findMedicationByName(resources, 'Paracetamol');
+      expect(medication?.dosage?.[0]?.route?.coding?.[0]).toEqual(MEDICATION_ROUTE_CODES.iv);
     });
   });
 });

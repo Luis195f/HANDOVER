@@ -1,4 +1,4 @@
-import type { TerminologyCode } from '../codes';
+import { BOOLEAN_CODES, type TerminologyCode } from '../codes';
 import type { HandoverBedsideChecklist, PsychosocialCare } from '../../types/handover';
 import type {
   BuildOptions,
@@ -146,9 +146,9 @@ export function mapBedsideChecklistObservationImpl(
         valueCodeableConcept: {
           coding: [
             {
-              system: 'urn:handover-pro:boolean',
-              code: value ? 'yes' : 'no',
-              display: value ? 'Yes' : 'No',
+              system: value ? BOOLEAN_CODES.YES.system : BOOLEAN_CODES.NO.system,
+              code: value ? BOOLEAN_CODES.YES.code : BOOLEAN_CODES.NO.code,
+              display: value ? BOOLEAN_CODES.YES.display : BOOLEAN_CODES.NO.display,
             },
           ],
           text: value ? 'Yes' : 'No',
@@ -458,6 +458,7 @@ export function buildCompositionImpl(
     attester: attesters.length > 0 ? (attesters as CompositionAttester[]) : undefined,
   };
 }
+
 
 
 

@@ -2,9 +2,14 @@ import { describe, expect, it, expectTypeOf } from 'vitest';
 
 import {
   ALERT_CODES,
+  BOOLEAN_CODES,
   CATEGORY,
+  CONDITION_CODES,
+  DOCUMENT_CLASS_CODES,
+  EXAM_CODES,
   FHIR_CODES,
   LOINC,
+  MEDICATION_ROUTE_CODES,
   SNOMED,
   TERMINOLOGY_SYSTEMS,
   type LoincCode,
@@ -48,9 +53,19 @@ describe('FHIR terminology dictionary', () => {
       code: 'laboratory',
       display: 'Laboratory',
     });
+    expect(CATEGORY.survey).toMatchObject<TerminologyCode<string>>({
+      system,
+      code: 'survey',
+      display: 'Survey',
+    });
+    expect(CATEGORY.imaging).toMatchObject<TerminologyCode<string>>({
+      system,
+      code: 'imaging',
+      display: 'Imaging',
+    });
   });
 
-  it('defines SNOMED and risk codes as coded concepts', () => {
+  it('defines SNOMED, condition, and risk codes as coded concepts', () => {
     expect(SNOMED.oxygenTherapy).toBe('371907003');
     expect(FHIR_CODES.RISK.FALL).toMatchObject({
       system: TERMINOLOGY_SYSTEMS.SNOMED,
@@ -58,9 +73,15 @@ describe('FHIR terminology dictionary', () => {
     });
     expect(FHIR_CODES.RISK.PRESSURE_ULCER.code).toBe('714658008');
     expect(FHIR_CODES.RISK.SOCIAL_ISOLATION.code).toBe('1144779008');
+    expect(CONDITION_CODES.ACTIVE).toMatchObject({
+      system: TERMINOLOGY_SYSTEMS.CONDITION_CLINICAL_STATUS,
+      code: 'active',
+    });
+    expect(CONDITION_CODES.UNCONFIRMED.code).toBe('unconfirmed');
+    expect(CONDITION_CODES.PROBLEM_LIST_ITEM.code).toBe('problem-list-item');
   });
 
-  it('exposes reusable dictionary entries for vitals and clinical scales', () => {
+  it('exposes reusable dictionary entries for vitals, scales, exams, and medication routes', () => {
     expect(FHIR_CODES.VITALS.HEART_RATE).toMatchObject({
       system: TERMINOLOGY_SYSTEMS.LOINC,
       code: LOINC.hr,
@@ -71,6 +92,24 @@ describe('FHIR terminology dictionary', () => {
     expect(FHIR_CODES.SCALES.BRADEN.code).toBe(LOINC.bradenScale);
     expect(FHIR_CODES.SCALES.GLASGOW.code).toBe(LOINC.glasgowTotal);
     expect(FHIR_CODES.CARE.NUTRITION.system).toBe(TERMINOLOGY_SYSTEMS.HANDOVER_CARE);
+    expect(EXAM_CODES.LABORATORY).toMatchObject({
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_EXAM,
+      code: 'lab',
+    });
+    expect(MEDICATION_ROUTE_CODES.iv).toMatchObject({
+      system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+      code: 'IV',
+    });
+  });
+
+  it('keeps local boolean and document-class codes stable for downstream consumers', () => {
+    expect(BOOLEAN_CODES.YES).toMatchObject({
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN,
+      code: 'yes',
+    });
+    expect(BOOLEAN_CODES.NO.code).toBe('no');
+    expect(DOCUMENT_CLASS_CODES.AUDIO_RECORDING.code).toBe('LP29684-5');
+    expect(DOCUMENT_CLASS_CODES.ATTACHMENT.system).toBe(TERMINOLOGY_SYSTEMS.DOCUMENT_CLASSCODES);
   });
 
   it('keeps alert identifiers stable for downstream consumers', () => {

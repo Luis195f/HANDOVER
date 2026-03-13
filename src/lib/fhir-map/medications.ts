@@ -1,4 +1,5 @@
 import type { MedicationItem } from '../../types/handover';
+import { MEDICATION_ROUTE_CODES, TERMINOLOGY_SYSTEMS } from '../codes';
 import type {
   BuildOptions,
   MedicationAdministration,
@@ -39,73 +40,31 @@ const MEDICATION_HIGH_ALERT_EXTENSION_URL = 'urn:handover-pro:medication-high-al
 
 const MEDICATION_ROUTE_CONCEPTS: Partial<Record<NonNullable<MedicationItem['route']>, MedicationStatement['medicationCodeableConcept']>> = {
   oral: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'PO',
-        display: 'Oral',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.oral],
     text: 'Oral',
   },
   iv: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'IV',
-        display: 'Intravenous',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.iv],
     text: 'IV',
   },
   im: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'IM',
-        display: 'Intramuscular',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.im],
     text: 'IM',
   },
   sc: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'SC',
-        display: 'Subcutaneous',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.sc],
     text: 'SC',
   },
   inhaled: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'INHAL',
-        display: 'Inhalation',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.inhaled],
     text: 'Inhalada',
   },
   topical: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'TOP',
-        display: 'Topical',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.topical],
     text: 'Tópica',
   },
   other: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'OTH',
-        display: 'Other',
-      },
-    ],
+    coding: [MEDICATION_ROUTE_CODES.other],
     text: 'Otra vía',
   },
 };
@@ -163,7 +122,7 @@ function parseDoseQuantity(dose?: string): MedicationDoseQuantity | undefined {
   return {
     value,
     unit,
-    system: unit ? 'http://unitsofmeasure.org' : undefined,
+    system: unit ? TERMINOLOGY_SYSTEMS.UCUM : undefined,
     code: unit || undefined,
   };
 }
@@ -350,3 +309,4 @@ export function mapMedicationStatementsImpl(
 
   return [...structuredStatements, ...legacyStatements];
 }
+

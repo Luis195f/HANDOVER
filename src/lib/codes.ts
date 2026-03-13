@@ -2,7 +2,13 @@ export const TERMINOLOGY_SYSTEMS = {
   LOINC: 'http://loinc.org',
   SNOMED: 'http://snomed.info/sct',
   UCUM: 'http://unitsofmeasure.org',
+  ATC: 'http://www.whocc.no/atc',
   OBSERVATION_CATEGORY: 'http://terminology.hl7.org/CodeSystem/observation-category',
+  CONDITION_CLINICAL_STATUS: 'http://terminology.hl7.org/CodeSystem/condition-clinical',
+  CONDITION_VERIFICATION_STATUS: 'http://terminology.hl7.org/CodeSystem/condition-ver-status',
+  CONDITION_CATEGORY: 'http://terminology.hl7.org/CodeSystem/condition-category',
+  DOCUMENT_CLASSCODES: 'http://terminology.hl7.org/CodeSystem/document-classcodes',
+  V3_ROUTE_OF_ADMINISTRATION: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
   NANDA_I: 'urn:handover:terminology:NANDA-I',
   NIC: 'urn:handover:terminology:NIC',
   NOC: 'urn:handover:terminology:NOC',
@@ -14,6 +20,13 @@ export const TERMINOLOGY_SYSTEMS = {
   HANDOVER_BEDSIDE_CHECKLIST: 'urn:handover-pro:bedside-checklist',
   HANDOVER_BOOLEAN: 'urn:handover-pro:boolean',
   HANDOVER_NOC_SCORE: 'urn:handover-pro:noc-score',
+  HANDOVER_COMPONENT: 'urn:handover-pro:component',
+  HANDOVER_EXAM: 'https://handover.app/fhir/CodeSystem/handover-exam',
+  HANDOVER_DIET: 'urn:handover-pro:diet',
+  HANDOVER_STOOL_PATTERN: 'urn:handover-pro:stool-pattern',
+  HANDOVER_MOBILITY_LEVEL: 'urn:handover-pro:mobility-level',
+  HANDOVER_BRADEN: 'urn:handover-pro:braden',
+  HANDOVER_GLASGOW: 'urn:handover-pro:glasgow',
 } as const;
 
 export type TerminologySystem =
@@ -69,6 +82,16 @@ export const CATEGORY = {
     system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
     code: 'laboratory',
     display: 'Laboratory',
+  },
+  survey: {
+    system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
+    code: 'survey',
+    display: 'Survey',
+  },
+  imaging: {
+    system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
+    code: 'imaging',
+    display: 'Imaging',
   },
 } as const satisfies Record<string, TerminologyCode<string>>;
 
@@ -224,12 +247,112 @@ export type FhirVitalCode = (typeof FHIR_CODES.VITALS)[keyof typeof FHIR_CODES.V
 export type FhirScaleCode = (typeof FHIR_CODES.SCALES)[keyof typeof FHIR_CODES.SCALES];
 export type FhirRiskCode = (typeof FHIR_CODES.RISK)[keyof typeof FHIR_CODES.RISK];
 
+export const CONDITION_CODES = {
+  ACTIVE: {
+    system: TERMINOLOGY_SYSTEMS.CONDITION_CLINICAL_STATUS,
+    code: 'active',
+    display: 'Active',
+  },
+  UNCONFIRMED: {
+    system: TERMINOLOGY_SYSTEMS.CONDITION_VERIFICATION_STATUS,
+    code: 'unconfirmed',
+    display: 'Unconfirmed',
+  },
+  PROBLEM_LIST_ITEM: {
+    system: TERMINOLOGY_SYSTEMS.CONDITION_CATEGORY,
+    code: 'problem-list-item',
+    display: 'Problem List Item',
+  },
+} as const satisfies FhirCodeGroup;
+
+export const BOOLEAN_CODES = {
+  YES: {
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN,
+    code: 'yes',
+    display: 'Yes',
+  },
+  NO: {
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN,
+    code: 'no',
+    display: 'No',
+  },
+} as const satisfies FhirCodeGroup;
+
+export const EXAM_CODES = {
+  LABORATORY: {
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_EXAM,
+    code: 'lab',
+    display: 'Laboratory result',
+  },
+  IMAGING: {
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_EXAM,
+    code: 'imaging',
+    display: 'Imaging result',
+  },
+  OTHER: {
+    system: TERMINOLOGY_SYSTEMS.HANDOVER_EXAM,
+    code: 'other',
+    display: 'Diagnostic result',
+  },
+} as const satisfies FhirCodeGroup;
+
+export const DOCUMENT_CLASS_CODES = {
+  AUDIO_RECORDING: {
+    system: TERMINOLOGY_SYSTEMS.DOCUMENT_CLASSCODES,
+    code: 'LP29684-5',
+    display: 'Audio recording',
+  },
+  ATTACHMENT: {
+    system: TERMINOLOGY_SYSTEMS.DOCUMENT_CLASSCODES,
+    code: 'LP29684-5',
+    display: 'Attachment',
+  },
+} as const satisfies FhirCodeGroup;
+
+export const MEDICATION_ROUTE_CODES = {
+  oral: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'PO',
+    display: 'Oral',
+  },
+  iv: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'IV',
+    display: 'Intravenous',
+  },
+  im: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'IM',
+    display: 'Intramuscular',
+  },
+  sc: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'SC',
+    display: 'Subcutaneous',
+  },
+  inhaled: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'INHAL',
+    display: 'Inhalation',
+  },
+  topical: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'TOP',
+    display: 'Topical',
+  },
+  other: {
+    system: TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION,
+    code: 'OTH',
+    display: 'Other',
+  },
+} as const satisfies FhirCodeGroup;
+
 export const MEDICATIONS_QUICKPICK_ICU = [
   {
     id: 'med-paracetamol',
     name: 'Paracetamol',
     code: {
-      system: 'http://www.whocc.no/atc',
+      system: TERMINOLOGY_SYSTEMS.ATC,
       code: 'N02BE01',
       display: 'Paracetamol',
     },
@@ -238,7 +361,7 @@ export const MEDICATIONS_QUICKPICK_ICU = [
     id: 'med-omeprazole',
     name: 'Omeprazol',
     code: {
-      system: 'http://www.whocc.no/atc',
+      system: TERMINOLOGY_SYSTEMS.ATC,
       code: 'A02BC01',
       display: 'Omeprazole',
     },
@@ -247,7 +370,7 @@ export const MEDICATIONS_QUICKPICK_ICU = [
     id: 'med-norepinephrine',
     name: 'Noradrenalina',
     code: {
-      system: 'http://snomed.info/sct',
+      system: TERMINOLOGY_SYSTEMS.SNOMED,
       code: '111397005',
       display: 'Product containing noradrenaline (medicinal product)',
     },
@@ -256,7 +379,7 @@ export const MEDICATIONS_QUICKPICK_ICU = [
     id: 'med-vancomycin',
     name: 'Vancomicina',
     code: {
-      system: 'http://www.whocc.no/atc',
+      system: TERMINOLOGY_SYSTEMS.ATC,
       code: 'J01XA01',
       display: 'Vancomycin',
     },
@@ -270,6 +393,4 @@ export const ALERT_CODES = {
   dressingOverdue: 'alert.dressing.overdue',
   drainOverdue: 'alert.drain.overdue',
   oxygenProlonged: 'alert.oxygen.prolonged',
-
 } as const;
-

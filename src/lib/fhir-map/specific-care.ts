@@ -8,7 +8,7 @@ import type {
   SkinInfo,
   TreatmentItem,
 } from '../../types/handover';
-import { FHIR_CODES, TERMINOLOGY_SYSTEMS, type TerminologyCode } from '../codes';
+import { BOOLEAN_CODES, CATEGORY, EXAM_CODES, FHIR_CODES, TERMINOLOGY_SYSTEMS, type TerminologyCode } from '../codes';
 import { buildNicProcedure, buildNocOutcomeObservation } from './nnn';
 import { normalizeTextValue, normalizeStringList } from './shared';
 import type {
@@ -71,9 +71,6 @@ const TREATMENT_TYPE_LABELS: Record<TreatmentItem['type'], string> = {
   other: 'Otro',
 };
 
-const OBSERVATION_CATEGORY_SYSTEM = 'http://terminology.hl7.org/CodeSystem/observation-category';
-const EXAM_CODE_SYSTEM = 'https://handover.app/fhir/CodeSystem/handover-exam';
-
 export const normalizeExamInputs = (values: { exams?: unknown; examsPending?: unknown }): NormalizedExamInput => {
   const items: Array<ExamItem | unknown> = [];
   const legacyFields = new Set<string>();
@@ -126,11 +123,11 @@ export function mapNutritionCareImpl(
 
   const components: ObservationComponent[] = [
     {
-      code: { coding: [{ system: 'urn:handover-pro:component', code: 'diet-type', display: 'Diet type' }], text: 'Diet type' },
+      code: { coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'diet-type', display: 'Diet type' }], text: 'Diet type' },
       valueCodeableConcept: {
         coding: [
           {
-            system: 'urn:handover-pro:diet',
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_DIET,
             code: values.nutrition.dietType,
             display: values.nutrition.dietType,
           },
@@ -143,7 +140,7 @@ export function mapNutritionCareImpl(
   if (values.nutrition.tolerance) {
     components.push({
       code: {
-        coding: [{ system: 'urn:handover-pro:component', code: 'tolerance', display: 'Tolerance' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'tolerance', display: 'Tolerance' }],
         text: 'Tolerance',
       },
       valueString: values.nutrition.tolerance,
@@ -153,7 +150,7 @@ export function mapNutritionCareImpl(
   if (values.nutrition.intakeMl !== undefined) {
     components.push({
       code: {
-        coding: [{ system: 'urn:handover-pro:component', code: 'intake', display: 'Intake (mL)' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'intake', display: 'Intake (mL)' }],
         text: 'Intake (mL)',
       },
       valueQuantity: deps.quantity(values.nutrition.intakeMl, 'mL', 'mL'),
@@ -219,7 +216,7 @@ export function mapEliminationCareImpl(
       valueCodeableConcept: {
         coding: [
           {
-            system: 'urn:handover-pro:stool-pattern',
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_STOOL_PATTERN,
             code: values.elimination.stoolPattern,
             display: values.elimination.stoolPattern,
           },
@@ -240,8 +237,8 @@ export function mapEliminationCareImpl(
       valueCodeableConcept: {
         coding: [
           {
-            system: 'urn:handover-pro:boolean',
-            code: values.elimination.hasRectalTube ? 'yes' : 'no',
+            system: values.elimination.hasRectalTube ? BOOLEAN_CODES.YES.system : BOOLEAN_CODES.NO.system,
+            code: values.elimination.hasRectalTube ? BOOLEAN_CODES.YES.code : BOOLEAN_CODES.NO.code,
             display: values.elimination.hasRectalTube ? 'Present' : 'Absent',
           },
         ],
@@ -276,7 +273,7 @@ export function mapMobilitySkinCareImpl(
       valueCodeableConcept: {
         coding: [
           {
-            system: 'urn:handover-pro:mobility-level',
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_MOBILITY_LEVEL,
             code: values.mobility.mobilityLevel,
             display: values.mobility.mobilityLevel,
           },
@@ -295,15 +292,15 @@ export function mapMobilitySkinCareImpl(
       components.push({
         code: {
           coding: [
-            { system: 'urn:handover-pro:component', code: 'pressure-injury', display: 'Pressure injury' },
+            { system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'pressure-injury', display: 'Pressure injury' },
           ],
           text: 'Pressure injury',
         },
         valueCodeableConcept: {
           coding: [
             {
-              system: 'urn:handover-pro:boolean',
-              code: values.skin.hasPressureInjury ? 'yes' : 'no',
+              system: values.skin.hasPressureInjury ? BOOLEAN_CODES.YES.system : BOOLEAN_CODES.NO.system,
+              code: values.skin.hasPressureInjury ? BOOLEAN_CODES.YES.code : BOOLEAN_CODES.NO.code,
               display: values.skin.hasPressureInjury ? 'Present' : 'Absent',
             },
           ],
@@ -342,12 +339,12 @@ export function mapFluidBalanceCareImpl(
   const components: ObservationComponent[] = [];
 
   components.push({
-    code: { coding: [{ system: 'urn:handover-pro:component', code: 'intake', display: 'Intake' }], text: 'Intake' },
+    code: { coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'intake', display: 'Intake' }], text: 'Intake' },
     valueQuantity: deps.quantity(values.fluidBalance.intakeMl, 'mL', 'mL'),
   });
 
   components.push({
-    code: { coding: [{ system: 'urn:handover-pro:component', code: 'output', display: 'Output' }], text: 'Output' },
+    code: { coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'output', display: 'Output' }], text: 'Output' },
     valueQuantity: deps.quantity(values.fluidBalance.outputMl, 'mL', 'mL'),
   });
 
@@ -358,7 +355,7 @@ export function mapFluidBalanceCareImpl(
 
   if (Number.isFinite(net)) {
     components.push({
-      code: { coding: [{ system: 'urn:handover-pro:component', code: 'net', display: 'Net balance' }], text: 'Net balance' },
+      code: { coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'net', display: 'Net balance' }], text: 'Net balance' },
       valueQuantity: deps.quantity(net as number, 'mL', 'mL'),
     });
   }
@@ -437,16 +434,16 @@ export function mapExamObservationsImpl(
 
   const categoryByType: Record<ExamItem['type'], CodeableConcept | undefined> = {
     laboratory: {
-      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'laboratory', display: 'Laboratory' }],
-      text: 'Laboratory',
+      coding: [CATEGORY.laboratory],
+      text: CATEGORY.laboratory.display,
     },
     imaging: {
-      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'imaging', display: 'Imaging' }],
-      text: 'Imaging',
+      coding: [CATEGORY.imaging],
+      text: CATEGORY.imaging.display,
     },
     other: {
-      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'survey', display: 'Survey' }],
-      text: 'Survey',
+      coding: [CATEGORY.survey],
+      text: CATEGORY.survey.display,
     },
   };
 
@@ -455,9 +452,9 @@ export function mapExamObservationsImpl(
     pending: 'registered',
   };
   const codeByType: Record<ExamItem['type'], CodeableConcept> = {
-    laboratory: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'lab' }], text: 'Laboratory result' },
-    imaging: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'imaging' }], text: 'Imaging result' },
-    other: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'other' }], text: 'Diagnostic result' },
+    laboratory: { coding: [EXAM_CODES.LABORATORY], text: EXAM_CODES.LABORATORY.display },
+    imaging: { coding: [EXAM_CODES.IMAGING], text: EXAM_CODES.IMAGING.display },
+    other: { coding: [EXAM_CODES.OTHER], text: EXAM_CODES.OTHER.display },
   };
   return normalizedExams.items.flatMap((exam) => {
     const descriptionRaw = (exam as ExamItem | Record<string, unknown>)?.description;
@@ -598,4 +595,6 @@ export function mapProceduresImpl(
     ];
   });
 }
+
+
 

@@ -1,5 +1,5 @@
 import type { BradenScale, PainAssessment, RiskItem, GlasgowScale } from '../../types/handover';
-import { FHIR_CODES, type TerminologyCode } from '../codes';
+import { FHIR_CODES, TERMINOLOGY_SYSTEMS, type TerminologyCode } from '../codes';
 import type {
   BuildOptions,
   CodeableConcept,
@@ -35,7 +35,7 @@ export function mapEvaObservationImpl(
     components.push({
       code: {
         coding: [
-          { system: 'urn:handover-pro:component', code: 'pain-location', display: 'Pain location' },
+          { system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'pain-location', display: 'Pain location' },
         ],
         text: 'Pain location',
       },
@@ -47,7 +47,7 @@ export function mapEvaObservationImpl(
     components.push({
       code: {
         coding: [
-          { system: 'urn:handover-pro:component', code: 'pain-actions', display: 'Actions taken' },
+          { system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'pain-actions', display: 'Actions taken' },
         ],
         text: 'Actions taken',
       },
@@ -81,7 +81,7 @@ export function mapBradenObservationImpl(
       code: {
         coding: [
           {
-            system: 'urn:handover-pro:braden',
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN,
             code: 'sensory-perception',
             display: 'Sensory perception',
           },
@@ -92,35 +92,35 @@ export function mapBradenObservationImpl(
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:braden', code: 'moisture', display: 'Moisture' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN, code: 'moisture', display: 'Moisture' }],
         text: 'Moisture',
       },
       valueInteger: braden.moisture,
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:braden', code: 'activity', display: 'Activity' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN, code: 'activity', display: 'Activity' }],
         text: 'Activity',
       },
       valueInteger: braden.activity,
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:braden', code: 'mobility', display: 'Mobility' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN, code: 'mobility', display: 'Mobility' }],
         text: 'Mobility',
       },
       valueInteger: braden.mobility,
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:braden', code: 'nutrition', display: 'Nutrition' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN, code: 'nutrition', display: 'Nutrition' }],
         text: 'Nutrition',
       },
       valueInteger: braden.nutrition,
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:braden', code: 'friction-shear', display: 'Friction/shear' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN, code: 'friction-shear', display: 'Friction/shear' }],
         text: 'Friction/shear',
       },
       valueInteger: braden.frictionShear,
@@ -151,21 +151,21 @@ export function mapGlasgowObservationImpl(
   const components: ObservationComponent[] = [
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:glasgow', code: 'eye', display: 'Respuesta ocular' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_GLASGOW, code: 'eye', display: 'Respuesta ocular' }],
         text: 'Respuesta ocular',
       },
       valueInteger: glasgow.eye,
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:glasgow', code: 'verbal', display: 'Respuesta verbal' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_GLASGOW, code: 'verbal', display: 'Respuesta verbal' }],
         text: 'Respuesta verbal',
       },
       valueInteger: glasgow.verbal,
     },
     {
       code: {
-        coding: [{ system: 'urn:handover-pro:glasgow', code: 'motor', display: 'Respuesta motora' }],
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_GLASGOW, code: 'motor', display: 'Respuesta motora' }],
         text: 'Respuesta motora',
       },
       valueInteger: glasgow.motor,
@@ -215,4 +215,5 @@ export function mapRiskConditionsImpl(
       note: entry.risk.notes ? [{ text: entry.risk.notes }] : undefined,
     }));
 }
+
 
