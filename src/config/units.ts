@@ -5,19 +5,80 @@ export type Unit = {
   name: string;
   specialtyId: string;
   profileId?: UnitProfileId;
+  aliases?: readonly string[];
 };
 
 export const UNITS: Unit[] = [
-  { id: 'icu-a', name: 'UCI Adulto · Ala A', specialtyId: 'icu', profileId: 'critical-care' },
-  { id: 'icu-b', name: 'UCI Adulto · Ala B', specialtyId: 'icu', profileId: 'critical-care' },
-  { id: 'ed-main', name: 'Urgencias Central', specialtyId: 'ed', profileId: 'emergency' },
-  { id: 'ed-obs', name: 'Urgencias Observación', specialtyId: 'ed', profileId: 'emergency' },
-  { id: 'onc-ward', name: 'Hospital de Día Oncología', specialtyId: 'onc', profileId: 'oncology' },
-  { id: 'neph-hd', name: 'Hemodiálisis', specialtyId: 'neph' },
-  { id: 'ped-ward', name: 'Pediatría Piso', specialtyId: 'ped', profileId: 'pediatrics' },
-  { id: 'ob-labor', name: 'Sala de Parto', specialtyId: 'ob', profileId: 'maternal-perinatal' },
-  { id: 'neuroicu-1', name: 'Neuro UCI · Sala 1', specialtyId: 'neuroicu', profileId: 'critical-care' },
-  { id: 'cvicu-1', name: 'Cardio UCI · Sala 1', specialtyId: 'cvicu', profileId: 'critical-care' },
+  {
+    id: 'icu-a',
+    name: 'UCI Adulto · Ala A',
+    specialtyId: 'icu',
+    profileId: 'critical-care',
+    aliases: ['uci-adulto-a', 'icu-adulto-a', 'uci-a'],
+  },
+  {
+    id: 'icu-b',
+    name: 'UCI Adulto · Ala B',
+    specialtyId: 'icu',
+    profileId: 'critical-care',
+    aliases: ['uci-adulto-b', 'icu-adulto-b', 'uci-b'],
+  },
+  {
+    id: 'ed-main',
+    name: 'Urgencias Central',
+    specialtyId: 'ed',
+    profileId: 'emergency',
+    aliases: ['urgencias', 'emergencias', 'ed-main'],
+  },
+  {
+    id: 'ed-obs',
+    name: 'Urgencias Observacion',
+    specialtyId: 'ed',
+    profileId: 'emergency',
+    aliases: ['observacion-urgencias', 'resucitacion', 'ed-observation'],
+  },
+  {
+    id: 'onc-ward',
+    name: 'Hospital de Dia Oncologia',
+    specialtyId: 'onc',
+    profileId: 'ambulatory',
+    aliases: ['oncologia', 'hospital-de-dia-oncologico', 'day-hospital-oncology'],
+  },
+  {
+    id: 'neph-hd',
+    name: 'Hemodialisis',
+    specialtyId: 'neph',
+    profileId: 'ambulatory',
+    aliases: ['dialisis', 'hemodialysis', 'renal-unit'],
+  },
+  {
+    id: 'ped-ward',
+    name: 'Pediatria Piso',
+    specialtyId: 'ped',
+    profileId: 'general-inpatient',
+    aliases: ['pediatria', 'hospitalizacion-pediatrica', 'ped-floor'],
+  },
+  {
+    id: 'ob-labor',
+    name: 'Sala de Parto',
+    specialtyId: 'ob',
+    profileId: 'maternal-perinatal',
+    aliases: ['obstetricia', 'labor-delivery', 'materno-perinatal'],
+  },
+  {
+    id: 'neuroicu-1',
+    name: 'Neuro UCI · Sala 1',
+    specialtyId: 'neuroicu',
+    profileId: 'specialized-critical-care',
+    aliases: ['neuro-icu', 'stroke-unit-1', 'neurocritical-care-1'],
+  },
+  {
+    id: 'cvicu-1',
+    name: 'Cardio UCI · Sala 1',
+    specialtyId: 'cvicu',
+    profileId: 'specialized-critical-care',
+    aliases: ['cardio-icu', 'cvicu', 'hemodinamia-1'],
+  },
 ];
 
 export const UNITS_BY_SPECIALTY: Record<string, string[]> = UNITS.reduce((acc, unit) => {
@@ -50,15 +111,26 @@ function normalize(value?: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+function getUnitMatchers(unit: Unit): string[] {
+  return [unit.id, unit.name, ...(unit.aliases ?? [])].map((value) => normalize(value)).filter(Boolean);
+}
+
 export function matchLocationToUnit(locationText?: string): string | null {
   const loc = normalize(locationText);
   if (!loc) return null;
+
+  let bestMatch: { unitId: string; length: number } | null = null;
+
   for (const unit of UNITS) {
-    if (loc.includes(normalize(unit.id))) {
-      return unit.id;
+    for (const candidate of getUnitMatchers(unit)) {
+      if (!loc.includes(candidate)) continue;
+      if (!bestMatch || candidate.length > bestMatch.length) {
+        bestMatch = { unitId: unit.id, length: candidate.length };
+      }
     }
   }
-  return null;
+
+  return bestMatch?.unitId ?? null;
 }
 
 export function guessSpecialtyFromLocation(locationText?: string): string | null {
@@ -66,4 +138,3 @@ export function guessSpecialtyFromLocation(locationText?: string): string | null
   if (!unitId) return null;
   return UNITS_BY_ID[unitId]?.specialtyId ?? null;
 }
-

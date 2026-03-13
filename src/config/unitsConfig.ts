@@ -5,8 +5,8 @@ import Constants from 'expo-constants';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS, type BedsideChecklistItem } from './bedsideChecklist';
 import { isOn } from './flags';
 import {
-  isSpecialtyOverlayId,
-  isUnitProfileId,
+  normalizeSpecialtyOverlayId,
+  normalizeUnitProfileId,
   type SpecialtyOverlayId,
   type UnitProfileId,
 } from '../types/profile';
@@ -52,8 +52,10 @@ const parseBooleanLike = (value: BooleanLike): boolean | undefined => {
 
 const normalizeOverlayIds = (value: unknown): SpecialtyOverlayId[] | undefined => {
   if (!Array.isArray(value)) return undefined;
-  const normalized = value.filter(isSpecialtyOverlayId);
-  return normalized.length > 0 ? normalized : undefined;
+  const normalized = value
+    .map((entry) => normalizeSpecialtyOverlayId(entry))
+    .filter((entry): entry is SpecialtyOverlayId => Boolean(entry));
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
 };
 
 const BASE_FEATURES: UnitFeatureFlags = {
@@ -78,7 +80,7 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     id: 'oncologia',
     name: 'Oncología',
     specialty: 'onc',
-    profileId: 'oncology',
+    profileId: 'ambulatory',
     specialtyOverlayIds: ['onc'],
     features: { ...BASE_FEATURES, enableOncoFields: true },
   },
@@ -86,7 +88,7 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     id: 'pediatria',
     name: 'Pediatría',
     specialty: 'ped',
-    profileId: 'pediatrics',
+    profileId: 'general-inpatient',
     specialtyOverlayIds: ['ped'],
     features: { ...BASE_FEATURES, enablePediatricScales: true },
   },
@@ -97,7 +99,12 @@ function normalizeUnitConfig(unit: HandoverUnitConfig): HandoverUnitConfig {
 
   return {
     ...unit,
-    profileId: isUnitProfileId(unit.profileId) ? unit.profileId : undefined,
+    profileId:
+      normalizeUnitProfileId(unit.profileId, {
+        unitId: unit.id,
+        unitName: unit.name,
+        specialtyId: unit.specialty,
+      }) ?? undefined,
     specialtyOverlayIds: normalizeOverlayIds(unit.specialtyOverlayIds),
     features: {
       ...BASE_FEATURES,
@@ -113,7 +120,6 @@ function normalizeUnitConfig(unit: HandoverUnitConfig): HandoverUnitConfig {
 
 /** Intenta obtener la configuración desde una variable de entorno JSON.  */
 function resolveUnitsConfig(): HandoverUnitConfig[] {
-  // similar a resolveBaseUrl() en env.ts
   const expoVal = Constants.expoConfig?.extra?.HANDOVER_UNITS_JSON;
   const envVal =
     process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON ??
@@ -159,3 +165,4 @@ export const UNITS_CONFIG: HandoverUnitConfig[] = resolveUnitsConfig();
 export const getGlobalFeatureDefaults = (): UnitFeatureFlags => ({ ...BASE_FEATURES });
 
 // END HANDOVER D4 – MultiUnitConfig
+
