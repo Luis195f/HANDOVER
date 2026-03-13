@@ -32,7 +32,7 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
   'general-inpatient': createPack({
     id: 'general-inpatient',
     label: 'Hospitalizacion general',
-    enabledSections: ['nutrition', 'elimination', 'mobilitySkin', 'psychosocial', 'examenes', 'outcomes'],
+    enabledSections: ['nutrition', 'elimination', 'mobilitySkin', 'psychosocial', 'escalas', 'examenes', 'outcomes'],
     requiredExtraFields: ['Dependencia funcional', 'Plan de alta o continuidad', 'Riesgo de caidas o UPP'],
     optionalExtraFields: ['Soporte familiar', 'Conciliacion terapeutica'],
     scales: ['EVA', 'Braden'],
@@ -73,7 +73,7 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     scales: ['EVA', 'Glasgow'],
     sentinelEvents: ['Desaturacion', 'Error de dosis', 'Cambio conductual o neurologico'],
     visibleOutputs: ['Riesgos ajustados por edad y peso'],
-    notes: ['Escalas pediatricas proximamente.'],
+    notes: ['Escalas pediátricas próximamente.'],
   }),
   'specialized-critical-care': createPack({
     id: 'specialized-critical-care',
@@ -137,7 +137,7 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
       ],
     },
     visibleOutputs: ['Plan de autocuidado', 'Instrucciones de continuidad'],
-    notes: ['Campos oncologicos adicionales proximamente.'],
+    notes: ['Campos oncológicos adicionales próximamente.'],
   }),
   rehabilitation: createPack({
     id: 'rehabilitation',

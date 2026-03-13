@@ -1,7 +1,8 @@
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '../config/bedsideChecklist';
 import { getUnitProfileDefinition, resolveProfileContext } from '../config/profiles';
 import { HANDOVER_CORE_RUNTIME_PACK, UNIT_PROFILE_RUNTIME_PACKS } from '../config/profiles/units';
-import { getUnitConfig } from './unitConfig';
+import { UNITS_BY_ID } from '../config/units';
+import { getDefaultUnitConfig, getUnitConfig } from './unitConfig';
 import { resolveUnitFeatureFlags, type UnitFeatureFlags } from '../config/unitsConfig';
 import { isOn } from '../config/flags';
 import type { BedsideChecklistItem } from '../config/bedsideChecklist';
@@ -11,6 +12,7 @@ import type {
   ProfileRuntimeFieldId,
   ProfileRuntimeMedicationQuickPick,
   ProfileRuntimeTreatmentQuickPick,
+  UnitProfileId,
   UnitProfileRuntimePack,
 } from '../types/profile';
 
@@ -20,21 +22,21 @@ export const HANDOVER_SECTIONS_INFO = [
   { key: 'sbar', title: 'SBAR' },
   { key: 'signos', title: 'Signos vitales' },
   { key: 'oxigenoterapia', title: 'Oxigenoterapia' },
-  { key: 'dispositivos', title: 'Dispositivos Medicos' },
+  { key: 'dispositivos', title: 'Dispositivos médicos' },
   { key: 'seguridad', title: 'Seguridad y riesgos' },
   { key: 'alertas', title: 'Alertas' },
-  { key: 'nutrition', title: 'Nutricion' },
-  { key: 'elimination', title: 'Eliminacion' },
-  { key: 'fluidBalance', title: 'Balance hidrico' },
+  { key: 'nutrition', title: 'Nutrición' },
+  { key: 'elimination', title: 'Eliminación' },
+  { key: 'fluidBalance', title: 'Balance hídrico' },
   { key: 'mobilitySkin', title: 'Movilidad y piel' },
   { key: 'psychosocial', title: 'Psicosocial' },
-  { key: 'escalas', title: 'Escalas clinicas' },
-  { key: 'examenes', title: 'Examenes y procedimientos' },
-  { key: 'medicacion', title: 'Medicacion y tratamientos' },
+  { key: 'escalas', title: 'Escalas clínicas' },
+  { key: 'examenes', title: 'Exámenes y procedimientos' },
+  { key: 'medicacion', title: 'Medicación y tratamientos' },
   { key: 'adjuntos', title: 'Adjuntos' },
-  { key: 'diagnosticos', title: 'Diagnosticos medicos/enfermeria' },
+  { key: 'diagnosticos', title: 'Diagnósticos médicos/enfermería' },
   { key: 'outcomes', title: 'Resultados esperados (NOC)' },
-  { key: 'evolucion', title: 'Evolucion' },
+  { key: 'evolucion', title: 'Evolución' },
   { key: 'resumen', title: 'Resumen / cierre de turno' },
   { key: 'bedsideChecklist', title: 'Bedside Checklist' },
   { key: 'firmas', title: 'Firmas' },
@@ -75,6 +77,12 @@ const unique = <T,>(values: readonly T[]): T[] => Array.from(new Set(values));
 const mergeText = (...values: ReadonlyArray<readonly string[] | undefined>): string[] =>
   unique(values.flatMap((value) => value ?? []).filter((value) => value.trim().length > 0));
 
+const normalizeUnitId = (value?: string | null): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+};
+
 const mergeRuntimePack = (pack: UnitProfileRuntimePack): UnitProfileRuntimePack => ({
   ...HANDOVER_CORE_RUNTIME_PACK,
   ...pack,
@@ -98,13 +106,13 @@ const mergeRuntimePack = (pack: UnitProfileRuntimePack): UnitProfileRuntimePack 
   },
 });
 
-const resolvePack = (context: ProfileContext): UnitProfileRuntimePack => {
-  if (!context.unitProfileId) {
-    return HANDOVER_CORE_RUNTIME_PACK;
+const resolvePackForProfileId = (profileId?: UnitProfileId | null): UnitProfileRuntimePack | null => {
+  if (!profileId) {
+    return null;
   }
 
-  const pack = UNIT_PROFILE_RUNTIME_PACKS[context.unitProfileId];
-  const definition = getUnitProfileDefinition(context.unitProfileId);
+  const pack = UNIT_PROFILE_RUNTIME_PACKS[profileId];
+  const definition = getUnitProfileDefinition(profileId);
   if (!pack) {
     return {
       ...HANDOVER_CORE_RUNTIME_PACK,
@@ -118,14 +126,31 @@ const resolvePack = (context: ProfileContext): UnitProfileRuntimePack => {
   });
 };
 
+const resolvePack = (
+  context: ProfileContext,
+  compatibilityProfileId?: UnitProfileId | null,
+): UnitProfileRuntimePack => {
+  const activePack = resolvePackForProfileId(context.unitProfileId);
+  if (activePack) {
+    return activePack;
+  }
+
+  const compatibilityPack = resolvePackForProfileId(compatibilityProfileId);
+  if (compatibilityPack) {
+    return compatibilityPack;
+  }
+
+  return HANDOVER_CORE_RUNTIME_PACK;
+};
+
 const resolveNotes = (pack: UnitProfileRuntimePack, features: UnitFeatureFlags): string[] => {
   const notes = [...(pack.notes ?? [])];
 
   if (features.enablePediatricScales) {
-    notes.push('Escalas pediatricas proximamente.');
+    notes.push('Escalas pediátricas próximamente.');
   }
   if (features.enableOncoFields) {
-    notes.push('Campos oncologicos adicionales proximamente.');
+    notes.push('Campos oncológicos adicionales próximamente.');
   }
 
   return unique(notes);
@@ -201,13 +226,33 @@ export const resolveHandoverProfileRuntime = ({
   unitId?: string | null;
   specialtyId?: string | null;
 }): HandoverProfileRuntime => {
-  const unitConfig = getUnitConfig(unitId);
+  const normalizedRequestedUnitId = normalizeUnitId(unitId);
+  const requestedUnitConfig = getUnitConfig(normalizedRequestedUnitId);
+  const requestedCatalogUnit = normalizedRequestedUnitId ? UNITS_BY_ID[normalizedRequestedUnitId] : undefined;
+  const defaultUnitConfig = getDefaultUnitConfig();
+  const shouldUseDefaultConfiguredUnit =
+    !requestedUnitConfig &&
+    Boolean(defaultUnitConfig?.profileId) &&
+    (!requestedCatalogUnit ||
+      requestedCatalogUnit.profileId === defaultUnitConfig?.profileId ||
+      requestedCatalogUnit.specialtyId === defaultUnitConfig?.specialty);
+  const effectiveUnitConfig = requestedUnitConfig ?? (shouldUseDefaultConfiguredUnit ? defaultUnitConfig : null);
+  const effectiveUnitId =
+    requestedUnitConfig || !shouldUseDefaultConfiguredUnit
+      ? normalizedRequestedUnitId
+      : effectiveUnitConfig?.id ?? normalizedRequestedUnitId;
+  const effectiveSpecialtyId =
+    specialtyId ??
+    requestedUnitConfig?.specialty ??
+    (shouldUseDefaultConfiguredUnit ? effectiveUnitConfig?.specialty : undefined);
   const context = resolveProfileContext({
-    unitId,
-    specialtyId: specialtyId ?? unitConfig?.specialty,
+    unitId: effectiveUnitId,
+    specialtyId: effectiveSpecialtyId,
   });
-  const features = resolveUnitFeatureFlags(unitId);
-  const pack = resolvePack(context);
+  const features = resolveUnitFeatureFlags(effectiveUnitId);
+  const compatibilityProfileId =
+    context.unitProfileId == null && effectiveUnitConfig?.profileId ? effectiveUnitConfig.profileId : null;
+  const pack = resolvePack(context, compatibilityProfileId);
   const fieldVisibility = resolveFieldVisibility(pack, features);
   const notes = resolveNotes(pack, features);
   const sectionVisibility = resolveSectionVisibility(pack, fieldVisibility);
@@ -229,3 +274,6 @@ export const resolveHandoverProfileRuntime = ({
     treatmentQuickPicks: pack.quickPicks?.treatments ?? [],
   };
 };
+
+
+

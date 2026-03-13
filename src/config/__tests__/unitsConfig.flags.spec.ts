@@ -19,6 +19,8 @@ describe('unitsConfig advanced flags by unit', () => {
     delete process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS;
     delete process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS;
     delete process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON;
+    delete process.env.HANDOVER_UNITS_JSON;
+    delete process.env.UNITS_CONFIG;
   });
 
   it('applies global defaults from env flags', async () => {
@@ -232,6 +234,32 @@ describe('unitsConfig advanced flags by unit', () => {
     });
     expect(resolveUnitFeatureFlags('profiled-unit')).toMatchObject({
       showNicCoding: true,
+    });
+  });
+
+  it('accepts the legacy UNITS_CONFIG object shape and restores default-unit compatibility', async () => {
+    process.env.UNITS_CONFIG = JSON.stringify({
+      defaultUnit: 'uci-adulto',
+      units: [
+        { id: 'uci-adulto', name: 'UCI Adulto', isPediatric: false },
+        { id: 'pediatria', name: 'Pediatría', isPediatric: true },
+      ],
+    });
+
+    const { UNITS_CONFIG, getDefaultUnitConfig, getUnitConfig, resolveUnitFeatureFlags } = await import('../unitsConfig');
+
+    expect(UNITS_CONFIG.find((entry) => entry.id === 'uci-adulto')).toMatchObject({
+      specialty: 'icu',
+      profileId: 'critical-care',
+      default: true,
+    });
+    expect(getDefaultUnitConfig()).toMatchObject({ id: 'uci-adulto' });
+    expect(getUnitConfig('pediatria')).toMatchObject({
+      specialty: 'ped',
+      profileId: 'general-inpatient',
+    });
+    expect(resolveUnitFeatureFlags('pediatria')).toMatchObject({
+      enablePediatricScales: true,
     });
   });
 });
