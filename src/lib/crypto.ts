@@ -10,7 +10,11 @@ import {
   getOrCreateEncryptionKey,
   isPayloadEncrypted,
 } from '../security/crypto';
-import { secureDeleteItem, secureGetItem, secureSetItem } from '../security/secure-storage';
+import {
+  secureDeleteSensitiveItem,
+  secureGetSensitiveItem,
+  secureSetSensitiveItem,
+} from '../security/secure-storage';
 
 const AES_GCM_ALGO = 'AES-256-GCM' as const;
 
@@ -78,7 +82,7 @@ function fromBase64(base64: string): Uint8Array {
 async function persistOfflineKey(bytes: Uint8Array): Promise<void> {
   const base64 = toBase64(bytes);
   try {
-    await secureSetItem(OFFLINE_KEY_STORAGE, base64);
+    await secureSetSensitiveItem(OFFLINE_KEY_STORAGE, base64);
   } catch {
     // ignore
   }
@@ -88,7 +92,7 @@ async function deriveKeyBytes(): Promise<Uint8Array> {
   if (cachedOfflineKey?.length === GCM_KEY_SIZE) return cachedOfflineKey;
 
   try {
-    const stored = await secureGetItem(OFFLINE_KEY_STORAGE);
+    const stored = await secureGetSensitiveItem(OFFLINE_KEY_STORAGE);
     if (stored) {
       const decoded = fromBase64(stored);
       if (decoded.length === GCM_KEY_SIZE) {
@@ -234,7 +238,7 @@ let cachedLegacyKey: string | null = null;
 export async function clearOfflineEncryptionKeys(): Promise<void> {
   cachedOfflineKey = null;
   cachedLegacyKey = null;
-  await Promise.allSettled([secureDeleteItem(OFFLINE_KEY_STORAGE), secureDeleteItem(LEGACY_QUEUE_KEY)]);
+  await Promise.allSettled([secureDeleteSensitiveItem(OFFLINE_KEY_STORAGE), secureDeleteSensitiveItem(LEGACY_QUEUE_KEY)]);
 }
 
 function generateLegacyKey(): string {
@@ -245,7 +249,7 @@ function generateLegacyKey(): string {
 async function readLegacyKey(): Promise<string | null> {
   if (cachedLegacyKey) return cachedLegacyKey;
   try {
-    const stored = await secureGetItem(LEGACY_QUEUE_KEY);
+    const stored = await secureGetSensitiveItem(LEGACY_QUEUE_KEY);
     if (stored) {
       cachedLegacyKey = stored;
       return stored;
@@ -258,7 +262,7 @@ async function readLegacyKey(): Promise<string | null> {
 
 async function persistLegacyKey(key: string): Promise<void> {
   try {
-    await secureSetItem(LEGACY_QUEUE_KEY, key);
+    await secureSetSensitiveItem(LEGACY_QUEUE_KEY, key);
   } catch {
     // ignore
   }

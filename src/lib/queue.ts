@@ -82,6 +82,12 @@ type MemoryQueueRow = {
 let memQueue: MemoryQueueRow[] = [];
 let memId = 1;
 
+const OFFLINE_QUEUE_PLAINTEXT_WARNING_CODE = 'HNDR_QUEUE_001';
+const OFFLINE_QUEUE_ENCRYPTION_FAILURE_WARNING_CODE = 'HNDR_QUEUE_002';
+const OFFLINE_QUEUE_PLAINTEXT_BLOCKED_WARNING_CODE = 'HNDR_QUEUE_003';
+const OFFLINE_QUEUE_ENCRYPTION_ERROR_MESSAGE = 'No se pudo proteger el payload offline; no se persistio contenido clinico.';
+const warnedQueueWarnings = new Set<string>();
+
 type QueueRow = {
   key: string;
   payload: string;
@@ -127,11 +133,50 @@ function wrapQueuePayload(payload: unknown, patientId?: string): unknown {
   return { bundle: payload, patientId };
 }
 
+function isDevelopmentRuntime(): boolean {
+  if (typeof __DEV__ !== 'undefined') {
+    return __DEV__ === true;
+  }
+  return process.env.NODE_ENV !== 'production';
+}
+
+function warnQueuePlaintextBlockedOnce(payloadHash: string): void {
+  if (warnedQueueWarnings.has('plaintext-blocked')) return;
+  warnedQueueWarnings.add('plaintext-blocked');
+  console.warn(
+    `${OFFLINE_QUEUE_PLAINTEXT_BLOCKED_WARNING_CODE} Offline queue encryption disable flag ignored in production; storing a hash-only sentinel instead of plaintext PHI.`,
+    { payloadHash },
+  );
+}
+
+function warnQueuePlaintextFallbackOnce(): void {
+  if (warnedQueueWarnings.has('plaintext')) return;
+  warnedQueueWarnings.add('plaintext');
+  console.warn(
+    `${OFFLINE_QUEUE_PLAINTEXT_WARNING_CODE} Offline queue encryption disabled; payloads will be stored in plaintext. This is allowed only for local dev/test.`,
+  );
+}
+
+function warnQueueProtectionFailureOnce(payloadHash: string): void {
+  if (warnedQueueWarnings.has('encryption-failed')) return;
+  warnedQueueWarnings.add('encryption-failed');
+  console.warn(
+    `${OFFLINE_QUEUE_ENCRYPTION_FAILURE_WARNING_CODE} Offline queue payload protection failed; storing a hash-only sentinel instead of plaintext PHI.`,
+    { payloadHash },
+  );
+}
+
 async function encryptQueuePayload(payload: unknown, patientId?: string): Promise<string> {
   const wrapped = wrapQueuePayload(payload, patientId);
   const serialized = typeof wrapped === "string" ? wrapped : JSON.stringify(wrapped ?? null);
   if (isEncryptionDisabled()) {
-    return serialized;
+    if (isDevelopmentRuntime()) {
+      warnQueuePlaintextFallbackOnce();
+      return serialized;
+    }
+    const payloadHash = hashHex(serialized);
+    warnQueuePlaintextBlockedOnce(payloadHash);
+    return JSON.stringify({ __encryptionFailed: true, payloadHash, v: 1 });
   }
   try {
     return await encryptOfflinePayload(serialized);
@@ -142,6 +187,7 @@ async function encryptQueuePayload(payload: unknown, patientId?: string): Promis
   } catch {
   }
   const payloadHash = hashHex(serialized);
+  warnQueueProtectionFailureOnce(payloadHash);
   return JSON.stringify({ __encryptionFailed: true, payloadHash, v: 1 });
 }
 
@@ -256,6 +302,10 @@ type QueueItemInput =
       payload: unknown;
     };
 
+type QueueIdentityInput = QueueItemInput & {
+  queueIdentityPayload?: unknown;
+};
+
 type QueueItemRow = {
   id: string;
   created_at: string;
@@ -298,13 +348,37 @@ if (db?.execSync) {
   try { db.execSync(`ALTER TABLE ${OFFLINE_TABLE} ADD COLUMN last_attempt_at TEXT;`); } catch {}
 }
 
-function normalizeQueueItem(input: QueueItemInput & { payload: string }): QueuedBundle {
+function serializeOfflineQueueIdentity(input: QueueIdentityInput): string {
+  const payloadType = input.payloadType ?? "handover-bundle";
+  const patientId = input.patientId;
+  const identityPayload = input.queueIdentityPayload ?? input.payload;
+  const wrapped = wrapQueuePayload(identityPayload, patientId);
+  const identity = {
+    patientId,
+    payloadType,
+    payload: wrapped,
+  };
+  try {
+    return stableStringify(identity);
+  } catch {
+    return JSON.stringify(identity);
+  }
+}
+
+function buildOfflineQueueId(input: QueueIdentityInput): string {
+  if (typeof input.id === 'string' && input.id.length > 0) {
+    return input.id;
+  }
+  return `handover:${hashHex(serializeOfflineQueueIdentity(input), 32)}`;
+}
+
+function normalizeQueueItem(input: QueueIdentityInput & { payload: string }): QueuedBundle {
   const nowIso = input.createdAt ?? new Date().toISOString();
   const firstEnqueuedAt = input.firstEnqueuedAt ?? input.createdAt ?? nowIso;
   const attempts = input.attempts ?? input.attemptCount ?? 0;
   const attemptCount = input.attemptCount ?? attempts;
   return {
-    id: input.id ?? `handover:${hashHex(`${Date.now()}-${Math.random()}`, 16)}`,
+    id: buildOfflineQueueId(input),
     createdAt: nowIso,
     firstEnqueuedAt,
     lastAttemptAt: input.lastAttemptAt,
@@ -404,7 +478,8 @@ export async function enqueueOfflineQueueItem(input: QueueItemInput): Promise<Qu
   const item = normalizeQueueItem({
     ...input,
     payload: encryptedPayload,
-    ...(encryptionFailed ? { syncStatus: "error", errorMessage: "offline_encryption_failed" } : {}),
+    queueIdentityPayload: input.payload,
+    ...(encryptionFailed ? { syncStatus: "error", errorMessage: OFFLINE_QUEUE_ENCRYPTION_ERROR_MESSAGE } : {}),
   });
   persistQueueItem(item);
   return item;
@@ -459,7 +534,7 @@ export async function updateOfflineQueueItem(id: string, updates: Partial<Queued
     attempts: attemptCount,
     attemptCount,
     syncStatus: encryptionFailed ? "error" : updates.syncStatus ?? current.syncStatus,
-    errorMessage: encryptionFailed ? "offline_encryption_failed" : updates.errorMessage ?? current.errorMessage,
+    errorMessage: encryptionFailed ? OFFLINE_QUEUE_ENCRYPTION_ERROR_MESSAGE : updates.errorMessage ?? current.errorMessage,
     errorStatus: updates.errorStatus ?? current.errorStatus,
     errorIssuesJson: updates.errorIssuesJson ?? current.errorIssuesJson,
     payload,
@@ -951,5 +1026,3 @@ export async function __getRawOfflineQueueRows(): Promise<QueueItemRow[]> {
     patient_id: item.patientId,
   }));
 }
-
-

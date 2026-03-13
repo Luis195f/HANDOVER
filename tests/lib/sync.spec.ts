@@ -93,6 +93,9 @@ describe('sync engine state machine', () => {
 
   beforeEach(async () => {
     vi.useFakeTimers();
+    vi.restoreAllMocks();
+    vi.stubGlobal('__DEV__', true);
+    process.env.NODE_ENV = 'test';
     vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
     await clearOfflineQueue();
     isOnline.mockResolvedValue(true);
@@ -104,8 +107,10 @@ describe('sync engine state machine', () => {
     await clearOfflineQueue();
     await stopSyncEngine();
     vi.clearAllTimers();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.NODE_ENV;
   });
 
   // ======================================================
@@ -319,6 +324,9 @@ describe('offline encryption integration', () => {
 
   beforeEach(async () => {
     vi.useFakeTimers();
+    vi.restoreAllMocks();
+    vi.stubGlobal('__DEV__', true);
+    process.env.NODE_ENV = 'test';
     vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
     await clearOfflineQueue();
     isOnline.mockResolvedValue(true);
@@ -329,8 +337,10 @@ describe('offline encryption integration', () => {
     await clearOfflineQueue();
     await stopSyncEngine();
     vi.clearAllTimers();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.NODE_ENV;
   });
 
   it('encrypts stored payloads but sends decrypted JSON when encryption is enabled', async () => {
