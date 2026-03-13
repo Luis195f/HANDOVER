@@ -2,7 +2,11 @@
 import CryptoJS from 'crypto-js';
 import { Buffer } from 'buffer';
 
-import { secureDeleteItem, secureGetItem, secureSetItem } from './secure-storage';
+import {
+  secureDeleteSensitiveItem,
+  secureGetSensitiveItem,
+  secureSetSensitiveItem,
+} from './secure-storage';
 import { warn } from "@/src/lib/otel";
 
 const STORAGE_KEYS = ['handover_local_crypto_key', 'handover_encryption_key_v1'] as const;
@@ -15,7 +19,7 @@ let cachedKey: string | null = null;
 export async function clearCryptoKeys(): Promise<void> {
   cachedKey = null;
   await Promise.allSettled(
-    [...STORAGE_KEYS, CLIENT_SIGNING_KEY_STORAGE].map((key) => secureDeleteItem(key)),
+    [...STORAGE_KEYS, CLIENT_SIGNING_KEY_STORAGE].map((key) => secureDeleteSensitiveItem(key)),
   );
 }
 
@@ -49,7 +53,7 @@ async function persistKey(base64: string): Promise<void> {
   let lastError: unknown;
   for (const storageKey of STORAGE_KEYS) {
     try {
-      await secureSetItem(storageKey, base64);
+      await secureSetSensitiveItem(storageKey, base64);
       persisted += 1;
     } catch (error) {
       lastError = error;
@@ -70,7 +74,7 @@ async function persistKey(base64: string): Promise<void> {
 async function readStoredKey(): Promise<string | null> {
   for (const storageKey of STORAGE_KEYS) {
     try {
-      const stored = await secureGetItem(storageKey);
+      const stored = await secureGetSensitiveItem(storageKey);
       if (stored) return stored;
     } catch {
       // ignore and try next slot
@@ -240,13 +244,13 @@ function parseStoredKeypair(raw: string | null): { privateJwk: JsonWebKey; publi
 
 async function persistSigningKeypair(keypair: { privateJwk: JsonWebKey; publicJwk: JsonWebKey }): Promise<void> {
   const serialized = JSON.stringify({ privateJwk: keypair.privateJwk, publicJwk: keypair.publicJwk });
-  await secureSetItem(CLIENT_SIGNING_KEY_STORAGE, serialized);
+  await secureSetSensitiveItem(CLIENT_SIGNING_KEY_STORAGE, serialized);
 }
 
 export async function getOrCreateClientSigningKeypair(): Promise<{ privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null> {
   if (!hasWebCrypto()) return null;
 
-  const stored = await secureGetItem(CLIENT_SIGNING_KEY_STORAGE);
+  const stored = await secureGetSensitiveItem(CLIENT_SIGNING_KEY_STORAGE);
   const parsed = parseStoredKeypair(stored);
   if (parsed?.privateJwk && parsed?.publicJwk) {
     return parsed;

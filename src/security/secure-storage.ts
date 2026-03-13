@@ -6,8 +6,12 @@ const KEYCHAIN_SERVICE = 'handover-secure';
 const INSECURE_FALLBACK_WARNING_CODE = 'HNDR_SECSTORE_001';
 const warnedFallbacks = new Set<string>();
 
+type StorageOperation = 'read' | 'write' | 'delete';
+type StorageMode = 'compatible' | 'sensitive';
+type StorageBackend = 'secure-store' | 'async-storage';
+
 export class SecureStorageUnavailableError extends Error {
-  constructor(operation: 'read' | 'write' | 'delete') {
+  constructor(operation: StorageOperation) {
     super(
       `Secure storage unavailable for ${operation}; refusing insecure AsyncStorage fallback in production.`,
     );
@@ -34,12 +38,16 @@ function isDevelopmentRuntime(): boolean {
   return process.env.NODE_ENV !== 'production';
 }
 
-function allowInsecureFallback(): boolean {
+function allowInsecureFallback(mode: StorageMode): boolean {
+  if (mode === 'compatible') {
+    return true;
+  }
   return isDevelopmentRuntime();
 }
 
-function warnInsecureFallbackOnce(operation: 'read' | 'write' | 'delete', key: string): void {
-  const warningKey = `${operation}:${Platform.OS}`;
+function warnInsecureFallbackOnce(operation: StorageOperation, key: string, mode: StorageMode): void {
+  if (mode !== 'sensitive') return;
+  const warningKey = `${mode}:${operation}:${Platform.OS}`;
   if (warnedFallbacks.has(warningKey)) return;
   warnedFallbacks.add(warningKey);
   console.warn(
@@ -49,44 +57,69 @@ function warnInsecureFallbackOnce(operation: 'read' | 'write' | 'delete', key: s
 }
 
 async function resolveStorageBackend(
-  operation: 'read' | 'write' | 'delete',
-): Promise<'secure-store' | 'async-storage'> {
+  operation: StorageOperation,
+  mode: StorageMode = 'compatible',
+): Promise<StorageBackend> {
   if (await canUseSecureStore()) {
     return 'secure-store';
   }
-  if (allowInsecureFallback()) {
+  if (allowInsecureFallback(mode)) {
     return 'async-storage';
   }
   throw new SecureStorageUnavailableError(operation);
 }
 
-export async function secureSetItem(key: string, value: string): Promise<void> {
-  const backend = await resolveStorageBackend('write');
+async function setItemWithMode(key: string, value: string, mode: StorageMode): Promise<void> {
+  const backend = await resolveStorageBackend('write', mode);
   if (backend === 'secure-store') {
     await SecureStore.setItemAsync(key, value, { keychainService: KEYCHAIN_SERVICE });
     await AsyncStorage.removeItem(key);
     return;
   }
-  warnInsecureFallbackOnce('write', key);
+  warnInsecureFallbackOnce('write', key, mode);
   await AsyncStorage.setItem(key, value);
 }
 
-export async function secureGetItem(key: string): Promise<string | null> {
-  const backend = await resolveStorageBackend('read');
+async function getItemWithMode(key: string, mode: StorageMode): Promise<string | null> {
+  const backend = await resolveStorageBackend('read', mode);
   if (backend === 'secure-store') {
     return SecureStore.getItemAsync(key);
   }
-  warnInsecureFallbackOnce('read', key);
+  warnInsecureFallbackOnce('read', key, mode);
   return AsyncStorage.getItem(key);
 }
 
-export async function secureDeleteItem(key: string): Promise<void> {
-  const backend = await resolveStorageBackend('delete');
+async function deleteItemWithMode(key: string, mode: StorageMode): Promise<void> {
+  const backend = await resolveStorageBackend('delete', mode);
   if (backend === 'secure-store') {
     await SecureStore.deleteItemAsync(key);
     await AsyncStorage.removeItem(key);
     return;
   }
-  warnInsecureFallbackOnce('delete', key);
+  warnInsecureFallbackOnce('delete', key, mode);
   await AsyncStorage.removeItem(key);
+}
+
+export async function secureSetItem(key: string, value: string): Promise<void> {
+  await setItemWithMode(key, value, 'compatible');
+}
+
+export async function secureGetItem(key: string): Promise<string | null> {
+  return getItemWithMode(key, 'compatible');
+}
+
+export async function secureDeleteItem(key: string): Promise<void> {
+  await deleteItemWithMode(key, 'compatible');
+}
+
+export async function secureSetSensitiveItem(key: string, value: string): Promise<void> {
+  await setItemWithMode(key, value, 'sensitive');
+}
+
+export async function secureGetSensitiveItem(key: string): Promise<string | null> {
+  return getItemWithMode(key, 'sensitive');
+}
+
+export async function secureDeleteSensitiveItem(key: string): Promise<void> {
+  await deleteItemWithMode(key, 'sensitive');
 }

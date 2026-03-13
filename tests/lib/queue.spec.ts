@@ -280,12 +280,12 @@ describe('tx queue (sqlite + fallback)', () => {
     const queue = await loadQueue();
 
     const { LEGACY_ENCRYPTION_PREFIX } = await import('@/src/lib/crypto');
-    const { secureSetItem } = await import('@/src/security/secure-storage');
+    const { secureSetSensitiveItem } = await import('@/src/security/secure-storage');
 
     const bundle = { resourceType: 'Bundle', id: 'legacy-encrypted' };
     const legacyKey = 'legacy-key-for-tests';
 
-    await secureSetItem('handover_offline_queue_key', legacyKey);
+    await secureSetSensitiveItem('handover_offline_queue_key', legacyKey);
 
     const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(bundle), legacyKey).toString();
     const legacyCipher = `${LEGACY_ENCRYPTION_PREFIX}${ciphertext}`;
@@ -296,7 +296,7 @@ describe('tx queue (sqlite + fallback)', () => {
     expect(snapshot[0]?.payload).toEqual(bundle);
   });
 
-  it('throws SecureStorageUnavailableError in production when SecureStore is unavailable', async () => {
+  it('throws SecureStorageUnavailableError for sensitive storage in production when SecureStore is unavailable', async () => {
     vi.resetModules();
     process.env.NODE_ENV = 'production';
     vi.stubGlobal('__DEV__', false);
@@ -312,9 +312,9 @@ describe('tx queue (sqlite + fallback)', () => {
 
     const secureStorage = await import('@/src/security/secure-storage');
 
-    await expect(secureStorage.secureSetItem('phi-key', 'value')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
-    await expect(secureStorage.secureGetItem('phi-key')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
-    await expect(secureStorage.secureDeleteItem('phi-key')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
+    await expect(secureStorage.secureSetSensitiveItem('phi-key', 'value')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
+    await expect(secureStorage.secureGetSensitiveItem('phi-key')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
+    await expect(secureStorage.secureDeleteSensitiveItem('phi-key')).rejects.toBeInstanceOf(secureStorage.SecureStorageUnavailableError);
 
     expect(asyncStorageMock.setItem).not.toHaveBeenCalled();
     expect(asyncStorageMock.getItem).not.toHaveBeenCalled();
