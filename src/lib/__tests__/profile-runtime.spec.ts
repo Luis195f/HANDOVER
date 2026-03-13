@@ -229,6 +229,39 @@ describe('resolveHandoverProfileRuntime', () => {
     ]);
   });
 
+  it('keeps legacy narrative fields visible when hideLegacyFields is disabled and the runtime pack enables them', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['critical-care'],
+    });
+    isOn.mockImplementation((name) => name !== 'HIDE_LEGACY_FIELDS');
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'icu-a', specialtyId: 'icu' });
+
+    expect(runtime.pack.id).toBe('critical-care');
+    expect(runtime.pack.visibility?.['legacy-sbar-narrative']).toBe(true);
+    expect(runtime.pack.visibility?.['legacy-medication-text']).toBe(true);
+    expect(runtime.fieldVisibility['legacy-sbar-narrative']).toBe(true);
+    expect(runtime.fieldVisibility['legacy-medication-text']).toBe(true);
+  });
+
+  it('keeps hideLegacyFields as a final guardrail for legacy narrative fields after resolving the runtime pack', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['critical-care'],
+    });
+    isOn.mockReturnValue(true);
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'icu-a', specialtyId: 'icu' });
+
+    expect(runtime.pack.id).toBe('critical-care');
+    expect(runtime.pack.visibility?.['legacy-sbar-narrative']).toBe(true);
+    expect(runtime.pack.visibility?.['legacy-medication-text']).toBe(true);
+    expect(runtime.fieldVisibility['legacy-sbar-narrative']).toBe(false);
+    expect(runtime.fieldVisibility['legacy-medication-text']).toBe(false);
+  });
   it('covers every resolvable profile and overlay runtime pack', async () => {
     const { PROFILE_REGISTRY } = await import('@/src/config/profiles');
     const { UNIT_PROFILE_RUNTIME_PACKS } = await import('@/src/config/profiles/units');
@@ -242,4 +275,6 @@ describe('resolveHandoverProfileRuntime', () => {
     );
   });
 });
+
+
 
