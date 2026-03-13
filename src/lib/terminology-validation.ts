@@ -41,21 +41,31 @@ const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.SNOMED]: 'El código SNOMED ingresado no es válido',
   [TERMINOLOGY_SYSTEMS.LOINC]: 'Código LOINC desconocido',
   [TERMINOLOGY_SYSTEMS.UCUM]: 'Código UCUM desconocido',
+  [TERMINOLOGY_SYSTEMS.ATC]: 'Código ATC desconocido',
   [TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY]: 'Código de categoría de observación desconocido',
+  [TERMINOLOGY_SYSTEMS.CONDITION_CLINICAL_STATUS]: 'Estado clínico de condición desconocido',
+  [TERMINOLOGY_SYSTEMS.CONDITION_VERIFICATION_STATUS]: 'Estado de verificación de condición desconocido',
+  [TERMINOLOGY_SYSTEMS.CONDITION_CATEGORY]: 'Categoría de condición desconocida',
+  [TERMINOLOGY_SYSTEMS.DOCUMENT_CLASSCODES]: 'Clase documental desconocida',
+  [TERMINOLOGY_SYSTEMS.V3_ROUTE_OF_ADMINISTRATION]: 'Vía de administración desconocida',
   [TERMINOLOGY_SYSTEMS.NANDA_I]: 'Código NANDA-I no reconocido',
   [TERMINOLOGY_SYSTEMS.NIC]: 'Código NIC no reconocido',
   [TERMINOLOGY_SYSTEMS.NOC]: 'Código NOC no reconocido',
-
   [TERMINOLOGY_SYSTEMS.HANDOVER_CARE]: 'Código de cuidado no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE]: 'Tipo de tratamiento no reconocido',
-
-  // ✅ NUEVOS systems HANDOVER (URNs)
   [TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES]: 'Código HANDOVER Observation Codes no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION]: 'Código HANDOVER Composition Section no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_SBAR]: 'Código HANDOVER SBAR no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST]: 'Código HANDOVER Bedside Checklist no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN]: 'Valor booleano HANDOVER no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_NOC_SCORE]: 'Código de escala NOC no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT]: 'Código de componente HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_EXAM]: 'Código de examen HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_DIET]: 'Código de dieta HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_STOOL_PATTERN]: 'Código de patrón intestinal HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_MOBILITY_LEVEL]: 'Código de movilidad HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN]: 'Código Braden HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_GLASGOW]: 'Código Glasgow HANDOVER no reconocido',
 };
 
 export const isLocalSnomedCode = (code: string | undefined | null): boolean => {
@@ -122,7 +132,14 @@ const isLocalHandoverUrnCode = (
     system === TERMINOLOGY_SYSTEMS.HANDOVER_COMPOSITION_SECTION ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_SBAR ||
     system === TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST ||
-    system === TERMINOLOGY_SYSTEMS.HANDOVER_NOC_SCORE;
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_NOC_SCORE ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_EXAM ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_DIET ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_STOOL_PATTERN ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_MOBILITY_LEVEL ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_BRADEN ||
+    system === TERMINOLOGY_SYSTEMS.HANDOVER_GLASGOW;
 
   if (!isHandoverSystem) return false;
   return true;
@@ -225,4 +242,6 @@ export async function validateSnomed(code: string, display?: string) {
 export async function validateLoinc(code: string, display?: string) {
   return validateTerminologyCode({ system: TERMINOLOGY_SYSTEMS.LOINC, code, display });
 }
+
+
 

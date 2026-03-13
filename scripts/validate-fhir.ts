@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { readFile, readdir } from 'node:fs/promises';
-import { stdin as input } from 'node:process';
 import { resolve, extname, join } from 'node:path';
-import process from 'node:process';
+import process, { stdin as input } from 'node:process';
 
-import { ZodError } from 'zod';
-
-import { getValidationErrorsFromBundle, validateBundle } from '../src/lib/fhir-validation';
+import {
+  getValidationErrorsFromBundle,
+  validateBundle,
+  type ValidationResult,
+} from '../src/lib/fhir-validation';
 
 // Nota: este script se ejecuta en CI vía "pnpm validate:fhir" para validar bundles locales.
 
@@ -59,18 +60,39 @@ function printSuccess(
   console.log(`✔ ${label}: ${stats}`);
 }
 
+function isValidationResult(error: unknown): error is ValidationResult {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    typeof (error as ValidationResult).isValid === 'boolean' &&
+    Array.isArray((error as ValidationResult).errors)
+  );
+}
+
 function printFailure(label: string, error: unknown) {
   console.error(`✖ ${label}`);
-  if (error instanceof ZodError) {
-    for (const issue of error.issues) {
-      const path = issue.path.join('.') || '<root>';
-      console.error(`  • [${path}] ${issue.message}`);
+  if (isValidationResult(error)) {
+    for (const issue of error.errors) {
+      console.error(`  • [${issue.path}] ${issue.message}`);
     }
   } else if (error instanceof Error) {
     console.error(`  • ${error.message}`);
   } else {
     console.error('  • Unknown error');
   }
+}
+
+function validateBundleWithEmbeddedErrors(bundle: unknown): ValidationResult {
+  const result = validateBundle(bundle);
+  const bundledErrors = getValidationErrorsFromBundle(bundle) ?? [];
+  if (result.isValid && bundledErrors.length === 0) {
+    return result;
+  }
+
+  return {
+    isValid: false,
+    errors: [...result.errors, ...bundledErrors],
+  };
 }
 
 async function findFixtureBundles(): Promise<string[]> {
@@ -93,7 +115,6 @@ async function findFixtureBundles(): Promise<string[]> {
         }
       }
 
-      // 1 nivel de subcarpetas
       for (const ent of entries) {
         if (ent.isDirectory()) {
           const subdir = join(dir, ent.name);
@@ -115,19 +136,11 @@ async function findFixtureBundles(): Promise<string[]> {
 
 async function validateSource(source: string) {
   const label = source === '-' ? 'stdin' : resolve(source);
-
   const data = await readJson(source);
-  const result = validateBundle(data);
+  const result = validateBundleWithEmbeddedErrors(data);
 
   if (!result.isValid) {
-    const issues = [...result.errors, ...(getValidationErrorsFromBundle(data) ?? [])];
-    throw new ZodError(
-      issues.map((issue) => ({
-        code: 'custom',
-        path: [issue.path],
-        message: issue.message,
-      })),
-    );
+    throw result;
   }
 
   const bundle = data as { entry?: Array<{ resource?: { resourceType?: string } }> };
@@ -145,7 +158,7 @@ async function validateSource(source: string) {
     { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
   );
 
-  printSuccess(label, { ...counts });
+  printSuccess(label, counts);
 }
 
 async function main() {
@@ -153,7 +166,6 @@ async function main() {
   const args = [...argv];
   const isCi = String(process.env.CI ?? '').toLowerCase() === 'true';
 
-  // 1) Si pasan args, comportamiento original (estricto).
   if (args.length > 0) {
     let hasErrors = false;
     for (const source of args) {
@@ -161,48 +173,39 @@ async function main() {
         await validateSource(source);
       } catch (error) {
         hasErrors = true;
-        const label = source === '-' ? 'stdin' : resolve(source);
-        printFailure(label, error);
+        printFailure(source === '-' ? 'stdin' : resolve(source), error);
       }
     }
     if (hasErrors) process.exitCode = 1;
     return;
   }
 
-  // 2) Sin args: primero fixtures (determinista en CI si existen)
   const fixtures = await findFixtureBundles();
   if (fixtures.length > 0) {
     let hasErrors = false;
-    for (const f of fixtures) {
+    for (const fixture of fixtures) {
       try {
-        await validateSource(f);
+        await validateSource(fixture);
       } catch (error) {
         hasErrors = true;
-        printFailure(resolve(f), error);
+        printFailure(resolve(fixture), error);
       }
     }
     if (hasErrors) process.exitCode = 1;
     return;
   }
 
-  // 3) Sin args y sin fixtures: si hay stdin con datos, úsalo.
   if (!process.stdin.isTTY) {
     const raw = await readFromStdin();
     const trimmed = raw.trim();
     if (trimmed) {
       try {
         const data = JSON.parse(trimmed);
-        const result = validateBundle(data);
+        const result = validateBundleWithEmbeddedErrors(data);
         if (!result.isValid) {
-          const issues = [...result.errors, ...(getValidationErrorsFromBundle(data) ?? [])];
-          throw new ZodError(
-            issues.map((issue) => ({
-              code: 'custom',
-              path: [issue.path],
-              message: issue.message,
-            })),
-          );
+          throw result;
         }
+
         const bundle = data as { entry?: Array<{ resource?: { resourceType?: string } }> };
         const counts = (bundle.entry ?? []).reduce(
           (acc, entry) => {
@@ -217,7 +220,7 @@ async function main() {
           },
           { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
         );
-        printSuccess('stdin', { ...counts });
+        printSuccess('stdin', counts);
         return;
       } catch (error) {
         printFailure('stdin', error);
@@ -235,7 +238,6 @@ async function main() {
     return;
   }
 
-  // Local: mantener comportamiento estricto (como antes)
   console.error('Usage: pnpm validate:fhir <bundle.json> [more.json | -]');
   console.error('Tip: pass a bundle path or pipe JSON via stdin, e.g. `cat bundle.json | pnpm -w validate:fhir -`');
   console.error('Tip: or add fixtures under tests/fixtures/fhir/*.json for CI.');

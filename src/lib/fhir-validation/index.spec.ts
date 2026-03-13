@@ -1,54 +1,63 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
-import { validateResourceWithAjv, type FhirValidationResult } from './index';
+import {
+  validateBundle,
+  validateBundleWithAjv,
+  validateResourceWithAjv,
+  type ValidationResult,
+} from './index';
 
-describe('AJV FHIR validation', () => {
-  const observation = {
-    resourceType: 'Observation',
-    status: 'final',
-    code: {
-      coding: [
-        {
-          system: 'http://loinc.org',
-          code: '1234-5',
-          display: 'Test code',
-        },
-      ],
-    },
-    subject: { reference: 'Patient/123' },
-    effectiveDateTime: '2023-09-01T00:00:00Z',
-    valueQuantity: { value: 98, unit: 'bpm' },
-  } as const;
+function loadFixture(name: string): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL(`../../../tests/fixtures/fhir-bundles/${name}`, import.meta.url), 'utf8'),
+  ) as Record<string, unknown>;
+}
 
-  const bundle = {
-    resourceType: 'Bundle',
-    type: 'transaction',
-    entry: [
-      {
-        fullUrl: 'urn:uuid:1',
-        resource: observation,
-        request: { method: 'POST', url: 'Observation' },
-      },
-    ],
-  } satisfies Record<string, unknown>;
+describe('FHIR validation contract', () => {
+  it('returns a uniform success result for a valid bundle fixture', () => {
+    const result: ValidationResult = validateBundle(loadFixture('valid-bundle.json'));
 
-  it('returns ok=true for a valid Bundle', () => {
-    const result: FhirValidationResult = validateResourceWithAjv(bundle, 'Bundle');
-
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ isValid: true, errors: [] });
   });
 
-  it('flags missing required fields inside the Bundle', () => {
-    const invalidBundle = {
-      resourceType: 'Bundle',
-      entry: [],
-    } satisfies Record<string, unknown>;
+  it('returns structured bundle errors for an invalid bundle fixture with Zod', () => {
+    const result = validateBundle(loadFixture('invalid-bundle.json'));
 
-    const result = validateResourceWithAjv(invalidBundle, 'Bundle');
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'resourceType' }),
+      ]),
+    );
+  });
 
-    expect(result.ok).toBe(false);
-    expect(result.ok ? [] : result.errors).toEqual(
-      expect.arrayContaining([expect.stringContaining('/type')]),
+  it('returns structured bundle errors for an invalid bundle fixture with AJV', () => {
+    const result = validateBundleWithAjv(loadFixture('invalid-bundle.json'));
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'resourceType' }),
+      ]),
+    );
+  });
+
+  it('returns structured resource errors for AJV resource validation', () => {
+    const result = validateResourceWithAjv(
+      {
+        resourceType: 'Observation',
+        code: {},
+      },
+      'Observation',
+    );
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'status' }),
+      ]),
     );
   });
 });

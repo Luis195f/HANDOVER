@@ -31,7 +31,7 @@ import type {
   PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
-import { CATEGORY, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
+import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
 import { NOC_OUTCOME_CATEGORY } from './fhir-terminology';
 import {
   buildNicProcedure,
@@ -656,9 +656,9 @@ const laboratoryCategoryConcept: CodeableConcept = {
 const surveyCategoryConcept: CodeableConcept = {
   coding: [
     {
-      system: TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY,
-      code: 'survey',
-      display: 'Survey',
+      system: CATEGORY.survey.system,
+      code: CATEGORY.survey.code,
+      display: CATEGORY.survey.display,
     },
   ],
   text: 'Nursing care',
@@ -678,9 +678,9 @@ const outcomeCategoryConcept: CodeableConcept = {
 const conditionClinicalStatusActive: CodeableConcept = {
   coding: [
     {
-      system: 'http://terminology.hl7.org/CodeSystem/condition-clinical',
-      code: 'active',
-      display: 'Active',
+      system: CONDITION_CODES.ACTIVE.system,
+      code: CONDITION_CODES.ACTIVE.code,
+      display: CONDITION_CODES.ACTIVE.display,
     },
   ],
 };
@@ -688,9 +688,9 @@ const conditionClinicalStatusActive: CodeableConcept = {
 const conditionVerificationStatusUnconfirmed: CodeableConcept = {
   coding: [
     {
-      system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status',
-      code: 'unconfirmed',
-      display: 'Unconfirmed',
+      system: CONDITION_CODES.UNCONFIRMED.system,
+      code: CONDITION_CODES.UNCONFIRMED.code,
+      display: CONDITION_CODES.UNCONFIRMED.display,
     },
   ],
 };
@@ -698,12 +698,12 @@ const conditionVerificationStatusUnconfirmed: CodeableConcept = {
 const conditionProblemListCategory: CodeableConcept = {
   coding: [
     {
-      system: 'http://terminology.hl7.org/CodeSystem/condition-category',
-      code: 'problem-list-item',
-      display: 'Problem list item',
+      system: CONDITION_CODES.PROBLEM_LIST_ITEM.system,
+      code: CONDITION_CODES.PROBLEM_LIST_ITEM.code,
+      display: CONDITION_CODES.PROBLEM_LIST_ITEM.display,
     },
   ],
-  text: 'Problem list item',
+  text: CONDITION_CODES.PROBLEM_LIST_ITEM.display,
 };
 
 
@@ -1114,10 +1114,6 @@ const scalesMapperDependencies: ScalesMapperDependencies = {
   },
 };
 
-const OBSERVATION_CATEGORY_SYSTEM = 'http://terminology.hl7.org/CodeSystem/observation-category';
-
-const UCUM = 'http://unitsofmeasure.org';
-
 const normalizeId = (value: string | undefined, fallback: string): string => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (trimmed) return trimmed;
@@ -1172,7 +1168,7 @@ function quantity(value: number, unit: string, code: string): Quantity {
   return {
     value,
     unit,
-    system: UCUM,
+    system: TERMINOLOGY_SYSTEMS.UCUM,
     code,
   };
 }
@@ -1653,10 +1649,10 @@ export function mapDocumentReferenceAudio(
       {
         coding: [
           {
-            system: 'http://terminology.hl7.org/CodeSystem/document-classcodes',
-            code: 'LP29684-5',
-            display: 'Audio recording',
-          },
+              system: DOCUMENT_CLASS_CODES.AUDIO_RECORDING.system,
+              code: DOCUMENT_CLASS_CODES.AUDIO_RECORDING.code,
+              display: DOCUMENT_CLASS_CODES.AUDIO_RECORDING.display,
+            },
         ],
         text: 'Audio handover',
       },
@@ -1696,9 +1692,9 @@ function mapDocumentReferenceAttachments(
         {
           coding: [
             {
-              system: 'http://terminology.hl7.org/CodeSystem/document-classcodes',
-              code: 'LP29684-5',
-              display: 'Attachment',
+              system: DOCUMENT_CLASS_CODES.ATTACHMENT.system,
+              code: DOCUMENT_CLASS_CODES.ATTACHMENT.code,
+              display: DOCUMENT_CLASS_CODES.ATTACHMENT.display,
             },
           ],
           text: 'Attachment',
@@ -2632,12 +2628,15 @@ export function buildHandoverBundle(
   };
 
   // BEGIN HANDOVER_FHIR_VALIDATION
-  const validation = validateFhirResource(bundle);
-  if (!validation.isValid) {
-    const messages = validation.errors.map((err) => `${err.path}: ${err.message}`);
-    const error = new Error(messages.join('; '));
-    (error as Error & { details: string[] }).details = messages;
-    throw error;
+  const shouldValidateBuiltBundle = process.env.NODE_ENV !== 'production';
+  if (shouldValidateBuiltBundle) {
+    const validation = validateFhirResource(bundle);
+    if (!validation.isValid) {
+      const messages = validation.errors.map((err) => `${err.path}: ${err.message}`);
+      const error = new Error(messages.join('; '));
+      (error as Error & { details: string[] }).details = messages;
+      throw error;
+    }
   }
   // END HANDOVER_FHIR_VALIDATION
 
@@ -3001,12 +3000,12 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.EVA.code) refs.pain.push(reference);
         else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.BRADEN.code) refs.braden.push(reference);
         else if (resource.code?.coding?.[0]?.code === FHIR_CODES.SCALES.GLASGOW.code) refs.glasgow.push(reference);
-        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'vital-signs'))) refs.vitals.push(reference);
-        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === 'outcome'))) refs.outcomes.push(reference);
+        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === CATEGORY.vitalSigns.code))) refs.vitals.push(reference);
+        else if (resource.category?.some((c) => c.coding?.some((coding) => coding.code === NOC_OUTCOME_CATEGORY.code))) refs.outcomes.push(reference);
         else if (
           !resource.code?.coding?.length &&
           resource.category?.some((c) =>
-            c.coding?.some((coding) => coding.system === OBSERVATION_CATEGORY_SYSTEM),
+            c.coding?.some((coding) => coding.system === TERMINOLOGY_SYSTEMS.OBSERVATION_CATEGORY),
           )
         )
           refs.exams.push(reference);
@@ -3313,6 +3312,11 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
+
+
+
+
+
 
 
 

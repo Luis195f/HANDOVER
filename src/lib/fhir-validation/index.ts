@@ -9,6 +9,12 @@ import medicationStatementSchema from './schemas/MedicationStatement.json';
 import observationSchema from './schemas/Observation.json';
 import patientSchema from './schemas/Patient.json';
 import procedureSchema from './schemas/Procedure.json';
+import {
+  getValidationErrorsFromBundle,
+  validateBundle as validateBundleWithZod,
+  validateResourceWithZod,
+  type ValidationResult,
+} from './zod';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -25,43 +31,74 @@ const validators = {
 } as const;
 
 export type FhirResourceType = keyof typeof validators;
+export type FhirValidationResult = ValidationResult;
+export type AjvValidationSummary = ValidationResult;
 
-export type FhirValidationResult = { ok: true } | { ok: false; errors: string[] };
-export type AjvValidationSummary = { isValid: boolean; errors: string[] };
+function toValidationPath(instancePath: string): string {
+  if (!instancePath) {
+    return '$';
+  }
 
-export function validateResourceWithAjv(resource: unknown, type: FhirResourceType): FhirValidationResult {
+  return instancePath
+    .split('/')
+    .slice(1)
+    .map((segment) => decodeURIComponent(segment))
+    .reduce((acc, segment) => {
+      if (/^\d+$/.test(segment)) {
+        return `${acc}[${segment}]`;
+      }
+      return acc ? `${acc}.${segment}` : segment;
+    }, '');
+}
+
+function formatAjvError(err: ErrorObject): ValidationResult['errors'][number] {
+  const ajvError = err as ErrorObject & {
+    keyword?: string;
+    params?: { missingProperty?: unknown };
+  };
+  const missingProperty =
+    ajvError.keyword === 'required' && typeof ajvError.params?.missingProperty === 'string'
+      ? String(ajvError.params.missingProperty)
+      : undefined;
+  const basePath = toValidationPath(err.instancePath || '');
+  const path = missingProperty
+    ? basePath && basePath !== '$'
+      ? `${basePath}.${missingProperty}`
+      : missingProperty
+    : basePath;
+
+  return {
+    path: path || '$',
+    message: err.message ?? 'Invalid resource',
+  };
+}
+
+export function validateResourceWithAjv(resource: unknown, type: FhirResourceType): ValidationResult {
   const validate = validators[type];
   const valid = validate(resource);
-  if (valid) return { ok: true } as const;
-  const errors = (validate.errors ?? []).map(formatAjvError);
-  return { ok: false, errors } as const;
+  if (valid) {
+    return { isValid: true, errors: [] };
+  }
+
+  return {
+    isValid: false,
+    errors: (validate.errors ?? []).map(formatAjvError),
+  };
 }
 
 export const validateResourceAjv = validateResourceWithAjv;
 
-export function validateResource(resource: unknown, type: FhirResourceType): AjvValidationSummary {
-  const result = validateResourceWithAjv(resource, type);
-  if (result.ok) {
-    return { isValid: true, errors: [] };
-  }
-  return { isValid: false, errors: result.errors };
+export function validateBundleWithAjv(bundle: unknown): ValidationResult {
+  return validateResourceWithAjv(bundle, 'Bundle');
 }
 
-export function validateBundleWithAjv(bundle: unknown): AjvValidationSummary {
-  return validateResource(bundle, 'Bundle');
-}
-
-function formatAjvError(err: ErrorObject): string {
-  const path = err.instancePath || '/';
-  const message = err.message ?? '';
-  return `${path} ${message}`.trim();
-}
-// END HANDOVER_FHIR_VALIDATION
+export const validateResource = validateResourceWithZod;
+export const validateBundle = validateBundleWithZod;
 
 export {
   getValidationErrorsFromBundle,
-  validateBundle,
-  validateBundle as validateBundleWithZod,
+  validateBundleWithZod,
   validateResourceWithZod,
   type ValidationResult,
-} from './zod';
+};
+// END HANDOVER_FHIR_VALIDATION

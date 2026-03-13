@@ -43,6 +43,11 @@ Los comandos anteriores deben pasar antes de generar artefactos.
 En CI se ejecuta `pnpm -w validate:fhir` para validar bundles FHIR antes de permitir merges.
 Si la validación falla, el job falla y bloquea el merge.
 
+Nota:
+- La validación FHIR expone ahora un resultado uniforme con forma `{ isValid, errors }` para recursos y bundles.
+- `src/lib/fhir-validation.ts` re-exporta la API pública desde `src/lib/fhir-validation/index` para mantener un único punto de contrato.
+- `pnpm validate:fhir` y la validación de bundles construidos están orientados a reforzar contratos en CI/dev; en producción se evita endurecer innecesariamente la UX local.
+
 Para reproducir local:
 
 ```bash
