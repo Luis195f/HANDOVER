@@ -1,6 +1,5 @@
 import type { AdministrativeData } from '@/src/types/administrative';
 import type {
-  HandoverInput as FhirHandoverInput,
   HandoverProfileTraceInput,
   HandoverValues as FhirHandoverValues,
 } from '@/src/lib/fhir-map';
@@ -56,17 +55,8 @@ export function buildProfileTraceInput(
 export function buildHandoverInputPayload(
   values: FormHandoverValues,
   overrides: Partial<FhirHandoverValues>,
-): FhirHandoverValues;
-export function buildHandoverInputPayload(
-  values: FormHandoverValues,
-  overrides: Partial<FhirHandoverValues>,
-  profileTrace: HandoverProfileTraceInput,
-): Extract<FhirHandoverInput, { values: FhirHandoverValues }>;
-export function buildHandoverInputPayload(
-  values: FormHandoverValues,
-  overrides: Partial<FhirHandoverValues>,
   profileTrace?: HandoverProfileTraceInput,
-): FhirHandoverInput {
+): FhirHandoverValues {
   const normalizedValues: FhirHandoverValues = {
     ...(values as unknown as FhirHandoverValues),
     oxygenTherapy: normalizeOxygenTherapyInput(
@@ -80,7 +70,7 @@ export function buildHandoverInputPayload(
   }
 
   return {
-    values: normalizedValues,
+    ...normalizedValues,
     profileTrace,
   };
 }

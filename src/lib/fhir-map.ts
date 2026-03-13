@@ -943,6 +943,7 @@ export type HandoverValues = {
   risksStructured?: RiskItem[];
   treatments?: TreatmentItem[];
   outcomes?: NocOutcomeItem[];
+  profileTrace?: HandoverProfileTraceInput;
 };
 
 export interface HandoverProfileTraceInput {
@@ -4913,5 +4914,4 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
-
 
