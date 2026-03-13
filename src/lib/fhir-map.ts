@@ -1,7 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { GLUCOSE_MMOL_TO_MGDL_FACTOR } from '@/src/validation/normalization';
-
 import type { AdministrativeData } from '../types/administrative';
 import type {
   ProfileContext,
@@ -41,6 +39,54 @@ import {
   mapLegacyNursingCondition,
   mapNandaConditions,
 } from './fhir-map/nnn';
+import {
+  mapObservationVitalsImpl,
+  mapOxygenObservationsImpl,
+  mapVitalsToObservationsImpl,
+  type VitalsMapperDependencies,
+} from './fhir-map/vitals.impl';
+import {
+  mapMedicationStatementsImpl,
+  type MedicationsMapperDependencies,
+} from './fhir-map/medications';
+import {
+  mapDevicesImpl,
+  mapDeviceUseImpl,
+  type DevicesMapperDependencies,
+} from './fhir-map/devices';
+import {
+  mapEliminationCareImpl,
+  mapExamObservationsImpl,
+  mapFluidBalanceCareImpl,
+  mapMobilitySkinCareImpl,
+  mapNocOutcomesImpl,
+  mapNutritionCareImpl,
+  mapProceduresImpl,
+  mapTreatmentsImpl,
+  normalizeExamInputs,
+  type SpecificCareMapperDependencies,
+} from './fhir-map/specific-care';
+import {
+  attestersFromSignaturesImpl,
+  buildSignatureResourceImpl,
+  mapAttestersImpl,
+} from './fhir-map/signatures';
+import {
+  buildCompositionImpl,
+  mapAdministrativeObservationImpl,
+  mapBedsideChecklistObservationImpl,
+  mapPsychosocialObservationImpl,
+  mapSbarObservationsImpl,
+  mapSummaryObservationImpl,
+  type CompositionMapperDependencies,
+} from './fhir-map/composition';
+import {
+  mapBradenObservationImpl,
+  mapEvaObservationImpl,
+  mapGlasgowObservationImpl,
+  mapRiskConditionsImpl,
+  type ScalesMapperDependencies,
+} from './fhir-map/scales';
 import { hashHex, fhirId } from './crypto';
 import { FHIR_PROFILE_URLS_BY_RESOURCE_TYPE } from './fhir-profiles';
 import { validateResourceWithZod as validateFhirResource } from './fhir-validation';
@@ -249,6 +295,8 @@ type MedicationStatement = {
   dosage?: Dosage[];
   extension?: Extension[];
 };
+
+type MedicationResource = MedicationStatement | MedicationAdministration;
 
 type MedicationAdministration = {
   resourceType: 'MedicationAdministration';
@@ -969,6 +1017,105 @@ type MappingContext = {
   effectiveDateTime: string;
 };
 
+const vitalsMapperDependencies: VitalsMapperDependencies = {
+  resolveOptions,
+  patientReference,
+  encounterReference,
+  codeableConceptFromCode,
+  quantity,
+  normalizeIsoDateTimeValue,
+  observationVitalsSchema: ObservationVitalsSchema,
+  oxygenTherapySchema: OxygenTherapySchema,
+  avpuMap: AVPU_MAP,
+  profileVitalSigns: PROFILE_VITAL_SIGNS,
+  profileBloodPressure: PROFILE_BLOOD_PRESSURE,
+  profileObservation: PROFILE_OBSERVATION,
+  vitalCategoryConcept,
+  laboratoryCategoryConcept,
+};
+
+const medicationsMapperDependencies: MedicationsMapperDependencies = {
+  resolveOptions,
+  patientReference,
+  encounterReference,
+  normalizeIsoDateTimeValue,
+  medicationStatementSchema: MedicationStatementSchema,
+};
+
+const devicesMapperDependencies: DevicesMapperDependencies = {
+  resolveOptions,
+  patientReference,
+  encounterReference,
+  fhirId,
+  oxygenTherapySchema: OxygenTherapySchema,
+};
+
+const warnExamsItemSkipped = (payload: {
+  code: 'HANDOVER_EXAMS_ITEM_SKIPPED';
+  reason: 'invalid_shape' | 'empty_description' | 'unknown_type' | 'unknown_state';
+  examType?: string;
+  examState?: string;
+  len?: number;
+}) => {
+  void payload;
+};
+
+const warnProceduresItemSkipped = (payload: {
+  code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED';
+  reason: 'invalid_shape' | 'empty_description';
+  done?: boolean;
+  len?: number;
+}) => {
+  void payload;
+};
+
+const warnCompositionSectionOmitted = (section: 'exams' | 'procedures') => {
+  void section;
+};
+
+const specificCareMapperDependencies: SpecificCareMapperDependencies = {
+  resolveOptions,
+  patientReference,
+  encounterReference,
+  codeableConceptFromCode,
+  quantity,
+  surveyCategoryConcept,
+  outcomeCategoryConcept,
+  warnExamsItemSkipped,
+  warnProceduresItemSkipped,
+};
+
+const compositionMapperDependencies: CompositionMapperDependencies = {
+  resolveOptions,
+  ensureAuthorReference,
+  patientReference,
+  encounterReference,
+  codeableConceptFromCode,
+  administrativeSummaryText,
+  attestersFromSignatures,
+  defaultCompositionType: DEFAULT_COMPOSITION_TYPE,
+  compositionSectionCodes: COMPOSITION_SECTION_CODES,
+  compositionSectionConcept,
+  handoverObservationCodes: HANDOVER_OBSERVATION_CODES,
+  surveyCategoryConcept,
+  warnCompositionSectionOmitted,
+};
+
+const scalesMapperDependencies: ScalesMapperDependencies = {
+  codeableConceptFromCode,
+  surveyCategoryConcept,
+  conditionClinicalStatusActive,
+  conditionVerificationStatusUnconfirmed,
+  conditionProblemListCategory,
+  riskCodeMap: {
+    fall: FHIR_CODES.RISK.FALL,
+    pressureUlcer: FHIR_CODES.RISK.PRESSURE_ULCER,
+    isolation: FHIR_CODES.RISK.SOCIAL_ISOLATION,
+  },
+};
+
+const OBSERVATION_CATEGORY_SYSTEM = 'http://terminology.hl7.org/CodeSystem/observation-category';
+
 const UCUM = 'http://unitsofmeasure.org';
 
 const normalizeId = (value: string | undefined, fallback: string): string => {
@@ -1257,629 +1404,25 @@ function replaceSubjectReference<T extends FhirResource>(resource: T, subject: R
   return resource;
 }
 
-function ensureEffectiveDate(
-  parsed: ObservationVitalsInput,
-  optionsMerged: ResolvedBuildOptions,
-): { effective: string; issued: string } {
-  const effective = parsed.recordedAt ?? optionsMerged.now();
-  const issued = parsed.issuedAt ?? effective;
-  return { effective, issued };
-}
-
 export function mapObservationVitals(
   values: ObservationVitalsInput,
   options?: BuildOptions,
 ): Observation[] {
-  const hasMeasurement =
-    values.hr !== undefined ||
-    values.rr !== undefined ||
-    values.tempC !== undefined ||
-    values.spo2 !== undefined ||
-    values.sbp !== undefined ||
-    values.dbp !== undefined ||
-    values.glucoseMgDl !== undefined ||
-    values.glucoseMmolL !== undefined ||
-    values.avpu !== undefined;
-
-  if (!hasMeasurement) {
-    return [];
-  }
-
-  const optionsMerged = resolveOptions(options);
-  const parsed = ObservationVitalsSchema.parse(values);
-  const { effective, issued } = ensureEffectiveDate(parsed, optionsMerged);
-  const subject = patientReference(parsed.patientId);
-  const encounter = encounterReference(parsed.encounterId);
-  const glucoseDecimals = optionsMerged.glucoseDecimals ?? 0;
-
-  const observations: Observation[] = [];
-
-  if (parsed.sbp !== undefined || parsed.dbp !== undefined) {
-    const components: ObservationComponent[] = [];
-    if (parsed.sbp !== undefined) {
-      components.push({
-        code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_SYSTOLIC),
-        valueQuantity: quantity(parsed.sbp, 'mm[Hg]', 'mm[Hg]'),
-      });
-    }
-    if (parsed.dbp !== undefined) {
-      components.push({
-        code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_DIASTOLIC),
-        valueQuantity: quantity(parsed.dbp, 'mm[Hg]', 'mm[Hg]'),
-      });
-    }
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_BLOOD_PRESSURE, PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_PANEL),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      component: components,
-    });
-  }
-
-  if (parsed.hr !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.HEART_RATE),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.hr, '/min', '/min'),
-    });
-  }
-
-  if (parsed.rr !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.RESP_RATE),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.rr, '/min', '/min'),
-    });
-  }
-
-  if (parsed.tempC !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.TEMPERATURE),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.tempC, '°C', 'Cel'),
-    });
-  }
-
-  if (parsed.spo2 !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.SPO2),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.spo2, '%', '%'),
-    });
-  }
-
-  if (parsed.glucoseMgDl !== undefined || parsed.glucoseMmolL !== undefined) {
-    const factor = GLUCOSE_MMOL_TO_MGDL_FACTOR;
-    const valueMgDl =
-      parsed.glucoseMgDl !== undefined
-        ? parsed.glucoseMgDl
-        : Number((parsed.glucoseMmolL! * factor).toFixed(glucoseDecimals));
-
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_OBSERVATION] },
-      status: 'final',
-      category: [laboratoryCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.GLUCOSE_MASS_BLD),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(valueMgDl, 'mg/dL', 'mg/dL'),
-      note:
-        parsed.glucoseMgDl === undefined && parsed.glucoseMmolL !== undefined
-          ? [{ text: `Convertido desde ${parsed.glucoseMmolL} mmol/L (factor ${factor}).` }]
-          : undefined,
-    });
-  }
-
-  if (parsed.avpu !== undefined) {
-    const details = AVPU_MAP[parsed.avpu];
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.ACVPU, 'AVPU scale'),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueCodeableConcept: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.SNOMED,
-            code: details.code,
-            display: details.display,
-          },
-        ],
-        text: details.display,
-      },
-    });
-  }
-
-  return observations;
+  return mapObservationVitalsImpl(vitalsMapperDependencies, values, options);
 }
 
 export function mapVitalsToObservations(
   input: { patientId: string; encounterId?: string; vitals?: VitalsValues },
   options?: BuildOptions,
 ): Observation[] {
-  if (!input.vitals) {
-    return [];
-  }
-
-  const sanitizeNumber = (value: unknown, min: number, max: number) =>
-    Number.isFinite(value) && Number(value) >= min && Number(value) <= max
-      ? Number(value)
-      : undefined;
-  const rawVitals = input.vitals as VitalsValues & {
-    bgMgDl?: number;
-    bgMmolL?: number;
-    temp?: number;
-    acvpu?: ObservationVitalsInput['avpu'];
-  };
-  const legacyBgMgDl = (input.vitals as { bgMgDl?: number }).bgMgDl;
-  const legacyBgMmolL = (input.vitals as { bgMmolL?: number }).bgMmolL;
-  const glucoseMgDl = Number.isFinite(input.vitals.glucoseMgDl)
-    ? input.vitals.glucoseMgDl
-    : undefined;
-  const glucoseMmolL = Number.isFinite(input.vitals.glucoseMmolL)
-    ? input.vitals.glucoseMmolL
-    : undefined;
-  const tempValue = Number.isFinite(rawVitals.tempC)
-    ? rawVitals.tempC
-    : Number.isFinite(rawVitals.temp)
-      ? rawVitals.temp
-      : undefined;
-  const rawAvpu = rawVitals.avpu ?? rawVitals.acvpu;
-  const avpuValue =
-    typeof rawAvpu === 'string' && rawAvpu in AVPU_MAP
-      ? rawAvpu
-      : undefined;
-  const recordedAt = typeof rawVitals.recordedAt === 'string' ? rawVitals.recordedAt : undefined;
-  const issuedAt = typeof rawVitals.issuedAt === 'string' ? rawVitals.issuedAt : undefined;
-
-  const normalizedVitals: VitalsValues = {
-    hr: sanitizeNumber(rawVitals.hr, 30, 220),
-    rr: sanitizeNumber(rawVitals.rr, 5, 60),
-    tempC: sanitizeNumber(tempValue, 30, 45),
-    spo2: sanitizeNumber(rawVitals.spo2, 50, 100),
-    sbp: sanitizeNumber(rawVitals.sbp, 60, 260),
-    dbp: sanitizeNumber(rawVitals.dbp, 30, 160),
-    glucoseMgDl: sanitizeNumber(
-      glucoseMgDl ?? (Number.isFinite(legacyBgMgDl) ? legacyBgMgDl : undefined),
-      20,
-      1000,
-    ),
-    glucoseMmolL: sanitizeNumber(
-      glucoseMmolL ?? (Number.isFinite(legacyBgMmolL) ? legacyBgMmolL : undefined),
-      1,
-      55,
-    ),
-    avpu: avpuValue,
-    recordedAt,
-    issuedAt,
-  };
-
-  const baseObservations = mapObservationVitals(
-    {
-      patientId: input.patientId,
-      encounterId: input.encounterId,
-      ...normalizedVitals,
-    },
-    options,
-  );
-
-  const filteredObservations = baseObservations.filter(
-    (observation) =>
-      !observation.code?.coding?.some(
-        (coding) =>
-          coding.system === TERMINOLOGY_SYSTEMS.LOINC &&
-          coding.code === FHIR_CODES.VITALS.BP_PANEL.code,
-      ),
-  );
-
-  if (normalizedVitals.sbp === undefined && normalizedVitals.dbp === undefined) {
-    return filteredObservations;
-  }
-
-  const optionsMerged = resolveOptions(options);
-  const normalizedRecordedAt = normalizeIsoDateTimeValue(normalizedVitals.recordedAt);
-  const normalizedIssuedAt = normalizeIsoDateTimeValue(normalizedVitals.issuedAt);
-  const effective = normalizedRecordedAt ?? optionsMerged.now();
-  const issued = normalizedIssuedAt ?? effective;
-  const subject = patientReference(input.patientId);
-  const encounter = encounterReference(input.encounterId);
-
-  const bpIndividuals: Observation[] = [];
-  if (normalizedVitals.sbp !== undefined) {
-    bpIndividuals.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_SYSTOLIC),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(normalizedVitals.sbp, 'mm[Hg]', 'mm[Hg]'),
-    });
-  }
-  if (normalizedVitals.dbp !== undefined) {
-    bpIndividuals.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.BP_DIASTOLIC),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(normalizedVitals.dbp, 'mm[Hg]', 'mm[Hg]'),
-    });
-  }
-
-  return [...filteredObservations, ...bpIndividuals];
-}
-
-const MEDICATION_ROUTE_LABELS: Partial<Record<NonNullable<MedicationItem['route']>, string>> = {
-  oral: 'Oral',
-  iv: 'IV',
-  im: 'IM',
-  sc: 'SC',
-  inhaled: 'Inhalada',
-  topical: 'Tópica',
-  other: 'Otra vía',
-};
-
-const MEDICATION_HIGH_ALERT_EXTENSION_URL = 'urn:handover-pro:medication-high-alert';
-
-const MEDICATION_ROUTE_CONCEPTS: Partial<Record<NonNullable<MedicationItem['route']>, CodeableConcept>> = {
-  oral: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'PO',
-        display: 'Oral',
-      },
-    ],
-    text: 'Oral',
-  },
-  iv: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'IV',
-        display: 'Intravenous',
-      },
-    ],
-    text: 'IV',
-  },
-  im: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'IM',
-        display: 'Intramuscular',
-      },
-    ],
-    text: 'IM',
-  },
-  sc: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'SC',
-        display: 'Subcutaneous',
-      },
-    ],
-    text: 'SC',
-  },
-  inhaled: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'INHAL',
-        display: 'Inhalation',
-      },
-    ],
-    text: 'Inhalada',
-  },
-  topical: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'TOP',
-        display: 'Topical',
-      },
-    ],
-    text: 'Tópica',
-  },
-  other: {
-    coding: [
-      {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration',
-        code: 'OTH',
-        display: 'Other',
-      },
-    ],
-    text: 'Otra vía',
-  },
-};
-
-function structuredDosageText(medication: MedicationItem): string | undefined {
-  const parts = [medication.dose, medication.route ? MEDICATION_ROUTE_LABELS[medication.route] : null, medication.frequency]
-    .filter(Boolean)
-    .join(' ');
-  return parts || undefined;
-}
-
-const frequencyPatterns = [
-  {
-    regex: /(\d+)\s*(?:x|veces)\s*(?:\/|por)\s*d[ií]a/i,
-    builder: (match: RegExpMatchArray) => ({ frequency: Number(match[1]), period: 1, periodUnit: 'd' as const }),
-  },
-  {
-    regex: /cada\s*(\d+)\s*(h|horas?|hora)/i,
-    builder: (match: RegExpMatchArray) => ({ frequency: 1, period: Number(match[1]), periodUnit: 'h' as const }),
-  },
-  {
-    regex: /cada\s*(\d+)\s*(d|d[ií]as?|día)/i,
-    builder: (match: RegExpMatchArray) => ({ frequency: 1, period: Number(match[1]), periodUnit: 'd' as const }),
-  },
-  {
-    regex: /^q(\d+)h$/i,
-    builder: (match: RegExpMatchArray) => ({ frequency: 1, period: Number(match[1]), periodUnit: 'h' as const }),
-  },
-] as const;
-
-function parseFrequencyToTiming(frequency?: string): Timing | undefined {
-  if (!frequency) return undefined;
-  const trimmed = frequency.trim();
-  if (!trimmed) return undefined;
-  for (const pattern of frequencyPatterns) {
-    const match = trimmed.match(pattern.regex);
-    if (match) {
-      return { repeat: pattern.builder(match) };
-    }
-  }
-  return undefined;
-}
-
-function parseDoseQuantity(dose?: string): Quantity | undefined {
-  if (!dose) return undefined;
-  const match = dose.trim().match(/^(\d+(?:[.,]\d+)?)\s*([^\d\s]+)?/);
-  if (!match) return undefined;
-  const value = Number(match[1].replace(',', '.'));
-  if (Number.isNaN(value)) return undefined;
-  const unit = match[2]?.trim();
-  return {
-    value,
-    unit,
-    system: unit ? 'http://unitsofmeasure.org' : undefined,
-    code: unit || undefined,
-  };
-}
-
-function buildMedicationDosage(medication: MedicationItem): Dosage | undefined {
-  const timing = parseFrequencyToTiming(medication.frequency);
-  const doseQuantity = parseDoseQuantity(medication.dose);
-  const route = medication.route ? MEDICATION_ROUTE_CONCEPTS[medication.route] : undefined;
-  const text = structuredDosageText(medication);
-  if (!timing && !doseQuantity && !route && !text) return undefined;
-  return {
-    text,
-    timing,
-    route,
-    doseAndRate: doseQuantity ? [{ doseQuantity }] : undefined,
-  };
-}
-
-function buildAdministrationDosage(medication: MedicationItem): MedicationAdministration['dosage'] | undefined {
-  const route = medication.route ? MEDICATION_ROUTE_CONCEPTS[medication.route] : undefined;
-  const dose = parseDoseQuantity(medication.dose);
-  const text = structuredDosageText(medication);
-  if (!route && !dose && !text) return undefined;
-  return {
-    text,
-    route,
-    dose,
-  };
-}
-
-function buildHighAlertExtension(isHighAlert?: boolean): Extension[] | undefined {
-  if (!isHighAlert) return undefined;
-  return [{ url: MEDICATION_HIGH_ALERT_EXTENSION_URL, valueBoolean: true }];
-}
-
-function buildMedicationNotes(medication: MedicationItem): Annotation[] | undefined {
-  const notes: Annotation[] = [];
-  if (medication.isHighAlert) {
-    notes.push({ text: 'High alert medication' });
-  }
-  if (medication.notes) {
-    notes.push({ text: medication.notes });
-  }
-  if (medication.signature) {
-    const role = medication.signature.role ?? 'nurse';
-    notes.push({
-      text: `Signed by ${medication.signature.fullName} (${role}) at ${medication.signature.signedAt}`,
-    });
-  }
-  return notes.length > 0 ? notes : undefined;
-}
-
-function isStructuredMedication(
-  input: MedicationStatementInput | MedicationItem,
-): input is MedicationItem {
-  return (input as MedicationItem).name !== undefined;
-}
-
-type MedicationResource = MedicationStatement | MedicationAdministration;
-
-function mapStructuredMedicationResource(
-  medication: MedicationItem,
-  subject: Reference,
-  encounter: Reference | undefined,
-  assertedAt: string,
-): MedicationResource {
-  const concept: CodeableConcept = medication.code
-    ? {
-        coding: [medication.code],
-        text: medication.name,
-      }
-    : {
-        coding: [],
-        text: medication.name,
-      };
-  const notes = buildMedicationNotes(medication);
-  const extension = buildHighAlertExtension(medication.isHighAlert);
-  const normalizedStart = normalizeIsoDateTimeValue(medication.startTime) ?? assertedAt;
-  const normalizedEnd = normalizeIsoDateTimeValue(medication.endTime);
-  const isContinuous = medication.isContinuous === true;
-
-  if (!isContinuous && medication.isContinuous === false) {
-    const effectivePeriod = normalizedEnd ? { start: normalizedStart, end: normalizedEnd } : undefined;
-    return {
-      resourceType: 'MedicationAdministration',
-      identifier: [{ system: 'urn:handover-pro:medication-item', value: medication.id }],
-      status: normalizedEnd ? 'completed' : 'in-progress',
-      medicationCodeableConcept: concept,
-      subject,
-      encounter,
-      effectiveDateTime: effectivePeriod ? undefined : normalizedStart,
-      effectivePeriod,
-      note: notes,
-      dosage: buildAdministrationDosage(medication),
-      extension,
-    };
-  }
-
-  const effectivePeriod = normalizedStart || normalizedEnd
-    ? {
-        start: normalizedStart,
-        end: normalizedEnd ?? undefined,
-      }
-    : undefined;
-
-  return {
-    resourceType: 'MedicationStatement',
-    identifier: [{ system: 'urn:handover-pro:medication-item', value: medication.id }],
-    status: normalizedEnd ? 'completed' : 'active',
-    medicationCodeableConcept: concept,
-    subject,
-    encounter,
-    effectivePeriod,
-    effectiveDateTime: effectivePeriod ? undefined : normalizedStart,
-    dateAsserted: assertedAt,
-    note: notes,
-    dosage: (() => {
-      const dosage = buildMedicationDosage(medication);
-      return dosage ? [dosage] : undefined;
-    })(),
-    extension,
-  };
-}
-
-function mapLegacyMedicationStatement(
-  input: MedicationStatementInput,
-  subject: Reference,
-  encounter: Reference | undefined,
-  assertedAt: string,
-): MedicationStatement | null {
-  const parsedResult = MedicationStatementSchema.safeParse(input);
-  if (!parsedResult.success) return null;
-  const parsed = parsedResult.data;
-  const concept: CodeableConcept = parsed.code
-    ? {
-        coding: [parsed.code],
-        text: parsed.display ?? parsed.code.display,
-      }
-    : {
-        coding: [],
-        text: parsed.display ?? 'Medication',
-      };
-
-  const period: Period | undefined = parsed.start || parsed.end
-    ? {
-        start: parsed.start ?? assertedAt,
-        end: parsed.end ?? undefined,
-      }
-    : undefined;
-
-  const note = parsed.note ? [{ text: parsed.note }] : undefined;
-
-  return {
-    resourceType: 'MedicationStatement',
-    status: parsed.status,
-    medicationCodeableConcept: concept,
-    subject,
-    encounter,
-    effectivePeriod: period,
-    dateAsserted: assertedAt,
-    note,
-  };
+  return mapVitalsToObservationsImpl(vitalsMapperDependencies, input, options);
 }
 
 export function mapMedicationStatements(
   values: MedicationValues,
   options?: BuildOptions,
 ): MedicationResource[] {
-  const inputs = values.medications ?? [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const assertedAt = optionsMerged.now();
-
-  const structuredInputs = inputs.filter(isStructuredMedication);
-  const legacyInputs = inputs.filter((item): item is MedicationStatementInput => !isStructuredMedication(item));
-
-  const structuredStatements = structuredInputs.map((item) =>
-    mapStructuredMedicationResource(item, subject, encounter, assertedAt),
-  );
-
-  const legacyStatements = legacyInputs
-    .map((item) => mapLegacyMedicationStatement(item, subject, encounter, assertedAt))
-    .filter((value): value is MedicationStatement => value != null);
-
-  return [...structuredStatements, ...legacyStatements];
+  return mapMedicationStatementsImpl(medicationsMapperDependencies, values, options);
 }
 
 export function mapDeviceUse(
@@ -1981,895 +1524,96 @@ export function mapDevices(
   values: { patientId: string; encounterId?: string; devices?: Array<DeviceItem | unknown> },
   options?: BuildOptions,
 ): Array<Device | DeviceUseStatement> {
-  const devices = Array.isArray(values.devices) ? values.devices : [];
-  if (devices.length === 0) return [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const context = encounterReference(values.encounterId);
-  const timestamp = optionsMerged.now();
-
-  return devices.flatMap((device, index) => {
-    if (!device || typeof device !== 'object') {
-      warnDevicesItemSkipped({
-        code: 'HANDOVER_DEVICES_ITEM_SKIPPED',
-        reason: 'invalid_shape',
-        item: device,
-      });
-      return [];
-    }
-
-    const nameRaw = (device as DeviceItem).name;
-    const name = typeof nameRaw === 'string' ? nameRaw.trim() : '';
-    if (!name) {
-      warnDevicesItemSkipped({
-        code: 'HANDOVER_DEVICES_ITEM_SKIPPED',
-        reason: 'missing_name',
-        item: device,
-      });
-      return [];
-    }
-
-    const isActive = (device as DeviceItem).active === true;
-    const baseKey = `${values.patientId}|${values.encounterId ?? ''}|${name}|${index}`;
-    const deviceId = fhirId('device-', baseKey);
-    const deviceUseId = fhirId('dus-', `${baseKey}|${isActive ? 'active' : 'inactive'}`);
-
-    const deviceResource: Device = {
-      resourceType: 'Device',
-      id: deviceId,
-      status: isActive ? 'active' : 'inactive',
-      deviceName: [{ name, type: 'user-friendly' }],
-      patient: subject,
-    };
-
-    const deviceUseStatement: DeviceUseStatement = {
-      resourceType: 'DeviceUseStatement',
-      id: deviceUseId,
-      status: isActive ? 'active' : 'completed',
-      subject,
-      context,
-      device: { reference: `Device/${deviceId}`, display: name },
-      timingPeriod: isActive ? { start: timestamp } : { start: timestamp, end: timestamp },
-    };
-
-    return [deviceResource, deviceUseStatement];
-  });
+  return mapDevicesImpl(devicesMapperDependencies, values, options);
 }
 
 export function mapOxygenObservations(
   values: OxygenValues,
   options?: BuildOptions,
 ): Observation[] {
-  if (!values.oxygenTherapy) return [];
-  const optionsMerged = resolveOptions(options);
-  const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effective = parsed.start ?? optionsMerged.now();
-  const issued = optionsMerged.now();
-
-  const observations: Observation[] = [];
-
-  if (parsed.fio2 !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.FIO2),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.fio2, '%', '%'),
-    });
-  }
-
-  if (parsed.flowLMin !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      meta: { profile: [PROFILE_VITAL_SIGNS] },
-      status: 'final',
-      category: [vitalCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.VITALS.O2_FLOW),
-      subject,
-      encounter,
-      effectiveDateTime: effective,
-      issued,
-      valueQuantity: quantity(parsed.flowLMin, 'L/min', 'L/min'),
-    });
-  }
-
-  return observations;
+  return mapOxygenObservationsImpl(vitalsMapperDependencies, values, options);
 }
 
-type CareValues = { patientId: string; encounterId?: string };
-type TreatmentValues = CareValues & { treatments?: TreatmentItem[] };
-
 export function mapNutritionCare(
-  values: CareValues & { nutrition?: NutritionInfo },
+  values: { patientId: string; encounterId?: string; nutrition?: NutritionInfo },
   options?: BuildOptions,
 ): Observation[] {
-  if (!values.nutrition) return [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effectiveDateTime = optionsMerged.now();
-
-  const components: ObservationComponent[] = [
-    {
-      code: { coding: [{ system: 'urn:handover-pro:component', code: 'diet-type', display: 'Diet type' }], text: 'Diet type' },
-      valueCodeableConcept: {
-        coding: [
-          {
-            system: 'urn:handover-pro:diet',
-            code: values.nutrition.dietType,
-            display: values.nutrition.dietType,
-          },
-        ],
-        text: values.nutrition.dietType,
-      },
-    },
-  ];
-
-  if (values.nutrition.tolerance) {
-    components.push({
-      code: {
-        coding: [{ system: 'urn:handover-pro:component', code: 'tolerance', display: 'Tolerance' }],
-        text: 'Tolerance',
-      },
-      valueString: values.nutrition.tolerance,
-    });
-  }
-
-  if (values.nutrition.intakeMl !== undefined) {
-    components.push({
-      code: {
-        coding: [{ system: 'urn:handover-pro:component', code: 'intake', display: 'Intake (mL)' }],
-        text: 'Intake (mL)',
-      },
-      valueQuantity: quantity(values.nutrition.intakeMl, 'mL', 'mL'),
-    });
-  }
-
-  return [
-    {
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.NUTRITION),
-      subject,
-      encounter,
-      effectiveDateTime,
-      component: components,
-    },
-  ];
+  return mapNutritionCareImpl(specificCareMapperDependencies, values, options);
 }
 
 export function mapEliminationCare(
-  values: CareValues & { elimination?: EliminationInfo },
+  values: { patientId: string; encounterId?: string; elimination?: EliminationInfo },
   options?: BuildOptions,
 ): Observation[] {
-  if (!values.elimination) return [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effectiveDateTime = optionsMerged.now();
-  const observations: Observation[] = [];
-
-  if (values.elimination.urineMl !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.URINE_OUTPUT),
-      subject,
-      encounter,
-      effectiveDateTime,
-      valueQuantity: quantity(values.elimination.urineMl, 'mL', 'mL'),
-    });
-  }
-
-  if (values.elimination.stoolPattern) {
-    const note = values.elimination.hasRectalTube !== undefined
-      ? [
-          {
-            text: values.elimination.hasRectalTube ? 'Rectal tube present' : 'No rectal tube',
-          },
-        ]
-      : undefined;
-
-    observations.push({
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.STOOL_PATTERN),
-      subject,
-      encounter,
-      effectiveDateTime,
-      valueCodeableConcept: {
-        coding: [
-          {
-            system: 'urn:handover-pro:stool-pattern',
-            code: values.elimination.stoolPattern,
-            display: values.elimination.stoolPattern,
-          },
-        ],
-        text: values.elimination.stoolPattern,
-      },
-      note,
-    });
-  } else if (values.elimination.hasRectalTube !== undefined) {
-    observations.push({
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.RECTAL_TUBE),
-      subject,
-      encounter,
-      effectiveDateTime,
-      valueCodeableConcept: {
-        coding: [
-          {
-            system: 'urn:handover-pro:boolean',
-            code: values.elimination.hasRectalTube ? 'yes' : 'no',
-            display: values.elimination.hasRectalTube ? 'Present' : 'Absent',
-          },
-        ],
-        text: values.elimination.hasRectalTube ? 'Present' : 'Absent',
-      },
-    });
-  }
-
-  return observations;
+  return mapEliminationCareImpl(specificCareMapperDependencies, values, options);
 }
 
 export function mapMobilitySkinCare(
-  values: CareValues & { mobility?: MobilityInfo; skin?: SkinInfo },
+  values: { patientId: string; encounterId?: string; mobility?: MobilityInfo; skin?: SkinInfo },
   options?: BuildOptions,
 ): Observation[] {
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effectiveDateTime = optionsMerged.now();
-  const observations: Observation[] = [];
-
-  if (values.mobility) {
-    observations.push({
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.MOBILITY),
-      subject,
-      encounter,
-      effectiveDateTime,
-      valueCodeableConcept: {
-        coding: [
-          {
-            system: 'urn:handover-pro:mobility-level',
-            code: values.mobility.mobilityLevel,
-            display: values.mobility.mobilityLevel,
-          },
-        ],
-        text: values.mobility.mobilityLevel,
-      },
-      note: values.mobility.repositioningPlan
-        ? [{ text: `Repositioning plan: ${values.mobility.repositioningPlan}` }]
-        : undefined,
-    });
-  }
-
-  if (values.skin) {
-    const components: ObservationComponent[] = [];
-    if (values.skin.hasPressureInjury !== undefined) {
-      components.push({
-        code: {
-          coding: [
-            { system: 'urn:handover-pro:component', code: 'pressure-injury', display: 'Pressure injury' },
-          ],
-          text: 'Pressure injury',
-        },
-        valueCodeableConcept: {
-          coding: [
-            {
-              system: 'urn:handover-pro:boolean',
-              code: values.skin.hasPressureInjury ? 'yes' : 'no',
-              display: values.skin.hasPressureInjury ? 'Present' : 'Absent',
-            },
-          ],
-          text: values.skin.hasPressureInjury ? 'Present' : 'Absent',
-        },
-      });
-    }
-
-    observations.push({
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.SKIN),
-      subject,
-      encounter,
-      effectiveDateTime,
-      valueString: values.skin.skinStatus,
-      component: components.length > 0 ? components : undefined,
-    });
-  }
-
-  return observations;
+  return mapMobilitySkinCareImpl(specificCareMapperDependencies, values, options);
 }
 
 export function mapFluidBalanceCare(
-  values: CareValues & { fluidBalance?: FluidBalanceInfo },
+  values: { patientId: string; encounterId?: string; fluidBalance?: FluidBalanceInfo },
   options?: BuildOptions,
 ): Observation[] {
-  if (!values.fluidBalance) return [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effectiveDateTime = optionsMerged.now();
-
-  const components: ObservationComponent[] = [];
-
-  components.push({
-    code: { coding: [{ system: 'urn:handover-pro:component', code: 'intake', display: 'Intake' }], text: 'Intake' },
-    valueQuantity: quantity(values.fluidBalance.intakeMl, 'mL', 'mL'),
-  });
-
-  components.push({
-    code: { coding: [{ system: 'urn:handover-pro:component', code: 'output', display: 'Output' }], text: 'Output' },
-    valueQuantity: quantity(values.fluidBalance.outputMl, 'mL', 'mL'),
-  });
-
-  const net =
-    values.fluidBalance.netBalanceMl !== undefined
-      ? values.fluidBalance.netBalanceMl
-      : values.fluidBalance.intakeMl - values.fluidBalance.outputMl;
-
-  if (Number.isFinite(net)) {
-    components.push({
-      code: { coding: [{ system: 'urn:handover-pro:component', code: 'net', display: 'Net balance' }], text: 'Net balance' },
-      valueQuantity: quantity(net as number, 'mL', 'mL'),
-    });
-  }
-
-  return [
-    {
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(FHIR_CODES.CARE.FLUID_BALANCE),
-      subject,
-      encounter,
-      effectiveDateTime,
-      component: components,
-      note: values.fluidBalance.notes ? [{ text: values.fluidBalance.notes }] : undefined,
-    },
-  ];
+  return mapFluidBalanceCareImpl(specificCareMapperDependencies, values, options);
 }
 
-type NormalizedExamInput = {
-  items: Array<ExamItem | unknown>;
-  legacyFields: string[];
-  legacyCount: number;
-  inputCount: number;
-};
-
-const warnExamsItemSkipped = (payload: {
-  code: 'HANDOVER_EXAMS_ITEM_SKIPPED';
-  reason: 'invalid_shape' | 'empty_description' | 'unknown_type' | 'unknown_state';
-  examType?: string;
-  examState?: string;
-  len?: number;
-}) => {
-  void payload;
-};
-
-const warnProceduresItemSkipped = (payload: {
-  code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED';
-  reason: 'invalid_shape' | 'empty_description';
-  done?: boolean;
-  len?: number;
-}) => {
-  void payload;
-};
-
-const warnDevicesItemSkipped = (payload: {
-  code: 'HANDOVER_DEVICES_ITEM_SKIPPED';
-  reason: 'missing_name' | 'invalid_shape';
-  item?: unknown;
-}) => {
-  console.warn('[HNDV][WARN][DEVICES_ITEM_SKIPPED]', payload);
-};
-
-const warnCompositionSectionOmitted = (section: 'exams' | 'procedures') => {
-  void section;
-};
-
-const normalizeExamInputs = (values: { exams?: unknown; examsPending?: unknown }): NormalizedExamInput => {
-  const items: Array<ExamItem | unknown> = [];
-  const legacyFields = new Set<string>();
-  let legacyCount = 0;
-
-  const pushLegacyStrings = (input: unknown, state: ExamItem['state'], field: string) => {
-    if (input === undefined || input === null) return;
-    legacyFields.add(field);
-    const list = Array.isArray(input) ? input : [input];
-    list.forEach((entry) => {
-      if (typeof entry !== 'string') return;
-      const trimmed = entry.trim();
-      if (!trimmed) return;
-      items.push({ type: 'other', state, description: trimmed });
-      legacyCount += 1;
-    });
-  };
-
-  if (Array.isArray(values.exams)) {
-    values.exams.forEach((entry) => {
-      if (typeof entry === 'string') {
-        legacyFields.add('exams');
-        const trimmed = entry.trim();
-        if (trimmed) {
-          items.push({ type: 'other', state: 'result', description: trimmed });
-          legacyCount += 1;
-        }
-        return;
-      }
-      items.push(entry);
-    });
-  } else if (values.exams && typeof values.exams === 'object') {
-    items.push(values.exams as ExamItem);
-  } else {
-    pushLegacyStrings(values.exams, 'result', 'exams');
-  }
-
-  pushLegacyStrings((values as { examsPending?: unknown }).examsPending, 'pending', 'examsPending');
-
-  return { items, legacyFields: Array.from(legacyFields), legacyCount, inputCount: items.length };
-};
-
-const isExamType = (value: unknown): value is ExamItem['type'] =>
-  value === 'laboratory' || value === 'imaging' || value === 'other';
-
-const isExamState = (value: unknown): value is ExamItem['state'] =>
-  value === 'result' || value === 'pending';
-
-const TREATMENT_TYPE_LABELS: Record<TreatmentItem['type'], string> = {
-  woundCare: 'Curación de heridas',
-  respiratory: 'Respiratorio',
-  mobilization: 'Movilización',
-  education: 'Educación',
-  other: 'Otro',
-};
-
-const OBSERVATION_CATEGORY_SYSTEM = 'http://terminology.hl7.org/CodeSystem/observation-category';
-
 export function mapTreatments(
-  values: TreatmentValues,
-  _options?: BuildOptions,
+  values: { patientId: string; encounterId?: string; treatments?: TreatmentItem[] },
+  options?: BuildOptions,
 ): Procedure[] {
-  if (!values.treatments || values.treatments.length === 0) return [];
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-
-  return values.treatments.map(
-    (treatment) =>
-      buildNicProcedure(treatment, {
-        display: TREATMENT_TYPE_LABELS[treatment.type],
-        subject,
-        encounter,
-        localSystem: TERMINOLOGY_SYSTEMS.HANDOVER_TREATMENT_TYPE,
-      }) as Procedure,
-  );
+  return mapTreatmentsImpl(specificCareMapperDependencies, values, options);
 }
 
 export function mapNocOutcomes(values: OutcomeValues, options?: BuildOptions): Observation[] {
-  if (!values.outcomes || values.outcomes.length === 0) return [];
-
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effectiveDateTime = optionsMerged.now();
-
-  return values.outcomes.flatMap((item) => {
-    const observation = buildNocOutcomeObservation(item, {
-      subject,
-      encounter,
-      effectiveDateTime,
-      category: outcomeCategoryConcept,
-    });
-    return observation ? [observation as Observation] : [];
-  });
+  return mapNocOutcomesImpl(specificCareMapperDependencies, values, options);
 }
 
 export function mapExamObservations(
-  values: CareValues & { exams?: ExamItem[]; examsPending?: unknown },
+  values: { patientId: string; encounterId?: string; exams?: ExamItem[]; examsPending?: unknown },
   options?: BuildOptions,
-  normalizedInput?: NormalizedExamInput,
+  normalizedInput?: ReturnType<typeof normalizeExamInputs>,
 ): Observation[] {
-  const normalizedExams = normalizedInput ?? normalizeExamInputs(values);
-
-  if (normalizedExams.inputCount === 0) return [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const effectiveDateTime = optionsMerged.now();
-
-  const categoryByType: Record<ExamItem['type'], CodeableConcept | undefined> = {
-    laboratory: {
-      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'laboratory', display: 'Laboratory' }],
-      text: 'Laboratory',
-    },
-    imaging: {
-      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'imaging', display: 'Imaging' }],
-      text: 'Imaging',
-    },
-    other: {
-      coding: [{ system: OBSERVATION_CATEGORY_SYSTEM, code: 'survey', display: 'Survey' }],
-      text: 'Survey',
-    },
-  };
-
-  const statusByState: Record<ExamItem['state'], Observation['status']> = {
-    result: 'final',
-    pending: 'registered',
-  };
-const EXAM_CODE_SYSTEM = 'https://handover.app/fhir/CodeSystem/handover-exam';
-  const codeByType: Record<ExamItem['type'], CodeableConcept> = {
-    laboratory: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'lab' }], text: 'Laboratory result' },
-    imaging: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'imaging' }], text: 'Imaging result' },
-    other: { coding: [{ system: EXAM_CODE_SYSTEM, code: 'other' }], text: 'Diagnostic result' },
-  };
-  return normalizedExams.items.flatMap((exam) => {
-    const descriptionRaw = (exam as ExamItem | Record<string, unknown>)?.description;
-    const description =
-      typeof descriptionRaw === 'string' ? descriptionRaw.trim() : typeof descriptionRaw === 'number' ? String(descriptionRaw) : '';
-    const len = typeof descriptionRaw === 'string' ? description.length : undefined;
-    const examType = (exam as ExamItem | Record<string, unknown>)?.type as ExamItem['type'] | undefined;
-    const examState = (exam as ExamItem | Record<string, unknown>)?.state as ExamItem['state'] | undefined;
-
-    if (!exam || typeof exam !== 'object' || examType === undefined || examState === undefined) {
-      warnExamsItemSkipped({
-        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
-        reason: 'invalid_shape',
-        examType: typeof examType === 'string' ? examType : undefined,
-        examState: typeof examState === 'string' ? examState : undefined,
-        len,
-      });
-      return [];
-    }
-
-    if (!description) {
-      warnExamsItemSkipped({
-        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
-        reason: 'empty_description',
-        examType: typeof examType === 'string' ? examType : undefined,
-        examState: typeof examState === 'string' ? examState : undefined,
-        len: len ?? 0,
-      });
-      return [];
-    }
-
-    if (!isExamType(examType)) {
-      warnExamsItemSkipped({
-        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
-        reason: 'unknown_type',
-        examType: typeof examType === 'string' ? examType : undefined,
-        examState: typeof examState === 'string' ? examState : undefined,
-        len,
-      });
-      return [];
-    }
-
-    if (!isExamState(examState)) {
-      warnExamsItemSkipped({
-        code: 'HANDOVER_EXAMS_ITEM_SKIPPED',
-        reason: 'unknown_state',
-        examType,
-        examState: typeof examState === 'string' ? examState : undefined,
-        len,
-      });
-      return [];
-    }
-
-    return [
-      {
-        resourceType: 'Observation',
-        status: statusByState[examState],
-        category: categoryByType[examType] ? [categoryByType[examType] as CodeableConcept] : [],
-        code: codeByType[examType],
-        valueString: description,
-        subject,
-        encounter,
-        effectiveDateTime,
-      },
-    ];
-  });
+  return mapExamObservationsImpl(specificCareMapperDependencies, values, options, normalizedInput);
 }
 
 export function mapProcedures(
-  values: CareValues & { procedures?: ProcedureItem[] },
+  values: { patientId: string; encounterId?: string; procedures?: ProcedureItem[] },
   options?: BuildOptions,
 ): Procedure[] {
-  const procedures = Array.isArray(values.procedures)
-    ? values.procedures
-    : values.procedures !== undefined && values.procedures !== null
-      ? ([values.procedures] as Array<ProcedureItem | unknown>)
-      : [];
-  if (procedures.length === 0) return [];
-  const optionsMerged = resolveOptions(options);
-  const subject = patientReference(values.patientId);
-  const encounter = encounterReference(values.encounterId);
-  const performedDateTime = optionsMerged.now();
-
-  return procedures.flatMap((procedure) => {
-    if (!procedure || typeof procedure !== 'object') {
-      warnProceduresItemSkipped({
-        code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED',
-        reason: 'invalid_shape',
-        done: undefined,
-      });
-      return [];
-    }
-
-    const descriptionRaw = (procedure as ProcedureItem | Record<string, unknown>).description;
-    const description =
-      typeof descriptionRaw === 'string' ? descriptionRaw.trim() : typeof descriptionRaw === 'number' ? String(descriptionRaw) : '';
-    const len = typeof descriptionRaw === 'string' ? description.length : undefined;
-    const doneRaw = (procedure as ProcedureItem | Record<string, unknown>).done;
-
-    if (doneRaw !== undefined && typeof doneRaw !== 'boolean') {
-      warnProceduresItemSkipped({
-        code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED',
-        reason: 'invalid_shape',
-        done: undefined,
-        len,
-      });
-      return [];
-    }
-
-    if (!description) {
-      warnProceduresItemSkipped({
-        code: 'HANDOVER_PROCEDURES_ITEM_SKIPPED',
-        reason: 'empty_description',
-        done: typeof doneRaw === 'boolean' ? doneRaw : undefined,
-        len: len ?? 0,
-      });
-      return [];
-    }
-
-    const done = doneRaw === true;
-    return [
-      {
-        resourceType: 'Procedure',
-        status: done ? 'completed' : 'preparation',
-        code: {
-          coding: [
-            {
-              system: 'urn:handover-pro:procedure',
-              code: done ? 'completed' : 'planned',
-              display: 'Procedure',
-            },
-          ],
-          text: description,
-        },
-        subject,
-        encounter,
-        performedDateTime: done ? performedDateTime : undefined,
-      },
-    ];
-  });
+  return mapProceduresImpl(specificCareMapperDependencies, values, options);
 }
 
 function mapEvaObservation(
   pain: PainAssessment | undefined,
   context: MappingContext,
 ): Observation | null {
-  if (!pain) return null;
-
-  const components: ObservationComponent[] = [];
-  const note: Annotation[] = [{ text: `Dolor reportado: ${pain.hasPain ? 'Sí' : 'No'}` }];
-
-  if (pain.location) {
-    components.push({
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:component', code: 'pain-location', display: 'Pain location' },
-        ],
-        text: 'Pain location',
-      },
-      valueString: pain.location,
-    });
-  }
-
-  if (pain.actionsTaken) {
-    components.push({
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:component', code: 'pain-actions', display: 'Actions taken' },
-        ],
-        text: 'Actions taken',
-      },
-      valueString: pain.actionsTaken,
-    });
-  }
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(FHIR_CODES.SCALES.EVA, 'Escala EVA del dolor'),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    valueInteger: pain.evaScore ?? undefined,
-    component: components.length > 0 ? components : undefined,
-    note,
-  };
+  return mapEvaObservationImpl(scalesMapperDependencies, pain, context);
 }
 
 function mapBradenObservation(
   braden: BradenScale | undefined,
   context: MappingContext,
 ): Observation | null {
-  if (!braden) return null;
-
-  const components: ObservationComponent[] = [
-    {
-      code: {
-        coding: [
-          {
-            system: 'urn:handover-pro:braden',
-            code: 'sensory-perception',
-            display: 'Sensory perception',
-          },
-        ],
-        text: 'Sensory perception',
-      },
-      valueInteger: braden.sensoryPerception,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:braden', code: 'moisture', display: 'Moisture' },
-        ],
-        text: 'Moisture',
-      },
-      valueInteger: braden.moisture,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:braden', code: 'activity', display: 'Activity' },
-        ],
-        text: 'Activity',
-      },
-      valueInteger: braden.activity,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:braden', code: 'mobility', display: 'Mobility' },
-        ],
-        text: 'Mobility',
-      },
-      valueInteger: braden.mobility,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:braden', code: 'nutrition', display: 'Nutrition' },
-        ],
-        text: 'Nutrition',
-      },
-      valueInteger: braden.nutrition,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:braden', code: 'friction-shear', display: 'Friction/shear' },
-        ],
-        text: 'Friction/shear',
-      },
-      valueInteger: braden.frictionShear,
-    },
-  ];
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(FHIR_CODES.SCALES.BRADEN, 'Escala de Braden'),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    valueInteger: braden.totalScore,
-    component: components,
-    note: [{ text: `Nivel de riesgo: ${braden.riskLevel}` }],
-  };
+  return mapBradenObservationImpl(scalesMapperDependencies, braden, context);
 }
 
 function mapGlasgowObservation(
   glasgow: GlasgowScale | undefined,
   context: MappingContext,
 ): Observation | null {
-  if (!glasgow) return null;
-
-  const components: ObservationComponent[] = [
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:glasgow', code: 'eye', display: 'Respuesta ocular' },
-        ],
-        text: 'Respuesta ocular',
-      },
-      valueInteger: glasgow.eye,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:glasgow', code: 'verbal', display: 'Respuesta verbal' },
-        ],
-        text: 'Respuesta verbal',
-      },
-      valueInteger: glasgow.verbal,
-    },
-    {
-      code: {
-        coding: [
-          { system: 'urn:handover-pro:glasgow', code: 'motor', display: 'Respuesta motora' },
-        ],
-        text: 'Respuesta motora',
-      },
-      valueInteger: glasgow.motor,
-    },
-  ];
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(FHIR_CODES.SCALES.GLASGOW, 'Escala de Glasgow'),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    valueQuantity: {
-      value: glasgow.total,
-      unit: 'score',
-    },
-    component: components,
-    note: [{ text: `Severidad: ${glasgow.severity}` }],
-  };
+  return mapGlasgowObservationImpl(scalesMapperDependencies, glasgow, context);
 }
 
 export function mapRiskConditions(
   risksStructured: RiskItem[] | undefined,
   context: MappingContext,
 ): Condition[] {
-  const activeRisks = (risksStructured ?? []).filter((risk) => risk.present === true);
-  if (activeRisks.length === 0) return [];
-
-  const { subject, encounter, effectiveDateTime } = context;
-  const riskCodeMap: Partial<Record<RiskItem['type'], FhirCodeDescriptor>> = {
-    fall: FHIR_CODES.RISK.FALL,
-    pressureUlcer: FHIR_CODES.RISK.PRESSURE_ULCER,
-    isolation: FHIR_CODES.RISK.SOCIAL_ISOLATION,
-  };
-
-  return activeRisks
-    .map((risk) => ({ risk, code: riskCodeMap[risk.type] }))
-    .filter((entry): entry is { risk: RiskItem; code: FhirCodeDescriptor } => Boolean(entry.code))
-    .map((entry) => ({
-      resourceType: 'Condition',
-      clinicalStatus: conditionClinicalStatusActive,
-      verificationStatus: conditionVerificationStatusUnconfirmed,
-      category: [conditionProblemListCategory],
-      code: codeableConceptFromCode(entry.code),
-      subject,
-      encounter,
-      onsetDateTime: effectiveDateTime,
-      recordedDate: effectiveDateTime,
-      note: entry.risk.notes ? [{ text: entry.risk.notes }] : undefined,
-    }));
+  return mapRiskConditionsImpl(scalesMapperDependencies, risksStructured, context);
 }
 
 export function mapDocumentReferenceAudio(
@@ -2968,165 +1712,29 @@ function mapAdministrativeObservation(
   values: CompositionValues,
   context: MappingContext,
 ): Observation | null {
-  if (!values.administrativeData) return null;
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.administrative),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    issued: context.effectiveDateTime,
-    valueString: administrativeSummaryText(values.administrativeData),
-  };
+  return mapAdministrativeObservationImpl(compositionMapperDependencies, values, context);
 }
 
 function mapSbarObservations(values: CompositionValues, context: MappingContext): Observation[] {
-  const sbar = values.sbar;
-  if (!sbar) return [];
-
-  const components: ObservationComponent[] = [];
-
-  const addComponent = (code: string, display: string, value?: string | null) => {
-    const trimmed = value?.trim();
-    if (!trimmed) return;
-
-    components.push({
-      code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_SBAR,
-            code,
-            display,
-          },
-        ],
-        text: display,
-      },
-      valueString: trimmed,
-    });
-  };
-
-  addComponent('situation', 'Situation', sbar.situation);
-  addComponent('background', 'Background', sbar.background);
-  addComponent('assessment', 'Assessment', sbar.assessment);
-  addComponent('recommendation', 'Recommendation', sbar.recommendation);
-
-  if (components.length === 0) return [];
-
-  return [
-    {
-      resourceType: 'Observation',
-      status: 'final',
-      category: [surveyCategoryConcept],
-      code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.sbar),
-      subject: context.subject,
-      encounter: context.encounter,
-      effectiveDateTime: context.effectiveDateTime,
-      issued: context.effectiveDateTime,
-      component: components,
-    },
-  ];
+  return mapSbarObservationsImpl(compositionMapperDependencies, values, context);
 }
 
 function mapBedsideChecklistObservation(
   checklist: HandoverBedsideChecklist,
   context: MappingContext,
 ): Observation | null {
-  if (!checklist) return null;
-
-  const components: ObservationComponent[] = [];
-  const notes: Annotation[] = [];
-
-  Object.entries(checklist).forEach(([key, value]) => {
-    if (key === 'bedsideNotes' && typeof value === 'string' && value.trim()) {
-      notes.push({ text: value.trim() });
-      return;
-    }
-
-    if (typeof value === 'boolean') {
-      components.push({
-        code: {
-          coding: [
-            {
-              system: TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST,
-              code: key,
-              display: key,
-            },
-          ],
-          text: key,
-        },
-        valueCodeableConcept: {
-          coding: [
-            {
-              system: TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN,
-              code: value ? 'yes' : 'no',
-              display: value ? 'Yes' : 'No',
-            },
-          ],
-          text: value ? 'Yes' : 'No',
-        },
-      });
-    }
-  });
-
-  if (components.length === 0 && notes.length === 0) return null;
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.bedsideChecklist),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    issued: context.effectiveDateTime,
-    component: components.length > 0 ? components : undefined,
-    note: notes.length > 0 ? notes : undefined,
-  };
+  return mapBedsideChecklistObservationImpl(compositionMapperDependencies, checklist, context);
 }
 
 function mapSummaryObservation(summary: string | null | undefined, context: MappingContext): Observation | null {
-  const trimmed = summary?.trim();
-  if (!trimmed) return null;
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.notes),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    issued: context.effectiveDateTime,
-    valueString: trimmed,
-  };
+  return mapSummaryObservationImpl(compositionMapperDependencies, summary, context);
 }
 
 function mapPsychosocialObservation(
   psychosocial: PsychosocialCare | undefined,
   context: MappingContext,
 ): Observation | null {
-  if (!psychosocial) return null;
-
-  const emotionalStatus = psychosocial.emotionalStatus?.trim() || 'Sin novedad';
-  const familyVisits = psychosocial.familyVisits ? 'Sí' : 'No';
-  const familyNotes = psychosocial.familyNotes?.trim();
-  const extra = familyNotes ? ` (${familyNotes})` : '';
-  const narrative = `Estado emocional: ${emotionalStatus}. Visitas familiares: ${familyVisits}${extra}.`;
-
-  return {
-    resourceType: 'Observation',
-    status: 'final',
-    category: [surveyCategoryConcept],
-    code: codeableConceptFromCode(HANDOVER_OBSERVATION_CODES.notes, 'Psychosocial notes'),
-    subject: context.subject,
-    encounter: context.encounter,
-    effectiveDateTime: context.effectiveDateTime,
-    issued: context.effectiveDateTime,
-    valueString: narrative,
-  };
+  return mapPsychosocialObservationImpl(compositionMapperDependencies, psychosocial, context);
 }
 
 export function buildComposition(
@@ -3134,236 +1742,7 @@ export function buildComposition(
   refs: BundleReferenceIndex,
   options?: BuildOptions,
 ): Composition {
-  const optionsMerged = resolveOptions(options);
-  const authorRef = ensureAuthorReference(values);
-  const type = values.composition?.type ?? DEFAULT_COMPOSITION_TYPE;
-  const status = values.composition?.status ?? 'final';
-  const title = values.composition?.title ?? 'Clinical handover summary';
-
-  const sections: CompositionSection[] = [];
-  const attesters = [
-    ...(values.composition?.attesters ?? []),
-    ...attestersFromSignatures(values.signatures),
-  ];
-
-  if (refs.administrative.length > 0) {
-    sections.push({
-      title: 'Administrative',
-      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.administrative, 'Administrative'),
-      entry: refs.administrative.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.vitals.length > 0) {
-    sections.push({
-      title: 'Vital signs',
-      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.vitals, 'Vital signs'),
-      entry: refs.vitals.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.care.length > 0) {
-    sections.push({
-      title: 'Care / Treatments',
-      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.care, 'Care / Treatments'),
-      entry: refs.care.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.sbar.length > 0) {
-    sections.push({
-      title: 'SBAR',
-      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.sbar, 'SBAR'),
-      entry: refs.sbar.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.bedsideChecklist.length > 0) {
-    sections.push({
-      title: 'Bedside checklist',
-      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.bedsideChecklist, 'Bedside checklist'),
-      entry: refs.bedsideChecklist.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.notes.length > 0) {
-    sections.push({
-      title: 'Notes / Summary',
-      code: codeableConceptFromCode(COMPOSITION_SECTION_CODES.notes, 'Notes / Summary'),
-      entry: refs.notes.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.medications.length > 0) {
-    sections.push({
-      title: 'Medications',
-      code: compositionSectionConcept('medications', 'Medications'),
-      entry: refs.medications.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.treatments.length > 0) {
-    sections.push({
-      title: 'Tratamientos no farmacológicos',
-      code: compositionSectionConcept('treatments', 'Non-pharmacological treatments'),
-      entry: refs.treatments.map((reference) => ({ reference })),
-    });
-  }
-  if (refs.outcomes.length > 0) {
-    sections.push({
-      title: 'Resultados esperados (NOC)',
-      code: compositionSectionConcept('outcomes', 'NOC outcomes'),
-      entry: refs.outcomes.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.exams.length > 0) {
-    sections.push({
-      title: 'Exámenes',
-      code: compositionSectionConcept('exams', 'Exámenes'),
-      entry: refs.exams.map((reference) => ({ reference })),
-    });
-  } else if ((values.sectionSources?.exams ?? 0) > 0) {
-    warnCompositionSectionOmitted('exams');
-  }
-
-  if (refs.procedures.length > 0) {
-    sections.push({
-      title: 'Procedimientos',
-      code: compositionSectionConcept('procedures', 'Procedimientos'),
-      entry: refs.procedures.map((reference) => ({ reference })),
-    });
-  } else if ((values.sectionSources?.procedures ?? 0) > 0) {
-    warnCompositionSectionOmitted('procedures');
-  }
-
-  if (refs.oxygen.length > 0) {
-    sections.push({
-      title: 'Oxygen therapy',
-      code: compositionSectionConcept('oxygen', 'Oxygen therapy'),
-      entry: refs.oxygen.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.devices.length > 0) {
-    sections.push({
-      title: 'Devices',
-      code: compositionSectionConcept('devices', 'Devices'),
-      entry: refs.devices.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.nutrition.length > 0) {
-    sections.push({
-      title: 'Nutrition',
-      code: compositionSectionConcept('nutrition', 'Nutrition'),
-      entry: refs.nutrition.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.elimination.length > 0) {
-    sections.push({
-      title: 'Elimination',
-      code: compositionSectionConcept('elimination', 'Elimination'),
-      entry: refs.elimination.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.mobilitySkin.length > 0) {
-    sections.push({
-      title: 'Mobility and Skin',
-      code: compositionSectionConcept('mobility-skin', 'Mobility and Skin'),
-      entry: refs.mobilitySkin.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.risks.length > 0) {
-    sections.push({
-      title: 'Risks',
-      code: compositionSectionConcept('risks', 'Risks'),
-      entry: refs.risks.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.detectedIssues && refs.detectedIssues.length > 0) {
-    sections.push({
-      title: 'Detected issues',
-      code: compositionSectionConcept('detected-issues', 'Detected issues'),
-      entry: refs.detectedIssues.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.diagnoses && refs.diagnoses.length > 0) {
-    sections.push({
-      title: 'Diagnoses',
-      code: compositionSectionConcept('diagnoses', 'Diagnoses'),
-      entry: refs.diagnoses.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.fluidBalance.length > 0) {
-    sections.push({
-      title: 'Fluid balance',
-      code: compositionSectionConcept('fluid-balance', 'Fluid balance'),
-      entry: refs.fluidBalance.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.pain.length > 0) {
-    sections.push({
-      title: 'Pain assessment',
-      code: compositionSectionConcept('pain', 'Pain assessment'),
-      entry: refs.pain.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.braden.length > 0) {
-    sections.push({
-      title: 'Braden scale',
-      code: compositionSectionConcept('braden', 'Braden scale'),
-      entry: refs.braden.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.glasgow.length > 0) {
-    sections.push({
-      title: 'Glasgow scale',
-      code: compositionSectionConcept('glasgow', 'Glasgow scale'),
-      entry: refs.glasgow.map((reference) => ({ reference })),
-    });
-  }
-
-  if (refs.attachments.length > 0) {
-    sections.push({
-      title: 'Attachments',
-      code: compositionSectionConcept('attachments', 'Attachments'),
-      entry: refs.attachments.map((reference) => ({ reference })),
-    });
-  }
-
-  const subject = patientReference(values.patientId);
-  const encounter = values.encounterId ? encounterReference(values.encounterId) : undefined;
-
-  const shiftPeriod =
-    values.administrativeData?.shiftStart && values.administrativeData?.shiftEnd
-      ? { start: values.administrativeData.shiftStart, end: values.administrativeData.shiftEnd }
-      : undefined;
-
-  const now = typeof optionsMerged?.now === 'function' ? optionsMerged.now() : new Date().toISOString();
-
-  return {
-    resourceType: 'Composition',
-    status,
-    type,
-    subject,
-    encounter,
-    author: [authorRef],
-    title,
-    date: now,
-    event: shiftPeriod ? [{ period: shiftPeriod }] : undefined,
-    section: sections.length > 0 ? sections : undefined,
-    attester: attesters.length > 0 ? attesters : undefined,
-  };
+  return buildCompositionImpl(compositionMapperDependencies, values, refs, options);
 }
 
 export function buildHandoverBundle(
@@ -4895,7 +3274,27 @@ export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; er
 }
 
 export type {
+  Annotation,
   Observation,
+  ObservationComponent,
+  CodeableConcept,
+  Quantity,
+  Reference,
+  Meta,
+  ResolvedBuildOptions,
+  ObservationVitalsInput,
+  MedicationStatementInput,
+  OxygenTherapyInput,
+  AttesterInput,
+  MedicationValues,
+  OxygenValues,
+  DocumentValues,
+  OutcomeValues,
+  CompositionValues,
+  BundleReferenceIndex,
+  MappingContext,
+  Signature,
+  CompositionAttester,
   MedicationStatement,
   MedicationAdministration,
   Procedure,
@@ -4914,4 +3313,17 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
 
