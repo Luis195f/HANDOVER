@@ -1,0 +1,324 @@
+{
+  "description": "Known explicit any/ts-ignore/ts-nocheck usages in pilot-grade sensitive HANDOVER source paths. New entries fail CI until reviewed.",
+  "generatedFrom": [
+    "src/lib/auth.ts",
+    "src/security",
+    "src/lib/queue.ts",
+    "src/lib/sync.ts",
+    "src/lib/fhir-map.ts",
+    "src/lib/fhir-map",
+    "src/validation",
+    "src/lib/profile-runtime.ts",
+    "src/screens/HandoverForm.tsx",
+    "src/config/profiles"
+  ],
+  "entries": [
+    {
+      "file": "src/lib/auth.ts",
+      "kind": "any",
+      "text": "    const mod: any = await import('expo-secure-store');",
+      "count": 1
+    },
+    {
+      "file": "src/lib/auth.ts",
+      "kind": "any",
+      "text": "    const resolved: any = mod?.default ?? mod;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/fhir-map.ts",
+      "kind": "any",
+      "text": "        resource: z.record(z.any()),",
+      "count": 1
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "if (_isWebRuntime && typeof (globalThis as any).SharedArrayBuffer === 'undefined') {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "  (globalThis as any).SharedArrayBuffer = ArrayBuffer;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "const SAB = (globalThis as any).SharedArrayBuffer as (typeof SharedArrayBuffer | undefined);",
+      "count": 1
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "    if (typeof maybeEnvelope === \"object\" && maybeEnvelope && \"v\" in (maybeEnvelope as any) && \"ct\" in (maybeEnvelope as any)) {",
+      "count": 2
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "  if ((row as any).status === \"pending\" || (row as any).status === \"inFlight\" || (row as any).status === \"synced\" || (row as any).status === \"error\") {",
+      "count": 4
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "    return (row as any).status as SyncStatus;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "  if ((row as any).syncStatus === \"pending\" || (row as any).syncStatus === \"inFlight\" || (row as any).syncStatus === \"synced\" || (row as any).syncStatus === \"error\") {",
+      "count": 4
+    },
+    {
+      "file": "src/lib/queue.ts",
+      "kind": "any",
+      "text": "    return (row as any).syncStatus as SyncStatus;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "type Bundle = { resourceType: 'Bundle'; type?: string; entry?: any[]; identifier?: any; meta?: any };",
+      "count": 3
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  entry?: any[];",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "    return isOnlineState(state as any);",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "      if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "function attachTxIdToEntry(entry: any, txId: string, index: number) {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  bundle: { resourceType: 'Bundle'; entry?: any[]; identifier?: any; type?: string },",
+      "count": 2
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "      _validationErrors: (bundle as any)._validationErrors,",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "      (globalThis as any).__insecureKV ??= new Map<string, string>();",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "      (globalThis as any).__insecureKV.set(key, value);",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "    const map: Map<string, string> | undefined = (globalThis as any).__insecureKV;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "          if (error && typeof error === 'object' && 'validationErrors' in (error as any)) {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "              response: { ok: false, status: 422 } as any,",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "function ensureTransactionBundle(bundle: any): TransactionBundle {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  const normalized: any = Array.isArray(bundle.entry)",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "function migrateLegacyQueueItem(raw: any): LegacyQueueItem | null {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "    const payload = raw.payload as any;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  bundle: any;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "function isRawBundleInput(value: unknown): value is { resourceType?: string; entry?: any[] } {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  return !!value && typeof value === 'object' && (value as any).resourceType === 'Bundle';",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "function extractPatientIdFromBundle(bundle: { entry?: any[] }): string | undefined {",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  input: EnqueueBundleInput | { resourceType: string; entry?: any[] },",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "        typeof (res as any)?.status === 'number'",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "          ? (res as any).status",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "        (res as any)?.ok === true ||",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "    resource: any;",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "      ? cloned.code.coding.find((c: any) => c?.system === 'http://loinc.org')?.code",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "        ...existing.filter((it: any) => it && typeof it === 'object'),",
+      "count": 1
+    },
+    {
+      "file": "src/lib/sync.ts",
+      "kind": "any",
+      "text": "  if (typeof values !== 'object' || values === null || !('patientId' in values) || !(values as any).patientId) {",
+      "count": 1
+    },
+    {
+      "file": "src/screens/HandoverForm.tsx",
+      "kind": "any",
+      "text": "    .map((it) => ({ key: String((it as any)?.key ?? \"\") }))",
+      "count": 1
+    },
+    {
+      "file": "src/screens/HandoverForm.tsx",
+      "kind": "any",
+      "text": "      (completed as any)[key] = value;",
+      "count": 1
+    },
+    {
+      "file": "src/screens/HandoverForm.tsx",
+      "kind": "any",
+      "text": "          method: ((signaturesValue.outgoing as any).method ?? 'session') as OutgoingSig['method'],",
+      "count": 1
+    },
+    {
+      "file": "src/screens/HandoverForm.tsx",
+      "kind": "any",
+      "text": "                  method: (((next.outgoing as any).method ?? 'session') as OutgoingSig['method']),",
+      "count": 1
+    },
+    {
+      "file": "src/security/acl.ts",
+      "kind": "any",
+      "text": "  const permissionsArray = (session as any).permissions;",
+      "count": 1
+    },
+    {
+      "file": "src/security/acl.ts",
+      "kind": "any",
+      "text": "  const scopeString = (session as any).scope;",
+      "count": 1
+    },
+    {
+      "file": "src/security/acl.ts",
+      "kind": "any",
+      "text": "  const scopesArray = (session as any).scopes;",
+      "count": 1
+    },
+    {
+      "file": "src/security/auth.tsx",
+      "kind": "any",
+      "text": "        hasAudience: Boolean((options.config as any)?.audience),",
+      "count": 1
+    },
+    {
+      "file": "src/security/auth.tsx",
+      "kind": "any",
+      "text": "        hasAudience: Boolean((merged as any)?.audience),",
+      "count": 1
+    },
+    {
+      "file": "src/security/auth.tsx",
+      "kind": "any",
+      "text": "    extraParams: buildExtraParams((merged as any).audience),",
+      "count": 1
+    },
+    {
+      "file": "src/validation/form-hooks.ts",
+      "kind": "any",
+      "text": "    resolver: zodResolver(schema as any),",
+      "count": 1
+    },
+    {
+      "file": "src/validation/schemas.ts",
+      "kind": "any",
+      "text": "    const v = val as any;",
+      "count": 1
+    }
+  ]
+}
+
