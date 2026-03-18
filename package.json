@@ -8,11 +8,24 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test:legacy": "jest --config jest.config.cjs --passWithNoTests",
     "test": "jest --config jest.config.cjs --passWithNoTests",
     "test:watch": "jest --config jest.config.cjs --watch",
+    "test:legacy:watch": "jest --config jest.config.cjs --watch",
     "test:cov": "jest --config jest.config.cjs --coverage",
+    "test:legacy:cov": "jest --config jest.config.cjs --coverage",
+    "test:unit": "vitest run",
+    "test:unit:cov": "vitest run --coverage",
+    "test:pilot": "vitest run --config vitest.pilot.config.ts",
+    "test:pilot:coverage": "vitest run --config vitest.pilot.config.ts --coverage",
+    "test:pilot:coverage:ci": "vitest run --config vitest.pilot.config.ts --reporter=verbose --coverage --coverage.reporter=lcov --coverage.reporter=cobertura --coverage.reportsDirectory=coverage",
+    "test:smoke:forms": "vitest run src/screens/__tests__/handover.sections.spec.tsx src/screens/__tests__/handover.visibility.spec.ts src/screens/handover/__tests__/submission.spec.ts tests/screens/HandoverForm.draft.spec.tsx tests/screens/HandoverForm.network-errors.spec.tsx tests/screens/HandoverForm.patientHeader.spec.tsx tests/screens/HandoverForm.sbar.spec.tsx",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
     "validate:fhir": "tsx scripts/validate-fhir.ts",
+    "validate:fhir:fixture": "tsx scripts/validate-fhir.ts tests/fixtures/fhir/minimal-transaction-bundle.json",
+    "gate:any-sensitive": "tsx scripts/check-sensitive-anys.ts",
+    "gate:any-sensitive:write": "tsx scripts/check-sensitive-anys.ts --write-baseline",
+    "quality:pilot": "pnpm typecheck && pnpm lint:ci && pnpm gate:any-sensitive && pnpm test:pilot:coverage && pnpm validate:fhir:fixture",
     "test:e2e": "playwright test",
     "lint:ci": "eslint . --max-warnings=0"
   },
@@ -101,3 +114,4 @@
   },
   "private": true
 }
+

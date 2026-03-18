@@ -6,13 +6,19 @@
 
 # How to test
 ```
-# Example commands
-pnpm -w typecheck
-pnpm -w vitest run --coverage
+# Pilot-grade quality gates
+pnpm -w quality:pilot
+
+# Focused reruns when needed
+pnpm -w test:pilot:coverage
+pnpm -w test:smoke:forms
+pnpm -w gate:any-sensitive
+pnpm -w validate:fhir:fixture
 ```
 
 # Coverage
-- Note: If coverage fails due to registry access for @vitest/coverage-v8, note it here.
+- Note: pilot-grade coverage runs through `vitest.pilot.config.ts`.
+- Note: If coverage fails due to registry access for `@vitest/coverage-v8`, note it here.
 
 # PHI/Security
 - [ ] No PHI in logs/snapshots
@@ -24,3 +30,4 @@ pnpm -w vitest run --coverage
 - [ ] Tests/commands in this PR are documented and results reported
 - [ ] Coverage expectations and gaps are clearly stated
 - [ ] No PHI or sensitive data introduced
+

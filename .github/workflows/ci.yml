@@ -39,11 +39,14 @@ jobs:
         run: pnpm -w typecheck
 
       - name: Lint
-        run: pnpm -w lint
+        run: pnpm -w lint:ci
 
-      # Genera cobertura Cobertura XML en /coverage
-      - name: Unit and integration tests (with coverage)
-        run: pnpm -w vitest run --reporter=verbose --coverage --coverage.reporter=cobertura --coverage.reportsDirectory=coverage
+      - name: Sensitive any guard
+        run: pnpm -w gate:any-sensitive
+
+      # Genera cobertura pilot-grade (lcov + Cobertura XML) en /coverage
+      - name: Pilot-grade critical suites (with coverage)
+        run: pnpm -w test:pilot:coverage:ci
 
       # Python deps para genbadge (FIX: pin setuptools para recuperar pkg_resources)
       - name: Install python deps for genbadge
@@ -85,11 +88,11 @@ jobs:
         run: pnpm -w test:e2e
 
       - name: Validate FHIR bundles
-        run: pnpm -w validate:fhir tests/fixtures/fhir/minimal-transaction-bundle.json
+        run: pnpm -w validate:fhir:fixture
 
       - name: Upload unit coverage
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
-          path: coverage/unit/lcov.info
+          path: coverage/lcov.info
 

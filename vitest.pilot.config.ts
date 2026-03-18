@@ -1,0 +1,108 @@
+import { defineConfig } from 'vitest/config';
+
+import baseConfig from './vitest.config';
+
+const PILOT_GRADE_SUITES = [
+  'tests/lib/auth.spec.ts',
+  'tests/lib/queue.spec.ts',
+  'tests/lib/sync.spec.ts',
+  'tests/lib/sync-validation.test.ts',
+  'tests/security/auth.spec.ts',
+  'tests/security/auth.refresh.spec.ts',
+  'tests/security/auth-service.spec.ts',
+  'tests/security/oauth-service.spec.ts',
+  'tests/security/acl.spec.ts',
+  'tests/security/capabilities.routes.spec.ts',
+  'tests/sync.spec.ts',
+  'tests/offline-sync.spec.ts',
+  'src/security/__tests__/auth.refresh.spec.ts',
+  'src/security/__tests__/auth.logout.spec.ts',
+  'src/security/__tests__/auth.capabilities-cache.spec.tsx',
+  'src/security/__tests__/capabilities.spec.ts',
+  'src/security/__tests__/capabilities.cache.spec.ts',
+  'src/lib/__tests__/acl.bypass.production.spec.ts',
+  'src/lib/__tests__/queue.encryption.spec.ts',
+  'src/lib/__tests__/queue.test.ts',
+  'src/lib/__tests__/sync.offline.spec.ts',
+  'src/lib/__tests__/sync.queue.spec.ts',
+  'src/lib/__tests__/sync.test.ts',
+  'src/lib/__tests__/sync.transaction.spec.ts',
+  'src/lib/__tests__/sync.validation.spec.ts',
+  'src/lib/__tests__/sync-errors.spec.ts',
+  'tests/queue/offline-queue.spec.ts',
+  'src/lib/__tests__/fhir-map.bundle.integrity.spec.ts',
+  'src/lib/__tests__/fhir-map.public-compat.spec.ts',
+  'src/lib/__tests__/fhir-map.validation.spec.ts',
+  'tests/validation/handover-schema.spec.ts',
+  'tests/validation/handover.schemas.spec.ts',
+  'src/lib/__tests__/profile-runtime.spec.ts',
+  'src/screens/__tests__/handover.sections.spec.tsx',
+  'src/screens/__tests__/handover.visibility.spec.ts',
+  'src/screens/handover/__tests__/submission.spec.ts',
+  'tests/screens/HandoverForm.draft.spec.tsx',
+  'tests/screens/HandoverForm.network-errors.spec.tsx',
+  'tests/screens/HandoverForm.patientHeader.spec.tsx',
+  'tests/screens/HandoverForm.sbar.spec.tsx',
+  'tests/screens/HandoverForm.sbar-ai.spec.tsx',
+  'tests/screens/HandoverForm.validation.spec.tsx',
+  'tests/handover-form.signatures.spec.tsx',
+  'tests/handover-form.qr-rescan.test.ts',
+] as const;
+
+const PILOT_GRADE_COVERAGE_INCLUDE = [
+  'src/lib/auth.ts',
+  'src/security/auth.tsx',
+  'src/security/OAuthService.ts',
+  'src/security/acl.ts',
+  'src/security/capabilities.ts',
+  'src/lib/queue.ts',
+  'src/lib/sync.ts',
+  'src/lib/fhir-map.ts',
+  'src/validation/schemas.ts',
+  'src/lib/profile-runtime.ts',
+  'src/screens/HandoverForm.tsx',
+  'src/screens/handover/submission.ts',
+  'src/screens/handover/visibility.ts',
+] as const;
+
+const baseTestConfig = baseConfig.test ?? {};
+const baseCoverageConfig =
+  typeof baseTestConfig.coverage === 'object' && baseTestConfig.coverage !== null
+    ? baseTestConfig.coverage
+    : {};
+
+export default defineConfig({
+  ...baseConfig,
+  test: {
+    ...baseTestConfig,
+    include: [...PILOT_GRADE_SUITES],
+    coverage: {
+      ...baseCoverageConfig,
+      all: true,
+      include: [...PILOT_GRADE_COVERAGE_INCLUDE],
+      reporter: ['text', 'lcov'],
+      reportsDirectory: './coverage/pilot-grade',
+      thresholds: {
+        perFile: true,
+        lines: 0,
+        functions: 0,
+        branches: 0,
+        statements: 0,
+        'src/lib/auth.ts': { lines: 65, statements: 65, functions: 80, branches: 50 },
+        'src/security/auth.tsx': { lines: 40, statements: 40, functions: 35, branches: 30 },
+        'src/security/OAuthService.ts': { lines: 55, statements: 55, functions: 50, branches: 40 },
+        'src/security/acl.ts': { lines: 75, statements: 75, functions: 80, branches: 60 },
+        'src/security/capabilities.ts': { lines: 74, statements: 74, functions: 80, branches: 65 },
+        'src/lib/queue.ts': { lines: 60, statements: 60, functions: 70, branches: 55 },
+        'src/lib/sync.ts': { lines: 70, statements: 70, functions: 80, branches: 55 },
+        'src/lib/fhir-map.ts': { lines: 45, statements: 45, functions: 40, branches: 30 },
+        'src/validation/schemas.ts': { lines: 85, statements: 85, functions: 80, branches: 70 },
+        'src/lib/profile-runtime.ts': { lines: 80, statements: 80, functions: 80, branches: 65 },
+        'src/screens/HandoverForm.tsx': { lines: 55, statements: 55, functions: 20, branches: 45 },
+        'src/screens/handover/submission.ts': { lines: 80, statements: 80, functions: 85, branches: 65 },
+        'src/screens/handover/visibility.ts': { lines: 90, statements: 90, functions: 100, branches: 90 },
+      },
+    },
+  },
+});
+
