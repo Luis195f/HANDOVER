@@ -267,6 +267,8 @@ interface ProfileRuntimePackShape {
   notes?: readonly string[];
 }
 
+export type ProfileRuntimeLayerSource = 'core' | 'unit-profile' | 'specialty-overlay';
+
 export type ProfileRuntimeMergeKey =
   | 'enabledSections'
   | 'hiddenSections'
@@ -281,12 +283,99 @@ export type ProfileRuntimeMergeKey =
   | 'visibleOutputs'
   | 'notes';
 
+export type ProfileRuntimeExtensionMode = 'additive' | 'sticky-hidden' | 'guarded-visibility';
+
+export interface ProfileRuntimeExtensionPoint {
+  mode: ProfileRuntimeExtensionMode;
+  allowedSources: readonly Exclude<ProfileRuntimeLayerSource, 'core'>[];
+  description: string;
+}
+
+export const PROFILE_RUNTIME_EXTENSION_POINTS: Readonly<
+  Record<ProfileRuntimeMergeKey, ProfileRuntimeExtensionPoint>
+> = {
+  enabledSections: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Amplia secciones visibles sin abrir formularios paralelos.',
+  },
+  hiddenSections: {
+    mode: 'sticky-hidden',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Solo reduce visibilidad; una seccion ya ocultada no debe reabrirse por omision.',
+  },
+  requiredExtraFields: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Anade campos clinicos obligatorios del contexto resuelto.',
+  },
+  optionalExtraFields: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Anade campos opcionales contextuales sin duplicar formularios.',
+  },
+  focusAreas: {
+    mode: 'additive',
+    allowedSources: ['specialty-overlay'],
+    description: 'Permite a overlays reforzar focos clinicos sobre el mismo formulario base.',
+  },
+  explanations: {
+    mode: 'additive',
+    allowedSources: ['specialty-overlay'],
+    description: 'Explica por que un overlay esta activo sin alterar el payload clinico.',
+  },
+  scales: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Anade escalas sugeridas compatibles con el perfil base.',
+  },
+  sentinelEvents: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Anade eventos centinela esperables para la unidad o subespecialidad.',
+  },
+  visibility: {
+    mode: 'guarded-visibility',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Los UPP afinan visibilidad; los overlays solo pueden estrecharla y no reactivar campos ya cerrados.',
+  },
+  quickPicks: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Anade sugerencias contextuales con deduplicacion por id.',
+  },
+  visibleOutputs: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Declara salidas visibles esperadas del runtime resuelto.',
+  },
+  notes: {
+    mode: 'additive',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Anade notas de compatibilidad o rollout del perfil.',
+  },
+} as const;
+
+export const UNIT_PROFILE_RUNTIME_EXTENSION_KEYS = (
+  Object.entries(PROFILE_RUNTIME_EXTENSION_POINTS)
+    .filter(([, value]) => value.allowedSources.includes('unit-profile'))
+    .map(([key]) => key)
+) as ProfileRuntimeMergeKey[];
+
+export const SPECIALTY_OVERLAY_RUNTIME_EXTENSION_KEYS = (
+  Object.entries(PROFILE_RUNTIME_EXTENSION_POINTS)
+    .filter(([, value]) => value.allowedSources.includes('specialty-overlay'))
+    .map(([key]) => key)
+) as ProfileRuntimeMergeKey[];
+
 export interface ProfileRuntimeMergeTraceEntry {
-  source: 'core' | 'unit-profile' | 'specialty-overlay';
+  source: ProfileRuntimeLayerSource;
   profileId: ProfileSelectorId;
   label: string;
   additiveKeys: readonly ProfileRuntimeMergeKey[];
   overrideKeys: readonly ProfileRuntimeMergeKey[];
+  ignoredKeys?: readonly ProfileRuntimeMergeKey[];
+  guardrailNotes?: readonly string[];
 }
 
 export interface UnitProfileRuntimePack extends ProfileRuntimePackShape {
