@@ -17,7 +17,8 @@ Principios aplicados:
 3. Si `ENABLE_ICEA_BRIDGE=true`, HANDOVER crea o actualiza un `IceaBridgeRequest`.
 4. Se construye el payload analitico v1 en `backend/api/icea_payload_mapper.py`.
 5. La entrega a ICEA+ se intenta de forma desacoplada y best-effort desde `backend/api/icea_bridge_service.py`.
-6. HANDOVER persiste el ultimo estado visible (`queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`) y un resumen minimo del score si ICEA+ lo devuelve.
+6. El scheduler del bridge tiene una sola fuente de verdad: el service programa entregas nuevas al crear el request y evita reprogramar una request ya `queued`; los retries admin reutilizan el mismo helper con `force=true`.
+7. HANDOVER persiste el ultimo estado visible (`queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`) y un resumen minimo del score si ICEA+ lo devuelve.
 
 ## Payload analitico v1
 
@@ -64,12 +65,14 @@ Familias de campos implementadas:
 - `qualitySignals`: completitud estructurada, campos criticos presentes/faltantes, calidad del cierre y SBAR.
 - `uncertaintySignals`: `missingnessRate`, clase de completitud, `insufficientEvidence`, `staleData` y warnings trazables.
 - `provenance`: version de mapper, hash del Bundle y lineage minimo.
+- `identity.handoverId` y `identity.bundleId`: aliases estables del mismo identificador de handover para no romper consumidores clinicos u operativos.
 
 ## Integracion upstream real
 
-La entrega analitica actual del bridge se alinea con el repo ICEA+ verificado en C:\\h\\icea_mvp_v0_7:
+La entrega analitica actual del bridge se alinea con el repo ICEA+ verificado en C:\h\icea_mvp_v0_7:
 - POST /api/v1/icea-plus/score/ para scoring inmediato o enriquecido;
 - no se ha encontrado un endpoint real de status de score en ese upstream, por lo que HANDOVER no inventa polling remoto;
+- si ICEA+ responde con aliases de contrato (`status`/`state`/`result`, `formulaVersion`/`formula_version`, `warnings`/`issues`), HANDOVER los normaliza sin renombrar el contrato publico del bridge;
 - GET /api/icea/bridge/status/<handoverId>?refresh=true solo intenta refresco remoto si ICEA_BRIDGE_STATUS_PATH esta configurado explicitamente;
 - cuando no existe ese path, HANDOVER responde `remoteStatusSupported=false`, `remoteRefreshAttempted=false` y `localStatusIsAuthoritative=true` con estado local visible.
 
@@ -95,21 +98,45 @@ Se usa para reintentos o recalculo posterior cuando ya existen datos downstream 
 
 ## Persistencia local minima
 
+### Aliases y disciplina de scheduling
+
+Contrato estable y aditivo hoy:
+- `handoverId` es el alias publico de `bundleId` en respuestas del bridge; ambos se mantienen para compatibilidad.
+- la normalizacion remota acepta `status`, `state` o `result` como fuente de estado; `formulaVersion` o `formula_version`; `warnings` o `issues`.
+- los enqueues normales no reprograman una request ya `queued`; si el payload se refresca antes de entregar, se actualiza el request existente sin abrir otro side effect paralelo.
+- `POST /api/icea/bridge/retry/<bridgeId>` no crea un scheduler paralelo: usa el mismo helper del service con `force=true`.
+
+Ejemplo resumido de `bridgeRequest` expuesto a UI/operacion:
+
+```json
+{
+  "bridgeRequestId": "req-bridge-001:immediate_provisional",
+  "handoverId": "bundle-bridge-001",
+  "bundleId": "bundle-bridge-001",
+  "requestId": "req-bridge-001",
+  "payloadHash": "abc123...",
+  "attempts": 2,
+  "remoteRefs": {"jobId": "job-bridge-001"}
+}
+```
+
 Modelo principal: `backend/api/models.py::IceaBridgeRequest`
 
 Campos visibles y auditables:
 - linkage: `request_id`, `bundle_id`, `patient_id`, `unit_id`, `encounter_id`, `episode_id`;
 - trazabilidad: `bridge_request_id`, `idempotency_key`, `payload_hash`, `payload_json`;
 - estado: `status`, `attempts`, `last_error`, `last_http_status`, `sent_at`, `received_at`;
-- resultado minimo: `provisional`, `insufficient_evidence`, `contract_version`, `formula_version`, `score_summary_json`, `warnings_json`, `remote_refs_json`.
+- resultado minimo: `provisional`, `insufficient_evidence`, `contract_version`, `formula_version`, `score_summary_json`, `warnings_json`, `remote_refs_json`;
+- trazabilidad explicable expuesta por API: `bridgeRequestId`, `requestId`, `payloadHash`, `attempts` y `remoteRefs`.
 
 ## Endpoints backend
 
 - `GET /api/icea/bridge/status/<handoverId>`
   - roles: `nurse`, `supervisor`, `admin`
   - devuelve `bridgeRequest` + `summary` + metadata aditiva: `remoteStatusSupported`, `remoteRefreshAttempted`, `localStatusIsAuthoritative`
-- `GET /api/icea/bridge/status?patientId=&unitId=&shift=&status=&scoringMode=`
+- `GET /api/icea/bridge/status?bridgeRequestId=&requestId=&handoverId=&bundleId=&patientId=&unitId=&shift=&status=&scoringMode=`
   - roles: `supervisor`, `admin`
+  - `handoverId` y `bundleId` filtran el mismo campo estable (`bundle_id`)
   - devuelve lista resumida para dashboards/operacion
 - `GET /api/icea/bridge/summary/<handoverId>`
   - roles: `nurse`, `supervisor`, `admin`
@@ -147,3 +174,4 @@ Frontend:
 - El modo `enriched_followup` requiere disponibilidad de datos posteriores; HANDOVER no los inventa.
 - La vista admin actual expone resumen del bridge, no un dashboard analitico completo.
 - Sigue existiendo una advertencia heredada no relacionada en `backend/api/views.py` por `datetime.utcnow()` usada en auditoria existente.
+

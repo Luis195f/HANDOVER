@@ -38,6 +38,8 @@ export interface IceaBridgeRequest {
   insufficientEvidence: boolean;
   scoreSummary?: Record<string, unknown> | null;
   warnings: IceaBridgeWarning[];
+  attempts: number;
+  remoteRefs: Record<string, unknown>;
   lastError?: string | null;
   lastHttpStatus?: number | null;
   source: string;

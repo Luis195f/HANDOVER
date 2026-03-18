@@ -34,6 +34,11 @@ function normalizeResponseError(value: unknown): IceaBridgeResponseError | undef
   return { code, detail, remoteStatus };
 }
 
+function normalizeRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return { ...(value as Record<string, unknown>) };
+}
+
 function normalizeBridgeRequest(payload: Partial<IceaBridgeRequest> | null | undefined): IceaBridgeRequest {
   return {
     id: typeof payload?.id === 'number' ? payload.id : 0,
@@ -57,6 +62,8 @@ function normalizeBridgeRequest(payload: Partial<IceaBridgeRequest> | null | und
     insufficientEvidence: Boolean(payload?.insufficientEvidence),
     scoreSummary: payload?.scoreSummary && typeof payload.scoreSummary === 'object' ? payload.scoreSummary : null,
     warnings: normalizeWarnings(payload?.warnings),
+    attempts: typeof payload?.attempts === 'number' ? payload.attempts : 0,
+    remoteRefs: normalizeRecord(payload?.remoteRefs),
     lastError: typeof payload?.lastError === 'string' ? payload.lastError : null,
     lastHttpStatus: typeof payload?.lastHttpStatus === 'number' ? payload.lastHttpStatus : null,
     source: typeof payload?.source === 'string' ? payload.source : 'HANDOVER',

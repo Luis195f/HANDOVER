@@ -17,7 +17,7 @@ from backend.api.icea_bridge_service import (
     load_icea_bridge_settings,
     serialize_bridge_request,
 )
-from backend.api.icea_payload_mapper import build_icea_bridge_payload
+from backend.api.icea_payload_mapper import build_icea_bridge_payload, compute_payload_hash
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest, IceaPipelineSnapshot
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response, build_icea_bundle
 
@@ -440,6 +440,29 @@ class IceaBridgeServiceTests(TestCase):
         {
             'ENABLE_ICEA_BRIDGE': 'true',
             'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_enqueue_same_payload_does_not_schedule_duplicate_delivery(self, mock_schedule):
+        first = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        second = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+
+        self.assertEqual(first.id, second.id)
+        mock_schedule.assert_called_once_with(first.id)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
             'ICEA_API_BASE_URL': 'https://icea.example',
             'ICEA_API_BEARER_TOKEN': 'svc-token',
             'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
@@ -462,6 +485,41 @@ class IceaBridgeServiceTests(TestCase):
         self.assertEqual(bridge_request.last_error, STORED_BUNDLE_UNAVAILABLE_ERROR)
         self.assertEqual(bridge_request.bundle_id, 'bundle-bridge-001')
         mock_request.assert_not_called()
+
+
+    def test_normalize_remote_payload_accepts_alias_fields_and_collects_remote_refs(self):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-alias:immediate_provisional',
+            request_id='req-bridge-alias',
+            bundle_id='bundle-bridge-alias',
+            patient_id='pat-bridge-alias',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-alias:immediate_provisional:alias',
+            payload_hash='alias' * 16,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_SENT,
+        )
+
+        normalized = _normalize_remote_payload(
+            {
+                'state': 'completed',
+                'formulaVersion': 'icea_plus_v2',
+                'issues': ['Remote latency'],
+                'model': {'id': 'model-bridge-1', 'version': '2026.03'},
+                'jobId': 'job-bridge-1',
+            },
+            bridge_request=bridge_request,
+            http_status=200,
+            stale_after_seconds=60,
+        )
+
+        self.assertEqual(normalized['status'], IceaBridgeRequest.STATUS_SCORED)
+        self.assertEqual(normalized['formulaVersion'], 'icea_plus_v2')
+        self.assertEqual(normalized['warnings'][0]['code'], 'remote_warning')
+        self.assertEqual(normalized['remoteRefs']['jobId'], 'job-bridge-1')
+        self.assertEqual(normalized['remoteRefs']['modelId'], 'model-bridge-1')
+        self.assertEqual(normalized['remoteRefs']['modelVersion'], '2026.03')
 
     def test_normalize_remote_payload_marks_stale_without_name_error(self):
         bridge_request = IceaBridgeRequest.objects.create(
@@ -511,6 +569,8 @@ class IceaBridgeApiTests(TestCase):
             payload_json={'contractVersion': 'handover-icea-bridge-v1'},
             status=IceaBridgeRequest.STATUS_PENDING,
             warnings_json=[{'code': 'insufficient_evidence', 'message': 'Not enough data'}],
+            attempts=2,
+            remote_refs_json={'jobId': 'job-bridge-001'},
         )
         self.retry_url = reverse('icea-bridge-retry', kwargs={'bridge_id': self.bridge_request.id})
         HandoverBundleRecord.objects.create(
@@ -535,6 +595,8 @@ class IceaBridgeApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['bridgeRequest']['status'], 'pending')
+        self.assertEqual(response.json()['bridgeRequest']['attempts'], 2)
+        self.assertEqual(response.json()['bridgeRequest']['remoteRefs']['jobId'], 'job-bridge-001')
         self.assertTrue(response.json()['summary']['provisional'])
 
     @patch('backend.api.views_icea_bridge.refresh_icea_bridge_request')
@@ -564,6 +626,17 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['count'], 1)
         self.assertEqual(response.json()['results'][0]['handoverId'], 'bundle-bridge-001')
+        self.assertEqual(response.json()['results'][0]['attempts'], 2)
+        self.assertEqual(response.json()['results'][0]['remoteRefs']['jobId'], 'job-bridge-001')
+
+    def test_query_view_accepts_handover_alias_filter(self):
+        self._auth(roles=['supervisor'])
+
+        response = self.client.get(self.status_query_url, {'handoverId': 'bundle-bridge-001'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+        self.assertEqual(response.json()['results'][0]['bundleId'], 'bundle-bridge-001')
 
     @patch.dict(
         os.environ,
@@ -653,6 +726,41 @@ class IceaBridgeApiTests(TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.json()['bridgeRequest']['scoringMode'], IceaBridgeRequest.SCORING_MODE_IMMEDIATE)
+        mock_service_schedule.assert_called_once_with(self.bridge_request.id, force=True)
+        mock_view_schedule.assert_not_called()
+
+    @patch('backend.api.views_icea_bridge.schedule_icea_bridge_delivery', create=True)
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_retry_same_mode_forces_delivery_when_payload_is_unchanged(self, mock_service_schedule, mock_view_schedule):
+        self._auth(roles=['admin'])
+        payload = build_icea_bridge_payload(
+            build_bridge_bundle(),
+            request_id='req-bridge-001',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            unit_id='icu-a',
+        )
+        payload_hash = compute_payload_hash(payload)
+        self.bridge_request.payload_json = payload
+        self.bridge_request.payload_hash = payload_hash
+        self.bridge_request.idempotency_key = (
+            f'req-bridge-001:{IceaBridgeRequest.SCORING_MODE_IMMEDIATE}:{payload_hash[:16]}'
+        )
+        self.bridge_request.save(update_fields=['payload_json', 'payload_hash', 'idempotency_key'])
+
+        with patch.dict(
+            os.environ,
+            {
+                'ENABLE_ICEA_BRIDGE': 'true',
+                'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+                'ICEA_API_BASE_URL': 'https://icea.example',
+                'ICEA_API_BEARER_TOKEN': 'svc-token',
+                'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            },
+            clear=False,
+        ):
+            response = self.client.post(self.retry_url, format='json')
+
+        self.assertEqual(response.status_code, 202)
         mock_service_schedule.assert_called_once_with(self.bridge_request.id, force=True)
         mock_view_schedule.assert_not_called()
 
