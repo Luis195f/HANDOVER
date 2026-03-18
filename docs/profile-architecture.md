@@ -164,9 +164,11 @@ La PRE-03 agrega una capa runtime aditiva para el formulario unico:
 La PRE-04 extiende el runtime del formulario unico con Specialty Overlay Packs sin multiplicar pantallas:
 
 - `src/config/profiles/overlays/index.ts` declara el runtime de cada SOP como capa separada del catalogo maestro y de la activacion productiva.
-- `src/lib/profile-runtime.ts` aplica merge determinista `Core < UPP < SOP...` en el orden resuelto por contexto, con precedencia final del ultimo overlay activo para claves sobrescribibles.
+- `src/types/profile.ts` hace explicitos los puntos de extension permitidos del runtime (`PROFILE_RUNTIME_EXTENSION_POINTS`) para distinguir claves aditivas, ocultacion monotona y visibilidad protegida.
+- `src/lib/profile-runtime.ts` aplica merge determinista `Core < UPP < SOP...` en el orden resuelto por contexto y expone una traza auditable por capa real aplicada.
 - Partes solo aditivas: `enabledSections`, `requiredExtraFields`, `optionalExtraFields`, `focusAreas`, `explanations`, `scales`, `sentinelEvents`, `quickPicks`, `visibleOutputs` y `notes`.
-- Partes sobrescribibles: `hiddenSections` y `visibility`; cuando un layer define `hiddenSections`, reemplaza el set oculto previo completo, y `visibility` mantiene merge por ultima escritura. En ambos casos el ultimo SOP activo gana en colision y la traza de merge queda expuesta para UI y payload interno.
-- La trazabilidad visible incluye UPP base, SOP activos, origen del specialty (`explicit`, `unit`, `unit-config`, `none`) y si hubo override humano.
+- `hiddenSections` queda monotono: cualquier layer puede ocultar mas secciones, pero un SOP posterior no las reabre por omision. Esto evita reactivaciones accidentales de ruido clinico.
+- `visibility` se resuelve con guardrail conservador: un UPP puede afinar campos frente al Core, pero un SOP no puede reactivar campos ya cerrados por capas anteriores. Si lo intenta, la traza marca la clave ignorada y deja nota explicita.
+- La trazabilidad visible incluye UPP base, SOP activos, origen del specialty (`explicit`, `unit`, `unit-config`, `none`), si hubo override humano y cualquier guardrail aplicado durante el merge.
 - El payload FHIR no cambia en esta fase; la traza se adjunta solo como metadata interna backward compatible para consumidores futuros de FHIR/ICEA/outbox.
 

@@ -10,11 +10,13 @@ import { UNITS_BY_ID } from '../config/units';
 import { getDefaultUnitConfig, getUnitConfig } from './unitConfig';
 import { resolveUnitFeatureFlags, type UnitFeatureFlags } from '../config/unitsConfig';
 import { isOn } from '../config/flags';
+import { PROFILE_RUNTIME_EXTENSION_POINTS } from '../types/profile';
 import type { BedsideChecklistItem } from '../config/bedsideChecklist';
 import type {
   HandoverSectionKey,
   ProfileContext,
   ProfileRuntimeFieldId,
+  ProfileRuntimeLayerSource,
   ProfileRuntimeMergeKey,
   ProfileRuntimeMergeTraceEntry,
   ProfileRuntimeMedicationQuickPick,
@@ -55,20 +57,17 @@ export type HandoverSectionInfo = (typeof HANDOVER_SECTIONS_INFO)[number];
 export type HandoverSectionVisibility = Record<HandoverSectionKey, boolean>;
 export type HandoverFieldVisibility = Record<ProfileRuntimeFieldId, boolean>;
 
-export const PROFILE_RUNTIME_ADDITIVE_KEYS = [
-  'enabledSections',
-  'requiredExtraFields',
-  'optionalExtraFields',
-  'focusAreas',
-  'explanations',
-  'scales',
-  'sentinelEvents',
-  'quickPicks',
-  'visibleOutputs',
-  'notes',
-] as const satisfies readonly ProfileRuntimeMergeKey[];
+export const PROFILE_RUNTIME_ADDITIVE_KEYS = (
+  Object.entries(PROFILE_RUNTIME_EXTENSION_POINTS)
+    .filter(([, value]) => value.mode === 'additive')
+    .map(([key]) => key)
+) as ProfileRuntimeMergeKey[];
 
-export const PROFILE_RUNTIME_OVERRIDE_KEYS = ['hiddenSections', 'visibility'] as const satisfies readonly ProfileRuntimeMergeKey[];
+export const PROFILE_RUNTIME_OVERRIDE_KEYS = (
+  Object.entries(PROFILE_RUNTIME_EXTENSION_POINTS)
+    .filter(([, value]) => value.mode !== 'additive')
+    .map(([key]) => key)
+) as ProfileRuntimeMergeKey[];
 
 export interface ActiveSpecialtyOverlayRuntime {
   id: SpecialtyOverlayId;
@@ -161,46 +160,116 @@ const hasRuntimeKey = (
   }
 };
 
+type RuntimeMergeLayerSource = Exclude<ProfileRuntimeLayerSource, 'core'>;
+
+interface RuntimePackMergeAudit {
+  ignoredKeys: ProfileRuntimeMergeKey[];
+  guardrailNotes: string[];
+}
+
+interface RuntimePackMergeResult {
+  pack: UnitProfileRuntimePack;
+  audit: RuntimePackMergeAudit;
+}
+
+interface ResolvedBasePackResult {
+  pack: UnitProfileRuntimePack;
+  sourcePack: UnitProfileRuntimePack | null;
+  audit: RuntimePackMergeAudit | null;
+}
+
 const buildMergeTraceEntry = (
-  source: ProfileRuntimeMergeTraceEntry['source'],
+  source: ProfileRuntimeLayerSource,
   pack: UnitProfileRuntimePack | SpecialtyOverlayRuntimePack,
-): ProfileRuntimeMergeTraceEntry => ({
-  source,
-  profileId: pack.id,
-  label: pack.label,
-  additiveKeys: PROFILE_RUNTIME_ADDITIVE_KEYS.filter((key) => hasRuntimeKey(pack, key)),
-  overrideKeys: PROFILE_RUNTIME_OVERRIDE_KEYS.filter((key) => hasRuntimeKey(pack, key)),
-});
+  audit?: RuntimePackMergeAudit | null,
+): ProfileRuntimeMergeTraceEntry => {
+  const ignoredKeys = unique(audit?.ignoredKeys ?? []);
+  const guardrailNotes = unique(audit?.guardrailNotes ?? []);
+
+  return {
+    source,
+    profileId: pack.id,
+    label: pack.label,
+    additiveKeys: PROFILE_RUNTIME_ADDITIVE_KEYS.filter((key) => hasRuntimeKey(pack, key)),
+    overrideKeys: PROFILE_RUNTIME_OVERRIDE_KEYS.filter((key) => hasRuntimeKey(pack, key)),
+    ignoredKeys: ignoredKeys.length > 0 ? ignoredKeys : undefined,
+    guardrailNotes: guardrailNotes.length > 0 ? guardrailNotes : undefined,
+  };
+};
+
+const mergeVisibility = (
+  baseVisibility: UnitProfileRuntimePack['visibility'],
+  layerVisibility: UnitProfileRuntimePack['visibility'] | SpecialtyOverlayRuntimePack['visibility'],
+  source: RuntimeMergeLayerSource,
+  audit: RuntimePackMergeAudit,
+): UnitProfileRuntimePack['visibility'] => {
+  const nextVisibility: Partial<Record<ProfileRuntimeFieldId, boolean>> = {
+    ...(baseVisibility ?? {}),
+  };
+  const blockedFields: ProfileRuntimeFieldId[] = [];
+
+  for (const fieldId of FIELD_IDS) {
+    const override = layerVisibility?.[fieldId];
+    if (typeof override !== 'boolean') {
+      continue;
+    }
+
+    const previous = nextVisibility[fieldId];
+    if (source === 'specialty-overlay' && previous === false && override === true) {
+      blockedFields.push(fieldId);
+      continue;
+    }
+
+    nextVisibility[fieldId] = override;
+  }
+
+  if (blockedFields.length > 0) {
+    audit.ignoredKeys.push('visibility');
+    audit.guardrailNotes.push(
+      `Overlay visibility cannot reactivate fields already hidden: ${blockedFields.join(', ')}`,
+    );
+  }
+
+  return Object.keys(nextVisibility).length > 0 ? nextVisibility : undefined;
+};
 
 const mergeIntoRuntimePack = (
   basePack: UnitProfileRuntimePack,
   layer: UnitProfileRuntimePack | SpecialtyOverlayRuntimePack,
-): UnitProfileRuntimePack => ({
-  ...basePack,
-  enabledSections: unique([...(basePack.enabledSections ?? []), ...(layer.enabledSections ?? [])]),
-  hiddenSections:
-    layer.hiddenSections !== undefined
-      ? unique(layer.hiddenSections)
-      : basePack.hiddenSections,
-  requiredExtraFields: mergeText(basePack.requiredExtraFields, layer.requiredExtraFields),
-  optionalExtraFields: mergeText(basePack.optionalExtraFields, layer.optionalExtraFields),
-  focusAreas: mergeText(basePack.focusAreas, layer.focusAreas),
-  explanations: mergeText(basePack.explanations, layer.explanations),
-  scales: mergeText(basePack.scales, layer.scales),
-  sentinelEvents: mergeText(basePack.sentinelEvents, layer.sentinelEvents),
-  visibleOutputs: mergeText(basePack.visibleOutputs, layer.visibleOutputs),
-  notes: mergeText(basePack.notes, layer.notes),
-  visibility: {
-    ...(basePack.visibility ?? {}),
-    ...(layer.visibility ?? {}),
-  },
-  quickPicks: {
-    medications: mergeQuickPickList(basePack.quickPicks?.medications, layer.quickPicks?.medications),
-    treatments: mergeQuickPickList(basePack.quickPicks?.treatments, layer.quickPicks?.treatments),
-  },
-});
+  source: RuntimeMergeLayerSource,
+): RuntimePackMergeResult => {
+  const audit: RuntimePackMergeAudit = {
+    ignoredKeys: [],
+    guardrailNotes: [],
+  };
 
-const mergeBasePackWithCore = (pack: UnitProfileRuntimePack): UnitProfileRuntimePack =>
+  return {
+    pack: {
+      ...basePack,
+      enabledSections: unique([...(basePack.enabledSections ?? []), ...(layer.enabledSections ?? [])]),
+      hiddenSections:
+        layer.hiddenSections !== undefined
+          ? unique([...(basePack.hiddenSections ?? []), ...layer.hiddenSections])
+          : basePack.hiddenSections,
+      requiredExtraFields: mergeText(basePack.requiredExtraFields, layer.requiredExtraFields),
+      optionalExtraFields: mergeText(basePack.optionalExtraFields, layer.optionalExtraFields),
+      focusAreas: mergeText(basePack.focusAreas, layer.focusAreas),
+      explanations: mergeText(basePack.explanations, layer.explanations),
+      scales: mergeText(basePack.scales, layer.scales),
+      sentinelEvents: mergeText(basePack.sentinelEvents, layer.sentinelEvents),
+      visibleOutputs: mergeText(basePack.visibleOutputs, layer.visibleOutputs),
+      notes: mergeText(basePack.notes, layer.notes),
+      visibility: mergeVisibility(basePack.visibility, layer.visibility, source, audit),
+      quickPicks: {
+        medications: mergeQuickPickList(basePack.quickPicks?.medications, layer.quickPicks?.medications),
+        treatments: mergeQuickPickList(basePack.quickPicks?.treatments, layer.quickPicks?.treatments),
+      },
+    },
+    audit,
+  };
+};
+
+const mergeBasePackWithCore = (pack: UnitProfileRuntimePack): RuntimePackMergeResult =>
   mergeIntoRuntimePack(
     {
       ...HANDOVER_CORE_RUNTIME_PACK,
@@ -212,6 +281,7 @@ const mergeBasePackWithCore = (pack: UnitProfileRuntimePack): UnitProfileRuntime
       },
     },
     pack,
+    'unit-profile',
   );
 
 const resolveUnitRuntimePack = (profileId?: UnitProfileId | null): UnitProfileRuntimePack | null => {
@@ -262,18 +332,32 @@ const resolveOverlayRuntimePack = (overlayId?: SpecialtyOverlayId | null): Speci
 const resolveBasePack = (
   context: ProfileContext,
   compatibilityProfileId?: UnitProfileId | null,
-): UnitProfileRuntimePack => {
+): ResolvedBasePackResult => {
   const activePack = resolveUnitRuntimePack(context.unitProfileId);
   if (activePack) {
-    return mergeBasePackWithCore(activePack);
+    const merged = mergeBasePackWithCore(activePack);
+    return {
+      pack: merged.pack,
+      sourcePack: activePack,
+      audit: merged.audit,
+    };
   }
 
   const compatibilityPack = resolveUnitRuntimePack(compatibilityProfileId);
   if (compatibilityPack) {
-    return mergeBasePackWithCore(compatibilityPack);
+    const merged = mergeBasePackWithCore(compatibilityPack);
+    return {
+      pack: merged.pack,
+      sourcePack: compatibilityPack,
+      audit: merged.audit,
+    };
   }
 
-  return HANDOVER_CORE_RUNTIME_PACK;
+  return {
+    pack: HANDOVER_CORE_RUNTIME_PACK,
+    sourcePack: null,
+    audit: null,
+  };
 };
 
 const resolveNotes = (pack: UnitProfileRuntimePack, features: UnitFeatureFlags): string[] => {
@@ -391,18 +475,39 @@ export const resolveHandoverProfileRuntime = ({
   const features = resolveUnitFeatureFlags(effectiveUnitId);
   const compatibilityProfileId =
     context.unitProfileId == null && effectiveUnitConfig?.profileId ? effectiveUnitConfig.profileId : null;
-  const basePack = resolveBasePack(context, compatibilityProfileId);
+  const baseResolution = resolveBasePack(context, compatibilityProfileId);
+  const basePack = baseResolution.pack;
   const overlayPacks = context.specialtyOverlayIds
     .map((overlayId) => resolveOverlayRuntimePack(overlayId))
     .filter((pack): pack is SpecialtyOverlayRuntimePack => Boolean(pack));
-  const pack = overlayPacks.reduce((currentPack, overlayPack) => mergeIntoRuntimePack(currentPack, overlayPack), basePack);
+  const overlayMergeResults = overlayPacks.reduce<{
+    pack: UnitProfileRuntimePack;
+    audits: RuntimePackMergeAudit[];
+  }>(
+    (state, overlayPack) => {
+      const merged = mergeIntoRuntimePack(state.pack, overlayPack, 'specialty-overlay');
+      return {
+        pack: merged.pack,
+        audits: [...state.audits, merged.audit],
+      };
+    },
+    {
+      pack: basePack,
+      audits: [],
+    },
+  );
+  const pack = overlayMergeResults.pack;
   const fieldVisibility = resolveFieldVisibility(pack, features);
   const notes = resolveNotes(pack, features);
   const sectionVisibility = resolveSectionVisibility(pack, fieldVisibility);
   const mergeTrace = [
     buildMergeTraceEntry('core', HANDOVER_CORE_RUNTIME_PACK),
-    ...(basePack.id !== HANDOVER_CORE_RUNTIME_PACK.id ? [buildMergeTraceEntry('unit-profile', basePack)] : []),
-    ...overlayPacks.map((overlayPack) => buildMergeTraceEntry('specialty-overlay', overlayPack)),
+    ...(baseResolution.sourcePack
+      ? [buildMergeTraceEntry('unit-profile', baseResolution.sourcePack, baseResolution.audit)]
+      : []),
+    ...overlayPacks.map((overlayPack, index) =>
+      buildMergeTraceEntry('specialty-overlay', overlayPack, overlayMergeResults.audits[index]),
+    ),
   ];
   const activeOverlays = context.specialtyOverlayIds.map((overlayId) => {
     const overlayPack = overlayPacks.find((candidate) => candidate.id === overlayId);
