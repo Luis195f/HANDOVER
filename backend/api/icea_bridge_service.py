@@ -61,6 +61,18 @@ class IceaBridgeRemoteResponse:
     body_json: dict[str, Any] | list[Any] | None
 
 
+@dataclass(frozen=True)
+class IceaBridgeUpsertResult:
+    bridge_request: IceaBridgeRequest
+    created: bool
+    payload_changed: bool
+    already_queued: bool
+
+    @property
+    def should_schedule(self) -> bool:
+        return self.created or (self.payload_changed and not self.already_queued)
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -161,11 +173,12 @@ def _bundle_unavailable_payload(record: HandoverBundleRecord) -> dict[str, Any]:
 
 
 def _mark_bundle_unavailable(record: HandoverBundleRecord, *, scoring_mode: str) -> IceaBridgeRequest:
-    bridge_request = _upsert_bridge_request(
+    upsert_result = _upsert_bridge_request(
         request_id=record.request_id,
         scoring_mode=scoring_mode,
         payload=_bundle_unavailable_payload(record),
     )
+    bridge_request = upsert_result.bridge_request
     _mark_failed(bridge_request, detail=STORED_BUNDLE_UNAVAILABLE_ERROR)
     return bridge_request
 
@@ -187,16 +200,17 @@ def enqueue_icea_bridge_request_for_transaction(
         scoring_mode=scoring_mode,
         unit_id=str(request.headers.get('X-Unit-Id') or ''),
     )
-    bridge_request = _upsert_bridge_request(
+    upsert_result = _upsert_bridge_request(
         request_id=request_id,
         scoring_mode=scoring_mode,
         payload=payload,
     )
+    bridge_request = upsert_result.bridge_request
     configuration_error = _score_configuration_error(settings, scoring_mode=scoring_mode)
     if configuration_error is not None:
         _mark_failed(bridge_request, detail=configuration_error)
         return bridge_request
-    if bridge_request.status == IceaBridgeRequest.STATUS_QUEUED:
+    if upsert_result.should_schedule:
         schedule_icea_bridge_delivery(bridge_request.id)
     return bridge_request
 
@@ -205,6 +219,7 @@ def enqueue_icea_bridge_request_for_bundle_record(
     *,
     record: HandoverBundleRecord,
     scoring_mode: str,
+    force_delivery: bool = False,
 ) -> IceaBridgeRequest | None:
     settings = load_icea_bridge_settings()
     if not settings.enabled or not settings.allows_mode(scoring_mode):
@@ -220,20 +235,23 @@ def enqueue_icea_bridge_request_for_bundle_record(
         scoring_mode=scoring_mode,
         unit_id=record.unit_id,
     )
-    bridge_request = _upsert_bridge_request(
+    upsert_result = _upsert_bridge_request(
         request_id=record.request_id,
         scoring_mode=scoring_mode,
         payload=payload,
     )
+    bridge_request = upsert_result.bridge_request
     configuration_error = _score_configuration_error(settings, scoring_mode=scoring_mode)
     if configuration_error is not None:
         _mark_failed(bridge_request, detail=configuration_error)
         return bridge_request
-    if bridge_request.status == IceaBridgeRequest.STATUS_QUEUED:
+    if force_delivery:
         schedule_icea_bridge_delivery(bridge_request.id, force=True)
+    elif upsert_result.should_schedule:
+        schedule_icea_bridge_delivery(bridge_request.id)
     return bridge_request
 
-def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[str, Any]) -> IceaBridgeRequest:
+def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[str, Any]) -> IceaBridgeUpsertResult:
     payload_hash = compute_payload_hash(payload)
     identity = payload.get('identity') if isinstance(payload.get('identity'), dict) else {}
     context = payload.get('context') if isinstance(payload.get('context'), dict) else {}
@@ -262,8 +280,9 @@ def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[
         defaults=defaults,
     )
     if created:
-        return bridge_request
+        return IceaBridgeUpsertResult(bridge_request=bridge_request, created=True, payload_changed=False, already_queued=False)
     if bridge_request.payload_hash != payload_hash:
+        was_queued = bridge_request.status == IceaBridgeRequest.STATUS_QUEUED
         bridge_request.bundle_id = defaults['bundle_id']
         bridge_request.patient_id = defaults['patient_id']
         bridge_request.unit_id = defaults['unit_id']
@@ -301,7 +320,8 @@ def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[
             'last_http_status',
             'updated_at',
         ])
-    return bridge_request
+        return IceaBridgeUpsertResult(bridge_request=bridge_request, created=False, payload_changed=True, already_queued=was_queued)
+    return IceaBridgeUpsertResult(bridge_request=bridge_request, created=False, payload_changed=False, already_queued=bridge_request.status == IceaBridgeRequest.STATUS_QUEUED)
 
 
 def _build_icea_plus_score_request(bridge_request: IceaBridgeRequest, settings: IceaBridgeSettings) -> dict[str, Any]:
@@ -783,6 +803,8 @@ def serialize_bridge_request(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'insufficientEvidence': bridge_request.insufficient_evidence,
         'scoreSummary': bridge_request.score_summary_json,
         'warnings': bridge_request.warnings_json or [],
+        'attempts': bridge_request.attempts,
+        'remoteRefs': bridge_request.remote_refs_json or {},
         'lastError': bridge_request.last_error or None,
         'lastHttpStatus': bridge_request.last_http_status,
         'source': SOURCE,

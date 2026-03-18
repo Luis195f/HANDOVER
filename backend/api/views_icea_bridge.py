@@ -48,14 +48,19 @@ def _latest_bridge_request(*, handover_id: str, scoring_mode: str | None = None)
     return queryset.order_by('-updated_at').first()
 
 
+def _error_response(*, detail: str, code: str, status: int, **extra: Any) -> Response:
+    payload: dict[str, Any] = {'detail': detail, 'code': code}
+    if extra:
+        payload.update(extra)
+    return Response(payload, status=status)
+
+
 def _stored_bundle_unavailable_response(bridge_request: IceaBridgeRequest) -> Response:
-    return Response(
-        {
-            'detail': 'Stored bundle is unavailable.',
-            'code': STORED_BUNDLE_UNAVAILABLE_ERROR,
-            'bridgeRequest': serialize_bridge_request(bridge_request),
-        },
+    return _error_response(
+        detail='Stored bundle is unavailable.',
+        code=STORED_BUNDLE_UNAVAILABLE_ERROR,
         status=503,
+        bridgeRequest=serialize_bridge_request(bridge_request),
     )
 
 
@@ -70,6 +75,15 @@ def _active_handover_record_for_bridge_request(bridge_request: IceaBridgeRequest
             expires_at__gt=timezone.now(),
         ).first()
     return record
+
+
+def _first_query_param(request, *names: str) -> str:
+    for name in names:
+        value = str(request.query_params.get(name) or '').strip()
+        if value:
+            return value
+    return ''
+
 
 def _can_query_all_patient_risk(request) -> bool:
     claims = getattr(request, 'auth', None)
@@ -115,11 +129,9 @@ def _resolve_patient_risk_scope(request, *, patient_id: str | None, unit_id: str
 
     if unit_id:
         if unit_id not in authorized_unit_ids:
-            return None, Response(
-                {
-                    'detail': 'Requested unit is outside your authorized scope.',
-                    'code': 'icea_patient_risk_forbidden_unit',
-                },
+            return None, _error_response(
+                detail='Requested unit is outside your authorized scope.',
+                code='icea_patient_risk_forbidden_unit',
                 status=403,
             )
         return unit_id, None
@@ -127,19 +139,15 @@ def _resolve_patient_risk_scope(request, *, patient_id: str | None, unit_id: str
     if patient_id:
         if len(authorized_unit_ids) == 1:
             return next(iter(authorized_unit_ids)), None
-        return None, Response(
-            {
-                'detail': 'unitId is required to resolve patient risk for this user scope.',
-                'code': 'icea_patient_risk_unit_required',
-            },
+        return None, _error_response(
+            detail='unitId is required to resolve patient risk for this user scope.',
+            code='icea_patient_risk_unit_required',
             status=400,
         )
 
-    return None, Response(
-        {
-            'detail': 'unitId is required for this role.',
-            'code': 'icea_patient_risk_filter_required',
-        },
+    return None, _error_response(
+        detail='unitId is required for this role.',
+        code='icea_patient_risk_filter_required',
         status=400,
     )
 
@@ -154,7 +162,7 @@ class IceaBridgeStatusDetailView(AuthenticatedAPIView):
         scoring_mode = str(request.query_params.get('scoringMode') or '').strip() or None
         bridge_request = _latest_bridge_request(handover_id=handover_id, scoring_mode=scoring_mode)
         if bridge_request is None:
-            return Response({'detail': 'ICEA bridge request not found.', 'code': 'icea_bridge_not_found'}, status=404)
+            return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
 
         settings = load_icea_bridge_settings()
         should_refresh = _truthy(request.query_params.get('refresh'))
@@ -206,15 +214,17 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
 
     def get(self, request):
         queryset = IceaBridgeRequest.objects.all()
-        for query_key, model_key in (
-            ('requestId', 'request_id'),
-            ('patientId', 'patient_id'),
-            ('unitId', 'unit_id'),
-            ('shift', 'shift'),
-            ('status', 'status'),
-            ('scoringMode', 'scoring_mode'),
+        for query_keys, model_key in (
+            (('bridgeRequestId',), 'bridge_request_id'),
+            (('requestId',), 'request_id'),
+            (('handoverId', 'bundleId'), 'bundle_id'),
+            (('patientId',), 'patient_id'),
+            (('unitId',), 'unit_id'),
+            (('shift',), 'shift'),
+            (('status',), 'status'),
+            (('scoringMode',), 'scoring_mode'),
         ):
-            value = str(request.query_params.get(query_key) or '').strip()
+            value = _first_query_param(request, *query_keys)
             if value:
                 queryset = queryset.filter(**{model_key: value})
         try:
@@ -236,7 +246,7 @@ class IceaBridgeSummaryView(AuthenticatedAPIView):
         scoring_mode = str(request.query_params.get('scoringMode') or '').strip() or None
         bridge_request = _latest_bridge_request(handover_id=handover_id, scoring_mode=scoring_mode)
         if bridge_request is None:
-            return Response({'detail': 'ICEA bridge request not found.', 'code': 'icea_bridge_not_found'}, status=404)
+            return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
         return Response({'summary': serialize_bridge_summary(bridge_request)}, status=200)
 
 
@@ -248,8 +258,9 @@ class IceaPatientRiskSummaryView(AuthenticatedAPIView):
 
     def get(self, request):
         if not icea_patient_risk_enabled():
-            return Response(
-                {'detail': 'ICEA patient risk support is disabled.', 'code': 'icea_patient_risk_disabled'},
+            return _error_response(
+                detail='ICEA patient risk support is disabled.',
+                code='icea_patient_risk_disabled',
                 status=503,
             )
 
@@ -282,7 +293,7 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
     def post(self, request, bridge_id: int):
         bridge_request = IceaBridgeRequest.objects.filter(id=bridge_id).first()
         if bridge_request is None:
-            return Response({'detail': 'ICEA bridge request not found.', 'code': 'icea_bridge_not_found'}, status=404)
+            return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
 
         payload = request.data if isinstance(request.data, dict) else {}
         requested_mode = str(payload.get('scoringMode') or '').strip() or bridge_request.scoring_mode
@@ -290,34 +301,42 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
             IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
             IceaBridgeRequest.SCORING_MODE_ENRICHED,
         }:
-            return Response({'detail': 'Unsupported scoring mode.', 'code': 'invalid_scoring_mode'}, status=400)
+            return _error_response(detail='Unsupported scoring mode.', code='invalid_scoring_mode', status=400)
 
         settings = load_icea_bridge_settings()
         if not settings.enabled or not settings.allows_mode(requested_mode):
-            return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
+            return _error_response(
+                detail='ICEA bridge is disabled for this scoring mode.',
+                code='icea_bridge_disabled',
+                status=503,
+            )
 
         configuration_error = score_configuration_error_code(scoring_mode=requested_mode, settings_obj=settings)
         if configuration_error not in (None, 'icea_bridge_disabled'):
-            return Response({'detail': score_configuration_error_detail(configuration_error), 'code': configuration_error}, status=503)
+            return _error_response(
+                detail=score_configuration_error_detail(configuration_error),
+                code=configuration_error,
+                status=503,
+            )
 
         record = _active_handover_record_for_bridge_request(bridge_request)
         if record is None:
-            return Response({'detail': 'Local handover bundle not found.', 'code': 'handover_bundle_not_found'}, status=404)
+            return _error_response(detail='Local handover bundle not found.', code='handover_bundle_not_found', status=404)
 
-        if requested_mode == bridge_request.scoring_mode:
-            retriggered = enqueue_icea_bridge_request_for_bundle_record(record=record, scoring_mode=requested_mode)
-            if retriggered is None:
-                return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
-            if retriggered.status == IceaBridgeRequest.STATUS_FAILED and retriggered.last_error == STORED_BUNDLE_UNAVAILABLE_ERROR:
-                return _stored_bundle_unavailable_response(retriggered)
-            retriggered.refresh_from_db()
-            return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
-
-        retriggered = enqueue_icea_bridge_request_for_bundle_record(record=record, scoring_mode=requested_mode)
+        retriggered = enqueue_icea_bridge_request_for_bundle_record(
+            record=record,
+            scoring_mode=requested_mode,
+            force_delivery=True,
+        )
         if retriggered is None:
-            return Response({'detail': 'ICEA bridge is disabled for this scoring mode.', 'code': 'icea_bridge_disabled'}, status=503)
+            return _error_response(
+                detail='ICEA bridge is disabled for this scoring mode.',
+                code='icea_bridge_disabled',
+                status=503,
+            )
         if retriggered.status == IceaBridgeRequest.STATUS_FAILED and retriggered.last_error == STORED_BUNDLE_UNAVAILABLE_ERROR:
             return _stored_bundle_unavailable_response(retriggered)
+        retriggered.refresh_from_db()
         return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
 
 
