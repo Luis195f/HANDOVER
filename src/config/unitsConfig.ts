@@ -92,7 +92,7 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     name: 'Pediatría',
     specialty: 'ped',
     profileId: 'general-inpatient',
-    specialtyOverlayIds: ['ped'],
+    specialtyOverlayIds: ['pedsSubspecialties'],
     features: { ...BASE_FEATURES, enablePediatricScales: true },
   },
 ] as const;
@@ -130,7 +130,7 @@ function normalizeUnitConfig(unit: LegacyHandoverUnitConfig, defaultUnitId?: str
   const specialtyOverlayIds =
     normalizeOverlayIds(unit.specialtyOverlayIds) ??
     fallbackUnit?.specialtyOverlayIds ??
-    (legacyPediatricFlag ? ['ped'] : undefined);
+    (legacyPediatricFlag ? ['pedsSubspecialties'] : undefined);
   const normalizedDefault =
     parseBooleanLike(unit.default) ??
     (typeof defaultUnitId === 'string' && defaultUnitId.trim() ? unit.id === defaultUnitId.trim() : undefined) ??
@@ -269,5 +269,4 @@ export function getDefaultUnitConfig(units?: readonly HandoverUnitConfig[]): Han
 }
 
 // END HANDOVER D4 – MultiUnitConfig
-
 

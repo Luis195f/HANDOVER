@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  REGISTRY_ONLY_SPECIALTY_OVERLAY_IDS,
   SPECIALTY_OVERLAY_CATALOG,
   UNIT_PROFILE_CATALOG,
   WAVE_1_SPECIALTY_OVERLAY_IDS,
   WAVE_1_UNIT_PROFILE_IDS,
 } from '../../profile-catalog';
 import { PROFILE_REGISTRY } from '../index';
+import { SPECIALTY_OVERLAY_RUNTIME_PACKS } from '../overlays';
 import { SPECIALTIES } from '../../specialties';
 import { matchLocationToUnit } from '../../units';
 import {
@@ -49,20 +51,20 @@ const DOCUMENTED_UPP_LABELS = [
 ] as const;
 
 const DOCUMENTED_SOP_IDS = [
-  'cvicu',
-  'neuroicu',
+  'cardio',
+  'neuro',
   'onc',
   'trauma',
-  'neph',
-  'gastro',
+  'infecto',
+  'neumo',
+  'nefroUro',
+  'gastroHepato',
   'endo',
-  'pulm',
-  'infect',
-  'ped',
-  'ob',
-  'ent',
-  'burns',
-  'critical-emergency',
+  'gynObs',
+  'pedsSubspecialties',
+  'ophthalEnt',
+  'plasticsBurns',
+  'criticalEmergency',
   'transplant',
 ] as const;
 
@@ -71,18 +73,54 @@ const DOCUMENTED_SOP_LABELS = [
   'Neurologia y neurocirugia',
   'Oncologia y hematologia',
   'Traumatologia y ortopedia',
+  'Infectologia',
+  'Neumologia',
   'Nefrologia y urologia',
   'Gastroenterologia y hepatologia',
   'Endocrinologia',
-  'Neumologia',
-  'Infectologia',
-  'Pediatria y subespecialidades',
   'Ginecologia y obstetricia',
+  'Pediatria y subespecialidades',
   'Oftalmologia y otorrinolaringologia',
   'Cirugia plastica y quemados',
   'Medicina critica y emergencias',
   'Trasplante de organos solidos',
 ] as const;
+
+const EXPECTED_COMPATIBILITY = {
+  cardio: ['critical-care', 'specialized-critical-care', 'emergency', 'general-inpatient', 'home-care'],
+  neuro: ['critical-care', 'specialized-critical-care', 'emergency', 'general-inpatient', 'rehabilitation'],
+  onc: ['general-inpatient', 'ambulatory', 'emergency', 'home-care'],
+  trauma: ['emergency', 'critical-care', 'general-inpatient', 'rehabilitation'],
+  infecto: ['critical-care', 'general-inpatient', 'ambulatory', 'home-care', 'emergency'],
+  neumo: ['critical-care', 'emergency', 'general-inpatient', 'home-care'],
+  nefroUro: ['general-inpatient', 'emergency', 'ambulatory', 'home-care'],
+  gastroHepato: ['general-inpatient', 'emergency', 'ambulatory', 'home-care'],
+  endo: ['general-inpatient', 'emergency', 'ambulatory', 'home-care'],
+  gynObs: ['maternal-perinatal', 'general-inpatient', 'emergency', 'ambulatory', 'home-care'],
+  pedsSubspecialties: ['pediatric-critical-care'],
+  ophthalEnt: ['ambulatory', 'emergency', 'general-inpatient'],
+  plasticsBurns: ['emergency', 'general-inpatient', 'home-care'],
+  criticalEmergency: ['emergency', 'critical-care'],
+  transplant: ['general-inpatient', 'ambulatory', 'home-care', 'critical-care'],
+} as const;
+
+const EXPECTED_ICEA_PLACEHOLDERS = {
+  cardio: ['temporalCriticality', 'therapeuticLoad', 'coordinationComplexity'],
+  neuro: ['surveillanceIntensity', 'dependencyLoad', 'temporalCriticality'],
+  onc: ['surveillanceIntensity', 'therapeuticLoad', 'temporalCriticality', 'continuityRisk', 'dependencyLoad', 'coordinationComplexity'],
+  trauma: ['temporalCriticality', 'therapeuticLoad', 'coordinationComplexity'],
+  infecto: ['surveillanceIntensity', 'temporalCriticality', 'continuityRisk'],
+  neumo: ['surveillanceIntensity', 'therapeuticLoad', 'dependencyLoad'],
+  nefroUro: ['therapeuticLoad', 'continuityRisk', 'coordinationComplexity'],
+  gastroHepato: ['therapeuticLoad', 'continuityRisk', 'dependencyLoad'],
+  endo: ['therapeuticLoad', 'temporalCriticality', 'continuityRisk'],
+  gynObs: ['temporalCriticality', 'coordinationComplexity', 'continuityRisk'],
+  pedsSubspecialties: ['dependencyLoad', 'surveillanceIntensity', 'coordinationComplexity'],
+  ophthalEnt: ['therapeuticLoad', 'continuityRisk'],
+  plasticsBurns: ['therapeuticLoad', 'surveillanceIntensity', 'dependencyLoad'],
+  criticalEmergency: ['temporalCriticality', 'surveillanceIntensity', 'coordinationComplexity'],
+  transplant: ['surveillanceIntensity', 'continuityRisk', 'therapeuticLoad', 'coordinationComplexity'],
+} as const;
 
 const unique = <T,>(values: readonly T[]) => new Set(values).size;
 
@@ -120,7 +158,7 @@ describe('profile master catalog', () => {
     }
   });
 
-  it('documents legacy translations and keeps oncology compatibility contextual instead of rigid', () => {
+  it('documents legacy translations and keeps wave-1 canon ids backward compatible', () => {
     expect(LEGACY_UNIT_PROFILE_ALIASES).toEqual({
       pediatrics: 'general-inpatient',
     });
@@ -128,7 +166,18 @@ describe('profile master catalog', () => {
       oncology: ['general-inpatient', 'ambulatory', 'emergency', 'home-care'],
     });
     expect(LEGACY_SPECIALTY_OVERLAY_ALIASES).toEqual({
-      gyn: 'ob',
+      cvicu: 'cardio',
+      neuroicu: 'neuro',
+      neph: 'nefroUro',
+      gastro: 'gastroHepato',
+      pulm: 'neumo',
+      infect: 'infecto',
+      ped: 'pedsSubspecialties',
+      ob: 'gynObs',
+      ent: 'ophthalEnt',
+      burns: 'plasticsBurns',
+      'critical-emergency': 'criticalEmergency',
+      gyn: 'gynObs',
     });
 
     expect(expandUnitProfileIdsForActivation('oncology')).toEqual([
@@ -147,10 +196,15 @@ describe('profile master catalog', () => {
     expect(normalizeUnitProfileId('oncology', { unitName: 'Urgencias Oncologicas' })).toBe('emergency');
     expect(normalizeUnitProfileId('oncology', { unitName: 'Paliativos Domicilio' })).toBe('home-care');
     expect(normalizeUnitProfileId('pediatrics')).toBe('general-inpatient');
-    expect(normalizeSpecialtyOverlayId('gyn')).toBe('ob');
+    expect(normalizeSpecialtyOverlayId('cvicu')).toBe('cardio');
+    expect(normalizeSpecialtyOverlayId('neuroicu')).toBe('neuro');
+    expect(normalizeSpecialtyOverlayId('infect')).toBe('infecto');
+    expect(normalizeSpecialtyOverlayId('ped')).toBe('pedsSubspecialties');
+    expect(normalizeSpecialtyOverlayId('gyn')).toBe('gynObs');
+    expect(normalizeSpecialtyOverlayId('critical-emergency')).toBe('criticalEmergency');
   });
 
-  it('keeps operational specialties limited to the visible subset while wave-1 stays coherent', () => {
+  it('keeps operational specialties limited to the visible subset while pilot-ready and registry-only stages stay explicit', () => {
     expect(SPECIALTIES.map((specialty) => specialty.id)).toEqual(['icu', 'ed', 'onc', 'neph', 'ped', 'ob', 'neuroicu', 'cvicu']);
     expect(WAVE_1_UNIT_PROFILE_IDS).toEqual([
       'emergency',
@@ -162,14 +216,45 @@ describe('profile master catalog', () => {
       'ambulatory',
     ]);
     expect(WAVE_1_SPECIALTY_OVERLAY_IDS).toEqual([
-      'cvicu',
-      'neuroicu',
+      'cardio',
+      'neuro',
       'onc',
-      'neph',
-      'ped',
-      'ob',
-      'critical-emergency',
+      'trauma',
+      'infecto',
+      'neumo',
+      'nefroUro',
+      'gastroHepato',
+      'endo',
+      'gynObs',
     ]);
+    expect(REGISTRY_ONLY_SPECIALTY_OVERLAY_IDS).toEqual([
+      'pedsSubspecialties',
+      'ophthalEnt',
+      'plasticsBurns',
+      'criticalEmergency',
+      'transplant',
+    ]);
+  });
+
+  it('keeps every wave-1 and registry-only overlay fully described in registry and runtime', () => {
+    for (const overlayId of DOCUMENTED_SOP_IDS) {
+      const definition = PROFILE_REGISTRY.specialtyOverlays[overlayId];
+      const runtimePack = SPECIALTY_OVERLAY_RUNTIME_PACKS[overlayId];
+
+      expect(definition.allowedUnitProfiles).toEqual(expect.arrayContaining([...EXPECTED_COMPATIBILITY[overlayId]]));
+      expect(definition.prioritySignals?.length ?? 0).toBeGreaterThan(0);
+      expect(definition.iceaContextDefaults?.caseMixHints?.length ?? 0).toBeGreaterThan(0);
+      expect(definition.iceaContextPlaceholders).toEqual(expect.arrayContaining([...EXPECTED_ICEA_PLACEHOLDERS[overlayId]]));
+
+      expect(runtimePack.enabledSections?.length ?? 0).toBeGreaterThan(0);
+      expect(runtimePack.focusAreas?.length ?? 0).toBeGreaterThan(0);
+      expect(runtimePack.explanations?.length ?? 0).toBeGreaterThan(0);
+      expect(runtimePack.sentinelEvents?.length ?? 0).toBeGreaterThan(0);
+      expect(runtimePack.visibleOutputs?.length ?? 0).toBeGreaterThan(0);
+      expect(
+        (runtimePack.quickPicks?.medications?.length ?? 0) + (runtimePack.quickPicks?.treatments?.length ?? 0),
+      ).toBeGreaterThan(0);
+    }
   });
 
   it('matches existing locations through ids, names and migration aliases', () => {

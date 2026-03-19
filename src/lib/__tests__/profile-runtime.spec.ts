@@ -69,7 +69,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.mergeTrace.map((entry) => entry.label)).toEqual(['HANDOVER Core', 'UCI adulto']);
   });
 
-  it('keeps pediatric runtime compatibility through the configured unit catalog', async () => {
+  it('keeps pediatric runtime catalog traceability without auto-activating the registry-only overlay', async () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       defaultUnit: 'uci-adulto',
       units: [
@@ -79,7 +79,7 @@ describe('resolveHandoverProfileRuntime', () => {
           name: 'Pediatría',
           specialty: 'ped',
           profileId: 'general-inpatient',
-          specialtyOverlayIds: ['ped'],
+          specialtyOverlayIds: ['pedsSubspecialties'],
           features: { enablePediatricScales: true },
         },
       ],
@@ -94,7 +94,8 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.pack.id).toBe('general-inpatient');
     expect(runtime.sectionVisibility.escalas).toBe(true);
     expect(runtime.notes).toContain('Escalas pediátricas próximamente.');
-    expect(runtime.context.overlaySelections.map((selection) => selection.overlayId)).toEqual(['ped']);
+    expect(runtime.context.overlaySelections.map((selection) => selection.overlayId)).toEqual(['pedsSubspecialties']);
+    expect(runtime.context.specialtyOverlayIds).toEqual([]);
   });
 
   it('resolves an active critical-care UPP with profile-driven scales and quick-picks', async () => {
@@ -114,6 +115,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.medicationQuickPicks.length).toBeGreaterThan(0);
     expect(runtime.visibleOutputs).toContain('Resumen de microvigilancia');
   });
+
   it('projects the first wave operational packs into runtime focus, outputs and checklist labels', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['critical-care', 'general-inpatient', 'emergency'],
@@ -156,19 +158,19 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(emergency.checklistItems[0]?.label).toContain('triage y motivo sindromico');
   });
 
-  it('keeps hidden sections monotonic across overlay merges while preserving trace order', async () => {
+  it('keeps hidden sections monotonic across compatible overlay merges while preserving trace order', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['emergency'],
-      specialtyOverlays: ['ped', 'critical-emergency'],
+      specialtyOverlays: ['infecto', 'criticalEmergency'],
     });
     process.env.UNITS_CONFIG = JSON.stringify({
       units: [
         {
-          id: 'peds-ed',
-          name: 'Urgencias Pediátricas',
-          specialty: 'ped',
+          id: 'infect-ed',
+          name: 'Urgencias Infecto',
+          specialty: 'infect',
           profileId: 'emergency',
-          specialtyOverlayIds: ['ped'],
+          specialtyOverlayIds: ['infecto'],
         },
       ],
     });
@@ -180,12 +182,12 @@ describe('resolveHandoverProfileRuntime', () => {
         ...actual,
         SPECIALTY_OVERLAY_RUNTIME_PACKS: {
           ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS,
-          ped: {
-            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS.ped,
+          infecto: {
+            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS.infecto,
             hiddenSections: ['psychosocial'],
           },
-          'critical-emergency': {
-            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS['critical-emergency'],
+          criticalEmergency: {
+            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS.criticalEmergency,
             hiddenSections: ['outcomes'],
             visibility: {
               'legacy-nursing-diagnosis-text': false,
@@ -197,16 +199,16 @@ describe('resolveHandoverProfileRuntime', () => {
 
     const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
 
-    const runtime = resolveHandoverProfileRuntime({ unitId: 'peds-ed', specialtyId: 'ed' });
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'infect-ed', specialtyId: 'ed' });
 
     expect(runtime.context.unitProfileId).toBe('emergency');
-    expect(runtime.context.specialtyOverlayIds).toEqual(['ped', 'critical-emergency']);
+    expect(runtime.context.specialtyOverlayIds).toEqual(['infecto', 'criticalEmergency']);
     expect(runtime.activeOverlays.map((overlay) => overlay.label)).toEqual([
-      'Pediatria y subespecialidades',
+      'Infectologia',
       'Medicina critica y emergencias',
     ]);
     expect(runtime.focusAreas).toEqual(
-      expect.arrayContaining(['Edad, peso y seguridad de dosis', 'ABCDE y soporte avanzado']),
+      expect.arrayContaining(['Foco infeccioso, sepsis y adherencia a aislamiento', 'ABCDE, soporte avanzado y respuesta inmediata']),
     );
     expect(runtime.pack.hiddenSections).toEqual(['psychosocial', 'outcomes']);
     expect(runtime.sectionVisibility.psychosocial).toBe(false);
@@ -215,24 +217,24 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.mergeTrace.map((entry) => entry.profileId)).toEqual([
       'handover-core',
       'emergency',
-      'ped',
-      'critical-emergency',
+      'infecto',
+      'criticalEmergency',
     ]);
   });
 
   it('blocks overlays from reactivating fields hidden by earlier layers and records the guardrail', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['emergency'],
-      specialtyOverlays: ['ped', 'critical-emergency'],
+      specialtyOverlays: ['infecto', 'criticalEmergency'],
     });
     process.env.UNITS_CONFIG = JSON.stringify({
       units: [
         {
-          id: 'peds-ed',
-          name: 'Urgencias Pediátricas',
-          specialty: 'ped',
+          id: 'infect-ed',
+          name: 'Urgencias Infecto',
+          specialty: 'infect',
           profileId: 'emergency',
-          specialtyOverlayIds: ['ped'],
+          specialtyOverlayIds: ['infecto'],
         },
       ],
     });
@@ -244,14 +246,14 @@ describe('resolveHandoverProfileRuntime', () => {
         ...actual,
         SPECIALTY_OVERLAY_RUNTIME_PACKS: {
           ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS,
-          ped: {
-            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS.ped,
+          infecto: {
+            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS.infecto,
             visibility: {
               'legacy-nursing-diagnosis-text': false,
             },
           },
-          'critical-emergency': {
-            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS['critical-emergency'],
+          criticalEmergency: {
+            ...actual.SPECIALTY_OVERLAY_RUNTIME_PACKS.criticalEmergency,
             visibility: {
               'legacy-nursing-diagnosis-text': true,
             },
@@ -262,8 +264,8 @@ describe('resolveHandoverProfileRuntime', () => {
 
     const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
 
-    const runtime = resolveHandoverProfileRuntime({ unitId: 'peds-ed', specialtyId: 'ed' });
-    const criticalEmergencyTrace = runtime.mergeTrace.find((entry) => entry.profileId === 'critical-emergency');
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'infect-ed', specialtyId: 'ed' });
+    const criticalEmergencyTrace = runtime.mergeTrace.find((entry) => entry.profileId === 'criticalEmergency');
 
     expect(runtime.fieldVisibility['legacy-nursing-diagnosis-text']).toBe(false);
     expect(runtime.pack.visibility?.['legacy-nursing-diagnosis-text']).toBe(false);
@@ -272,10 +274,11 @@ describe('resolveHandoverProfileRuntime', () => {
       'Overlay visibility cannot reactivate fields already hidden: legacy-nursing-diagnosis-text',
     ]);
   });
+
   it('tracks explicit specialty override alongside unit-config overlays for downstream traceability', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['general-inpatient'],
-      specialtyOverlays: ['infect', 'onc'],
+      specialtyOverlays: ['infecto', 'onc'],
     });
     process.env.UNITS_CONFIG = JSON.stringify({
       units: [
@@ -284,7 +287,7 @@ describe('resolveHandoverProfileRuntime', () => {
           name: 'Sala A',
           specialty: 'infect',
           profileId: 'general-inpatient',
-          specialtyOverlayIds: ['infect'],
+          specialtyOverlayIds: ['infecto'],
         },
       ],
     });
@@ -297,7 +300,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.context.hasHumanSpecialtyOverride).toBe(true);
     expect(runtime.context.overlaySelections).toEqual([
       {
-        overlayId: 'infect',
+        overlayId: 'infecto',
         source: 'unit-config',
         specialtyId: undefined,
         isHumanOverride: false,
@@ -309,12 +312,12 @@ describe('resolveHandoverProfileRuntime', () => {
         isHumanOverride: true,
       },
     ]);
-    expect(runtime.context.specialtyOverlayIds).toEqual(['infect', 'onc']);
+    expect(runtime.context.specialtyOverlayIds).toEqual(['infecto', 'onc']);
     expect(runtime.activeOverlays[1]?.isHumanOverride).toBe(true);
     expect(runtime.mergeTrace.map((entry) => entry.profileId)).toEqual([
       'handover-core',
       'general-inpatient',
-      'infect',
+      'infecto',
       'onc',
     ]);
   });
@@ -399,6 +402,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.fieldVisibility['legacy-sbar-narrative']).toBe(false);
     expect(runtime.fieldVisibility['legacy-medication-text']).toBe(false);
   });
+
   it('stays deterministic when runtime context is incomplete and falls back to the configured default unit', async () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       defaultUnit: 'uci-adulto',
@@ -463,4 +467,3 @@ describe('resolveHandoverProfileRuntime', () => {
     }
   });
 });
-

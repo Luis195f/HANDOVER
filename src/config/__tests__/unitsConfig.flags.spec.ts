@@ -230,7 +230,7 @@ describe('unitsConfig advanced flags by unit', () => {
 
     expect(UNITS_CONFIG[0]).toMatchObject({
       profileId: 'general-inpatient',
-      specialtyOverlayIds: ['ped', 'ob'],
+      specialtyOverlayIds: ['pedsSubspecialties', 'gynObs'],
     });
     expect(resolveUnitFeatureFlags('profiled-unit')).toMatchObject({
       showNicCoding: true,
