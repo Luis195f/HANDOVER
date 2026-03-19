@@ -84,4 +84,59 @@ describe('priority-ui', () => {
 
     expect(hasActionablePrioritySignal(quietPatient)).toBe(false);
   });
+
+  it('surfaces contextual overlay guidance in the existing brief priority UI when oncology modifiers are active', () => {
+    const contextualPatient: PrioritizedPatient = {
+      ...basePatient,
+      patientId: 'pat-onc',
+      displayName: 'Paciente Onco',
+      news2Score: 4,
+      totalScore: 6.2,
+      baseScore: 4.5,
+      level: 'high',
+      baseLevel: 'medium',
+      reasons: ['PROFILE_CONTEXT'],
+      reasonSummary: 'NEWS2 4, contexto Consulta externa y ambulatoria + Oncologia y hematologia',
+      pendingCriticalTasksCount: 0,
+      explanation: {
+        ...basePatient.explanation,
+        sourceData: [],
+        clinicalChange: [],
+        pendingCritical: [],
+        activeContext: {
+          unitId: 'onc-ward',
+          specialtyId: 'onc',
+          unitProfileId: 'ambulatory',
+          specialtyOverlayIds: ['onc'],
+          activeProfileIds: ['handover-core', 'ambulatory', 'onc'],
+          labels: ['HANDOVER Core', 'Consulta externa y ambulatoria', 'Oncologia y hematologia'],
+          usesCoreFallback: false,
+          hasHumanSpecialtyOverride: false,
+        },
+        modifiers: [
+          {
+            signalId: 'overlay-onc-neutropenia',
+            label: 'Neutropenia febril y sepsis oculta',
+            dimension: 'deterioration-risk',
+            source: 'specialty-overlay',
+            profileId: 'onc',
+            weight: 1.35,
+            contribution: 1,
+            applied: true,
+            note: 'SOP: EOPROP-IA prioriza fiebre, inmunosupresion y deterioro infeccioso precoz.',
+          },
+        ],
+      },
+    };
+
+    const model = buildPriorityUiModel({
+      patient: contextualPatient,
+      referenceTime: '2026-03-19T10:15:00.000Z',
+    });
+
+    expect(model.whyNow).toBe('Contexto activo: Neutropenia febril y sepsis oculta');
+    expect(model.actionLabel).toBe('No omitir: Neutropenia febril y sepsis oculta');
+    expect(model.windowLabel).toBe('Ventana: reevaluar este turno');
+    expect(model.windowTone).toBe('warning');
+  });
 });

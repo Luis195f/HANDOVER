@@ -371,7 +371,7 @@ const resolveNotes = (pack: UnitProfileRuntimePack, features: UnitFeatureFlags):
     notes.push('Escalas pediátricas próximamente.');
   }
   if (features.enableOncoFields) {
-    notes.push('Campos oncológicos adicionales próximamente.');
+    notes.push('Contexto onco-hematologico: reforzar fase terapeutica, inmunosupresion, CVC y soporte anticipatorio.');
   }
 
   return unique(notes);
@@ -582,8 +582,4 @@ export const resolveHandoverProfileRuntime = ({
     treatmentQuickPicks: pack.quickPicks?.treatments ?? [],
   };
 };
-
-
-
-
 

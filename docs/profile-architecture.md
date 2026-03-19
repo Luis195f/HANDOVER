@@ -1,6 +1,6 @@
 # Contrato base de perfiles clinicos
 
-Estado revisado el 2026-03-12.
+Estado revisado el 2026-03-19.
 
 Este documento describe el contrato minimo ya cableado en el repo para representar:
 
@@ -148,8 +148,7 @@ No se hace en esta fase:
 - no se cambia el contrato contextual FHIR;
 - no se emiten nuevos vectores ICEA+ en runtime;
 - no se activan todos los perfiles por defecto;
-- no se implementa todavia la logica EOPROP-IA ni una estratificacion oncológica avanzada por hospital de dia, urgencias oncológicas, planta o paliativos.
-
+- la estratificacion EOPROP-IA solo se implementa como overlay contextual y salida explicable; no crea payload FHIR ni runtime ICEA+ nuevos.
 
 ## 7. Runtime UPP PRE-03
 
@@ -174,4 +173,18 @@ La PRE-04 extiende el runtime del formulario unico con Specialty Overlay Packs s
 - La trazabilidad visible incluye UPP base, SOP activos, origen del specialty (`explicit`, `unit`, `unit-config`, `none`), si hubo override humano y cualquier guardrail aplicado durante el merge.
 - El payload FHIR no cambia en esta fase; la traza se adjunta solo como metadata interna backward compatible para consumidores futuros de FHIR/ICEA/outbox.
 
+## 9. Overlay EOPROP-IA PRE-09
 
+PRE-09 activa `onc` como overlay onco-hematologico operativo real dentro del stack actual de perfiles:
+
+- reutiliza la compatibilidad legacy `oncology` ya existente;
+- mantiene precedencia determinista `Core < UPP < SOP`;
+- no abre un tercer formulario ni una pantalla nueva;
+- no toca `fhir-map.ts` ni los contratos FHIR;
+- no emite todavia nuevos vectores ICEA+ en runtime.
+
+La capa onco-hematologica se expresa mediante:
+
+- `prioritySignals` explicables para neutropenia febril, sepsis, extravasacion, dolor no controlado, deshidratacion y complicaciones de tratamiento sistemico;
+- `requiredExtraFields` y `optionalExtraFields` para fase terapeutica, inmunosupresion, CVC, transfusion y paliacion cuando apliquen;
+- `quickPicks`, `visibleOutputs` y trazabilidad visible reutilizando la UI existente de formulario, lista y dashboard.

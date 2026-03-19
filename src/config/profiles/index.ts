@@ -400,11 +400,82 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
     }),
     onc: createOverlayDefinition('onc', {
       prioritySignals: [
-        overlaySignal('onc', 'overlay-onc-infection', 'Riesgo infeccioso y carga sintomatica', 'specialty-modifier'),
+        overlaySignal(
+          'onc',
+          'overlay-onc-neutropenia',
+          'Neutropenia febril y sepsis oculta',
+          'deterioration-risk',
+          {
+            weight: 1.35,
+            explanation:
+              'EOPROP-IA prioriza fiebre, inmunosupresion y deterioro infeccioso precoz como riesgo no delegable del relevo.',
+          },
+        ),
+        overlaySignal(
+          'onc',
+          'overlay-onc-sepsis-window',
+          'Sepsis, antimicrobianos y reevaluacion del CVC',
+          'time-critical',
+          {
+            weight: 1.25,
+            explanation:
+              'La ventana de sepsis y la seguridad del acceso vascular exigen seguimiento visible en el siguiente turno.',
+          },
+        ),
+        overlaySignal(
+          'onc',
+          'overlay-onc-extravasation',
+          'Extravasacion y continuidad segura de terapia sistemica',
+          'time-critical',
+          {
+            weight: 1.2,
+            explanation:
+              'Extravasacion, infusiones activas y cambios de acceso deben anticiparse sin abrir un flujo paralelo.',
+          },
+        ),
+        overlaySignal(
+          'onc',
+          'overlay-onc-symptoms',
+          'Dolor no controlado, mucositis o deshidratacion',
+          'therapeutic-load',
+          {
+            weight: 1.2,
+            explanation:
+              'La carga sintomatica dominante cambia la prioridad enfermera aunque no exista un evento hemodinamico mayor.',
+          },
+        ),
+        overlaySignal(
+          'onc',
+          'overlay-onc-systemic-treatment',
+          'Complicaciones de tratamiento sistemico y soporte hematologico',
+          'specialty-modifier',
+          {
+            weight: 1.15,
+            explanation:
+              'Quimioterapia, inmunoterapia, transfusion y soporte hematologico elevan complejidad dinamica contextual.',
+          },
+        ),
+        overlaySignal(
+          'onc',
+          'overlay-onc-palliation',
+          'Paliacion activa y objetivos de cuidado',
+          'coordination',
+          {
+            weight: 1.05,
+            explanation:
+              'Cuando hay paliacion activa, los objetivos y limites del plan no deben perderse durante el relevo.',
+          },
+        ),
       ],
       iceaContextDefaults: {
         baselineComplexity: 1,
-        caseMixHints: ['specialty-onc'],
+        surveillanceIntensity: 1,
+        therapeuticLoad: 1,
+        temporalCriticality: 1,
+        continuityRisk: 1,
+        dependencyLoad: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-onc', 'eoprop-ia', 'oncology-hematology'],
       },
     }),
     trauma: createOverlayDefinition('trauma', {
@@ -775,8 +846,4 @@ export type {
   ProfileContextInput,
   ProfileRegistryActivation,
 } from '../../types/profile';
-
-
-
-
 
