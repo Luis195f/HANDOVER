@@ -14,6 +14,7 @@ import {
 } from '@/src/lib/fhir-map';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { zHandover } from '@/src/validation/schemas';
+import { FHIR_CODES } from '@/src/lib/codes';
 
 const NOW = '2025-01-05T10:30:00.000Z';
 
@@ -776,6 +777,127 @@ describe('buildFhirBundleFromFormData', () => {
       start: '2025-01-05T08:00:00Z',
       end: '2025-01-05T16:00:00Z',
     });
+  });
+  it('maps turn context pending tasks and contingency plan as additive observations', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 8,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      patientId: 'patient-core-ops-1',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: makeCoding('195967001', 'Neumonía'),
+      dxNursing: '',
+      turnContext: {
+        shiftPhase: 'closing',
+        workload: 'high',
+        operationalSummary: 'Alta rotación con presión asistencial',
+        serviceIncidents: [
+          { kind: 'staffing', severity: 'high', description: 'Cobertura parcial', resolved: false },
+        ],
+      },
+      pendingTasks: [
+        {
+          id: 'task-1',
+          category: 'reevaluation',
+          title: 'Reevaluar Glasgow en 15 min',
+          status: 'pending',
+          priority: 'critical',
+          dueBy: '2025-01-05T16:15:00Z',
+          owner: 'Enfermera entrante',
+          escalationCriteria: 'Avisar si baja 2 puntos',
+        },
+      ],
+      contingencyPlan: {
+        watchItems: ['SatO2 < 92%'],
+        immediateActions: ['Valorar ABC'],
+        escalationCriteria: ['Avisar si no responde a oxígeno'],
+        escalationContact: 'Médico de guardia',
+        fallbackPlan: 'Preparar traslado a UCI',
+      },
+      exams: [
+        {
+          type: 'laboratory',
+          state: 'pending',
+          description: 'Gasometría arterial',
+          priority: 'critical',
+          dueBy: '2025-01-05T16:10:00Z',
+          responsible: 'Laboratorio',
+        },
+      ],
+      procedures: [
+        {
+          description: 'Curación de vía central',
+          done: false,
+          priority: 'urgent',
+          scheduledFor: '2025-01-05T16:30:00Z',
+          responsible: 'Enfermería',
+          escalationCriteria: 'Avisar si sangrado',
+        },
+      ],
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const observations = bundle.entry
+      .map((entry) => entry.resource as any)
+      .filter((resource) => resource.resourceType === 'Observation');
+    const procedures = bundle.entry
+      .map((entry) => entry.resource as any)
+      .filter((resource) => resource.resourceType === 'Procedure');
+
+    const turnContextObservation = observations.find(
+      (resource) => resource.code?.coding?.[0]?.code === FHIR_CODES.CARE.TURN_CONTEXT.code,
+    );
+    const pendingTaskObservation = observations.find(
+      (resource) => resource.code?.coding?.[0]?.code === FHIR_CODES.CARE.PENDING_TASK.code,
+    );
+    const contingencyObservation = observations.find(
+      (resource) => resource.code?.coding?.[0]?.code === FHIR_CODES.CARE.CONTINGENCY_PLAN.code,
+    );
+    const examObservation = observations.find(
+      (resource) => resource.valueString === 'Gasometría arterial',
+    );
+    const procedure = procedures.find(
+      (resource) => resource.code?.text === 'Curación de vía central',
+    );
+
+    expect(turnContextObservation?.component).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Shift phase' }),
+        }),
+      ]),
+    );
+    expect(pendingTaskObservation?.valueString).toBe('Reevaluar Glasgow en 15 min');
+    expect(pendingTaskObservation?.component).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Task priority' }),
+        }),
+      ]),
+    );
+    expect(contingencyObservation?.component).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Escalation contact' }),
+          valueString: 'Médico de guardia',
+        }),
+      ]),
+    );
+    expect(examObservation?.note?.[0]?.text).toContain('Exam priority');
+    expect(procedure?.note?.some((note: { text?: string }) => note.text?.includes('Priority: urgent'))).toBe(true);
   });
 });
 

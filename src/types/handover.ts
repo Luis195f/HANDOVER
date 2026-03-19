@@ -2,12 +2,15 @@ import { z } from 'zod';
 
 import type { AdministrativeData } from './administrative';
 import type {
+  zContingencyPlan,
   zExamItem,
   zMedicationItem,
+  zPendingTask,
   zProcedureItem,
   zRiskItem,
   zRiskType,
   zTreatmentItem,
+  zTurnContext,
   zNocOutcomeItem,
 } from '../validation/schemas';
 import type { SnomedCoding } from '../data/snomed-dict';
@@ -75,6 +78,10 @@ export type RiskFlags = {
   pressureUlcer?: boolean;
   isolation?: boolean;
 };
+
+export type TurnContext = z.infer<typeof zTurnContext>;
+export type PendingTask = z.infer<typeof zPendingTask>;
+export type ContingencyPlan = z.infer<typeof zContingencyPlan>;
 
 // BEGIN HANDOVER D1 – BedsideChecklist types
 export type HandoverBedsideChecklist = {
@@ -224,8 +231,11 @@ export type HandoverValues = {
   medications?: MedicationItem[];
   treatments?: TreatmentItem[];
   outcomes?: NocOutcomeItem[];
+  turnContext?: TurnContext;
+  pendingTasks?: PendingTask[];
   exams?: ExamItem[];
   procedures?: ProcedureItem[];
+  contingencyPlan?: ContingencyPlan;
   oxygenTherapy?: OxygenTherapy;
   devices?: DeviceItem[];
   audioUri?: string;
@@ -261,4 +271,5 @@ export type {
   SpecialtyOverlayId,
   UnitProfileId,
 } from './profile';
+
 

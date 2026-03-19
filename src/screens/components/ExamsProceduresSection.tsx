@@ -16,6 +16,12 @@ const EXAM_STATE_LABELS: Record<ExamItem['state'], string> = {
   pending: 'Pendiente',
 };
 
+const PRIORITY_LABELS: Record<NonNullable<ExamItem['priority']>, string> = {
+  routine: 'Rutina',
+  urgent: 'Urgente',
+  critical: 'Crítico',
+};
+
 const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
   card: {
@@ -36,7 +42,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: '#fff',
   },
-  segmentedRow: { flexDirection: 'row', gap: 8 },
+  segmentedRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -91,17 +97,28 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   subsectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  row: { flexDirection: 'row', alignItems: 'flex-start' },
+  flex: { flex: 1 },
+  spacer: { width: 12 },
+  metaText: { marginTop: 6, color: '#4B5563' },
 });
 
 const defaultExam: ExamItem = {
   type: 'laboratory',
   state: 'result',
   description: '',
+  priority: 'urgent',
+  dueBy: undefined,
+  responsible: undefined,
 };
 
 const defaultProcedure: ProcedureItem = {
   description: '',
   done: false,
+  priority: 'urgent',
+  scheduledFor: undefined,
+  responsible: undefined,
+  escalationCriteria: undefined,
 };
 
 export function ExamsProceduresSection() {
@@ -126,18 +143,25 @@ export function ExamsProceduresSection() {
   );
 
   const handleAddExam = () => {
-    if (!canAddExam) {
-      return;
-    }
-    appendExam({ ...nextExam, description: nextExam.description.trim() });
+    if (!canAddExam) return;
+    appendExam({
+      ...nextExam,
+      description: nextExam.description.trim(),
+      dueBy: nextExam.dueBy?.trim() || undefined,
+      responsible: nextExam.responsible?.trim() || undefined,
+    });
     setNextExam(defaultExam);
   };
 
   const handleAddProcedure = () => {
-    if (!canAddProcedure) {
-      return;
-    }
-    appendProcedure({ ...nextProcedure, description: nextProcedure.description.trim() });
+    if (!canAddProcedure) return;
+    appendProcedure({
+      ...nextProcedure,
+      description: nextProcedure.description.trim(),
+      scheduledFor: nextProcedure.scheduledFor?.trim() || undefined,
+      responsible: nextProcedure.responsible?.trim() || undefined,
+      escalationCriteria: nextProcedure.escalationCriteria?.trim() || undefined,
+    });
     setNextProcedure(defaultProcedure);
   };
 
@@ -192,6 +216,24 @@ export function ExamsProceduresSection() {
         </View>
 
         <View style={styles.field}>
+          <Text style={styles.label}>Prioridad</Text>
+          <View style={styles.segmentedRow}>
+            {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
+              <Pressable
+                key={value}
+                accessibilityLabel={`Prioridad examen ${label}`}
+                style={[styles.chip, nextExam.priority === value ? styles.chipActive : null]}
+                onPress={() => setNextExam((prev) => ({ ...prev, priority: value as ExamItem['priority'] }))}
+              >
+                <Text style={[styles.chipText, nextExam.priority === value ? styles.chipTextActive : null]}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.field}>
           <Text style={styles.label}>Descripción</Text>
           <TextInput
             accessibilityLabel="Descripción de examen"
@@ -200,6 +242,30 @@ export function ExamsProceduresSection() {
             value={nextExam.description}
             onChangeText={(text) => setNextExam((prev) => ({ ...prev, description: text }))}
           />
+        </View>
+
+        <View style={styles.row}>
+          <View style={[styles.field, styles.flex]}>
+            <Text style={styles.label}>Hora objetivo</Text>
+            <TextInput
+              accessibilityLabel="Hora objetivo de examen"
+              style={styles.input}
+              placeholder="2026-03-19T11:00:00Z"
+              value={nextExam.dueBy ?? ''}
+              onChangeText={(text) => setNextExam((prev) => ({ ...prev, dueBy: text }))}
+            />
+          </View>
+          <View style={styles.spacer} />
+          <View style={[styles.field, styles.flex]}>
+            <Text style={styles.label}>Responsable</Text>
+            <TextInput
+              accessibilityLabel="Responsable de examen"
+              style={styles.input}
+              placeholder="Laboratorio / imagen / enfermería"
+              value={nextExam.responsible ?? ''}
+              onChangeText={(text) => setNextExam((prev) => ({ ...prev, responsible: text }))}
+            />
+          </View>
         </View>
 
         <Pressable
@@ -218,6 +284,9 @@ export function ExamsProceduresSection() {
                 type: field.type ?? 'laboratory',
                 state: field.state ?? 'result',
                 description: field.description ?? '',
+                priority: field.priority,
+                dueBy: field.dueBy,
+                responsible: field.responsible,
               };
               return (
                 <View key={field.id} style={styles.listItem}>
@@ -234,15 +303,17 @@ export function ExamsProceduresSection() {
                   <View style={styles.badgeRow}>
                     <Text style={styles.badge}>{EXAM_TYPE_LABELS[item.type]}</Text>
                     <Text style={styles.badge}>{EXAM_STATE_LABELS[item.state]}</Text>
+                    {item.priority ? <Text style={styles.badge}>{PRIORITY_LABELS[item.priority]}</Text> : null}
                   </View>
+                  {item.dueBy ? <Text style={styles.metaText}>Hora objetivo: {item.dueBy}</Text> : null}
+                  {item.responsible ? <Text style={styles.metaText}>Responsable: {item.responsible}</Text> : null}
                 </View>
               );
             })}
           </View>
         ) : null}
         <Text style={styles.hintText}>
-          Puedes agregar resultados de laboratorio o estudios de imagen relevantes, y marcar
-          procedimientos realizados durante el turno.
+          Registra estudios relevantes y marca prioridad si condicionan la continuidad del turno.
         </Text>
       </View>
 
@@ -257,6 +328,64 @@ export function ExamsProceduresSection() {
             placeholder="Ej: Curación, sondaje, etc."
             value={nextProcedure.description}
             onChangeText={(text) => setNextProcedure((prev) => ({ ...prev, description: text }))}
+          />
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Prioridad</Text>
+          <View style={styles.segmentedRow}>
+            {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
+              <Pressable
+                key={value}
+                accessibilityLabel={`Prioridad procedimiento ${label}`}
+                style={[styles.chip, nextProcedure.priority === value ? styles.chipActive : null]}
+                onPress={() => setNextProcedure((prev) => ({ ...prev, priority: value as ProcedureItem['priority'] }))}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    nextProcedure.priority === value ? styles.chipTextActive : null,
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.row}>
+          <View style={[styles.field, styles.flex]}>
+            <Text style={styles.label}>Programado para</Text>
+            <TextInput
+              accessibilityLabel="Hora de procedimiento"
+              style={styles.input}
+              placeholder="2026-03-19T12:00:00Z"
+              value={nextProcedure.scheduledFor ?? ''}
+              onChangeText={(text) => setNextProcedure((prev) => ({ ...prev, scheduledFor: text }))}
+            />
+          </View>
+          <View style={styles.spacer} />
+          <View style={[styles.field, styles.flex]}>
+            <Text style={styles.label}>Responsable</Text>
+            <TextInput
+              accessibilityLabel="Responsable de procedimiento"
+              style={styles.input}
+              placeholder="Enfermería / médico"
+              value={nextProcedure.responsible ?? ''}
+              onChangeText={(text) => setNextProcedure((prev) => ({ ...prev, responsible: text }))}
+            />
+          </View>
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Criterio de escalado</Text>
+          <TextInput
+            accessibilityLabel="Criterio de escalado de procedimiento"
+            style={styles.input}
+            placeholder="Ej: avisar si sangrado activo o mala tolerancia"
+            value={nextProcedure.escalationCriteria ?? ''}
+            onChangeText={(text) => setNextProcedure((prev) => ({ ...prev, escalationCriteria: text }))}
           />
         </View>
 
@@ -284,6 +413,10 @@ export function ExamsProceduresSection() {
               const item: ProcedureItem = {
                 description: field.description ?? '',
                 done: field.done ?? false,
+                priority: field.priority,
+                scheduledFor: field.scheduledFor,
+                responsible: field.responsible,
+                escalationCriteria: field.escalationCriteria,
               };
               return (
                 <View key={field.id} style={styles.listItem}>
@@ -299,15 +432,20 @@ export function ExamsProceduresSection() {
                   </View>
                   <View style={styles.badgeRow}>
                     <Text style={styles.badge}>{item.done ? 'Realizado' : 'Pendiente'}</Text>
+                    {item.priority ? <Text style={styles.badge}>{PRIORITY_LABELS[item.priority]}</Text> : null}
                   </View>
+                  {item.scheduledFor ? <Text style={styles.metaText}>Programado: {item.scheduledFor}</Text> : null}
+                  {item.responsible ? <Text style={styles.metaText}>Responsable: {item.responsible}</Text> : null}
+                  {item.escalationCriteria ? (
+                    <Text style={styles.metaText}>Escalado: {item.escalationCriteria}</Text>
+                  ) : null}
                 </View>
               );
             })}
           </View>
         ) : null}
         <Text style={styles.hintText}>
-          Puedes agregar resultados de laboratorio o estudios de imagen relevantes, y marcar
-          procedimientos realizados durante el turno.
+          Marca si quedó hecho, quién lo asume y cuándo debe resolverse si sigue pendiente.
         </Text>
       </View>
     </View>

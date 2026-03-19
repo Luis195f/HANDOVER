@@ -471,15 +471,76 @@ export const zRiskFlags = z
   })
   .partial();
 
+export const zTurnContextIncident = z.object({
+  kind: z.enum(["admission", "transfer", "staffing", "supply", "system", "other"]),
+  severity: z.enum(["low", "moderate", "high"]).default("moderate"),
+  description: z.string().trim().min(1, "Detalle requerido").max(200, "Máx. 200 caracteres"),
+  resolved: z.boolean().default(false),
+});
+
+export const zTurnContext = z.object({
+  shiftPhase: z.enum(["start", "mid", "closing", "coverage"]).optional(),
+  workload: z.enum(["stable", "high", "saturated", "contingency"]).optional(),
+  operationalSummary: optionalTrimmedString(300).optional(),
+  serviceIncidents: z.array(zTurnContextIncident).max(8, "Máximo 8 incidencias").optional(),
+});
+
+export const zPendingTask = z
+  .object({
+    id: z.string().trim().min(1, "Identificador requerido"),
+    category: z.enum([
+      "critical-task",
+      "reevaluation",
+      "exam-followup",
+      "procedure-followup",
+      "escalation",
+      "other",
+    ]),
+    title: z.string().trim().min(1, "Detalle requerido").max(200, "Máx. 200 caracteres"),
+    status: z.enum(["pending", "in_progress", "done"]).default("pending"),
+    priority: z.enum(["routine", "urgent", "critical"]).default("urgent"),
+    dueBy: z.string().datetime().optional(),
+    owner: optionalTrimmedString(120).optional(),
+    escalationCriteria: optionalTrimmedString(240).optional(),
+    notes: optionalTrimmedString(300).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.category === "escalation" && !value.escalationCriteria) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["escalationCriteria"],
+        message: "Define el criterio de escalado para este pendiente.",
+      });
+    }
+  });
+
+export const zContingencyPlan = z.object({
+  watchItems: z.array(z.string().trim().min(1).max(160)).max(6, "Máximo 6 ítems").optional(),
+  immediateActions: z.array(z.string().trim().min(1).max(160)).max(6, "Máximo 6 acciones").optional(),
+  escalationCriteria: z
+    .array(z.string().trim().min(1).max(160))
+    .max(6, "Máximo 6 criterios")
+    .optional(),
+  escalationContact: optionalTrimmedString(120).optional(),
+  fallbackPlan: optionalTrimmedString(300).optional(),
+});
+
 export const zExamItem = z.object({
   type: z.enum(["laboratory", "imaging", "other"]),
   state: z.enum(["result", "pending"]).default("result"),
   description: z.string().trim().min(1, "Detalle requerido").max(200, "Máx. 200 caracteres"),
+  priority: z.enum(["routine", "urgent", "critical"]).optional(),
+  dueBy: z.string().datetime().optional(),
+  responsible: optionalTrimmedString(120).optional(),
 });
 
 export const zProcedureItem = z.object({
   description: z.string().trim().min(1, "Detalle requerido").max(200, "Máx. 200 caracteres"),
   done: z.boolean().default(false),
+  priority: z.enum(["routine", "urgent", "critical"]).optional(),
+  scheduledFor: z.string().datetime().optional(),
+  responsible: optionalTrimmedString(120).optional(),
+  escalationCriteria: optionalTrimmedString(240).optional(),
 });
 
 // BEGIN HANDOVER D3 – StructuredDiagnosis schema
@@ -659,8 +720,11 @@ export const zHandoverObject = z.object({
   medications: z.array(zMedicationItem).default([]),
   treatments: z.array(zTreatmentItem).default([]),
   outcomes: z.array(zNocOutcomeItem).max(3, "Puedes registrar hasta 3 resultados NOC").optional(),
+  turnContext: zTurnContext.optional(),
+  pendingTasks: z.array(zPendingTask).max(12, "Máximo 12 pendientes").optional(),
   exams: z.array(zExamItem).default([]),
   procedures: z.array(zProcedureItem).default([]),
+  contingencyPlan: zContingencyPlan.optional(),
 
   oxygenTherapy: zOxygen.optional(),
   devices: z.array(zDeviceItem).default([]),
@@ -745,4 +809,5 @@ export const zHandover = z.preprocess(normalizeLegacyHandoverPayload, zHandoverB
 
 export type HandoverValues = z.infer<typeof zHandover>;
 export type HandoverFormData = HandoverValues;
+
 

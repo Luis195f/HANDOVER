@@ -97,6 +97,8 @@ import { PatientBanner } from './components/PatientBanner';
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { BedsideChecklistModal } from './components/BedsideChecklistModal';
 import { BedsideChecklistSection } from './components/BedsideChecklistSection';
+import PendingTasksSection from './components/PendingTasksSection';
+import TurnContextSection from './components/TurnContextSection';
 import EliminationSection from './components/EliminationSection';
 import FluidBalanceSection from './components/FluidBalanceSection';
 import MobilitySkinSection from './components/MobilitySkinSection';
@@ -649,8 +651,22 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       medications: [],
       treatments: [],
       outcomes: [],
+      turnContext: {
+        shiftPhase: undefined,
+        workload: undefined,
+        operationalSummary: '',
+        serviceIncidents: [],
+      },
+      pendingTasks: [],
       exams: [],
       procedures: [],
+      contingencyPlan: {
+        watchItems: [],
+        immediateActions: [],
+        escalationCriteria: [],
+        escalationContact: '',
+        fallbackPlan: '',
+      },
       sbarSituation: '',
       sbarBackground: '',
       sbarAssessment: '',
@@ -1403,6 +1419,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     braden: values.braden,
     glasgow: values.glasgow,
     bedsideChecklist: values.bedsideChecklist,
+    turnContext: values.turnContext,
+    pendingTasks: values.pendingTasks,
+    contingencyPlan: values.contingencyPlan,
   });
 
   const buildSbarFreeText = (values: HandoverFormValues) => {
@@ -2304,6 +2323,9 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               }}
               DictationMicButton={DictationMicButton}
             />
+            <View style={{ marginTop: 24 }}>
+              <TurnContextSection />
+            </View>
           </CollapsibleSection>
         </View>
 
@@ -2583,7 +2605,10 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           isCollapsed={collapsedSections.examenes}
           onToggle={() => toggleSection('examenes')}
         >
-          <ExamsProceduresSection />
+          <PendingTasksSection />
+          <View style={{ marginTop: 24 }}>
+            <ExamsProceduresSection />
+          </View>
         </CollapsibleSection>
       </View>
       ) : null}
@@ -3093,5 +3118,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     </FormProvider>
   );
 }
+
+
 
 

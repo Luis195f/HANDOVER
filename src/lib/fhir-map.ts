@@ -26,6 +26,9 @@ import type {
   ExamItem,
   ProcedureItem,
   RiskFlags,
+  TurnContext,
+  PendingTask,
+  ContingencyPlan,
   RiskItem,
   DeviceItem,
   PsychosocialCare,
@@ -59,10 +62,13 @@ import {
   mapExamObservationsImpl,
   mapFluidBalanceCareImpl,
   mapMobilitySkinCareImpl,
+  mapContingencyPlanObservationImpl,
   mapNocOutcomesImpl,
   mapNutritionCareImpl,
+  mapPendingTaskObservationsImpl,
   mapProceduresImpl,
   mapTreatmentsImpl,
+  mapTurnContextObservationImpl,
   normalizeExamInputs,
   type SpecificCareMapperDependencies,
 } from './fhir-map/specific-care';
@@ -980,8 +986,11 @@ export type HandoverValues = {
   psychosocial?: PsychosocialCare;
   fluidBalance?: FluidBalanceInfo;
   painAssessment?: PainAssessment;
+  turnContext?: TurnContext;
+  pendingTasks?: PendingTask[];
   exams?: ExamItem[];
   procedures?: ProcedureItem[];
+  contingencyPlan?: ContingencyPlan;
   braden?: BradenScale;
   glasgow?: GlasgowScale;
   // BEGIN HANDOVER D1 – BedsideChecklist types
@@ -1558,6 +1567,27 @@ export function mapFluidBalanceCare(
   return mapFluidBalanceCareImpl(specificCareMapperDependencies, values, options);
 }
 
+export function mapTurnContextObservation(
+  values: { patientId: string; encounterId?: string; turnContext?: TurnContext },
+  options?: BuildOptions,
+): Observation[] {
+  return mapTurnContextObservationImpl(specificCareMapperDependencies, values, options);
+}
+
+export function mapPendingTaskObservations(
+  values: { patientId: string; encounterId?: string; pendingTasks?: PendingTask[] },
+  options?: BuildOptions,
+): Observation[] {
+  return mapPendingTaskObservationsImpl(specificCareMapperDependencies, values, options);
+}
+
+export function mapContingencyPlanObservation(
+  values: { patientId: string; encounterId?: string; contingencyPlan?: ContingencyPlan },
+  options?: BuildOptions,
+): Observation[] {
+  return mapContingencyPlanObservationImpl(specificCareMapperDependencies, values, options);
+}
+
 export function mapTreatments(
   values: { patientId: string; encounterId?: string; treatments?: TreatmentItem[] },
   options?: BuildOptions,
@@ -1979,6 +2009,21 @@ export function buildHandoverBundle(
     sharedOptions,
   ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
 
+  const turnContextObservations = mapTurnContextObservation(
+    { patientId: values.patientId, encounterId, turnContext: values.turnContext },
+    sharedOptions,
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
+
+  const pendingTaskObservations = mapPendingTaskObservations(
+    { patientId: values.patientId, encounterId, pendingTasks: values.pendingTasks },
+    sharedOptions,
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
+
+  const contingencyPlanObservations = mapContingencyPlanObservation(
+    { patientId: values.patientId, encounterId, contingencyPlan: values.contingencyPlan },
+    sharedOptions,
+  ).map((observation) => replaceSubjectReference(observation, patientSubjectReference));
+
   const normalizedExams = normalizeExamInputs({
     exams: values.exams,
     examsPending: (values as { examsPending?: unknown }).examsPending,
@@ -2153,10 +2198,13 @@ export function buildHandoverBundle(
   };
 
   pushObservationEntry(administrativeObservation, administrativeRefs);
+  turnContextObservations.forEach((observation) => pushObservationEntry(observation, administrativeRefs));
   sbarObservations.forEach((observation) => pushObservationEntry(observation, sbarRefs));
   pushObservationEntry(bedsideChecklistObservation, bedsideChecklistRefs);
+  contingencyPlanObservations.forEach((observation) => pushObservationEntry(observation, notesRefs));
   pushObservationEntry(summaryObservation, notesRefs);
   pushObservationEntry(psychosocialObservation, careRefs);
+  pendingTaskObservations.forEach((observation) => pushObservationEntry(observation, careRefs));
 
   vitalObservations.forEach((observation) => {
     const { resource, fullUrl } = assignStableIds(
@@ -2830,6 +2878,18 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     { patientId: data.patientId, encounterId, fluidBalance: data.fluidBalance },
     sharedOptions,
   );
+  const turnContextObservations = mapTurnContextObservation(
+    { patientId: data.patientId, encounterId, turnContext: data.turnContext },
+    sharedOptions,
+  );
+  const pendingTaskObservations = mapPendingTaskObservations(
+    { patientId: data.patientId, encounterId, pendingTasks: data.pendingTasks },
+    sharedOptions,
+  );
+  const contingencyPlanObservations = mapContingencyPlanObservation(
+    { patientId: data.patientId, encounterId, contingencyPlan: data.contingencyPlan },
+    sharedOptions,
+  );
   const normalizedExamsForm = normalizeExamInputs({
     exams: data.exams,
     examsPending: (data as { examsPending?: unknown }).examsPending,
@@ -3051,10 +3111,13 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   };
 
   pushObservationWithRefs(administrativeObservation, refs.administrative);
+  turnContextObservations.forEach((observation) => pushObservationWithRefs(observation, refs.administrative));
   sbarObservations.forEach((observation) => pushObservationWithRefs(observation, refs.sbar));
   pushObservationWithRefs(bedsideChecklistObservation, refs.bedsideChecklist);
+  contingencyPlanObservations.forEach((observation) => pushObservationWithRefs(observation, refs.notes));
   pushObservationWithRefs(summaryObservation, refs.notes);
   pushObservationWithRefs(psychosocialObservation, refs.care);
+  pendingTaskObservations.forEach((observation) => pushObservationWithRefs(observation, refs.care));
 
   vitals.forEach(pushEntry);
   oxygenObservations.forEach(pushEntry);
@@ -3312,6 +3375,10 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
+
+
+
+
 
 
 
