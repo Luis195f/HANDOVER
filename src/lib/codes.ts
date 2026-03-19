@@ -21,6 +21,10 @@ export const TERMINOLOGY_SYSTEMS = {
   HANDOVER_BOOLEAN: 'urn:handover-pro:boolean',
   HANDOVER_NOC_SCORE: 'urn:handover-pro:noc-score',
   HANDOVER_COMPONENT: 'urn:handover-pro:component',
+  HANDOVER_TURN_CONTEXT: 'urn:handover-pro:turn-context',
+  HANDOVER_TASK_CATEGORY: 'urn:handover-pro:task-category',
+  HANDOVER_TASK_PRIORITY: 'urn:handover-pro:task-priority',
+  HANDOVER_TASK_STATUS: 'urn:handover-pro:task-status',
   HANDOVER_EXAM: 'https://handover.app/fhir/CodeSystem/handover-exam',
   HANDOVER_DIET: 'urn:handover-pro:diet',
   HANDOVER_STOOL_PATTERN: 'urn:handover-pro:stool-pattern',
@@ -223,6 +227,21 @@ export const FHIR_CODES = {
       code: 'fluid-balance',
       display: 'Fluid balance',
     },
+    TURN_CONTEXT: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'turn-context',
+      display: 'Turn context',
+    },
+    PENDING_TASK: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'pending-task',
+      display: 'Pending task',
+    },
+    CONTINGENCY_PLAN: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
+      code: 'contingency-plan',
+      display: 'Contingency plan',
+    },
   },
   RISK: {
     FALL: {
@@ -394,3 +413,4 @@ export const ALERT_CODES = {
   drainOverdue: 'alert.drain.overdue',
   oxygenProlonged: 'alert.oxygen.prolonged',
 } as const;
+

@@ -2,8 +2,11 @@
 import { computeNEWS2 } from './news2';
 import type {
   FluidBalanceInfo,
+  ContingencyPlan,
   OxygenTherapy,
   PainAssessment,
+  PendingTask,
+  TurnContext,
   RiskFlags,
   RiskItem,
   RiskType,
@@ -161,6 +164,55 @@ function describeMobility(mobilityLevel?: string, repositioningPlan?: string): s
   return details.join('. ');
 }
 
+function describeTurnContext(turnContext?: TurnContext): string | undefined {
+  if (!turnContext) return undefined;
+
+  const parts: string[] = [];
+  if (turnContext.workload) parts.push(`Carga ${turnContext.workload}`);
+  if (turnContext.shiftPhase) parts.push(`franja ${turnContext.shiftPhase}`);
+  if (turnContext.operationalSummary) parts.push(turnContext.operationalSummary);
+
+  const incidents = (turnContext.serviceIncidents ?? [])
+    .map((incident) => incident.description?.trim())
+    .filter(isNonEmptyString);
+  if (incidents.length > 0) {
+    parts.push(`Incidencias de servicio: ${incidents.join(', ')}`);
+  }
+
+  return parts.length > 0 ? parts.join('. ') : undefined;
+}
+
+function describePendingTasks(tasks?: PendingTask[]): string | undefined {
+  const actionable = (tasks ?? [])
+    .filter((task) => task.status !== 'done')
+    .slice(0, 3)
+    .map((task) => {
+      const extras = [task.priority, task.dueBy].filter(isNonEmptyString).join(' / ');
+      return extras ? `${task.title} (${extras})` : task.title;
+    });
+
+  return actionable.length > 0 ? `Pendientes: ${actionable.join(', ')}` : undefined;
+}
+
+function describeContingencyPlan(plan?: ContingencyPlan): string | undefined {
+  if (!plan) return undefined;
+
+  const parts: string[] = [];
+  if ((plan.watchItems ?? []).length > 0) {
+    parts.push(`Vigilar ${plan.watchItems?.join(', ')}`);
+  }
+  if ((plan.immediateActions ?? []).length > 0) {
+    parts.push(`Acciones inmediatas: ${plan.immediateActions?.join(', ')}`);
+  }
+  if ((plan.escalationCriteria ?? []).length > 0) {
+    parts.push(`Escalar si ${plan.escalationCriteria?.join(', ')}`);
+  }
+  if (plan.escalationContact) {
+    parts.push(`Avisar a ${plan.escalationContact}`);
+  }
+
+  return parts.length > 0 ? parts.join('. ') : undefined;
+}
 function bestNursingDx(h: HandoverFormData): string | undefined {
   const nanda = h.dxNursingStructured?.find((d) => d?.system === 'NANDA' && d.display)?.display?.trim();
   if (nanda) return nanda;
@@ -194,8 +246,9 @@ function buildSituation(data: HandoverFormData): string {
   const newsText = news2 ? `NEWS2 ${news2.total} (${NEWS2_BAND_LABEL[news2.band]} riesgo)` : undefined;
   const oxygen = formatOxygenTherapy((data as any).oxygenTherapy);
   const evolution = data.evolution ? `Evolución: ${data.evolution}` : undefined;
+  const turnContext = describeTurnContext(data.turnContext);
 
-  const situation = joinSentences([admission, location, newsText, oxygen, evolution]);
+  const situation = joinSentences([admission, location, newsText, oxygen, evolution, turnContext]);
   return situation || 'Paciente con información parcial disponible. Revisar historia clínica y registro de enfermería.';
 }
 
@@ -213,7 +266,9 @@ function buildBackground(data: HandoverFormData): string {
   const allergies = (data as any).bedsideChecklist?.allergiesReviewed ? 'Alergias revisadas' : undefined;
   const bedsideNotes = (data as any).bedsideChecklist?.bedsideNotes;
 
-  antecedentes.push(...[diet, mobility, skin, allergies, bedsideNotes].filter(isNonEmptyString));
+  const contingency = describeContingencyPlan(data.contingencyPlan);
+
+  antecedentes.push(...[diet, mobility, skin, allergies, bedsideNotes, contingency].filter(isNonEmptyString));
 
   const background = antecedentes.join('. ');
   return background || 'Antecedentes relevantes recogidos en la historia clínica, revisar para más detalles.';
@@ -242,6 +297,9 @@ function buildAssessment(data: HandoverFormData): string {
 
   const risks = describeRisks((data as any).risks, (data as any).risksStructured);
   if (risks) parts.push(risks);
+
+  const pendingTasks = describePendingTasks(data.pendingTasks);
+  if (pendingTasks) parts.push(pendingTasks);
 
   const pain = describePain((data as any).painAssessment);
   if (pain) parts.push(pain);
@@ -274,6 +332,12 @@ function buildRecommendation(data: HandoverFormData): string {
 
   if ((data as any).fluidBalance?.notes) tasks.push(`Balance/diuresis: ${(data as any).fluidBalance.notes}`);
   if (data.evolution) tasks.push(`Seguir plan: ${data.evolution}`);
+
+  const pendingTasks = describePendingTasks(data.pendingTasks);
+  if (pendingTasks) tasks.push(pendingTasks);
+
+  const contingency = describeContingencyPlan(data.contingencyPlan);
+  if (contingency) tasks.push(contingency);
 
   if (!tasks.length) tasks.push('Control de signos vitales cada 4-6 h y revisar diuresis si aplica');
   return tasks.join('. ');
@@ -319,3 +383,7 @@ export function generateSbarText(data: HandoverFormData, options: SbarOptions = 
   const summary = generateSbarSummary(data, options);
   return formatSbar(summary, options.locale ?? 'es');
 }
+
+
+
+

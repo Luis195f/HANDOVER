@@ -27,9 +27,12 @@ export const SENSITIVE_FIELDS = [
   'vitalsHistory',
   'devices',
   'medications',
+  'turnContext',
+  'pendingTasks',
   'exams',
   'examsPending',
   'procedures',
+  'contingencyPlan',
   'risks',
   'incidents',
   'summary',
@@ -46,3 +49,4 @@ export const SENSITIVE_FIELDS = [
 ] as const;
 
 export type SensitiveFieldPath = (typeof SENSITIVE_FIELDS)[number];
+

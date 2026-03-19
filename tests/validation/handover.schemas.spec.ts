@@ -217,4 +217,78 @@ describe('zHandover schema', () => {
     data.braden = { ...data.braden!, totalScore: 10 };
     expect(() => zHandover.parse(data)).toThrowError(ZodError);
   });
+  it('accepts structured turn context pending tasks and contingency plan', () => {
+    const data = buildValidHandover();
+    data.turnContext = {
+      shiftPhase: 'closing',
+      workload: 'high',
+      operationalSummary: 'Alta rotación en las últimas 2 horas',
+      serviceIncidents: [
+        {
+          kind: 'staffing',
+          severity: 'high',
+          description: 'Cobertura parcial del sector B',
+          resolved: false,
+        },
+      ],
+    };
+    data.pendingTasks = [
+      {
+        id: 'task-1',
+        category: 'reevaluation',
+        title: 'Reevaluar Glasgow en 30 min',
+        status: 'pending',
+        priority: 'critical',
+        dueBy: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        owner: 'Enfermera entrante',
+        escalationCriteria: 'Avisar si baja 2 puntos',
+      },
+    ];
+    data.contingencyPlan = {
+      watchItems: ['SatO2 < 92%'],
+      immediateActions: ['Valorar ABC'],
+      escalationCriteria: ['Avisar si no responde a oxígeno'],
+      escalationContact: 'Médico de guardia',
+      fallbackPlan: 'Preparar traslado a UCI si empeora',
+    };
+    data.exams = [
+      {
+        type: 'laboratory',
+        state: 'pending',
+        description: 'Gasometría arterial',
+        priority: 'critical',
+        dueBy: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        responsible: 'Laboratorio',
+      },
+    ];
+    data.procedures = [
+      {
+        description: 'Curación de vía central',
+        done: false,
+        priority: 'urgent',
+        scheduledFor: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        responsible: 'Enfermería',
+        escalationCriteria: 'Avisar si sangrado',
+      },
+    ];
+
+    expect(() => zHandover.parse(data)).not.toThrowError();
+  });
+
+  it('requires escalation criteria for escalation pending tasks', () => {
+    const data = buildValidHandover();
+    data.pendingTasks = [
+      {
+        id: 'task-escalation',
+        category: 'escalation',
+        title: 'Aviso a supervisor',
+        status: 'pending',
+        priority: 'critical',
+      } as never,
+    ];
+
+    expect(() => zHandover.parse(data)).toThrowError(ZodError);
+  });
 });
+
+

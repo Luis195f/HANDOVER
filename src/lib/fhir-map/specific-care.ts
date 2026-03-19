@@ -1,11 +1,14 @@
 import type {
+  ContingencyPlan,
   EliminationInfo,
   ExamItem,
   FluidBalanceInfo,
   MobilityInfo,
   NutritionInfo,
+  PendingTask,
   ProcedureItem,
   SkinInfo,
+  TurnContext,
   TreatmentItem,
 } from '../../types/handover';
 import { BOOLEAN_CODES, CATEGORY, EXAM_CODES, FHIR_CODES, TERMINOLOGY_SYSTEMS, type TerminologyCode } from '../codes';
@@ -71,6 +74,52 @@ const TREATMENT_TYPE_LABELS: Record<TreatmentItem['type'], string> = {
   other: 'Otro',
 };
 
+const TURN_CONTEXT_PHASE_LABELS: Record<NonNullable<TurnContext['shiftPhase']>, string> = {
+  start: 'Inicio',
+  mid: 'Mitad',
+  closing: 'Cierre',
+  coverage: 'Cobertura',
+};
+
+const TURN_CONTEXT_WORKLOAD_LABELS: Record<NonNullable<TurnContext['workload']>, string> = {
+  stable: 'Estable',
+  high: 'Alta demanda',
+  saturated: 'Saturado',
+  contingency: 'Contingencia',
+};
+
+const PENDING_TASK_CATEGORY_LABELS: Record<PendingTask['category'], string> = {
+  'critical-task': 'Pendiente crítico',
+  reevaluation: 'Reevaluación',
+  'exam-followup': 'Examen',
+  'procedure-followup': 'Procedimiento',
+  escalation: 'Escalado',
+  other: 'Otro',
+};
+
+const PENDING_TASK_PRIORITY_LABELS: Record<NonNullable<PendingTask['priority']>, string> = {
+  routine: 'Rutina',
+  urgent: 'Urgente',
+  critical: 'Crítico',
+};
+
+const PENDING_TASK_STATUS_LABELS: Record<NonNullable<PendingTask['status']>, string> = {
+  pending: 'Pendiente',
+  in_progress: 'En curso',
+  done: 'Resuelto',
+};
+
+const buildStringComponent = (code: string, display: string, value?: string): ObservationComponent | null => {
+  const normalized = normalizeTextValue(value);
+  if (!normalized) return null;
+  return {
+    code: {
+      coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code, display }],
+      text: display,
+    },
+    valueString: normalized,
+  };
+};
 export const normalizeExamInputs = (values: { exams?: unknown; examsPending?: unknown }): NormalizedExamInput => {
   const items: Array<ExamItem | unknown> = [];
   const legacyFields = new Set<string>();
@@ -506,6 +555,14 @@ export function mapExamObservationsImpl(
       });
       return [];
     }
+    const examItem = exam as ExamItem;
+    const notes = [
+      buildStringComponent('exam-priority', 'Exam priority', examItem.priority),
+      buildStringComponent('exam-due-by', 'Exam due by', examItem.dueBy),
+      buildStringComponent('exam-responsible', 'Exam responsible', examItem.responsible),
+    ]
+      .filter((component): component is ObservationComponent => Boolean(component))
+      .map((component) => ({ text: `${component.code.text}: ${component.valueString}` }));
 
     return [
       {
@@ -517,6 +574,7 @@ export function mapExamObservationsImpl(
         subject,
         encounter,
         effectiveDateTime,
+        note: notes.length > 0 ? notes : undefined,
       },
     ];
   });
@@ -573,7 +631,16 @@ export function mapProceduresImpl(
       return [];
     }
 
+    const procedureItem = procedure as ProcedureItem;
     const done = doneRaw === true;
+    const noteLines = [
+      procedureItem.priority ? `Priority: ${procedureItem.priority}` : undefined,
+      normalizeTextValue(procedureItem.scheduledFor) ? `Scheduled for: ${procedureItem.scheduledFor}` : undefined,
+      normalizeTextValue(procedureItem.responsible) ? `Responsible: ${procedureItem.responsible}` : undefined,
+      normalizeTextValue(procedureItem.escalationCriteria)
+        ? `Escalation: ${procedureItem.escalationCriteria}`
+        : undefined,
+    ].filter((item): item is string => Boolean(item));
     return [
       {
         resourceType: 'Procedure',
@@ -591,10 +658,240 @@ export function mapProceduresImpl(
         subject,
         encounter,
         performedDateTime: done ? performedDateTime : undefined,
+        note: noteLines.length > 0 ? noteLines.map((text) => ({ text })) : undefined,
       },
     ];
   });
 }
+
+
+
+
+export function mapTurnContextObservationImpl(
+  deps: SpecificCareMapperDependencies,
+  values: CareValues & { turnContext?: TurnContext },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.turnContext) return [];
+  const optionsMerged = deps.resolveOptions(options);
+  const subject = deps.patientReference(values.patientId);
+  const encounter = deps.encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+  const components: ObservationComponent[] = [];
+
+  if (values.turnContext.shiftPhase) {
+    components.push({
+      code: {
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'shift-phase', display: 'Shift phase' }],
+        text: 'Shift phase',
+      },
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_TURN_CONTEXT,
+            code: values.turnContext.shiftPhase,
+            display: TURN_CONTEXT_PHASE_LABELS[values.turnContext.shiftPhase],
+          },
+        ],
+        text: TURN_CONTEXT_PHASE_LABELS[values.turnContext.shiftPhase],
+      },
+    });
+  }
+
+  if (values.turnContext.workload) {
+    components.push({
+      code: {
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'workload', display: 'Workload' }],
+        text: 'Workload',
+      },
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_TURN_CONTEXT,
+            code: values.turnContext.workload,
+            display: TURN_CONTEXT_WORKLOAD_LABELS[values.turnContext.workload],
+          },
+        ],
+        text: TURN_CONTEXT_WORKLOAD_LABELS[values.turnContext.workload],
+      },
+    });
+  }
+
+  const operationalSummaryComponent = buildStringComponent(
+    'operational-summary',
+    'Operational summary',
+    values.turnContext.operationalSummary,
+  );
+  if (operationalSummaryComponent) {
+    components.push(operationalSummaryComponent);
+  }
+
+  (values.turnContext.serviceIncidents ?? []).forEach((incident) => {
+    const encoded = `${incident.kind}|${incident.severity}|${incident.resolved ? 'resolved' : 'open'}|${incident.description}`;
+    const component = buildStringComponent('service-incident', 'Service incident', encoded);
+    if (component) {
+      components.push(component);
+    }
+  });
+
+  if (components.length === 0) return [];
+
+  return [
+    {
+      resourceType: 'Observation',
+      status: 'final',
+      category: [deps.surveyCategoryConcept],
+      code: deps.codeableConceptFromCode(FHIR_CODES.CARE.TURN_CONTEXT),
+      subject,
+      encounter,
+      effectiveDateTime,
+      component: components,
+    },
+  ];
+}
+
+export function mapPendingTaskObservationsImpl(
+  deps: SpecificCareMapperDependencies,
+  values: CareValues & { pendingTasks?: PendingTask[] },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.pendingTasks || values.pendingTasks.length === 0) return [];
+  const optionsMerged = deps.resolveOptions(options);
+  const subject = deps.patientReference(values.patientId);
+  const encounter = deps.encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+
+  return values.pendingTasks.map((task) => {
+    const components: ObservationComponent[] = [];
+
+    components.push({
+      code: {
+        coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'task-category', display: 'Task category' }],
+        text: 'Task category',
+      },
+      valueCodeableConcept: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_TASK_CATEGORY,
+            code: task.category,
+            display: PENDING_TASK_CATEGORY_LABELS[task.category],
+          },
+        ],
+        text: PENDING_TASK_CATEGORY_LABELS[task.category],
+      },
+    });
+
+    if (task.priority) {
+      components.push({
+        code: {
+          coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'task-priority', display: 'Task priority' }],
+          text: 'Task priority',
+        },
+        valueCodeableConcept: {
+          coding: [
+            {
+              system: TERMINOLOGY_SYSTEMS.HANDOVER_TASK_PRIORITY,
+              code: task.priority,
+              display: PENDING_TASK_PRIORITY_LABELS[task.priority],
+            },
+          ],
+          text: PENDING_TASK_PRIORITY_LABELS[task.priority],
+        },
+      });
+    }
+
+    if (task.status) {
+      components.push({
+        code: {
+          coding: [{ system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT, code: 'task-status', display: 'Task status' }],
+          text: 'Task status',
+        },
+        valueCodeableConcept: {
+          coding: [
+            {
+              system: TERMINOLOGY_SYSTEMS.HANDOVER_TASK_STATUS,
+              code: task.status,
+              display: PENDING_TASK_STATUS_LABELS[task.status],
+            },
+          ],
+          text: PENDING_TASK_STATUS_LABELS[task.status],
+        },
+      });
+    }
+
+    [
+      buildStringComponent('due-by', 'Due by', task.dueBy),
+      buildStringComponent('owner', 'Owner', task.owner),
+      buildStringComponent('escalation-criteria', 'Escalation criteria', task.escalationCriteria),
+    ].forEach((component) => {
+      if (component) {
+        components.push(component);
+      }
+    });
+
+    return {
+      resourceType: 'Observation',
+      status: task.status === 'done' ? 'final' : 'registered',
+      category: [deps.surveyCategoryConcept],
+      code: deps.codeableConceptFromCode(FHIR_CODES.CARE.PENDING_TASK),
+      subject,
+      encounter,
+      effectiveDateTime,
+      valueString: task.title,
+      component: components,
+      note: task.notes ? [{ text: task.notes }] : undefined,
+    };
+  });
+}
+
+export function mapContingencyPlanObservationImpl(
+  deps: SpecificCareMapperDependencies,
+  values: CareValues & { contingencyPlan?: ContingencyPlan },
+  options?: BuildOptions,
+): Observation[] {
+  if (!values.contingencyPlan) return [];
+  const optionsMerged = deps.resolveOptions(options);
+  const subject = deps.patientReference(values.patientId);
+  const encounter = deps.encounterReference(values.encounterId);
+  const effectiveDateTime = optionsMerged.now();
+  const components: ObservationComponent[] = [];
+
+  (values.contingencyPlan.watchItems ?? []).forEach((item) => {
+    const component = buildStringComponent('watch-item', 'Watch item', item);
+    if (component) components.push(component);
+  });
+  (values.contingencyPlan.immediateActions ?? []).forEach((item) => {
+    const component = buildStringComponent('immediate-action', 'Immediate action', item);
+    if (component) components.push(component);
+  });
+  (values.contingencyPlan.escalationCriteria ?? []).forEach((item) => {
+    const component = buildStringComponent('escalation-criteria', 'Escalation criteria', item);
+    if (component) components.push(component);
+  });
+
+  [
+    buildStringComponent('escalation-contact', 'Escalation contact', values.contingencyPlan.escalationContact),
+    buildStringComponent('fallback-plan', 'Fallback plan', values.contingencyPlan.fallbackPlan),
+  ].forEach((component) => {
+    if (component) components.push(component);
+  });
+
+  if (components.length === 0) return [];
+
+  return [
+    {
+      resourceType: 'Observation',
+      status: 'final',
+      category: [deps.surveyCategoryConcept],
+      code: deps.codeableConceptFromCode(FHIR_CODES.CARE.CONTINGENCY_PLAN),
+      subject,
+      encounter,
+      effectiveDateTime,
+      component: components,
+    },
+  ];
+}
+
 
 
 

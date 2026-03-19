@@ -49,6 +49,16 @@ Tests principales:
 - `Profile URI` especifico para NNN sigue como `no especificado`.
 - El repo no distribuye corpus oficial NANDA/NIC/NOC ni prueba de licencia.
 
+## 4.1) Dominios Core estructurados del turno
+
+Desde el estado del repo revisado el 2026-03-19, el Core agrega salida FHIR aditiva para dominios operativos del relevo sin romper compatibilidad previa:
+
+- `turnContext`: `Observation` de encuesta con franja operativa, carga del turno e incidencias de servicio codificadas con URNs locales HANDOVER.
+- `pendingTasks[]`: `Observation` por pendiente/reevaluacion con categoria, prioridad, estado, hora objetivo y criterio de escalado cuando aplica.
+- `contingencyPlan`: `Observation` de encuesta con items a vigilar, acciones inmediatas, criterios de escalado y contacto de aviso.
+- `exams[]` / `procedures[]`: se mantiene el contrato previo y se anaden notas aditivas para prioridad, responsable y hora objetivo/programada.
+
+Estas extensiones siguen en sistemas locales `urn:handover-pro:*` y se documentan como soporte interoperable piloto-grade, no como perfil externo cerrado.
 ## 4) Evidencia concreta por tipo NNN
 
 ### NANDA
@@ -135,5 +145,6 @@ Notas de alcance:
 | Consumo externo mas estricto | un tercero puede requerir ValueSets/profiles adicionales no presentes aqui |
 
 Este documento sirve para trazabilidad tecnica de piloto, no como declaracion de conformidad interoperable completa frente a un perfil externo especifico.
+
 
 

@@ -61,19 +61,40 @@ describe('ExamsProceduresSection', () => {
 
     fireEvent.press(getByLabelText('Seleccionar tipo Laboratorio'));
     fireEvent.press(getByLabelText('Seleccionar estado Resultado'));
+    fireEvent.press(getByLabelText('Prioridad examen Crítico'));
     fireEvent.changeText(getByLabelText('Descripción de examen'), 'Hemograma completo');
+    fireEvent.changeText(getByLabelText('Hora objetivo de examen'), '2026-03-19T09:00:00Z');
+    fireEvent.changeText(getByLabelText('Responsable de examen'), 'Laboratorio');
     fireEvent.press(getByLabelText('Añadir examen'));
 
+    fireEvent.press(getByLabelText('Prioridad procedimiento Urgente'));
     fireEvent.changeText(getByLabelText('Descripción de procedimiento'), 'Curación de herida');
+    fireEvent.changeText(getByLabelText('Hora de procedimiento'), '2026-03-19T10:00:00Z');
+    fireEvent.changeText(getByLabelText('Responsable de procedimiento'), 'Enfermería');
+    fireEvent.changeText(getByLabelText('Criterio de escalado de procedimiento'), 'Avisar si sangrado activo');
     fireEvent(getByLabelText('Marcar procedimiento realizado'), 'valueChange', true);
     fireEvent.press(getByLabelText('Añadir procedimiento'));
 
     await waitFor(() => {
       expect(methods.getValues('exams')).toEqual([
-        { type: 'laboratory', state: 'result', description: 'Hemograma completo' },
+        {
+          type: 'laboratory',
+          state: 'result',
+          description: 'Hemograma completo',
+          priority: 'critical',
+          dueBy: '2026-03-19T09:00:00Z',
+          responsible: 'Laboratorio',
+        },
       ]);
       expect(methods.getValues('procedures')).toEqual([
-        { description: 'Curación de herida', done: true },
+        {
+          description: 'Curación de herida',
+          done: true,
+          priority: 'urgent',
+          scheduledFor: '2026-03-19T10:00:00Z',
+          responsible: 'Enfermería',
+          escalationCriteria: 'Avisar si sangrado activo',
+        },
       ]);
     });
 
@@ -81,3 +102,4 @@ describe('ExamsProceduresSection', () => {
     expect(getByText('Curación de herida')).toBeTruthy();
   });
 });
+
