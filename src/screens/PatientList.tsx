@@ -442,6 +442,7 @@ export default function PatientList({ navigation }: Props) {
         devices: patient.devices ?? [],
         risks: patient.risks ?? {},
         pendingTasks: patient.pendingTasks ?? [],
+        unitId: patient.unitId,
         lastIncidentAt: patient.lastIncidentAt ?? null,
         recentIncidentFlag: patient.recentIncidentFlag,
       })),
@@ -1100,3 +1101,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+

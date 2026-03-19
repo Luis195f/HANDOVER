@@ -5,7 +5,7 @@ import { computePriorityList, type PriorityInput, type PrioritizedPatient } from
 import * as priority from '@/src/lib/priority';
 
 describe('computeTurnMetrics', () => {
-  it('maneja un turno sin pacientes', () => {
+  it('handles an empty shift', () => {
     const metrics = computeTurnMetrics([]);
 
     expect(metrics.totalPatients).toBe(0);
@@ -15,15 +15,16 @@ describe('computeTurnMetrics', () => {
     expect(metrics.pendingCriticalTasks).toBe(0);
   });
 
-  it('agrega correctamente las métricas del turno', () => {
+  it('aggregates shift metrics including critical pending tasks', () => {
     const patients: PrioritizedPatient[] = [
       {
         patientId: 'p-critical',
-        displayName: 'Crítico',
+        displayName: 'Critico',
         news2Score: 7,
         level: 'critical',
         reasons: ['RECENT_INCIDENT'],
         reasonSummary: 'NEWS2 7, incidente reciente',
+        pendingCriticalTasksCount: 2,
       },
       {
         patientId: 'p-high',
@@ -31,7 +32,8 @@ describe('computeTurnMetrics', () => {
         news2Score: 5,
         level: 'high',
         reasons: ['PENDING_URGENT_TASK'],
-        reasonSummary: 'NEWS2 5, tareas críticas',
+        reasonSummary: 'NEWS2 5, tareas criticas',
+        pendingCriticalTasksCount: 1,
       },
       {
         patientId: 'p-medium',
@@ -57,22 +59,25 @@ describe('computeTurnMetrics', () => {
     expect(metrics.byPriority).toEqual({ critical: 1, high: 1, medium: 1, low: 1 });
     expect(metrics.averageNews2).toBeCloseTo(4);
     expect(metrics.incidentsCount).toBe(1);
+    expect(metrics.pendingCriticalTasks).toBe(3);
   });
 
-  it('calcula las métricas a partir de los PriorityInput ordenados', () => {
+  it('derives metrics from ordered PriorityInput items', () => {
     const inputs: PriorityInput[] = [
       {
         patientId: 'p-1',
         displayName: 'Urgente',
+        unitId: 'icu-a',
         vitals: { rr: 28, spo2: 90, tempC: 39.2, sbp: 88, hr: 135, o2: true, avpu: 'V' },
         devices: [{ id: 'dev-vent', label: 'VM', category: 'invasive', critical: true }],
         risks: {},
-        pendingTasks: [{ id: 't1', title: 'Gasometría', urgent: true }],
+        pendingTasks: [{ id: 't1', title: 'Gasometria', priority: 'critical', category: 'critical-task' }],
         recentIncidentFlag: true,
       },
       {
         patientId: 'p-2',
         displayName: 'Estable',
+        unitId: 'icu-a',
         vitals: { rr: 16, spo2: 97, tempC: 36.8, sbp: 120, hr: 85 },
         devices: [],
         risks: {},
@@ -87,17 +92,19 @@ describe('computeTurnMetrics', () => {
     expect(metrics.byPriority.critical).toBe(1);
     expect(metrics.byPriority.low).toBe(1);
     expect(metrics.incidentsCount).toBe(1);
+    expect(metrics.pendingCriticalTasks).toBe(1);
     expect(metrics.averageNews2).toBeGreaterThan(0);
   });
 });
 
 describe('buildPrioritySnapshot', () => {
-  it('delegates en computePriorityList', () => {
+  it('delegates to computePriorityList', () => {
     const computeSpy = vi.spyOn(priority, 'computePriorityList');
     const inputs: PriorityInput[] = [
       {
         patientId: 'p-1',
         displayName: 'Paciente 1',
+        unitId: 'icu-a',
         vitals: {},
         devices: [],
         risks: {},

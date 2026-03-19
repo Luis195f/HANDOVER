@@ -152,6 +152,11 @@ export type PendingTaskSummary = {
   title: string;
   urgent?: boolean;
   critical?: boolean;
+  priority?: 'routine' | 'urgent' | 'critical';
+  status?: 'pending' | 'in_progress' | 'done';
+  category?: 'critical-task' | 'reevaluation' | 'exam-followup' | 'procedure-followup' | 'escalation' | 'other';
+  dueBy?: string;
+  escalationCriteria?: string;
 };
 
 export type OxygenTherapy = {
@@ -271,5 +276,4 @@ export type {
   SpecialtyOverlayId,
   UnitProfileId,
 } from './profile';
-
 
