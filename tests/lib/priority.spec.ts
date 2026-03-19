@@ -12,14 +12,14 @@ const baseInput: PriorityInput = {
 };
 
 describe('computePriority', () => {
-  it('marca como crítico cuando NEWS2 es alto y hay soporte invasivo', () => {
+  it('marks a patient as critical and exposes explainable output', () => {
     const critical = computePriority({
       ...baseInput,
       patientId: 'p-critical',
-      displayName: 'Crítico',
+      displayName: 'Critico',
       vitals: { rr: 28, spo2: 90, tempC: 39.2, sbp: 88, hr: 135, o2: true, avpu: 'V' },
-      devices: [{ id: 'vent', label: 'Ventilación mecánica', category: 'invasive', critical: true }],
-      pendingTasks: [{ id: 'urgent', title: 'Gasometría', urgent: true }],
+      devices: [{ id: 'vent', label: 'Ventilacion mecanica', category: 'invasive', critical: true }],
+      pendingTasks: [{ id: 'urgent', title: 'Gasometria', priority: 'critical', category: 'critical-task' }],
       recentIncidentFlag: true,
       referenceTime: '2024-02-01T00:00:00Z',
     });
@@ -30,9 +30,13 @@ describe('computePriority', () => {
     expect(critical.reasons).toContain('RECENT_INCIDENT');
     expect(critical.reasonSummary).toContain('NEWS2');
     expect(critical.reasonSummary.toLowerCase()).toContain('incidente');
+    expect(critical.totalScore).toBeGreaterThan(0);
+    expect(critical.pendingCriticalTasksCount).toBe(1);
+    expect(critical.explanation?.sourceData[0]).toContain('NEWS2');
+    expect(critical.explanation?.clinicalChange.length).toBeGreaterThan(0);
   });
 
-  it('retorna prioridad alta con NEWS2 intermedio', () => {
+  it('returns high priority for an intermediate NEWS2 score', () => {
     const high = computePriority({
       ...baseInput,
       patientId: 'p-high',
@@ -42,9 +46,10 @@ describe('computePriority', () => {
 
     expect(high.level).toBe('high');
     expect(high.reasons).toContain('HIGH_NEWS2');
+    expect(high.explanation?.coreDimensions.some((dimension) => dimension.key === 'instability')).toBe(true);
   });
 
-  it('retorna prioridad media con NEWS2 moderado sin otros factores', () => {
+  it('returns medium priority for moderate NEWS2 without other factors', () => {
     const medium = computePriority({
       ...baseInput,
       patientId: 'p-medium',
@@ -57,7 +62,7 @@ describe('computePriority', () => {
     expect(medium.reasonSummary).toBe('NEWS2 3');
   });
 
-  it('retorna prioridad baja cuando no hay alertas', () => {
+  it('returns low priority when no clinical signals are present', () => {
     const low = computePriority({
       ...baseInput,
       patientId: 'p-low',
@@ -67,11 +72,12 @@ describe('computePriority', () => {
 
     expect(low.level).toBe('low');
     expect(low.reasons).toHaveLength(0);
+    expect(low.explanation?.pendingCritical).toHaveLength(0);
   });
 });
 
 describe('computePriorityList', () => {
-  it('ordena por nivel, NEWS2 y recencia de incidentes', () => {
+  it('sorts by effective level, total score, NEWS2, and incident recency', () => {
     const inputs: PriorityInput[] = [
       {
         ...baseInput,
@@ -82,9 +88,10 @@ describe('computePriorityList', () => {
       {
         ...baseInput,
         patientId: 'p-critical',
-        displayName: 'Crítico',
+        displayName: 'Critico',
         vitals: { rr: 28, spo2: 90, tempC: 39.2, sbp: 88, hr: 135, o2: true, avpu: 'V' },
         devices: [{ id: 'vent', label: 'VM', category: 'invasive', critical: true }],
+        pendingTasks: [{ id: 'urgent', title: 'Gasometria', priority: 'critical', category: 'critical-task' }],
         recentIncidentFlag: true,
         referenceTime: '2024-02-01T00:00:00Z',
       },
@@ -104,7 +111,7 @@ describe('computePriorityList', () => {
 
     const prioritized = computePriorityList(inputs);
 
-    expect(prioritized.map(p => p.patientId)).toEqual(['p-critical', 'p-high', 'p-medium', 'p-low']);
+    expect(prioritized.map((patient) => patient.patientId)).toEqual(['p-critical', 'p-high', 'p-medium', 'p-low']);
     expect(prioritized[0].reasonSummary).toContain('NEWS2');
     expect(prioritized[1].reasonSummary.toLowerCase()).toContain('news2 6');
   });

@@ -1,12 +1,12 @@
-// Fase 3 – Bloque D (dashboard): utilidades de analítica de turno para supervisores.
+// Fase 3 - Bloque D (dashboard): utilidades de analitica de turno para supervisores.
 import { PATIENTS_MOCK } from '@/src/data/mockPatients';
 import { computePriorityList } from './priority';
 import type { PriorityLevel, PrioritizedPatient, PriorityInput } from './priority';
 
 export interface TurnFilter {
   unitId: string;
-  start: string; // ISO datetime de inicio de turno
-  end: string; // ISO datetime de fin de turno
+  start: string;
+  end: string;
 }
 
 export interface TurnMetrics {
@@ -18,10 +18,9 @@ export interface TurnMetrics {
 }
 
 export async function getTurnData(filter: TurnFilter): Promise<PriorityInput[]> {
-  // Nota: reemplazar por consulta a backend/servicio de analítica.
-  const patientsForUnit = PATIENTS_MOCK.filter(patient => patient.unitId === filter.unitId);
+  const patientsForUnit = PATIENTS_MOCK.filter((patient) => patient.unitId === filter.unitId);
 
-  return patientsForUnit.map(patient => ({
+  return patientsForUnit.map((patient) => ({
     patientId: patient.id,
     displayName: patient.name,
     bedLabel: patient.bedLabel,
@@ -29,6 +28,7 @@ export async function getTurnData(filter: TurnFilter): Promise<PriorityInput[]> 
     devices: patient.devices ?? [],
     risks: patient.risks ?? {},
     pendingTasks: patient.pendingTasks ?? [],
+    unitId: patient.unitId,
     lastIncidentAt: patient.lastIncidentAt ?? null,
     recentIncidentFlag: patient.recentIncidentFlag,
     referenceTime: filter.end,
@@ -49,10 +49,12 @@ export function computeTurnMetrics(patients: PrioritizedPatient[]): TurnMetrics 
 
   let incidentsCount = 0;
   let news2Sum = 0;
+  let pendingCriticalTasks = 0;
 
-  patients.forEach(patient => {
+  patients.forEach((patient) => {
     byPriority[patient.level] += 1;
     news2Sum += patient.news2Score;
+    pendingCriticalTasks += patient.pendingCriticalTasksCount ?? 0;
     if (patient.reasons.includes('RECENT_INCIDENT')) {
       incidentsCount += 1;
     }
@@ -65,7 +67,7 @@ export function computeTurnMetrics(patients: PrioritizedPatient[]): TurnMetrics 
     totalPatients,
     byPriority,
     averageNews2,
-    pendingCriticalTasks: 0, // Nota: mapear tareas críticas cuando estén disponibles en PrioritizedPatient.
+    pendingCriticalTasks,
     incidentsCount,
   };
 }
