@@ -68,6 +68,14 @@ This keeps the nurse decision visible instead of replacing the trace.
 
 `src/lib/mpac.ts` exposes an optional future extension interface so a later additive predictor can contribute a bounded score delta with its own note, without replacing the rules engine.
 
+## UI surfacing
+
+The contextual priority output is surfaced in the existing React Native experience without creating a parallel workflow:
+
+- PatientList can auto-sort only when there is actionable contextual signal and otherwise falls back to the received order.
+- Each patient card shows a compact, non-alarmist explanation covering why the patient is elevated, what cannot be omitted, and the active time window when available.
+- SupervisorDashboard reuses the same patient census and MPAC facade to expose a unit-level priority snapshot for supervision.
+
 ## Validation
 
 Relevant tests:
@@ -75,3 +83,4 @@ Relevant tests:
 - `tests/lib/mpac.spec.ts`
 - `tests/lib/priority.spec.ts`
 - `tests/lib/analytics.spec.ts`
+

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, Switch } from 'react-native';
+import { FlatList, Switch, Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -9,11 +9,6 @@ vi.mock('expo', () => ({
   requireNativeModule: () => ({}),
 }));
 
-/**
- * Fixtures mínimos para que PatientList tenga data:
- * - pat-002 aparece primero en el orden "normal"
- * - pat-001 debe quedar primero al activar prioridad clínica y contener "NEWS2"
- */
 const API_PATIENTS = [
   {
     id: 'pat-002',
@@ -23,6 +18,7 @@ const API_PATIENTS = [
     vitals: {},
     devices: [],
     risks: {},
+    pendingTasks: [],
   },
   {
     id: 'pat-001',
@@ -30,80 +26,179 @@ const API_PATIENTS = [
     unitId: 'icu-a',
     bedLabel: '1',
     vitals: {},
-    devices: [],
-    risks: { news2: 7 },
+    devices: [{ id: 'vent', label: 'Ventilación mecánica', category: 'invasive', critical: true }],
+    risks: { isolation: true },
+    pendingTasks: [
+      {
+        id: 'task-1',
+        title: 'Gasometría urgente',
+        critical: true,
+        dueBy: '2026-03-19T10:45:00.000Z',
+      },
+    ],
+    recentIncidentFlag: true,
   },
 ] as const;
 
-// ✅ helper: deja correr microtasks/effects
-const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-/**
- * ✅ PatientList carga por apiGet('/api/patients?...'), así que mockeamos esa fuente REAL.
- */
 vi.mock('@/src/lib/api', () => ({
-  apiGet: vi.fn(async (url: string) => {
-    // opcional: si quieres asegurar que la URL es la esperada
-    // if (!url.startsWith('/api/patients')) throw new Error(`Unexpected url: ${url}`);
-
-    // PatientList hace: Array.isArray(data) ? data : (data?.results ?? [])
-    // devolvemos array directo para que sea simple.
-    return [...API_PATIENTS];
-  }),
+  apiGet: vi.fn(async () => [...API_PATIENTS]),
 }));
 
-/**
- * ✅ Evita que src/lib/queue.ts importe SQLite en tests.
- * PatientList solo necesita estos exports para pintar estado offline; devolvemos no-op.
- */
 vi.mock('@/src/lib/queue', () => ({
   listOfflineQueue: vi.fn(() => []),
-  summarizePatientQueueState: vi.fn(() => ({})),
+  summarizePatientQueueState: vi.fn(() => 'synced'),
 }));
 
-/**
- * ✅ Controlamos la prioridad clínica aquí (sin depender de cálculos reales).
- * PatientList usa computePriority / computePriorityList; devolvemos estructura estable.
- */
 vi.mock('@/src/lib/priority', () => ({
-  computePriority: (input: any) => {
-    const id = String(input?.patientId ?? input?.id ?? '');
+  computePriority: (input: { patientId?: string }) => {
+    const id = String(input?.patientId ?? '');
     if (id === 'pat-001') {
       return {
         patientId: 'pat-001',
-        reasonSummary: 'NEWS2: 7 (riesgo)',
+        displayName: 'Paciente 1',
+        bedLabel: '1',
+        news2Score: 7,
+        totalScore: 12,
+        baseScore: 10,
+        level: 'critical',
+        baseLevel: 'critical',
+        reasons: ['HIGH_NEWS2', 'PENDING_URGENT_TASK', 'RECENT_INCIDENT'],
+        reasonSummary: 'NEWS2 7, incidente reciente, 1 pendiente crítico',
+        pendingCriticalTasksCount: 1,
+        explanation: {
+          engine: 'mpac-v1-hybrid-rules',
+          version: 1,
+          sourceData: ['NEWS2 7 (alto)'],
+          clinicalChange: ['Incidente reciente registrado'],
+          pendingCritical: ['Gasometría urgente (crítico)'],
+          activeContext: {
+            unitId: 'icu-a',
+            specialtyId: null,
+            unitProfileId: null,
+            specialtyOverlayIds: [],
+            activeProfileIds: [],
+            labels: ['HANDOVER Core'],
+            usesCoreFallback: true,
+            hasHumanSpecialtyOverride: false,
+          },
+          coreDimensions: [],
+          modifiers: [],
+        },
       };
     }
+
     return {
       patientId: id || 'pat-002',
-      reasonSummary: 'Sin alertas',
+      displayName: 'Paciente 2',
+      bedLabel: '2',
+      news2Score: 0,
+      totalScore: 0,
+      baseScore: 0,
+      level: 'low',
+      baseLevel: 'low',
+      reasons: [],
+      reasonSummary: 'Sin señal contextual relevante',
+      pendingCriticalTasksCount: 0,
+      explanation: {
+        engine: 'mpac-v1-hybrid-rules',
+        version: 1,
+        sourceData: [],
+        clinicalChange: [],
+        pendingCritical: [],
+        activeContext: {
+          unitId: 'icu-a',
+          specialtyId: null,
+          unitProfileId: null,
+          specialtyOverlayIds: [],
+          activeProfileIds: [],
+          labels: ['HANDOVER Core'],
+          usesCoreFallback: true,
+          hasHumanSpecialtyOverride: false,
+        },
+        coreDimensions: [],
+        modifiers: [],
+      },
     };
   },
-
-  computePriorityList: (inputs: any[]) => {
-    // Cuando activas prioridad clínica, queremos pat-001 primero.
-    // Mantén la salida con patientId + reasonSummary (lo que el test valida).
-    const ids = inputs.map(x => String(x?.patientId ?? x?.id ?? ''));
-    const has001 = ids.includes('pat-001');
-    const has002 = ids.includes('pat-002');
-
-    const out: Array<{ patientId: string; reasonSummary: string }> = [];
-    if (has001) out.push({ patientId: 'pat-001', reasonSummary: 'NEWS2: 7 (riesgo)' });
-    if (has002) out.push({ patientId: 'pat-002', reasonSummary: 'Sin alertas' });
-
-    // fallback por si cambia el input shape
-    if (out.length === 0) {
-      out.push({ patientId: 'pat-001', reasonSummary: 'NEWS2: 7 (riesgo)' });
-      out.push({ patientId: 'pat-002', reasonSummary: 'Sin alertas' });
-    }
-    return out;
+  computePriorityList: (inputs: Array<{ patientId?: string }>) => {
+    const ids = inputs.map((item) => String(item?.patientId ?? ''));
+    const ordered = ['pat-001', 'pat-002'].filter((id) => ids.includes(id));
+    return ordered.map((id) => {
+      const items = id === 'pat-001'
+        ? {
+            patientId: 'pat-001',
+            displayName: 'Paciente 1',
+            bedLabel: '1',
+            news2Score: 7,
+            totalScore: 12,
+            baseScore: 10,
+            level: 'critical',
+            baseLevel: 'critical',
+            reasons: ['HIGH_NEWS2', 'PENDING_URGENT_TASK', 'RECENT_INCIDENT'],
+            reasonSummary: 'NEWS2 7, incidente reciente, 1 pendiente crítico',
+            pendingCriticalTasksCount: 1,
+            explanation: {
+              engine: 'mpac-v1-hybrid-rules',
+              version: 1,
+              sourceData: ['NEWS2 7 (alto)'],
+              clinicalChange: ['Incidente reciente registrado'],
+              pendingCritical: ['Gasometría urgente (crítico)'],
+              activeContext: {
+                unitId: 'icu-a',
+                specialtyId: null,
+                unitProfileId: null,
+                specialtyOverlayIds: [],
+                activeProfileIds: [],
+                labels: ['HANDOVER Core'],
+                usesCoreFallback: true,
+                hasHumanSpecialtyOverride: false,
+              },
+              coreDimensions: [],
+              modifiers: [],
+            },
+          }
+        : {
+            patientId: 'pat-002',
+            displayName: 'Paciente 2',
+            bedLabel: '2',
+            news2Score: 0,
+            totalScore: 0,
+            baseScore: 0,
+            level: 'low',
+            baseLevel: 'low',
+            reasons: [],
+            reasonSummary: 'Sin señal contextual relevante',
+            pendingCriticalTasksCount: 0,
+            explanation: {
+              engine: 'mpac-v1-hybrid-rules',
+              version: 1,
+              sourceData: [],
+              clinicalChange: [],
+              pendingCritical: [],
+              activeContext: {
+                unitId: 'icu-a',
+                specialtyId: null,
+                unitProfileId: null,
+                specialtyOverlayIds: [],
+                activeProfileIds: [],
+                labels: ['HANDOVER Core'],
+                usesCoreFallback: true,
+                hasHumanSpecialtyOverride: false,
+              },
+              coreDimensions: [],
+              modifiers: [],
+            },
+          };
+      return items;
+    });
   },
 }));
 
 vi.mock('@/src/security/acl', () => ({
-  currentUser: () => ({ id: 'tester' }),
-  hasUnitAccess: () => true,
-  hasRole: (_session: any, _roles: string[]) => false,
+  ensureUnitAccess: vi.fn(),
+  hasRole: () => false,
 }));
 
 vi.mock('@/src/security/auth', () => ({
@@ -121,13 +216,28 @@ vi.mock('@/src/lib/otel', () => ({
 }));
 
 describe('PatientList – prioridad clínica', () => {
-  const navigation: any = { navigate: vi.fn(), setOptions: vi.fn() };
+  const props = {
+    navigation: { navigate: vi.fn(), setOptions: vi.fn() },
+    route: { key: 'PatientList-key', name: 'PatientList', params: undefined },
+  } as const;
 
-  const findSwitchInElement = (node: any): any | null => {
+  function hasText(renderer: ReturnType<typeof create>, needle: string) {
+    return renderer.root.findAll((node) => {
+      if (node.type !== Text) return false;
+      const value = node.props?.children;
+      if (typeof value === 'string') return value.includes(needle);
+      if (Array.isArray(value)) return value.join('').includes(needle);
+      return false;
+    }).length > 0;
+  }
+
+  function findSwitchInElement(node: unknown): React.ReactTestInstance | null {
     if (!node || typeof node !== 'object') return null;
-    if (node.type === Switch) return node;
+    if ((node as React.ReactTestInstance).type === Switch) {
+      return node as React.ReactTestInstance;
+    }
 
-    const children = node.props?.children;
+    const children = (node as { props?: { children?: unknown } }).props?.children;
     if (Array.isArray(children)) {
       for (const child of children) {
         const found = findSwitchInElement(child);
@@ -137,64 +247,36 @@ describe('PatientList – prioridad clínica', () => {
     }
 
     return findSwitchInElement(children);
-  };
+  }
 
-  it('ordena por prioridad clínica y muestra el resumen', async () => {
+  it('ordena por prioridad contextual de forma automática y permite volver al orden base', async () => {
     let renderer: ReturnType<typeof create>;
 
-    // 1) Render + esperar a que apiGet resuelva y setPatients haga re-render
     await act(async () => {
-      renderer = create(<PatientList navigation={navigation} />);
+      renderer = create(<PatientList {...(props as unknown as React.ComponentProps<typeof PatientList>)} />);
       await flush();
       await flush();
     });
 
-    // 2) Si tu UI requiere seleccionar filtros para cargar, mantenemos tu lógica
-    await act(async () => {
-      const specialtyAll = renderer!
-        .root
-        .findAll(node => node.props?.accessibilityLabel === 'Todas las especialidades')
-        .at(0);
-      specialtyAll?.props.onPress?.();
+    const initialData = (renderer!.root.findByType(FlatList).props.data ?? []) as Array<{ patientId: string }>;
+    expect(initialData[0].patientId).toBe('pat-001');
+    expect(renderer!.root.findByProps({ testID: 'priority-omission-pat-001' })).toBeTruthy();
+    expect(renderer!.root.findByProps({ testID: 'priority-window-pat-001' })).toBeTruthy();
+    expect(hasText(renderer!, 'No omitir: Gasometría urgente')).toBe(true);
 
-      const unitsAll = renderer!
-        .root
-        .findAll(node => node.props?.accessibilityLabel === 'Todas las unidades')
-        .at(0);
-      unitsAll?.props.onPress?.();
-
-      await flush();
-      await flush();
-    });
-
-    // 3) Data inicial (orden normal)
-    const initialList = renderer!.root.findByType(FlatList);
-    const initialData = (initialList.props.data ?? []) as Array<{ patientId: string }>;
-
-    expect(Array.isArray(initialData)).toBe(true);
-    expect(initialData.length).toBeGreaterThan(0);
-
-    // En orden “normal” esperamos pat-002 primero (según fixture + tu intención del test)
-    expect(initialData[0].patientId).toBe('pat-002');
-
-    // 4) Activar prioridad clínica + esperar re-render
-    const listAfterLoad = renderer!.root.findByType(FlatList);
-    const header = listAfterLoad.props.ListHeaderComponent;
+    const header = renderer!.root.findByType(FlatList).props.ListHeaderComponent;
     const toggle = findSwitchInElement(header);
     expect(toggle).toBeTruthy();
     await act(async () => {
-      toggle.props.onValueChange(true);
+      toggle.props.onValueChange(false);
       await flush();
       await flush();
     });
 
-    const sorted = (renderer!.root.findByType(FlatList).props.data ?? []) as Array<{
-      patientId: string;
-      reasonSummary: string;
-    }>;
-
-    expect(sorted.length).toBeGreaterThan(0);
-    expect(sorted[0].patientId).toBe('pat-001');
-    expect(sorted[0].reasonSummary).toContain('NEWS2');
+    const unsortedData = (renderer!.root.findByType(FlatList).props.data ?? []) as Array<{ patientId: string }>;
+    expect(unsortedData[0].patientId).toBe('pat-002');
   });
 });
+
+
+

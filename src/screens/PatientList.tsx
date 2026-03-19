@@ -13,23 +13,25 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import Chip from "@/src/components/Chip";
+import PriorityBadge from "@/src/components/priority/PriorityBadge";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { isOn } from '@/src/config/flags';
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { type PatientListItem } from "@/src/data/mockPatients";
-import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { ensureUnitAccess, hasRole } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
 import { listOfflineQueue, summarizePatientQueueState, type SyncStatus } from "@/src/lib/queue";
-import { computePriority, computePriorityList, type PriorityInput, type PrioritizedPatient } from "@/src/lib/priority";
+import { computePriority, computePriorityList, type PrioritizedPatient } from "@/src/lib/priority";
+import { buildPriorityUiModel, getPriorityToneStyles, hasActionablePrioritySignal, type PriorityUiTone } from "@/src/lib/priority-ui";
+import { buildPriorityInputs, normalizePatientListResponse } from "@/src/lib/patientListData";
 import {
   ALL_UNITS_OPTION,
   setSelectedUnitId,
   useSelectedUnitId,
 } from "@/src/state/filterStore";
-import type { Handover } from "@/src/types/handover";
+
 import type { IceaPatientRiskSummary } from '@/src/types/icea';
 import { computeAlerts, type HandoverAlertsSource } from '@/src/lib/alerts';
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
@@ -205,7 +207,7 @@ export default function PatientList({ navigation }: Props) {
   const { i18n } = useTranslation();
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
-  const [sortByPriority, setSortByPriority] = useState(false);
+  const [sortByPriorityOverride, setSortByPriorityOverride] = useState<boolean | null>(null);
   const [patientSyncStatuses, setPatientSyncStatuses] = useState<Record<string, SyncStatus>>({});
   const [patients, setPatients] = useState<PatientListItem[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
@@ -243,19 +245,15 @@ export default function PatientList({ navigation }: Props) {
         ? '/api/patients'
         : `/api/patients?unit=${encodeURIComponent(String(selectedUnitId))}`;
       const data = await apiGet(path);
-      const items = Array.isArray(data) ? data : (data?.results ?? data?.entry?.map((entry: any) => entry?.resource) ?? []);
       if (requestId !== loadPatientsRequestRef.current) {
         return;
       }
-      setPatients(items.map((p: any) => ({
-        id: String(p.id ?? p.patientId ?? ""),
-        name: String(p.name ?? p.displayName ?? p.fullName ?? [p.first_name, p.last_name].filter(Boolean).join(' ') ?? "Paciente"),
-        unitId: String(p.unitId ?? p.unit_id ?? p.unit ?? (selectedUnitId !== ALL_UNITS_OPTION ? selectedUnitId : "") ?? ""),
-        bedLabel: p.bedLabel ?? p.bed ?? p.room ?? "",
-        vitals: p.vitals ?? {},
-        devices: p.devices ?? [],
-        risks: p.risks ?? {},
-      })));
+      setPatients(
+        normalizePatientListResponse(
+          data,
+          selectedUnitId !== ALL_UNITS_OPTION ? String(selectedUnitId) : undefined,
+        ),
+      );
     } catch {
       if (requestId !== loadPatientsRequestRef.current) {
         return;
@@ -266,7 +264,7 @@ export default function PatientList({ navigation }: Props) {
         setIsLoadingPatients(false);
       }
     }
-  }, [selectedUnitId, selectedSpecialtyId]);
+  }, [selectedUnitId]);
 
   const resetNewPatientForm = useCallback(() => {
     setNewPatientForm({
@@ -432,22 +430,7 @@ export default function PatientList({ navigation }: Props) {
     ];
   }, [availableUnits, i18n.language, onUnitChange, selectedUnitId]);
 
-  const priorityInputs = useMemo<PriorityInput[]>(
-    () =>
-      patients.map(patient => ({
-        patientId: patient.id,
-        displayName: patient.name,
-        bedLabel: patient.bedLabel,
-        vitals: patient.vitals ?? {},
-        devices: patient.devices ?? [],
-        risks: patient.risks ?? {},
-        pendingTasks: patient.pendingTasks ?? [],
-        unitId: patient.unitId,
-        lastIncidentAt: patient.lastIncidentAt ?? null,
-        recentIncidentFlag: patient.recentIncidentFlag,
-      })),
-    [patients],
-  );
+  const priorityInputs = useMemo(() => buildPriorityInputs(patients), [patients]);
 
   const prioritizedPatients = useMemo<PrioritizedPatient[]>(() => priorityInputs.map(computePriority), [priorityInputs]);
   const sortedByPriority = useMemo<PrioritizedPatient[]>(() => computePriorityList(priorityInputs), [priorityInputs]);
@@ -465,7 +448,35 @@ export default function PatientList({ navigation }: Props) {
       return acc;
     }, {});
   }, [patients]);
-  const patientsForList = sortByPriority ? sortedByPriority : prioritizedPatients;
+  const priorityUiByPatientId = useMemo(() => {
+    const patientsMap = new Map(patients.map((patient) => [patient.id, patient] as const));
+    return prioritizedPatients.reduce((acc, patient) => {
+      const basePatient = patientsMap.get(patient.patientId);
+      acc[patient.patientId] = buildPriorityUiModel({
+        patient,
+        pendingTasks: basePatient?.pendingTasks,
+        alerts: alertsByPatient[patient.patientId] ?? [],
+      });
+      return acc;
+    }, {} as Record<string, ReturnType<typeof buildPriorityUiModel>>);
+  }, [alertsByPatient, patients, prioritizedPatients]);
+  const actionablePriorityCount = useMemo(
+    () => prioritizedPatients.filter((patient) => hasActionablePrioritySignal(patient)).length,
+    [prioritizedPatients],
+  );
+  const effectiveSortByPriority = sortByPriorityOverride ?? actionablePriorityCount > 0;
+  const patientsForList = effectiveSortByPriority ? sortedByPriority : prioritizedPatients;
+  const priorityCounts = useMemo(
+    () =>
+      prioritizedPatients.reduce(
+        (acc, patient) => {
+          acc[patient.level] += 1;
+          return acc;
+        },
+        { critical: 0, high: 0, medium: 0, low: 0 } as Record<PrioritizedPatient['level'], number>,
+      ),
+    [prioritizedPatients],
+  );
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const { session } = useAuth();
@@ -514,25 +525,27 @@ export default function PatientList({ navigation }: Props) {
     [navigation, patientById, selectedUnitId, session]
   );
 
-  const renderPriorityBadge = useCallback((level: PrioritizedPatient['level']) => {
-    const labelMap: Record<PrioritizedPatient['level'], string> = {
-      critical: t("patientList.priorityCritical"),
-      high: t("patientList.priorityHigh"),
-      medium: t("patientList.priorityMedium"),
-      low: t("patientList.priorityLow"),
-    };
-    const colorMap: Record<PrioritizedPatient['level'], string> = {
-      critical: colors.danger,
-      high: colors.warning,
-      medium: "#ca8a04",
-      low: colors.success,
-    };
-    return (
-      <View style={[styles.priorityBadge, { backgroundColor: colorMap[level] }]}> 
-        <Text style={styles.priorityBadgeText}>{labelMap[level]}</Text>
-      </View>
-    );
-  }, [colors.danger, colors.success, colors.warning, i18n.language]);
+  const renderSignalChip = useCallback(
+    (label: string, tone: PriorityUiTone | undefined, testID?: string) => {
+      if (!tone) return null;
+      const chipTone = getPriorityToneStyles(tone);
+      return (
+        <View
+          style={[
+            styles.contextChip,
+            {
+              backgroundColor: chipTone.backgroundColor,
+              borderColor: chipTone.borderColor,
+            },
+          ]}
+          testID={testID}
+        >
+          <Text style={[styles.contextChipText, { color: chipTone.textColor }]}>{label}</Text>
+        </View>
+      );
+    },
+    [],
+  );
 
   const listHeader = useMemo(
     () => (
@@ -587,9 +600,31 @@ export default function PatientList({ navigation }: Props) {
           </View>
         </View>
 
-        <View style={styles.priorityToggle}>
-          <Text style={styles.priorityToggleLabel}>{t("patientList.sortByPriority")}</Text>
-          <Switch value={sortByPriority} onValueChange={setSortByPriority} />
+        <View style={styles.priorityToggleCard}>
+          <View style={styles.priorityToggle}>
+            <Text style={styles.priorityToggleLabel}>Orden contextual de pacientes</Text>
+            <Switch value={effectiveSortByPriority} onValueChange={setSortByPriorityOverride} />
+          </View>
+          <Text style={[styles.priorityToggleHint, { color: colors.muted }]}>
+            {effectiveSortByPriority
+              ? actionablePriorityCount > 0
+                ? 'Activa: adelanta cambios clínicos, pendientes críticos y ventanas temporales.'
+                : 'Sin señal contextual suficiente; se conserva el orden actual.'
+              : 'Desactivada manualmente; la lista mantiene el orden recibido.'}
+          </Text>
+          {actionablePriorityCount > 0 ? (
+            <View style={styles.prioritySummaryRow}>
+              <View style={styles.prioritySummaryChip}>
+                <Text style={styles.prioritySummaryChipText}>{priorityCounts.critical} críticas</Text>
+              </View>
+              <View style={styles.prioritySummaryChip}>
+                <Text style={styles.prioritySummaryChipText}>{priorityCounts.high} altas</Text>
+              </View>
+              <View style={styles.prioritySummaryChip}>
+                <Text style={styles.prioritySummaryChipText}>{actionablePriorityCount} con señal</Text>
+              </View>
+            </View>
+          ) : null}
         </View>
 
         {canViewSupervisorDashboard ? (
@@ -609,6 +644,7 @@ export default function PatientList({ navigation }: Props) {
     [
       availableUnits.length,
       canViewSupervisorDashboard,
+      colors.muted,
       colors.primary,
       colors.text,
       navigation,
@@ -617,7 +653,10 @@ export default function PatientList({ navigation }: Props) {
       openNewPatientForm,
       selectedSpecialtyId,
       selectedUnitId,
-      sortByPriority,
+      actionablePriorityCount,
+      effectiveSortByPriority,
+      priorityCounts.critical,
+      priorityCounts.high,
       specialtyChips,
       specialtyOptions,
       t,
@@ -648,6 +687,7 @@ export default function PatientList({ navigation }: Props) {
           const iceaRisk = iceaPatientRiskByPatientId.get(item.patientId);
           const hasCriticalAlert = alerts.some(alert => alert.severity === 'critical');
           const hasWarningAlert = alerts.some(alert => alert.severity === 'warning');
+          const priorityUi = priorityUiByPatientId[item.patientId];
           return (
             <Pressable
               onPress={() => onOpenPatient(item.patientId)}
@@ -691,9 +731,32 @@ export default function PatientList({ navigation }: Props) {
                   </Pressable>
                 ) : null}
               </View>
-              <View style={styles.priorityRow}>
-                {renderPriorityBadge(item.level)}
-                <Text style={styles.reasonText}>{item.reasonSummary}</Text>
+              <View style={styles.prioritySection}>
+                <View style={styles.priorityRow}>
+                  <PriorityBadge level={item.level} testID={`priority-badge-${item.patientId}`} />
+                  {priorityUi?.omissionLabel
+                    ? renderSignalChip(
+                        priorityUi.omissionLabel,
+                        priorityUi.omissionTone,
+                        `priority-omission-${item.patientId}`,
+                      )
+                    : null}
+                  {priorityUi?.windowLabel
+                    ? renderSignalChip(
+                        priorityUi.windowLabel,
+                        priorityUi.windowTone,
+                        `priority-window-${item.patientId}`,
+                      )
+                    : null}
+                </View>
+                <Text style={[styles.reasonText, { color: colors.text }]} numberOfLines={2}>
+                  {priorityUi?.whyNow ?? item.reasonSummary}
+                </Text>
+                {priorityUi?.actionLabel ? (
+                  <Text style={[styles.priorityActionText, { color: colors.muted }]} numberOfLines={2}>
+                    {priorityUi.actionLabel}
+                  </Text>
+                ) : null}
               </View>
               {alerts.length > 0 ? (
                 <View style={styles.alertChipRow}>
@@ -878,15 +941,47 @@ const styles = StyleSheet.create({
   pickerButtonText: {
     color: "#1f2a44",
   },
+  priorityToggleCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+    gap: 8,
+  },
   priorityToggle: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 6,
+    gap: 12,
   },
   priorityToggleLabel: {
+    flex: 1,
     fontWeight: "600",
     color: "#111827",
+  },
+  priorityToggleHint: {
+    color: "#475569",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  prioritySummaryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  prioritySummaryChip: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  prioritySummaryChipText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
   },
   supervisorButton: {
     backgroundColor: '#0f172a',
@@ -971,24 +1066,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  prioritySection: {
+    marginTop: 10,
+    gap: 6,
+  },
   priorityRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
+    flexWrap: "wrap",
+    gap: 6,
   },
-  priorityBadge: {
+  contextChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 30,
+    justifyContent: "center",
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
   },
-  priorityBadgeText: {
-    color: "#fff",
+  contextChipText: {
+    fontSize: 12,
     fontWeight: "700",
   },
   reasonText: {
-    flex: 1,
-    marginLeft: 8,
     color: "#374151",
+    lineHeight: 20,
+  },
+  priorityActionText: {
+    color: "#475569",
+    fontSize: 13,
+    lineHeight: 18,
   },
   alertChipRow: {
     flexDirection: 'row',
@@ -1101,4 +1208,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

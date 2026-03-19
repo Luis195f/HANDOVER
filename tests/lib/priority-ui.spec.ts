@@ -1,0 +1,87 @@
+import { describe, expect, it } from 'vitest';
+
+import { buildPriorityUiModel, hasActionablePrioritySignal } from '@/src/lib/priority-ui';
+import type { PrioritizedPatient } from '@/src/lib/priority';
+import type { PendingTaskSummary } from '@/src/types/handover';
+
+const basePatient: PrioritizedPatient = {
+  patientId: 'pat-1',
+  displayName: 'Paciente 1',
+  bedLabel: 'A1',
+  news2Score: 7,
+  totalScore: 12,
+  baseScore: 10,
+  level: 'critical',
+  baseLevel: 'critical',
+  reasons: ['HIGH_NEWS2', 'PENDING_URGENT_TASK'],
+  reasonSummary: 'NEWS2 7, 1 pendiente crítico',
+  pendingCriticalTasksCount: 1,
+  explanation: {
+    engine: 'mpac-v1-hybrid-rules',
+    version: 1,
+    sourceData: ['NEWS2 7 (alto)'],
+    clinicalChange: ['Incidente reciente registrado'],
+    pendingCritical: ['Gasometría urgente (crítico)'],
+    activeContext: {
+      unitId: 'icu-a',
+      specialtyId: null,
+      unitProfileId: null,
+      specialtyOverlayIds: [],
+      activeProfileIds: [],
+      labels: ['HANDOVER Core'],
+      usesCoreFallback: true,
+      hasHumanSpecialtyOverride: false,
+    },
+    coreDimensions: [],
+    modifiers: [],
+  },
+};
+
+describe('priority-ui', () => {
+  it('builds omission and time-window copy for urgent tasks', () => {
+    const tasks: PendingTaskSummary[] = [
+      {
+        id: 'task-1',
+        title: 'Gasometría urgente',
+        critical: true,
+        dueBy: '2026-03-19T10:45:00.000Z',
+      },
+    ];
+
+    const model = buildPriorityUiModel({
+      patient: basePatient,
+      pendingTasks: tasks,
+      referenceTime: '2026-03-19T10:15:00.000Z',
+    });
+
+    expect(model.hasSignal).toBe(true);
+    expect(model.whyNow).toContain('Incidente reciente');
+    expect(model.actionLabel).toBe('No omitir: Gasometría urgente');
+    expect(model.omissionLabel).toBe('Riesgo de omisión alto');
+    expect(model.windowLabel).toBe('Ventana en 30 min');
+  });
+
+  it('does not flag a patient without contextual signals', () => {
+    const quietPatient: PrioritizedPatient = {
+      ...basePatient,
+      patientId: 'pat-2',
+      displayName: 'Paciente estable',
+      news2Score: 0,
+      totalScore: 0,
+      baseScore: 0,
+      level: 'low',
+      baseLevel: 'low',
+      reasons: [],
+      reasonSummary: 'Sin señal contextual relevante',
+      pendingCriticalTasksCount: 0,
+      explanation: {
+        ...basePatient.explanation,
+        sourceData: [],
+        clinicalChange: [],
+        pendingCritical: [],
+      },
+    };
+
+    expect(hasActionablePrioritySignal(quietPatient)).toBe(false);
+  });
+});
