@@ -182,8 +182,51 @@ describe('MPAC v1', () => {
     expect(result.explanation.modifiers.some((modifier) => modifier.note.includes('transmision'))).toBe(true);
     expect(result.reasons).toContain('PROFILE_CONTEXT');
   });
+  it('applies explainable EOPROP-IA modifiers for oncology-hematology without changing the transport contracts', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['ambulatory'],
+      specialtyOverlays: ['onc'],
+    });
+
+    const { computeMPACFromInput } = await import('@/src/lib/mpac');
+
+    const result = computeMPACFromInput({
+      patientId: 'pat-onc',
+      displayName: 'Paciente Onco',
+      unitId: 'onc-ward',
+      specialtyId: 'onc',
+      vitals: { rr: 23, spo2: 95, tempC: 38.4, sbp: 104, hr: 118 },
+      devices: [{ id: 'cvc', label: 'CVC tunelizado', category: 'invasive', critical: false }],
+      risks: {},
+      pendingTasks: [
+        { id: 'cultures', title: 'Tomar cultivos y avisar fiebre en neutropenia', priority: 'critical', category: 'reevaluation' },
+        { id: 'pain', title: 'Reevaluar dolor y tolerancia oral', priority: 'urgent', category: 'other' },
+      ],
+      referenceTime: '2024-02-01T00:00:00Z',
+    });
+
+    expect(result.explanation.activeContext.unitProfileId).toBe('ambulatory');
+    expect(result.explanation.activeContext.specialtyOverlayIds).toEqual(['onc']);
+    expect(
+      result.explanation.modifiers.some(
+        (modifier) => modifier.label === 'Neutropenia febril y sepsis oculta' && modifier.applied,
+      ),
+    ).toBe(true);
+    expect(
+      result.explanation.modifiers.some(
+        (modifier) =>
+          modifier.label === 'Extravasacion y continuidad segura de terapia sistemica' && modifier.applied,
+      ),
+    ).toBe(true);
+    expect(
+      result.explanation.modifiers.some(
+        (modifier) =>
+          modifier.label === 'Complicaciones de tratamiento sistemico y soporte hematologico' &&
+          modifier.note.includes('Quimioterapia, inmunoterapia, transfusion'),
+      ),
+    ).toBe(true);
+    expect(result.reasons).toContain('PROFILE_CONTEXT');
+    expect(result.reasonSummary).toContain('contexto');
+  });
 });
-
-
-
 

@@ -30,6 +30,16 @@ type OpenTaskAssessment = {
   dueAtMs: number | null;
 };
 
+function getOncologyAppliedModifier(patient: PrioritizedPatient) {
+  if (!patient.explanation?.activeContext.specialtyOverlayIds.includes('onc')) {
+    return undefined;
+  }
+
+  return patient.explanation.modifiers.find(
+    (modifier) => modifier.applied && modifier.source === 'specialty-overlay' && modifier.profileId === 'onc',
+  );
+}
+
 const DUE_SOON_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 
 export function getPriorityToneStyles(tone: PriorityUiTone): PriorityToneStyles {
@@ -159,6 +169,11 @@ function buildWhyNow(patient: PrioritizedPatient): string {
     return clinicalChange;
   }
 
+  const appliedModifier = getOncologyAppliedModifier(patient);
+  if (appliedModifier) {
+    return `Contexto activo: ${appliedModifier.label}`;
+  }
+
   const sourceData = patient.explanation?.sourceData[0];
   if (sourceData) {
     return sourceData;
@@ -187,6 +202,11 @@ function buildActionLabel(
 
   if (alerts.some((alert) => alert.severity === 'critical')) {
     return 'No omitir: revisar alertas críticas activas';
+  }
+
+  const appliedModifier = getOncologyAppliedModifier(patient);
+  if (appliedModifier) {
+    return `No omitir: ${appliedModifier.label}`;
   }
 
   return undefined;
@@ -242,6 +262,14 @@ export function buildPriorityUiModel(params: {
   const hasSignal = hasActionablePrioritySignal(patient);
   const omission = buildOmissionCopy(primaryTask, patient, alerts);
   const window = getWindowCopy(primaryTask, referenceTimeMs);
+  const hasContextualReevaluationWindow =
+    patient.explanation?.activeContext.specialtyOverlayIds.includes('onc') &&
+    (patient.explanation?.modifiers.some(
+      (modifier) =>
+        modifier.applied &&
+        modifier.profileId === 'onc' &&
+        (modifier.dimension === 'time-critical' || modifier.dimension === 'deterioration-risk'),
+    ) ?? false);
 
   return {
     hasSignal,
@@ -251,9 +279,11 @@ export function buildPriorityUiModel(params: {
     omissionTone: omission.omissionTone,
     windowLabel:
       window.windowLabel ??
-      (patient.reasons.includes('RECENT_INCIDENT') ? 'Ventana: reevaluar este turno' : undefined),
+      (patient.reasons.includes('RECENT_INCIDENT') || hasContextualReevaluationWindow
+        ? 'Ventana: reevaluar este turno'
+        : undefined),
     windowTone:
       window.windowTone ??
-      (patient.reasons.includes('RECENT_INCIDENT') ? 'warning' : undefined),
+      (patient.reasons.includes('RECENT_INCIDENT') || hasContextualReevaluationWindow ? 'warning' : undefined),
   };
 }

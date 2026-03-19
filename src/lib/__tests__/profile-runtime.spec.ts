@@ -319,6 +319,53 @@ describe('resolveHandoverProfileRuntime', () => {
     ]);
   });
 
+  it('projects EOPROP-IA as an operational oncology-hematology overlay without opening a parallel form', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['ambulatory'],
+      specialtyOverlays: ['onc'],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'onc-ward', specialtyId: 'onc' });
+
+    expect(runtime.context.unitProfileId).toBe('ambulatory');
+    expect(runtime.context.specialtyOverlayIds).toEqual(['onc']);
+    expect(runtime.activeOverlays.map((overlay) => overlay.label)).toEqual(['Oncologia y hematologia']);
+    expect(runtime.requiredExtraFields).toEqual(
+      expect.arrayContaining(['Fase terapeutica', 'Inmunosupresion', 'CVC', 'Sintoma toxico dominante']),
+    );
+    expect(runtime.optionalExtraFields).toEqual(
+      expect.arrayContaining(['Transfusion cuando aplique', 'Paliacion / objetivos de cuidado cuando aplique']),
+    );
+    expect(runtime.sentinelEvents).toEqual(
+      expect.arrayContaining([
+        'Neutropenia febril',
+        'Sepsis',
+        'Extravasacion',
+        'Dolor no controlado',
+        'Deshidratacion',
+        'Complicaciones de tratamiento sistemico',
+      ]),
+    );
+    expect(runtime.visibleOutputs).toEqual(
+      expect.arrayContaining([
+        'Quien primero: fiebre, sepsis, extravasacion o dolor no controlado',
+        'Por que: inmunosupresion, CVC y toxicidad sistemica aumentan deterioro',
+        'No omitir: transfusion, acceso vascular, analgesia y vigilancia infecciosa',
+        'Cuando reevaluar: este turno ante fiebre, dolor refractario o hidratacion comprometida',
+      ]),
+    );
+    expect(runtime.treatmentQuickPicks.map((quickPick) => quickPick.id)).toEqual(
+      expect.arrayContaining([
+        'onc-neutropenia-reeval',
+        'onc-extravasation-check',
+        'onc-transfusion-safety',
+        'onc-symptom-reeval',
+      ]),
+    );
+  });
+
   it('keeps legacy narrative fields visible when hideLegacyFields is disabled and the runtime pack enables them', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['critical-care'],

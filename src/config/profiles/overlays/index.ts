@@ -1,4 +1,5 @@
 import type { SpecialtyOverlayId, SpecialtyOverlayRuntimePack } from '../../../types/profile';
+import { ONCOLOGY_HEMATOLOGY_OVERLAY_RUNTIME_PACK } from './oncologyHematology';
 
 const createPack = <T extends SpecialtyOverlayRuntimePack & { id: SpecialtyOverlayId }>(pack: T): T => pack;
 
@@ -24,16 +25,7 @@ export const SPECIALTY_OVERLAY_RUNTIME_PACKS: Readonly<
     sentinelEvents: ['Cambio pupilar', 'Descenso de Glasgow', 'Convulsion o deterioro neurologico'],
     visibleOutputs: ['Resumen de neurovigilancia'],
   }),
-  onc: createPack({
-    id: 'onc',
-    label: 'Overlay oncologico',
-    enabledSections: ['examenes', 'outcomes'],
-    focusAreas: ['Neutropenia, toxicidad y control sintomatico', 'Extravasacion y continuidad terapeutica'],
-    explanations: ['Mantiene el formulario unico y destaca riesgos de toxicidad, infeccion y continuidad oncologica.'],
-    sentinelEvents: ['Fiebre en neutropenia', 'Extravasacion', 'Dolor o sintomas refractarios'],
-    visibleOutputs: ['Pendientes oncologicos criticos'],
-    notes: ['Campos oncológicos adicionales próximamente.'],
-  }),
+  onc: createPack(ONCOLOGY_HEMATOLOGY_OVERLAY_RUNTIME_PACK),
   trauma: createPack({
     id: 'trauma',
     label: 'Overlay trauma',

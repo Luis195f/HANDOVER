@@ -55,17 +55,17 @@ Principio aplicado en PRE-02:
 
 Estas traducciones se mantienen por compatibilidad con ids ya usados en configuracion previa, pero ya no forman parte del inventario canonico UPP/SOP.
 
-| ID legacy | Resolucion PRE-02 | Motivo |
+| ID legacy | Resolucion PRE-09 | Motivo |
 | --- | --- | --- |
-| `oncology` | Alias legacy contextual para el overlay `onc` sobre `general-inpatient`, `ambulatory`, `emergency` o `home-care` | El source of truth multiunidad ubica oncologia/hematologia como SOP transversal. PRE-02 no implanta todavia EOPROP-IA, pero tampoco afirma la equivalencia falsa `oncology == ambulatory`. Cuando hay contexto de unidad se resuelve al UPP base compatible; sin contexto suficiente cae prudentemente a `general-inpatient`. En activacion JSON el alias se expande al set completo compatible. |
+| `oncology` | Alias legacy contextual para el overlay `onc` sobre `general-inpatient`, `ambulatory`, `emergency` o `home-care` | El source of truth multiunidad ubica oncologia/hematologia como SOP transversal. PRE-09 implementa EOPROP-IA como overlay contextual real sin afirmar la equivalencia falsa `oncology == ambulatory`. Cuando hay contexto de unidad se resuelve al UPP base compatible; sin contexto suficiente cae prudentemente a `general-inpatient`. En activacion JSON el alias se expande al set completo compatible. |
 | `pediatrics` | `general-inpatient` | El source of truth ubica pediatria general como overlay/subespecialidad sobre base de hospitalizacion, no como UPP independiente. |
 | `gyn` | `ob` | El source of truth define una sola entidad combinada Ginecologia/Obstetricia; el id operativo `ob` se conserva por compatibilidad. |
 
-La compatibilidad legacy oncológica queda asi delimitada en PRE-02:
+La compatibilidad legacy oncológica queda asi delimitada en PRE-09:
 
-- resuelto ahora: catalogo maestro correcto, alias legacy explicito, expansion segura en activacion, resolucion contextual basica por metadatos de unidad y sin activaciones nuevas por defecto;
-- no resuelto aun: reglas clinicas EOPROP-IA, priorizacion oncológica avanzada, subcontextos de urgencias oncológicas o paliativos con logica propia de runtime;
-- esa capa se difiere expresamente a PRE-09 y posteriores.
+- resuelto ahora: catalogo maestro correcto, alias legacy explicito, expansion segura en activacion, resolucion contextual basica por metadatos de unidad y overlay operativo EOPROP-IA sobre `general-inpatient`, `ambulatory`, `emergency` y `home-care`;
+- preservado: no hay activaciones nuevas por defecto, no cambia FHIR y no cambia el runtime ICEA+;
+- no resuelto aun: vectores ICEA+ emitidos en runtime o un contrato FHIR contextual nuevo para oncologia/hematologia.
 
 Estas traducciones se aplican en:
 
