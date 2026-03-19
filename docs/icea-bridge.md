@@ -103,8 +103,9 @@ Se usa para reintentos o recalculo posterior cuando ya existen datos downstream 
 Contrato estable y aditivo hoy:
 - `handoverId` es el alias publico de `bundleId` en respuestas del bridge; ambos se mantienen para compatibilidad.
 - la normalizacion remota acepta `status`, `state` o `result` como fuente de estado; `formulaVersion` o `formula_version`; `warnings` o `issues`.
-- los enqueues normales no reprograman una request ya `queued`; si el payload se refresca antes de entregar, se actualiza el request existente sin abrir otro side effect paralelo.
+- los enqueues normales no reprograman una request ya `queued`; si el payload se refresca antes de entregar, el worker reutiliza el payload vigente persistido y evita abrir un side effect paralelo adicional.
 - `POST /api/icea/bridge/retry/<bridgeId>` no crea un scheduler paralelo: usa el mismo helper del service con `force=true`.
+- si una entrega vieja responde despues de que `payload_hash` o `idempotency_key` cambiaron, HANDOVER descarta esa respuesta para no sobrescribir la corrida vigente.
 
 Ejemplo resumido de `bridgeRequest` expuesto a UI/operacion:
 
@@ -126,7 +127,7 @@ Campos visibles y auditables:
 - linkage: `request_id`, `bundle_id`, `patient_id`, `unit_id`, `encounter_id`, `episode_id`;
 - trazabilidad: `bridge_request_id`, `idempotency_key`, `payload_hash`, `payload_json`;
 - estado: `status`, `attempts`, `last_error`, `last_http_status`, `sent_at`, `received_at`;
-- resultado minimo: `provisional`, `insufficient_evidence`, `contract_version`, `formula_version`, `score_summary_json`, `warnings_json`, `remote_refs_json`;
+- resultado minimo: `provisional`, `insufficient_evidence`, `contract_version`, `formula_version`, `score_summary_json`, `warnings_json`, `remote_refs_json`; cuando cambia el payload se resetean `formula_version`, `score_summary_json`, `remote_refs_json`, `sent_at`, `received_at`, `attempts`, `last_error` y `last_http_status` para iniciar una corrida limpia;
 - trazabilidad explicable expuesta por API: `bridgeRequestId`, `requestId`, `payloadHash`, `attempts` y `remoteRefs`.
 
 ## Endpoints backend
