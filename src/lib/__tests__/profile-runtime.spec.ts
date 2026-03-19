@@ -114,6 +114,47 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.medicationQuickPicks.length).toBeGreaterThan(0);
     expect(runtime.visibleOutputs).toContain('Resumen de microvigilancia');
   });
+  it('projects the first wave operational packs into runtime focus, outputs and checklist labels', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['critical-care', 'general-inpatient', 'emergency'],
+    });
+    process.env.UNITS_CONFIG = JSON.stringify({
+      units: [
+        { id: 'ward-mi', name: 'Medicina Interna A', specialty: 'med', profileId: 'general-inpatient' },
+      ],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const criticalCare = resolveHandoverProfileRuntime({ unitId: 'icu-a', specialtyId: 'icu' });
+    expect(criticalCare.focusAreas).toEqual(
+      expect.arrayContaining(['Ventilacion, sedacion y perfusion minuto a minuto']),
+    );
+    expect(criticalCare.explanations).toContain(
+      'Prioriza soporte ventilatorio, sedacion, vasoactivos y checklist de vigilancia critica dentro del formulario unico.',
+    );
+    expect(criticalCare.visibleOutputs).toContain('Checklist de vigilancia critica');
+    expect(criticalCare.checklistItems[0]?.label).toBe('Paciente, cama y objetivos criticos confirmados');
+    expect(criticalCare.checklistItems[0]?.helper).toContain('metas ventilatorias');
+
+    const generalInpatient = resolveHandoverProfileRuntime({ unitId: 'ward-mi', specialtyId: 'med' });
+    expect(generalInpatient.focusAreas).toEqual(
+      expect.arrayContaining(['Fragilidad, dependencia y delirium']),
+    );
+    expect(generalInpatient.suggestedScales).toEqual(expect.arrayContaining(['Barthel / Katz', 'CAM']));
+    expect(generalInpatient.visibleOutputs).toContain('Riesgos de omision y alta compleja');
+    expect(generalInpatient.checklistItems[1]?.label).toContain('conciliacion terapeutica');
+
+    const emergency = resolveHandoverProfileRuntime({ unitId: 'ed-main', specialtyId: 'ed' });
+    expect(emergency.focusAreas).toEqual(
+      expect.arrayContaining(['Triage, motivo sindromico y ventana desde la llegada']),
+    );
+    expect(emergency.explanations).toContain(
+      'Prioriza triage, hora de llegada, reevaluacion y destino sin abrir un formulario paralelo.',
+    );
+    expect(emergency.visibleOutputs).toContain('Destino probable explicitado');
+    expect(emergency.checklistItems[0]?.label).toContain('triage y motivo sindromico');
+  });
 
   it('keeps hidden sections monotonic across overlay merges while preserving trace order', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
@@ -352,9 +393,11 @@ describe('resolveHandoverProfileRuntime', () => {
     const unitExtensionKeys = new Set<string>(UNIT_PROFILE_RUNTIME_EXTENSION_KEYS);
     const overlayExtensionKeys = new Set<string>(SPECIALTY_OVERLAY_RUNTIME_EXTENSION_KEYS);
 
+    expect(unitExtensionKeys.has('focusAreas')).toBe(true);
+    expect(unitExtensionKeys.has('explanations')).toBe(true);
+    expect(unitExtensionKeys.has('visibility')).toBe(true);
     expect(overlayExtensionKeys.has('focusAreas')).toBe(true);
     expect(overlayExtensionKeys.has('hiddenSections')).toBe(true);
-    expect(unitExtensionKeys.has('visibility')).toBe(true);
 
     for (const pack of Object.values(UNIT_PROFILE_RUNTIME_PACKS)) {
       expect(
@@ -373,3 +416,4 @@ describe('resolveHandoverProfileRuntime', () => {
     }
   });
 });
+

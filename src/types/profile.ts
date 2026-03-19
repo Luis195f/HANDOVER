@@ -316,13 +316,13 @@ export const PROFILE_RUNTIME_EXTENSION_POINTS: Readonly<
   },
   focusAreas: {
     mode: 'additive',
-    allowedSources: ['specialty-overlay'],
-    description: 'Permite a overlays reforzar focos clinicos sobre el mismo formulario base.',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Permite a UPP y overlays reforzar focos clinicos sobre el mismo formulario base.',
   },
   explanations: {
     mode: 'additive',
-    allowedSources: ['specialty-overlay'],
-    description: 'Explica por que un overlay esta activo sin alterar el payload clinico.',
+    allowedSources: ['unit-profile', 'specialty-overlay'],
+    description: 'Explica por que un UPP u overlay esta activo sin alterar el payload clinico.',
   },
   scales: {
     mode: 'additive',
@@ -445,5 +445,6 @@ export const normalizeSpecialtyOverlayId = (value: unknown): SpecialtyOverlayId 
   if (typeof value !== 'string') return null;
   return LEGACY_SPECIALTY_OVERLAY_ALIASES[value as LegacySpecialtyOverlayAlias] ?? null;
 };
+
 
 

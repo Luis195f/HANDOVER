@@ -157,6 +157,7 @@ La PRE-03 agrega una capa runtime aditiva para el formulario unico:
 
 - `resolveHandoverProfileRuntime` resuelve la unidad activa y mantiene fallback seguro al Core.
 - `src/config/profiles/units/core.ts` y `src/config/profiles/units/index.ts` declaran secciones visibles, campos legacy, escalas sugeridas, eventos centinela, quick-picks y salidas visibles por UPP.
+- En PRE-08 la Wave 1 operativa queda afinada in place para `critical-care`, `general-inpatient` y `emergency` con foco clinico, explicaciones visibles, quick-picks, checklist de cabecera contextual y eventos a anticipar, sin abrir formularios paralelos.
 - `src/lib/profile-runtime.ts` entrega un mapa puro de visibilidad y ayudas contextuales para `HandoverForm`, sin abrir pantallas paralelas ni cambiar el payload clinico runtime.
 
 ## 8. Runtime SOP PRE-04
@@ -167,8 +168,10 @@ La PRE-04 extiende el runtime del formulario unico con Specialty Overlay Packs s
 - `src/types/profile.ts` hace explicitos los puntos de extension permitidos del runtime (`PROFILE_RUNTIME_EXTENSION_POINTS`) para distinguir claves aditivas, ocultacion monotona y visibilidad protegida.
 - `src/lib/profile-runtime.ts` aplica merge determinista `Core < UPP < SOP...` en el orden resuelto por contexto y expone una traza auditable por capa real aplicada.
 - Partes solo aditivas: `enabledSections`, `requiredExtraFields`, `optionalExtraFields`, `focusAreas`, `explanations`, `scales`, `sentinelEvents`, `quickPicks`, `visibleOutputs` y `notes`.
+- En PRE-08 los UPP base tambien pueden proyectar `focusAreas` y `explanations` propias para que la UI y MPAC expliquen el contexto operativo sin depender solo de overlays.
 - `hiddenSections` queda monotono: cualquier layer puede ocultar mas secciones, pero un SOP posterior no las reabre por omision. Esto evita reactivaciones accidentales de ruido clinico.
 - `visibility` se resuelve con guardrail conservador: un UPP puede afinar campos frente al Core, pero un SOP no puede reactivar campos ya cerrados por capas anteriores. Si lo intenta, la traza marca la clave ignorada y deja nota explicita.
 - La trazabilidad visible incluye UPP base, SOP activos, origen del specialty (`explicit`, `unit`, `unit-config`, `none`), si hubo override humano y cualquier guardrail aplicado durante el merge.
 - El payload FHIR no cambia en esta fase; la traza se adjunta solo como metadata interna backward compatible para consumidores futuros de FHIR/ICEA/outbox.
+
 

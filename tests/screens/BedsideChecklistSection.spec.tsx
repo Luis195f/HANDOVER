@@ -4,6 +4,7 @@ import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
 import { describe, expect, it } from 'vitest';
 
 import { BedsideChecklistSection } from '@/src/screens/components/BedsideChecklistSection';
+import type { BedsideChecklistItem } from '@/src/config/bedsideChecklist';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
@@ -90,5 +91,20 @@ describe('BedsideChecklistSection', () => {
         fallbackPlan: 'Preparar carro de parada y traslado si empeora',
       });
     });
+  });
+
+  it('renderiza ayudas contextuales cuando el runtime cambia el checklist', () => {
+    const customItems: BedsideChecklistItem[] = [
+      {
+        key: 'patientIdentityConfirmed',
+        label: 'Paciente, triage y motivo sindromico confirmados',
+        helper: 'Incluye hora de llegada o ultima reevaluacion documentada.',
+      },
+    ];
+
+    const { getByText } = renderWithForm(<BedsideChecklistSection items={customItems} />);
+
+    expect(getByText('Paciente, triage y motivo sindromico confirmados')).toBeTruthy();
+    expect(getByText('Incluye hora de llegada o ultima reevaluacion documentada.')).toBeTruthy();
   });
 });

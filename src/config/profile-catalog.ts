@@ -28,7 +28,7 @@ export const UNIT_PROFILE_CATALOG: readonly UnitProfileCatalogEntry[] = [
     label: 'Urgencias y emergencias',
     aliases: ['urgencias', 'emergencias', 'triage', 'boxes', 'observacion', 'resucitacion'],
     baseUnitType: 'emergency',
-    clinicalFocus: 'Triage, reevaluacion obligatoria, ventanas cortas de deterioro y gestion de flujo saturado.',
+    clinicalFocus: 'Triage, motivo sindromico, reevaluacion obligatoria, aislamiento y gestion de flujo saturado.',
     readiness: 'wave-1',
   },
   {
@@ -36,7 +36,7 @@ export const UNIT_PROFILE_CATALOG: readonly UnitProfileCatalogEntry[] = [
     label: 'Hospitalizacion general',
     aliases: ['hospitalizacion', 'medicina-interna', 'planta-medica', 'planta-quirurgica'],
     baseUnitType: 'inpatient',
-    clinicalFocus: 'Continuidad de cuidados, dependencia, conciliacion, plan de alta y riesgo de omision en planta.',
+    clinicalFocus: 'Continuidad de cuidados, fragilidad, dependencia, conciliacion, delirium, alta compleja y riesgo de omision en planta.',
     readiness: 'wave-1',
   },
   {
@@ -44,7 +44,7 @@ export const UNIT_PROFILE_CATALOG: readonly UnitProfileCatalogEntry[] = [
     label: 'UCI adulto',
     aliases: ['uci-adulto', 'adult-icu', 'cuidados-criticos-adulto'],
     baseUnitType: 'critical-care',
-    clinicalFocus: 'Inestabilidad minuto a minuto, ventilacion, perfusion, drogas vasoactivas y microvigilancia.',
+    clinicalFocus: 'Inestabilidad minuto a minuto, ventilacion, sedacion, perfusion, drogas vasoactivas, balance fino y microvigilancia.',
     readiness: 'wave-1',
   },
   {
@@ -263,3 +263,4 @@ export const WAVE_1_UNIT_PROFILE_IDS = UNIT_PROFILE_CATALOG.filter((entry) => en
 export const WAVE_1_SPECIALTY_OVERLAY_IDS = SPECIALTY_OVERLAY_CATALOG.filter(
   (entry) => entry.readiness === 'wave-1',
 ).map((entry) => entry.id);
+

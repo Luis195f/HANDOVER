@@ -1,3 +1,4 @@
+import type { BedsideChecklistItem } from '../../../config/bedsideChecklist';
 import { MEDICATIONS_QUICKPICK_ICU } from '../../../lib/codes';
 import type { UnitProfileId, UnitProfileRuntimePack } from '../../../types/profile';
 import { HANDOVER_CORE_RUNTIME_PACK } from './core';
@@ -11,58 +12,170 @@ const createPack = (
   enabledSections: Array.from(new Set([...(SHARED_CORE_SECTIONS ?? []), ...(pack.enabledSections ?? [])])),
 });
 
+export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
+  Record<UnitProfileId, readonly BedsideChecklistItem[]>
+> = {
+  emergency: [
+    {
+      key: 'patientIdentityConfirmed',
+      label: 'Paciente, triage y motivo sindromico confirmados',
+      helper: 'Incluye hora de llegada o ultima reevaluacion documentada.',
+    },
+    {
+      key: 'allergiesReviewed',
+      label: 'Alergias, aislamiento y alertas inmediatas revisadas',
+      helper: 'Confirma precauciones y riesgos de transmision antes del relevo.',
+    },
+    {
+      key: 'linesAndDevicesChecked',
+      label: 'Via aerea, accesos y dispositivos iniciales verificados',
+      helper: 'Comprueba permeabilidad, fijacion y soporte activo al cierre del turno.',
+    },
+    {
+      key: 'medicationPlanReviewed',
+      label: 'Tratamiento inicial y reevaluacion obligatoria revisados',
+      helper: 'Haz visible lo ya administrado y lo que no puede omitirse en la siguiente ventana.',
+    },
+    {
+      key: 'safetyMeasuresApplied',
+      label: 'Medidas de aislamiento y seguridad de flujo aplicadas',
+      helper: 'Prioriza contencion del riesgo, boxes seguros y alertas para sala de espera.',
+    },
+    {
+      key: 'questionsAnswered',
+      label: 'Destino probable y gatillos de reevaluacion verbalizados',
+      helper: 'Deja claro si va a observacion, hospitalizacion, UCI o alta segura.',
+    },
+  ],
+  'general-inpatient': [
+    {
+      key: 'patientIdentityConfirmed',
+      label: 'Paciente, basal funcional y referente identificados',
+      helper: 'Incluye fragilidad, dependencia y quien sostiene la continuidad del cuidado.',
+    },
+    {
+      key: 'allergiesReviewed',
+      label: 'Alergias, conciliacion terapeutica y omisiones revisadas',
+      helper: 'Contrasta medicacion basal, cambios del ingreso y riesgos de olvido.',
+    },
+    {
+      key: 'linesAndDevicesChecked',
+      label: 'Accesos, ayudas tecnicas y dispositivos verificados',
+      helper: 'Asegura continuidad de sondas, vias y apoyos de movilizacion.',
+    },
+    {
+      key: 'medicationPlanReviewed',
+      label: 'Plan terapeutico, deprescripcion y pendientes revisados',
+      helper: 'Visibiliza conciliacion, medicacion critica y horarios no delegables.',
+    },
+    {
+      key: 'safetyMeasuresApplied',
+      label: 'Prevencion de caidas, delirium y UPP aplicada',
+      helper: 'Confirma medidas de orientacion, movilizacion y proteccion cutanea.',
+    },
+    {
+      key: 'questionsAnswered',
+      label: 'Plan de alta compleja y continuidad verbalizado',
+      helper: 'Deja claras barreras, educacion pendiente y coordinaciones externas.',
+    },
+  ],
+  'critical-care': [
+    {
+      key: 'patientIdentityConfirmed',
+      label: 'Paciente, cama y objetivos criticos confirmados',
+      helper: 'Verifica metas ventilatorias, hemodinamicas o neurologicas vigentes.',
+    },
+    {
+      key: 'allergiesReviewed',
+      label: 'Alergias, sedacion, analgesia y bombas revisadas',
+      helper: 'Confirma infusiones activas, compatibilidad y objetivos de sedacion.',
+    },
+    {
+      key: 'linesAndDevicesChecked',
+      label: 'VM, accesos invasivos y fijaciones verificados',
+      helper: 'Incluye via aerea artificial, cateteres, drenajes y alarmas activas.',
+    },
+    {
+      key: 'medicationPlanReviewed',
+      label: 'Vasoactivos, sedacion y titulaciones validadas',
+      helper: 'Deja explicitos objetivos, limites y ultimo ajuste relevante.',
+    },
+    {
+      key: 'safetyMeasuresApplied',
+      label: 'Paquete de vigilancia critica aplicado',
+      helper: 'Comprueba delirium, ulceras, prevencion de extubacion y eventos de alto dano.',
+    },
+    {
+      key: 'questionsAnswered',
+      label: 'Pendientes de microvigilancia y escalado verbalizados',
+      helper: 'Resume gatillos para avisar y la siguiente reevaluacion no delegable.',
+    },
+  ],
+};
+
 export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProfileRuntimePack & { id: UnitProfileId }>> = {
   emergency: createPack({
     id: 'emergency',
     label: 'Urgencias y emergencias',
     enabledSections: ['oxigenoterapia', 'examenes'],
-    requiredExtraFields: ['Motivo de reevaluacion', 'Ventana temporal critica'],
-    optionalExtraFields: ['Observacion breve', 'Traslado o destino'],
-    scales: ['EVA', 'Glasgow'],
-    sentinelEvents: ['Deterioro en sala de espera', 'Compromiso ABCDE', 'Pendiente tiempo dependiente'],
+    requiredExtraFields: ['Motivo sindromico', 'Hora de llegada o ultima reevaluacion', 'Destino probable'],
+    optionalExtraFields: ['Aislamiento activo', 'Hallazgo gatillo para reevaluacion'],
+    focusAreas: ['Triage, motivo sindromico y ventana desde la llegada', 'Reevaluacion obligatoria, aislamiento y destino probable'],
+    explanations: ['Prioriza triage, hora de llegada, reevaluacion y destino sin abrir un formulario paralelo.'],
+    scales: ['EVA', 'Glasgow', 'ESI / Manchester'],
+    sentinelEvents: ['Deterioro en sala de espera', 'Compromiso ABCDE', 'Reevaluacion omitida', 'Cambio brusco de destino'],
     quickPicks: {
       treatments: [
+        { id: 'ed-triage-reeval', type: 'other', description: 'Documentar triage, hora de llegada y proxima reevaluacion obligatoria' },
         { id: 'ed-airway', type: 'respiratory', description: 'Vigilar via aerea y reevaluar saturacion' },
-        { id: 'ed-sepsis', type: 'other', description: 'Completar bundle inicial de sepsis y controles seriados' },
-        { id: 'ed-transfer', type: 'education', description: 'Preparar traslado con resumen verbal y pendientes criticos' },
+        { id: 'ed-isolation', type: 'other', description: 'Confirmar aislamiento, muestras y medidas de transmision cruzada' },
+        { id: 'ed-transfer', type: 'education', description: 'Preparar traslado con resumen verbal, destino probable y pendientes criticos' },
       ],
     },
-    visibleOutputs: ['Alertas contextuales', 'Pendientes criticos de reevaluacion'],
+    visibleOutputs: ['Alertas contextuales', 'Pendientes criticos de reevaluacion', 'Destino probable explicitado'],
   }),
   'general-inpatient': createPack({
     id: 'general-inpatient',
     label: 'Hospitalizacion general',
     enabledSections: ['nutrition', 'elimination', 'mobilitySkin', 'psychosocial', 'escalas', 'examenes', 'outcomes'],
-    requiredExtraFields: ['Dependencia funcional', 'Plan de alta o continuidad', 'Riesgo de caidas o UPP'],
-    optionalExtraFields: ['Soporte familiar', 'Conciliacion terapeutica'],
-    scales: ['EVA', 'Braden'],
-    sentinelEvents: ['Caida', 'UPP', 'Error de continuidad', 'Deterioro insidioso'],
+    requiredExtraFields: ['Dependencia funcional y fragilidad', 'Conciliacion terapeutica', 'Plan de alta o continuidad'],
+    optionalExtraFields: ['Riesgo de delirium u omision', 'Soporte familiar y barreras para el egreso'],
+    focusAreas: ['Fragilidad, dependencia y delirium', 'Conciliacion terapeutica, omisiones y alta compleja'],
+    explanations: ['Hace visible continuidad clinica, conciliacion y riesgo de omision sin duplicar el Core.'],
+    scales: ['EVA', 'Braden', 'Barthel / Katz', 'CAM'],
+    sentinelEvents: ['Caida', 'UPP', 'Error de continuidad', 'Delirium no detectado', 'Alta compleja sin cierre'],
     quickPicks: {
       treatments: [
-        { id: 'inpatient-turning', type: 'mobilization', description: 'Cambios posturales programados cada 2 horas' },
-        { id: 'inpatient-education', type: 'education', description: 'Refuerzo de educacion para alta y autocuidado' },
-        { id: 'inpatient-skin', type: 'woundCare', description: 'Vigilancia de piel y superficies de apoyo' },
+        { id: 'inpatient-fragility', type: 'mobilization', description: 'Revisar dependencia funcional, ayuda tecnica y tolerancia a la movilizacion' },
+        { id: 'inpatient-reconciliation', type: 'education', description: 'Conciliar medicacion basal, cambios del ingreso y pendientes de administracion' },
+        { id: 'inpatient-delirium', type: 'other', description: 'Refuerzo de orientacion, sueno y prevencion de delirium durante el turno' },
+        { id: 'inpatient-skin', type: 'woundCare', description: 'Vigilancia de piel, cambios posturales y superficies de apoyo' },
+        { id: 'inpatient-discharge', type: 'education', description: 'Alinear alta compleja, educacion y coordinacion con familia o red externa' },
       ],
     },
-    visibleOutputs: ['Plan de continuidad', 'Resultados esperados visibles para enfermeria'],
+    visibleOutputs: ['Plan de continuidad', 'Resultados esperados visibles para enfermeria', 'Riesgos de omision y alta compleja'],
   }),
   'critical-care': createPack({
     id: 'critical-care',
     label: 'UCI adulto',
     enabledSections: ['oxigenoterapia', 'fluidBalance', 'escalas', 'examenes'],
-    requiredExtraFields: ['Soporte ventilatorio', 'Balance hidrico fino', 'Dispositivos invasivos'],
-    optionalExtraFields: ['Perfusion y vasoactivos', 'Objetivos hemodinamicos'],
-    scales: ['EVA', 'Glasgow', 'Braden'],
-    sentinelEvents: ['Cambio neurologico nuevo', 'Desconexion de dispositivo', 'Escalada de soporte'],
+    requiredExtraFields: ['Soporte ventilatorio y objetivos', 'Sedacion o ventana neurologica', 'Balance hidrico fino y dispositivos invasivos'],
+    optionalExtraFields: ['Vasoactivos y objetivos hemodinamicos', 'Eventos de vigilancia critica anticipados'],
+    focusAreas: ['Ventilacion, sedacion y perfusion minuto a minuto', 'Balance hidrico, dispositivos invasivos y vigilancia critica'],
+    explanations: ['Prioriza soporte ventilatorio, sedacion, vasoactivos y checklist de vigilancia critica dentro del formulario unico.'],
+    scales: ['EVA', 'Glasgow', 'RASS / SAS', 'Braden'],
+    sentinelEvents: ['Cambio neurologico nuevo', 'Desconexion de dispositivo', 'Escalada de soporte', 'Balance hidrico fuera de objetivo'],
     quickPicks: {
       medications: MEDICATIONS_QUICKPICK_ICU,
       treatments: [
-        { id: 'icu-neuro', type: 'other', description: 'Reevaluacion neurologica horaria y tendencia de Glasgow' },
-        { id: 'icu-resp', type: 'respiratory', description: 'Control de secreciones y objetivos de ventilacion' },
-        { id: 'icu-lines', type: 'woundCare', description: 'Revision de fijacion y curacion de accesos invasivos' },
+        { id: 'icu-ventilation', type: 'respiratory', description: 'Revisar modo ventilatorio, secreciones y objetivo de saturacion/FiO2' },
+        { id: 'icu-sedation', type: 'other', description: 'Validar sedacion, analgesia y ventana neurologica segura del turno' },
+        { id: 'icu-vasoactive', type: 'other', description: 'Confirmar vasoactivos, perfusion y metas hemodinamicas activas' },
+        { id: 'icu-balance', type: 'other', description: 'Cerrar balance hidrico fino y diuresis con siguiente corte horario' },
+        { id: 'icu-lines', type: 'woundCare', description: 'Revision de fijacion, curacion y alarmas de accesos invasivos' },
       ],
     },
-    visibleOutputs: ['Resumen de microvigilancia', 'Eventos centinela del turno'],
+    visibleOutputs: ['Resumen de microvigilancia', 'Eventos centinela del turno', 'Checklist de vigilancia critica'],
   }),
   'pediatric-critical-care': createPack({
     id: 'pediatric-critical-care',
