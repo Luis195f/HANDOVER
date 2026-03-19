@@ -55,13 +55,15 @@ const unitSignal = (
   id: string,
   label: string,
   dimension: ContextualPrioritySignal['dimension'],
+  extra?: Pick<ContextualPrioritySignal, 'weight' | 'explanation'>,
 ): ContextualPrioritySignal => ({
   id,
   label,
   dimension,
   source: 'unit-profile',
   profileId,
-  weight: 1,
+  weight: extra?.weight ?? 1,
+  explanation: extra?.explanation,
 });
 
 const overlaySignal = (
@@ -69,13 +71,15 @@ const overlaySignal = (
   id: string,
   label: string,
   dimension: ContextualPrioritySignal['dimension'],
+  extra?: Pick<ContextualPrioritySignal, 'weight' | 'explanation'>,
 ): ContextualPrioritySignal => ({
   id,
   label,
   dimension,
   source: 'specialty-overlay',
   profileId,
-  weight: 1,
+  weight: extra?.weight ?? 1,
+  explanation: extra?.explanation,
 });
 
 const activationStageForReadiness = (readiness: ProfileCatalogReadiness): 'catalog' | 'pilot' =>
@@ -161,37 +165,98 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
     emergency: createUnitProfileDefinition('emergency', {
       enabledSections: ['signos', 'seguridad', 'alertas', 'medicacion', 'resumen'],
       prioritySignals: [
-        unitSignal('emergency', 'emergency-time', 'Reevaluacion obligatoria', 'time-critical'),
-        unitSignal('emergency', 'emergency-deterioration', 'Riesgo de empeorar en espera', 'deterioration-risk'),
-      ],
-      iceaContextDefaults: {
-        temporalCriticality: 1,
-        coordinationComplexity: 1,
-        caseMixHints: ['emergency'],
-      },
-    }),
-    'general-inpatient': createUnitProfileDefinition('general-inpatient', {
-      enabledSections: ['seguridad', 'medicacion', 'mobilitySkin', 'resumen'],
-      prioritySignals: [
-        unitSignal('general-inpatient', 'general-inpatient-dependency', 'Dependencia funcional', 'dependency'),
-        unitSignal('general-inpatient', 'general-inpatient-continuity', 'Riesgo de continuidad', 'coordination'),
-      ],
-      iceaContextDefaults: {
-        continuityRisk: 1,
-        dependencyLoad: 1,
-        caseMixHints: ['general-inpatient'],
-      },
-    }),
-    'critical-care': createUnitProfileDefinition('critical-care', {
-      enabledSections: ['signos', 'dispositivos', 'seguridad', 'escalas', 'medicacion'],
-      prioritySignals: [
-        unitSignal('critical-care', 'critical-care-instability', 'Microvigilancia fisiologica', 'instability'),
-        unitSignal('critical-care', 'critical-care-time', 'Criticidad temporal continua', 'time-critical'),
+        unitSignal('emergency', 'emergency-triage', 'Triage y prioridad sindromica', 'time-critical', {
+          weight: 1.25,
+          explanation: 'Triage, motivo sindromico y prioridad inicial sostienen la ventana de respuesta del relevo.',
+        }),
+        unitSignal('emergency', 'emergency-arrival-window', 'Ventana desde la llegada', 'deterioration-risk', {
+          weight: 1.1,
+          explanation: 'El tiempo desde la llegada o la ultima reevaluacion modula el riesgo de empeorar en espera.',
+        }),
+        unitSignal('emergency', 'emergency-reevaluation', 'Reevaluacion obligatoria', 'time-critical', {
+          weight: 1.3,
+          explanation: 'El pack exige hacer visible la siguiente reevaluacion clinica no delegable.',
+        }),
+        unitSignal('emergency', 'emergency-isolation', 'Aislamiento y seguridad de flujo', 'omission-risk', {
+          weight: 1,
+          explanation: 'Las precauciones y alertas de transmision no deben omitirse durante el relevo de urgencias.',
+        }),
+        unitSignal('emergency', 'emergency-destination', 'Destino probable y coordinacion inmediata', 'coordination', {
+          weight: 1.1,
+          explanation: 'El destino probable cambia prioridades, recursos y forma de escalar en el siguiente turno.',
+        }),
       ],
       iceaContextDefaults: {
         surveillanceIntensity: 1,
-        temporalCriticality: 1,
-        caseMixHints: ['critical-care'],
+        temporalCriticality: 2,
+        continuityRisk: 1,
+        coordinationComplexity: 2,
+        caseMixHints: ['emergency', 'triage', 'reevaluation'],
+      },
+    }),
+    'general-inpatient': createUnitProfileDefinition('general-inpatient', {
+      enabledSections: ['seguridad', 'medicacion', 'mobilitySkin', 'psychosocial', 'escalas', 'resumen'],
+      prioritySignals: [
+        unitSignal('general-inpatient', 'general-inpatient-fragility', 'Fragilidad y reserva funcional', 'dependency', {
+          weight: 1.2,
+          explanation: 'La fragilidad y la dependencia aumentan la carga de vigilancia y movilizacion segura del turno.',
+        }),
+        unitSignal('general-inpatient', 'general-inpatient-delirium', 'Delirium y deterioro insidioso', 'deterioration-risk', {
+          weight: 1.1,
+          explanation: 'El pack hace visible delirium, desorientacion y cambios sutiles que suelen omitirse en planta.',
+        }),
+        unitSignal('general-inpatient', 'general-inpatient-reconciliation', 'Conciliacion terapeutica', 'omission-risk', {
+          weight: 1.15,
+          explanation: 'La conciliacion y los cambios del ingreso sostienen riesgo real de omision terapeutica.',
+        }),
+        unitSignal('general-inpatient', 'general-inpatient-dependency', 'Dependencia funcional', 'dependency', {
+          weight: 1,
+          explanation: 'Necesita ayuda para ABVD, movilizacion y prevencion de caidas o UPP.',
+        }),
+        unitSignal('general-inpatient', 'general-inpatient-discharge', 'Alta compleja y continuidad', 'coordination', {
+          weight: 1.2,
+          explanation: 'Alta compleja, soporte familiar y coordinacion externa condicionan el cierre seguro del turno.',
+        }),
+      ],
+      iceaContextDefaults: {
+        baselineComplexity: 1,
+        continuityRisk: 2,
+        dependencyLoad: 2,
+        coordinationComplexity: 2,
+        caseMixHints: ['general-inpatient', 'fragility', 'complex-discharge'],
+      },
+    }),
+    'critical-care': createUnitProfileDefinition('critical-care', {
+      enabledSections: ['signos', 'dispositivos', 'seguridad', 'escalas', 'medicacion', 'fluidBalance'],
+      prioritySignals: [
+        unitSignal('critical-care', 'critical-care-ventilation', 'Ventilacion y microvigilancia respiratoria', 'instability', {
+          weight: 1.25,
+          explanation: 'Ventilacion mecanica, intercambio gaseoso y secreciones sostienen la prioridad clinica del turno.',
+        }),
+        unitSignal('critical-care', 'critical-care-sedation', 'Sedacion y ventana neurologica', 'dependency', {
+          weight: 1.1,
+          explanation: 'Sedacion, analgesia y reevaluacion neurologica cambian la dependencia de vigilancia.',
+        }),
+        unitSignal('critical-care', 'critical-care-vasoactive', 'Perfusion y vasoactivos', 'time-critical', {
+          weight: 1.3,
+          explanation: 'Vasoactivos y objetivos hemodinamicos exigen continuidad minuto a minuto sin omisiones.',
+        }),
+        unitSignal('critical-care', 'critical-care-balance', 'Balance hidrico fino', 'therapeutic-load', {
+          weight: 1.1,
+          explanation: 'El cierre de balance y diuresis condiciona decisiones inmediatas del siguiente relevo.',
+        }),
+        unitSignal('critical-care', 'critical-care-devices', 'Dispositivos invasivos y checklist critica', 'dependency', {
+          weight: 1.15,
+          explanation: 'La seguridad de accesos, drenajes y vigilancia critica agrega carga de dependencia y dano potencial.',
+        }),
+      ],
+      iceaContextDefaults: {
+        baselineComplexity: 1,
+        surveillanceIntensity: 2,
+        therapeuticLoad: 2,
+        temporalCriticality: 2,
+        dependencyLoad: 2,
+        caseMixHints: ['critical-care', 'ventilation', 'vasoactive'],
       },
     }),
     'pediatric-critical-care': createUnitProfileDefinition('pediatric-critical-care', {
@@ -710,5 +775,8 @@ export type {
   ProfileContextInput,
   ProfileRegistryActivation,
 } from '../../types/profile';
+
+
+
 
 

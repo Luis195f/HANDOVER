@@ -5,7 +5,11 @@ import {
   resolveProfileContext,
 } from '../config/profiles';
 import { SPECIALTY_OVERLAY_RUNTIME_PACKS } from '../config/profiles/overlays';
-import { HANDOVER_CORE_RUNTIME_PACK, UNIT_PROFILE_RUNTIME_PACKS } from '../config/profiles/units';
+import {
+  HANDOVER_CORE_RUNTIME_PACK,
+  UNIT_PROFILE_CHECKLIST_ITEMS,
+  UNIT_PROFILE_RUNTIME_PACKS,
+} from '../config/profiles/units';
 import { UNITS_BY_ID } from '../config/units';
 import { getDefaultUnitConfig, getUnitConfig } from './unitConfig';
 import { resolveUnitFeatureFlags, type UnitFeatureFlags } from '../config/unitsConfig';
@@ -373,6 +377,39 @@ const resolveNotes = (pack: UnitProfileRuntimePack, features: UnitFeatureFlags):
   return unique(notes);
 };
 
+const hasCustomChecklistItems = (items?: readonly BedsideChecklistItem[]): boolean => {
+  if (!items || items.length === 0) {
+    return false;
+  }
+
+  if (items.length !== DEFAULT_BEDSIDE_CHECKLIST_ITEMS.length) {
+    return true;
+  }
+
+  return items.some((item, index) => {
+    const baseline = DEFAULT_BEDSIDE_CHECKLIST_ITEMS[index];
+    return item.key !== baseline?.key || item.label !== baseline?.label || item.helper !== baseline?.helper;
+  });
+};
+
+const resolveChecklistItems = (
+  pack: UnitProfileRuntimePack,
+  features: UnitFeatureFlags,
+): BedsideChecklistItem[] => {
+  if (hasCustomChecklistItems(features.checklistItems)) {
+    return [...(features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS)];
+  }
+
+  const profileChecklistItems =
+    pack.id !== 'handover-core' ? UNIT_PROFILE_CHECKLIST_ITEMS[pack.id as UnitProfileId] : undefined;
+
+  if (profileChecklistItems && profileChecklistItems.length > 0) {
+    return [...profileChecklistItems];
+  }
+
+  return [...(features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS)];
+};
+
 const resolveFieldVisibility = (pack: UnitProfileRuntimePack, features: UnitFeatureFlags): HandoverFieldVisibility => {
   const base: HandoverFieldVisibility = {
     'legacy-sbar-narrative': !features.hideLegacyFields,
@@ -532,7 +569,7 @@ export const resolveHandoverProfileRuntime = ({
     sectionVisibility,
     fieldVisibility,
     features,
-    checklistItems: features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS,
+    checklistItems: resolveChecklistItems(pack, features),
     requiredExtraFields: pack.requiredExtraFields ?? [],
     optionalExtraFields: pack.optionalExtraFields ?? [],
     focusAreas: pack.focusAreas ?? [],
@@ -545,6 +582,7 @@ export const resolveHandoverProfileRuntime = ({
     treatmentQuickPicks: pack.quickPicks?.treatments ?? [],
   };
 };
+
 
 
 

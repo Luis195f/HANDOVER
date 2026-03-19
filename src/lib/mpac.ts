@@ -494,6 +494,21 @@ function getContextSupportScore(
   }
 }
 
+function buildModifierNote(
+  signal: ContextualPrioritySignal & { source: 'unit-profile' | 'specialty-overlay' },
+  applied: boolean,
+): string {
+  if (!applied) {
+    return `Contexto activo sin cambio cuantitativo para ${signal.dimension}`;
+  }
+
+  if (signal.explanation) {
+    return `${signal.source === 'unit-profile' ? 'UPP' : 'SOP'}: ${signal.explanation}`;
+  }
+
+  return `Modificador ${signal.source === 'unit-profile' ? 'UPP' : 'SOP'} aplicado sobre ${signal.dimension}`;
+}
+
 function computeContextModifiers(
   profileContext: ProfileContext,
   dimensions: readonly MPACDimensionScore[],
@@ -524,9 +539,8 @@ function computeContextModifiers(
         weight,
         contribution,
         applied,
-        note: applied
-          ? `Modificador ${signal.source === 'unit-profile' ? 'UPP' : 'SOP'} aplicado sobre ${signal.dimension}`
-          : `Contexto activo sin cambio cuantitativo para ${signal.dimension}`,
+        note: buildModifierNote(signal, applied),
+
       };
     });
 }
@@ -784,4 +798,6 @@ export default {
   computeMPACFromInput,
   resolveMPACInput,
 };
+
+
 

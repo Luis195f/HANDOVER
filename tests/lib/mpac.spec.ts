@@ -97,6 +97,93 @@ describe('MPAC v1', () => {
     expect(result.reasons).toContain('PROFILE_CONTEXT');
     expect(result.reasonSummary).toContain('contexto');
   });
+  it('explains ICU adulto modifiers with named wave-1 signals', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['critical-care'],
+    });
+
+    const { computeMPACFromInput } = await import('@/src/lib/mpac');
+
+    const result = computeMPACFromInput({
+      patientId: 'pat-icu',
+      displayName: 'Paciente UCI',
+      unitId: 'icu-a',
+      specialtyId: 'icu',
+      vitals: { rr: 28, spo2: 90, tempC: 38.2, sbp: 88, hr: 124, o2: true, avpu: 'V' },
+      devices: [
+        { id: 'vent', label: 'VM', category: 'invasive', critical: true },
+        { id: 'cvl', label: 'CVC', category: 'invasive', critical: false },
+      ],
+      risks: { isolation: true },
+      pendingTasks: [{ id: 'vaso', title: 'Titulacion de noradrenalina', priority: 'critical', category: 'critical-task' }],
+      recentIncidentFlag: true,
+      referenceTime: '2024-02-01T00:00:00Z',
+    });
+
+    expect(result.explanation.activeContext.unitProfileId).toBe('critical-care');
+    expect(result.explanation.modifiers.some((modifier) => modifier.label === 'Ventilacion y microvigilancia respiratoria' && modifier.applied)).toBe(true);
+    expect(result.explanation.modifiers.some((modifier) => modifier.note.includes('Vasoactivos y objetivos hemodinamicos'))).toBe(true);
+    expect(result.reasons).toContain('PROFILE_CONTEXT');
+  });
+
+  it('adds explainable omission and continuity modifiers for hospitalizacion general', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['general-inpatient'],
+    });
+    process.env.UNITS_CONFIG = JSON.stringify({
+      units: [{ id: 'ward-mi', name: 'Medicina Interna A', specialty: 'med', profileId: 'general-inpatient' }],
+    });
+
+    const { computeMPACFromInput } = await import('@/src/lib/mpac');
+
+    const result = computeMPACFromInput({
+      patientId: 'pat-ward',
+      displayName: 'Paciente Planta',
+      unitId: 'ward-mi',
+      specialtyId: 'med',
+      vitals: { rr: 20, spo2: 95, tempC: 37.3, sbp: 112, hr: 98 },
+      devices: [],
+      risks: { pressureUlcer: true },
+      risksStructured: [{ type: 'delirium', present: true, actions: [], notes: undefined }],
+      pendingTasks: [
+        { id: 'med-rec', title: 'Conciliar medicacion basal', priority: 'urgent', category: 'other' },
+        { id: 'discharge', title: 'Coordinar alta compleja', priority: 'urgent', category: 'other' },
+      ],
+      referenceTime: '2024-02-01T00:00:00Z',
+    });
+
+    expect(result.explanation.activeContext.unitProfileId).toBe('general-inpatient');
+    expect(result.explanation.modifiers.some((modifier) => modifier.label === 'Conciliacion terapeutica' && modifier.applied)).toBe(true);
+    expect(result.explanation.modifiers.some((modifier) => modifier.note.includes('Alta compleja'))).toBe(true);
+    expect(result.reasons).toContain('PROFILE_CONTEXT');
+  });
+
+  it('keeps emergency modifiers additive and traceable around triage and reevaluation', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['emergency'],
+    });
+
+    const { computeMPACFromInput } = await import('@/src/lib/mpac');
+
+    const result = computeMPACFromInput({
+      patientId: 'pat-ed',
+      displayName: 'Paciente Urgencias',
+      unitId: 'ed-main',
+      specialtyId: 'ed',
+      vitals: { rr: 24, spo2: 94, tempC: 37.9, sbp: 102, hr: 116 },
+      devices: [],
+      risks: { isolation: true },
+      pendingTasks: [{ id: 'reeval', title: 'Reevaluacion de box', priority: 'critical', category: 'reevaluation' }],
+      referenceTime: '2024-02-01T00:00:00Z',
+    });
+
+    expect(result.explanation.activeContext.unitProfileId).toBe('emergency');
+    expect(result.explanation.modifiers.some((modifier) => modifier.label === 'Reevaluacion obligatoria' && modifier.applied)).toBe(true);
+    expect(result.explanation.modifiers.some((modifier) => modifier.note.includes('transmision'))).toBe(true);
+    expect(result.reasons).toContain('PROFILE_CONTEXT');
+  });
 });
+
+
 
 

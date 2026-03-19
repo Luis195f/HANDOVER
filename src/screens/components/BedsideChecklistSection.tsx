@@ -102,6 +102,7 @@ export function BedsideChecklistSection({
               onValueChange={(next) => onChange(Boolean(next))}
             />
           </View>
+          {item.helper ? <Text style={styles.helper}>{item.helper}</Text> : null}
           {value ? (
             <Text style={styles.timestamp}>
               {(() => {
@@ -233,3 +234,4 @@ const styles = StyleSheet.create({
   error: { color: '#DC2626', marginTop: 6 },
   missingLabel: { color: '#DC2626', fontWeight: '600' },
 });
+
