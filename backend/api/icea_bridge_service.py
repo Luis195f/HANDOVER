@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 from django.db import close_old_connections
+from django.db.models import F
 from django.http import HttpRequest
 from django.utils import timezone
 
@@ -180,6 +181,7 @@ def _mark_bundle_unavailable(record: HandoverBundleRecord, *, scoring_mode: str)
     )
     bridge_request = upsert_result.bridge_request
     _mark_failed(bridge_request, detail=STORED_BUNDLE_UNAVAILABLE_ERROR)
+    bridge_request.refresh_from_db()
     return bridge_request
 
 def enqueue_icea_bridge_request_for_transaction(
@@ -209,6 +211,7 @@ def enqueue_icea_bridge_request_for_transaction(
     configuration_error = _score_configuration_error(settings, scoring_mode=scoring_mode)
     if configuration_error is not None:
         _mark_failed(bridge_request, detail=configuration_error)
+        bridge_request.refresh_from_db()
         return bridge_request
     if upsert_result.should_schedule:
         schedule_icea_bridge_delivery(bridge_request.id)
@@ -244,6 +247,7 @@ def enqueue_icea_bridge_request_for_bundle_record(
     configuration_error = _score_configuration_error(settings, scoring_mode=scoring_mode)
     if configuration_error is not None:
         _mark_failed(bridge_request, detail=configuration_error)
+        bridge_request.refresh_from_db()
         return bridge_request
     if force_delivery:
         schedule_icea_bridge_delivery(bridge_request.id, force=True)
@@ -296,10 +300,16 @@ def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[
         bridge_request.provisional = defaults['provisional']
         bridge_request.insufficient_evidence = defaults['insufficient_evidence']
         bridge_request.contract_version = defaults['contract_version']
+        bridge_request.formula_version = ''
+        bridge_request.score_summary_json = None
         bridge_request.warnings_json = defaults['warnings_json']
+        bridge_request.remote_refs_json = None
         bridge_request.status = IceaBridgeRequest.STATUS_QUEUED
+        bridge_request.attempts = 0
         bridge_request.last_error = ''
         bridge_request.last_http_status = None
+        bridge_request.sent_at = None
+        bridge_request.received_at = None
         bridge_request.save(update_fields=[
             'bundle_id',
             'patient_id',
@@ -314,14 +324,36 @@ def _upsert_bridge_request(*, request_id: str, scoring_mode: str, payload: dict[
             'provisional',
             'insufficient_evidence',
             'contract_version',
+            'formula_version',
+            'score_summary_json',
             'warnings_json',
+            'remote_refs_json',
             'status',
+            'attempts',
             'last_error',
             'last_http_status',
+            'sent_at',
+            'received_at',
             'updated_at',
         ])
         return IceaBridgeUpsertResult(bridge_request=bridge_request, created=False, payload_changed=True, already_queued=was_queued)
     return IceaBridgeUpsertResult(bridge_request=bridge_request, created=False, payload_changed=False, already_queued=bridge_request.status == IceaBridgeRequest.STATUS_QUEUED)
+
+
+def _current_bridge_request(bridge_request_id: int) -> IceaBridgeRequest | None:
+    return IceaBridgeRequest.objects.filter(id=bridge_request_id).first()
+
+
+def _bridge_request_matches_delivery(
+    bridge_request: IceaBridgeRequest,
+    *,
+    expected_payload_hash: str,
+    expected_idempotency_key: str,
+) -> bool:
+    return (
+        bridge_request.payload_hash == expected_payload_hash
+        and bridge_request.idempotency_key == expected_idempotency_key
+    )
 
 
 def _build_icea_plus_score_request(bridge_request: IceaBridgeRequest, settings: IceaBridgeSettings) -> dict[str, Any]:
@@ -517,6 +549,7 @@ class IceaBridgeRemoteService:
 
 def attempt_icea_bridge_delivery(bridge_request: IceaBridgeRequest, *, force: bool = False) -> IceaBridgeDeliveryResult:
     settings = load_icea_bridge_settings()
+    bridge_request = _current_bridge_request(bridge_request.id) or bridge_request
     if not settings.enabled or not settings.allows_mode(bridge_request.scoring_mode):
         return IceaBridgeDeliveryResult(delivered=False, status='disabled', detail='bridge_disabled')
     configuration_error = _score_configuration_error(settings, scoring_mode=bridge_request.scoring_mode)
@@ -525,21 +558,82 @@ def attempt_icea_bridge_delivery(bridge_request: IceaBridgeRequest, *, force: bo
     if bridge_request.status == IceaBridgeRequest.STATUS_SCORED and not force:
         return IceaBridgeDeliveryResult(delivered=True, status=bridge_request.status, detail='already_scored')
 
-    bridge_request.attempts += 1
-    bridge_request.status = IceaBridgeRequest.STATUS_SENT
-    bridge_request.sent_at = timezone.now()
-    bridge_request.save(update_fields=['attempts', 'status', 'sent_at', 'updated_at'])
+    while True:
+        sent_payload_hash = bridge_request.payload_hash
+        sent_idempotency_key = bridge_request.idempotency_key
+        sent_at = timezone.now()
+        send_query = IceaBridgeRequest.objects.filter(
+            id=bridge_request.id,
+            payload_hash=sent_payload_hash,
+            idempotency_key=sent_idempotency_key,
+        )
+        if not force:
+            send_query = send_query.filter(status=IceaBridgeRequest.STATUS_QUEUED)
+        updated = send_query.update(
+            attempts=F('attempts') + 1,
+            status=IceaBridgeRequest.STATUS_SENT,
+            sent_at=sent_at,
+            updated_at=sent_at,
+        )
+        if updated:
+            bridge_request = _current_bridge_request(bridge_request.id) or bridge_request
+            break
+
+        latest_bridge_request = _current_bridge_request(bridge_request.id)
+        if latest_bridge_request is None:
+            return IceaBridgeDeliveryResult(delivered=False, status='missing', detail='not_found')
+        if latest_bridge_request.status == IceaBridgeRequest.STATUS_SCORED and not force:
+            return IceaBridgeDeliveryResult(delivered=True, status=latest_bridge_request.status, detail='already_scored')
+        if not force and latest_bridge_request.status != IceaBridgeRequest.STATUS_QUEUED:
+            return IceaBridgeDeliveryResult(
+                delivered=latest_bridge_request.status == IceaBridgeRequest.STATUS_SCORED,
+                status=latest_bridge_request.status,
+                detail='delivery_skipped',
+            )
+        if _bridge_request_matches_delivery(
+            latest_bridge_request,
+            expected_payload_hash=sent_payload_hash,
+            expected_idempotency_key=sent_idempotency_key,
+        ):
+            return IceaBridgeDeliveryResult(
+                delivered=latest_bridge_request.status == IceaBridgeRequest.STATUS_SCORED,
+                status=latest_bridge_request.status,
+                detail='delivery_skipped',
+            )
+        bridge_request = latest_bridge_request
 
     service = IceaBridgeRemoteService(settings_obj=settings)
     try:
         response = service.submit_score(bridge_request)
     except IceaPipelineConfigurationError as exc:
-        return _mark_failed(bridge_request, detail=exc.detail)
+        return _mark_failed(
+            bridge_request,
+            detail=exc.detail,
+            expected_payload_hash=sent_payload_hash,
+            expected_idempotency_key=sent_idempotency_key,
+        )
     except IceaPipelineTransportError as exc:
-        return _mark_failed(bridge_request, detail=exc.detail)
+        return _mark_failed(
+            bridge_request,
+            detail=exc.detail,
+            expected_payload_hash=sent_payload_hash,
+            expected_idempotency_key=sent_idempotency_key,
+        )
     except IceaPipelineHTTPStatusError as exc:
-        return _mark_failed(bridge_request, detail=exc.detail, http_status=exc.http_status)
-    return _apply_remote_payload(bridge_request, response.body_json, response.status_code)
+        return _mark_failed(
+            bridge_request,
+            detail=exc.detail,
+            http_status=exc.http_status,
+            expected_payload_hash=sent_payload_hash,
+            expected_idempotency_key=sent_idempotency_key,
+        )
+    return _apply_remote_payload(
+        bridge_request,
+        response.body_json,
+        response.status_code,
+        expected_payload_hash=sent_payload_hash,
+        expected_idempotency_key=sent_idempotency_key,
+    )
 
 
 def refresh_icea_bridge_request(bridge_request: IceaBridgeRequest) -> IceaBridgeDeliveryResult:
@@ -568,7 +662,25 @@ def _apply_remote_payload(
     bridge_request: IceaBridgeRequest,
     body_json: dict[str, Any] | list[Any] | None,
     http_status: int,
+    *,
+    expected_payload_hash: str | None = None,
+    expected_idempotency_key: str | None = None,
 ) -> IceaBridgeDeliveryResult:
+    current_bridge_request = _current_bridge_request(bridge_request.id)
+    if current_bridge_request is None:
+        return IceaBridgeDeliveryResult(delivered=False, status='missing', http_status=http_status, detail='not_found')
+    if expected_payload_hash and expected_idempotency_key and not _bridge_request_matches_delivery(
+        current_bridge_request,
+        expected_payload_hash=expected_payload_hash,
+        expected_idempotency_key=expected_idempotency_key,
+    ):
+        return IceaBridgeDeliveryResult(
+            delivered=current_bridge_request.status == IceaBridgeRequest.STATUS_SCORED,
+            status=current_bridge_request.status,
+            http_status=current_bridge_request.last_http_status,
+            detail='stale_delivery_ignored',
+        )
+    bridge_request = current_bridge_request
     normalized = _normalize_remote_payload(
         body_json,
         bridge_request=bridge_request,
@@ -613,7 +725,24 @@ def _mark_failed(
     *,
     detail: str,
     http_status: int | None = None,
+    expected_payload_hash: str | None = None,
+    expected_idempotency_key: str | None = None,
 ) -> IceaBridgeDeliveryResult:
+    current_bridge_request = _current_bridge_request(bridge_request.id)
+    if current_bridge_request is None:
+        return IceaBridgeDeliveryResult(delivered=False, status='missing', http_status=http_status, detail='not_found')
+    if expected_payload_hash and expected_idempotency_key and not _bridge_request_matches_delivery(
+        current_bridge_request,
+        expected_payload_hash=expected_payload_hash,
+        expected_idempotency_key=expected_idempotency_key,
+    ):
+        return IceaBridgeDeliveryResult(
+            delivered=current_bridge_request.status == IceaBridgeRequest.STATUS_SCORED,
+            status=current_bridge_request.status,
+            http_status=current_bridge_request.last_http_status,
+            detail='stale_delivery_ignored',
+        )
+    bridge_request = current_bridge_request
     bridge_request.status = IceaBridgeRequest.STATUS_FAILED
     bridge_request.last_error = (detail or '')[:255]
     bridge_request.last_http_status = http_status
@@ -828,5 +957,4 @@ def serialize_bridge_summary(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'lastUpdated': bridge_request.updated_at.isoformat(),
         'source': SOURCE,
     }
-
 
