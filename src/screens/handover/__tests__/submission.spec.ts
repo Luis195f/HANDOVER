@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { FHIR_CODES } from '@/src/lib/codes';
+import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import {
   buildHandoverInputPayload,
+  buildProfileTraceInput,
   buildSubmissionAdministrativeData,
   buildSubmissionOxygenTherapy,
   normalizeUnitSelection,
@@ -91,6 +94,67 @@ describe('handover submission helpers', () => {
     expect(payload.status).toBe('draft');
     expect(payload.profileTrace).toEqual(profileTrace);
     expect('values' in payload).toBe(false);
+  });
+
+  it('exports Clinical context through the real submission payload flow when profile trace is active', () => {
+    const profileTrace = buildProfileTraceInput({
+      context: {
+        coreProfileId: 'handover-core',
+        unitId: 'icu-neuro',
+        requestedSpecialtyId: 'neuroicu',
+        specialtyId: 'neuroicu',
+        specialtySource: 'explicit',
+        catalogUnitProfileId: 'specialized-critical-care',
+        unitProfileId: 'specialized-critical-care',
+        overlaySelections: [{ overlayId: 'neuro', source: 'specialty', specialtyId: 'neuroicu', isHumanOverride: true }],
+        catalogSpecialtyOverlayIds: ['neuro'],
+        specialtyOverlayIds: ['neuro'],
+        activeProfileIds: ['handover-core', 'specialized-critical-care', 'neuro'],
+        hasHumanSpecialtyOverride: true,
+        usesCoreFallback: false,
+        prioritySignals: [],
+        iceaContext: {},
+      },
+      mergeTrace: [
+        { source: 'core', profileId: 'handover-core', label: 'HANDOVER Core', additiveKeys: [], overrideKeys: [] },
+        { source: 'unit-profile', profileId: 'specialized-critical-care', label: 'UCI especializada', additiveKeys: [], overrideKeys: [] },
+        { source: 'specialty-overlay', profileId: 'neuro', label: 'Neurologia y neurocirugia', additiveKeys: [], overrideKeys: [] },
+      ],
+    });
+
+    const payload = buildHandoverInputPayload(
+      {
+        ...baseValues,
+        pendingTasks: [
+          {
+            id: 'task-critical',
+            category: 'critical-task',
+            title: 'Reevaluar pupilas y Glasgow',
+            status: 'pending',
+            priority: 'critical',
+            dueBy: '2025-01-01T16:10:00Z',
+          },
+        ],
+      } as any,
+      { status: 'draft' },
+      profileTrace,
+    );
+
+    const bundle = buildHandoverBundle(payload, { now: () => '2025-01-01T16:00:00Z' });
+    const composition = bundle.entry.find((entry) => entry.resource.resourceType === 'Composition')?.resource as any;
+    const contextSection = (composition?.section ?? []).find((section: any) => section.title === 'Clinical context');
+    const contextObservation = bundle.entry
+      .map((entry) => entry.resource as any)
+      .find(
+        (resource) =>
+          resource.resourceType === 'Observation' &&
+          resource.code?.coding?.some((coding: any) => coding.code === FHIR_CODES.CONTEXT.CLINICAL_CONTEXT.code),
+      );
+
+    expect(payload.profileTrace).toEqual(profileTrace);
+    expect(contextSection?.entry).toHaveLength(1);
+    expect(contextObservation?.valueString).toContain('UCI especializada');
+    expect(contextObservation?.note?.[0]?.text).toContain('Reevaluar pupilas y Glasgow');
   });
 });
 

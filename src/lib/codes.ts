@@ -25,6 +25,7 @@ export const TERMINOLOGY_SYSTEMS = {
   HANDOVER_TASK_CATEGORY: 'urn:handover-pro:task-category',
   HANDOVER_TASK_PRIORITY: 'urn:handover-pro:task-priority',
   HANDOVER_TASK_STATUS: 'urn:handover-pro:task-status',
+  HANDOVER_CONTEXT: 'urn:handover-pro:context',
   HANDOVER_EXAM: 'https://handover.app/fhir/CodeSystem/handover-exam',
   HANDOVER_DIET: 'urn:handover-pro:diet',
   HANDOVER_STOOL_PATTERN: 'urn:handover-pro:stool-pattern',
@@ -101,6 +102,11 @@ export const CATEGORY = {
 
 export type ObservationCategory =
   (typeof CATEGORY)[keyof typeof CATEGORY];
+
+export const FHIR_EXTENSION_URLS = {
+  CONTEXT_VERSION: 'https://handover.app/fhir/StructureDefinition/handover-context-version',
+  ACTIVE_PROFILE: 'https://handover.app/fhir/StructureDefinition/handover-active-profile',
+} as const;
 
 export type FhirCode = TerminologyCode<string>;
 
@@ -241,6 +247,13 @@ export const FHIR_CODES = {
       system: TERMINOLOGY_SYSTEMS.HANDOVER_CARE,
       code: 'contingency-plan',
       display: 'Contingency plan',
+    },
+  },
+  CONTEXT: {
+    CLINICAL_CONTEXT: {
+      system: TERMINOLOGY_SYSTEMS.HANDOVER_CONTEXT,
+      code: 'clinical-context',
+      display: 'Clinical context summary',
     },
   },
   RISK: {
@@ -413,4 +426,5 @@ export const ALERT_CODES = {
   drainOverdue: 'alert.drain.overdue',
   oxygenProlonged: 'alert.oxygen.prolonged',
 } as const;
+
 

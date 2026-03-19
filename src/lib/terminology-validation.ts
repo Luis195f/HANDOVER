@@ -64,6 +64,7 @@ const DEFAULT_MESSAGES: Record<TerminologySystem, string> = {
   [TERMINOLOGY_SYSTEMS.HANDOVER_TASK_CATEGORY]: 'Categoría de pendiente HANDOVER no reconocida',
   [TERMINOLOGY_SYSTEMS.HANDOVER_TASK_PRIORITY]: 'Prioridad de pendiente HANDOVER no reconocida',
   [TERMINOLOGY_SYSTEMS.HANDOVER_TASK_STATUS]: 'Estado de pendiente HANDOVER no reconocido',
+  [TERMINOLOGY_SYSTEMS.HANDOVER_CONTEXT]: 'Código de contexto clínico HANDOVER no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_EXAM]: 'Código de examen HANDOVER no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_DIET]: 'Código de dieta HANDOVER no reconocido',
   [TERMINOLOGY_SYSTEMS.HANDOVER_STOOL_PATTERN]: 'Código de patrón intestinal HANDOVER no reconocido',
@@ -250,6 +251,7 @@ export async function validateSnomed(code: string, display?: string) {
 export async function validateLoinc(code: string, display?: string) {
   return validateTerminologyCode({ system: TERMINOLOGY_SYSTEMS.LOINC, code, display });
 }
+
 
 
 

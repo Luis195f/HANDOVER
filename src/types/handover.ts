@@ -18,6 +18,7 @@ import type { SnomedCoding } from '../data/snomed-dict';
 import type { DiagnosisSystem } from '../catalogs/diagnosisCodes';
 // END HANDOVER D3 – StructuredDiagnosis types
 import { DIET_TYPES, MOBILITY_LEVELS, STOOL_PATTERNS } from './handover-constants';
+import type { SpecialtyOverlayId, UnitProfileId } from './profile';
 
 // BEGIN HANDOVER: SIGNATURES_DUAL_TYPES
 export type HandoverSignature = {
@@ -82,6 +83,45 @@ export type RiskFlags = {
 export type TurnContext = z.infer<typeof zTurnContext>;
 export type PendingTask = z.infer<typeof zPendingTask>;
 export type ContingencyPlan = z.infer<typeof zContingencyPlan>;
+
+export type HandoverFhirContextVersion = '1';
+
+export type HandoverFhirContextProfileRef =
+  | {
+      id: 'handover-core';
+      label: string;
+      kind: 'core';
+    }
+  | {
+      id: UnitProfileId;
+      label: string;
+      kind: 'unit-profile';
+    }
+  | {
+      id: SpecialtyOverlayId;
+      label: string;
+      kind: 'specialty-overlay';
+    };
+
+export type HandoverFhirPrioritySignalRef = {
+  id: string;
+  label: string;
+  source: 'core' | 'unit-profile' | 'specialty-overlay';
+};
+
+export type HandoverFhirPendingCriticalTaskRef = Pick<
+  PendingTask,
+  'id' | 'title' | 'priority' | 'status' | 'dueBy'
+>;
+
+export type HandoverFhirClinicalContext = {
+  version: HandoverFhirContextVersion;
+  coreProfile: Extract<HandoverFhirContextProfileRef, { kind: 'core' }>;
+  unitProfile?: Extract<HandoverFhirContextProfileRef, { kind: 'unit-profile' }>;
+  specialtyOverlays: Array<Extract<HandoverFhirContextProfileRef, { kind: 'specialty-overlay' }>>;
+  prioritySignals: HandoverFhirPrioritySignalRef[];
+  pendingCriticalTasks: HandoverFhirPendingCriticalTaskRef[];
+};
 
 // BEGIN HANDOVER D1 – BedsideChecklist types
 export type HandoverBedsideChecklist = {
@@ -276,4 +316,5 @@ export type {
   SpecialtyOverlayId,
   UnitProfileId,
 } from './profile';
+
 
