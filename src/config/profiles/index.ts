@@ -379,24 +379,55 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
     }),
   },
   specialtyOverlays: {
-    cvicu: createOverlayDefinition('cvicu', {
+    cardio: createOverlayDefinition('cardio', {
       prioritySignals: [
-        overlaySignal('cvicu', 'overlay-cvicu-perfusion', 'Perfusion y soporte hemodinamico', 'specialty-modifier'),
+        overlaySignal('cardio', 'overlay-cardio-perfusion', 'Perfusion y dolor toracico isquemico', 'time-critical', {
+          weight: 1.3,
+          explanation: 'Dolor toracico, hipoperfusion y cambios isquemicos sostienen una ventana de reevaluacion no delegable.',
+        }),
+        overlaySignal('cardio', 'overlay-cardio-rhythm', 'Arritmia y ritmo inestable', 'deterioration-risk', {
+          weight: 1.2,
+          explanation: 'Ritmo irregular o arritmia inestable cambian rapido la prioridad enfermera del turno.',
+        }),
+        overlaySignal('cardio', 'overlay-cardio-anticoag', 'Anticoagulacion y riesgo de sangrado', 'therapeutic-load', {
+          weight: 1.1,
+          explanation: 'La anticoagulacion activa exige continuidad segura y vigilancia explicable de sangrado.',
+        }),
+        overlaySignal('cardio', 'overlay-cardio-congestion', 'Congestion, diuresis y edema', 'coordination', {
+          weight: 1.05,
+          explanation: 'Congestion, edema y diuresis cambian decisiones compartidas entre monitorizacion, tratamiento y escalado.',
+        }),
       ],
       iceaContextDefaults: {
-        surveillanceIntensity: 1,
+        temporalCriticality: 1,
         therapeuticLoad: 1,
-        caseMixHints: ['specialty-cvicu'],
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-cardio', 'ischemia', 'arrhythmia'],
       },
+      iceaContextPlaceholders: ['temporalCriticality', 'therapeuticLoad', 'coordinationComplexity'],
     }),
-    neuroicu: createOverlayDefinition('neuroicu', {
+    neuro: createOverlayDefinition('neuro', {
       prioritySignals: [
-        overlaySignal('neuroicu', 'overlay-neuroicu-change', 'Cambio neurologico nuevo', 'specialty-modifier'),
+        overlaySignal('neuro', 'overlay-neuro-consciousness', 'Neurodeterioro y cambio del nivel de conciencia', 'time-critical', {
+          weight: 1.3,
+          explanation: 'Cualquier descenso de Glasgow, AVPU o estado mental exige relevo con reevaluacion visible.',
+        }),
+        overlaySignal('neuro', 'overlay-neuro-focal', 'Deficit focal y pupilas', 'specialty-modifier', {
+          weight: 1.15,
+          explanation: 'Pupilas y deficit focal sostienen una vigilancia neurologica mas intensa durante el turno.',
+        }),
+        overlaySignal('neuro', 'overlay-neuro-seizure', 'Convulsion y riesgo de broncoaspiracion', 'dependency', {
+          weight: 1.15,
+          explanation: 'Convulsiones, via oral y deglucion cambian dependencia y seguridad inmediata de cuidados.',
+        }),
       ],
       iceaContextDefaults: {
         surveillanceIntensity: 1,
-        caseMixHints: ['specialty-neurocritical'],
+        dependencyLoad: 1,
+        temporalCriticality: 1,
+        caseMixHints: ['specialty-neuro', 'stroke', 'neurovigilance'],
       },
+      iceaContextPlaceholders: ['surveillanceIntensity', 'dependencyLoad', 'temporalCriticality'],
     }),
     onc: createOverlayDefinition('onc', {
       prioritySignals: [
@@ -477,120 +508,289 @@ export const PROFILE_REGISTRY: ProfileRegistry = {
         coordinationComplexity: 1,
         caseMixHints: ['specialty-onc', 'eoprop-ia', 'oncology-hematology'],
       },
+      iceaContextPlaceholders: [
+        'surveillanceIntensity',
+        'therapeuticLoad',
+        'temporalCriticality',
+        'continuityRisk',
+        'dependencyLoad',
+        'coordinationComplexity',
+      ],
     }),
     trauma: createOverlayDefinition('trauma', {
       prioritySignals: [
-        overlaySignal('trauma', 'overlay-trauma-neurovascular', 'Movilizacion segura y control neurovascular distal', 'specialty-modifier'),
+        overlaySignal('trauma', 'overlay-trauma-bleeding', 'Sangrado y hemorragia oculta', 'time-critical', {
+          weight: 1.25,
+          explanation: 'Sangrado visible u oculto cambia la prioridad de vigilancia y reevaluacion inmediata.',
+        }),
+        overlaySignal('trauma', 'overlay-trauma-neurovascular', 'Perfusion distal e inmovilizacion segura', 'therapeutic-load', {
+          weight: 1.15,
+          explanation: 'Control neurovascular distal e inmovilizacion agregan carga terapeutica y riesgo de omision.',
+        }),
+        overlaySignal('trauma', 'overlay-trauma-pain', 'Dolor no controlado y mecanismo lesional', 'coordination', {
+          weight: 1.05,
+          explanation: 'Mecanismo, dolor y movilidad segura cambian la coordinacion del siguiente turno.',
+        }),
       ],
       iceaContextDefaults: {
+        temporalCriticality: 1,
+        therapeuticLoad: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-trauma', 'bleeding', 'neurovascular'],
+      },
+      iceaContextPlaceholders: ['temporalCriticality', 'therapeuticLoad', 'coordinationComplexity'],
+    }),
+    infecto: createOverlayDefinition('infecto', {
+      prioritySignals: [
+        overlaySignal('infecto', 'overlay-infecto-sepsis', 'Sepsis y deterioro infeccioso', 'time-critical', {
+          weight: 1.25,
+          explanation: 'La sospecha de sepsis vuelve no delegable la reevaluacion del foco y la respuesta al tratamiento.',
+        }),
+        overlaySignal('infecto', 'overlay-infecto-isolation', 'Aislamiento y transmision cruzada', 'specialty-modifier', {
+          weight: 1.1,
+          explanation: 'El aislamiento modifica vigilancia, omisiones aceptables y seguridad operacional del relevo.',
+        }),
+        overlaySignal('infecto', 'overlay-infecto-focus-control', 'Cultivos, antimicrobianos y control de foco', 'coordination', {
+          weight: 1.05,
+          explanation: 'Cultivos, antibiotico y control de foco requieren continuidad entre turnos sin huecos.',
+        }),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        temporalCriticality: 1,
+        continuityRisk: 1,
+        caseMixHints: ['specialty-infecto', 'sepsis', 'isolation'],
+      },
+      iceaContextPlaceholders: ['surveillanceIntensity', 'temporalCriticality', 'continuityRisk'],
+    }),
+    neumo: createOverlayDefinition('neumo', {
+      prioritySignals: [
+        overlaySignal('neumo', 'overlay-neumo-support', 'Soporte respiratorio activo y FiO2', 'time-critical', {
+          weight: 1.2,
+          explanation: 'FiO2, NIV y soporte activo cambian la prioridad de reevaluacion respiratoria.',
+        }),
+        overlaySignal('neumo', 'overlay-neumo-work', 'Trabajo respiratorio y fatiga', 'specialty-modifier', {
+          weight: 1.15,
+          explanation: 'Disnea, uso de musculatura accesoria y fatiga aumentan la vigilancia del siguiente turno.',
+        }),
+        overlaySignal('neumo', 'overlay-neumo-secretions', 'Secreciones y broncoaspiracion', 'dependency', {
+          weight: 1.1,
+          explanation: 'Secreciones, tolerancia a aspiracion y broncoaspiracion cambian dependencia y carga de cuidados.',
+        }),
+      ],
+      iceaContextDefaults: {
+        surveillanceIntensity: 1,
+        therapeuticLoad: 1,
         dependencyLoad: 1,
-        caseMixHints: ['specialty-trauma'],
+        caseMixHints: ['specialty-neumo', 'oxygen-support', 'secretions'],
       },
+      iceaContextPlaceholders: ['surveillanceIntensity', 'therapeuticLoad', 'dependencyLoad'],
     }),
-    neph: createOverlayDefinition('neph', {
+    nefroUro: createOverlayDefinition('nefroUro', {
       prioritySignals: [
-        overlaySignal('neph', 'overlay-neph-balance', 'Balance y acceso vascular', 'specialty-modifier'),
+        overlaySignal('nefroUro', 'overlay-nefrouro-diuresis', 'Diuresis, balance y sobrecarga', 'therapeutic-load', {
+          weight: 1.2,
+          explanation: 'Diuresis, balance y sobrecarga cambian la carga terapeutica y la ventana de reevaluacion renal.',
+        }),
+        overlaySignal('nefroUro', 'overlay-nefrouro-electrolytes', 'Electrolitos y deterioro renal agudo', 'time-critical', {
+          weight: 1.2,
+          explanation: 'Hiperpotasemia o deterioro renal agudo sostienen una criticidad temporal explicable.',
+        }),
+        overlaySignal('nefroUro', 'overlay-nefrouro-access', 'Obstruccion y complicacion de acceso', 'coordination', {
+          weight: 1.05,
+          explanation: 'Acceso, nefrostomia o cateter cambian continuidad y coordinacion inmediata.',
+        }),
       ],
       iceaContextDefaults: {
         therapeuticLoad: 1,
-        caseMixHints: ['specialty-neph'],
+        continuityRisk: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-nefrouro', 'aki', 'renal-access'],
       },
+      iceaContextPlaceholders: ['therapeuticLoad', 'continuityRisk', 'coordinationComplexity'],
     }),
-    gastro: createOverlayDefinition('gastro', {
+    gastroHepato: createOverlayDefinition('gastroHepato', {
       prioritySignals: [
-        overlaySignal('gastro', 'overlay-gastro-bleeding', 'Sangrado digestivo y encefalopatia', 'specialty-modifier'),
+        overlaySignal('gastroHepato', 'overlay-gastrohepato-bleeding', 'Sangrado digestivo y abdomen agudo', 'time-critical', {
+          weight: 1.2,
+          explanation: 'Sangrado digestivo y dolor abdominal dominante exigen seguimiento visible entre turnos.',
+        }),
+        overlaySignal('gastroHepato', 'overlay-gastrohepato-enceph', 'Encefalopatia y cambio del sensorio', 'dependency', {
+          weight: 1.15,
+          explanation: 'Encefalopatia y alteracion del sensorio elevan dependencia y vigilancia de seguridad.',
+        }),
+        overlaySignal('gastroHepato', 'overlay-gastrohepato-drains', 'Drenajes, ostomias e hidratacion', 'therapeutic-load', {
+          weight: 1.1,
+          explanation: 'Drenajes, ostomias e hidratacion agregan carga terapeutica y continuidad del plan.',
+        }),
       ],
       iceaContextDefaults: {
         therapeuticLoad: 1,
-        caseMixHints: ['specialty-gastro'],
+        continuityRisk: 1,
+        dependencyLoad: 1,
+        caseMixHints: ['specialty-gastrohepato', 'gi-bleeding', 'encephalopathy'],
       },
+      iceaContextPlaceholders: ['therapeuticLoad', 'continuityRisk', 'dependencyLoad'],
     }),
     endo: createOverlayDefinition('endo', {
       prioritySignals: [
-        overlaySignal('endo', 'overlay-endo-metabolic', 'Seguridad metabolica y dosificacion de insulina', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        temporalCriticality: 1,
-        caseMixHints: ['specialty-endo'],
-      },
-    }),
-    pulm: createOverlayDefinition('pulm', {
-      prioritySignals: [
-        overlaySignal('pulm', 'overlay-pulm-respiratory', 'Deterioro respiratorio y soporte activo', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        surveillanceIntensity: 1,
-        caseMixHints: ['specialty-pulm'],
-      },
-    }),
-    infect: createOverlayDefinition('infect', {
-      prioritySignals: [
-        overlaySignal('infect', 'overlay-infect-isolation', 'Aislamiento, sepsis y reevaluacion infecciosa', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        baselineComplexity: 1,
-        caseMixHints: ['specialty-infect'],
-      },
-    }),
-    ped: createOverlayDefinition('ped', {
-      prioritySignals: [
-        overlaySignal('ped', 'overlay-ped-safety', 'Seguridad por edad, peso y dosificacion', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        surveillanceIntensity: 1,
-        caseMixHints: ['specialty-ped'],
-      },
-    }),
-    ob: createOverlayDefinition('ob', {
-      prioritySignals: [
-        overlaySignal('ob', 'overlay-ob-bleeding', 'Sangrado, vigilancia gineco-obstetrica y continuidad perinatal', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        temporalCriticality: 1,
-        caseMixHints: ['specialty-gyn-ob'],
-      },
-    }),
-    ent: createOverlayDefinition('ent', {
-      prioritySignals: [
-        overlaySignal('ent', 'overlay-ent-airway', 'Complicaciones precoces de via aerea, dolor y sangrado localizado', 'specialty-modifier'),
-      ],
-      iceaContextDefaults: {
-        continuityRisk: 1,
-        caseMixHints: ['specialty-ent'],
-      },
-    }),
-    burns: createOverlayDefinition('burns', {
-      prioritySignals: [
-        overlaySignal('burns', 'overlay-burns-fluid', 'Balance, injertos y dolor en quemados', 'specialty-modifier'),
+        overlaySignal('endo', 'overlay-endo-glucose', 'Descompensacion metabolica y glucemia critica', 'time-critical', {
+          weight: 1.2,
+          explanation: 'Hipoglucemia o hiperglucemia grave vuelven no delegable la reevaluacion de glucemia e ingesta.',
+        }),
+        overlaySignal('endo', 'overlay-endo-insulin', 'Insulina activa y carga terapeutica metabolica', 'therapeutic-load', {
+          weight: 1.15,
+          explanation: 'Insulina, ajustes y controles seriados aumentan la carga terapeutica del turno.',
+        }),
+        overlaySignal('endo', 'overlay-endo-crisis', 'Esteroides y crisis endocrinas', 'coordination', {
+          weight: 1.05,
+          explanation: 'Esteroides y crisis endocrinas sostienen riesgo de continuidad si el relevo omite contexto.',
+        }),
       ],
       iceaContextDefaults: {
         therapeuticLoad: 1,
-        caseMixHints: ['specialty-burns'],
+        temporalCriticality: 1,
+        continuityRisk: 1,
+        caseMixHints: ['specialty-endo', 'glycemic-control', 'steroids'],
       },
+      iceaContextPlaceholders: ['therapeuticLoad', 'temporalCriticality', 'continuityRisk'],
     }),
-    'critical-emergency': createOverlayDefinition('critical-emergency', {
+    gynObs: createOverlayDefinition('gynObs', {
       prioritySignals: [
-        overlaySignal('critical-emergency', 'overlay-critical-emergency-abcde', 'ABCDE, soporte avanzado y reevaluacion inmediata', 'specialty-modifier'),
+        overlaySignal('gynObs', 'overlay-gynobs-bleeding', 'Sangrado y perdidas gineco-obstetricas', 'time-critical', {
+          weight: 1.2,
+          explanation: 'Sangrado o perdidas anormales sostienen una reevaluacion inmediata del turno.',
+        }),
+        overlaySignal('gynObs', 'overlay-gynobs-hypertension', 'HTA y vigilancia materna', 'specialty-modifier', {
+          weight: 1.15,
+          explanation: 'TA, sintomas de alarma y vigilancia materna cambian la lectura del riesgo del relevo.',
+        }),
+        overlaySignal('gynObs', 'overlay-gynobs-continuity', 'Dolor pelvico agudo y continuidad obstetrica', 'coordination', {
+          weight: 1.05,
+          explanation: 'Dolor agudo y continuidad obstetrica requieren coordinacion clara del siguiente paso.',
+        }),
       ],
       iceaContextDefaults: {
-        surveillanceIntensity: 1,
         temporalCriticality: 1,
-        caseMixHints: ['specialty-critical-emergency'],
+        coordinationComplexity: 1,
+        continuityRisk: 1,
+        caseMixHints: ['specialty-gynobs', 'bleeding', 'maternal-surveillance'],
       },
+      iceaContextPlaceholders: ['temporalCriticality', 'coordinationComplexity', 'continuityRisk'],
+    }),
+    pedsSubspecialties: createOverlayDefinition('pedsSubspecialties', {
+      prioritySignals: [
+        overlaySignal('pedsSubspecialties', 'overlay-peds-dependency', 'Dependencia pediatrica aumentada', 'dependency', {
+          weight: 1.1,
+          explanation: 'Peso, edad y dependencia aumentada cambian la intensidad de vigilancia y soporte del turno.',
+        }),
+        overlaySignal('pedsSubspecialties', 'overlay-peds-surveillance', 'Peso/edad y reevaluacion pediatrica', 'specialty-modifier', {
+          weight: 1.05,
+          explanation: 'El overlay queda trazado para bases pediatricas compatibles y seguimiento prudente.',
+        }),
+        overlaySignal('pedsSubspecialties', 'overlay-peds-family', 'Comunicacion con familia y continuidad', 'coordination', {
+          weight: 1,
+          explanation: 'La continuidad con familia/cuidador sigue siendo visible aunque el pack quede pilot-off.',
+        }),
+      ],
+      iceaContextDefaults: {
+        dependencyLoad: 1,
+        surveillanceIntensity: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-peds-subspecialties', 'family-centered', 'kg-dosing'],
+      },
+      iceaContextPlaceholders: ['dependencyLoad', 'surveillanceIntensity', 'coordinationComplexity'],
+    }),
+    ophthalEnt: createOverlayDefinition('ophthalEnt', {
+      prioritySignals: [
+        overlaySignal('ophthalEnt', 'overlay-ophthalent-local', 'Dolor, sangrado y secrecion localizada', 'therapeutic-load', {
+          weight: 1.05,
+          explanation: 'Dolor localizado, sangrado y curaciones complejas agregan carga terapeutica contextual.',
+        }),
+        overlaySignal('ophthalEnt', 'overlay-ophthalent-discharge', 'Via aerea superior y continuidad de alta', 'coordination', {
+          weight: 1,
+          explanation: 'Cuando aplica ORL o alta especifica, la continuidad de cuidados sigue siendo visible.',
+        }),
+      ],
+      iceaContextDefaults: {
+        therapeuticLoad: 1,
+        continuityRisk: 1,
+        caseMixHints: ['specialty-ophthal-ent', 'post-procedure', 'local-bleeding'],
+      },
+      iceaContextPlaceholders: ['therapeuticLoad', 'continuityRisk'],
+    }),
+    plasticsBurns: createOverlayDefinition('plasticsBurns', {
+      prioritySignals: [
+        overlaySignal('plasticsBurns', 'overlay-plasticsburns-balance', 'Balance y riesgo infeccioso en quemados', 'specialty-modifier', {
+          weight: 1.1,
+          explanation: 'Balance, exudado y riesgo infeccioso requieren vigilancia intensiva aunque el overlay siga pilot-off.',
+        }),
+        overlaySignal('plasticsBurns', 'overlay-plasticsburns-pain', 'Dolor y curas complejas', 'therapeutic-load', {
+          weight: 1.1,
+          explanation: 'Dolor, curas complejas e injertos elevan carga terapeutica y riesgo de omision.',
+        }),
+        overlaySignal('plasticsBurns', 'overlay-plasticsburns-skin', 'Cobertura cutanea e injertos', 'dependency', {
+          weight: 1.05,
+          explanation: 'Cobertura cutanea e injertos aumentan dependencia de cuidados especializados.',
+        }),
+      ],
+      iceaContextDefaults: {
+        therapeuticLoad: 1,
+        surveillanceIntensity: 1,
+        dependencyLoad: 1,
+        caseMixHints: ['specialty-plastics-burns', 'dressings', 'grafts'],
+      },
+      iceaContextPlaceholders: ['therapeuticLoad', 'surveillanceIntensity', 'dependencyLoad'],
+    }),
+    criticalEmergency: createOverlayDefinition('criticalEmergency', {
+      prioritySignals: [
+        overlaySignal('criticalEmergency', 'overlay-critical-emergency-abcde', 'ABCDE y soporte avanzado', 'time-critical', {
+          weight: 1.15,
+          explanation: 'El overlay solo se activa de forma deliberada para reforzar ABCDE y reevaluacion inmediata.',
+        }),
+        overlaySignal('criticalEmergency', 'overlay-critical-emergency-surveillance', 'Reevaluacion corta y vigilancia intensiva', 'specialty-modifier', {
+          weight: 1.05,
+          explanation: 'Su uso prudente evita duplicar la logica base y solo reduce ruido clinico no prioritario.',
+        }),
+        overlaySignal('criticalEmergency', 'overlay-critical-emergency-destination', 'Destino critico y coordinacion inmediata', 'coordination', {
+          weight: 1,
+          explanation: 'Hace visible destino critico y siguiente escalado sin reabrir un UPP paralelo.',
+        }),
+      ],
+      iceaContextDefaults: {
+        temporalCriticality: 1,
+        surveillanceIntensity: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-critical-emergency', 'abcde', 'resuscitation'],
+      },
+      iceaContextPlaceholders: ['temporalCriticality', 'surveillanceIntensity', 'coordinationComplexity'],
     }),
     transplant: createOverlayDefinition('transplant', {
       prioritySignals: [
-        overlaySignal('transplant', 'overlay-transplant-graft', 'Vigilancia de rechazo, injerto e inmunosupresion', 'specialty-modifier'),
+        overlaySignal('transplant', 'overlay-transplant-rejection', 'Rechazo e infeccion en inmunosuprimido', 'specialty-modifier', {
+          weight: 1.15,
+          explanation: 'Rechazo e infeccion sostienen vigilancia compleja y continuidad critica del injerto.',
+        }),
+        overlaySignal('transplant', 'overlay-transplant-therapy', 'Inmunosupresion y carga terapeutica', 'therapeutic-load', {
+          weight: 1.1,
+          explanation: 'Inmunosupresion, balance y monitoreo del injerto agregan carga terapeutica explicable.',
+        }),
+        overlaySignal('transplant', 'overlay-transplant-continuity', 'Acceso, adherencia y coordinacion del injerto', 'coordination', {
+          weight: 1.05,
+          explanation: 'Acceso, adherencia y seguimiento del injerto elevan la coordinacion entre turnos y equipos.',
+        }),
       ],
       iceaContextDefaults: {
-        baselineComplexity: 1,
+        surveillanceIntensity: 1,
         continuityRisk: 1,
-        caseMixHints: ['specialty-transplant'],
+        therapeuticLoad: 1,
+        coordinationComplexity: 1,
+        caseMixHints: ['specialty-transplant', 'immunosuppression', 'graft-surveillance'],
       },
+      iceaContextPlaceholders: ['surveillanceIntensity', 'continuityRisk', 'therapeuticLoad', 'coordinationComplexity'],
     }),
   },
 };
-
 const normalizeIdList = <T extends string>(
   value: unknown,
   normalizer: (candidate: unknown) => readonly T[],
@@ -716,6 +916,7 @@ const resolveCatalogOverlaySelections = (
 ): ProfileOverlaySelection[] => {
   const configuredUnit = unitId ? UNITS_CONFIG.find((entry) => entry.id === unitId) : undefined;
   const knownSpecialty = specialtyId ? SPECIALTIES_BY_ID[specialtyId] : undefined;
+  const explicitOverlayId = normalizeSpecialtyOverlayId(specialtyId);
   const selections: ProfileOverlaySelection[] = [];
 
   const appendSelection = (
@@ -750,6 +951,8 @@ const resolveCatalogOverlaySelections = (
   }
   if (knownSpecialty?.overlayId) {
     appendSelection(knownSpecialty.overlayId, 'specialty');
+  } else if (explicitOverlayId) {
+    appendSelection(explicitOverlayId, 'specialty');
   }
 
   return selections;

@@ -71,9 +71,9 @@ describe('handover submission helpers', () => {
       catalogUnitProfileId: 'general-inpatient' as const,
       unitProfileId: 'general-inpatient' as const,
       overlaySelections: [],
-      catalogSpecialtyOverlayIds: ['infect'] as const,
-      specialtyOverlayIds: ['infect'] as const,
-      activeProfileIds: ['general-inpatient', 'infect'] as const,
+      catalogSpecialtyOverlayIds: ['infecto'] as const,
+      specialtyOverlayIds: ['infecto'] as const,
+      activeProfileIds: ['general-inpatient', 'infecto'] as const,
       hasHumanSpecialtyOverride: true,
       mergeTrace: [
         { source: 'core' as const, profileId: 'handover-core' as const, label: 'HANDOVER Core' },
@@ -82,7 +82,7 @@ describe('handover submission helpers', () => {
           profileId: 'general-inpatient' as const,
           label: 'Hospitalizacion general',
         },
-        { source: 'specialty-overlay' as const, profileId: 'infect' as const, label: 'Infectologia' },
+        { source: 'specialty-overlay' as const, profileId: 'infecto' as const, label: 'Infectologia' },
       ],
     };
 
@@ -93,5 +93,4 @@ describe('handover submission helpers', () => {
     expect('values' in payload).toBe(false);
   });
 });
-
 

@@ -72,7 +72,7 @@ describe('MPAC v1', () => {
   it('allows activated unit and specialty overlays to inject explainable modifiers', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['specialized-critical-care'],
-      specialtyOverlays: ['neuroicu'],
+      specialtyOverlays: ['neuro'],
     });
 
     const { computeMPACFromInput } = await import('@/src/lib/mpac');
@@ -91,7 +91,7 @@ describe('MPAC v1', () => {
     });
 
     expect(result.explanation.activeContext.unitProfileId).toBe('specialized-critical-care');
-    expect(result.explanation.activeContext.specialtyOverlayIds).toEqual(['neuroicu']);
+    expect(result.explanation.activeContext.specialtyOverlayIds).toEqual(['neuro']);
     expect(result.explanation.modifiers.some((modifier) => modifier.source === 'unit-profile' && modifier.applied)).toBe(true);
     expect(result.explanation.modifiers.some((modifier) => modifier.source === 'specialty-overlay' && modifier.applied)).toBe(true);
     expect(result.reasons).toContain('PROFILE_CONTEXT');

@@ -1,138 +1,38 @@
 import type { SpecialtyOverlayId, SpecialtyOverlayRuntimePack } from '../../../types/profile';
+import { CARDIO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './cardio';
+import { CRITICAL_EMERGENCY_SPECIALTY_OVERLAY_RUNTIME_PACK } from './criticalEmergency';
+import { ENDO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './endo';
+import { GASTRO_HEPATO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './gastroHepato';
+import { GYN_OBS_SPECIALTY_OVERLAY_RUNTIME_PACK } from './gynObs';
+import { INFECTO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './infecto';
+import { NEFRO_URO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './nefroUro';
+import { NEUMO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './neumo';
+import { NEURO_SPECIALTY_OVERLAY_RUNTIME_PACK } from './neuro';
 import { ONCOLOGY_HEMATOLOGY_OVERLAY_RUNTIME_PACK } from './oncologyHematology';
+import { OPHTHAL_ENT_SPECIALTY_OVERLAY_RUNTIME_PACK } from './ophthalEnt';
+import { PEDS_SUBSPECIALTIES_SPECIALTY_OVERLAY_RUNTIME_PACK } from './pedsSubspecialties';
+import { PLASTICS_BURNS_SPECIALTY_OVERLAY_RUNTIME_PACK } from './plasticsBurns';
+import { TRAUMA_SPECIALTY_OVERLAY_RUNTIME_PACK } from './trauma';
+import { TRANSPLANT_SPECIALTY_OVERLAY_RUNTIME_PACK } from './transplant';
 
 const createPack = <T extends SpecialtyOverlayRuntimePack & { id: SpecialtyOverlayId }>(pack: T): T => pack;
 
 export const SPECIALTY_OVERLAY_RUNTIME_PACKS: Readonly<
   Record<SpecialtyOverlayId, SpecialtyOverlayRuntimePack & { id: SpecialtyOverlayId }>
 > = {
-  cvicu: createPack({
-    id: 'cvicu',
-    label: 'Overlay cardiovascular',
-    enabledSections: ['fluidBalance'],
-    focusAreas: ['Perfusion, ritmo y soporte hemodinamico', 'Dispositivos cardiovasculares y drenajes'],
-    explanations: ['Refuerza el mismo formulario con foco hemodinamico y vigilancia de perfusion.'],
-    scales: ['Balance hemodinamico'],
-    sentinelEvents: ['Arritmia nueva', 'Hipoperfusion', 'Sangrado cardiovascular'],
-    visibleOutputs: ['Resumen de perfusion y soporte cardiovascular'],
-  }),
-  neuroicu: createPack({
-    id: 'neuroicu',
-    label: 'Overlay neurologico',
-    focusAreas: ['Neuroproteccion y cambios neurologicos sutiles', 'PIC, sedacion y seguridad deglutoria'],
-    explanations: ['Aumenta el foco neurologico sin abrir una pantalla paralela.'],
-    scales: ['Glasgow'],
-    sentinelEvents: ['Cambio pupilar', 'Descenso de Glasgow', 'Convulsion o deterioro neurologico'],
-    visibleOutputs: ['Resumen de neurovigilancia'],
-  }),
+  cardio: createPack(CARDIO_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  neuro: createPack(NEURO_SPECIALTY_OVERLAY_RUNTIME_PACK),
   onc: createPack(ONCOLOGY_HEMATOLOGY_OVERLAY_RUNTIME_PACK),
-  trauma: createPack({
-    id: 'trauma',
-    label: 'Overlay trauma',
-    focusAreas: ['Dolor y perfusion distal', 'Movilizacion segura e inmovilizaciones'],
-    explanations: ['Añade foco neurovascular distal y seguridad de movilizacion.'],
-    sentinelEvents: ['Dolor desproporcionado', 'Compromiso neurovascular distal', 'Caida o movilizacion insegura'],
-    visibleOutputs: ['Checklist de seguridad traumatologica'],
-  }),
-  neph: createPack({
-    id: 'neph',
-    label: 'Overlay nefrologico',
-    enabledSections: ['fluidBalance'],
-    focusAreas: ['Balance hidrico fino', 'Accesos vasculares y diuresis'],
-    explanations: ['Refuerza balance, accesos y vigilancia de complicaciones dialiticas en la misma experiencia.'],
-    scales: ['Balance hidrico'],
-    sentinelEvents: ['Hiperkalemia sospechada', 'Anuria u oliguria', 'Incidencia en acceso de dialisis'],
-    visibleOutputs: ['Resumen de balance y acceso vascular'],
-  }),
-  gastro: createPack({
-    id: 'gastro',
-    label: 'Overlay digestivo',
-    focusAreas: ['Sangrado digestivo y encefalopatia', 'Ostomias, drenajes y tolerancia nutricional'],
-    explanations: ['Aumenta el foco en sangrado, drenajes y tolerancia digestiva sin duplicar registro.'],
-    sentinelEvents: ['Hematemesis o melena', 'Empeoramiento encefalopatico', 'Salida anomala por drenajes'],
-    visibleOutputs: ['Pendientes digestivos y de drenajes'],
-  }),
-  endo: createPack({
-    id: 'endo',
-    label: 'Overlay endocrino',
-    focusAreas: ['Seguridad metabolica', 'Insulina, cetosis y adherencia'],
-    explanations: ['Prioriza hipoglucemia, hiperglucemia y seguridad de dosificacion.'],
-    sentinelEvents: ['Hipoglucemia', 'Hiperglucemia sostenida', 'Sospecha de cetosis'],
-    visibleOutputs: ['Controles metabolicos prioritarios'],
-  }),
-  pulm: createPack({
-    id: 'pulm',
-    label: 'Overlay respiratorio',
-    enabledSections: ['oxigenoterapia'],
-    focusAreas: ['Intercambio gaseoso y fatiga respiratoria', 'Secreciones y soporte respiratorio'],
-    explanations: ['Refuerza la vigilancia respiratoria y el trabajo ventilatorio en el formulario unico.'],
-    scales: ['Escala respiratoria'],
-    sentinelEvents: ['Aumento del trabajo respiratorio', 'Retencion de secreciones', 'Desaturacion progresiva'],
-    visibleOutputs: ['Resumen respiratorio y de soporte'],
-  }),
-  infect: createPack({
-    id: 'infect',
-    label: 'Overlay infectologico',
-    enabledSections: ['examenes'],
-    focusAreas: ['Aislamiento y prevencion de transmision', 'Sepsis, cultivos y antimicrobianos'],
-    explanations: ['Hace visible el foco de aislamiento, reevaluacion infecciosa y adherencia antimicrobiana.'],
-    sentinelEvents: ['Sepsis sospechada', 'Incumplimiento de aislamiento', 'Retraso en antimicrobianos'],
-    visibleOutputs: ['Pendientes infecciosos y de aislamiento'],
-  }),
-  ped: createPack({
-    id: 'ped',
-    label: 'Overlay pediatrico',
-    enabledSections: ['psychosocial'],
-    focusAreas: ['Edad, peso y seguridad de dosis', 'Cuidador principal y soporte familiar'],
-    explanations: ['Añade foco pediatrico y del cuidador sobre la misma experiencia de formulario.'],
-    scales: ['Peso y edad para dosis'],
-    sentinelEvents: ['Error de dosis', 'Deshidratacion', 'Cambio conductual no basal'],
-    visibleOutputs: ['Resumen pediatrico y del cuidador'],
-  }),
-  ob: createPack({
-    id: 'ob',
-    label: 'Overlay gineco-obstetrico',
-    focusAreas: ['Sangrado, dolor e infeccion', 'Continuidad obstetrica y perinatal'],
-    explanations: ['Refuerza vigilancia gineco-obstetrica sin fragmentar el Core ni el UPP base.'],
-    sentinelEvents: ['Sangrado anormal', 'Dolor no controlado', 'Signos de infeccion obstetrica'],
-    visibleOutputs: ['Continuidad obstetrica priorizada'],
-  }),
-  ent: createPack({
-    id: 'ent',
-    label: 'Overlay ORL-oftalmologia',
-    focusAreas: ['Via aerea localizada, dolor y sangrado', 'Educacion de alta especifica'],
-    explanations: ['Aumenta el foco en dolor localizado, sangrado y cuidados al alta.'],
-    sentinelEvents: ['Sangrado localizado', 'Compromiso de via aerea alta', 'Dolor no controlado'],
-    visibleOutputs: ['Checklist de alta especifica'],
-  }),
-  burns: createPack({
-    id: 'burns',
-    label: 'Overlay quemados',
-    enabledSections: ['fluidBalance'],
-    focusAreas: ['Balance y cobertura cutanea', 'Dolor, injertos y aislamiento'],
-    explanations: ['Refuerza balance, dolor y vigilancia de injertos dentro del formulario unico.'],
-    sentinelEvents: ['Deterioro hemodinamico', 'Dolor refractario', 'Compromiso de injertos o curaciones'],
-    visibleOutputs: ['Resumen de balance y cobertura cutanea'],
-  }),
-  'critical-emergency': createPack({
-    id: 'critical-emergency',
-    label: 'Overlay critico de urgencias',
-    hiddenSections: ['psychosocial', 'outcomes'],
-    focusAreas: ['ABCDE y soporte avanzado', 'Reevaluacion inmediata y destino critico'],
-    explanations: ['Reduce ruido no urgente y prioriza soporte inmediato, reevaluacion y pendientes tiempo-criticos.'],
-    scales: ['Glasgow'],
-    sentinelEvents: ['Compromiso ABCDE', 'Shock', 'Necesidad de traslado o soporte avanzado'],
-    visibleOutputs: ['Explicacion visible de prioridad y reevaluacion inmediata'],
-    visibility: {
-      'legacy-nursing-diagnosis-text': false,
-    },
-  }),
-  transplant: createPack({
-    id: 'transplant',
-    label: 'Overlay trasplante',
-    focusAreas: ['Inmunosupresion y signos de rechazo', 'Prevencion infecciosa y seguimiento del injerto'],
-    explanations: ['Aumenta el foco en rechazo, infeccion e inmunosupresion sin crear un formulario nuevo.'],
-    sentinelEvents: ['Fiebre en inmunosuprimido', 'Sospecha de rechazo', 'Incidencia con inmunosupresion'],
-    visibleOutputs: ['Pendientes de injerto e inmunosupresion'],
-  }),
+  trauma: createPack(TRAUMA_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  infecto: createPack(INFECTO_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  neumo: createPack(NEUMO_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  nefroUro: createPack(NEFRO_URO_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  gastroHepato: createPack(GASTRO_HEPATO_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  endo: createPack(ENDO_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  gynObs: createPack(GYN_OBS_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  pedsSubspecialties: createPack(PEDS_SUBSPECIALTIES_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  ophthalEnt: createPack(OPHTHAL_ENT_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  plasticsBurns: createPack(PLASTICS_BURNS_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  criticalEmergency: createPack(CRITICAL_EMERGENCY_SPECIALTY_OVERLAY_RUNTIME_PACK),
+  transplant: createPack(TRANSPLANT_SPECIALTY_OVERLAY_RUNTIME_PACK),
 };

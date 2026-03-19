@@ -16,20 +16,20 @@ export const UNIT_PROFILE_IDS = [
 ] as const;
 
 export const SPECIALTY_OVERLAY_IDS = [
-  'cvicu',
-  'neuroicu',
+  'cardio',
+  'neuro',
   'onc',
   'trauma',
-  'neph',
-  'gastro',
+  'infecto',
+  'neumo',
+  'nefroUro',
+  'gastroHepato',
   'endo',
-  'pulm',
-  'infect',
-  'ped',
-  'ob',
-  'ent',
-  'burns',
-  'critical-emergency',
+  'gynObs',
+  'pedsSubspecialties',
+  'ophthalEnt',
+  'plasticsBurns',
+  'criticalEmergency',
   'transplant',
 ] as const;
 
@@ -42,7 +42,18 @@ export const LEGACY_CONTEXTUAL_UNIT_PROFILE_ALIASES = {
 } as const;
 
 export const LEGACY_SPECIALTY_OVERLAY_ALIASES = {
-  gyn: 'ob',
+  cvicu: 'cardio',
+  neuroicu: 'neuro',
+  neph: 'nefroUro',
+  gastro: 'gastroHepato',
+  pulm: 'neumo',
+  infect: 'infecto',
+  ped: 'pedsSubspecialties',
+  ob: 'gynObs',
+  ent: 'ophthalEnt',
+  burns: 'plasticsBurns',
+  'critical-emergency': 'criticalEmergency',
+  gyn: 'gynObs',
 } as const;
 
 const UNIT_PROFILE_ID_SET = new Set<string>(UNIT_PROFILE_IDS);
@@ -69,7 +80,7 @@ export type LegacyUnitProfileAlias = keyof typeof LEGACY_UNIT_PROFILE_ALIASES;
 export type LegacyContextualUnitProfileAlias = keyof typeof LEGACY_CONTEXTUAL_UNIT_PROFILE_ALIASES;
 export type LegacySpecialtyOverlayAlias = keyof typeof LEGACY_SPECIALTY_OVERLAY_ALIASES;
 export type ProfileSelectorId = HandoverCoreProfileId | UnitProfileId | SpecialtyOverlayId;
-export type ProfileCatalogReadiness = 'wave-1' | 'scaffold';
+export type ProfileCatalogReadiness = 'wave-1' | 'registry-only' | 'scaffold';
 export const HANDOVER_SECTION_KEYS = [
   'turno',
   'paciente',
@@ -144,6 +155,8 @@ export interface IceaContextVector {
   caseMixHints?: readonly string[];
 }
 
+export type IceaContextPlaceholderKey = Exclude<keyof IceaContextVector, 'caseMixHints'>;
+
 export interface ProfileActivation {
   enabledByDefault: boolean;
   stage: 'catalog' | 'pilot' | 'active';
@@ -184,6 +197,7 @@ export interface SpecialtyOverlayDefinition {
   allowedUnitProfiles?: readonly UnitProfileId[];
   prioritySignals?: readonly ContextualPrioritySignal[];
   iceaContextDefaults?: Readonly<Partial<IceaContextVector>>;
+  iceaContextPlaceholders?: readonly IceaContextPlaceholderKey[];
 }
 
 export interface ProfileRegistry {
@@ -445,6 +459,4 @@ export const normalizeSpecialtyOverlayId = (value: unknown): SpecialtyOverlayId 
   if (typeof value !== 'string') return null;
   return LEGACY_SPECIALTY_OVERLAY_ALIASES[value as LegacySpecialtyOverlayAlias] ?? null;
 };
-
-
 
