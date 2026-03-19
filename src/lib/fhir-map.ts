@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import type { AdministrativeData } from '../types/administrative';
 import type {
+  ContextualPrioritySignal,
   ProfileContext,
   ProfileOverlaySelection,
   ProfileRuntimeMergeTraceEntry,
@@ -13,6 +14,7 @@ import type {
   EliminationInfo,
   FluidBalanceInfo,
   HandoverBedsideChecklist,
+  HandoverFhirClinicalContext,
   HandoverSignature,
   MedicationItem,
   MobilityInfo,
@@ -34,7 +36,8 @@ import type {
   PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
-import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
+import { getSpecialtyOverlayDefinition, getUnitProfileDefinition } from '../config/profiles';
+import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, FHIR_EXTENSION_URLS, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
 import { NOC_OUTCOME_CATEGORY } from './fhir-terminology';
 import {
   buildNicProcedure,
@@ -218,7 +221,9 @@ type Annotation = {
 
 type Extension = {
   url: string;
+  extension?: Extension[];
   valueBoolean?: boolean;
+  valueInteger?: number;
   valueString?: string;
 };
 
@@ -468,6 +473,7 @@ type Composition = {
   title: string;
   attester?: CompositionAttester[];
   event?: CompositionEvent[];
+  extension?: Extension[];
   section?: CompositionSection[];
 };
 
@@ -926,6 +932,7 @@ type BundleReferenceIndex = {
   sbar: string[];
   bedsideChecklist: string[];
   notes: string[];
+  clinicalContext: string[];
   nutrition: string[];
   elimination: string[];
   mobilitySkin: string[];
@@ -1019,6 +1026,265 @@ export interface HandoverProfileTraceInput {
 }
 
 export type HandoverInput = HandoverValues | { values: HandoverValues; profileTrace?: HandoverProfileTraceInput };
+
+const FHIR_CONTEXT_EXPORT_VERSION = '1' as const;
+const CLINICAL_CONTEXT_SECTION_TITLE = 'Clinical context';
+
+const isPrioritySignalExportable = (
+  signal: ContextualPrioritySignal,
+): signal is ContextualPrioritySignal & { source: 'unit-profile' | 'specialty-overlay' } =>
+  signal.source === 'unit-profile' || signal.source === 'specialty-overlay';
+
+function resolveProfilePrioritySignals(
+  profileTrace: HandoverProfileTraceInput,
+): HandoverFhirClinicalContext['prioritySignals'] {
+  const unitSignals = profileTrace.unitProfileId
+    ? (getUnitProfileDefinition(profileTrace.unitProfileId)?.prioritySignals ?? [])
+    : [];
+  const overlaySignals = profileTrace.specialtyOverlayIds.flatMap(
+    (overlayId) => getSpecialtyOverlayDefinition(overlayId)?.prioritySignals ?? [],
+  );
+
+  return [...unitSignals, ...overlaySignals]
+    .filter(isPrioritySignalExportable)
+    .map((signal) => ({
+      id: signal.id,
+      label: signal.label,
+      source: signal.source,
+    }));
+}
+
+function resolveCriticalPendingTasks(
+  pendingTasks: readonly PendingTask[] | undefined,
+): HandoverFhirClinicalContext['pendingCriticalTasks'] {
+  return (pendingTasks ?? [])
+    .filter(
+      (task) =>
+        task.status !== 'done' &&
+        (task.priority === 'critical' || task.category === 'critical-task' || task.category === 'escalation'),
+    )
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      priority: task.priority,
+      status: task.status,
+      dueBy: task.dueBy,
+    }));
+}
+
+function buildClinicalContextExport(
+  profileTrace: HandoverProfileTraceInput | undefined,
+  pendingTasks: readonly PendingTask[] | undefined,
+): HandoverFhirClinicalContext | null {
+  const pendingCriticalTasks = resolveCriticalPendingTasks(pendingTasks);
+  if (!profileTrace) {
+    return pendingCriticalTasks.length > 0
+      ? {
+          version: FHIR_CONTEXT_EXPORT_VERSION,
+          coreProfile: { id: 'handover-core', label: 'HANDOVER Core', kind: 'core' },
+          specialtyOverlays: [],
+          prioritySignals: [],
+          pendingCriticalTasks,
+        }
+      : null;
+  }
+
+  const unitProfile = profileTrace.unitProfileId
+    ? getUnitProfileDefinition(profileTrace.unitProfileId)
+    : null;
+  const specialtyOverlays = profileTrace.specialtyOverlayIds
+    .map((overlayId) => getSpecialtyOverlayDefinition(overlayId))
+    .filter(
+      (
+        overlay,
+      ): overlay is NonNullable<ReturnType<typeof getSpecialtyOverlayDefinition>> =>
+        Boolean(overlay),
+    )
+    .map((overlay) => ({
+      id: overlay.id,
+      label: overlay.label,
+      kind: 'specialty-overlay' as const,
+    }));
+  const prioritySignals = resolveProfilePrioritySignals(profileTrace);
+  const hasAdditiveContext = Boolean(unitProfile || specialtyOverlays.length > 0 || pendingCriticalTasks.length > 0);
+
+  if (!hasAdditiveContext) {
+    return null;
+  }
+
+  return {
+    version: FHIR_CONTEXT_EXPORT_VERSION,
+    coreProfile: { id: 'handover-core', label: 'HANDOVER Core', kind: 'core' },
+    unitProfile: unitProfile
+      ? {
+          id: unitProfile.id,
+          label: unitProfile.label,
+          kind: 'unit-profile',
+        }
+      : undefined,
+    specialtyOverlays,
+    prioritySignals,
+    pendingCriticalTasks,
+  };
+}
+
+function makeClinicalContextProfileExtension(
+  profile: HandoverFhirClinicalContext['coreProfile'] | NonNullable<HandoverFhirClinicalContext['unitProfile']> | HandoverFhirClinicalContext['specialtyOverlays'][number],
+): Extension {
+  return {
+    url: FHIR_EXTENSION_URLS.ACTIVE_PROFILE,
+    extension: [
+      { url: 'profileId', valueString: profile.id },
+      { url: 'profileLabel', valueString: profile.label },
+      { url: 'profileKind', valueString: profile.kind },
+    ],
+  };
+}
+
+function buildClinicalContextCompositionExtensions(
+  clinicalContext: HandoverFhirClinicalContext | null,
+): Extension[] | undefined {
+  if (!clinicalContext) return undefined;
+
+  const profileExtensions = [
+    makeClinicalContextProfileExtension(clinicalContext.coreProfile),
+    ...(clinicalContext.unitProfile ? [makeClinicalContextProfileExtension(clinicalContext.unitProfile)] : []),
+    ...clinicalContext.specialtyOverlays.map((profile) => makeClinicalContextProfileExtension(profile)),
+  ];
+
+  return [
+    { url: FHIR_EXTENSION_URLS.CONTEXT_VERSION, valueString: clinicalContext.version },
+    ...profileExtensions,
+  ];
+}
+
+function buildClinicalContextSummary(clinicalContext: HandoverFhirClinicalContext): string {
+  const labels = [
+    clinicalContext.coreProfile.label,
+    ...(clinicalContext.unitProfile ? [clinicalContext.unitProfile.label] : []),
+    ...clinicalContext.specialtyOverlays.map((overlay) => overlay.label),
+  ];
+  const parts = [`Profiles: ${labels.join(' + ')}`];
+
+  if (clinicalContext.prioritySignals.length > 0) {
+    parts.push(
+      `Signals: ${clinicalContext.prioritySignals
+        .map((signal) => signal.label)
+        .join('; ')}`,
+    );
+  }
+  if (clinicalContext.pendingCriticalTasks.length > 0) {
+    parts.push(`Pending critical tasks: ${clinicalContext.pendingCriticalTasks.length}`);
+  }
+
+  return parts.join('. ');
+}
+
+function mapClinicalContextObservation(
+  clinicalContext: HandoverFhirClinicalContext | null,
+  context: MappingContext,
+): Observation | null {
+  if (!clinicalContext) return null;
+
+  const components: ObservationComponent[] = [
+    {
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
+            code: 'core-profile',
+            display: 'Core profile',
+          },
+        ],
+        text: 'Core profile',
+      },
+      valueString: clinicalContext.coreProfile.label,
+    },
+  ];
+
+  if (clinicalContext.unitProfile) {
+    components.push({
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
+            code: 'unit-profile',
+            display: 'Unit profile',
+          },
+        ],
+        text: 'Unit profile',
+      },
+      valueString: `${clinicalContext.unitProfile.label} (${clinicalContext.unitProfile.id})`,
+    });
+  }
+
+  clinicalContext.specialtyOverlays.forEach((overlay) => {
+    components.push({
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
+            code: 'specialty-overlay',
+            display: 'Specialty overlay',
+          },
+        ],
+        text: 'Specialty overlay',
+      },
+      valueString: `${overlay.label} (${overlay.id})`,
+    });
+  });
+
+  clinicalContext.prioritySignals.forEach((signal) => {
+    components.push({
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
+            code: 'priority-signal',
+            display: 'Contextual priority signal',
+          },
+        ],
+        text: 'Contextual priority signal',
+      },
+      valueString: signal.label,
+    });
+  });
+
+  if (clinicalContext.pendingCriticalTasks.length > 0) {
+    components.push({
+      code: {
+        coding: [
+          {
+            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
+            code: 'pending-critical-task-count',
+            display: 'Pending critical task count',
+          },
+        ],
+        text: 'Pending critical task count',
+      },
+      valueInteger: clinicalContext.pendingCriticalTasks.length,
+    });
+  }
+
+  return {
+    resourceType: 'Observation',
+    status: 'final',
+    category: [surveyCategoryConcept],
+    code: codeableConceptFromCode(FHIR_CODES.CONTEXT.CLINICAL_CONTEXT),
+    subject: context.subject,
+    encounter: context.encounter,
+    effectiveDateTime: context.effectiveDateTime,
+    issued: context.effectiveDateTime,
+    valueString: buildClinicalContextSummary(clinicalContext),
+    component: components,
+    note:
+      clinicalContext.pendingCriticalTasks.length > 0
+        ? clinicalContext.pendingCriticalTasks.map((task) => ({
+            text: `${task.title}${task.dueBy ? ` (due ${task.dueBy})` : ''}`,
+          }))
+        : undefined,
+  };
+}
 
 type MappingContext = {
   subject: Reference;
@@ -1771,11 +2037,38 @@ export function buildComposition(
   return buildCompositionImpl(compositionMapperDependencies, values, refs, options);
 }
 
+function addClinicalContextToComposition(
+  composition: Composition,
+  refs: BundleReferenceIndex,
+  clinicalContext: HandoverFhirClinicalContext | null,
+): Composition {
+  if (!clinicalContext) return composition;
+
+  const extension = buildClinicalContextCompositionExtensions(clinicalContext);
+  const section = refs.clinicalContext.length > 0
+    ? {
+        title: CLINICAL_CONTEXT_SECTION_TITLE,
+        code: compositionSectionConcept('clinical-context', CLINICAL_CONTEXT_SECTION_TITLE),
+        entry: refs.clinicalContext.map((reference) => ({ reference })),
+      }
+    : undefined;
+  const nextSections = [
+    ...(composition.section ?? []),
+    ...(section ? [section] : []),
+  ];
+
+  return {
+    ...composition,
+    extension: extension ? [...(composition.extension ?? []), ...extension] : composition.extension,
+    section: nextSections.length > 0 ? nextSections : composition.section,
+  };
+}
 export function buildHandoverBundle(
   input: HandoverInput,
   options?: BuildOptions,
 ): Bundle {
   const values = 'values' in input ? input.values : input;
+  const profileTrace = 'values' in input ? input.profileTrace : values.profileTrace;
   const optionsMerged: ResolvedBuildOptions = resolveOptions(options);
   const nowIso = optionsMerged.now();
   const sharedOptions: BuildOptions = { ...optionsMerged, now: () => nowIso };
@@ -1841,6 +2134,7 @@ export function buildHandoverBundle(
     effectiveDateTime: nowIso,
   };
 
+  const clinicalContext = buildClinicalContextExport(profileTrace, values.pendingTasks);
   const diagnoses = mapDiagnoses(values as HandoverData, mappingContext);
   const detectedIssues = mapDetectedIssuesFromRisks(values.risksStructured, mappingContext);
   const administrativeObservation = mapAdministrativeObservation(
@@ -1857,6 +2151,7 @@ export function buildHandoverBundle(
   );
   const summaryObservation = mapSummaryObservation(values.closingSummary, mappingContext);
   const psychosocialObservation = mapPsychosocialObservation(values.psychosocial, mappingContext);
+  const clinicalContextObservation = mapClinicalContextObservation(clinicalContext, mappingContext);
 
   const normalizedVitals = values.vitals
     ? (() => {
@@ -2167,6 +2462,7 @@ export function buildHandoverBundle(
   const sbarRefs: string[] = [];
   const bedsideChecklistRefs: string[] = [];
   const notesRefs: string[] = [];
+  const clinicalContextRefs: string[] = [];
   const nutritionRefs: string[] = [];
   const eliminationRefs: string[] = [];
   const mobilitySkinRefs: string[] = [];
@@ -2203,6 +2499,7 @@ export function buildHandoverBundle(
   pushObservationEntry(bedsideChecklistObservation, bedsideChecklistRefs);
   contingencyPlanObservations.forEach((observation) => pushObservationEntry(observation, notesRefs));
   pushObservationEntry(summaryObservation, notesRefs);
+  pushObservationEntry(clinicalContextObservation, clinicalContextRefs);
   pushObservationEntry(psychosocialObservation, careRefs);
   pendingTaskObservations.forEach((observation) => pushObservationEntry(observation, careRefs));
 
@@ -2556,51 +2853,57 @@ export function buildHandoverBundle(
     ...deviceRefs,
   );
 
+  const compositionRefs: BundleReferenceIndex = {
+    vitals: vitalsRefs,
+    medications: medicationRefs,
+    treatments: treatmentRefs,
+    outcomes: outcomeRefs,
+    oxygen: oxygenRefs,
+    devices: deviceRefs,
+    attachments: attachmentRefs,
+    administrative: administrativeRefs,
+    care: careRefs,
+    sbar: sbarRefs,
+    bedsideChecklist: bedsideChecklistRefs,
+    notes: notesRefs,
+    clinicalContext: clinicalContextRefs,
+    nutrition: nutritionRefs,
+    elimination: eliminationRefs,
+    mobilitySkin: mobilitySkinRefs,
+    fluidBalance: fluidBalanceRefs,
+    pain: painRefs,
+    braden: bradenRefs,
+    glasgow: glasgowRefs,
+    exams: examRefs,
+    procedures: procedureRefs,
+    risks: riskRefs,
+    detectedIssues: issueRefs,
+    diagnoses: diagnosisRefs,
+  };
+
   const composition = replaceSubjectReference(
-    buildComposition(
-      {
-        patientId: values.patientId,
-        encounterId,
-        author: values.author,
-        composition: values.composition,
-        closingSummary: values.closingSummary,
-        administrativeData: values.administrativeData,
-        sbar: values.sbar,
-        psychosocial: values.psychosocial,
-        signatures: values.signatures,
-        sectionSources: { exams: examInputCount, procedures: procedureInputCount },
-      },
-      {
-        vitals: vitalsRefs,
-        medications: medicationRefs,
-        treatments: treatmentRefs,
-        outcomes: outcomeRefs,
-        oxygen: oxygenRefs,
-        devices: deviceRefs,
-        attachments: attachmentRefs,
-        administrative: administrativeRefs,
-        care: careRefs,
-        sbar: sbarRefs,
-        bedsideChecklist: bedsideChecklistRefs,
-        notes: notesRefs,
-        nutrition: nutritionRefs,
-        elimination: eliminationRefs,
-        mobilitySkin: mobilitySkinRefs,
-        fluidBalance: fluidBalanceRefs,
-        pain: painRefs,
-        braden: bradenRefs,
-        glasgow: glasgowRefs,
-        exams: examRefs,
-        procedures: procedureRefs,
-        risks: riskRefs,
-        detectedIssues: issueRefs,
-        diagnoses: diagnosisRefs,
-      },
-      sharedOptions,
+    addClinicalContextToComposition(
+      buildComposition(
+        {
+          patientId: values.patientId,
+          encounterId,
+          author: values.author,
+          composition: values.composition,
+          closingSummary: values.closingSummary,
+          administrativeData: values.administrativeData,
+          sbar: values.sbar,
+          psychosocial: values.psychosocial,
+          signatures: values.signatures,
+          sectionSources: { exams: examInputCount, procedures: procedureInputCount },
+        },
+        compositionRefs,
+        sharedOptions,
+      ),
+      compositionRefs,
+      clinicalContext,
     ),
     patientSubjectReference,
   );
-
   const { resource: compositionWithId, fullUrl: compositionFullUrl } = assignStableIds(
     applyProfiles(composition),
     values.patientId,
@@ -3036,6 +3339,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     sbar: [],
     bedsideChecklist: [],
     notes: [],
+    clinicalContext: [],
     nutrition: [],
     elimination: [],
     mobilitySkin: [],
@@ -3375,26 +3679,4 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

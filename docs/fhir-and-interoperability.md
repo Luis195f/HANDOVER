@@ -1,6 +1,6 @@
 # Interoperabilidad FHIR (estado piloto-grade)
 
-> Estado revisado el 2026-03-09. El repo soporta mapeo FHIR real para NNN y transaccion clinica via Django/DRF, pero no declara perfiles regulatorios cerrados ni terminologia oficial licenciada dentro del repositorio.
+> Estado revisado el 2026-03-19. El repo soporta mapeo FHIR real para NNN y transaccion clinica via Django/DRF, y exporta contexto clinico contextual aditivo sin declarar perfiles regulatorios cerrados ni terminologia oficial licenciada dentro del repositorio.
 
 ## 1) Arquitectura real
 
@@ -59,6 +59,37 @@ Desde el estado del repo revisado el 2026-03-19, el Core agrega salida FHIR adit
 - `exams[]` / `procedures[]`: se mantiene el contrato previo y se anaden notas aditivas para prioridad, responsable y hora objetivo/programada.
 
 Estas extensiones siguen en sistemas locales `urn:handover-pro:*` y se documentan como soporte interoperable piloto-grade, no como perfil externo cerrado.
+
+## 4.2) Contexto clinico contextual exportado de forma aditiva
+
+Desde el estado del repo revisado el 2026-03-19, HANDOVER exporta contexto Core/UPP/SOP y senal de pendientes criticos de forma aditiva, sin romper el `Bundle` existente:
+
+- `Composition.extension` documenta version del contrato contextual (`https://handover.app/fhir/StructureDefinition/handover-context-version`) y perfiles activos (`https://handover.app/fhir/StructureDefinition/handover-active-profile`).
+- `Composition.section[title="Clinical context"]` agrega una seccion dedicada cuando existe contexto exportable real.
+- La seccion contextual referencia una `Observation` resumida con perfiles activos, senales de prioridad visibles del pack activo y conteo de pendientes criticos abiertos.
+- `pendingTasks[]` sigue siendo la fuente detallada de pendientes; el nuevo bloque contextual no reemplaza ni duplica el detalle operativo ya emitido.
+
+### Politica de transporte FHIR
+
+| Campo / contexto | Origen real | Destino FHIR | Clasificacion | Decision |
+|---|---|---|---|---|
+| Core siempre activo | `ProfileContext.coreProfileId` | `Composition.extension` + `Observation.component` | clinico | incluido para dejar trazabilidad del baseline clinico compartido |
+| UPP activo | `profileTrace.unitProfileId` resuelto contra catalogo | `Composition.extension` + `Observation.component` | clinico | incluido por impacto real en continuidad de cuidados |
+| SOP activos | `profileTrace.specialtyOverlayIds` resueltos contra catalogo | `Composition.extension` + `Observation.component` | clinico | incluidos si estan activos y compatibles |
+| Senales contextuales visibles | `prioritySignals` de UPP/SOP activos | `Observation.component` | clinico | incluidas solo como labels visibles; no se exportan pesos ni heuristicas internas |
+| Pendientes criticos abiertos | `pendingTasks[]` con prioridad critica / categoria critica o escalado | `Observation.component` + `Observation.note` | clinico | incluido como senal resumida; el detalle sigue en `pendingTasks[]` |
+| Bedside checklist | `bedsideChecklist` | `Observation` ya existente + `Composition.section` ya existente | clinico | se mantiene sin duplicacion contextual |
+| Resumen operativo del turno | `turnContext.operationalSummary` y `serviceIncidents` | `Observation` ya existente en seccion administrativa | operativo | se mantiene fuera del nuevo bloque clinico contextual |
+| `mergeTrace`, `specialtySource`, `hasHumanSpecialtyOverride` | `profileTrace` | no exportado | operativo / tecnico | excluido por ser trazabilidad de runtime y no contexto clinico del paciente |
+| `iceaContext`, pesos MPAC, placeholders analiticos | `ProfileContext.iceaContext` y scoring derivado | no exportado | analitico | excluido en PRE-11 para no abrir contrato ICEA runtime antes de PRE-12 |
+| `visibleOutputs`, `focusAreas`, `sentinelEvents`, `explanations` de packs | catalogo de perfiles | no exportado | analitico / editorial | excluidos por describir el pack, no el estado clinico puntual del paciente |
+
+### Notas de compatibilidad
+
+- El contrato es aditivo: no cambia recursos base ni secciones previas obligatorias.
+- El caller real del frontend ya estaba cableado: `src/screens/HandoverForm.tsx` construye `profileTraceInput` con `buildProfileTraceInput(profileRuntime)`, lo inyecta en `buildHandoverInputPayload(...)` y luego envia ese payload a `buildHandoverBundleAsync(...)` antes de encolar el Bundle.
+- `validate:fhir` no requirio cambios porque la validacion local ya acepta `Composition.extension` y secciones adicionales validas en R4.
+- No se modifica `fhir-client`, cola offline, sync ni writeback backend para habilitar este transporte.
 ## 4) Evidencia concreta por tipo NNN
 
 ### NANDA
@@ -145,6 +176,7 @@ Notas de alcance:
 | Consumo externo mas estricto | un tercero puede requerir ValueSets/profiles adicionales no presentes aqui |
 
 Este documento sirve para trazabilidad tecnica de piloto, no como declaracion de conformidad interoperable completa frente a un perfil externo especifico.
+
 
 
 
