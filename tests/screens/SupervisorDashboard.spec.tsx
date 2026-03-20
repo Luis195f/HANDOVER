@@ -8,7 +8,6 @@ import type { IceaDashboardSummary } from '@/src/types/admin';
 
 const mockUseAuth = vi.fn();
 const mockUseAdminDashboardData = vi.fn();
-const mockApiGet = vi.fn();
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 vi.mock('@/src/security/auth', () => ({
@@ -17,10 +16,6 @@ vi.mock('@/src/security/auth', () => ({
 
 vi.mock('@/src/hooks/useAdminDashboardData', () => ({
   useAdminDashboardData: (enabled?: boolean, options?: unknown) => mockUseAdminDashboardData(enabled, options),
-}));
-
-vi.mock('@/src/lib/api', () => ({
-  apiGet: (...args: unknown[]) => mockApiGet(...args),
 }));
 
 vi.mock('@/src/lib/priority', () => ({
@@ -99,6 +94,27 @@ function buildDashboardData(overrides: Partial<IceaDashboardSummary> = {}): Icea
           insufficientEvidence: 0,
           lastUpdatedAt: null,
         },
+        clinicalPatients: [
+          {
+            id: 'pat-1',
+            name: 'Paciente crítico',
+            unitId: 'icu-a',
+            bedLabel: 'A1',
+            vitals: { rr: 28, spo2: 90, tempC: 38.2, sbp: 88, hr: 126, o2: true, avpu: 'V' },
+            devices: [{ id: 'vent-1', label: 'Ventilación mecánica', category: 'support', critical: true }],
+            risks: { isolation: true },
+            pendingTasks: [
+              {
+                id: 'task-1',
+                title: 'Gasometría urgente',
+                category: 'critical-task',
+                priority: 'routine',
+                dueBy: '2026-03-19T10:45:00.000Z',
+              },
+            ],
+            recentIncidentFlag: true,
+          },
+        ],
         handoverTiming: [{ unitId: 'icu-a', sectionId: 'sbar', avgDurationMs: 1500, samples: 5 }],
         alertsOpen: 1,
         degraded: false,
@@ -165,7 +181,6 @@ describe('SupervisorDashboardScreen', () => {
   beforeEach(() => {
     mockUseAuth.mockReset();
     mockUseAdminDashboardData.mockReset();
-    mockApiGet.mockReset();
   });
 
   it('muestra prioridad contextual para supervisor usando el censo real de la unidad', async () => {
@@ -188,22 +203,6 @@ describe('SupervisorDashboardScreen', () => {
       stale: false,
       lastLoadedAt: '2026-03-08T10:00:00Z',
     });
-    mockApiGet.mockResolvedValue([
-      {
-        id: 'pat-1',
-        name: 'Paciente crítico',
-        unitId: 'icu-a',
-        bedLabel: 'A1',
-        pendingTasks: [
-          {
-            id: 'task-1',
-            title: 'Gasometría urgente',
-            critical: true,
-            dueBy: '2026-03-19T10:45:00.000Z',
-          },
-        ],
-      },
-    ]);
 
     const screen = render(<SupervisorDashboardScreen />);
 
@@ -220,7 +219,7 @@ describe('SupervisorDashboardScreen', () => {
   });
 
 
-  it('degrada con mensaje no bloqueante si falla el censo de pacientes de la unidad', async () => {
+  it('muestra un mensaje no bloqueante si no hay snapshots clínicos utilizables', async () => {
     mockUseAuth.mockReturnValue({
       session: {
         userId: 'sup-1',
@@ -231,7 +230,14 @@ describe('SupervisorDashboardScreen', () => {
       loading: false,
     });
     mockUseAdminDashboardData.mockReturnValue({
-      data: buildDashboardData(),
+      data: buildDashboardData({
+        units: [
+          {
+            ...buildDashboardData().units[0],
+            clinicalPatients: [],
+          },
+        ],
+      }),
       loading: false,
       error: null,
       reload: vi.fn(),
@@ -240,7 +246,6 @@ describe('SupervisorDashboardScreen', () => {
       stale: false,
       lastLoadedAt: '2026-03-08T10:00:00Z',
     });
-    mockApiGet.mockRejectedValue(new Error('boom'));
 
     const screen = render(<SupervisorDashboardScreen />);
 
@@ -251,7 +256,7 @@ describe('SupervisorDashboardScreen', () => {
 
     expect(screen.getByTestId('dashboard-priority-panel')).toBeTruthy();
     expect(
-      screen.getByText('No se pudo calcular la prioridad contextual con el censo actual de la unidad.'),
+      screen.getByText('Sin snapshots clínicos persistidos con señal utilizable para esta unidad.'),
     ).toBeTruthy();
     expect(screen.getByText('Estado operativo')).toBeTruthy();
   });

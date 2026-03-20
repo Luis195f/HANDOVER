@@ -30,14 +30,37 @@ type OpenTaskAssessment = {
   dueAtMs: number | null;
 };
 
+const ONCOLOGY_MODIFIER_PRIORITY: Record<string, number> = {
+  'overlay-onc-neutropenia': 60,
+  'overlay-onc-sepsis-window': 50,
+  'overlay-onc-extravasation': 40,
+  'overlay-onc-systemic-treatment': 30,
+  'overlay-onc-symptoms': 20,
+  'overlay-onc-palliation': 10,
+};
+
+function sortOncologyModifierPriority(left: NonNullable<PrioritizedPatient['explanation']>['modifiers'][number], right: NonNullable<PrioritizedPatient['explanation']>['modifiers'][number]) {
+  const leftPriority = ONCOLOGY_MODIFIER_PRIORITY[left.signalId] ?? 0;
+  const rightPriority = ONCOLOGY_MODIFIER_PRIORITY[right.signalId] ?? 0;
+
+  if (rightPriority !== leftPriority) {
+    return rightPriority - leftPriority;
+  }
+  if (right.contribution !== left.contribution) {
+    return right.contribution - left.contribution;
+  }
+
+  return left.label.localeCompare(right.label);
+}
+
 function getOncologyAppliedModifier(patient: PrioritizedPatient) {
   if (!patient.explanation?.activeContext.specialtyOverlayIds.includes('onc')) {
     return undefined;
   }
 
-  return patient.explanation.modifiers.find(
-    (modifier) => modifier.applied && modifier.source === 'specialty-overlay' && modifier.profileId === 'onc',
-  );
+  return [...patient.explanation.modifiers]
+    .filter((modifier) => modifier.applied && modifier.source === 'specialty-overlay' && modifier.profileId === 'onc')
+    .sort(sortOncologyModifierPriority)[0];
 }
 
 const DUE_SOON_THRESHOLD_MS = 2 * 60 * 60 * 1000;
@@ -76,7 +99,10 @@ function buildOpenTaskAssessments(
     .map((task) => {
       const dueAtMs = parseTimeMs(task.dueBy);
       const isCritical =
-        Boolean(task.critical) || task.priority === 'critical' || task.category === 'escalation';
+        Boolean(task.critical) ||
+        task.priority === 'critical' ||
+        task.category === 'critical-task' ||
+        task.category === 'escalation';
       const isUrgent = isCritical || Boolean(task.urgent) || task.priority === 'urgent';
       const isOverdue = dueAtMs != null && dueAtMs < referenceTimeMs;
       const isDueSoon =

@@ -43,7 +43,8 @@ describe('priority-ui', () => {
       {
         id: 'task-1',
         title: 'Gasometría urgente',
-        critical: true,
+        priority: 'routine',
+        category: 'critical-task',
         dueBy: '2026-03-19T10:45:00.000Z',
       },
     ];
@@ -138,5 +139,63 @@ describe('priority-ui', () => {
     expect(model.actionLabel).toBe('No omitir: Neutropenia febril y sepsis oculta');
     expect(model.windowLabel).toBe('Ventana: reevaluar este turno');
     expect(model.windowTone).toBe('warning');
+  });
+
+  it('prioritizes oncology modifiers explicitly instead of trusting source order', () => {
+    const contextualPatient: PrioritizedPatient = {
+      ...basePatient,
+      patientId: 'pat-onc-ranked',
+      displayName: 'Paciente Onco 2',
+      reasons: ['PROFILE_CONTEXT'],
+      pendingCriticalTasksCount: 0,
+      explanation: {
+        ...basePatient.explanation,
+        sourceData: [],
+        clinicalChange: [],
+        pendingCritical: [],
+        activeContext: {
+          unitId: 'onc-ward',
+          specialtyId: 'onc',
+          unitProfileId: 'ambulatory',
+          specialtyOverlayIds: ['onc'],
+          activeProfileIds: ['handover-core', 'ambulatory', 'onc'],
+          labels: ['HANDOVER Core', 'Consulta externa y ambulatoria', 'Oncologia y hematologia'],
+          usesCoreFallback: false,
+          hasHumanSpecialtyOverride: false,
+        },
+        modifiers: [
+          {
+            signalId: 'overlay-onc-palliation',
+            label: 'Necesidades paliativas y alivio de síntomas',
+            dimension: 'coordination',
+            source: 'specialty-overlay',
+            profileId: 'onc',
+            weight: 1,
+            contribution: 1.5,
+            applied: true,
+            note: 'SOP: soporte paliativo.',
+          },
+          {
+            signalId: 'overlay-onc-neutropenia',
+            label: 'Neutropenia febril y sepsis oculta',
+            dimension: 'deterioration-risk',
+            source: 'specialty-overlay',
+            profileId: 'onc',
+            weight: 1,
+            contribution: 0.4,
+            applied: true,
+            note: 'SOP: fiebre e inmunosupresión temprana.',
+          },
+        ],
+      },
+    };
+
+    const model = buildPriorityUiModel({
+      patient: contextualPatient,
+      referenceTime: '2026-03-19T10:15:00.000Z',
+    });
+
+    expect(model.whyNow).toBe('Contexto activo: Neutropenia febril y sepsis oculta');
+    expect(model.actionLabel).toBe('No omitir: Neutropenia febril y sepsis oculta');
   });
 });

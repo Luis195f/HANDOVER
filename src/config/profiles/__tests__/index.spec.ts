@@ -69,9 +69,9 @@ describe('profile registry activation and fallback', () => {
     expect(context.catalogUnitProfileId).toBe('general-inpatient');
     expect(context.unitProfileId).toBe('general-inpatient');
     expect(context.catalogSpecialtyOverlayIds).toEqual(['pedsSubspecialties', 'criticalEmergency']);
-    expect(context.specialtyOverlayIds).toEqual([]);
+    expect(context.specialtyOverlayIds).toEqual(['pedsSubspecialties']);
     expect(context.usesCoreFallback).toBe(false);
-    expect(context.activeProfileIds).toEqual(['handover-core', 'general-inpatient']);
+    expect(context.activeProfileIds).toEqual(['handover-core', 'general-inpatient', 'pedsSubspecialties']);
   });
 
   it('activates a compatible overlay and accepts canonical explicit overlay ids without a specialty catalog entry', async () => {
@@ -125,7 +125,7 @@ describe('profile registry activation and fallback', () => {
     expect(pediatricContext.catalogUnitProfileId).toBe('general-inpatient');
     expect(pediatricContext.unitProfileId).toBe('general-inpatient');
     expect(pediatricContext.catalogSpecialtyOverlayIds).toEqual(['pedsSubspecialties']);
-    expect(pediatricContext.specialtyOverlayIds).toEqual([]);
+    expect(pediatricContext.specialtyOverlayIds).toEqual(['pedsSubspecialties']);
 
     const oncologyDefaultContext = resolveProfileContext({ specialtyId: 'onc' });
     expect(oncologyDefaultContext.catalogUnitProfileId).toBe('general-inpatient');

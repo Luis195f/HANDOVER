@@ -13,6 +13,115 @@ from backend.api.models import (
     IceaPipelineSnapshot,
 )
 from backend.audit.models import AuditEvent
+from backend.api.tests.icea_test_utils import build_icea_bundle
+
+
+def build_dashboard_clinical_bundle() -> dict:
+    bundle = build_icea_bundle(
+        bundle_id="bundle-dashboard-1",
+        patient_id="pat-dashboard-1",
+        unit_id="icu-a",
+    )
+    patient = bundle["entry"][0]["resource"]
+    patient["name"] = [{"text": "Paciente Dashboard"}]
+    encounter_reference = bundle["entry"][1]["fullUrl"]
+
+    bundle["entry"].extend(
+        [
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "status": "final",
+                    "code": {
+                        "coding": [
+                            {
+                                "system": "urn:handover-pro:observation-codes",
+                                "code": "administrative",
+                            }
+                        ]
+                    },
+                    "valueString": "Unit: icu-a\nIncidents: desaturación súbita",
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "status": "final",
+                    "code": {"coding": [{"system": "http://loinc.org", "code": "9279-1"}]},
+                    "valueQuantity": {"value": 28},
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "status": "final",
+                    "code": {"coding": [{"system": "http://loinc.org", "code": "59408-5"}]},
+                    "valueQuantity": {"value": 88},
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Condition",
+                    "code": {
+                        "text": "Risk for falls",
+                        "coding": [{"system": "http://snomed.info/sct", "code": "248244005", "display": "Risk for falls"}],
+                    },
+                    "category": [{"text": "Risk"}],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "id": "task-dashboard-1",
+                    "status": "registered",
+                    "code": {"coding": [{"system": "urn:handover-pro:care", "code": "pending-task"}]},
+                    "valueString": "Gasometría urgente",
+                    "component": [
+                        {
+                            "code": {"coding": [{"system": "urn:handover-pro:component", "code": "task-category"}]},
+                            "valueCodeableConcept": {
+                                "coding": [{"system": "urn:handover-pro:task-category", "code": "critical-task"}]
+                            },
+                        },
+                        {
+                            "code": {"coding": [{"system": "urn:handover-pro:component", "code": "task-priority"}]},
+                            "valueCodeableConcept": {
+                                "coding": [{"system": "urn:handover-pro:task-priority", "code": "routine"}]
+                            },
+                        },
+                        {
+                            "code": {"coding": [{"system": "urn:handover-pro:component", "code": "task-status"}]},
+                            "valueCodeableConcept": {
+                                "coding": [{"system": "urn:handover-pro:task-status", "code": "pending"}]
+                            },
+                        },
+                        {
+                            "code": {"coding": [{"system": "urn:handover-pro:component", "code": "due-by"}]},
+                            "valueString": "2026-03-08T11:30:00Z",
+                        },
+                    ],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Device",
+                    "id": "vent-dashboard",
+                    "status": "active",
+                    "deviceName": [{"name": "Ventilación mecánica", "type": "user-friendly"}],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "DeviceUseStatement",
+                    "status": "active",
+                    "subject": {"reference": bundle["entry"][0]["fullUrl"]},
+                    "encounter": {"reference": encounter_reference},
+                    "device": {"reference": "Device/vent-dashboard", "display": "Ventilación mecánica"},
+                }
+            },
+        ]
+    )
+    return bundle
 
 
 class IceaDashboardSummaryContractTests(TestCase):
@@ -33,7 +142,7 @@ class IceaDashboardSummaryContractTests(TestCase):
             patient_id="pat-dashboard-1",
             unit_id="icu-a",
             request_id="req-dashboard-1",
-            bundle_json={"resourceType": "Bundle", "id": "bundle-dashboard-1"},
+            bundle_json=build_dashboard_clinical_bundle(),
             expires_at=HandoverBundleRecord.default_expiry(now=now),
         )
         IceaPipelineSnapshot.objects.create(
@@ -89,6 +198,12 @@ class IceaDashboardSummaryContractTests(TestCase):
         self.assertEqual(payload["units"][0]["unitId"], "icu-a")
         self.assertEqual(payload["units"][0]["outbox"]["failed"], 1)
         self.assertEqual(payload["units"][0]["bridge"]["stale"], 1)
+        self.assertEqual(payload["units"][0]["clinicalPatients"][0]["id"], "pat-dashboard-1")
+        self.assertEqual(payload["units"][0]["clinicalPatients"][0]["name"], "Paciente Dashboard")
+        self.assertEqual(payload["units"][0]["clinicalPatients"][0]["vitals"]["spo2"], 88)
+        self.assertEqual(payload["units"][0]["clinicalPatients"][0]["devices"][0]["label"], "Ventilación mecánica")
+        self.assertEqual(payload["units"][0]["clinicalPatients"][0]["pendingTasks"][0]["category"], "critical-task")
+        self.assertTrue(payload["units"][0]["clinicalPatients"][0]["recentIncidentFlag"])
         self.assertEqual(payload["units"][0]["handoverTiming"][0]["sectionId"], "sbar")
         self.assertGreaterEqual(len(payload["alerts"]), 2)
 

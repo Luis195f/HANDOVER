@@ -1,14 +1,15 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useTranslation } from '@/src/i18n';
 import type { PriorityLevel } from '@/src/lib/priority';
 import { useThemeTokens } from '@/src/theme';
 
-const LEVEL_LABELS: Record<PriorityLevel, string> = {
-  critical: 'Prioridad crítica',
-  high: 'Prioridad alta',
-  medium: 'Prioridad media',
-  low: 'Prioridad baja',
+const LEVEL_LABEL_KEYS: Record<PriorityLevel, string> = {
+  critical: 'patientList.priorityCritical',
+  high: 'patientList.priorityHigh',
+  medium: 'patientList.priorityMedium',
+  low: 'patientList.priorityLow',
 };
 
 function getPriorityColors(level: PriorityLevel, fallbackText: string) {
@@ -27,11 +28,13 @@ function getPriorityColors(level: PriorityLevel, fallbackText: string) {
 
 export function PriorityBadge({ level, testID }: { level: PriorityLevel; testID?: string }) {
   const { colors } = useThemeTokens();
+  const { t } = useTranslation();
   const tone = getPriorityColors(level, colors.success);
+  const label = t(LEVEL_LABEL_KEYS[level]);
 
   return (
     <View
-      accessibilityLabel={LEVEL_LABELS[level]}
+      accessibilityLabel={label}
       style={[
         styles.badge,
         {
@@ -41,7 +44,7 @@ export function PriorityBadge({ level, testID }: { level: PriorityLevel; testID?
       ]}
       testID={testID}
     >
-      <Text style={[styles.label, { color: tone.textColor }]}>{LEVEL_LABELS[level]}</Text>
+      <Text style={[styles.label, { color: tone.textColor }]}>{label}</Text>
     </View>
   );
 }

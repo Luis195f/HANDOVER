@@ -43,8 +43,8 @@ export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
     },
     {
       key: 'questionsAnswered',
-      label: 'Destino probable y gatillos de reevaluacion verbalizados',
-      helper: 'Deja claro si va a observacion, hospitalizacion, UCI o alta segura.',
+      label: 'Preguntas del equipo entrante resueltas',
+      helper: 'Aclara dudas críticas del relevo, incluyendo destino probable y gatillos de reevaluación.',
     },
   ],
   'general-inpatient': [
@@ -75,8 +75,8 @@ export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
     },
     {
       key: 'questionsAnswered',
-      label: 'Plan de alta compleja y continuidad verbalizado',
-      helper: 'Deja claras barreras, educacion pendiente y coordinaciones externas.',
+      label: 'Preguntas del equipo entrante resueltas',
+      helper: 'Aclara dudas del relevo sobre continuidad, educación pendiente y coordinaciones externas.',
     },
   ],
   'critical-care': [
@@ -107,8 +107,8 @@ export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
     },
     {
       key: 'questionsAnswered',
-      label: 'Pendientes de microvigilancia y escalado verbalizados',
-      helper: 'Resume gatillos para avisar y la siguiente reevaluacion no delegable.',
+      label: 'Preguntas del equipo entrante resueltas',
+      helper: 'Aclara dudas del relevo sobre microvigilancia, avisos y la siguiente reevaluación no delegable.',
     },
   ],
 };

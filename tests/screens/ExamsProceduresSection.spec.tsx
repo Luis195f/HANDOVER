@@ -101,5 +101,30 @@ describe('ExamsProceduresSection', () => {
     expect(getByText('Hemograma completo')).toBeTruthy();
     expect(getByText('Curación de herida')).toBeTruthy();
   });
+
+  it('usa prioridad de rutina por defecto para nuevos borradores', async () => {
+    const { getByLabelText, methods } = renderWithForm(<ExamsProceduresSection />);
+
+    fireEvent.changeText(getByLabelText('Descripción de examen'), 'Perfil básico');
+    fireEvent.press(getByLabelText('Añadir examen'));
+
+    fireEvent.changeText(getByLabelText('Descripción de procedimiento'), 'Cambio de apósito');
+    fireEvent.press(getByLabelText('Añadir procedimiento'));
+
+    await waitFor(() => {
+      expect(methods.getValues('exams')).toEqual([
+        expect.objectContaining({
+          description: 'Perfil básico',
+          priority: 'routine',
+        }),
+      ]);
+      expect(methods.getValues('procedures')).toEqual([
+        expect.objectContaining({
+          description: 'Cambio de apósito',
+          priority: 'routine',
+        }),
+      ]);
+    });
+  });
 });
 

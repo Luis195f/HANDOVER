@@ -14,6 +14,13 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
+function asIdentifierString(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return asString(value);
+}
+
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -63,7 +70,7 @@ export function normalizePatientListResponse(payload: unknown, fallbackUnitId?: 
       '';
 
     return {
-      id: asString(patient.id) ?? asString(patient.patientId) ?? '',
+      id: asIdentifierString(patient.id) ?? asIdentifierString(patient.patientId) ?? '',
       name: displayName || 'Paciente',
       unitId,
       bedLabel: asString(patient.bedLabel) ?? asString(patient.bed) ?? asString(patient.room) ?? '',

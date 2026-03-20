@@ -107,7 +107,7 @@ const defaultExam: ExamItem = {
   type: 'laboratory',
   state: 'result',
   description: '',
-  priority: 'urgent',
+  priority: 'routine',
   dueBy: undefined,
   responsible: undefined,
 };
@@ -115,7 +115,7 @@ const defaultExam: ExamItem = {
 const defaultProcedure: ProcedureItem = {
   description: '',
   done: false,
-  priority: 'urgent',
+  priority: 'routine',
   scheduledFor: undefined,
   responsible: undefined,
   escalationCriteria: undefined,

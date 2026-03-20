@@ -10,6 +10,7 @@ from typing import Any
 from django.db.models import Count, Max, Q
 from django.utils import timezone
 
+from backend.api import icea_payload_mapper
 from backend.api.icea_client import load_icea_webhook_settings
 from backend.api.models import (
     HandoverBundleRecord,
@@ -22,6 +23,18 @@ from backend.audit.models import AuditEvent
 
 DASHBOARD_STALE_AFTER = timezone.timedelta(hours=6)
 TIMING_ALLOWED_SECTIONS = frozenset({"sbar", "vitals", "diagnostics", "treatments"})
+HANDOVER_CARE_SYSTEM = "urn:handover-pro:care"
+HANDOVER_COMPONENT_SYSTEM = "urn:handover-pro:component"
+HANDOVER_TASK_CATEGORY_SYSTEM = "urn:handover-pro:task-category"
+HANDOVER_TASK_PRIORITY_SYSTEM = "urn:handover-pro:task-priority"
+HANDOVER_TASK_STATUS_SYSTEM = "urn:handover-pro:task-status"
+PENDING_TASK_CODE = "pending-task"
+FALL_RISK_TOKENS = ("fall", "falls", "caid")
+PRESSURE_ULCER_RISK_TOKENS = ("pressure", "ulcer", "upp", "decubit")
+ISOLATION_RISK_TOKENS = ("isolation", "aislam")
+CRITICAL_DEVICE_TOKENS = ("vent", "vm", "intub", "trach", "ecmo")
+INVASIVE_DEVICE_TOKENS = ("cvc", "picc", "central", "venoso", "venous", "cateter", "catheter", "arterial", "dren")
+SUPPORT_DEVICE_TOKENS = ("oxygen", "oxigen", "cpap", "bipap", "venturi", "mask", "mascar", "cannula", "canula")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -212,6 +225,316 @@ def _resolve_unit_operational_status(
     return "empty"
 
 
+def _safe_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _extract_bundle_resources(bundle_json: Any) -> list[dict[str, Any]]:
+    if not isinstance(bundle_json, dict):
+        return []
+    entries = bundle_json.get("entry")
+    if not isinstance(entries, list):
+        return []
+    resources: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if isinstance(resource, dict):
+            resources.append(resource)
+    return resources
+
+
+def _coding_strings(source: Any) -> list[str]:
+    if not isinstance(source, dict):
+        return []
+    values: list[str] = []
+    text = _safe_text(source.get("text"))
+    if text:
+        values.append(text)
+    codings = source.get("coding")
+    if not isinstance(codings, list):
+        return values
+    for coding in codings:
+        if not isinstance(coding, dict):
+            continue
+        for field_name in ("display", "code", "system"):
+            field_value = _safe_text(coding.get(field_name))
+            if field_value:
+                values.append(field_value)
+    return values
+
+
+def _resource_has_code(resource: dict[str, Any], system: str, code: str) -> bool:
+    for coding_value in _coding_strings(resource.get("code")):
+        if coding_value == code:
+            return True
+    code_value = resource.get("code")
+    if not isinstance(code_value, dict):
+        return False
+    for coding in code_value.get("coding") or []:
+        if not isinstance(coding, dict):
+            continue
+        if _safe_text(coding.get("system")) == system and _safe_text(coding.get("code")) == code:
+            return True
+    return False
+
+
+def _patient_display_name(patient: dict[str, Any] | None, fallback_patient_id: str) -> str:
+    if not isinstance(patient, dict):
+        return fallback_patient_id or "Paciente"
+    names = patient.get("name")
+    if isinstance(names, list):
+        for item in names:
+            if not isinstance(item, dict):
+                continue
+            text = _safe_text(item.get("text"))
+            if text:
+                return text
+            given_names = [part.strip() for part in item.get("given") or [] if isinstance(part, str) and part.strip()]
+            family_name = _safe_text(item.get("family"))
+            display_name = " ".join([*given_names, family_name or ""]).strip()
+            if display_name:
+                return display_name
+    return _safe_text(patient.get("id")) or fallback_patient_id or "Paciente"
+
+
+def _component_code(component: dict[str, Any]) -> str | None:
+    code = component.get("code")
+    if not isinstance(code, dict):
+        return None
+    for coding in code.get("coding") or []:
+        if not isinstance(coding, dict):
+            continue
+        if _safe_text(coding.get("system")) == HANDOVER_COMPONENT_SYSTEM:
+            component_code = _safe_text(coding.get("code"))
+            if component_code:
+                return component_code
+    return _safe_text(code.get("text"))
+
+
+def _component_string_value(component: dict[str, Any]) -> str | None:
+    direct_value = _safe_text(component.get("valueString"))
+    if direct_value:
+        return direct_value
+    concept = component.get("valueCodeableConcept")
+    if not isinstance(concept, dict):
+        return None
+    for coding in concept.get("coding") or []:
+        if not isinstance(coding, dict):
+            continue
+        for field_name in ("code", "display"):
+            value = _safe_text(coding.get(field_name))
+            if value:
+                return value
+    return _safe_text(concept.get("text"))
+
+
+def _classify_device(label: str) -> tuple[str, bool]:
+    lowered = label.lower()
+    if any(token in lowered for token in CRITICAL_DEVICE_TOKENS):
+        return "support", True
+    if any(token in lowered for token in INVASIVE_DEVICE_TOKENS):
+        return "invasive", False
+    if any(token in lowered for token in SUPPORT_DEVICE_TOKENS):
+        return "support", False
+    return "monitoring", False
+
+
+def _extract_dashboard_devices(resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    device_labels_by_reference: dict[str, str] = {}
+    for resource in resources:
+        if resource.get("resourceType") != "Device":
+            continue
+        device_id = _safe_text(resource.get("id"))
+        device_names = resource.get("deviceName")
+        label = None
+        if isinstance(device_names, list):
+            for item in device_names:
+                if not isinstance(item, dict):
+                    continue
+                label = _safe_text(item.get("name"))
+                if label:
+                    break
+        if device_id and label:
+            device_labels_by_reference[f"Device/{device_id}"] = label
+
+    summarized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for resource in resources:
+        if resource.get("resourceType") != "DeviceUseStatement":
+            continue
+        if _safe_text(resource.get("status")) != "active":
+            continue
+        device = resource.get("device")
+        if not isinstance(device, dict):
+            continue
+        reference = _safe_text(device.get("reference")) or ""
+        label = _safe_text(device.get("display")) or device_labels_by_reference.get(reference)
+        if not label:
+            continue
+        category, critical = _classify_device(label)
+        device_id = reference.rsplit("/", 1)[-1] if reference else label.lower().replace(" ", "-")
+        if device_id in seen_ids:
+            continue
+        seen_ids.add(device_id)
+        summarized.append(
+            {
+                "id": device_id,
+                "label": label,
+                "category": category,
+                "critical": critical,
+            }
+        )
+    return summarized
+
+
+def _extract_dashboard_pending_tasks(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pending_tasks: list[dict[str, Any]] = []
+    for observation in observations:
+        if not _resource_has_code(observation, HANDOVER_CARE_SYSTEM, PENDING_TASK_CODE):
+            continue
+        title = _safe_text(observation.get("valueString"))
+        if not title:
+            continue
+        task: dict[str, Any] = {
+            "id": _safe_text(observation.get("id")) or title.lower().replace(" ", "-"),
+            "title": title,
+        }
+        components = observation.get("component")
+        if isinstance(components, list):
+            for component in components:
+                if not isinstance(component, dict):
+                    continue
+                component_code = _component_code(component)
+                component_value = _component_string_value(component)
+                if not component_code or not component_value:
+                    continue
+                if component_code == "task-category":
+                    task["category"] = component_value
+                elif component_code == "task-priority":
+                    task["priority"] = component_value
+                elif component_code == "task-status":
+                    task["status"] = component_value
+                elif component_code == "due-by":
+                    task["dueBy"] = component_value
+                elif component_code == "escalation-criteria":
+                    task["escalationCriteria"] = component_value
+        pending_tasks.append(task)
+    return pending_tasks
+
+
+def _condition_contains_token(condition: dict[str, Any], tokens: tuple[str, ...]) -> bool:
+    fragments = _coding_strings(condition.get("code"))
+    categories = condition.get("category")
+    if isinstance(categories, list):
+        for category in categories:
+            fragments.extend(_coding_strings(category))
+    lowered_text = " ".join(fragment.lower() for fragment in fragments)
+    return any(token in lowered_text for token in tokens)
+
+
+def _extract_dashboard_risks(conditions: list[dict[str, Any]]) -> dict[str, bool]:
+    risks = {
+        "fall": False,
+        "pressureUlcer": False,
+        "isolation": False,
+    }
+    for condition in conditions:
+        if _condition_contains_token(condition, FALL_RISK_TOKENS):
+            risks["fall"] = True
+        if _condition_contains_token(condition, PRESSURE_ULCER_RISK_TOKENS):
+            risks["pressureUlcer"] = True
+        if _condition_contains_token(condition, ISOLATION_RISK_TOKENS):
+            risks["isolation"] = True
+    return {key: value for key, value in risks.items() if value}
+
+
+def _extract_dashboard_vitals(observations: list[dict[str, Any]], resources: list[dict[str, Any]]) -> dict[str, Any]:
+    vitals = icea_payload_mapper._vitals(observations)
+    summary = {
+        "hr": vitals.get("hr"),
+        "rr": vitals.get("rr"),
+        "tempC": vitals.get("tempC"),
+        "spo2": vitals.get("spo2"),
+        "sbp": vitals.get("sbp"),
+        "avpu": vitals.get("avpu"),
+    }
+    has_oxygen_support = False
+    for resource in resources:
+        if resource.get("resourceType") == "DeviceUseStatement":
+            device = resource.get("device")
+            label = _safe_text(device.get("display")) if isinstance(device, dict) else None
+            if label and any(token in label.lower() for token in SUPPORT_DEVICE_TOKENS + CRITICAL_DEVICE_TOKENS):
+                has_oxygen_support = True
+                break
+        if resource.get("resourceType") == "Procedure":
+            if any("oxygen" in fragment.lower() or "oxigen" in fragment.lower() for fragment in _coding_strings(resource.get("code"))):
+                has_oxygen_support = True
+                break
+    if has_oxygen_support:
+        summary["o2"] = True
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def _has_clinical_signal(snapshot: dict[str, Any]) -> bool:
+    return bool(
+        snapshot.get("recentIncidentFlag")
+        or snapshot.get("devices")
+        or snapshot.get("pendingTasks")
+        or snapshot.get("risks")
+        or snapshot.get("vitals")
+    )
+
+
+def _extract_dashboard_patient_snapshot(record: HandoverBundleRecord) -> dict[str, Any] | None:
+    resources = _extract_bundle_resources(record.bundle_json)
+    if not resources:
+        return None
+    observations = [resource for resource in resources if resource.get("resourceType") == "Observation"]
+    conditions = [resource for resource in resources if resource.get("resourceType") == "Condition"]
+    patient_resource = next((resource for resource in resources if resource.get("resourceType") == "Patient"), None)
+    admin_summary = icea_payload_mapper._admin(observations)
+
+    snapshot = {
+        "id": (record.patient_id or "").strip() or (record.request_id or "").strip(),
+        "name": _patient_display_name(patient_resource, (record.patient_id or "").strip()),
+        "unitId": (record.unit_id or "").strip() or "unknown",
+        "bedLabel": "",
+        "vitals": _extract_dashboard_vitals(observations, resources),
+        "devices": _extract_dashboard_devices(resources),
+        "risks": _extract_dashboard_risks(conditions),
+        "pendingTasks": _extract_dashboard_pending_tasks(observations),
+        "lastIncidentAt": record.created_at.isoformat() if admin_summary.get("incidentCount") else None,
+        "recentIncidentFlag": bool(admin_summary.get("incidentCount")),
+    }
+    return snapshot if _has_clinical_signal(snapshot) else None
+
+
+def _build_dashboard_clinical_patients(*, records) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen_patients: set[tuple[str, str]] = set()
+
+    for record in records.order_by("unit_id", "patient_id", "-created_at", "-id"):
+        unit_key = (record.unit_id or "").strip() or "unknown"
+        patient_key = (record.patient_id or "").strip() or (record.request_id or "").strip() or f"record-{record.id}"
+        dedupe_key = (unit_key, patient_key)
+        if dedupe_key in seen_patients:
+            continue
+        seen_patients.add(dedupe_key)
+        snapshot = _extract_dashboard_patient_snapshot(record)
+        if snapshot is None:
+            continue
+        grouped[unit_key].append(snapshot)
+
+    for unit_key in list(grouped.keys()):
+        grouped[unit_key].sort(key=lambda item: (str(item.get("name") or ""), str(item.get("id") or "")))
+    return dict(grouped)
+
+
 def build_dashboard_summary_payload(
     *,
     unit_id: str | None,
@@ -306,6 +629,7 @@ def build_dashboard_summary_payload(
             latest_summaries[event.unit_id] = event
 
     timing_by_unit = _build_dashboard_timing_summary(timing_events=timing_events, unit_filter=unit_id)
+    clinical_patients_by_unit = _build_dashboard_clinical_patients(records=records)
     alerts = _build_dashboard_alerts(snapshots=snapshots, outbox=outbox, bridge=bridge)
     alert_counts_by_unit: dict[str, int] = defaultdict(int)
     for alert in alerts:
@@ -328,6 +652,7 @@ def build_dashboard_summary_payload(
             | set(outbox_by_unit.keys())
             | set(bridge_by_unit.keys())
             | set(timing_by_unit.keys())
+            | set(clinical_patients_by_unit.keys())
         )
         if unit_key
     }
@@ -448,6 +773,7 @@ def build_dashboard_summary_payload(
                 },
                 "outbox": outbox_summary,
                 "bridge": bridge_summary,
+                "clinicalPatients": clinical_patients_by_unit.get(unit_key, []),
                 "handoverTiming": timing_by_unit.get(unit_key, []),
                 "alertsOpen": int(alert_counts_by_unit.get(unit_key, 0)),
                 "degraded": bool(unit_degradation_reasons),

@@ -2,6 +2,7 @@ import { ApiClientError, apiGet, apiPost } from '@/src/lib/api';
 import { buildDemoAdminDashboardSummary } from '@/src/mock/admin/dashboard-fixture';
 import type {
   IceaDashboardAlert,
+  IceaDashboardClinicalPatient,
   IceaDashboardBridgeUnitSummary,
   IceaDashboardOperationalActivity,
   IceaDashboardOutboxSummary,
@@ -148,6 +149,43 @@ function normalizeBridgeUnitSummary(payload: unknown): IceaDashboardBridgeUnitSu
   };
 }
 
+function normalizeClinicalPatients(payload: unknown): IceaDashboardClinicalPatient[] {
+  if (!Array.isArray(payload)) return [];
+  const normalized: IceaDashboardClinicalPatient[] = [];
+  for (const item of payload) {
+    if (!item || typeof item !== 'object') continue;
+    normalized.push({
+      id: typeof (item as { id?: unknown }).id === 'string' ? (item as { id: string }).id : '',
+      name: typeof (item as { name?: unknown }).name === 'string' ? (item as { name: string }).name : 'Paciente',
+      unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : '',
+      bedLabel:
+        typeof (item as { bedLabel?: unknown }).bedLabel === 'string'
+          ? (item as { bedLabel: string }).bedLabel
+          : '',
+      vitals:
+        (item as { vitals?: unknown }).vitals && typeof (item as { vitals?: unknown }).vitals === 'object'
+          ? ((item as { vitals: IceaDashboardClinicalPatient['vitals'] }).vitals ?? {})
+          : {},
+      devices: Array.isArray((item as { devices?: unknown }).devices)
+        ? ((item as { devices: IceaDashboardClinicalPatient['devices'] }).devices ?? [])
+        : [],
+      risks:
+        (item as { risks?: unknown }).risks && typeof (item as { risks?: unknown }).risks === 'object'
+          ? ((item as { risks: IceaDashboardClinicalPatient['risks'] }).risks ?? {})
+          : {},
+      pendingTasks: Array.isArray((item as { pendingTasks?: unknown }).pendingTasks)
+        ? ((item as { pendingTasks: IceaDashboardClinicalPatient['pendingTasks'] }).pendingTasks ?? [])
+        : [],
+      lastIncidentAt:
+        typeof (item as { lastIncidentAt?: unknown }).lastIncidentAt === 'string'
+          ? (item as { lastIncidentAt: string }).lastIncidentAt
+          : null,
+      recentIncidentFlag: Boolean((item as { recentIncidentFlag?: unknown }).recentIncidentFlag),
+    });
+  }
+  return normalized;
+}
+
 function normalizeUnitSummary(payload: unknown): IceaDashboardUnitSummary[] {
   if (!Array.isArray(payload)) return [];
   const normalized: IceaDashboardUnitSummary[] = [];
@@ -183,6 +221,7 @@ function normalizeUnitSummary(payload: unknown): IceaDashboardUnitSummary[] {
       activity: normalizeActivity((item as { activity?: unknown }).activity),
       outbox: normalizeOutboxUnitSummary((item as { outbox?: unknown }).outbox),
       bridge: normalizeBridgeUnitSummary((item as { bridge?: unknown }).bridge),
+      clinicalPatients: normalizeClinicalPatients((item as { clinicalPatients?: unknown }).clinicalPatients),
       handoverTiming: normalizeTimingSummary((item as { handoverTiming?: unknown }).handoverTiming),
       alertsOpen:
         typeof (item as { alertsOpen?: unknown }).alertsOpen === 'number' ? (item as { alertsOpen: number }).alertsOpen : 0,

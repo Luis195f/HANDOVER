@@ -269,6 +269,7 @@ describe('FHIR Composition', () => {
     ['hospitalizacion-general-medicina-interna-contextual-bundle.json', 'general-inpatient', []],
     ['urgencias-contextual-bundle.json', 'emergency', []],
     ['oncologia-eoprop-ia-contextual-bundle.json', 'ambulatory', ['onc']],
+    ['contextual-clinical-context-bundle.json', 'specialized-critical-care', ['neuro']],
   ])(
     'keeps the contextual export stable for %s',
     async (fixtureFile, expectedUnitProfileId, expectedOverlayIds) => {

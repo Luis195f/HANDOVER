@@ -53,6 +53,19 @@ export function buildDemoAdminDashboardSummary(): IceaDashboardSummary {
           insufficientEvidence: 2,
           lastUpdatedAt: '2026-03-08T09:44:00Z',
         },
+        clinicalPatients: [
+          {
+            id: 'pat-demo-icu-1',
+            name: 'Paciente demo UCI',
+            unitId: 'icu-adult',
+            bedLabel: 'A1',
+            vitals: { rr: 28, spo2: 90, tempC: 38.2, sbp: 88, hr: 126, o2: true, avpu: 'V' },
+            devices: [{ id: 'vent-demo', label: 'Ventilación mecánica', category: 'support', critical: true }],
+            risks: { isolation: true },
+            pendingTasks: [{ id: 'gas-demo', title: 'Gasometría urgente', category: 'critical-task', priority: 'routine' }],
+            recentIncidentFlag: true,
+          },
+        ],
         handoverTiming: [
           { unitId: 'icu-adult', sectionId: 'sbar', avgDurationMs: 1400, samples: 12 },
           { unitId: 'icu-adult', sectionId: 'vitals', avgDurationMs: 980, samples: 12 },
@@ -103,6 +116,19 @@ export function buildDemoAdminDashboardSummary(): IceaDashboardSummary {
           insufficientEvidence: 0,
           lastUpdatedAt: '2026-03-08T09:05:00Z',
         },
+        clinicalPatients: [
+          {
+            id: 'pat-demo-cardio-1',
+            name: 'Paciente demo cardio',
+            unitId: 'cardio-icu',
+            bedLabel: 'B2',
+            vitals: { rr: 18, spo2: 96, tempC: 36.9, sbp: 118, hr: 84 },
+            devices: [{ id: 'cvc-demo', label: 'CVC', category: 'invasive', critical: false }],
+            risks: {},
+            pendingTasks: [{ id: 'reeval-demo', title: 'Reevaluar perfusión', category: 'reevaluation', priority: 'urgent' }],
+            recentIncidentFlag: false,
+          },
+        ],
         handoverTiming: [
           { unitId: 'cardio-icu', sectionId: 'sbar', avgDurationMs: 1250, samples: 8 },
           { unitId: 'cardio-icu', sectionId: 'treatments', avgDurationMs: 1110, samples: 8 },
