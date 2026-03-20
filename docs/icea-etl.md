@@ -12,6 +12,8 @@ Eso deja tres propiedades utiles para piloto:
 2. la lectura no queda bloqueada por `IceaOutboundEvent` o `IceaBridgeRequest`;
 3. un fallo ICEA+ no elimina la fuente ETL del handover ya aceptado.
 
+El endpoint ETL sigue sin cambiar su contrato por el envelope contextual ICEA+: si el Bundle persistido ya trae `Observation/clinical-context`, ese contenido viaja como parte del FHIR original y puede ser reutilizado por el bridge, pero `GET /api/handover/{bundle_id}` no agrega ni transforma un payload paralelo.
+
 Implementacion:
 
 - `backend/api/views.py::HandoverEtlReadView`

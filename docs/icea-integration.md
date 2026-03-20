@@ -90,6 +90,7 @@ Evidencia:
   - `backend/api/icea_payload_mapper.py`
 - persistencia visible por request:
   - `backend/api/models.py::IceaBridgeRequest`
+- envelope contextual aditivo persistido en `payload_json.contextualSignal` y proyectado a `rows[].lineage.contextual_signal`
 - modos:
   - `immediate_provisional`
   - `enriched_followup`
@@ -105,6 +106,8 @@ Evidencia:
 
 - HANDOVER no ejecuta el motor matematico de ICEA+;
 - el score puede ser provisional;
+- el envelope contextual separa observado, derivado y pendiente de fuente hospitalaria futura;
+- la proyeccion contextual sirve para ajuste minimo por case-mix, vigilancia y continuidad, no para afirmar causalidad;
 - si no existe `ICEA_BRIDGE_STATUS_PATH`, el estado local visible pasa a ser la fuente autoritativa;
 - el bridge no bloquea el cierre clinico.
 
@@ -173,6 +176,7 @@ Limite clinico actual:
 |---|---|
 | Estado remoto no consultable para score | cuando no hay `ICEA_BRIDGE_STATUS_PATH`, el estado local es autoritativo |
 | Bridge provisional interpretado como definitivo | el soporte prudente depende tambien del entrenamiento operativo del piloto |
+| Envelope contextual interpretado como causalidad | el contrato explicita observado vs derivado y mantiene campos pendientes para fuentes hospitalarias futuras |
 | Anti-replay no forzado | queda a configuracion del entorno webhook |
 | Dependencia del upstream ICEA+ | disponibilidad, semantica final y deduplicacion remota no viven en este repo |
 

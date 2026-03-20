@@ -53,7 +53,25 @@ Contrato actual (`contractVersion=handover-icea-bridge-v1`):
   "nursingExposure": {},
   "qualitySignals": {},
   "uncertaintySignals": {},
-  "provenance": {}
+  "provenance": {},
+  "contextualSignal": {
+    "contract_version": "handover-icea-context-v1",
+    "profile_id": "critical-care",
+    "overlay_ids": ["neuro"],
+    "case_mix_envelope": {
+      "baseline_complexity": 0.58,
+      "surveillance_intensity": 0.47,
+      "therapeutic_load": 0.31,
+      "temporal_criticality": 0.44,
+      "continuity_risk": 0.29,
+      "dependency_load": 0.34,
+      "coordination_complexity": 0.39,
+      "explainability_summary": "Deterministic stratification only; not causal attribution.",
+      "observed_fields": {},
+      "derived_fields": {},
+      "pending_hospital_source_fields": []
+    }
+  }
 }
 ```
 
@@ -66,6 +84,30 @@ Familias de campos implementadas:
 - `uncertaintySignals`: `missingnessRate`, clase de completitud, `insufficientEvidence`, `staleData` y warnings trazables.
 - `provenance`: version de mapper, hash del Bundle y lineage minimo.
 - `identity.handoverId` y `identity.bundleId`: aliases estables del mismo identificador de handover para no romper consumidores clinicos u operativos.
+- `contextualSignal`: envelope contextual aditivo y versionado para ICEA+.
+
+## Envelope contextual v1
+
+El bridge mantiene `contractVersion=handover-icea-bridge-v1` y agrega, de forma aditiva, `contextualSignal.contract_version=handover-icea-context-v1`.
+
+Campos minimos emitidos:
+- `profile_id`: perfil observado en `Observation/clinical-context` cuando el Bundle lo trae.
+- `overlay_ids`: overlays observados en `Observation/clinical-context`.
+- `case_mix_envelope.baseline_complexity`: derivado deterministico de edad, diagnosticos, risk flags y severidad observada.
+- `case_mix_envelope.surveillance_intensity`: derivado deterministico de vitales anormales, pendientes criticos y gap de soporte.
+- `case_mix_envelope.therapeutic_load`: derivado deterministico de medicacion, procedimientos, dispositivos, outcomes y examenes documentados.
+- `case_mix_envelope.temporal_criticality`: derivado deterministico de pendientes criticos, vitales anormales y brechas del cierre.
+- `case_mix_envelope.continuity_risk`: derivado deterministico de brechas de cierre, soporte incompleto y pendientes abiertos.
+- `case_mix_envelope.dependency_load`: derivado deterministico de dispositivos, severidad observada y risk flags.
+- `case_mix_envelope.coordination_complexity`: derivado deterministico de overlays observados, pendientes criticos y brechas de cierre.
+- `case_mix_envelope.observed_fields`: solo señales vistas en el Bundle/contexto actual.
+- `case_mix_envelope.derived_fields`: reglas deterministicas transparentes del repo.
+- `case_mix_envelope.pending_hospital_source_fields`: campos explicitamente reservados para futuras fuentes hospitalarias.
+
+Reglas interpretativas:
+- `observed_fields` no inventa fuentes ausentes. Si no hay `Observation/clinical-context`, `profile_id` queda `null` y `overlay_ids` vacio.
+- `derived_fields` no expresa causalidad ni efectividad clinica; solo estratificacion basal y trazable para ICEA+.
+- `pending_hospital_source_fields` no se emite como dato real: marca dependencias futuras como ADT, ratios, MAR, consultorias y planes de transicion.
 
 ## Integracion upstream real
 
@@ -73,6 +115,7 @@ La entrega analitica actual del bridge se alinea con el repo ICEA+ verificado en
 - POST /api/v1/icea-plus/score/ para scoring inmediato o enriquecido;
 - no se ha encontrado un endpoint real de status de score en ese upstream, por lo que HANDOVER no inventa polling remoto;
 - si ICEA+ responde con aliases de contrato (`status`/`state`/`result`, `formulaVersion`/`formula_version`, `warnings`/`issues`), HANDOVER los normaliza sin renombrar el contrato publico del bridge;
+- la fila enviada a ICEA+ mantiene las features numericas actuales y agrega el envelope contextual dentro de `rows[].lineage.contextual_signal` para trazabilidad y capas analiticas posteriores;
 - GET /api/icea/bridge/status/<handoverId>?refresh=true solo intenta refresco remoto si ICEA_BRIDGE_STATUS_PATH esta configurado explicitamente;
 - cuando no existe ese path, HANDOVER responde `remoteStatusSupported=false`, `remoteRefreshAttempted=false` y `localStatusIsAuthoritative=true` con estado local visible.
 
@@ -167,6 +210,8 @@ Frontend:
 - HANDOVER no ejecuta el motor matematico de ICEA+.
 - `severityWeight` y `exposureShare` son precursores transparentes construidos solo con datos realmente presentes.
 - Si faltan campos, HANDOVER degrada explicitamente via `missingnessRate`, `payloadCompletenessClass`, `insufficientEvidence` y warnings.
+- `contextualSignal` sirve para ajuste minimo por case-mix y continuidad; no valida comparaciones brutas entre unidades sin analitica posterior.
+- Ningun campo del envelope contextual debe interpretarse como causalidad, benchmarking causal o explicabilidad clinica fuerte.
 - El dashboard debe tratar `provisional=true` y `insufficientEvidence=true` como resultados no concluyentes.
 
 ## Riesgos residuales
