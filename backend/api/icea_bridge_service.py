@@ -375,6 +375,7 @@ def _build_icea_plus_score_request(bridge_request: IceaBridgeRequest, settings: 
 def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaBridgeRequest) -> dict[str, Any]:
     identity = payload.get('identity') if isinstance(payload.get('identity'), dict) else {}
     context = payload.get('context') if isinstance(payload.get('context'), dict) else {}
+    contextual_signal = payload.get('contextualSignal') if isinstance(payload.get('contextualSignal'), dict) else {}
     case_mix = payload.get('caseMix') if isinstance(payload.get('caseMix'), dict) else {}
     baseline_scores = case_mix.get('baselineScores') if isinstance(case_mix.get('baselineScores'), dict) else {}
     exposure = payload.get('nursingExposure') if isinstance(payload.get('nursingExposure'), dict) else {}
@@ -443,6 +444,9 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
             'encounter_id': identity.get('encounterId') or bridge_request.encounter_id,
             'composition_id': identity.get('compositionId') or bridge_request.composition_id,
             'source_contract_version': payload.get('contractVersion'),
+            'contextual_contract_version': contextual_signal.get('contract_version'),
+            'contextual_signal_present': bool(contextual_signal),
+            'contextual_signal': contextual_signal or None,
             'request_hash': bridge_request.payload_hash,
             'bridge_request_id': bridge_request.bridge_request_id,
             'source': lineage,

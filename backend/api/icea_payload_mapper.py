@@ -10,6 +10,7 @@ from django.utils import timezone
 from backend.audit.utils import canonical_json
 
 CONTRACT_VERSION = 'handover-icea-bridge-v1'
+CONTEXTUAL_SIGNAL_CONTRACT_VERSION = 'handover-icea-context-v1'
 MAPPER_VERSION = '2026-03-08'
 SOURCE = 'HANDOVER'
 OBS_CODE_SYSTEM = 'urn:handover-pro:observation-codes'
@@ -36,7 +37,23 @@ VITAL_CODES = {
 SCALE_CODES = {'painEva': '38208-5', 'braden': '38876-5', 'glasgow': '9267-6'}
 OBS_CATEGORY_SYSTEM = 'http://terminology.hl7.org/CodeSystem/observation-category'
 OBS_CATEGORY_OUTCOME = 'outcome'
+CONTEXT_SYSTEM = 'urn:handover-pro:context'
+CONTEXT_CODE = 'clinical-context'
+CONTEXT_COMPONENT_SYSTEM = 'urn:handover-pro:component'
+PROFILE_COMPONENT_RE = re.compile(r'^(?P<label>.+?)\s*\((?P<identifier>[^()]+)\)\s*$')
 SHIFT_RE = re.compile(r'^Shift:\s*(?P<start>.+?)\s*(?:→|->|>)\s*(?P<end>.+?)\s*$')
+PENDING_HOSPITAL_SOURCE_FIELDS = [
+    'adt_admission_source',
+    'adt_length_of_stay_days',
+    'nurse_to_patient_ratio',
+    'mar_administration_count',
+    'active_infusion_count',
+    'recent_rapid_response_events',
+    'multidisciplinary_consult_count',
+    'discharge_destination',
+    'functional_dependency_assessment',
+    'care_transition_plan_status',
+]
 
 
 def build_icea_bridge_payload(
@@ -71,6 +88,7 @@ def build_icea_bridge_payload(
     closing_summary = _notes(observations)
     sbar = _sbar(observations)
     actors = _actors(bundle, composition, full_urls)
+    clinical_context = _clinical_context(observations)
 
     intervention_count = sum(
         1
@@ -120,6 +138,32 @@ def build_icea_bridge_payload(
 
     signature_count = int(actors['signatureCount'] or 0)
     exposure_share = round(1.0 / signature_count, 4) if signature_count > 0 else None
+    observed_contextual_fields = _build_observed_contextual_fields(
+        clinical_context=clinical_context,
+        case_mix={'ageYears': _age(patient.get('birthDate') if isinstance(patient, dict) else None), 'diagnoses': diagnoses, 'riskFlags': risk_flags},
+        exposure={
+            'documentedMedicationCount': sum(1 for resource in resources if resource.get('resourceType') == 'MedicationStatement'),
+            'documentedProcedureCount': sum(1 for resource in resources if resource.get('resourceType') == 'Procedure'),
+            'documentedDeviceUseCount': sum(1 for resource in resources if resource.get('resourceType') == 'DeviceUseStatement'),
+            'documentedOutcomeCount': outcomes['documentedOutcomeCount'],
+            'documentedExamCount': exam_count,
+        },
+        change_signals={
+            'abnormalVitalCount': vitals['abnormalVitalCount'],
+            'closingSummaryPresent': bool(closing_summary),
+            'sbarPresent': sbar['present'],
+        },
+        quality={'shiftClosureDocumented': completeness_checks['shiftWindow'] and completeness_checks['signedClosure']},
+        uncertainty={'missingnessRate': missingness_rate, 'supportLevel': round(1 - missingness_rate, 4)},
+        severity_weight=_severity(vitals, scales, risk_flags),
+    )
+    derived_contextual_fields = _build_derived_contextual_fields(observed_contextual_fields)
+    contextual_signal = _build_contextual_signal(
+        clinical_context=clinical_context,
+        observed_fields=observed_contextual_fields,
+        derived_fields=derived_contextual_fields,
+    )
+
     payload = {
         'contractVersion': CONTRACT_VERSION,
         'source': SOURCE,
@@ -214,6 +258,7 @@ def build_icea_bridge_payload(
                 'compositionId': composition_id,
             },
         },
+        'contextualSignal': contextual_signal,
     }
     return payload
 
@@ -550,6 +595,40 @@ def _sbar(observations: list[dict[str, Any]]) -> dict[str, Any]:
     return {'present': component_count > 0, 'componentCount': component_count, 'sections': sections}
 
 
+def _clinical_context(observations: list[dict[str, Any]]) -> dict[str, Any]:
+    context = {
+        'profileId': None,
+        'overlayIds': [],
+        'prioritySignals': [],
+        'pendingCriticalTaskCount': 0,
+    }
+    for observation in observations:
+        if not _has_code(observation, CONTEXT_SYSTEM, CONTEXT_CODE):
+            continue
+        for component in observation.get('component') or []:
+            if not isinstance(component, dict):
+                continue
+            component_code = _component_code(component)
+            if component_code == 'unit-profile':
+                _label, identifier = _profile_value(component.get('valueString'))
+                if identifier:
+                    context['profileId'] = identifier
+            elif component_code == 'specialty-overlay':
+                _label, identifier = _profile_value(component.get('valueString'))
+                if identifier and identifier not in context['overlayIds']:
+                    context['overlayIds'].append(identifier)
+            elif component_code == 'priority-signal':
+                signal = _safe(component.get('valueString'))
+                if signal:
+                    context['prioritySignals'].append(signal)
+            elif component_code == 'pending-critical-task-count':
+                count = component.get('valueInteger')
+                if isinstance(count, int) and count >= 0:
+                    context['pendingCriticalTaskCount'] = count
+        break
+    return context
+
+
 def _actors(bundle: dict[str, Any], composition: dict[str, Any] | None, full_urls: dict[str, dict[str, Any]]) -> dict[str, Any]:
     actor_ids: list[str] = []
     author_id = None
@@ -588,6 +667,207 @@ def _actors(bundle: dict[str, Any], composition: dict[str, Any] | None, full_url
     }
 
 
+def _build_observed_contextual_fields(
+    *,
+    clinical_context: dict[str, Any],
+    case_mix: dict[str, Any],
+    exposure: dict[str, Any],
+    change_signals: dict[str, Any],
+    quality: dict[str, Any],
+    uncertainty: dict[str, Any],
+    severity_weight: float | None,
+) -> dict[str, dict[str, Any]]:
+    diagnoses = case_mix.get('diagnoses') if isinstance(case_mix.get('diagnoses'), list) else []
+    risk_flags = case_mix.get('riskFlags') if isinstance(case_mix.get('riskFlags'), list) else []
+    return {
+        'profile_id': {
+            'value': clinical_context.get('profileId'),
+            'source': 'bundle.clinical-context.unit-profile',
+        },
+        'overlay_ids': {
+            'value': clinical_context.get('overlayIds') if isinstance(clinical_context.get('overlayIds'), list) else [],
+            'source': 'bundle.clinical-context.specialty-overlay',
+        },
+        'priority_signal_labels': {
+            'value': clinical_context.get('prioritySignals') if isinstance(clinical_context.get('prioritySignals'), list) else [],
+            'source': 'bundle.clinical-context.priority-signal',
+        },
+        'pending_critical_task_count': {
+            'value': _float_value(clinical_context.get('pendingCriticalTaskCount')),
+            'source': 'bundle.clinical-context.pending-critical-task-count',
+        },
+        'age_years': {'value': _float_value(case_mix.get('ageYears')), 'source': 'caseMix.ageYears'},
+        'diagnosis_count': {'value': float(len(diagnoses)), 'source': 'caseMix.diagnoses'},
+        'risk_flag_count': {'value': float(len(risk_flags)), 'source': 'caseMix.riskFlags'},
+        'documented_medication_count': {
+            'value': _float_value(exposure.get('documentedMedicationCount')),
+            'source': 'nursingExposure.documentedMedicationCount',
+        },
+        'documented_procedure_count': {
+            'value': _float_value(exposure.get('documentedProcedureCount')),
+            'source': 'nursingExposure.documentedProcedureCount',
+        },
+        'documented_device_use_count': {
+            'value': _float_value(exposure.get('documentedDeviceUseCount')),
+            'source': 'nursingExposure.documentedDeviceUseCount',
+        },
+        'documented_outcome_count': {
+            'value': _float_value(exposure.get('documentedOutcomeCount')),
+            'source': 'nursingExposure.documentedOutcomeCount',
+        },
+        'documented_exam_count': {
+            'value': _float_value(exposure.get('documentedExamCount')),
+            'source': 'nursingExposure.documentedExamCount',
+        },
+        'abnormal_vital_count': {
+            'value': _float_value(change_signals.get('abnormalVitalCount')),
+            'source': 'nursingExposure.documentedChangeSignals.abnormalVitalCount',
+        },
+        'closing_summary_present': {
+            'value': 1.0 if change_signals.get('closingSummaryPresent') else 0.0,
+            'source': 'nursingExposure.documentedChangeSignals.closingSummaryPresent',
+        },
+        'sbar_present': {
+            'value': 1.0 if change_signals.get('sbarPresent') else 0.0,
+            'source': 'nursingExposure.documentedChangeSignals.sbarPresent',
+        },
+        'shift_closure_documented': {
+            'value': 1.0 if quality.get('shiftClosureDocumented') else 0.0,
+            'source': 'qualitySignals.shiftClosureDocumented',
+        },
+        'missingness_rate': {
+            'value': _float_value(uncertainty.get('missingnessRate')),
+            'source': 'uncertaintySignals.missingnessRate',
+        },
+        'support_level': {
+            'value': _float_value(uncertainty.get('supportLevel')),
+            'source': 'uncertaintySignals.supportLevel',
+        },
+        'severity_weight': {
+            'value': _float_value(severity_weight),
+            'source': 'nursingExposure.severityWeight',
+        },
+    }
+
+
+def _build_derived_contextual_fields(
+    observed_fields: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    diagnosis_count = _observed_value(observed_fields, 'diagnosis_count')
+    risk_flag_count = _observed_value(observed_fields, 'risk_flag_count')
+    age_years = _observed_value(observed_fields, 'age_years')
+    severity_weight = _observed_value(observed_fields, 'severity_weight')
+    abnormal_vital_count = _observed_value(observed_fields, 'abnormal_vital_count')
+    pending_critical_task_count = _observed_value(observed_fields, 'pending_critical_task_count')
+    documented_medication_count = _observed_value(observed_fields, 'documented_medication_count')
+    documented_procedure_count = _observed_value(observed_fields, 'documented_procedure_count')
+    documented_device_use_count = _observed_value(observed_fields, 'documented_device_use_count')
+    documented_outcome_count = _observed_value(observed_fields, 'documented_outcome_count')
+    documented_exam_count = _observed_value(observed_fields, 'documented_exam_count')
+    shift_closure_documented = _observed_value(observed_fields, 'shift_closure_documented')
+    closing_summary_present = _observed_value(observed_fields, 'closing_summary_present')
+    support_level = _observed_value(observed_fields, 'support_level')
+    overlay_ids = observed_fields.get('overlay_ids', {}).get('value') if isinstance(observed_fields.get('overlay_ids'), dict) else []
+
+    age_band = 1.0 if age_years >= 85 else 0.75 if age_years >= 75 else 0.5 if age_years >= 65 else 0.25 if age_years >= 50 else 0.0
+    diagnosis_burden = min(diagnosis_count / 4.0, 1.0)
+    risk_burden = min(risk_flag_count / 3.0, 1.0)
+    abnormal_burden = min(abnormal_vital_count / 3.0, 1.0)
+    task_burden = min(pending_critical_task_count / 3.0, 1.0)
+    therapeutic_burden = min(
+        (
+            documented_medication_count
+            + documented_procedure_count
+            + documented_device_use_count * 1.5
+            + documented_outcome_count * 0.5
+            + documented_exam_count * 0.5
+        )
+        / 8.0,
+        1.0,
+    )
+    overlay_burden = min(len(overlay_ids) / 3.0, 1.0) if isinstance(overlay_ids, list) else 0.0
+    support_gap = max(0.0, min(1.0, 1.0 - support_level))
+    continuity_gap = max(0.0, 1.0 - max(shift_closure_documented, closing_summary_present))
+
+    return {
+        'baseline_complexity': {
+            'value': round(min(1.0, (diagnosis_burden * 0.35) + (risk_burden * 0.25) + (severity_weight * 0.25) + (age_band * 0.15)), 4),
+            'rule': 'weighted_case_mix_baseline',
+            'inputs': ['diagnosis_count', 'risk_flag_count', 'severity_weight', 'age_years'],
+        },
+        'surveillance_intensity': {
+            'value': round(min(1.0, (abnormal_burden * 0.5) + (task_burden * 0.3) + (support_gap * 0.2)), 4),
+            'rule': 'abnormal_vitals_plus_pending_critical_tasks_plus_support_gap',
+            'inputs': ['abnormal_vital_count', 'pending_critical_task_count', 'support_level'],
+        },
+        'therapeutic_load': {
+            'value': round(therapeutic_burden, 4),
+            'rule': 'weighted_documented_interventions_and_exams',
+            'inputs': [
+                'documented_medication_count',
+                'documented_procedure_count',
+                'documented_device_use_count',
+                'documented_outcome_count',
+                'documented_exam_count',
+            ],
+        },
+        'temporal_criticality': {
+            'value': round(min(1.0, (task_burden * 0.5) + (abnormal_burden * 0.35) + (continuity_gap * 0.15)), 4),
+            'rule': 'pending_critical_tasks_plus_abnormal_vitals_plus_handover_gaps',
+            'inputs': ['pending_critical_task_count', 'abnormal_vital_count', 'shift_closure_documented', 'closing_summary_present'],
+        },
+        'continuity_risk': {
+            'value': round(min(1.0, (continuity_gap * 0.45) + (support_gap * 0.35) + (task_burden * 0.2)), 4),
+            'rule': 'handover_gap_plus_support_gap_plus_pending_tasks',
+            'inputs': ['shift_closure_documented', 'closing_summary_present', 'support_level', 'pending_critical_task_count'],
+        },
+        'dependency_load': {
+            'value': round(min(1.0, (documented_device_use_count / 3.0 * 0.45) + (severity_weight * 0.35) + (risk_burden * 0.2)), 4),
+            'rule': 'devices_plus_severity_plus_risk_flags',
+            'inputs': ['documented_device_use_count', 'severity_weight', 'risk_flag_count'],
+        },
+        'coordination_complexity': {
+            'value': round(min(1.0, (overlay_burden * 0.3) + (task_burden * 0.35) + (continuity_gap * 0.35)), 4),
+            'rule': 'overlay_pressure_plus_pending_tasks_plus_handover_gap',
+            'inputs': ['overlay_ids', 'pending_critical_task_count', 'shift_closure_documented', 'closing_summary_present'],
+        },
+    }
+
+
+def _build_contextual_signal(
+    *,
+    clinical_context: dict[str, Any],
+    observed_fields: dict[str, dict[str, Any]],
+    derived_fields: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    profile_id = clinical_context.get('profileId')
+    overlay_ids = clinical_context.get('overlayIds') if isinstance(clinical_context.get('overlayIds'), list) else []
+    case_mix_envelope = {
+        'baseline_complexity': derived_fields['baseline_complexity']['value'],
+        'surveillance_intensity': derived_fields['surveillance_intensity']['value'],
+        'therapeutic_load': derived_fields['therapeutic_load']['value'],
+        'temporal_criticality': derived_fields['temporal_criticality']['value'],
+        'continuity_risk': derived_fields['continuity_risk']['value'],
+        'dependency_load': derived_fields['dependency_load']['value'],
+        'coordination_complexity': derived_fields['coordination_complexity']['value'],
+        'explainability_summary': _contextual_explainability_summary(
+            profile_id=profile_id,
+            overlay_ids=overlay_ids,
+            observed_fields=observed_fields,
+            derived_fields=derived_fields,
+        ),
+        'observed_fields': observed_fields,
+        'derived_fields': derived_fields,
+        'pending_hospital_source_fields': PENDING_HOSPITAL_SOURCE_FIELDS,
+    }
+    return {
+        'contract_version': CONTEXTUAL_SIGNAL_CONTRACT_VERSION,
+        'profile_id': profile_id,
+        'overlay_ids': overlay_ids,
+        'case_mix_envelope': case_mix_envelope,
+    }
+
+
 def _severity(vitals: dict[str, Any], scales: dict[str, Any], risk_flags: list[str]) -> float | None:
     score = min(float(vitals.get('abnormalVitalCount') or 0) * 0.75, 2.0)
     if isinstance(scales.get('glasgow'), (int, float)):
@@ -598,6 +878,30 @@ def _severity(vitals: dict[str, Any], scales: dict[str, Any], risk_flags: list[s
         score += 1.5
     score += min(len(risk_flags) * 0.4, 1.0)
     return round(min(score / 5.0, 1.0), 4) if score > 0 else None
+
+
+def _contextual_explainability_summary(
+    *,
+    profile_id: str | None,
+    overlay_ids: list[str],
+    observed_fields: dict[str, dict[str, Any]],
+    derived_fields: dict[str, dict[str, Any]],
+) -> str:
+    profile_part = f'profile={profile_id}' if profile_id else 'profile=unknown'
+    overlay_part = f"overlays={','.join(overlay_ids)}" if overlay_ids else 'overlays=none'
+    diagnosis_count = int(_observed_value(observed_fields, 'diagnosis_count'))
+    risk_flag_count = int(_observed_value(observed_fields, 'risk_flag_count'))
+    abnormal_vital_count = int(_observed_value(observed_fields, 'abnormal_vital_count'))
+    pending_critical_task_count = int(_observed_value(observed_fields, 'pending_critical_task_count'))
+    baseline_complexity = derived_fields['baseline_complexity']['value']
+    surveillance_intensity = derived_fields['surveillance_intensity']['value']
+    therapeutic_load = derived_fields['therapeutic_load']['value']
+    return (
+        f'{profile_part}; {overlay_part}; diagnoses={diagnosis_count}; risk_flags={risk_flag_count}; '
+        f'abnormal_vitals={abnormal_vital_count}; pending_critical_tasks={pending_critical_task_count}; '
+        f'baseline_complexity={baseline_complexity}; surveillance_intensity={surveillance_intensity}; '
+        f'therapeutic_load={therapeutic_load}. Deterministic stratification only; not causal attribution.'
+    )
 
 
 def _numeric(resource: dict[str, Any]) -> float | int | None:
@@ -618,6 +922,27 @@ def _code_value(concept: Any) -> str | None:
         if value:
             return value
     return None
+
+
+def _component_code(component: dict[str, Any]) -> str | None:
+    concept = component.get('code') or {}
+    codings = concept.get('coding') if isinstance(concept, dict) else []
+    for coding in codings or []:
+        system = _safe((coding or {}).get('system'))
+        code = _safe((coding or {}).get('code'))
+        if system == CONTEXT_COMPONENT_SYSTEM and code:
+            return code
+    return None
+
+
+def _profile_value(value: Any) -> tuple[str | None, str | None]:
+    raw = _safe(value)
+    if not raw:
+        return None, None
+    match = PROFILE_COMPONENT_RE.match(raw)
+    if not match:
+        return raw, None
+    return match.group('label').strip(), match.group('identifier').strip()
 
 
 def _has_code(resource: dict[str, Any], system: str, code: str) -> bool:
@@ -648,6 +973,21 @@ def _is_exam(observation: dict[str, Any]) -> bool:
 
 def _safe(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _float_value(value: Any) -> float:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+def _observed_value(observed_fields: dict[str, dict[str, Any]], key: str) -> float:
+    payload = observed_fields.get(key)
+    if not isinstance(payload, dict):
+        return 0.0
+    return _float_value(payload.get('value'))
 
 
 def _validated_window(start_value: Any, end_value: Any) -> tuple[str | None, str | None, bool]:

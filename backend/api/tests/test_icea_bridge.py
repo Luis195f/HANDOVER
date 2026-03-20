@@ -12,6 +12,7 @@ from backend.api.clinical_storage import ENCRYPTED_BUNDLE_MARKER
 
 from backend.api.icea_bridge_service import (
     STORED_BUNDLE_UNAVAILABLE_ERROR,
+    _build_icea_plus_score_row,
     _normalize_remote_payload,
     attempt_icea_bridge_delivery,
     enqueue_icea_bridge_request_for_bundle_record,
@@ -29,6 +30,8 @@ BEDSIDE_SYSTEM = 'urn:handover-pro:bedside-checklist'
 BOOL_SYSTEM = 'urn:handover-pro:boolean'
 NOC_SYSTEM = 'urn:handover:terminology:NOC'
 LOINC_SYSTEM = 'http://loinc.org'
+HANDOVER_CONTEXT_SYSTEM = 'urn:handover-pro:context'
+HANDOVER_CONTEXT_COMPONENT_SYSTEM = 'urn:handover-pro:component'
 MODEL_ID = '11111111-1111-4111-8111-111111111111'
 
 
@@ -105,6 +108,31 @@ def build_bridge_bundle(*, complete: bool = True) -> dict:
                         {
                             'code': {'coding': [{'system': BEDSIDE_SYSTEM, 'code': 'medicationPlanReviewed'}]},
                             'valueCodeableConcept': {'coding': [{'system': BOOL_SYSTEM, 'code': 'no'}]},
+                        },
+                    ],
+                }
+            },
+            {
+                'resource': {
+                    'resourceType': 'Observation',
+                    'status': 'final',
+                    'code': {'coding': [{'system': HANDOVER_CONTEXT_SYSTEM, 'code': 'clinical-context'}]},
+                    'component': [
+                        {
+                            'code': {'coding': [{'system': HANDOVER_CONTEXT_COMPONENT_SYSTEM, 'code': 'unit-profile'}]},
+                            'valueString': 'Critical care (critical-care)',
+                        },
+                        {
+                            'code': {'coding': [{'system': HANDOVER_CONTEXT_COMPONENT_SYSTEM, 'code': 'specialty-overlay'}]},
+                            'valueString': 'Neurologia (neuro)',
+                        },
+                        {
+                            'code': {'coding': [{'system': HANDOVER_CONTEXT_COMPONENT_SYSTEM, 'code': 'priority-signal'}]},
+                            'valueString': 'Ventilacion y microvigilancia respiratoria',
+                        },
+                        {
+                            'code': {'coding': [{'system': HANDOVER_CONTEXT_COMPONENT_SYSTEM, 'code': 'pending-critical-task-count'}]},
+                            'valueInteger': 2,
                         },
                     ],
                 }
@@ -211,6 +239,15 @@ class IceaBridgeMapperTests(TestCase):
         self.assertLess(payload['uncertaintySignals']['missingnessRate'], 0.5)
         self.assertGreater(payload['qualitySignals']['structuredCompletenessRate'], 0.7)
         self.assertTrue(payload['nursingExposure']['severityWeight'] is not None)
+        self.assertEqual(payload['contextualSignal']['contract_version'], 'handover-icea-context-v1')
+        self.assertEqual(payload['contextualSignal']['profile_id'], 'critical-care')
+        self.assertEqual(payload['contextualSignal']['overlay_ids'], ['neuro'])
+        self.assertEqual(payload['contextualSignal']['case_mix_envelope']['observed_fields']['pending_critical_task_count']['value'], 2.0)
+        self.assertGreater(payload['contextualSignal']['case_mix_envelope']['baseline_complexity'], 0.0)
+        self.assertIn(
+            'nurse_to_patient_ratio',
+            payload['contextualSignal']['case_mix_envelope']['pending_hospital_source_fields'],
+        )
 
     def test_mapper_degrades_without_inventing_missing_fields(self):
         payload = build_icea_bridge_payload(
@@ -227,6 +264,8 @@ class IceaBridgeMapperTests(TestCase):
         warning_codes = {item['code'] for item in payload['uncertaintySignals']['warnings']}
         self.assertIn('insufficient_evidence', warning_codes)
         self.assertIn('missing_shift_window', warning_codes)
+        self.assertIsNone(payload['contextualSignal']['profile_id'])
+        self.assertEqual(payload['contextualSignal']['overlay_ids'], [])
 
     def test_mapper_degrades_when_shift_window_is_invalid(self):
         bundle = build_bridge_bundle()
@@ -254,6 +293,63 @@ class IceaBridgeMapperTests(TestCase):
         warning_codes = {item['code'] for item in payload['uncertaintySignals']['warnings']}
         self.assertIn('invalid_shift_window', warning_codes)
         self.assertIn('missing_shift_window', warning_codes)
+
+    def test_contextual_contract_is_serialized_for_real_bridge_projection(self):
+        payload = build_icea_bridge_payload(
+            build_bridge_bundle(),
+            request_id='req-bridge-ctx-001',
+            scoring_mode='immediate_provisional',
+            unit_id='icu-a',
+        )
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-ctx-001:immediate_provisional',
+            request_id='req-bridge-ctx-001',
+            bundle_id='bundle-bridge-001',
+            patient_id='pat-bridge-001',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-ctx-001:immediate_provisional:ctx',
+            payload_hash='ctx' * 16,
+            payload_json=payload,
+            status=IceaBridgeRequest.STATUS_QUEUED,
+        )
+
+        row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
+
+        self.assertTrue(row['lineage']['contextual_signal_present'])
+        self.assertEqual(row['lineage']['contextual_contract_version'], 'handover-icea-context-v1')
+        self.assertEqual(row['lineage']['contextual_signal']['profile_id'], 'critical-care')
+        self.assertEqual(row['lineage']['contextual_signal']['case_mix_envelope']['therapeutic_load'], payload['contextualSignal']['case_mix_envelope']['therapeutic_load'])
+
+    def test_bridge_projection_remains_backward_compatible_without_contextual_signal(self):
+        payload = {
+            'contractVersion': 'handover-icea-bridge-v1',
+            'identity': {'bundleId': 'bundle-legacy', 'requestId': 'req-legacy', 'patientId': 'pat-legacy'},
+            'context': {'grain': 'episode', 'unitId': 'icu-a'},
+            'caseMix': {},
+            'nursingExposure': {},
+            'qualitySignals': {},
+            'uncertaintySignals': {},
+            'provenance': {'lineage': {'requestId': 'req-legacy'}},
+        }
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-legacy:immediate_provisional',
+            request_id='req-legacy',
+            bundle_id='bundle-legacy',
+            patient_id='pat-legacy',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-legacy:immediate_provisional:legacy',
+            payload_hash='legacy' * 10 + 'abcd',
+            payload_json=payload,
+            status=IceaBridgeRequest.STATUS_QUEUED,
+        )
+
+        row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
+
+        self.assertFalse(row['lineage']['contextual_signal_present'])
+        self.assertIsNone(row['lineage']['contextual_contract_version'])
+        self.assertIsNone(row['lineage']['contextual_signal'])
 
 
 class IceaBridgeServiceTests(TestCase):
@@ -1087,6 +1183,8 @@ class IceaBridgeTransactionFlowTests(TestCase):
         bridge_request = IceaBridgeRequest.objects.get(request_id='req-bridge-001')
         self.assertEqual(bridge_request.bundle_id, 'bundle-bridge-001')
         self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_ACCEPTED)
+        self.assertEqual(bridge_request.payload_json['contextualSignal']['contract_version'], 'handover-icea-context-v1')
+        self.assertEqual(bridge_request.payload_json['contextualSignal']['profile_id'], 'critical-care')
 
     @patch.dict(
         os.environ,
