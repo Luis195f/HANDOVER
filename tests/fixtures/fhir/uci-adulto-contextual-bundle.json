@@ -1,0 +1,1473 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "fixture-icu-1",
+        "identifier": [
+          {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        ],
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-patient"
+          ]
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "Patient"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:ad0ab8d94f3a41c97d23c2c8a3924f2a",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "nurse-fixture",
+        "identifier": [
+          {
+            "system": "urn:handover-pro:practitioner-id",
+            "value": "nurse-fixture"
+          }
+        ],
+        "name": [
+          {
+            "text": "Fixture Nurse"
+          }
+        ],
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-practitioner"
+          ]
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "Practitioner"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-fixture-icu-1",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "IMP",
+          "display": "inpatient encounter"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "period": {
+          "start": "2026-03-08T07:00:00Z",
+          "end": "2026-03-08T15:00:00Z"
+        },
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-encounter"
+          ]
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "Encounter"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:305086148f178997f7cf97be95e538ad",
+      "resource": {
+        "resourceType": "Composition",
+        "status": "final",
+        "type": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:composition-type",
+              "code": "handover-shift",
+              "display": "Nursing shift handover"
+            }
+          ],
+          "text": "Clinical handover"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "author": [
+          {
+            "reference": "urn:uuid:ad0ab8d94f3a41c97d23c2c8a3924f2a",
+            "type": "Practitioner",
+            "display": "Fixture Nurse",
+            "identifier": {
+              "system": "urn:handover-pro:practitioner-id",
+              "value": "nurse-fixture"
+            }
+          }
+        ],
+        "title": "Clinical handover summary",
+        "date": "2026-03-08T15:05:00Z",
+        "event": [
+          {
+            "period": {
+              "start": "2026-03-08T07:00:00Z",
+              "end": "2026-03-08T15:00:00Z"
+            }
+          }
+        ],
+        "section": [
+          {
+            "title": "Administrative",
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:composition-section",
+                  "code": "administrative",
+                  "display": "Administrative"
+                }
+              ],
+              "text": "Administrative"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:9d1b46a4f7a4061088ee1284880f53eb"
+              }
+            ]
+          },
+          {
+            "title": "Vital signs",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "85353-1",
+                  "display": "Vital signs"
+                }
+              ],
+              "text": "Vital signs"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:3dd6076eb9e49c2c7fcbc67a44e8688d"
+              },
+              {
+                "reference": "urn:uuid:c521e99e04f2f99c42b04fe5264779f0"
+              },
+              {
+                "reference": "urn:uuid:8dd556024a98f15d437628122c763f3f"
+              },
+              {
+                "reference": "urn:uuid:9dbdb5e7a95058fd5d44382652e78d85"
+              },
+              {
+                "reference": "urn:uuid:77cba0f9066c867e05bfb0fa71852b0c"
+              },
+              {
+                "reference": "urn:uuid:ac17fa68325b967ab4193dca83cc3a95"
+              },
+              {
+                "reference": "urn:uuid:5a8f85547bd0489f3ebcebacd24fcaf5"
+              }
+            ]
+          },
+          {
+            "title": "Care / Treatments",
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:composition-section",
+                  "code": "care-treatments",
+                  "display": "Care / Treatments"
+                }
+              ],
+              "text": "Care / Treatments"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:eb2a6d6c77333ba3ee569245ab26439e"
+              },
+              {
+                "reference": "urn:uuid:86c0f17e7f3865cd292aaba7c0c4324b"
+              }
+            ]
+          },
+          {
+            "title": "Bedside checklist",
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:composition-section",
+                  "code": "bedside-checklist",
+                  "display": "Bedside checklist"
+                }
+              ],
+              "text": "Bedside checklist"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:caa60a1536b41e269a8fdde2f4b03205"
+              }
+            ]
+          },
+          {
+            "title": "Notes / Summary",
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:composition-section",
+                  "code": "notes-summary",
+                  "display": "Notes / Summary"
+                }
+              ],
+              "text": "Notes / Summary"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:181f4025122d1f27627f60ea0df9bf29"
+              }
+            ]
+          },
+          {
+            "title": "Tratamientos no farmacológicos",
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:composition-section",
+                  "code": "treatments",
+                  "display": "Non-pharmacological treatments"
+                }
+              ],
+              "text": "Non-pharmacological treatments"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:86c0f17e7f3865cd292aaba7c0c4324b"
+              }
+            ]
+          },
+          {
+            "title": "Clinical context",
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:composition-section",
+                  "code": "clinical-context",
+                  "display": "Clinical context"
+                }
+              ],
+              "text": "Clinical context"
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:0266584cec0f124085363cf4de933c8a"
+              }
+            ]
+          }
+        ],
+        "extension": [
+          {
+            "url": "https://handover.app/fhir/StructureDefinition/handover-context-version",
+            "valueString": "1"
+          },
+          {
+            "url": "https://handover.app/fhir/StructureDefinition/handover-active-profile",
+            "extension": [
+              {
+                "url": "profileId",
+                "valueString": "handover-core"
+              },
+              {
+                "url": "profileLabel",
+                "valueString": "HANDOVER Core"
+              },
+              {
+                "url": "profileKind",
+                "valueString": "core"
+              }
+            ]
+          },
+          {
+            "url": "https://handover.app/fhir/StructureDefinition/handover-active-profile",
+            "extension": [
+              {
+                "url": "profileId",
+                "valueString": "critical-care"
+              },
+              {
+                "url": "profileLabel",
+                "valueString": "UCI adulto"
+              },
+              {
+                "url": "profileKind",
+                "valueString": "unit-profile"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-composition"
+          ]
+        },
+        "id": "comp-0fad8ea78c9b358f9a42f3e558a97cf77c9fc6283ac8e8796f4f9c3e948"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Composition"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:9d1b46a4f7a4061088ee1284880f53eb",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "survey",
+                "display": "Survey"
+              }
+            ],
+            "text": "Nursing care"
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:observation-codes",
+              "code": "administrative",
+              "display": "Administrative overview"
+            }
+          ],
+          "text": "Administrative overview"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueString": "Unit: UCI Adulto · Ala A\nCensus: 12\nShift: 2026-03-08T07:00:00Z → 2026-03-08T15:00:00Z\nShift type: Mañana\nIncoming staff: Ana\nOutgoing staff: Luis",
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "id": "obs-d46c5febc4b4c80d27ef1cb7d42df7a9419f226e0090e79e970abd21f951"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:caa60a1536b41e269a8fdde2f4b03205",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "survey",
+                "display": "Survey"
+              }
+            ],
+            "text": "Nursing care"
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:bedside-checklist",
+              "code": "bedside-checklist",
+              "display": "Bedside checklist"
+            }
+          ],
+          "text": "Bedside checklist"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "component": [
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:bedside-checklist",
+                  "code": "patientIdentityConfirmed",
+                  "display": "patientIdentityConfirmed"
+                }
+              ],
+              "text": "patientIdentityConfirmed"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:boolean",
+                  "code": "yes",
+                  "display": "Yes"
+                }
+              ],
+              "text": "Yes"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:bedside-checklist",
+                  "code": "allergiesReviewed",
+                  "display": "allergiesReviewed"
+                }
+              ],
+              "text": "allergiesReviewed"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:boolean",
+                  "code": "yes",
+                  "display": "Yes"
+                }
+              ],
+              "text": "Yes"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:bedside-checklist",
+                  "code": "linesAndDevicesChecked",
+                  "display": "linesAndDevicesChecked"
+                }
+              ],
+              "text": "linesAndDevicesChecked"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:boolean",
+                  "code": "yes",
+                  "display": "Yes"
+                }
+              ],
+              "text": "Yes"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:bedside-checklist",
+                  "code": "medicationPlanReviewed",
+                  "display": "medicationPlanReviewed"
+                }
+              ],
+              "text": "medicationPlanReviewed"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:boolean",
+                  "code": "yes",
+                  "display": "Yes"
+                }
+              ],
+              "text": "Yes"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:bedside-checklist",
+                  "code": "safetyMeasuresApplied",
+                  "display": "safetyMeasuresApplied"
+                }
+              ],
+              "text": "safetyMeasuresApplied"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:boolean",
+                  "code": "yes",
+                  "display": "Yes"
+                }
+              ],
+              "text": "Yes"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:bedside-checklist",
+                  "code": "questionsAnswered",
+                  "display": "questionsAnswered"
+                }
+              ],
+              "text": "questionsAnswered"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:boolean",
+                  "code": "yes",
+                  "display": "Yes"
+                }
+              ],
+              "text": "Yes"
+            }
+          }
+        ],
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "id": "obs-935e0aabcd069ca9797b3fca396a44e3173767f00fc5abf8ebac6a09c414"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:181f4025122d1f27627f60ea0df9bf29",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "survey",
+                "display": "Survey"
+              }
+            ],
+            "text": "Nursing care"
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:observation-codes",
+              "code": "handover-notes",
+              "display": "Handover notes"
+            }
+          ],
+          "text": "Handover notes"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueString": "Paciente crítico con soporte vasoactivo y vigilancia respiratoria estrecha.",
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "id": "obs-5671d9c27eacd7847ede369542acd038b3f317481ecc51c7b228f9dd4db2"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:0266584cec0f124085363cf4de933c8a",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "survey",
+                "display": "Survey"
+              }
+            ],
+            "text": "Nursing care"
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:context",
+              "code": "clinical-context",
+              "display": "Clinical context summary"
+            }
+          ],
+          "text": "Clinical context summary"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueString": "Profiles: HANDOVER Core + UCI adulto. Signals: Ventilacion y microvigilancia respiratoria; Sedacion y ventana neurologica; Perfusion y vasoactivos; Balance hidrico fino; Dispositivos invasivos y checklist critica. Pending critical tasks: 1",
+        "component": [
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "core-profile",
+                  "display": "Core profile"
+                }
+              ],
+              "text": "Core profile"
+            },
+            "valueString": "HANDOVER Core"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "unit-profile",
+                  "display": "Unit profile"
+                }
+              ],
+              "text": "Unit profile"
+            },
+            "valueString": "UCI adulto (critical-care)"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "priority-signal",
+                  "display": "Contextual priority signal"
+                }
+              ],
+              "text": "Contextual priority signal"
+            },
+            "valueString": "Ventilacion y microvigilancia respiratoria"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "priority-signal",
+                  "display": "Contextual priority signal"
+                }
+              ],
+              "text": "Contextual priority signal"
+            },
+            "valueString": "Sedacion y ventana neurologica"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "priority-signal",
+                  "display": "Contextual priority signal"
+                }
+              ],
+              "text": "Contextual priority signal"
+            },
+            "valueString": "Perfusion y vasoactivos"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "priority-signal",
+                  "display": "Contextual priority signal"
+                }
+              ],
+              "text": "Contextual priority signal"
+            },
+            "valueString": "Balance hidrico fino"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "priority-signal",
+                  "display": "Contextual priority signal"
+                }
+              ],
+              "text": "Contextual priority signal"
+            },
+            "valueString": "Dispositivos invasivos y checklist critica"
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "pending-critical-task-count",
+                  "display": "Pending critical task count"
+                }
+              ],
+              "text": "Pending critical task count"
+            },
+            "valueInteger": 1
+          }
+        ],
+        "note": [
+          {
+            "text": "Titular noradrenalina y revaluar perfusión (due 2026-03-08T15:10:00Z)"
+          }
+        ],
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "id": "obs-176cce308230af5fa06c38fc68a5f05c06c3abb18d808230b50f98dceb9a"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:eb2a6d6c77333ba3ee569245ab26439e",
+      "resource": {
+        "resourceType": "Observation",
+        "status": "registered",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "survey",
+                "display": "Survey"
+              }
+            ],
+            "text": "Nursing care"
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:care",
+              "code": "pending-task",
+              "display": "Pending task"
+            }
+          ],
+          "text": "Pending task"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "valueString": "Titular noradrenalina y revaluar perfusión",
+        "component": [
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "task-category",
+                  "display": "Task category"
+                }
+              ],
+              "text": "Task category"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:task-category",
+                  "code": "critical-task",
+                  "display": "Pendiente crítico"
+                }
+              ],
+              "text": "Pendiente crítico"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "task-priority",
+                  "display": "Task priority"
+                }
+              ],
+              "text": "Task priority"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:task-priority",
+                  "code": "critical",
+                  "display": "Crítico"
+                }
+              ],
+              "text": "Crítico"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "task-status",
+                  "display": "Task status"
+                }
+              ],
+              "text": "Task status"
+            },
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:task-status",
+                  "code": "pending",
+                  "display": "Pendiente"
+                }
+              ],
+              "text": "Pendiente"
+            }
+          },
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "urn:handover-pro:component",
+                  "code": "due-by",
+                  "display": "Due by"
+                }
+              ],
+              "text": "Due by"
+            },
+            "valueString": "2026-03-08T15:10:00Z"
+          }
+        ],
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "id": "obs-bc0fac495a37ce450fa94de18d552102ff2edc4d24a7a40b0b42053f8857"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:3dd6076eb9e49c2c7fcbc67a44e8688d",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/bp",
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "85354-9",
+              "display": "Blood pressure panel"
+            }
+          ],
+          "text": "Blood pressure panel"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "component": [
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "8480-6",
+                  "display": "Systolic blood pressure"
+                }
+              ],
+              "text": "Systolic blood pressure"
+            },
+            "valueQuantity": {
+              "value": 89,
+              "unit": "mm[Hg]",
+              "system": "http://unitsofmeasure.org",
+              "code": "mm[Hg]"
+            }
+          }
+        ],
+        "id": "obs-a12a9e7d053b97c3aeb431a9229df5609393fce77cd1e34bc2c0c5f3917a"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:c521e99e04f2f99c42b04fe5264779f0",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "8867-4",
+              "display": "Heart rate"
+            }
+          ],
+          "text": "Heart rate"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueQuantity": {
+          "value": 124,
+          "unit": "/min",
+          "system": "http://unitsofmeasure.org",
+          "code": "/min"
+        },
+        "id": "obs-04c58b2e1b1cac098331d8fe720a941ee9039c954a3efd350954ac032ad6"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:8dd556024a98f15d437628122c763f3f",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "9279-1",
+              "display": "Respiratory rate"
+            }
+          ],
+          "text": "Respiratory rate"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueQuantity": {
+          "value": 27,
+          "unit": "/min",
+          "system": "http://unitsofmeasure.org",
+          "code": "/min"
+        },
+        "id": "obs-118c2d9621be7dac01f36f74c3c6293c810420994c629ecc734128d734cc"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:9dbdb5e7a95058fd5d44382652e78d85",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "8310-5",
+              "display": "Body temperature"
+            }
+          ],
+          "text": "Body temperature"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueQuantity": {
+          "value": 38.2,
+          "unit": "°C",
+          "system": "http://unitsofmeasure.org",
+          "code": "Cel"
+        },
+        "id": "obs-5d598a23403f174d201c8b102f5022860842be6b0715a87427e296685737"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:77cba0f9066c867e05bfb0fa71852b0c",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "59408-5",
+              "display": "Oxygen saturation"
+            }
+          ],
+          "text": "Oxygen saturation"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueQuantity": {
+          "value": 91,
+          "unit": "%",
+          "system": "http://unitsofmeasure.org",
+          "code": "%"
+        },
+        "id": "obs-cc5f76b0eeb46a01b4bcad136e3d201fa0cf95ffc66493b34823abb40322"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:ac17fa68325b967ab4193dca83cc3a95",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "67775-7",
+              "display": "ACVPU scale"
+            }
+          ],
+          "text": "AVPU scale"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "248235005",
+              "display": "Responds to voice"
+            }
+          ],
+          "text": "Responds to voice"
+        },
+        "id": "obs-92061efa65f21a5e5ab509c3f47599e72e544af00c03c8fd29a6bc907bb3"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:5a8f85547bd0489f3ebcebacd24fcaf5",
+      "resource": {
+        "resourceType": "Observation",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/vitalsigns",
+            "https://example.org/fhir/StructureDefinition/handover-observation"
+          ]
+        },
+        "status": "final",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs",
+                "display": "Vital Signs"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "8480-6",
+              "display": "Systolic blood pressure"
+            }
+          ],
+          "text": "Systolic blood pressure"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "effectiveDateTime": "2026-03-08T15:05:00Z",
+        "issued": "2026-03-08T15:05:00Z",
+        "valueQuantity": {
+          "value": 89,
+          "unit": "mm[Hg]",
+          "system": "http://unitsofmeasure.org",
+          "code": "mm[Hg]"
+        },
+        "id": "obs-4894f4145050de9afeb6c15c23c730352eb7e902d56fe473811454afb443"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Observation"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:86c0f17e7f3865cd292aaba7c0c4324b",
+      "resource": {
+        "resourceType": "Procedure",
+        "identifier": [
+          {
+            "system": "urn:handover-pro:treatment-item",
+            "value": "icu-vasoactive-check"
+          }
+        ],
+        "status": "in-progress",
+        "code": {
+          "coding": [
+            {
+              "system": "urn:handover-pro:care:treatment-type",
+              "code": "other",
+              "display": "Otro"
+            }
+          ],
+          "text": "Otro"
+        },
+        "subject": {
+          "reference": "urn:uuid:9d6fc547f47bd53686004f48263d9ade",
+          "type": "Patient",
+          "identifier": {
+            "system": "urn:handover-pro:patient-id",
+            "value": "fixture-icu-1"
+          }
+        },
+        "encounter": {
+          "reference": "urn:uuid:faba9607e8f6e7f2ee1adaea777fde71",
+          "type": "Encounter",
+          "identifier": {
+            "system": "urn:handover-pro:encounter-id",
+            "value": "enc-fixture-icu-1"
+          }
+        },
+        "note": [
+          {
+            "text": "Titular vasoactivo y verificar acceso central"
+          }
+        ],
+        "performedPeriod": {
+          "start": "2026-03-08T15:10:00Z"
+        },
+        "meta": {
+          "profile": [
+            "https://example.org/fhir/StructureDefinition/handover-procedure"
+          ]
+        },
+        "id": "proc-32b8ec81e84aee7ed79dcd6f90d35eb7a9bc82e65276ccf46b31669c779"
+      },
+      "request": {
+        "method": "POST",
+        "url": "Procedure"
+      }
+    }
+  ]
+}

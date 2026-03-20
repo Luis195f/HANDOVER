@@ -1,7 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { FHIR_CODES, FHIR_EXTENSION_URLS } from '@/src/lib/codes';
+import { PROFILE_REGRESSION_SCENARIOS } from './fixtures/fhir/profileRegressionScenarios';
+
+const originalEnv = { ...process.env };
+
+vi.mock('expo-constants', () => ({
+  default: {
+    expoConfig: {
+      extra: {},
+    },
+  },
+}));
 
 const entryReference = (entry: { fullUrl?: string; resource: { resourceType: string; id?: string } }) =>
   entry.fullUrl ?? `${entry.resource.resourceType}/${entry.resource.id ?? ''}`;
@@ -11,7 +24,70 @@ const ACTIVE_PROFILE_EXTENSION_URL = FHIR_EXTENSION_URLS.ACTIVE_PROFILE;
 const readNestedExtension = (extension: { extension?: Array<{ url: string; valueString?: string }> }) =>
   Object.fromEntries((extension.extension ?? []).map((item) => [item.url, item.valueString]));
 
+const readFixtureBundle = (fixtureFile: string) =>
+  JSON.parse(readFileSync(new URL(`./fixtures/fhir/${fixtureFile}`, import.meta.url), 'utf8'));
+
+async function buildScenarioBundle(
+  fixtureFile: string,
+): Promise<{
+  bundle: ReturnType<typeof buildHandoverBundle>;
+  runtime: {
+    context: {
+      unitProfileId: string | null;
+      specialtyOverlayIds: readonly string[];
+    };
+  };
+}> {
+  const scenario = PROFILE_REGRESSION_SCENARIOS.find((candidate) => candidate.fixtureFile === fixtureFile);
+  if (!scenario) {
+    throw new Error(`Unknown regression fixture ${fixtureFile}`);
+  }
+
+  vi.resetModules();
+  process.env = { ...originalEnv };
+  delete process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON;
+  delete process.env.HANDOVER_PROFILE_ACTIVATION_JSON;
+  delete process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON;
+  delete process.env.HANDOVER_UNITS_JSON;
+  delete process.env.UNITS_CONFIG;
+
+  process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify(scenario.activation);
+  if (scenario.unitsConfig) {
+    process.env.UNITS_CONFIG = JSON.stringify(scenario.unitsConfig);
+  }
+
+  const { resolveHandoverProfileRuntime } = await import('@/src/lib/profile-runtime');
+  const { buildHandoverInputPayload, buildProfileTraceInput } = await import('@/src/screens/handover/submission');
+  const { buildHandoverBundle: buildScenarioHandoverBundle } = await import('@/src/lib/fhir-map');
+
+  const runtime = resolveHandoverProfileRuntime({
+    unitId: scenario.unitId,
+    specialtyId: scenario.specialtyId,
+  });
+
+  const payload = buildHandoverInputPayload(
+    scenario.values as any,
+    {},
+    buildProfileTraceInput(runtime),
+  );
+
+  return {
+    bundle: buildScenarioHandoverBundle(payload, { now: () => scenario.now }),
+    runtime,
+  };
+}
+
 describe('FHIR Composition', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...originalEnv };
+    delete process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON;
+    delete process.env.HANDOVER_PROFILE_ACTIVATION_JSON;
+    delete process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON;
+    delete process.env.HANDOVER_UNITS_JSON;
+    delete process.env.UNITS_CONFIG;
+  });
+
   it('includes required sections with resolvable references', () => {
     const bundle = buildHandoverBundle(
       {
@@ -187,5 +263,21 @@ describe('FHIR Composition', () => {
     );
     expect(contextObservation?.note?.[0]?.text).toContain('Reevaluar pupilas y Glasgow');
   });
+
+  it.each([
+    ['uci-adulto-contextual-bundle.json', 'critical-care', []],
+    ['hospitalizacion-general-medicina-interna-contextual-bundle.json', 'general-inpatient', []],
+    ['urgencias-contextual-bundle.json', 'emergency', []],
+    ['oncologia-eoprop-ia-contextual-bundle.json', 'ambulatory', ['onc']],
+  ])(
+    'keeps the contextual export stable for %s',
+    async (fixtureFile, expectedUnitProfileId, expectedOverlayIds) => {
+      const { bundle, runtime } = await buildScenarioBundle(fixtureFile);
+
+      expect(runtime.context.unitProfileId).toBe(expectedUnitProfileId);
+      expect(runtime.context.specialtyOverlayIds).toEqual(expectedOverlayIds);
+      expect(bundle).toEqual(readFixtureBundle(fixtureFile));
+    },
+  );
 });
 

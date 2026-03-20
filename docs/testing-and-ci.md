@@ -19,9 +19,9 @@ Usa este pipeline cuando toques auth, sync/queue, FHIR mapping, validacion clini
   ```bash
   pnpm -w test:smoke:forms
   ```
-- Validacion FHIR con fixture minima de transaccion:
+- Validacion FHIR con fixtures representativas versionadas:
   ```bash
-  pnpm -w validate:fhir:fixture
+  pnpm -w validate:fhir
   ```
 
 ## Alcance de los gates pilot-grade
@@ -32,6 +32,7 @@ La configuracion `vitest.pilot.config.ts` concentra suites reales para estos dom
 - validacion Zod del handover
 - runtime de perfiles
 - smoke tests del flujo seccionado de `HandoverForm`
+- regresion contextual de perfiles, MPAC/prioridad visible y `fhir-composition`
 
 La cobertura pilot-grade se evalua por archivo sobre estas rutas sensibles:
 - `src/lib/auth.ts`

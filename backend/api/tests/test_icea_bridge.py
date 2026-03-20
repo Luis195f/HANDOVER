@@ -1,6 +1,8 @@
 import datetime
+import json
 import os
 import types
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
@@ -33,6 +35,12 @@ LOINC_SYSTEM = 'http://loinc.org'
 HANDOVER_CONTEXT_SYSTEM = 'urn:handover-pro:context'
 HANDOVER_CONTEXT_COMPONENT_SYSTEM = 'urn:handover-pro:component'
 MODEL_ID = '11111111-1111-4111-8111-111111111111'
+FHIR_FIXTURE_DIR = Path(__file__).resolve().parents[3] / 'tests' / 'fixtures' / 'fhir'
+
+
+def load_fhir_fixture(name: str) -> dict:
+    with (FHIR_FIXTURE_DIR / name).open('r', encoding='utf-8') as handle:
+        return json.load(handle)
 
 
 def build_unreadable_encrypted_bundle() -> dict:
@@ -43,6 +51,7 @@ def build_unreadable_encrypted_bundle() -> dict:
         'nonce': 'AA==',
         'ciphertext': 'AA==',
     }
+
 
 def build_bridge_bundle(*, complete: bool = True) -> dict:
     bundle = build_icea_bundle(bundle_id='bundle-bridge-001', patient_id='pat-bridge-001', unit_id='icu-a')
@@ -216,6 +225,8 @@ def build_bridge_bundle_with_extra_medication() -> dict:
         }
     )
     return bundle
+
+
 class IceaBridgeMapperTests(TestCase):
     def test_mapper_builds_payload_with_quality_and_missingness_signals(self):
         payload = build_icea_bridge_payload(
@@ -350,6 +361,39 @@ class IceaBridgeMapperTests(TestCase):
         self.assertFalse(row['lineage']['contextual_signal_present'])
         self.assertIsNone(row['lineage']['contextual_contract_version'])
         self.assertIsNone(row['lineage']['contextual_signal'])
+
+    def test_contextual_contract_regression_fixtures_cover_uci_ward_ed_and_oncology(self):
+        scenarios = [
+            ('uci-adulto-contextual-bundle.json', 'critical-care', [], 1.0),
+            ('hospitalizacion-general-medicina-interna-contextual-bundle.json', 'general-inpatient', [], 1.0),
+            ('urgencias-contextual-bundle.json', 'emergency', [], 1.0),
+            ('oncologia-eoprop-ia-contextual-bundle.json', 'ambulatory', ['onc'], 1.0),
+        ]
+
+        for fixture_name, expected_profile_id, expected_overlay_ids, expected_pending_count in scenarios:
+            with self.subTest(fixture=fixture_name):
+                payload = build_icea_bridge_payload(
+                    load_fhir_fixture(fixture_name),
+                    request_id=f'req-{fixture_name}',
+                    scoring_mode='immediate_provisional',
+                    unit_id='fixture-unit',
+                )
+
+                self.assertEqual(payload['contextualSignal']['contract_version'], 'handover-icea-context-v1')
+                self.assertEqual(payload['contextualSignal']['profile_id'], expected_profile_id)
+                self.assertEqual(payload['contextualSignal']['overlay_ids'], expected_overlay_ids)
+                self.assertEqual(
+                    payload['contextualSignal']['case_mix_envelope']['observed_fields']['pending_critical_task_count']['value'],
+                    expected_pending_count,
+                )
+                self.assertIn(
+                    'nurse_to_patient_ratio',
+                    payload['contextualSignal']['case_mix_envelope']['pending_hospital_source_fields'],
+                )
+                self.assertIn(
+                    'Deterministic stratification only',
+                    payload['contextualSignal']['case_mix_envelope']['explainability_summary'],
+                )
 
 
 class IceaBridgeServiceTests(TestCase):

@@ -87,8 +87,8 @@ jobs:
       - name: End-to-end tests
         run: pnpm -w test:e2e
 
-      - name: Validate FHIR bundles
-        run: pnpm -w validate:fhir:fixture
+      - name: Validate representative FHIR bundles
+        run: pnpm -w validate:fhir
 
       - name: Upload unit coverage
         uses: actions/upload-artifact@v4

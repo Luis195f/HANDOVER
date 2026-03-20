@@ -223,7 +223,7 @@ La automatización usa Vitest junto con utilidades específicas para FHIR y segu
 - Linter: `pnpm -w lint`
 - Unit/integration y validaciones FHIR: `pnpm -w vitest run --reporter=verbose`
 - Cobertura ≥ 80 %: `pnpm -w vitest run --reporter=verbose --coverage`
-- Validación puntual de bundles FHIR: `pnpm validate:fhir`
+- Validación de bundles FHIR representativos: `pnpm validate:fhir`
 
 Los umbrales de cobertura están definidos en `vitest.config.ts` y se enfocan en seguridad (`src/lib/auth.ts`, `src/lib/net.ts`), validaciones (`src/validation/schemas.ts`) y componentes críticos (`src/screens/HandoverForm.tsx`).
 El reporte HTML queda en `coverage/unit/index.html` y el `lcov.info` en `coverage/unit/lcov.info` para integrar con Codecov u otras herramientas.
@@ -327,6 +327,7 @@ Explora la documentación técnica para conocer la arquitectura, configuración 
 
 - [Arquitectura general](docs/overview-architecture.md)
 - [Contrato base de perfiles clínicos](docs/profile-architecture.md)
+- [Playbook de rollout y gate de reanudación](docs/profile-rollout-playbook.md)
 - [Guía de onboarding](docs/dev-onboarding.md)
 - [Interoperabilidad FHIR](docs/fhir-and-interoperability.md)
 - [Seguridad y autenticación](docs/security-and-auth.md)

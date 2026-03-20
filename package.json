@@ -25,7 +25,7 @@
     "validate:fhir:fixture": "tsx scripts/validate-fhir.ts tests/fixtures/fhir/minimal-transaction-bundle.json",
     "gate:any-sensitive": "tsx scripts/check-sensitive-anys.ts",
     "gate:any-sensitive:write": "tsx scripts/check-sensitive-anys.ts --write-baseline",
-    "quality:pilot": "pnpm typecheck && pnpm lint:ci && pnpm gate:any-sensitive && pnpm test:pilot:coverage && pnpm validate:fhir:fixture",
+    "quality:pilot": "pnpm typecheck && pnpm lint:ci && pnpm gate:any-sensitive && pnpm test:pilot:coverage && pnpm validate:fhir",
     "test:e2e": "playwright test",
     "lint:ci": "eslint . --max-warnings=0"
   },
