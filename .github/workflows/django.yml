@@ -25,7 +25,7 @@ jobs:
       HANDOVER_FHIR_VALIDATION_MODE: off
       HANDOVER_REQUIRE_RBAC_ON_FHIR: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
@@ -72,7 +72,7 @@ jobs:
       HANDOVER_FHIR_VALIDATION_MODE: off
       HANDOVER_REQUIRE_RBAC_ON_FHIR: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
