@@ -254,4 +254,39 @@ export const PROFILE_REGRESSION_SCENARIOS: readonly ProfileRegressionScenario[] 
       closingSummary: 'Paciente oncohematológico con riesgo de neutropenia febril y continuidad segura de terapia.',
     },
   },
+  {
+    fixtureFile: 'contextual-clinical-context-bundle.json',
+    now: '2025-10-20T16:05:00Z',
+    activation: {
+      unitProfiles: ['specialized-critical-care'],
+      specialtyOverlays: ['neuro'],
+    },
+    unitId: 'neuroicu-1',
+    specialtyId: 'neuroicu',
+    values: {
+      patientId: 'fixture-context-1',
+      encounterId: 'enc-fixture-context-1',
+      author: baseAuthor,
+      bedsideChecklist: baseChecklist,
+      administrativeData: {
+        unit: 'UCI neuro',
+        census: 9,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-10-20T08:00:00Z',
+        shiftEnd: '2025-10-20T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      pendingTasks: [
+        {
+          id: 'context-task-neuro-1',
+          category: 'critical-task',
+          title: 'Reevaluar pupilas y Glasgow',
+          status: 'pending',
+          priority: 'critical',
+          dueBy: '2025-10-20T16:10:00Z',
+        },
+      ],
+    },
+  },
 ] as const;

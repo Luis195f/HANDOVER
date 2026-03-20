@@ -1,5 +1,6 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
+import { Text } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HandoverForm from '@/src/screens/HandoverForm';
@@ -83,6 +84,18 @@ vi.mock('@/src/screens/components/PsychosocialSection', () => ({ default: () => 
 vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
 vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ExportPdfButton', () => ({ ExportPdfButton: () => null }));
+vi.mock('@/src/screens/components/BedsideChecklistModal', () => ({
+  BedsideChecklistModal: ({ onCancel, onConfirm }: any) => (
+    <>
+      <Text testID="bedside-modal-cancel" onPress={onCancel}>
+        Cancelar checklist
+      </Text>
+      <Text testID="bedside-modal-confirm" onPress={onConfirm}>
+        Confirmar checklist
+      </Text>
+    </>
+  ),
+}));
 
 function buildFormMock(patientId: string) {
   const baseAdministrative = {
@@ -95,10 +108,18 @@ function buildFormMock(patientId: string) {
     shiftType: 'Noche',
     incidents: [],
   };
+  const baseBedsideChecklist = {
+    patientIdentityConfirmed: true,
+    allergiesReviewed: true,
+    linesAndDevicesChecked: true,
+    medicationPlanReviewed: true,
+    safetyMeasuresApplied: true,
+    questionsAnswered: true,
+  };
 
   return {
     control: {},
-    formState: { errors: {} },
+    formState: { errors: {}, isSubmitting: false },
     handleSubmit: (fn: any) => fn,
     trigger: vi.fn(async () => true),
     getValues: (field?: string) => {
@@ -108,6 +129,7 @@ function buildFormMock(patientId: string) {
           patientId,
           status: 'draft',
           signatures: {},
+          bedsideChecklist: baseBedsideChecklist,
           dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
           dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
         };
@@ -117,6 +139,7 @@ function buildFormMock(patientId: string) {
       if (field === 'signatures') return {};
       if (field === 'status') return 'draft';
       if (field === 'administrativeData.shiftStart') return baseAdministrative.shiftStart;
+      if (field === 'bedsideChecklist') return baseBedsideChecklist;
       return undefined;
     },
     getFieldState: () => ({ isDirty: false }),
@@ -135,6 +158,7 @@ function buildFormMock(patientId: string) {
           patientId,
           status: 'draft',
           signatures: {},
+          bedsideChecklist: baseBedsideChecklist,
           dxMedical: { system: SNOMED_SYSTEM, code: '', display: '' },
           dxNursing: { system: SNOMED_SYSTEM, code: '', display: '' },
           risksStructured: [],
@@ -146,6 +170,7 @@ function buildFormMock(patientId: string) {
       if (field === 'patientId') return patientId;
       if (field === 'administrativeData.unit') return baseAdministrative.unit;
       if (field === 'signatures') return {};
+      if (field === 'bedsideChecklist') return baseBedsideChecklist;
       return undefined;
     },
     setValue: vi.fn(),
@@ -193,5 +218,22 @@ describe('HandoverForm patient header', () => {
 
     expect(getByTestId('patient-banner-empty-title').props.children).toContain('Paciente no vinculado');
     expect(getByTestId('patient-banner-empty-subtitle').props.children).toContain('Asocia un ID para mostrar el banner.');
+  });
+
+  it('ejecuta los callbacks del modal bedside sin romper el formulario', () => {
+    mockUsePatientSummary.mockReturnValue({ loading: false, error: null, summary: null });
+    mockUseZodForm.mockReturnValue(buildFormMock('123'));
+
+    const { getByTestId } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '3', name: 'HandoverForm', params: { patientId: '123' } } as any}
+      />,
+    );
+
+    fireEvent.press(getByTestId('bedside-modal-cancel'));
+    fireEvent.press(getByTestId('bedside-modal-confirm'));
+
+    expect(getByTestId('bedside-modal-confirm')).toBeTruthy();
   });
 });

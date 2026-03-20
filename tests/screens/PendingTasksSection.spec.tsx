@@ -96,4 +96,21 @@ describe('PendingTasksSection', () => {
       expect(task?.id).toMatch(/^task-/);
     });
   });
+
+  it('bloquea pendientes de escalado incompletos y muestra un error útil', async () => {
+    const { getByLabelText, getByText, methods } = renderWithForm(<PendingTasksSection />);
+
+    fireEvent.press(getByLabelText('Tipo pendiente Escalado'));
+    fireEvent.changeText(getByLabelText('Detalle de pendiente'), 'Avisar al equipo médico');
+
+    expect(
+      getByText('Define el criterio de escalado antes de añadir un pendiente de tipo Escalado.'),
+    ).toBeTruthy();
+
+    fireEvent.press(getByLabelText('Añadir pendiente'));
+
+    await waitFor(() => {
+      expect(methods.getValues('pendingTasks')).toEqual([]);
+    });
+  });
 });

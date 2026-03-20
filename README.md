@@ -220,20 +220,17 @@ python manage.py transcribe_audio ./audio.m4a --language es
 La automatización usa Vitest junto con utilidades específicas para FHIR y seguridad.
 
 - Revisar tipos: `pnpm -w typecheck`
-- Linter: `pnpm -w lint`
-- Unit/integration y validaciones FHIR: `pnpm -w vitest run --reporter=verbose`
-- Cobertura ≥ 80 %: `pnpm -w vitest run --reporter=verbose --coverage`
-- Validación de bundles FHIR representativos: `pnpm validate:fhir`
+- Linter estricto: `pnpm -w lint:ci`
+- Suites pilot-grade sensibles: `pnpm -w test:pilot`
+- Cobertura pilot-grade local: `pnpm -w test:pilot:coverage`
+- Validación de bundles FHIR representativos: `pnpm -w validate:fhir`
 
-Los umbrales de cobertura están definidos en `vitest.config.ts` y se enfocan en seguridad (`src/lib/auth.ts`, `src/lib/net.ts`), validaciones (`src/validation/schemas.ts`) y componentes críticos (`src/screens/HandoverForm.tsx`).
-El reporte HTML queda en `coverage/unit/index.html` y el `lcov.info` en `coverage/unit/lcov.info` para integrar con Codecov u otras herramientas.
+Los umbrales de cobertura sensibles están definidos en `vitest.pilot.config.ts` y se enfocan en auth/ACL, queue/sync, `src/lib/fhir-map.ts`, `src/validation/schemas.ts`, `src/lib/profile-runtime.ts`, `src/screens/HandoverForm.tsx` y `src/screens/handover/submission.ts`.
+En local, `pnpm -w test:pilot:coverage` deja `lcov.info` bajo `coverage/pilot-grade/`. En CI, `pnpm -w test:pilot:coverage:ci` emite `lcov.info` y Cobertura XML bajo `coverage/`.
 
 ### CI y resiliencia del registry
 
-El workflow `CI` usa Node 20 y pnpm 10. El job de Node está configurado como “non-blocking” (`continue-on-error: true`) para mitigar errores `403` intermitentes del registry de npm; revisa los logs del paso `Install` para confirmar si ocurrió la incidencia.
-
-
-El workflow también instala navegadores Playwright y ejecuta E2E (`pnpm -w test:e2e`), por lo que las referencias a Playwright/E2E en PRs son válidas para CI mientras ese job permanezca activo en `.github/workflows/ci.yml`.
+El workflow `CI` usa Node 20 y pnpm 10. En el estado actual del repo, el job de Node es bloqueante: instala dependencias, ejecuta `pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage:ci`, instala Playwright, corre `pnpm -w test:e2e` y valida bundles con `pnpm -w validate:fhir`.
 
 ### Feature flags avanzadas por unidad (HANDOVER_UNITS_JSON)
 

@@ -1,8 +1,23 @@
+import type { DeviceSummary, PendingTaskSummary, RiskFlags, VitalsSnapshot } from '@/src/types/handover';
+
 export interface IceaDashboardTimingSummary {
   unitId: string;
   sectionId: string;
   avgDurationMs: number;
   samples: number;
+}
+
+export interface IceaDashboardClinicalPatient {
+  id: string;
+  name: string;
+  unitId: string;
+  bedLabel?: string;
+  vitals?: VitalsSnapshot;
+  devices?: DeviceSummary[];
+  risks?: RiskFlags;
+  pendingTasks?: PendingTaskSummary[];
+  lastIncidentAt?: string | null;
+  recentIncidentFlag?: boolean;
 }
 
 export interface IceaDashboardOperationalActivity {
@@ -53,6 +68,7 @@ export interface IceaDashboardUnitSummary {
   activity: IceaDashboardOperationalActivity;
   outbox: IceaDashboardOutboxUnitSummary;
   bridge: IceaDashboardBridgeUnitSummary;
+  clinicalPatients: IceaDashboardClinicalPatient[];
   handoverTiming: IceaDashboardTimingSummary[];
   alertsOpen: number;
   degraded: boolean;

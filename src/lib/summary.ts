@@ -210,6 +210,9 @@ function describeContingencyPlan(plan?: ContingencyPlan): string | undefined {
   if (plan.escalationContact) {
     parts.push(`Avisar a ${plan.escalationContact}`);
   }
+  if (plan.fallbackPlan?.trim()) {
+    parts.push(`Plan alternativo: ${plan.fallbackPlan.trim()}`);
+  }
 
   return parts.length > 0 ? parts.join('. ') : undefined;
 }

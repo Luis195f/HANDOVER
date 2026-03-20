@@ -162,4 +162,25 @@ describe('generateSBARSummary', () => {
     expect(summary.recommendation.length).toBeLessThanOrEqual(60);
     expect(summary.situation.endsWith('…')).toBe(true);
   });
+
+  it('incluye el plan alternativo de contingencia en el resumen SBAR', () => {
+    const summary = generateSBARSummary(
+      buildData({
+        contingencyPlan: {
+          watchItems: ['SatO2'],
+          immediateActions: ['Ajustar oxígeno'],
+          escalationCriteria: ['SatO2 < 92%'],
+          escalationContact: 'médico de guardia',
+          fallbackPlan: 'Trasladar a monitorización continua si no responde',
+        },
+      }),
+    );
+
+    expect(summary.background).toContain(
+      'Plan alternativo: Trasladar a monitorización continua si no responde',
+    );
+    expect(summary.recommendation).toContain(
+      'Plan alternativo: Trasladar a monitorización continua si no responde',
+    );
+  });
 });

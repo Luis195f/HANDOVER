@@ -207,7 +207,7 @@ export const SPECIALTY_OVERLAY_CATALOG: readonly SpecialtyOverlayCatalogEntry[] 
     label: 'Pediatria y subespecialidades',
     aliases: ['subespecialidades-pediatricas', 'onco-pediatria', 'peso-y-edad', 'ped'],
     clinicalFocus: 'Dependencia pediatrica aumentada, peso/edad, tolerancia y comunicacion con familia.',
-    allowedUnitProfiles: ['pediatric-critical-care'],
+    allowedUnitProfiles: ['general-inpatient', 'pediatric-critical-care'],
     readiness: 'registry-only',
   },
   {

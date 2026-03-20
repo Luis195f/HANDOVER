@@ -193,6 +193,7 @@ interface TaskAssessment {
   isOpen: boolean;
   isCritical: boolean;
   isUrgent: boolean;
+  isPriorityTask: boolean;
   isOverdue: boolean;
   isDueSoon: boolean;
   isReevaluation: boolean;
@@ -269,8 +270,12 @@ function assessTasks(tasks: readonly PendingTaskSummary[], referenceTimeMs: numb
     const dueMs = parseTimeMs(task.dueBy);
     const isOpen = task.status !== 'done';
     const isCritical =
-      Boolean(task.critical) || task.priority === 'critical' || task.category === 'escalation';
+      Boolean(task.critical) ||
+      task.priority === 'critical' ||
+      task.category === 'critical-task' ||
+      task.category === 'escalation';
     const isUrgent = isCritical || Boolean(task.urgent) || task.priority === 'urgent';
+    const isPriorityTask = isCritical || isUrgent;
     const isOverdue = Boolean(isOpen && dueMs != null && dueMs < referenceTimeMs);
     const isDueSoon = Boolean(
       isOpen && dueMs != null && dueMs >= referenceTimeMs && dueMs - referenceTimeMs <= DUE_SOON_THRESHOLD_MS,
@@ -283,6 +288,7 @@ function assessTasks(tasks: readonly PendingTaskSummary[], referenceTimeMs: numb
       isOpen,
       isCritical,
       isUrgent,
+      isPriorityTask,
       isOverdue,
       isDueSoon,
       isReevaluation: task.category === 'reevaluation',
@@ -324,7 +330,7 @@ function computeCoreDimensions(
   const openTasks = taskAssessments.filter((task) => task.isOpen);
   const criticalTasks = openTasks.filter((task) => task.isCritical);
   const urgentTasks = openTasks.filter((task) => task.isUrgent);
-  const overdueTasks = openTasks.filter((task) => task.isOverdue);
+  const overdueTasks = openTasks.filter((task) => task.isOverdue && !task.isPriorityTask);
   const reevaluationTasks = openTasks.filter((task) => task.isReevaluation);
   const alteredConsciousness = input.vitals.avpu != null && input.vitals.avpu !== 'A';
 
@@ -638,7 +644,7 @@ function buildClinicalChange(
 
 function buildPendingCritical(taskAssessments: readonly TaskAssessment[]): string[] {
   return taskAssessments
-    .filter((task) => task.isOpen && (task.isCritical || task.isUrgent || task.isOverdue))
+    .filter((task) => task.isOpen && task.isPriorityTask)
     .map((task) => `${task.title} (${task.priorityLabel}${task.isOverdue ? ', vencido' : ''})`);
 }
 

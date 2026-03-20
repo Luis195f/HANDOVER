@@ -35,9 +35,17 @@ describe('resolveHandoverProfileRuntime', () => {
     const runtime = resolveHandoverProfileRuntime({ unitId: 'neuroicu-1', specialtyId: 'neuroicu' });
 
     expect(runtime.context.usesCoreFallback).toBe(true);
-    expect(runtime.pack.id).toBe('handover-core');
+    expect(runtime.context.catalogUnitProfileId).toBe('specialized-critical-care');
+    expect(runtime.pack.id).toBe('specialized-critical-care');
+    expect(runtime.basePack.id).toBe('specialized-critical-care');
     expect(runtime.sectionVisibility.turno).toBe(true);
     expect(runtime.sectionVisibility.nutrition).toBe(false);
+    expect(runtime.requiredExtraFields).toEqual([]);
+    expect(runtime.checklistItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'patientIdentityConfirmed' }),
+      ]),
+    );
     expect(runtime.medicationQuickPicks).toEqual([]);
     expect(runtime.activeOverlays).toEqual([]);
   });
@@ -65,7 +73,9 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.pack.id).toBe('critical-care');
     expect(runtime.basePack.id).toBe('critical-care');
     expect(runtime.sectionVisibility.escalas).toBe(true);
-    expect(runtime.suggestedScales).toEqual(expect.arrayContaining(['Glasgow', 'Braden']));
+    expect(runtime.suggestedScales).toEqual([]);
+    expect(runtime.requiredExtraFields).toEqual([]);
+    expect(runtime.focusAreas).toEqual([]);
     expect(runtime.mergeTrace.map((entry) => entry.label)).toEqual(['HANDOVER Core', 'UCI adulto']);
   });
 
@@ -93,9 +103,50 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.context.usesCoreFallback).toBe(true);
     expect(runtime.pack.id).toBe('general-inpatient');
     expect(runtime.sectionVisibility.escalas).toBe(true);
-    expect(runtime.notes).toContain('Escalas pediátricas próximamente.');
+    expect(runtime.notes).toEqual([]);
     expect(runtime.context.overlaySelections.map((selection) => selection.overlayId)).toEqual(['pedsSubspecialties']);
     expect(runtime.context.specialtyOverlayIds).toEqual([]);
+  });
+
+  it('resolves a compatible base pack from canonical specialtyId without borrowing the default unit', async () => {
+    process.env.UNITS_CONFIG = JSON.stringify({
+      defaultUnit: 'uci-adulto',
+      units: [
+        { id: 'uci-adulto', name: 'UCI Adulto', specialty: 'icu', profileId: 'critical-care' },
+      ],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ specialtyId: 'ped' });
+
+    expect(runtime.context.unitId).toBeUndefined();
+    expect(runtime.context.specialtyId).toBe('ped');
+    expect(runtime.context.catalogUnitProfileId).toBe('general-inpatient');
+    expect(runtime.pack.id).toBe('general-inpatient');
+    expect(runtime.basePack.id).toBe('general-inpatient');
+  });
+
+  it('activates the pediatric overlay on a general pediatric floor when both base and overlay are active', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['general-inpatient'],
+      specialtyOverlays: ['pedsSubspecialties'],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'pediatria' });
+
+    expect(runtime.context.catalogUnitProfileId).toBe('general-inpatient');
+    expect(runtime.context.unitProfileId).toBe('general-inpatient');
+    expect(runtime.context.specialtyOverlayIds).toEqual(['pedsSubspecialties']);
+    expect(runtime.pack.id).toBe('general-inpatient');
+    expect(runtime.basePack.id).toBe('general-inpatient');
+    expect(runtime.activeOverlays.map((overlay) => overlay.id)).toEqual(['pedsSubspecialties']);
+    expect(runtime.suggestedScales).toEqual(expect.arrayContaining(['Barthel / Katz', 'CAM', 'PEWS local']));
+    expect(runtime.requiredExtraFields).toEqual(
+      expect.arrayContaining(['Dependencia funcional y fragilidad', 'Peso y edad', 'Comunicacion con familia']),
+    );
   });
 
   it('resolves an active critical-care UPP with profile-driven scales and quick-picks', async () => {
@@ -138,6 +189,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(criticalCare.visibleOutputs).toContain('Checklist de vigilancia critica');
     expect(criticalCare.checklistItems[0]?.label).toBe('Paciente, cama y objetivos criticos confirmados');
     expect(criticalCare.checklistItems[0]?.helper).toContain('metas ventilatorias');
+    expect(criticalCare.checklistItems.at(-1)?.label).toBe('Preguntas del equipo entrante resueltas');
 
     const generalInpatient = resolveHandoverProfileRuntime({ unitId: 'ward-mi', specialtyId: 'med' });
     expect(generalInpatient.focusAreas).toEqual(
@@ -146,6 +198,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(generalInpatient.suggestedScales).toEqual(expect.arrayContaining(['Barthel / Katz', 'CAM']));
     expect(generalInpatient.visibleOutputs).toContain('Riesgos de omision y alta compleja');
     expect(generalInpatient.checklistItems[1]?.label).toContain('conciliacion terapeutica');
+    expect(generalInpatient.checklistItems.at(-1)?.label).toBe('Preguntas del equipo entrante resueltas');
 
     const emergency = resolveHandoverProfileRuntime({ unitId: 'ed-main', specialtyId: 'ed' });
     expect(emergency.focusAreas).toEqual(
@@ -156,6 +209,7 @@ describe('resolveHandoverProfileRuntime', () => {
     );
     expect(emergency.visibleOutputs).toContain('Destino probable explicitado');
     expect(emergency.checklistItems[0]?.label).toContain('triage y motivo sindromico');
+    expect(emergency.checklistItems.at(-1)?.label).toBe('Preguntas del equipo entrante resueltas');
   });
 
   it('keeps hidden sections monotonic across compatible overlay merges while preserving trace order', async () => {

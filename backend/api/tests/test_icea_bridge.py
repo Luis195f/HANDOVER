@@ -14,11 +14,15 @@ from backend.api.clinical_storage import ENCRYPTED_BUNDLE_MARKER
 
 from backend.api.icea_bridge_service import (
     STORED_BUNDLE_UNAVAILABLE_ERROR,
+    _apply_remote_payload,
     _build_icea_plus_score_row,
+    _mark_failed,
     _normalize_remote_payload,
+    _persist_bridge_request_update,
     attempt_icea_bridge_delivery,
     enqueue_icea_bridge_request_for_bundle_record,
     load_icea_bridge_settings,
+    refresh_icea_bridge_request,
     serialize_bridge_request,
 )
 from backend.api.icea_payload_mapper import build_icea_bridge_payload, compute_payload_hash
@@ -705,6 +709,149 @@ class IceaBridgeServiceTests(TestCase):
         self.assertIsNone(current.received_at)
         self.assertEqual(current.attempts, 0)
         self.assertEqual(mock_schedule.call_count, 2)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_atomic_remote_apply_ignores_stale_payload_changed_during_final_persistence(self, mock_schedule):
+        initial = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        stale_worker_request = IceaBridgeRequest.objects.get(id=initial.id)
+        refreshed_bundle = build_bridge_bundle_with_extra_medication()
+
+        def normalize_side_effect(*args, **kwargs):
+            self.record.bundle_json = refreshed_bundle
+            self.record.save(update_fields=['bundle_json'])
+            enqueue_icea_bridge_request_for_bundle_record(
+                record=self.record,
+                scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            )
+            return _normalize_remote_payload(*args, **kwargs)
+
+        with patch('backend.api.icea_bridge_service._normalize_remote_payload', side_effect=normalize_side_effect):
+            result = _apply_remote_payload(
+                stale_worker_request,
+                {'status': 'accepted', 'jobId': 'job-old-run'},
+                202,
+                expected_payload_hash=stale_worker_request.payload_hash,
+                expected_idempotency_key=stale_worker_request.idempotency_key,
+            )
+
+        current = IceaBridgeRequest.objects.get(id=initial.id)
+        self.assertEqual(result.detail, 'stale_delivery_ignored')
+        self.assertEqual(current.status, IceaBridgeRequest.STATUS_QUEUED)
+        self.assertNotEqual(current.payload_hash, stale_worker_request.payload_hash)
+        self.assertIsNone(current.remote_refs_json)
+        self.assertIsNone(current.received_at)
+        self.assertEqual(current.attempts, 0)
+        self.assertEqual(mock_schedule.call_count, 1)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'ICEA_BRIDGE_STATUS_PATH': '/api/v1/icea-plus/status/',
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    def test_remote_refresh_ignores_stale_status_after_payload_refresh(self, mock_request, mock_schedule):
+        initial = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        IceaBridgeRequest.objects.filter(id=initial.id).update(
+            status=IceaBridgeRequest.STATUS_PENDING,
+            remote_refs_json={'jobId': 'job-old-run'},
+        )
+        stale_refresh_request = IceaBridgeRequest.objects.get(id=initial.id)
+        refreshed_bundle = build_bridge_bundle_with_extra_medication()
+
+        def remote_side_effect(*_args, **_kwargs):
+            self.record.bundle_json = refreshed_bundle
+            self.record.save(update_fields=['bundle_json'])
+            enqueue_icea_bridge_request_for_bundle_record(
+                record=self.record,
+                scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            )
+            remote_response = Mock()
+            remote_response.status_code = 200
+            remote_response.text = '{"status":"accepted","jobId":"job-old-run"}'
+            remote_response.headers = {'Content-Type': 'application/json'}
+            remote_response.json.return_value = {'status': 'accepted', 'jobId': 'job-old-run'}
+            return remote_response
+
+        mock_request.side_effect = remote_side_effect
+
+        result = refresh_icea_bridge_request(stale_refresh_request)
+
+        current = IceaBridgeRequest.objects.get(id=initial.id)
+        self.assertEqual(result.detail, 'stale_delivery_ignored')
+        self.assertEqual(current.status, IceaBridgeRequest.STATUS_QUEUED)
+        self.assertNotEqual(current.payload_hash, stale_refresh_request.payload_hash)
+        self.assertIsNone(current.remote_refs_json)
+        self.assertIsNone(current.last_http_status)
+        self.assertIsNone(current.received_at)
+        self.assertEqual(mock_schedule.call_count, 2)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    def test_mark_failed_does_not_overwrite_refreshed_payload_during_final_persistence(self, mock_schedule):
+        initial = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        stale_worker_request = IceaBridgeRequest.objects.get(id=initial.id)
+        refreshed_bundle = build_bridge_bundle_with_extra_medication()
+
+        def persist_side_effect(*args, **kwargs):
+            self.record.bundle_json = refreshed_bundle
+            self.record.save(update_fields=['bundle_json'])
+            enqueue_icea_bridge_request_for_bundle_record(
+                record=self.record,
+                scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            )
+            return _persist_bridge_request_update(*args, **kwargs)
+
+        with patch('backend.api.icea_bridge_service._persist_bridge_request_update', side_effect=persist_side_effect):
+            result = _mark_failed(
+                stale_worker_request,
+                detail='transport_error',
+                http_status=503,
+                expected_payload_hash=stale_worker_request.payload_hash,
+                expected_idempotency_key=stale_worker_request.idempotency_key,
+            )
+
+        current = IceaBridgeRequest.objects.get(id=initial.id)
+        self.assertEqual(result.detail, 'stale_delivery_ignored')
+        self.assertEqual(current.status, IceaBridgeRequest.STATUS_QUEUED)
+        self.assertNotEqual(current.payload_hash, stale_worker_request.payload_hash)
+        self.assertEqual(current.last_error, '')
+        self.assertIsNone(current.last_http_status)
+        self.assertIsNone(current.received_at)
+        self.assertEqual(mock_schedule.call_count, 1)
 
     @patch.dict(
         os.environ,

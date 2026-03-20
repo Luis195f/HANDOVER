@@ -97,7 +97,7 @@ const EXPECTED_COMPATIBILITY = {
   gastroHepato: ['general-inpatient', 'emergency', 'ambulatory', 'home-care'],
   endo: ['general-inpatient', 'emergency', 'ambulatory', 'home-care'],
   gynObs: ['maternal-perinatal', 'general-inpatient', 'emergency', 'ambulatory', 'home-care'],
-  pedsSubspecialties: ['pediatric-critical-care'],
+  pedsSubspecialties: ['general-inpatient', 'pediatric-critical-care'],
   ophthalEnt: ['ambulatory', 'emergency', 'general-inpatient'],
   plasticsBurns: ['emergency', 'general-inpatient', 'home-care'],
   criticalEmergency: ['emergency', 'critical-care'],

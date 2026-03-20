@@ -1,12 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import PriorityBadge from '@/src/components/priority/PriorityBadge';
 import { UNITS } from '@/src/config/units';
-import type { PatientListItem } from '@/src/data/mockPatients';
 import { useAdminDashboardData } from '@/src/hooks/useAdminDashboardData';
-import { apiGet } from '@/src/lib/api';
-import { buildPriorityInputs, normalizePatientListResponse } from '@/src/lib/patientListData';
+import { computeAlerts, type HandoverAlertsSource } from '@/src/lib/alerts';
+import { buildPriorityInputs } from '@/src/lib/patientListData';
 import { buildPriorityUiModel, getPriorityToneStyles, hasActionablePrioritySignal } from '@/src/lib/priority-ui';
 import { computePriorityList, type PrioritizedPatient } from '@/src/lib/priority';
 import { hasRole } from '@/src/security/acl';
@@ -34,59 +33,37 @@ export function SupervisorDashboardScreen() {
   const canViewDashboard = hasRole(session, ['supervisor', 'admin']);
   const isDemoSession = session?.mode === 'demo';
   const [selectedUnitId, setSelectedUnitId] = useState<string>(session?.units?.[0] ?? UNITS[0]?.id ?? '');
-  const [priorityPatients, setPriorityPatients] = useState<PatientListItem[]>([]);
-  const [prioritySnapshot, setPrioritySnapshot] = useState<PrioritizedPatient[]>([]);
-  const [priorityLoading, setPriorityLoading] = useState(false);
-  const [priorityError, setPriorityError] = useState<string | null>(null);
   const { data, loading, error, reload, stale } = useAdminDashboardData(canViewDashboard, {
     unitId: selectedUnitId,
     demoMode: isDemoSession,
   });
 
-  useEffect(() => {
-    if (!canViewDashboard || !selectedUnitId) {
-      setPriorityPatients([]);
-      setPrioritySnapshot([]);
-      setPriorityError(null);
-      setPriorityLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadPriorityPatients() {
-      setPriorityLoading(true);
-      try {
-        const payload = await apiGet(`/api/patients?unit=${encodeURIComponent(selectedUnitId)}`);
-        if (cancelled) return;
-        const patients = normalizePatientListResponse(payload, selectedUnitId);
-        setPriorityPatients(patients);
-        setPrioritySnapshot(computePriorityList(buildPriorityInputs(patients)));
-        setPriorityError(null);
-      } catch {
-        if (cancelled) return;
-        setPriorityPatients([]);
-        setPrioritySnapshot([]);
-        setPriorityError('No se pudo calcular la prioridad contextual con el censo actual de la unidad.');
-      } finally {
-        if (!cancelled) {
-          setPriorityLoading(false);
-        }
-      }
-    }
-
-    void loadPriorityPatients();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canViewDashboard, selectedUnitId]);
-
   const selectedUnit = useMemo(
     () => data?.units.find((unit) => unit.unitId === selectedUnitId) ?? data?.units[0] ?? null,
     [data, selectedUnitId],
   );
-  const patientById = useMemo(() => new Map(priorityPatients.map((patient) => [patient.id, patient] as const)), [priorityPatients]);
+  const priorityPatients = useMemo(() => selectedUnit?.clinicalPatients ?? [], [selectedUnit]);
+  const prioritySnapshot = useMemo<PrioritizedPatient[]>(
+    () => computePriorityList(buildPriorityInputs(priorityPatients)),
+    [priorityPatients],
+  );
+  const patientById = useMemo(
+    () => new Map(priorityPatients.map((patient) => [patient.id, patient] as const)),
+    [priorityPatients],
+  );
+  const alertsByPatient = useMemo(() => {
+    return priorityPatients.reduce<Record<string, ReturnType<typeof computeAlerts>>>((acc, patient) => {
+      const source: HandoverAlertsSource = {
+        vitals: patient.vitals ?? {},
+        risks: patient.risks ?? {},
+        risksStructured: [],
+        braden: undefined,
+        clinicalScales: undefined,
+      };
+      acc[patient.id] = computeAlerts(source);
+      return acc;
+    }, {});
+  }, [priorityPatients]);
   const actionablePriorityRows = useMemo(
     () =>
       prioritySnapshot
@@ -96,9 +73,10 @@ export function SupervisorDashboardScreen() {
           ui: buildPriorityUiModel({
             patient,
             pendingTasks: patientById.get(patient.patientId)?.pendingTasks,
+            alerts: alertsByPatient[patient.patientId] ?? [],
           }),
         })),
-    [patientById, prioritySnapshot],
+    [alertsByPatient, patientById, prioritySnapshot],
   );
   const prioritySummary = useMemo(
     () =>
@@ -199,16 +177,19 @@ export function SupervisorDashboardScreen() {
           <View style={styles.panel} testID="dashboard-priority-panel">
             <Text style={styles.panelTitle}>Prioridad contextual</Text>
             <Text style={styles.panelHint}>
-              Se calcula sobre el censo actual de la unidad con la misma lógica visible en la lista de pacientes.
+              Se calcula sobre el último handover clínico persistido por paciente, con la misma lógica visible en la lista de pacientes.
             </Text>
-            {priorityLoading ? <Text style={styles.emptyText}>Calculando prioridad contextual...</Text> : null}
-            {priorityError ? <Text style={styles.panelWarn}>{priorityError}</Text> : null}
-            {!priorityLoading && !priorityError && actionablePriorityRows.length === 0 ? (
+            {priorityPatients.length === 0 ? (
+              <Text style={styles.emptyText}>
+                Sin snapshots clínicos persistidos con señal utilizable para esta unidad.
+              </Text>
+            ) : null}
+            {priorityPatients.length > 0 && actionablePriorityRows.length === 0 ? (
               <Text style={styles.emptyText}>
                 Sin señal contextual suficiente; se mantiene la lectura operativa sin forzar reordenaciones.
               </Text>
             ) : null}
-            {!priorityLoading && !priorityError && actionablePriorityRows.length > 0 ? (
+            {actionablePriorityRows.length > 0 ? (
               <>
                 <View style={styles.prioritySummaryRow}>
                   <View style={styles.prioritySummaryChip}>

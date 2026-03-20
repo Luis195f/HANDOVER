@@ -228,5 +228,41 @@ describe('MPAC v1', () => {
     expect(result.reasons).toContain('PROFILE_CONTEXT');
     expect(result.reasonSummary).toContain('contexto');
   });
+
+  it('treats critical-task as critical and keeps overdue routine work out of pendingCritical', async () => {
+    const { computeMPACFromInput } = await import('@/src/lib/mpac');
+
+    const result = computeMPACFromInput({
+      patientId: 'pat-task-semantics',
+      displayName: 'Paciente tareas',
+      vitals: { rr: 18, spo2: 97, tempC: 36.8, sbp: 118, hr: 84 },
+      devices: [],
+      risks: {},
+      pendingTasks: [
+        {
+          id: 'routine-overdue',
+          title: 'Control administrativo vencido',
+          priority: 'routine',
+          category: 'other',
+          dueBy: '2024-02-01T08:00:00Z',
+        },
+        {
+          id: 'critical-category',
+          title: 'Revisar tarea crítica pendiente',
+          priority: 'routine',
+          category: 'critical-task',
+          dueBy: '2024-02-01T08:15:00Z',
+        },
+      ],
+      referenceTime: '2024-02-01T09:00:00Z',
+    });
+
+    expect(result.reasons).toContain('PENDING_URGENT_TASK');
+    expect(result.pendingCriticalTasksCount).toBe(1);
+    expect(result.explanation.pendingCritical).toEqual([
+      'Revisar tarea crítica pendiente (critico, vencido)',
+    ]);
+    expect(result.explanation.pendingCritical.join(' ')).not.toContain('Control administrativo vencido');
+  });
 });
 

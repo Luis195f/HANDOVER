@@ -395,7 +395,12 @@ const hasCustomChecklistItems = (items?: readonly BedsideChecklistItem[]): boole
 const resolveChecklistItems = (
   pack: UnitProfileRuntimePack,
   features: UnitFeatureFlags,
+  allowContextualChecklist: boolean,
 ): BedsideChecklistItem[] => {
+  if (!allowContextualChecklist) {
+    return [...DEFAULT_BEDSIDE_CHECKLIST_ITEMS];
+  }
+
   if (hasCustomChecklistItems(features.checklistItems)) {
     return [...(features.checklistItems ?? DEFAULT_BEDSIDE_CHECKLIST_ITEMS)];
   }
@@ -487,11 +492,13 @@ export const resolveHandoverProfileRuntime = ({
   specialtyId?: string | null;
 }): HandoverProfileRuntime => {
   const normalizedRequestedUnitId = normalizeUnitId(unitId);
+  const normalizedRequestedSpecialtyId = normalizeUnitId(specialtyId);
   const requestedUnitConfig = getUnitConfig(normalizedRequestedUnitId);
   const requestedCatalogUnit = normalizedRequestedUnitId ? UNITS_BY_ID[normalizedRequestedUnitId] : undefined;
   const defaultUnitConfig = getDefaultUnitConfig();
   const shouldUseDefaultConfiguredUnit =
     !requestedUnitConfig &&
+    !normalizedRequestedSpecialtyId &&
     Boolean(defaultUnitConfig?.profileId) &&
     (!requestedCatalogUnit ||
       requestedCatalogUnit.profileId === defaultUnitConfig?.profileId ||
@@ -502,16 +509,17 @@ export const resolveHandoverProfileRuntime = ({
       ? normalizedRequestedUnitId
       : effectiveUnitConfig?.id ?? normalizedRequestedUnitId;
   const effectiveSpecialtyId =
-    specialtyId ??
-    requestedUnitConfig?.specialty ??
-    (shouldUseDefaultConfiguredUnit ? effectiveUnitConfig?.specialty : undefined);
+    normalizedRequestedSpecialtyId ??
+    requestedUnitConfig?.specialty;
   const context = resolveProfileContext({
     unitId: effectiveUnitId,
     specialtyId: effectiveSpecialtyId,
   });
   const features = resolveUnitFeatureFlags(effectiveUnitId);
   const compatibilityProfileId =
-    context.unitProfileId == null && effectiveUnitConfig?.profileId ? effectiveUnitConfig.profileId : null;
+    context.unitProfileId == null
+      ? (context.catalogUnitProfileId ?? effectiveUnitConfig?.profileId ?? null)
+      : null;
   const baseResolution = resolveBasePack(context, compatibilityProfileId);
   const basePack = baseResolution.pack;
   const overlayPacks = context.specialtyOverlayIds
@@ -537,6 +545,7 @@ export const resolveHandoverProfileRuntime = ({
   const fieldVisibility = resolveFieldVisibility(pack, features);
   const notes = resolveNotes(pack, features);
   const sectionVisibility = resolveSectionVisibility(pack, fieldVisibility);
+  const exposeContextualProfileCopy = context.unitProfileId != null;
   const mergeTrace = [
     buildMergeTraceEntry('core', HANDOVER_CORE_RUNTIME_PACK),
     ...(baseResolution.sourcePack
@@ -569,17 +578,17 @@ export const resolveHandoverProfileRuntime = ({
     sectionVisibility,
     fieldVisibility,
     features,
-    checklistItems: resolveChecklistItems(pack, features),
-    requiredExtraFields: pack.requiredExtraFields ?? [],
-    optionalExtraFields: pack.optionalExtraFields ?? [],
-    focusAreas: pack.focusAreas ?? [],
-    explanations: pack.explanations ?? [],
-    suggestedScales: pack.scales ?? [],
-    sentinelEvents: pack.sentinelEvents ?? [],
-    visibleOutputs: pack.visibleOutputs ?? [],
-    notes,
-    medicationQuickPicks: pack.quickPicks?.medications ?? [],
-    treatmentQuickPicks: pack.quickPicks?.treatments ?? [],
+    checklistItems: resolveChecklistItems(pack, features, exposeContextualProfileCopy),
+    requiredExtraFields: exposeContextualProfileCopy ? pack.requiredExtraFields ?? [] : [],
+    optionalExtraFields: exposeContextualProfileCopy ? pack.optionalExtraFields ?? [] : [],
+    focusAreas: exposeContextualProfileCopy ? pack.focusAreas ?? [] : [],
+    explanations: exposeContextualProfileCopy ? pack.explanations ?? [] : [],
+    suggestedScales: exposeContextualProfileCopy ? pack.scales ?? [] : [],
+    sentinelEvents: exposeContextualProfileCopy ? pack.sentinelEvents ?? [] : [],
+    visibleOutputs: exposeContextualProfileCopy ? pack.visibleOutputs ?? [] : [],
+    notes: exposeContextualProfileCopy ? notes : [],
+    medicationQuickPicks: exposeContextualProfileCopy ? pack.quickPicks?.medications ?? [] : [],
+    treatmentQuickPicks: exposeContextualProfileCopy ? pack.quickPicks?.treatments ?? [] : [],
   };
 };
 

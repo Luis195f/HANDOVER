@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 
 import type { PendingTask } from '@/src/types/handover';
-import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { zPendingTask, type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 
 type Option<TValue extends string> = {
   label: string;
@@ -93,11 +93,22 @@ export function PendingTasksSection() {
     name: 'pendingTasks',
   });
   const [draft, setDraft] = useState<PendingTask>(createTaskDraft);
-  const canAddTask = useMemo(() => draft.title.trim().length > 0, [draft.title]);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const requiresEscalationCriteria =
+    draft.category === 'escalation' && (draft.escalationCriteria?.trim().length ?? 0) === 0;
+  const canAddTask = useMemo(
+    () => draft.title.trim().length > 0 && !requiresEscalationCriteria,
+    [draft.title, requiresEscalationCriteria],
+  );
+
+  const updateDraft = (updater: (current: PendingTask) => PendingTask) => {
+    setDraftError(null);
+    setDraft(updater);
+  };
 
   const handleAddTask = () => {
     if (!canAddTask) return;
-    append({
+    const nextTask = {
       ...draft,
       id: buildTaskId(),
       title: draft.title.trim(),
@@ -105,8 +116,15 @@ export function PendingTasksSection() {
       escalationCriteria: draft.escalationCriteria?.trim() || undefined,
       notes: draft.notes?.trim() || undefined,
       dueBy: draft.dueBy?.trim() || undefined,
-    });
+    };
+    const parsedTask = zPendingTask.safeParse(nextTask);
+    if (!parsedTask.success) {
+      setDraftError(parsedTask.error.issues[0]?.message ?? 'No se pudo añadir el pendiente.');
+      return;
+    }
+    append(parsedTask.data);
     setDraft(createTaskDraft());
+    setDraftError(null);
   };
 
   return (
@@ -118,7 +136,7 @@ export function PendingTasksSection() {
           label: 'Tipo',
           options: CATEGORY_OPTIONS,
           selected: draft.category,
-          onSelect: (value) => setDraft((current) => ({ ...current, category: value })),
+          onSelect: (value) => updateDraft((current) => ({ ...current, category: value })),
           accessibilityPrefix: 'Tipo pendiente',
         })}
 
@@ -126,7 +144,7 @@ export function PendingTasksSection() {
           label: 'Prioridad',
           options: PRIORITY_OPTIONS,
           selected: draft.priority,
-          onSelect: (value) => setDraft((current) => ({ ...current, priority: value })),
+          onSelect: (value) => updateDraft((current) => ({ ...current, priority: value })),
           accessibilityPrefix: 'Prioridad pendiente',
         })}
 
@@ -134,7 +152,7 @@ export function PendingTasksSection() {
           label: 'Estado',
           options: STATUS_OPTIONS,
           selected: draft.status,
-          onSelect: (value) => setDraft((current) => ({ ...current, status: value })),
+          onSelect: (value) => updateDraft((current) => ({ ...current, status: value })),
           accessibilityPrefix: 'Estado pendiente',
         })}
 
@@ -145,7 +163,7 @@ export function PendingTasksSection() {
             style={styles.input}
             placeholder="Ej: reevaluar SatO2 en 30 min"
             value={draft.title}
-            onChangeText={(text) => setDraft((current) => ({ ...current, title: text }))}
+            onChangeText={(text) => updateDraft((current) => ({ ...current, title: text }))}
           />
         </View>
 
@@ -157,7 +175,7 @@ export function PendingTasksSection() {
               style={styles.input}
               placeholder="2026-03-19T10:30:00Z"
               value={draft.dueBy ?? ''}
-              onChangeText={(text) => setDraft((current) => ({ ...current, dueBy: text }))}
+              onChangeText={(text) => updateDraft((current) => ({ ...current, dueBy: text }))}
             />
           </View>
           <View style={styles.spacer} />
@@ -168,7 +186,7 @@ export function PendingTasksSection() {
               style={styles.input}
               placeholder="Enfermera entrante / médico guardia"
               value={draft.owner ?? ''}
-              onChangeText={(text) => setDraft((current) => ({ ...current, owner: text }))}
+              onChangeText={(text) => updateDraft((current) => ({ ...current, owner: text }))}
             />
           </View>
         </View>
@@ -180,8 +198,16 @@ export function PendingTasksSection() {
             style={styles.input}
             placeholder="Ej: avisar si SatO2 < 92% o dolor no controlado"
             value={draft.escalationCriteria ?? ''}
-            onChangeText={(text) => setDraft((current) => ({ ...current, escalationCriteria: text }))}
+            onChangeText={(text) => updateDraft((current) => ({ ...current, escalationCriteria: text }))}
           />
+          {requiresEscalationCriteria ? (
+            <Text style={styles.errorText}>
+              Define el criterio de escalado antes de añadir un pendiente de tipo Escalado.
+            </Text>
+          ) : null}
+          {!requiresEscalationCriteria && draftError ? (
+            <Text style={styles.errorText}>{draftError}</Text>
+          ) : null}
         </View>
 
         <View style={styles.field}>
@@ -192,7 +218,7 @@ export function PendingTasksSection() {
             multiline
             placeholder="Contexto breve para el equipo entrante"
             value={draft.notes ?? ''}
-            onChangeText={(text) => setDraft((current) => ({ ...current, notes: text }))}
+            onChangeText={(text) => updateDraft((current) => ({ ...current, notes: text }))}
           />
         </View>
 
@@ -258,6 +284,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: '#fff',
   },
+  errorText: { color: '#B91C1C', marginTop: 6 },
   textArea: { minHeight: 72, textAlignVertical: 'top' },
   segmentedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
