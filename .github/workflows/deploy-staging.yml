@@ -1,4 +1,4 @@
-name: Deploy to Staging
+name: Deploy Web Staging (static export)
 
 on:
   push:
