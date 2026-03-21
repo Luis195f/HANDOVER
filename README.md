@@ -217,12 +217,15 @@ python manage.py transcribe_audio ./audio.m4a --language es
 
 ## Pruebas
 
-La automatización usa Vitest junto con utilidades específicas para FHIR y seguridad.
+La automatización usa Vitest como runner principal de frontend y `pytest` para Django/DRF.
 
 - Revisar tipos: `pnpm -w typecheck`
 - Linter estricto: `pnpm -w lint:ci`
-- Suites pilot-grade sensibles: `pnpm -w test:pilot`
-- Cobertura pilot-grade local: `pnpm -w test:pilot:coverage`
+- Runner principal JS: `pnpm test`
+- Suites pilot-grade sensibles con cobertura: `pnpm -w test:pilot:coverage`
+- Runner secundario Vitest general: `pnpm -w test:unit`
+- Runner legacy de compatibilidad: `pnpm -w test:legacy`
+- Runner backend: `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
 - Validación de bundles FHIR representativos: `pnpm -w validate:fhir`
 
 Los umbrales de cobertura sensibles están definidos en `vitest.pilot.config.ts` y se enfocan en auth/ACL, queue/sync, `src/lib/fhir-map.ts`, `src/validation/schemas.ts`, `src/lib/profile-runtime.ts`, `src/screens/HandoverForm.tsx` y `src/screens/handover/submission.ts`.
@@ -313,11 +316,14 @@ Se recomienda activar Dependabot para revisar automáticamente librerías fronte
 
 ## Despliegue y release candidate
 
-Consulta `docs/DEPLOY.md` para builds Android/iOS/Web. Las notas de la versión RC actual están en `RELEASE_NOTES.md` y los cambios detallados en `CHANGELOG.md`. Para publicar una RC:
+Consulta `docs/DEPLOY.md` para el estado real del despliegue. La topología automatizada prioritaria del repo es la exportación web estática en staging mediante `Dockerfile` + `docker-compose.yml` + `.github/workflows/deploy-staging.yml`; el backend Django sigue siendo un servicio separado con arranque `gunicorn` vía `Procfile`.
 
-1. Ejecuta los cheques (`pnpm -w typecheck`, `pnpm -w lint`, `pnpm -w vitest run --reporter=verbose`).
+Las notas de la versión RC actual están en `RELEASE_NOTES.md` y los cambios detallados en `CHANGELOG.md`. Para publicar una RC:
+
+1. Ejecuta los cheques (`pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm test`, `pnpm -w validate:fhir`).
 2. Genera los binarios siguiendo la guía de despliegue.
 3. Crea el tag `v0.4.0-rc.1` y sube artefactos + notas al repositorio.
+4. Trata el tag Git + `RELEASE_NOTES.md` como fuente de verdad del release piloto; `package.json` y `app.config.ts` no están sincronizados automáticamente con el identificador RC.
 
 ## Para desarrolladores
 Explora la documentación técnica para conocer la arquitectura, configuración y flujos clave antes de contribuir al proyecto.

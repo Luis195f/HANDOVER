@@ -25,14 +25,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      # En PRs permitimos lockfile flexible para no bloquear iteración.
-      # En main (push) exigimos lockfile consistente.
-      - name: Install dependencies (PR)
-        if: github.event_name == 'pull_request'
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Install dependencies (push to main)
-        if: github.event_name == 'push'
+      - name: Install dependencies (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
       - name: Type check
@@ -44,8 +37,9 @@ jobs:
       - name: Sensitive any guard
         run: pnpm -w gate:any-sensitive
 
-      # Genera cobertura pilot-grade (lcov + Cobertura XML) en /coverage
-      - name: Pilot-grade critical suites (with coverage)
+      # Misma bateria que `pnpm test`; en CI usamos la variante con cobertura
+      # para publicar artefactos lcov + Cobertura sin abrir otro runner JS.
+      - name: Primary JS test runner (pilot-grade, with coverage)
         run: pnpm -w test:pilot:coverage:ci
 
       # Python deps para genbadge (FIX: pin setuptools para recuperar pkg_resources)
@@ -90,9 +84,9 @@ jobs:
       - name: Validate representative FHIR bundles
         run: pnpm -w validate:fhir
 
-      - name: Upload unit coverage
+      - name: Upload pilot coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-unit
+          name: coverage-pilot
           path: coverage/lcov.info
 

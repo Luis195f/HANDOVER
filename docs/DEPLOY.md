@@ -1,128 +1,132 @@
-# Despliegue y Release Candidate
+# Despliegue y release piloto
 
-Esta guía describe cómo generar builds para Android, iOS y Web, así como los requisitos de entorno para preparar el Release Candidate `v0.4.0-rc.1`.
+Esta guía describe el estado real del despliegue en HANDOVER y deja una topología prioritaria explícita para el piloto.
 
-## Pre-requisitos
+## Topología objetivo prioritaria
 
-- Node.js 20 y pnpm 10 instalados en la máquina de build (los mismos usados por CI).
-- Cuenta en Expo/EAS con permisos para el proyecto (`app.json > expo.extra.eas.projectId`).
-- Archivo `.env` con configuración OIDC/FHIR actualizado y sincronizado en el servicio de secretos que uses.
+La topología prioritaria que hoy sí está respaldada por archivos reales del repo es esta:
 
-### Variables de entorno críticas
+- Frontend web exportado con Expo usando el `Dockerfile` raíz.
+- Ese artefacto web se sirve desde `nginx:alpine` usando `docker-compose.yml`.
+- El workflow [`.github/workflows/deploy-staging.yml`](../.github/workflows/deploy-staging.yml) despliega esa web estática en el VPS `staging` bajo `/srv/handover-staging`.
+- `config/staging.env` es la fuente de build args públicos para esa exportación.
 
-| Contexto | Variable | Descripción |
-| --- | --- | --- |
-| App runtime | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`, `OIDC_SCOPE`, `OIDC_REDIRECT_SCHEME` | Login OIDC seguro mediante `expo-auth-session`. |
-| App runtime | `FHIR_BASE_URL` / `EXPO_PUBLIC_FHIR_BASE_URL` | Endpoint FHIR con HTTPS obligatorio. |
-| App runtime | `EXPO_PUBLIC_ALLOWED_UNITS`, `EXPO_PUBLIC_ALLOW_ALL_UNITS`, `EXPO_PUBLIC_BYPASS_SCOPE` | Configuración RBAC/ACL consumida por `src/security/acl.ts`. |
-| App runtime | `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` | Activa la firma cliente (ECDSA P-256 + SHA-256) del Bundle FHIR; si no hay WebCrypto/clave, el envío sigue sin firma. |
-| App runtime | `EXPO_PUBLIC_STORAGE_NAMESPACE` | Namespacing de almacenamiento seguro/offline. |
-| Offline/Red | `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` | Ajustes de reintentos en la cola offline. La clave de cifrado offline se genera en runtime y no se inyecta por env público. |
-| Builds | `EXPO_TOKEN` | Necesario para `eas build` en CI o cuando no se usa login interactivo. |
-| Builds | `ANDROID_KEYSTORE_*` | Variables esperadas por Gradle si generas `.aab/.apk` firmados. |
-| Builds | `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `EAS_NO_VCS` | Variables requeridas por Expo/EAS para subir builds iOS. |
+Límite actual, explícito:
 
-> Nota: El workflow `CI` ejecuta el job de Node como bloqueante, por lo que fallos en dependencias o validaciones detendrán la pipeline. Si reproduces la pipeline en tu entorno de release, conserva esa configuración o usa un cache privado.
+- El repo no define hoy un `docker-compose` full-stack para Django.
+- El backend sigue siendo una pieza separada y su arranque documentado real es el comando del [`Procfile`](../Procfile).
+- `config/nginx/handover.conf` es un template de reverse proxy hacia `127.0.0.1:8000`; no forma parte del contenedor web exportado.
 
-> Seguridad: no publiques credenciales del proveedor de IA, tokens privilegiados ni credenciales eIDAS en `EXPO_PUBLIC_*`; el cliente solo debe conocer endpoints y flags no sensibles.
+## Topologías secundarias o residuales
 
-## Instalación común
+- Backend Django manual o PaaS-compatible: residual pero vigente, usando `gunicorn` según [`Procfile`](../Procfile).
+- Publicación a PyPI: desactivada de forma explícita. El repo no tiene `pyproject.toml`, `setup.py` ni `setup.cfg`, así que [`.github/workflows/python-publish.yml`](../.github/workflows/python-publish.yml) quedó como residual manual sin publicación real.
+- Android e iOS: siguen siendo artefactos de release, no un deploy automatizado dentro de este repo.
+
+## Validaciones previas mínimas
+
+Antes de generar artefactos o desplegar en piloto:
 
 ```bash
-pnpm -w install --frozen-lockfile
 pnpm -w typecheck
-pnpm -w lint
-pnpm -w vitest run --reporter=verbose
-pnpm -w vitest run --reporter=verbose --coverage
-```
-
-Los comandos anteriores deben pasar antes de generar artefactos.
-
-## CI: FHIR validation
-
-En CI se ejecuta `pnpm -w validate:fhir` para validar bundles FHIR antes de permitir merges.
-Si la validación falla, el job falla y bloquea el merge.
-
-Nota:
-- La validación FHIR expone ahora un resultado uniforme con forma `{ isValid, errors }` para recursos y bundles.
-- `src/lib/fhir-validation.ts` re-exporta la API pública desde `src/lib/fhir-validation/index` para mantener un único punto de contrato.
-- `pnpm validate:fhir` y la validación de bundles construidos están orientados a reforzar contratos en CI/dev; en producción se evita endurecer innecesariamente la UX local.
-
-Para reproducir local:
-
-```bash
+pnpm -w lint:ci
+pnpm test
 pnpm -w validate:fhir
+pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
 ```
 
-## Builds con Expo CLI (local)
+Si solo cambias frontend web y documentación operativa, `pytest` sigue recomendado pero deja de ser bloqueante solo si el backend no fue tocado.
 
-### Android (APK debug)
+## Variables de entorno y frontera de secretos
+
+### Web exportada con Docker Compose
+
+`docker-compose.yml` consume build args desde `config/staging.env` para estos valores públicos o semipúblicos:
+
+- `EXPO_PUBLIC_API_BASE_URL`
+- `EXPO_PUBLIC_FHIR_BASE_URL`
+- `EXPO_PUBLIC_ALLOWED_UNITS`
+- `EXPO_PUBLIC_ALLOW_ALL_UNITS`
+- `EXPO_PUBLIC_BYPASS_SCOPE`
+- `EXPO_PUBLIC_STORAGE_NAMESPACE`
+- `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`
+- `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`
+- `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`
+- `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED`
+- `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`
+- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`
+- `EXPO_PUBLIC_ENABLE_DEMO`
+- `OIDC_ISSUER`
+- `OIDC_CLIENT_ID`
+- `OIDC_AUDIENCE`
+- `OIDC_SCOPE`
+- `OIDC_REDIRECT_SCHEME`
+
+Regla operativa:
+
+- `config/staging.env` no debe almacenar secretos backend, claves privadas ni tokens privilegiados.
+- Los secretos de Django, firma, retención, DB y webhooks deben vivir fuera del repo en el entorno real del backend.
+
+### Backend Django
+
+Variables críticas documentadas en [`.env.example`](../.env.example) y [`backend/.env.example`](../backend/.env.example):
+
+- `HANDOVER_DEPLOYMENT_MODE`
+- `AUTH0_ISSUER_BASE_URL`
+- `AUTH0_AUDIENCE`
+- `HANDOVER_PRIVATE_KEY_PATH`
+- `HANDOVER_PUBLIC_KEY_PATH`
+- `HANDOVER_BUNDLE_ENCRYPTION_KEY`
+- `HANDOVER_BUNDLE_RETENTION_DAYS`
+- `HANDOVER_TECHNICAL_RETENTION_DAYS`
+- `ICEA_WEBHOOK_*`
+- `ENABLE_ICEA_BRIDGE` e `ICEA_BRIDGE_*`
+
+## Deploy web staging automatizado
+
+El flujo automatizado real del repo es:
+
 ```bash
-pnpm expo run:android --variant debug
+docker compose --env-file config/staging.env pull
+docker compose --env-file config/staging.env up -d --build
 ```
-El APK se genera en `android/app/build/outputs/apk/debug/`. Comparte el archivo como artefacto del RC.
 
-### Android (bundle firmado)
+Eso coincide con el workflow de staging. Para validarlo localmente antes de empujar cambios:
+
 ```bash
-pnpm expo run:android --variant release
+docker compose --env-file config/staging.env config
 ```
-Asegúrate de configurar `android/gradle.properties` con las credenciales del keystore (alias, password). Sube el `.aab` o `.apk` resultante.
 
-### iOS (simulador)
+Notas:
+
+- El `Dockerfile` exporta la web con `pnpm expo export --platform web`.
+- El contenedor final solo sirve archivos estáticos con nginx.
+- Las variables de runtime del servicio `web` no se usan para reconfigurar la app ya exportada; la configuración efectiva entra en build time.
+
+## Backend Django residual y explícito
+
+El backend no tiene `Dockerfile` ni `docker-compose` propio en este repo. La vía documentada real sigue siendo:
+
 ```bash
-pnpm expo run:ios --device
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install -r backend/requirements.txt
+python manage.py migrate
+gunicorn backend.wsgi --preload --bind 0.0.0.0:${PORT:-8000}
 ```
-Para builds firmados, abre `ios/` con Xcode y selecciona el equipo de firma. Exporta el `.ipa` desde el organizer y adjúntalo al release.
 
-### Web
-```bash
-pnpm expo export --platform web
-```
-El contenido estático queda en `dist/`. Puedes desplegarlo en cualquier hosting estático (Netlify, Vercel, S3).
+Ese comando es el mismo que declara el [`Procfile`](../Procfile). Si se usa nginx frontal, [`config/nginx/handover.conf`](../config/nginx/handover.conf) asume ese upstream en `127.0.0.1:8000`.
 
-## Builds con EAS
+## Paquetes de compartición y release hygiene
 
-1. Inicia sesión: `pnpm dlx eas login` (o configura `EAS_NO_VCS=1` en CI).
-2. Sincroniza dependencias nativas: `pnpm expo prebuild` si agregaste paquetes nativos nuevos.
-3. Ejecuta:
-   - Android: `pnpm dlx eas build --platform android --profile preview`
-   - iOS: `pnpm dlx eas build --platform ios --profile preview`
-4. Descarga los artefactos desde la consola de Expo y adjúntalos al release.
+- [`scripts/zip-project.ps1`](../scripts/zip-project.ps1) genera ahora ZIPs `lite` y `full` saneados.
+- Ambos ZIPs excluyen secretos, bases locales, `.env.*` no-ejemplo, logs y artefactos runtime compartibles.
+- [`.gitignore`](../.gitignore) y [`.dockerignore`](../.dockerignore) también excluyen `db.sqlite3`, variantes `*.sqlite3-*`, `backend/.env`, claves y media local.
 
-## Consideraciones offline
+## Política simple de release piloto
 
-- La cola offline reside en `src/lib/queue.ts` y `src/lib/sync.ts`. Antes de un release, verifica que la migración de esquema SQLite esté incluida en el build (`expo-sqlite`).
-- Usa `pnpm validate:fhir` para asegurarte de que los bundles generados por la cola cumplan con los perfiles requeridos.
-- Si planeas activar el modo de mantenimiento, configura `EXPO_PUBLIC_BYPASS_SCOPE` para permitir cuentas de soporte temporales.
-
-## Matriz de pruebas manuales (pre-RC)
-
-| Área | Caso | Pasos clave | Resultado esperado |
-| --- | --- | --- | --- |
-| UCI | Ingreso de paciente crítico | Autenticar con usuario UCI → Crear pase SBAR → Adjuntar audio → Guardar offline → Forzar modo avión → Restaurar conectividad → Sincronizar desde `SyncCenter`. | Bundle enviado con UUID único, aparece en historial con estado “Entregado”. |
-| UCI | Revisión de alertas | Autenticar → Abrir lista de pacientes → Verificar badges NEWS2 > 5 → Acceder a detalle y confirmar que los datos coinciden con validaciones zod. | Alertas visibles, sin errores de permisos ni validaciones. |
-| Urgencias | Escaneo QR | Autenticar con rol `triage` → Escanear QR de paciente → Completar formulario rápido → Enviar con conexión inestable (cortar Wi-Fi). | safeFetch reintenta y, si falla, el bundle queda en cola con backoff exponencial documentado. |
-| Urgencias | RBAC unidades | Autenticar con usuario de Urgencias → Intentar acceder a módulo UCI protegido. | UI bloquea acceso y muestra mensaje de permisos insuficientes. |
-| Transversal | Validación FHIR | Desde menú de soporte ejecutar `pnpm validate:fhir`. | Validaciones pasan sin errores; si hay fallos, se documentan antes del release. |
-
-## Checklist para `v0.4.0-rc.1`
-
-1. Ejecutar CI (typecheck, lint, vitest) en la rama release.
-2. Generar artefactos Android/iOS/Web y almacenarlos como adjuntos del release en GitHub.
-3. Redactar notas utilizando `RELEASE_NOTES.md` como base.
-4. Crear tag y release:
-   ```bash
-   git tag v0.4.0-rc.1
-   git push origin v0.4.0-rc.1
-   ```
-5. Publicar el release en GitHub con enlaces a los artefactos y resaltar cambios de seguridad/permisos, nuevas pruebas y validaciones FHIR.
-
-## Variables de storage sensible
-- `HANDOVER_BUNDLE_RETENTION_DAYS`: retención explícita de bundles clínicos persistidos para ETL.
-- `HANDOVER_TECHNICAL_RETENTION_DAYS`: retención de artefactos técnicos ICEA terminales.
-- `HANDOVER_BUNDLE_ENCRYPTION_KEY`: secreto solo backend para Django; aparece en ambos `.env.example` porque el archivo raíz documenta el despliegue del stack, pero nunca debe exponerse en `EXPO_PUBLIC_*`.
-
-## Operación de pruning
-- Programa `python manage.py prune_sensitive_records` en el scheduler operativo con una frecuencia al menos diaria.
-- El comando elimina bundles clínicos expirados y artefactos técnicos ICEA terminales antiguos según la retención configurada.
-- Mantén el mismo calendario para `python manage.py prune_audit` si el despliegue ya conserva auditoría en la misma base de datos.
+- La fuente de verdad del identificador de release piloto es el tag Git más [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
+- `package.json` y `app.config.ts` conservan hoy `1.0.0` como versión de build local; no los trates como mecanismo automático de versionado de release.
+- No declares “deploy listo” para full stack mientras el backend siga fuera de `docker-compose.yml`.
+- No reactives publicación a PyPI hasta que exista un contrato de paquete Python real en el repo.
