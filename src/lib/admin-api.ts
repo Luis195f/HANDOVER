@@ -1,20 +1,15 @@
 import { ApiClientError, apiGet, apiPost } from '@/src/lib/api';
 import { buildDemoAdminDashboardSummary } from '@/src/mock/admin/dashboard-fixture';
 import type {
-  IceaDashboardAlert,
-  IceaDashboardClinicalPatient,
-  IceaDashboardBridgeUnitSummary,
-  IceaDashboardOperationalActivity,
-  IceaDashboardOutboxSummary,
-  IceaDashboardOutboxUnitSummary,
-  IceaDashboardPipelineSummary,
-  IceaDashboardSummary,
-  IceaDashboardTimingSummary,
-  IceaDashboardUnitSummary,
-  IceaPipelineEventSummary,
+  IceaOpsDashboardData,
+  IceaOpsEventSummary,
+  IceaOpsEventsResponse,
+  IceaOpsSummary,
+  IceaOpsUnitDetail,
+  IceaOpsUnitSummary,
 } from '@/src/types/admin';
 
-export type AdminDashboardData = IceaDashboardSummary;
+export type AdminDashboardData = IceaOpsDashboardData;
 
 export interface AdminDashboardRequestOptions {
   demoMode?: boolean;
@@ -34,427 +29,365 @@ export class AdminDashboardApiError extends Error {
   }
 }
 
-function normalizeTimingSummary(payload: unknown): IceaDashboardTimingSummary[] {
+function normalizeLatency(payload: unknown) {
+  return {
+    count: typeof (payload as { count?: unknown })?.count === 'number' ? (payload as { count: number }).count : 0,
+    avgMs: typeof (payload as { avgMs?: unknown })?.avgMs === 'number' ? (payload as { avgMs: number }).avgMs : null,
+    p95Ms: typeof (payload as { p95Ms?: unknown })?.p95Ms === 'number' ? (payload as { p95Ms: number }).p95Ms : null,
+    maxMs: typeof (payload as { maxMs?: unknown })?.maxMs === 'number' ? (payload as { maxMs: number }).maxMs : null,
+    lastMeasuredAt:
+      typeof (payload as { lastMeasuredAt?: unknown })?.lastMeasuredAt === 'string'
+        ? (payload as { lastMeasuredAt: string }).lastMeasuredAt
+        : null,
+  };
+}
+
+function normalizeFreshness(payload: unknown) {
+  return {
+    lastOutboundAttemptAt:
+      typeof (payload as { lastOutboundAttemptAt?: unknown })?.lastOutboundAttemptAt === 'string'
+        ? (payload as { lastOutboundAttemptAt: string }).lastOutboundAttemptAt
+        : null,
+    lastOutboundDeliveredAt:
+      typeof (payload as { lastOutboundDeliveredAt?: unknown })?.lastOutboundDeliveredAt === 'string'
+        ? (payload as { lastOutboundDeliveredAt: string }).lastOutboundDeliveredAt
+        : null,
+    lastBridgeUpdatedAt:
+      typeof (payload as { lastBridgeUpdatedAt?: unknown })?.lastBridgeUpdatedAt === 'string'
+        ? (payload as { lastBridgeUpdatedAt: string }).lastBridgeUpdatedAt
+        : null,
+    lastBridgeReceivedAt:
+      typeof (payload as { lastBridgeReceivedAt?: unknown })?.lastBridgeReceivedAt === 'string'
+        ? (payload as { lastBridgeReceivedAt: string }).lastBridgeReceivedAt
+        : null,
+    lastPipelineEventAt:
+      typeof (payload as { lastPipelineEventAt?: unknown })?.lastPipelineEventAt === 'string'
+        ? (payload as { lastPipelineEventAt: string }).lastPipelineEventAt
+        : null,
+  };
+}
+
+function normalizeErrors(payload: unknown) {
   if (!Array.isArray(payload)) return [];
   return payload
     .map((item) => {
       if (!item || typeof item !== 'object') return null;
       return {
-        unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : '',
-        sectionId: typeof (item as { sectionId?: unknown }).sectionId === 'string' ? (item as { sectionId: string }).sectionId : '',
-        avgDurationMs: typeof (item as { avgDurationMs?: unknown }).avgDurationMs === 'number' ? (item as { avgDurationMs: number }).avgDurationMs : 0,
-        samples: typeof (item as { samples?: unknown }).samples === 'number' ? (item as { samples: number }).samples : 0,
+        source: typeof (item as { source?: unknown }).source === 'string' ? (item as { source: string }).source : 'pipeline',
+        errorFamily:
+          typeof (item as { errorFamily?: unknown }).errorFamily === 'string'
+            ? (item as { errorFamily: string }).errorFamily
+            : 'remote_error',
+        count: typeof (item as { count?: unknown }).count === 'number' ? (item as { count: number }).count : 0,
+        lastSeenAt:
+          typeof (item as { lastSeenAt?: unknown }).lastSeenAt === 'string' ? (item as { lastSeenAt: string }).lastSeenAt : null,
       };
     })
-    .filter((item): item is IceaDashboardTimingSummary => item !== null);
+    .filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
-function normalizeActivity(payload: unknown): IceaDashboardOperationalActivity {
-  if (!payload || typeof payload !== 'object') {
-    return {
-      status: 'empty',
-      handoversLast24h: 0,
-      eventsLast24h: 0,
-      activePipeline: 0,
-      lastActivityAt: null,
-    };
-  }
-  return {
-    status: typeof (payload as { status?: unknown }).status === 'string' ? (payload as { status: string }).status : 'empty',
-    handoversLast24h:
-      typeof (payload as { handoversLast24h?: unknown }).handoversLast24h === 'number'
-        ? (payload as { handoversLast24h: number }).handoversLast24h
-        : 0,
-    eventsLast24h:
-      typeof (payload as { eventsLast24h?: unknown }).eventsLast24h === 'number'
-        ? (payload as { eventsLast24h: number }).eventsLast24h
-        : 0,
-    activePipeline:
-      typeof (payload as { activePipeline?: unknown }).activePipeline === 'number'
-        ? (payload as { activePipeline: number }).activePipeline
-        : 0,
-    lastActivityAt:
-      typeof (payload as { lastActivityAt?: unknown }).lastActivityAt === 'string'
-        ? (payload as { lastActivityAt: string }).lastActivityAt
-        : null,
-  };
+function normalizeEvents(payload: unknown): IceaOpsEventSummary[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((item): IceaOpsEventSummary[] => {
+    if (!item || typeof item !== 'object') return [];
+    return [
+      {
+        eventId: typeof (item as { eventId?: unknown }).eventId === 'string' ? (item as { eventId: string }).eventId : '',
+        source: typeof (item as { source?: unknown }).source === 'string' ? (item as { source: string }).source : 'pipeline',
+        requestId:
+          typeof (item as { requestId?: unknown }).requestId === 'string' ? (item as { requestId: string }).requestId : null,
+        bundleId:
+          typeof (item as { bundleId?: unknown }).bundleId === 'string' ? (item as { bundleId: string }).bundleId : null,
+        unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : null,
+        payloadHash:
+          typeof (item as { payloadHash?: unknown }).payloadHash === 'string'
+            ? (item as { payloadHash: string }).payloadHash
+            : null,
+        status: typeof (item as { status?: unknown }).status === 'string' ? (item as { status: string }).status : '',
+        statusFamily:
+          typeof (item as { statusFamily?: unknown }).statusFamily === 'string'
+            ? (item as { statusFamily: string }).statusFamily
+            : null,
+        errorFamily:
+          typeof (item as { errorFamily?: unknown }).errorFamily === 'string'
+            ? (item as { errorFamily: string }).errorFamily
+            : null,
+        attempts: typeof (item as { attempts?: unknown }).attempts === 'number' ? (item as { attempts: number }).attempts : undefined,
+        httpStatus:
+          typeof (item as { httpStatus?: unknown }).httpStatus === 'number'
+            ? (item as { httpStatus: number }).httpStatus
+            : null,
+        latencyMs:
+          typeof (item as { latencyMs?: unknown }).latencyMs === 'number' ? (item as { latencyMs: number }).latencyMs : null,
+        nextRetryAt:
+          typeof (item as { nextRetryAt?: unknown }).nextRetryAt === 'string'
+            ? (item as { nextRetryAt: string }).nextRetryAt
+            : null,
+        stage: typeof (item as { stage?: unknown }).stage === 'string' ? (item as { stage: string }).stage : null,
+        action: typeof (item as { action?: unknown }).action === 'string' ? (item as { action: string }).action : null,
+        scoringMode:
+          typeof (item as { scoringMode?: unknown }).scoringMode === 'string'
+            ? (item as { scoringMode: string }).scoringMode
+            : null,
+        provisional:
+          typeof (item as { provisional?: unknown }).provisional === 'boolean'
+            ? (item as { provisional: boolean }).provisional
+            : undefined,
+        insufficientEvidence:
+          typeof (item as { insufficientEvidence?: unknown }).insufficientEvidence === 'boolean'
+            ? (item as { insufficientEvidence: boolean }).insufficientEvidence
+            : undefined,
+        detail: typeof (item as { detail?: unknown }).detail === 'string' ? (item as { detail: string }).detail : null,
+        createdAt: typeof (item as { createdAt?: unknown }).createdAt === 'string' ? (item as { createdAt: string }).createdAt : '',
+        updatedAt: typeof (item as { updatedAt?: unknown }).updatedAt === 'string' ? (item as { updatedAt: string }).updatedAt : '',
+      },
+    ];
+  });
 }
 
-function normalizeOutboxUnitSummary(payload: unknown): IceaDashboardOutboxUnitSummary {
-  if (!payload || typeof payload !== 'object') {
-    return {
-      total: 0,
-      queued: 0,
-      retry: 0,
-      delivered: 0,
-      failed: 0,
-      lastAttemptAt: null,
-      lastDeliveredAt: null,
-    };
-  }
+function normalizeUnitSummary(payload: unknown): IceaOpsUnitSummary {
+  const available = typeof (payload as { available?: unknown })?.available === 'boolean' ? (payload as { available: boolean }).available : false;
+  const unavailableReason =
+    typeof (payload as { unavailableReason?: unknown })?.unavailableReason === 'string'
+      ? (payload as { unavailableReason: string }).unavailableReason
+      : undefined;
   return {
-    total: typeof (payload as { total?: unknown }).total === 'number' ? (payload as { total: number }).total : 0,
-    queued: typeof (payload as { queued?: unknown }).queued === 'number' ? (payload as { queued: number }).queued : 0,
-    retry: typeof (payload as { retry?: unknown }).retry === 'number' ? (payload as { retry: number }).retry : 0,
-    delivered: typeof (payload as { delivered?: unknown }).delivered === 'number' ? (payload as { delivered: number }).delivered : 0,
-    failed: typeof (payload as { failed?: unknown }).failed === 'number' ? (payload as { failed: number }).failed : 0,
-    lastAttemptAt:
-      typeof (payload as { lastAttemptAt?: unknown }).lastAttemptAt === 'string'
-        ? (payload as { lastAttemptAt: string }).lastAttemptAt
-        : null,
-    lastDeliveredAt:
-      typeof (payload as { lastDeliveredAt?: unknown }).lastDeliveredAt === 'string'
-        ? (payload as { lastDeliveredAt: string }).lastDeliveredAt
-        : null,
-  };
-}
-
-function normalizeBridgeUnitSummary(payload: unknown): IceaDashboardBridgeUnitSummary {
-  const base: IceaDashboardBridgeUnitSummary = {
-    total: 0,
-    queued: 0,
-    sent: 0,
-    accepted: 0,
-    pending: 0,
-    scored: 0,
-    failed: 0,
-    stale: 0,
-    provisional: 0,
-    insufficientEvidence: 0,
-    lastUpdatedAt: null,
-  };
-  if (!payload || typeof payload !== 'object') return base;
-  return {
-    ...base,
-    total: typeof (payload as { total?: unknown }).total === 'number' ? (payload as { total: number }).total : 0,
-    queued: typeof (payload as { queued?: unknown }).queued === 'number' ? (payload as { queued: number }).queued : 0,
-    sent: typeof (payload as { sent?: unknown }).sent === 'number' ? (payload as { sent: number }).sent : 0,
-    accepted: typeof (payload as { accepted?: unknown }).accepted === 'number' ? (payload as { accepted: number }).accepted : 0,
-    pending: typeof (payload as { pending?: unknown }).pending === 'number' ? (payload as { pending: number }).pending : 0,
-    scored: typeof (payload as { scored?: unknown }).scored === 'number' ? (payload as { scored: number }).scored : 0,
-    failed: typeof (payload as { failed?: unknown }).failed === 'number' ? (payload as { failed: number }).failed : 0,
-    stale: typeof (payload as { stale?: unknown }).stale === 'number' ? (payload as { stale: number }).stale : 0,
-    provisional:
-      typeof (payload as { provisional?: unknown }).provisional === 'number'
-        ? (payload as { provisional: number }).provisional
-        : 0,
-    insufficientEvidence:
-      typeof (payload as { insufficientEvidence?: unknown }).insufficientEvidence === 'number'
-        ? (payload as { insufficientEvidence: number }).insufficientEvidence
-        : 0,
+    unitId: typeof (payload as { unitId?: unknown })?.unitId === 'string' ? (payload as { unitId: string }).unitId : '',
+    available,
+    state:
+      typeof (payload as { state?: unknown })?.state === 'string'
+        ? (payload as { state: IceaOpsUnitSummary['state'] }).state
+        : available
+          ? 'healthy'
+          : 'degraded',
     lastUpdatedAt:
-      typeof (payload as { lastUpdatedAt?: unknown }).lastUpdatedAt === 'string'
+      typeof (payload as { lastUpdatedAt?: unknown })?.lastUpdatedAt === 'string'
         ? (payload as { lastUpdatedAt: string }).lastUpdatedAt
         : null,
-  };
-}
-
-function normalizeClinicalPatients(payload: unknown): IceaDashboardClinicalPatient[] {
-  if (!Array.isArray(payload)) return [];
-  const normalized: IceaDashboardClinicalPatient[] = [];
-  for (const item of payload) {
-    if (!item || typeof item !== 'object') continue;
-    normalized.push({
-      id: typeof (item as { id?: unknown }).id === 'string' ? (item as { id: string }).id : '',
-      name: typeof (item as { name?: unknown }).name === 'string' ? (item as { name: string }).name : 'Paciente',
-      unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : '',
-      bedLabel:
-        typeof (item as { bedLabel?: unknown }).bedLabel === 'string'
-          ? (item as { bedLabel: string }).bedLabel
-          : '',
-      vitals:
-        (item as { vitals?: unknown }).vitals && typeof (item as { vitals?: unknown }).vitals === 'object'
-          ? ((item as { vitals: IceaDashboardClinicalPatient['vitals'] }).vitals ?? {})
-          : {},
-      devices: Array.isArray((item as { devices?: unknown }).devices)
-        ? ((item as { devices: IceaDashboardClinicalPatient['devices'] }).devices ?? [])
-        : [],
-      risks:
-        (item as { risks?: unknown }).risks && typeof (item as { risks?: unknown }).risks === 'object'
-          ? ((item as { risks: IceaDashboardClinicalPatient['risks'] }).risks ?? {})
-          : {},
-      pendingTasks: Array.isArray((item as { pendingTasks?: unknown }).pendingTasks)
-        ? ((item as { pendingTasks: IceaDashboardClinicalPatient['pendingTasks'] }).pendingTasks ?? [])
-        : [],
-      lastIncidentAt:
-        typeof (item as { lastIncidentAt?: unknown }).lastIncidentAt === 'string'
-          ? (item as { lastIncidentAt: string }).lastIncidentAt
-          : null,
-      recentIncidentFlag: Boolean((item as { recentIncidentFlag?: unknown }).recentIncidentFlag),
-    });
-  }
-  return normalized;
-}
-
-function normalizeUnitSummary(payload: unknown): IceaDashboardUnitSummary[] {
-  if (!Array.isArray(payload)) return [];
-  const normalized: IceaDashboardUnitSummary[] = [];
-  for (const item of payload) {
-    if (!item || typeof item !== 'object') continue;
-    normalized.push({
-      unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : '',
-      totalHandovers:
-        typeof (item as { totalHandovers?: unknown }).totalHandovers === 'number'
-          ? (item as { totalHandovers: number }).totalHandovers
+    pendingCount:
+      typeof (payload as { pendingCount?: unknown })?.pendingCount === 'number'
+        ? (payload as { pendingCount: number }).pendingCount
+        : 0,
+    unavailableReason,
+    freshness: normalizeFreshness((payload as { freshness?: unknown })?.freshness),
+    counts: {
+      handoversExported:
+        typeof (payload as { counts?: { handoversExported?: unknown } })?.counts?.handoversExported === 'number'
+          ? (payload as { counts: { handoversExported: number } }).counts.handoversExported
           : 0,
-      accepted: typeof (item as { accepted?: unknown }).accepted === 'number' ? (item as { accepted: number }).accepted : 0,
-      queued: typeof (item as { queued?: unknown }).queued === 'number' ? (item as { queued: number }).queued : 0,
-      running: typeof (item as { running?: unknown }).running === 'number' ? (item as { running: number }).running : 0,
-      delivered:
-        typeof (item as { delivered?: unknown }).delivered === 'number' ? (item as { delivered: number }).delivered : 0,
-      succeeded:
-        typeof (item as { succeeded?: unknown }).succeeded === 'number' ? (item as { succeeded: number }).succeeded : 0,
-      retry: typeof (item as { retry?: unknown }).retry === 'number' ? (item as { retry: number }).retry : 0,
-      failed: typeof (item as { failed?: unknown }).failed === 'number' ? (item as { failed: number }).failed : 0,
-      lastUpdatedAt:
-        typeof (item as { lastUpdatedAt?: unknown }).lastUpdatedAt === 'string'
-          ? (item as { lastUpdatedAt: string }).lastUpdatedAt
-          : null,
-      lastDashboardRefreshAt:
-        typeof (item as { lastDashboardRefreshAt?: unknown }).lastDashboardRefreshAt === 'string'
-          ? (item as { lastDashboardRefreshAt: string }).lastDashboardRefreshAt
-          : null,
-      cachedSummary:
-        (item as { cachedSummary?: unknown }).cachedSummary && typeof (item as { cachedSummary?: unknown }).cachedSummary === 'object'
-          ? ((item as { cachedSummary: Record<string, unknown> }).cachedSummary ?? null)
-          : null,
-      activity: normalizeActivity((item as { activity?: unknown }).activity),
-      outbox: normalizeOutboxUnitSummary((item as { outbox?: unknown }).outbox),
-      bridge: normalizeBridgeUnitSummary((item as { bridge?: unknown }).bridge),
-      clinicalPatients: normalizeClinicalPatients((item as { clinicalPatients?: unknown }).clinicalPatients),
-      handoverTiming: normalizeTimingSummary((item as { handoverTiming?: unknown }).handoverTiming),
-      alertsOpen:
-        typeof (item as { alertsOpen?: unknown }).alertsOpen === 'number' ? (item as { alertsOpen: number }).alertsOpen : 0,
-      degraded: Boolean((item as { degraded?: unknown }).degraded),
-      degradationReasons: Array.isArray((item as { degradationReasons?: unknown }).degradationReasons)
-        ? ((item as { degradationReasons: string[] }).degradationReasons ?? [])
-        : [],
-    });
-  }
-  return normalized;
-}
-
-function normalizeAlertSummary(payload: unknown): IceaDashboardAlert[] {
-  if (!Array.isArray(payload)) return [];
-  return payload
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      return {
-        id: typeof (item as { id?: unknown }).id === 'string' ? (item as { id: string }).id : '',
-        unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : null,
-        source: typeof (item as { source?: unknown }).source === 'string' ? (item as { source: string }).source : 'pipeline',
-        severity:
-          typeof (item as { severity?: unknown }).severity === 'string' ? (item as { severity: string }).severity : 'medium',
-        status: typeof (item as { status?: unknown }).status === 'string' ? (item as { status: string }).status : '',
-        title: typeof (item as { title?: unknown }).title === 'string' ? (item as { title: string }).title : '',
-        message: typeof (item as { message?: unknown }).message === 'string' ? (item as { message: string }).message : '',
-        requestId:
-          typeof (item as { requestId?: unknown }).requestId === 'string'
-            ? (item as { requestId: string }).requestId
-            : null,
-        createdAt: typeof (item as { createdAt?: unknown }).createdAt === 'string' ? (item as { createdAt: string }).createdAt : '',
-      };
-    })
-    .filter((item): item is IceaDashboardAlert => item !== null);
-}
-
-function normalizePipelineEvent(payload: unknown): IceaPipelineEventSummary[] {
-  if (!Array.isArray(payload)) return [];
-  const normalized: IceaPipelineEventSummary[] = [];
-  for (const item of payload) {
-    if (!item || typeof item !== 'object') continue;
-    normalized.push({
-      id: typeof (item as { id?: unknown }).id === 'number' ? (item as { id: number }).id : 0,
-      requestId:
-        typeof (item as { requestId?: unknown }).requestId === 'string'
-          ? (item as { requestId: string }).requestId
-          : null,
-      bundleId:
-        typeof (item as { bundleId?: unknown }).bundleId === 'string' ? (item as { bundleId: string }).bundleId : null,
-      patientId:
-        typeof (item as { patientId?: unknown }).patientId === 'string'
-          ? (item as { patientId: string }).patientId
-          : null,
-      unitId: typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : null,
-      stage: typeof (item as { stage?: unknown }).stage === 'string' ? (item as { stage: string }).stage : '',
-      action: typeof (item as { action?: unknown }).action === 'string' ? (item as { action: string }).action : null,
-      status: typeof (item as { status?: unknown }).status === 'string' ? (item as { status: string }).status : '',
-      source: typeof (item as { source?: unknown }).source === 'string' ? (item as { source: string }).source : null,
-      actorSub:
-        typeof (item as { actorSub?: unknown }).actorSub === 'string' ? (item as { actorSub: string }).actorSub : null,
-      detail: typeof (item as { detail?: unknown }).detail === 'string' ? (item as { detail: string }).detail : null,
-      httpStatus:
-        typeof (item as { httpStatus?: unknown }).httpStatus === 'number'
-          ? (item as { httpStatus: number }).httpStatus
-          : null,
-      payload:
-        (item as { payload?: unknown }).payload && typeof (item as { payload?: unknown }).payload === 'object'
-          ? ((item as { payload: Record<string, unknown> }).payload ?? null)
-          : null,
-      createdAt: typeof (item as { createdAt?: unknown }).createdAt === 'string' ? (item as { createdAt: string }).createdAt : '',
-    });
-  }
-  return normalized;
-}
-
-function normalizeOutboxSummary(payload: unknown): IceaDashboardOutboxSummary {
-  const empty: IceaDashboardOutboxSummary = {
-    enabled: false,
-    configured: false,
-    totals: { queued: 0, retry: 0, delivered: 0, failed: 0 },
-    lastAttemptAt: null,
-    lastDeliveredAt: null,
-  };
-  if (!payload || typeof payload !== 'object') return empty;
-  const totals = (payload as { totals?: unknown }).totals;
-  return {
-    enabled: Boolean((payload as { enabled?: unknown }).enabled),
-    configured: Boolean((payload as { configured?: unknown }).configured),
-    totals: {
-      queued: typeof (totals as { queued?: unknown })?.queued === 'number' ? (totals as { queued: number }).queued : 0,
-      retry: typeof (totals as { retry?: unknown })?.retry === 'number' ? (totals as { retry: number }).retry : 0,
-      delivered:
-        typeof (totals as { delivered?: unknown })?.delivered === 'number' ? (totals as { delivered: number }).delivered : 0,
-      failed: typeof (totals as { failed?: unknown })?.failed === 'number' ? (totals as { failed: number }).failed : 0,
+      outbox: {
+        total: typeof (payload as { counts?: { outbox?: { total?: unknown } } })?.counts?.outbox?.total === 'number' ? (payload as { counts: { outbox: { total: number } } }).counts.outbox.total : 0,
+        queued: typeof (payload as { counts?: { outbox?: { queued?: unknown } } })?.counts?.outbox?.queued === 'number' ? (payload as { counts: { outbox: { queued: number } } }).counts.outbox.queued : 0,
+        retry: typeof (payload as { counts?: { outbox?: { retry?: unknown } } })?.counts?.outbox?.retry === 'number' ? (payload as { counts: { outbox: { retry: number } } }).counts.outbox.retry : 0,
+        delivered: typeof (payload as { counts?: { outbox?: { delivered?: unknown } } })?.counts?.outbox?.delivered === 'number' ? (payload as { counts: { outbox: { delivered: number } } }).counts.outbox.delivered : 0,
+        failed: typeof (payload as { counts?: { outbox?: { failed?: unknown } } })?.counts?.outbox?.failed === 'number' ? (payload as { counts: { outbox: { failed: number } } }).counts.outbox.failed : 0,
+        retries: typeof (payload as { counts?: { outbox?: { retries?: unknown } } })?.counts?.outbox?.retries === 'number' ? (payload as { counts: { outbox: { retries: number } } }).counts.outbox.retries : 0,
+      },
+      bridge: {
+        total: typeof (payload as { counts?: { bridge?: { total?: unknown } } })?.counts?.bridge?.total === 'number' ? (payload as { counts: { bridge: { total: number } } }).counts.bridge.total : 0,
+        queued: typeof (payload as { counts?: { bridge?: { queued?: unknown } } })?.counts?.bridge?.queued === 'number' ? (payload as { counts: { bridge: { queued: number } } }).counts.bridge.queued : 0,
+        sent: typeof (payload as { counts?: { bridge?: { sent?: unknown } } })?.counts?.bridge?.sent === 'number' ? (payload as { counts: { bridge: { sent: number } } }).counts.bridge.sent : 0,
+        accepted: typeof (payload as { counts?: { bridge?: { accepted?: unknown } } })?.counts?.bridge?.accepted === 'number' ? (payload as { counts: { bridge: { accepted: number } } }).counts.bridge.accepted : 0,
+        pending: typeof (payload as { counts?: { bridge?: { pending?: unknown } } })?.counts?.bridge?.pending === 'number' ? (payload as { counts: { bridge: { pending: number } } }).counts.bridge.pending : 0,
+        scored: typeof (payload as { counts?: { bridge?: { scored?: unknown } } })?.counts?.bridge?.scored === 'number' ? (payload as { counts: { bridge: { scored: number } } }).counts.bridge.scored : 0,
+        failed: typeof (payload as { counts?: { bridge?: { failed?: unknown } } })?.counts?.bridge?.failed === 'number' ? (payload as { counts: { bridge: { failed: number } } }).counts.bridge.failed : 0,
+        stale: typeof (payload as { counts?: { bridge?: { stale?: unknown } } })?.counts?.bridge?.stale === 'number' ? (payload as { counts: { bridge: { stale: number } } }).counts.bridge.stale : 0,
+        retries: typeof (payload as { counts?: { bridge?: { retries?: unknown } } })?.counts?.bridge?.retries === 'number' ? (payload as { counts: { bridge: { retries: number } } }).counts.bridge.retries : 0,
+        provisional:
+          typeof (payload as { counts?: { bridge?: { provisional?: unknown } } })?.counts?.bridge?.provisional === 'number'
+            ? (payload as { counts: { bridge: { provisional: number } } }).counts.bridge.provisional
+            : 0,
+        immediate:
+          typeof (payload as { counts?: { bridge?: { immediate?: unknown } } })?.counts?.bridge?.immediate === 'number'
+            ? (payload as { counts: { bridge: { immediate: number } } }).counts.bridge.immediate
+            : 0,
+        enriched:
+          typeof (payload as { counts?: { bridge?: { enriched?: unknown } } })?.counts?.bridge?.enriched === 'number'
+            ? (payload as { counts: { bridge: { enriched: number } } }).counts.bridge.enriched
+            : 0,
+        insufficientEvidence:
+          typeof (payload as { counts?: { bridge?: { insufficientEvidence?: unknown } } })?.counts?.bridge?.insufficientEvidence === 'number'
+            ? (payload as { counts: { bridge: { insufficientEvidence: number } } }).counts.bridge.insufficientEvidence
+            : 0,
+      },
+      pipeline: {
+        snapshots:
+          typeof (payload as { counts?: { pipeline?: { snapshots?: unknown } } })?.counts?.pipeline?.snapshots === 'number'
+            ? (payload as { counts: { pipeline: { snapshots: number } } }).counts.pipeline.snapshots
+            : 0,
+        running:
+          typeof (payload as { counts?: { pipeline?: { running?: unknown } } })?.counts?.pipeline?.running === 'number'
+            ? (payload as { counts: { pipeline: { running: number } } }).counts.pipeline.running
+            : 0,
+        retry:
+          typeof (payload as { counts?: { pipeline?: { retry?: unknown } } })?.counts?.pipeline?.retry === 'number'
+            ? (payload as { counts: { pipeline: { retry: number } } }).counts.pipeline.retry
+            : 0,
+        failed:
+          typeof (payload as { counts?: { pipeline?: { failed?: unknown } } })?.counts?.pipeline?.failed === 'number'
+            ? (payload as { counts: { pipeline: { failed: number } } }).counts.pipeline.failed
+            : 0,
+        events:
+          typeof (payload as { counts?: { pipeline?: { events?: unknown } } })?.counts?.pipeline?.events === 'number'
+            ? (payload as { counts: { pipeline: { events: number } } }).counts.pipeline.events
+            : 0,
+      },
     },
-    lastAttemptAt:
-      typeof (payload as { lastAttemptAt?: unknown }).lastAttemptAt === 'string'
-        ? (payload as { lastAttemptAt: string }).lastAttemptAt
-        : null,
-    lastDeliveredAt:
-      typeof (payload as { lastDeliveredAt?: unknown }).lastDeliveredAt === 'string'
-        ? (payload as { lastDeliveredAt: string }).lastDeliveredAt
-        : null,
-  };
-}
-
-function normalizePipelineSummary(payload: unknown): IceaDashboardPipelineSummary {
-  const emptyBridge = {
-    queued: 0,
-    sent: 0,
-    accepted: 0,
-    pending: 0,
-    scored: 0,
-    failed: 0,
-    stale: 0,
-    provisional: 0,
-    insufficientEvidence: 0,
-  };
-  if (!payload || typeof payload !== 'object') {
-    return {
-      configured: false,
-      remoteActionsEnabled: false,
-      remoteStatusEnabled: false,
-      bridgeEnabled: false,
-      bridgeConfigured: false,
-      snapshots: 0,
-      running: 0,
-      retry: 0,
-      failed: 0,
-      bridge: emptyBridge,
-      lastEventAt: null,
-      degradationReasons: [],
-    };
-  }
-  const bridge = (payload as { bridge?: unknown }).bridge;
-  return {
-    configured: Boolean((payload as { configured?: unknown }).configured),
-    remoteActionsEnabled: Boolean((payload as { remoteActionsEnabled?: unknown }).remoteActionsEnabled),
-    remoteStatusEnabled: Boolean((payload as { remoteStatusEnabled?: unknown }).remoteStatusEnabled),
-    bridgeEnabled: Boolean((payload as { bridgeEnabled?: unknown }).bridgeEnabled),
-    bridgeConfigured: Boolean((payload as { bridgeConfigured?: unknown }).bridgeConfigured),
-    snapshots: typeof (payload as { snapshots?: unknown }).snapshots === 'number' ? (payload as { snapshots: number }).snapshots : 0,
-    running: typeof (payload as { running?: unknown }).running === 'number' ? (payload as { running: number }).running : 0,
-    retry: typeof (payload as { retry?: unknown }).retry === 'number' ? (payload as { retry: number }).retry : 0,
-    failed: typeof (payload as { failed?: unknown }).failed === 'number' ? (payload as { failed: number }).failed : 0,
-    bridge: {
-      queued: typeof (bridge as { queued?: unknown })?.queued === 'number' ? (bridge as { queued: number }).queued : 0,
-      sent: typeof (bridge as { sent?: unknown })?.sent === 'number' ? (bridge as { sent: number }).sent : 0,
-      accepted: typeof (bridge as { accepted?: unknown })?.accepted === 'number' ? (bridge as { accepted: number }).accepted : 0,
-      pending: typeof (bridge as { pending?: unknown })?.pending === 'number' ? (bridge as { pending: number }).pending : 0,
-      scored: typeof (bridge as { scored?: unknown })?.scored === 'number' ? (bridge as { scored: number }).scored : 0,
-      failed: typeof (bridge as { failed?: unknown })?.failed === 'number' ? (bridge as { failed: number }).failed : 0,
-      stale: typeof (bridge as { stale?: unknown })?.stale === 'number' ? (bridge as { stale: number }).stale : 0,
-      provisional:
-        typeof (bridge as { provisional?: unknown })?.provisional === 'number'
-          ? (bridge as { provisional: number }).provisional
-          : 0,
-      insufficientEvidence:
-        typeof (bridge as { insufficientEvidence?: unknown })?.insufficientEvidence === 'number'
-          ? (bridge as { insufficientEvidence: number }).insufficientEvidence
-          : 0,
+    latencies: {
+      outboxDelivery: normalizeLatency((payload as { latencies?: { outboxDelivery?: unknown } })?.latencies?.outboxDelivery),
+      bridgeResponse: normalizeLatency((payload as { latencies?: { bridgeResponse?: unknown } })?.latencies?.bridgeResponse),
     },
-    lastEventAt:
-      typeof (payload as { lastEventAt?: unknown }).lastEventAt === 'string'
-        ? (payload as { lastEventAt: string }).lastEventAt
-        : null,
-    degradationReasons: Array.isArray((payload as { degradationReasons?: unknown }).degradationReasons)
-      ? ((payload as { degradationReasons: string[] }).degradationReasons ?? [])
+    errors: normalizeErrors((payload as { errors?: unknown }).errors),
+    shifts: Array.isArray((payload as { shifts?: unknown }).shifts)
+      ? ((payload as { shifts: unknown[] }).shifts ?? [])
+          .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            return {
+              shift: typeof (item as { shift?: unknown }).shift === 'string' ? (item as { shift: string }).shift : '',
+              state: typeof (item as { state?: unknown }).state === 'string' ? (item as { state: IceaOpsUnitSummary['state'] }).state : 'healthy',
+              pendingCount:
+                typeof (item as { pendingCount?: unknown }).pendingCount === 'number'
+                  ? (item as { pendingCount: number }).pendingCount
+                  : 0,
+              lastUpdatedAt:
+                typeof (item as { lastUpdatedAt?: unknown }).lastUpdatedAt === 'string'
+                  ? (item as { lastUpdatedAt: string }).lastUpdatedAt
+                  : null,
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null)
       : [],
   };
 }
 
-function isContractLike(payload: unknown): payload is Partial<IceaDashboardSummary> {
-  return Boolean(payload && typeof payload === 'object' && 'units' in payload && 'recentEvents' in payload && 'pipeline' in payload);
-}
-
-function normalizeDashboardSummary(payload: Partial<IceaDashboardSummary> | null | undefined): IceaDashboardSummary {
+function normalizeSummary(payload: Partial<IceaOpsSummary> | null | undefined): IceaOpsSummary {
   return {
     generatedAt: typeof payload?.generatedAt === 'string' ? payload.generatedAt : '',
-    source: typeof payload?.source === 'string' ? payload.source : 'live',
-    demoMode: Boolean(payload?.demoMode),
+    available: Boolean(payload?.available),
+    enabled: Boolean(payload?.enabled),
+    scope: typeof payload?.scope === 'string' ? payload.scope : 'summary',
     empty: Boolean(payload?.empty),
-    stale: Boolean(payload?.stale),
-    degraded: Boolean(payload?.degraded),
-    degradationReasons: Array.isArray(payload?.degradationReasons) ? payload.degradationReasons : [],
-    latestActivityAt: typeof payload?.latestActivityAt === 'string' ? payload.latestActivityAt : null,
-    units: normalizeUnitSummary(payload?.units),
-    alerts: normalizeAlertSummary(payload?.alerts),
-    outbox: normalizeOutboxSummary(payload?.outbox),
-    pipeline: normalizePipelineSummary(payload?.pipeline),
-    recentEvents: normalizePipelineEvent(payload?.recentEvents),
+    state: typeof payload?.state === 'string' ? payload.state : undefined,
+    lastUpdatedAt: typeof payload?.lastUpdatedAt === 'string' ? payload.lastUpdatedAt : null,
+    pendingCount: typeof payload?.pendingCount === 'number' ? payload.pendingCount : 0,
+    unavailableReason: typeof payload?.unavailableReason === 'string' ? payload.unavailableReason : undefined,
+    flags: {
+      summaryEnabled: Boolean(payload?.flags?.summaryEnabled),
+      eventsEnabled: Boolean(payload?.flags?.eventsEnabled),
+      bridgeEnabled: Boolean(payload?.flags?.bridgeEnabled),
+      bridgeStatusEnabled: Boolean(payload?.flags?.bridgeStatusEnabled),
+      remoteActionsEnabled: Boolean(payload?.flags?.remoteActionsEnabled),
+      remoteStatusEnabled: Boolean(payload?.flags?.remoteStatusEnabled),
+      outboxEnabled: Boolean(payload?.flags?.outboxEnabled),
+    },
+    freshness: normalizeFreshness(payload?.freshness),
+    counts: {
+      handoversExported: typeof payload?.counts?.handoversExported === 'number' ? payload.counts.handoversExported : 0,
+      outbox: normalizeUnitSummary({ counts: { outbox: payload?.counts?.outbox ?? {} } }).counts.outbox,
+      bridge: normalizeUnitSummary({ counts: { bridge: payload?.counts?.bridge ?? {} } }).counts.bridge,
+      pipeline: normalizeUnitSummary({ counts: { pipeline: payload?.counts?.pipeline ?? {} } }).counts.pipeline,
+    },
+    latencies: {
+      outboxDelivery: normalizeLatency(payload?.latencies?.outboxDelivery),
+      bridgeResponse: normalizeLatency(payload?.latencies?.bridgeResponse),
+    },
+    errors: normalizeErrors(payload?.errors),
+    units: Array.isArray(payload?.units) ? payload.units.map((item) => normalizeUnitSummary(item)) : [],
   };
+}
+
+function normalizeUnit(payload: Partial<IceaOpsUnitDetail> | null | undefined): IceaOpsUnitDetail | null {
+  if (!payload || typeof payload !== 'object') return null;
+  return {
+    ...normalizeUnitSummary(payload),
+    generatedAt: typeof payload.generatedAt === 'string' ? payload.generatedAt : '',
+    enabled: Boolean(payload.enabled),
+    scope: typeof payload.scope === 'string' ? payload.scope : 'unit',
+    recentEvents: normalizeEvents(payload.recentEvents),
+  };
+}
+
+function hasFlags(payload: unknown): boolean {
+  return Boolean(payload && typeof payload === 'object' && 'flags' in payload && typeof (payload as { flags?: unknown }).flags === 'object');
+}
+
+function isIntentionalUnavailable(payload: unknown): boolean {
+  return Boolean(
+    payload &&
+      typeof payload === 'object' &&
+      (payload as { available?: unknown }).available === false &&
+      (payload as { enabled?: unknown }).enabled === false &&
+      typeof (payload as { unavailableReason?: unknown }).unavailableReason === 'string',
+  );
+}
+
+function isSummaryLike(payload: unknown): payload is Partial<IceaOpsSummary> {
+  return Boolean(
+    payload &&
+      typeof payload === 'object' &&
+      hasFlags(payload) &&
+      Array.isArray((payload as { units?: unknown }).units) &&
+      Array.isArray((payload as { errors?: unknown }).errors) &&
+      (!isIntentionalUnavailable(payload) || (payload as { scope?: unknown }).scope === 'summary'),
+  );
+}
+
+function isEventsLike(payload: unknown): payload is Partial<IceaOpsEventsResponse> {
+  return Boolean(
+    payload &&
+      typeof payload === 'object' &&
+      Array.isArray((payload as { results?: unknown }).results) &&
+      (!isIntentionalUnavailable(payload) || (payload as { scope?: unknown }).scope === 'events'),
+  );
 }
 
 function mapApiError(error: unknown): AdminDashboardApiError {
   if (error instanceof AdminDashboardApiError) return error;
   if (error instanceof ApiClientError) {
     if (error.status === 401 || error.status === 403) {
-      return new AdminDashboardApiError('forbidden', 'No tienes permisos para ver el dashboard administrativo.', {
+      return new AdminDashboardApiError('forbidden', 'No tienes permisos para ver la observabilidad operativa.', {
         status: error.status,
         details: error.details,
       });
     }
-    return new AdminDashboardApiError('remote', 'El backend devolvio un error al cargar el dashboard.', {
+    return new AdminDashboardApiError('remote', 'El backend devolvio un error al cargar la observabilidad operativa.', {
       status: error.status,
       details: error.details,
     });
   }
-  return new AdminDashboardApiError('network', 'No se pudo conectar con el backend del dashboard.');
+  return new AdminDashboardApiError('network', 'No se pudo conectar con el backend de observabilidad.');
 }
 
-function demoDashboardData(): IceaDashboardSummary {
+function demoDashboardData(): IceaOpsDashboardData {
   return buildDemoAdminDashboardSummary();
 }
 
-export async function fetchAdminDashboardData(unitId?: string, options?: AdminDashboardRequestOptions): Promise<IceaDashboardSummary> {
-  const qs = unitId ? `?unitId=${encodeURIComponent(unitId)}` : '';
+export async function fetchAdminDashboardData(unitId?: string, options?: AdminDashboardRequestOptions): Promise<IceaOpsDashboardData> {
   try {
-    const response = (await apiGet(`/api/icea/dashboard-summary${qs}`)) as Partial<IceaDashboardSummary> | { mode?: string } | null | undefined;
-    if (options?.demoMode && typeof response === 'object' && response && (response as { mode?: string }).mode === 'demo') {
+    const [summaryResponse, eventsResponse, unitResponse] = await Promise.all([
+      apiGet('/api/icea/ops/summary') as Promise<Partial<IceaOpsSummary> | { mode?: string } | null | undefined>,
+      apiGet(`/api/icea/ops/events${unitId ? `?unitId=${encodeURIComponent(unitId)}` : ''}`) as Promise<
+        Partial<IceaOpsEventsResponse> | null | undefined
+      >,
+      unitId ? (apiGet(`/api/icea/ops/unit/${encodeURIComponent(unitId)}`) as Promise<Partial<IceaOpsUnitDetail> | null | undefined>) : Promise.resolve(null),
+    ]);
+
+    if (options?.demoMode && typeof summaryResponse === 'object' && summaryResponse && (summaryResponse as { mode?: string }).mode === 'demo') {
       return demoDashboardData();
     }
-    if (!isContractLike(response)) {
-      if (options?.demoMode) {
-        return demoDashboardData();
-      }
-      throw new AdminDashboardApiError('invalid_payload', 'El backend devolvio un contrato de dashboard invalido.');
+
+    if (!isSummaryLike(summaryResponse) || !isEventsLike(eventsResponse)) {
+      if (options?.demoMode) return demoDashboardData();
+      throw new AdminDashboardApiError('invalid_payload', 'El backend devolvio un contrato ops invalido.');
     }
-    const normalized = normalizeDashboardSummary(response);
-    if (!normalized.generatedAt && !options?.demoMode) {
-      throw new AdminDashboardApiError('invalid_payload', 'El backend devolvio un contrato de dashboard incompleto.');
+
+    const summary = normalizeSummary(summaryResponse);
+    const unit = normalizeUnit(unitResponse);
+    const events = normalizeEvents(eventsResponse.results);
+    if (!summary.generatedAt && !options?.demoMode) {
+      throw new AdminDashboardApiError('invalid_payload', 'El backend devolvio un contrato ops incompleto.');
     }
-    return normalized;
+    return { summary, unit, events };
   } catch (error) {
     if (options?.demoMode) {
       return demoDashboardData();
@@ -473,7 +406,7 @@ export async function refreshIceaDashboardSummary(unitId: string, options?: Admi
           status: 'completed',
           summary: {
             unitId,
-            generatedAt: demoDashboardData().generatedAt,
+            generatedAt: demoDashboardData().summary.generatedAt,
           },
         },
       },

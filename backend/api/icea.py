@@ -5,7 +5,6 @@ import os
 import threading
 import uuid
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any, Dict, Iterable
 
 from django.conf import settings
@@ -20,6 +19,7 @@ from backend.api.icea_client import (
     load_icea_webhook_settings,
     send_icea_webhook,
 )
+from backend.api.icea_observability import safe_outbox_event_summary, technical_hash
 from backend.api.models import IceaOutboundEvent
 from backend.api.icea_pipeline import sync_pipeline_snapshot_from_outbound_event
 
@@ -257,27 +257,21 @@ def build_icea_webhook_payload(bundle: Dict[str, Any], request: HttpRequest) -> 
     return payload
 
 
-def _safe_hash(value: str | None) -> str:
-    normalized = (value or "").strip()
-    if not normalized:
-        return ""
-    return sha256(normalized.encode("utf-8")).hexdigest()[:16]
-
-
 def safe_icea_event_summary(event: IceaOutboundEvent, *, detail: str | None = None) -> dict[str, Any]:
+    summary = safe_outbox_event_summary(event, detail=detail)
     return {
         "event": "icea_outbound_delivery",
         "event_id": event.id,
         "request_id": event.request_id,
         "idempotency_key": event.idempotency_key,
-        "bundle_hash": _safe_hash(event.bundle_id),
-        "patient_hash": _safe_hash(event.patient_id),
-        "unit_hash": _safe_hash(event.unit_id),
-        "status": event.status,
-        "attempts": event.attempts,
-        "http_status": event.last_http_status,
-        "next_retry_at": event.next_retry_at.isoformat() if event.next_retry_at else None,
-        "detail": (detail or event.last_error or "")[:255],
+        "bundle_hash": technical_hash(event.bundle_id),
+        "unit_hash": technical_hash(event.unit_id),
+        "status": summary["status"],
+        "attempts": summary["attempts"],
+        "http_status": summary["httpStatus"],
+        "next_retry_at": summary["nextRetryAt"],
+        "detail": summary["detail"] or "",
+        "error_family": summary["errorFamily"],
     }
 
 
@@ -459,7 +453,7 @@ def enqueue_icea_outbound_event_for_transaction(
             "ICEA webhook payload could not be built",
             extra={
                 "request_id": _request_id_from_request(request),
-                "bundle_hash": _safe_hash(_bundle_identifier(bundle)),
+                "bundle_hash": technical_hash(_bundle_identifier(bundle)),
                 "error": exc.__class__.__name__,
             },
         )
@@ -497,7 +491,7 @@ def enqueue_icea_outbound_event_for_transaction(
                     "event_id": event.id,
                     "request_id": event.request_id,
                     "idempotency_key": event.idempotency_key,
-                    "bundle_hash": _safe_hash(event.bundle_id),
+                    "bundle_hash": technical_hash(event.bundle_id),
                     "status": event.status,
                 },
                 ensure_ascii=False,

@@ -1,14 +1,12 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
-import { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SupervisorDashboardScreen } from '@/src/screens/SupervisorDashboard';
-import type { IceaDashboardSummary } from '@/src/types/admin';
+import type { IceaOpsDashboardData } from '@/src/types/admin';
 
 const mockUseAuth = vi.fn();
 const mockUseAdminDashboardData = vi.fn();
-const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => mockUseAuth(),
@@ -18,161 +16,122 @@ vi.mock('@/src/hooks/useAdminDashboardData', () => ({
   useAdminDashboardData: (enabled?: boolean, options?: unknown) => mockUseAdminDashboardData(enabled, options),
 }));
 
-vi.mock('@/src/lib/priority', () => ({
-  computePriorityList: () => [
-    {
-      patientId: 'pat-1',
-      displayName: 'Paciente crítico',
-      bedLabel: 'A1',
-      news2Score: 7,
-      totalScore: 12,
-      baseScore: 10,
-      level: 'critical',
-      baseLevel: 'critical',
-      reasons: ['HIGH_NEWS2', 'PENDING_URGENT_TASK'],
-      reasonSummary: 'NEWS2 7, 1 pendiente crítico',
-      pendingCriticalTasksCount: 1,
-      explanation: {
-        engine: 'mpac-v1-hybrid-rules',
-        version: 1,
-        sourceData: ['NEWS2 7 (alto)'],
-        clinicalChange: ['Incidente reciente registrado'],
-        pendingCritical: ['Gasometría urgente (crítico)'],
-        activeContext: {
-          unitId: 'icu-a',
-          specialtyId: null,
-          unitProfileId: null,
-          specialtyOverlayIds: [],
-          activeProfileIds: [],
-          labels: ['HANDOVER Core'],
-          usesCoreFallback: true,
-          hasHumanSpecialtyOverride: false,
-        },
-        coreDimensions: [],
-        modifiers: [],
-      },
-    },
-  ],
-}));
-
-function buildDashboardData(overrides: Partial<IceaDashboardSummary> = {}): IceaDashboardSummary {
+function buildDashboardData(overrides: Partial<IceaOpsDashboardData> = {}): IceaOpsDashboardData {
   return {
-    generatedAt: '2026-03-08T10:00:00Z',
-    source: 'live',
-    demoMode: false,
-    empty: false,
-    stale: false,
-    degraded: false,
-    degradationReasons: [],
-    latestActivityAt: '2026-03-08T09:45:00Z',
-    units: [
-      {
-        unitId: 'icu-a',
-        totalHandovers: 10,
-        accepted: 1,
-        queued: 1,
-        running: 1,
-        delivered: 2,
-        succeeded: 5,
-        retry: 1,
-        failed: 0,
-        lastUpdatedAt: '2026-03-08T09:00:00Z',
-        lastDashboardRefreshAt: '2026-03-08T09:30:00Z',
-        cachedSummary: null,
-        activity: { status: 'active', handoversLast24h: 5, eventsLast24h: 7, activePipeline: 2, lastActivityAt: '2026-03-08T09:45:00Z' },
-        outbox: { total: 10, queued: 1, retry: 0, delivered: 9, failed: 0, lastAttemptAt: null, lastDeliveredAt: null },
+    summary: {
+      generatedAt: '2026-03-08T10:00:00Z',
+      available: true,
+      enabled: true,
+      scope: 'summary',
+      state: 'backlog',
+      pendingCount: 4,
+      flags: { summaryEnabled: true, eventsEnabled: true, bridgeEnabled: true },
+      units: [
+        {
+          unitId: 'icu-a',
+          available: true,
+          state: 'backlog',
+          lastUpdatedAt: '2026-03-08T09:44:00Z',
+          pendingCount: 4,
+          freshness: {
+            lastOutboundAttemptAt: '2026-03-08T09:42:00Z',
+            lastOutboundDeliveredAt: '2026-03-08T09:41:00Z',
+            lastBridgeUpdatedAt: '2026-03-08T09:44:00Z',
+            lastBridgeReceivedAt: '2026-03-08T09:43:00Z',
+            lastPipelineEventAt: '2026-03-08T09:45:00Z',
+          },
+          counts: {
+            handoversExported: 8,
+            outbox: { total: 8, queued: 1, retry: 1, delivered: 6, failed: 0, retries: 2 },
+            bridge: {
+              total: 6,
+              queued: 0,
+              sent: 1,
+              accepted: 1,
+              pending: 1,
+              scored: 3,
+              failed: 0,
+              stale: 1,
+              retries: 1,
+              provisional: 2,
+              immediate: 4,
+              enriched: 2,
+              insufficientEvidence: 0,
+            },
+            pipeline: { snapshots: 8, running: 1, retry: 1, failed: 0, events: 5 },
+          },
+          latencies: {
+            outboxDelivery: { count: 1, avgMs: 900, p95Ms: 900, maxMs: 900, lastMeasuredAt: '2026-03-08T09:41:00Z' },
+            bridgeResponse: { count: 1, avgMs: 1200, p95Ms: 1200, maxMs: 1200, lastMeasuredAt: '2026-03-08T09:43:00Z' },
+          },
+          errors: [{ source: 'outbox', errorFamily: 'timeout', count: 1, lastSeenAt: '2026-03-08T09:42:00Z' }],
+          shifts: [{ shift: 'morning', state: 'backlog', pendingCount: 2, lastUpdatedAt: '2026-03-08T09:44:00Z' }],
+        },
+      ],
+    } as unknown as IceaOpsDashboardData['summary'],
+    unit: {
+      generatedAt: '2026-03-08T10:00:00Z',
+      enabled: true,
+      scope: 'unit',
+      unitId: 'icu-a',
+      available: true,
+      state: 'backlog',
+      lastUpdatedAt: '2026-03-08T09:44:00Z',
+      pendingCount: 4,
+      freshness: {
+        lastOutboundAttemptAt: '2026-03-08T09:42:00Z',
+        lastOutboundDeliveredAt: '2026-03-08T09:41:00Z',
+        lastBridgeUpdatedAt: '2026-03-08T09:44:00Z',
+        lastBridgeReceivedAt: '2026-03-08T09:43:00Z',
+        lastPipelineEventAt: '2026-03-08T09:45:00Z',
+      },
+      counts: {
+        handoversExported: 8,
+        outbox: { total: 8, queued: 1, retry: 1, delivered: 6, failed: 0, retries: 2 },
         bridge: {
-          total: 8,
+          total: 6,
           queued: 0,
-          sent: 0,
+          sent: 1,
           accepted: 1,
           pending: 1,
-          scored: 6,
+          scored: 3,
           failed: 0,
-          stale: 0,
+          stale: 1,
+          retries: 1,
           provisional: 2,
+          immediate: 4,
+          enriched: 2,
           insufficientEvidence: 0,
-          lastUpdatedAt: null,
         },
-        clinicalPatients: [
-          {
-            id: 'pat-1',
-            name: 'Paciente crítico',
-            unitId: 'icu-a',
-            bedLabel: 'A1',
-            vitals: { rr: 28, spo2: 90, tempC: 38.2, sbp: 88, hr: 126, o2: true, avpu: 'V' },
-            devices: [{ id: 'vent-1', label: 'Ventilación mecánica', category: 'support', critical: true }],
-            risks: { isolation: true },
-            pendingTasks: [
-              {
-                id: 'task-1',
-                title: 'Gasometría urgente',
-                category: 'critical-task',
-                priority: 'routine',
-                dueBy: '2026-03-19T10:45:00.000Z',
-              },
-            ],
-            recentIncidentFlag: true,
-          },
-        ],
-        handoverTiming: [{ unitId: 'icu-a', sectionId: 'sbar', avgDurationMs: 1500, samples: 5 }],
-        alertsOpen: 1,
-        degraded: false,
-        degradationReasons: [],
+        pipeline: { snapshots: 8, running: 1, retry: 1, failed: 0, events: 5 },
       },
-    ],
-    alerts: [
-      {
-        id: 'alert-1',
-        unitId: 'icu-a',
-        source: 'pipeline',
-        severity: 'medium',
-        status: 'retry',
-        title: 'Pipeline ICEA degradado',
-        message: 'detalle',
-        requestId: 'req-1',
-        createdAt: '2026-03-08T09:40:00Z',
+      latencies: {
+        outboxDelivery: { count: 1, avgMs: 900, p95Ms: 900, maxMs: 900, lastMeasuredAt: '2026-03-08T09:41:00Z' },
+        bridgeResponse: { count: 1, avgMs: 1200, p95Ms: 1200, maxMs: 1200, lastMeasuredAt: '2026-03-08T09:43:00Z' },
       },
-    ],
-    outbox: {
-      enabled: true,
-      configured: true,
-      totals: { queued: 1, retry: 0, delivered: 9, failed: 0 },
-      lastAttemptAt: null,
-      lastDeliveredAt: null,
+      errors: [{ source: 'outbox', errorFamily: 'timeout', count: 1, lastSeenAt: '2026-03-08T09:42:00Z' }],
+      shifts: [{ shift: 'morning', state: 'backlog', pendingCount: 2, lastUpdatedAt: '2026-03-08T09:44:00Z' }],
+      recentEvents: [
+        {
+          eventId: 'outbox:1',
+          source: 'outbox',
+          requestId: 'req-1',
+          bundleId: 'bundle-1',
+          unitId: 'icu-a',
+          payloadHash: 'abcd1234',
+          status: 'retry',
+          statusFamily: null,
+          errorFamily: 'timeout',
+          attempts: 2,
+          httpStatus: null,
+          latencyMs: null,
+          detail: 'ConnectTimeout',
+          createdAt: '2026-03-08T09:45:00Z',
+          updatedAt: '2026-03-08T09:45:00Z',
+        },
+      ],
     },
-    pipeline: {
-      configured: true,
-      remoteActionsEnabled: true,
-      remoteStatusEnabled: true,
-      bridgeEnabled: true,
-      bridgeConfigured: true,
-      snapshots: 10,
-      running: 1,
-      retry: 1,
-      failed: 0,
-      bridge: { queued: 0, sent: 0, accepted: 1, pending: 1, scored: 6, failed: 0, stale: 0, provisional: 2, insufficientEvidence: 0 },
-      lastEventAt: '2026-03-08T09:45:00Z',
-      degradationReasons: [],
-    },
-    recentEvents: [
-      {
-        id: 1,
-        requestId: 'req-1',
-        bundleId: 'bundle-1',
-        patientId: 'pat-1',
-        unitId: 'icu-a',
-        stage: 'normalize',
-        action: 'normalize',
-        status: 'running',
-        source: 'manual-action',
-        actorSub: 'auth0|sup-1',
-        detail: null,
-        httpStatus: 200,
-        payload: null,
-        createdAt: '2026-03-08T09:45:00Z',
-      },
-    ],
+    events: [],
     ...overrides,
   };
 }
@@ -183,7 +142,7 @@ describe('SupervisorDashboardScreen', () => {
     mockUseAdminDashboardData.mockReset();
   });
 
-  it('muestra prioridad contextual para supervisor usando el censo real de la unidad', async () => {
+  it('muestra el panel operativo agregado para la unidad seleccionada', () => {
     mockUseAuth.mockReturnValue({
       session: {
         userId: 'sup-1',
@@ -206,20 +165,13 @@ describe('SupervisorDashboardScreen', () => {
 
     const screen = render(<SupervisorDashboardScreen />);
 
-    await act(async () => {
-      await flush();
-      await flush();
-    });
-
-    expect(screen.getByTestId('dashboard-priority-panel')).toBeTruthy();
-    expect(screen.getByText('Prioridad contextual')).toBeTruthy();
-    expect(screen.getByText('Paciente crítico')).toBeTruthy();
-    expect(screen.getByText('Riesgo de omisión alto')).toBeTruthy();
-    expect(screen.getByText('No omitir: Gasometría urgente')).toBeTruthy();
+    expect(screen.getByTestId('dashboard-ops-panel')).toBeTruthy();
+    expect(screen.getByText('Freshness y backlog')).toBeTruthy();
+    expect(screen.getByText('Shifts observables')).toBeTruthy();
+    expect(screen.getByText('payload_hash: abcd1234')).toBeTruthy();
   });
 
-
-  it('muestra un mensaje no bloqueante si no hay snapshots clínicos utilizables', async () => {
+  it('muestra unavailable explícito si no hay datos utilizables', () => {
     mockUseAuth.mockReturnValue({
       session: {
         userId: 'sup-1',
@@ -231,12 +183,11 @@ describe('SupervisorDashboardScreen', () => {
     });
     mockUseAdminDashboardData.mockReturnValue({
       data: buildDashboardData({
-        units: [
-          {
-            ...buildDashboardData().units[0],
-            clinicalPatients: [],
-          },
-        ],
+        unit: {
+          ...buildDashboardData().unit!,
+          available: false,
+          unavailableReason: 'icea_ops_unit_no_data',
+        },
       }),
       loading: false,
       error: null,
@@ -249,18 +200,56 @@ describe('SupervisorDashboardScreen', () => {
 
     const screen = render(<SupervisorDashboardScreen />);
 
-    await act(async () => {
-      await flush();
-      await flush();
+    expect(screen.getByText('Unavailable: icea_ops_unit_no_data')).toBeTruthy();
+  });
+
+  it('muestra unavailableReason del summary cuando ops esta disabled', () => {
+    mockUseAuth.mockReturnValue({
+      session: {
+        userId: 'sup-1',
+        roles: ['supervisor'],
+        units: ['icu-a'],
+        accessToken: 'token',
+      },
+      loading: false,
+    });
+    mockUseAdminDashboardData.mockReturnValue({
+      data: buildDashboardData({
+        summary: {
+          ...buildDashboardData().summary,
+          available: false,
+          enabled: false,
+          state: undefined,
+          units: [],
+          unavailableReason: 'icea_ops_summary_disabled',
+        } as unknown as IceaOpsDashboardData['summary'],
+        unit: {
+          ...buildDashboardData().unit!,
+          available: false,
+          enabled: false,
+          state: 'degraded',
+          unavailableReason: 'icea_ops_unit_disabled',
+          recentEvents: [],
+          shifts: [],
+          errors: [],
+        },
+      }),
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+      refreshRemoteSummary: vi.fn(),
+      refreshingUnitId: null,
+      stale: false,
+      lastLoadedAt: '2026-03-08T10:00:00Z',
     });
 
-    expect(screen.getByTestId('dashboard-priority-panel')).toBeTruthy();
-    expect(
-      screen.getByText('Sin snapshots clínicos persistidos con señal utilizable para esta unidad.'),
-    ).toBeTruthy();
-    expect(screen.getByText('Estado operativo')).toBeTruthy();
+    const screen = render(<SupervisorDashboardScreen />);
+
+    expect(screen.getByText('Observabilidad unavailable: icea_ops_summary_disabled')).toBeTruthy();
+    expect(screen.getByText('Unavailable: icea_ops_unit_disabled')).toBeTruthy();
   });
-  it('muestra un indicador de carga inicial', async () => {
+
+  it('muestra un indicador de carga inicial', () => {
     mockUseAuth.mockReturnValue({
       session: {
         userId: 'sup-1',
@@ -286,7 +275,7 @@ describe('SupervisorDashboardScreen', () => {
     expect(getByTestId('dashboard-loader')).toBeTruthy();
   });
 
-  it('renderiza el mensaje de error y permite reintentar', async () => {
+  it('renderiza el mensaje de error y permite reintentar', () => {
     mockUseAuth.mockReturnValue({
       session: {
         userId: 'sup-1',
@@ -312,7 +301,3 @@ describe('SupervisorDashboardScreen', () => {
     expect(getByTestId('dashboard-error')).toBeTruthy();
   });
 });
-
-
-
-

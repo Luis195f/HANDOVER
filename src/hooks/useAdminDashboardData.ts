@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AdminDashboardApiError, fetchAdminDashboardData, refreshIceaDashboardSummary } from '../lib/admin-api';
-import type { IceaDashboardSummary } from '../types/admin';
+import type { IceaOpsDashboardData } from '../types/admin';
 
 interface UseAdminDashboardDataOptions {
   unitId?: string;
@@ -8,7 +8,7 @@ interface UseAdminDashboardDataOptions {
 }
 
 interface UseAdminDashboardData {
-  data: IceaDashboardSummary | null;
+  data: IceaOpsDashboardData | null;
   loading: boolean;
   error: AdminDashboardApiError | null;
   reload: () => void;
@@ -19,7 +19,7 @@ interface UseAdminDashboardData {
 }
 
 export function useAdminDashboardData(enabled = true, options?: UseAdminDashboardDataOptions): UseAdminDashboardData {
-  const [data, setData] = useState<IceaDashboardSummary | null>(null);
+  const [data, setData] = useState<IceaOpsDashboardData | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<AdminDashboardApiError | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -79,7 +79,7 @@ export function useAdminDashboardData(enabled = true, options?: UseAdminDashboar
     reload,
     refreshRemoteSummary,
     refreshingUnitId,
-    stale: Boolean(data?.stale || (error && data)),
-    lastLoadedAt: data?.generatedAt ?? null,
+    stale: Boolean(data?.summary.state === 'stale' || (error && data)),
+    lastLoadedAt: data?.summary.generatedAt ?? null,
   };
 }

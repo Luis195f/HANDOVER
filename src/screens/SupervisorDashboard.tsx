@@ -1,15 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import PriorityBadge from '@/src/components/priority/PriorityBadge';
 import { UNITS } from '@/src/config/units';
 import { useAdminDashboardData } from '@/src/hooks/useAdminDashboardData';
-import { computeAlerts, type HandoverAlertsSource } from '@/src/lib/alerts';
-import { buildPriorityInputs } from '@/src/lib/patientListData';
-import { buildPriorityUiModel, getPriorityToneStyles, hasActionablePrioritySignal } from '@/src/lib/priority-ui';
-import { computePriorityList, type PrioritizedPatient } from '@/src/lib/priority';
 import { hasRole } from '@/src/security/acl';
 import { useAuth } from '@/src/security/auth';
+import type { IceaOpsErrorSummary, IceaOpsEventSummary, IceaOpsShiftSummary } from '@/src/types/admin';
 
 function formatDate(value: string | null | undefined) {
   if (!value) return 'Sin datos';
@@ -18,12 +14,64 @@ function formatDate(value: string | null | undefined) {
   return parsed.toLocaleString('es-ES');
 }
 
+function stateTone(state: string | null | undefined) {
+  switch (state) {
+    case 'healthy':
+      return { backgroundColor: '#f0fdf4', borderColor: '#86efac', textColor: '#166534' };
+    case 'backlog':
+      return { backgroundColor: '#fffbeb', borderColor: '#fcd34d', textColor: '#92400e' };
+    case 'stale':
+      return { backgroundColor: '#fff7ed', borderColor: '#fdba74', textColor: '#9a3412' };
+    case 'failed':
+      return { backgroundColor: '#fef2f2', borderColor: '#fca5a5', textColor: '#991b1b' };
+    default:
+      return { backgroundColor: '#fefce8', borderColor: '#facc15', textColor: '#854d0e' };
+  }
+}
+
 function UnitMetric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
   return (
     <View style={styles.metricCard}>
       <Text style={styles.metricLabel}>{label}</Text>
       <Text style={styles.metricValue}>{value}</Text>
       {detail ? <Text style={styles.metricDetail}>{detail}</Text> : null}
+    </View>
+  );
+}
+
+function ErrorCard({ item }: { item: IceaOpsErrorSummary }) {
+  return (
+    <View style={styles.itemCard}>
+      <Text style={styles.itemTitle}>{item.source} · {item.errorFamily}</Text>
+      <Text>Casos: {item.count}</Text>
+      <Text style={styles.itemMeta}>{formatDate(item.lastSeenAt)}</Text>
+    </View>
+  );
+}
+
+function ShiftCard({ shift }: { shift: IceaOpsShiftSummary }) {
+  const tone = stateTone(shift.state);
+  return (
+    <View style={[styles.itemCard, { borderColor: tone.borderColor, backgroundColor: tone.backgroundColor }]}>
+      <Text style={[styles.itemTitle, { color: tone.textColor }]}>{shift.shift}</Text>
+      <Text>Estado: {shift.state}</Text>
+      <Text>Pending count: {shift.pendingCount}</Text>
+      <Text style={styles.itemMeta}>{formatDate(shift.lastUpdatedAt)}</Text>
+    </View>
+  );
+}
+
+function EventCard({ event }: { event: IceaOpsEventSummary }) {
+  const tone = stateTone(event.status);
+  return (
+    <View style={[styles.itemCard, { borderColor: tone.borderColor, backgroundColor: tone.backgroundColor }]}>
+      <Text style={[styles.itemTitle, { color: tone.textColor }]}>{event.source} · {event.status}</Text>
+      {event.stage ? <Text>Etapa: {event.stage}</Text> : null}
+      {event.errorFamily ? <Text>Familia error: {event.errorFamily}</Text> : null}
+      {event.requestId ? <Text>request_id: {event.requestId}</Text> : null}
+      {event.bundleId ? <Text>bundle_id: {event.bundleId}</Text> : null}
+      {event.payloadHash ? <Text>payload_hash: {event.payloadHash}</Text> : null}
+      <Text style={styles.itemMeta}>{formatDate(event.updatedAt)}</Text>
     </View>
   );
 }
@@ -39,63 +87,13 @@ export function SupervisorDashboardScreen() {
   });
 
   const selectedUnit = useMemo(
-    () => data?.units.find((unit) => unit.unitId === selectedUnitId) ?? data?.units[0] ?? null,
+    () => data?.unit ?? data?.summary.units.find((unit) => unit.unitId === selectedUnitId) ?? data?.summary.units[0] ?? null,
     [data, selectedUnitId],
   );
-  const priorityPatients = useMemo(() => selectedUnit?.clinicalPatients ?? [], [selectedUnit]);
-  const prioritySnapshot = useMemo<PrioritizedPatient[]>(
-    () => computePriorityList(buildPriorityInputs(priorityPatients)),
-    [priorityPatients],
+  const selectedEvents = useMemo(
+    () => data?.unit?.recentEvents ?? data?.events.filter((event) => event.unitId === selectedUnitId) ?? [],
+    [data, selectedUnitId],
   );
-  const patientById = useMemo(
-    () => new Map(priorityPatients.map((patient) => [patient.id, patient] as const)),
-    [priorityPatients],
-  );
-  const alertsByPatient = useMemo(() => {
-    return priorityPatients.reduce<Record<string, ReturnType<typeof computeAlerts>>>((acc, patient) => {
-      const source: HandoverAlertsSource = {
-        vitals: patient.vitals ?? {},
-        risks: patient.risks ?? {},
-        risksStructured: [],
-        braden: undefined,
-        clinicalScales: undefined,
-      };
-      acc[patient.id] = computeAlerts(source);
-      return acc;
-    }, {});
-  }, [priorityPatients]);
-  const actionablePriorityRows = useMemo(
-    () =>
-      prioritySnapshot
-        .filter((patient) => hasActionablePrioritySignal(patient))
-        .map((patient) => ({
-          patient,
-          ui: buildPriorityUiModel({
-            patient,
-            pendingTasks: patientById.get(patient.patientId)?.pendingTasks,
-            alerts: alertsByPatient[patient.patientId] ?? [],
-          }),
-        })),
-    [alertsByPatient, patientById, prioritySnapshot],
-  );
-  const prioritySummary = useMemo(
-    () =>
-      actionablePriorityRows.reduce(
-        (acc, row) => {
-          acc[row.patient.level] += 1;
-          if (row.ui.omissionTone === 'critical') {
-            acc.omissionHigh += 1;
-          }
-          if (row.ui.windowLabel) {
-            acc.timeWindows += 1;
-          }
-          return acc;
-        },
-        { critical: 0, high: 0, medium: 0, low: 0, omissionHigh: 0, timeWindows: 0 },
-      ),
-    [actionablePriorityRows],
-  );
-  const topPriorityRows = actionablePriorityRows.slice(0, 4);
 
   if (authLoading) {
     return (
@@ -117,7 +115,7 @@ export function SupervisorDashboardScreen() {
     return (
       <View style={styles.centered} testID="dashboard-loader">
         <ActivityIndicator />
-        <Text style={styles.loaderText}>Cargando dashboard operativo...</Text>
+        <Text style={styles.loaderText}>Cargando observabilidad operativa...</Text>
       </View>
     );
   }
@@ -136,12 +134,17 @@ export function SupervisorDashboardScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Dashboard de supervisor</Text>
-      <Text style={styles.subtitle}>Vista backend-driven del estado operativo por unidad y del pipeline ICEA.</Text>
+      <Text style={styles.subtitle}>Estado operativo agregado del outbox, bridge y pipeline ICEA por unidad.</Text>
 
-      {data?.demoMode ? <Text style={styles.bannerInfo}>Modo demo explicito: datos ficticios etiquetados como demo.</Text> : null}
-      {stale ? <Text style={styles.bannerWarn}>El resumen puede estar stale; se muestra el ultimo dato persistido.</Text> : null}
-      {data?.degraded ? <Text style={styles.bannerWarn}>Estado degradado: {data.degradationReasons.join(', ')}</Text> : null}
-      {error && data ? <Text style={styles.bannerWarn}>No se pudo refrescar el backend; se conserva el ultimo resumen local.</Text> : null}
+      {data?.summary.available === false ? (
+        <Text style={styles.bannerWarn}>Observabilidad unavailable: {data.summary.unavailableReason ?? 'feature flag deshabilitado.'}</Text>
+      ) : null}
+      {data?.summary.state ? <Text style={styles.bannerInfo}>Estado global: {data.summary.state}</Text> : null}
+      {data?.summary.flags.bridgeEnabled === false ? (
+        <Text style={styles.bannerWarn}>Bridge ICEA en shadow mode no disponible en este entorno.</Text>
+      ) : null}
+      {stale ? <Text style={styles.bannerWarn}>El resumen puede estar stale; se muestra el último dato persistido.</Text> : null}
+      {error && data ? <Text style={styles.bannerWarn}>No se pudo refrescar el backend; se conserva el último resumen local.</Text> : null}
 
       <View style={styles.filters}>
         <Text style={styles.sectionLabel}>Unidad</Text>
@@ -158,7 +161,7 @@ export function SupervisorDashboardScreen() {
             </Pressable>
           ))}
         </View>
-        <Text style={styles.filterHint}>Generado: {formatDate(data?.generatedAt)}</Text>
+        <Text style={styles.filterHint}>Generado: {formatDate(data?.summary.generatedAt)}</Text>
       </View>
 
       {!selectedUnit ? (
@@ -168,157 +171,70 @@ export function SupervisorDashboardScreen() {
       ) : (
         <>
           <View style={styles.metricsGrid}>
-            <UnitMetric label="Handovers" value={selectedUnit.totalHandovers} detail={`24h ${selectedUnit.activity.handoversLast24h}`} />
-            <UnitMetric label="Pipeline" value={selectedUnit.activity.activePipeline} detail={selectedUnit.activity.status} />
-            <UnitMetric label="Outbox" value={selectedUnit.outbox.delivered} detail={`retry ${selectedUnit.outbox.retry} · failed ${selectedUnit.outbox.failed}`} />
-            <UnitMetric label="Bridge" value={selectedUnit.bridge.scored} detail={`pending ${selectedUnit.bridge.pending} · stale ${selectedUnit.bridge.stale}`} />
+            <UnitMetric label="Estado" value={selectedUnit.state} detail={`Pending ${selectedUnit.pendingCount}`} />
+            <UnitMetric
+              label="Handovers exportados"
+              value={selectedUnit.counts.handoversExported}
+              detail={`Outbox delivered ${selectedUnit.counts.outbox.delivered}`}
+            />
+            <UnitMetric
+              label="Bridge"
+              value={selectedUnit.counts.bridge.scored}
+              detail={`Pending ${selectedUnit.counts.bridge.pending} · Stale ${selectedUnit.counts.bridge.stale}`}
+            />
+            <UnitMetric
+              label="Pipeline"
+              value={selectedUnit.counts.pipeline.events}
+              detail={`Running ${selectedUnit.counts.pipeline.running} · Failed ${selectedUnit.counts.pipeline.failed}`}
+            />
           </View>
 
-          <View style={styles.panel} testID="dashboard-priority-panel">
-            <Text style={styles.panelTitle}>Prioridad contextual</Text>
-            <Text style={styles.panelHint}>
-              Se calcula sobre el último handover clínico persistido por paciente, con la misma lógica visible en la lista de pacientes.
+          <View style={styles.panel} testID="dashboard-ops-panel">
+            <Text style={styles.panelTitle}>Freshness y backlog</Text>
+            <Text>Última actualización: {formatDate(selectedUnit.lastUpdatedAt)}</Text>
+            <Text>Último intento outbox: {formatDate(selectedUnit.freshness.lastOutboundAttemptAt)}</Text>
+            <Text>Último delivery outbox: {formatDate(selectedUnit.freshness.lastOutboundDeliveredAt)}</Text>
+            <Text>Última respuesta bridge: {formatDate(selectedUnit.freshness.lastBridgeReceivedAt)}</Text>
+            <Text>Último evento pipeline: {formatDate(selectedUnit.freshness.lastPipelineEventAt)}</Text>
+            {!selectedUnit.available && selectedUnit.unavailableReason ? (
+              <Text style={styles.panelWarn}>Unavailable: {selectedUnit.unavailableReason}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Latencias</Text>
+            <Text>
+              Outbox delivery: {selectedUnit.latencies.outboxDelivery.avgMs ?? 'Sin datos'} ms promedio · p95{' '}
+              {selectedUnit.latencies.outboxDelivery.p95Ms ?? 'Sin datos'}
             </Text>
-            {priorityPatients.length === 0 ? (
-              <Text style={styles.emptyText}>
-                Sin snapshots clínicos persistidos con señal utilizable para esta unidad.
-              </Text>
-            ) : null}
-            {priorityPatients.length > 0 && actionablePriorityRows.length === 0 ? (
-              <Text style={styles.emptyText}>
-                Sin señal contextual suficiente; se mantiene la lectura operativa sin forzar reordenaciones.
-              </Text>
-            ) : null}
-            {actionablePriorityRows.length > 0 ? (
-              <>
-                <View style={styles.prioritySummaryRow}>
-                  <View style={styles.prioritySummaryChip}>
-                    <Text style={styles.prioritySummaryValue}>{prioritySummary.critical}</Text>
-                    <Text style={styles.prioritySummaryLabel}>críticas</Text>
-                  </View>
-                  <View style={styles.prioritySummaryChip}>
-                    <Text style={styles.prioritySummaryValue}>{prioritySummary.high}</Text>
-                    <Text style={styles.prioritySummaryLabel}>altas</Text>
-                  </View>
-                  <View style={styles.prioritySummaryChip}>
-                    <Text style={styles.prioritySummaryValue}>{prioritySummary.omissionHigh}</Text>
-                    <Text style={styles.prioritySummaryLabel}>omisión alta</Text>
-                  </View>
-                  <View style={styles.prioritySummaryChip}>
-                    <Text style={styles.prioritySummaryValue}>{prioritySummary.timeWindows}</Text>
-                    <Text style={styles.prioritySummaryLabel}>ventanas activas</Text>
-                  </View>
-                </View>
-                {topPriorityRows.map(({ patient, ui }) => (
-                  <View key={patient.patientId} style={styles.priorityPatientCard}>
-                    <View style={styles.priorityPatientHeader}>
-                      <PriorityBadge level={patient.level} />
-                      <View style={styles.priorityPatientHeaderText}>
-                        <Text style={styles.priorityPatientName}>{patient.displayName}</Text>
-                        {patient.bedLabel ? <Text style={styles.priorityPatientMeta}>Cama {patient.bedLabel}</Text> : null}
-                      </View>
-                    </View>
-                    <Text style={styles.priorityPatientReason}>{ui.whyNow}</Text>
-                    {ui.actionLabel ? <Text style={styles.priorityPatientAction}>{ui.actionLabel}</Text> : null}
-                    <View style={styles.priorityInlineRow}>
-                      {ui.omissionLabel ? (
-                        <View
-                          style={[
-                            styles.priorityInlineChip,
-                            {
-                              backgroundColor: getPriorityToneStyles(ui.omissionTone ?? 'neutral').backgroundColor,
-                              borderColor: getPriorityToneStyles(ui.omissionTone ?? 'neutral').borderColor,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.priorityInlineChipText,
-                              { color: getPriorityToneStyles(ui.omissionTone ?? 'neutral').textColor },
-                            ]}
-                          >
-                            {ui.omissionLabel}
-                          </Text>
-                        </View>
-                      ) : null}
-                      {ui.windowLabel ? (
-                        <View
-                          style={[
-                            styles.priorityInlineChip,
-                            {
-                              backgroundColor: getPriorityToneStyles(ui.windowTone ?? 'neutral').backgroundColor,
-                              borderColor: getPriorityToneStyles(ui.windowTone ?? 'neutral').borderColor,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.priorityInlineChipText,
-                              { color: getPriorityToneStyles(ui.windowTone ?? 'neutral').textColor },
-                            ]}
-                          >
-                            {ui.windowLabel}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                ))}
-              </>
-            ) : null}
+            <Text>
+              Bridge response: {selectedUnit.latencies.bridgeResponse.avgMs ?? 'Sin datos'} ms promedio · p95{' '}
+              {selectedUnit.latencies.bridgeResponse.p95Ms ?? 'Sin datos'}
+            </Text>
           </View>
 
           <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Estado operativo</Text>
-            <Text>Ultima actividad: {formatDate(selectedUnit.activity.lastActivityAt)}</Text>
-            <Text>Eventos 24h: {selectedUnit.activity.eventsLast24h}</Text>
-            <Text>Alertas abiertas: {selectedUnit.alertsOpen}</Text>
-            <Text>Refresh remoto: {formatDate(selectedUnit.lastDashboardRefreshAt)}</Text>
-            {selectedUnit.degradationReasons.length > 0 ? (
-              <Text style={styles.panelWarn}>Degradado por: {selectedUnit.degradationReasons.join(', ')}</Text>
-            ) : null}
-          </View>
-
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Tiempo promedio por seccion</Text>
-            {selectedUnit.handoverTiming.length === 0 ? <Text style={styles.emptyText}>Sin datos de timing.</Text> : null}
-            {selectedUnit.handoverTiming.map((item) => (
-              <Text key={`${item.unitId}-${item.sectionId}`} style={styles.metricDetail}>
-                {item.sectionId}: {Math.round(item.avgDurationMs)} ms ({item.samples})
-              </Text>
+            <Text style={styles.panelTitle}>Shifts observables</Text>
+            {selectedUnit.shifts.length === 0 ? <Text style={styles.emptyText}>Sin señal de shift persistida.</Text> : null}
+            {selectedUnit.shifts.map((shift) => (
+              <ShiftCard key={`${selectedUnit.unitId}-${shift.shift}`} shift={shift} />
             ))}
           </View>
 
           <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Alertas de la unidad</Text>
-            {data?.alerts.filter((alert) => alert.unitId === selectedUnit.unitId).length === 0 ? (
-              <Text style={styles.emptyText}>Sin alertas activas.</Text>
-            ) : null}
-            {data?.alerts
-              .filter((alert) => alert.unitId === selectedUnit.unitId)
-              .map((alert) => (
-                <View key={alert.id} style={styles.alertCard}>
-                  <Text style={styles.alertTitle}>{alert.title}</Text>
-                  <Text>{alert.message}</Text>
-                  <Text style={styles.alertMeta}>{formatDate(alert.createdAt)}</Text>
-                </View>
-              ))}
+            <Text style={styles.panelTitle}>Familias de error</Text>
+            {selectedUnit.errors.length === 0 ? <Text style={styles.emptyText}>Sin errores tipificados activos.</Text> : null}
+            {selectedUnit.errors.map((item) => (
+              <ErrorCard key={`${item.source}-${item.errorFamily}`} item={item} />
+            ))}
           </View>
 
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Eventos recientes</Text>
-            {data?.recentEvents.filter((event) => event.unitId === selectedUnit.unitId).length === 0 ? (
-              <Text style={styles.emptyText}>Sin eventos recientes para esta unidad.</Text>
-            ) : null}
-            {data?.recentEvents
-              .filter((event) => event.unitId === selectedUnit.unitId)
-              .map((event) => (
-                <View key={event.id} style={styles.eventCard}>
-                  <Text style={styles.alertTitle}>{event.stage} · {event.status}</Text>
-                  {event.detail ? <Text>{event.detail}</Text> : null}
-                  <Text style={styles.alertMeta}>{formatDate(event.createdAt)}</Text>
-                </View>
-              ))}
+            {selectedEvents.length === 0 ? <Text style={styles.emptyText}>Sin eventos recientes para esta unidad.</Text> : null}
+            {selectedEvents.map((event) => (
+              <EventCard key={event.eventId} event={event} />
+            ))}
           </View>
         </>
       )}
@@ -431,105 +347,22 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     marginBottom: 4,
   },
-  panelHint: {
-    color: '#475569',
-    lineHeight: 18,
-  },
   panelWarn: {
     color: '#92400e',
   },
-  prioritySummaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 4,
-  },
-  prioritySummaryChip: {
-    minWidth: '23%',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 10,
-  },
-  prioritySummaryValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  prioritySummaryLabel: {
-    color: '#475569',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  priorityPatientCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#FCFDFE',
-    padding: 12,
-    gap: 6,
-    marginTop: 4,
-  },
-  priorityPatientHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  priorityPatientHeaderText: {
-    flex: 1,
-    gap: 2,
-  },
-  priorityPatientName: {
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  priorityPatientMeta: {
-    color: '#64748b',
-    fontSize: 12,
-  },
-  priorityPatientReason: {
-    color: '#1f2937',
-    lineHeight: 19,
-  },
-  priorityPatientAction: {
-    color: '#475569',
-    lineHeight: 18,
-  },
-  priorityInlineRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  priorityInlineChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  priorityInlineChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  alertCard: {
-    borderWidth: 1,
-    borderColor: '#fde68a',
-    backgroundColor: '#fffbeb',
-    borderRadius: 10,
-    padding: 10,
-  },
-  eventCard: {
+  itemCard: {
     borderWidth: 1,
     borderColor: '#e2e8f0',
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 10,
+    marginTop: 6,
   },
-  alertTitle: {
+  itemTitle: {
     fontWeight: '600',
     color: '#0f172a',
   },
-  alertMeta: {
+  itemMeta: {
     color: '#64748b',
     fontSize: 12,
     marginTop: 4,
@@ -565,5 +398,3 @@ const styles = StyleSheet.create({
 });
 
 export default SupervisorDashboardScreen;
-
-

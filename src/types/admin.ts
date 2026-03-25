@@ -1,44 +1,62 @@
-import type { DeviceSummary, PendingTaskSummary, RiskFlags, VitalsSnapshot } from '@/src/types/handover';
+export type IceaOperationalState = 'healthy' | 'degraded' | 'backlog' | 'stale' | 'failed';
 
-export interface IceaDashboardTimingSummary {
-  unitId: string;
-  sectionId: string;
-  avgDurationMs: number;
-  samples: number;
+export interface IceaOpsLatencySummary {
+  count: number;
+  avgMs: number | null;
+  p95Ms: number | null;
+  maxMs: number | null;
+  lastMeasuredAt: string | null;
 }
 
-export interface IceaDashboardClinicalPatient {
-  id: string;
-  name: string;
-  unitId: string;
-  bedLabel?: string;
-  vitals?: VitalsSnapshot;
-  devices?: DeviceSummary[];
-  risks?: RiskFlags;
-  pendingTasks?: PendingTaskSummary[];
-  lastIncidentAt?: string | null;
-  recentIncidentFlag?: boolean;
+export interface IceaOpsErrorSummary {
+  source: 'outbox' | 'bridge' | 'pipeline' | string;
+  errorFamily: string;
+  count: number;
+  lastSeenAt: string | null;
 }
 
-export interface IceaDashboardOperationalActivity {
-  status: 'degraded' | 'attention' | 'active' | 'nominal' | 'empty' | string;
-  handoversLast24h: number;
-  eventsLast24h: number;
-  activePipeline: number;
-  lastActivityAt: string | null;
+export interface IceaOpsEventSummary {
+  eventId: string;
+  source: 'outbox' | 'bridge' | 'pipeline' | string;
+  requestId: string | null;
+  bundleId: string | null;
+  unitId: string | null;
+  payloadHash: string | null;
+  status: string;
+  statusFamily: string | null;
+  errorFamily: string | null;
+  attempts?: number;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  nextRetryAt?: string | null;
+  stage?: string | null;
+  action?: string | null;
+  scoringMode?: string | null;
+  provisional?: boolean;
+  insufficientEvidence?: boolean;
+  detail: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface IceaDashboardOutboxUnitSummary {
+export interface IceaOpsFreshnessSummary {
+  lastOutboundAttemptAt: string | null;
+  lastOutboundDeliveredAt: string | null;
+  lastBridgeUpdatedAt: string | null;
+  lastBridgeReceivedAt: string | null;
+  lastPipelineEventAt: string | null;
+}
+
+export interface IceaOpsOutboxCounts {
   total: number;
   queued: number;
   retry: number;
   delivered: number;
   failed: number;
-  lastAttemptAt: string | null;
-  lastDeliveredAt: string | null;
+  retries: number;
 }
 
-export interface IceaDashboardBridgeUnitSummary {
+export interface IceaOpsBridgeCounts {
   total: number;
   queued: number;
   sent: number;
@@ -47,113 +65,104 @@ export interface IceaDashboardBridgeUnitSummary {
   scored: number;
   failed: number;
   stale: number;
+  retries: number;
   provisional: number;
+  immediate: number;
+  enriched: number;
   insufficientEvidence: number;
-  lastUpdatedAt: string | null;
 }
 
-export interface IceaDashboardUnitSummary {
-  unitId: string;
-  totalHandovers: number;
-  accepted: number;
-  queued: number;
-  running: number;
-  delivered: number;
-  succeeded: number;
-  retry: number;
-  failed: number;
-  lastUpdatedAt: string | null;
-  lastDashboardRefreshAt: string | null;
-  cachedSummary?: Record<string, unknown> | null;
-  activity: IceaDashboardOperationalActivity;
-  outbox: IceaDashboardOutboxUnitSummary;
-  bridge: IceaDashboardBridgeUnitSummary;
-  clinicalPatients: IceaDashboardClinicalPatient[];
-  handoverTiming: IceaDashboardTimingSummary[];
-  alertsOpen: number;
-  degraded: boolean;
-  degradationReasons: string[];
-}
-
-export interface IceaPipelineEventSummary {
-  id: number;
-  requestId: string | null;
-  bundleId: string | null;
-  patientId: string | null;
-  unitId: string | null;
-  stage: string;
-  action: string | null;
-  status: string;
-  source: string | null;
-  actorSub: string | null;
-  detail: string | null;
-  httpStatus: number | null;
-  payload?: Record<string, unknown> | null;
-  createdAt: string;
-}
-
-export interface IceaDashboardAlert {
-  id: string;
-  unitId: string | null;
-  source: 'outbox' | 'bridge' | 'pipeline' | string;
-  severity: 'high' | 'medium' | 'low' | string;
-  status: string;
-  title: string;
-  message: string;
-  requestId: string | null;
-  createdAt: string;
-}
-
-export interface IceaDashboardOutboxSummary {
-  enabled: boolean;
-  configured: boolean;
-  totals: {
-    queued: number;
-    retry: number;
-    delivered: number;
-    failed: number;
-  };
-  lastAttemptAt: string | null;
-  lastDeliveredAt: string | null;
-}
-
-export interface IceaDashboardPipelineSummary {
-  configured: boolean;
-  remoteActionsEnabled: boolean;
-  remoteStatusEnabled: boolean;
-  bridgeEnabled: boolean;
-  bridgeConfigured: boolean;
+export interface IceaOpsPipelineCounts {
   snapshots: number;
   running: number;
   retry: number;
   failed: number;
-  bridge: {
-    queued: number;
-    sent: number;
-    accepted: number;
-    pending: number;
-    scored: number;
-    failed: number;
-    stale: number;
-    provisional: number;
-    insufficientEvidence: number;
-  };
-  lastEventAt: string | null;
-  degradationReasons: string[];
+  events: number;
 }
 
-export interface IceaDashboardSummary {
+export interface IceaOpsShiftSummary {
+  shift: string;
+  state: IceaOperationalState;
+  pendingCount: number;
+  lastUpdatedAt: string | null;
+}
+
+export interface IceaOpsUnitSummary {
+  unitId: string;
+  available: boolean;
+  state: IceaOperationalState;
+  lastUpdatedAt: string | null;
+  pendingCount: number;
+  unavailableReason?: string;
+  freshness: IceaOpsFreshnessSummary;
+  counts: {
+    handoversExported: number;
+    outbox: IceaOpsOutboxCounts;
+    bridge: IceaOpsBridgeCounts;
+    pipeline: IceaOpsPipelineCounts;
+  };
+  latencies: {
+    outboxDelivery: IceaOpsLatencySummary;
+    bridgeResponse: IceaOpsLatencySummary;
+  };
+  errors: IceaOpsErrorSummary[];
+  shifts: IceaOpsShiftSummary[];
+}
+
+export interface IceaOpsUnitDetail extends IceaOpsUnitSummary {
   generatedAt: string;
-  source: 'live' | 'demo' | string;
-  demoMode: boolean;
-  empty: boolean;
-  stale: boolean;
-  degraded: boolean;
-  degradationReasons: string[];
-  latestActivityAt: string | null;
-  units: IceaDashboardUnitSummary[];
-  alerts: IceaDashboardAlert[];
-  outbox: IceaDashboardOutboxSummary;
-  pipeline: IceaDashboardPipelineSummary;
-  recentEvents: IceaPipelineEventSummary[];
+  enabled: boolean;
+  scope: 'unit' | string;
+  recentEvents: IceaOpsEventSummary[];
+}
+
+export interface IceaOpsSummary {
+  generatedAt: string;
+  available: boolean;
+  enabled: boolean;
+  scope: 'summary' | string;
+  empty?: boolean;
+  state?: IceaOperationalState;
+  lastUpdatedAt?: string | null;
+  pendingCount?: number;
+  unavailableReason?: string;
+  flags: {
+    summaryEnabled: boolean;
+    eventsEnabled: boolean;
+    bridgeEnabled: boolean;
+    bridgeStatusEnabled?: boolean;
+    remoteActionsEnabled?: boolean;
+    remoteStatusEnabled?: boolean;
+    outboxEnabled?: boolean;
+  };
+  freshness?: IceaOpsFreshnessSummary;
+  counts?: {
+    handoversExported: number;
+    outbox: IceaOpsOutboxCounts;
+    bridge: IceaOpsBridgeCounts;
+    pipeline: IceaOpsPipelineCounts;
+  };
+  latencies?: {
+    outboxDelivery: IceaOpsLatencySummary;
+    bridgeResponse: IceaOpsLatencySummary;
+  };
+  errors?: IceaOpsErrorSummary[];
+  units: IceaOpsUnitSummary[];
+}
+
+export interface IceaOpsEventsResponse {
+  generatedAt: string;
+  available: boolean;
+  enabled: boolean;
+  scope: 'events' | string;
+  unitId?: string | null;
+  count: number;
+  results: IceaOpsEventSummary[];
+  unavailableReason?: string;
+}
+
+export interface IceaOpsDashboardData {
+  summary: IceaOpsSummary;
+  unit: IceaOpsUnitDetail | null;
+  events: IceaOpsEventSummary[];
 }

@@ -23,8 +23,24 @@ export async function buildDemoResponse(input: RequestInfo | URL, _init?: Reques
     return jsonResponse({ ok: true, mode: 'demo' });
   }
 
+  if (url.includes('/api/icea/ops/summary')) {
+    return jsonResponse(DEMO_ADMIN_DASHBOARD.summary);
+  }
+  if (url.includes('/api/icea/ops/events')) {
+    return jsonResponse({
+      generatedAt: DEMO_ADMIN_DASHBOARD.summary.generatedAt,
+      available: true,
+      enabled: true,
+      scope: 'events',
+      count: DEMO_ADMIN_DASHBOARD.events.length,
+      results: DEMO_ADMIN_DASHBOARD.events,
+    });
+  }
+  if (url.includes('/api/icea/ops/unit/')) {
+    return jsonResponse(DEMO_ADMIN_DASHBOARD.unit);
+  }
   if (url.includes('/api/icea/dashboard-summary')) {
-    return jsonResponse(DEMO_ADMIN_DASHBOARD);
+    return jsonResponse(DEMO_ADMIN_DASHBOARD.summary);
   }
   if (url.includes('/api/icea/actions/refresh-dashboard-summary')) {
     return jsonResponse({
@@ -35,7 +51,7 @@ export async function buildDemoResponse(input: RequestInfo | URL, _init?: Reques
           status: 'completed',
           summary: {
             unitId: 'icu-adult',
-            generatedAt: DEMO_ADMIN_DASHBOARD.generatedAt,
+            generatedAt: DEMO_ADMIN_DASHBOARD.summary.generatedAt,
           },
         },
       },
