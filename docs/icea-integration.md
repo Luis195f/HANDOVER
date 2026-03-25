@@ -181,3 +181,38 @@ Limite clinico actual:
 | Dependencia del upstream ICEA+ | disponibilidad, semantica final y deduplicacion remota no viven en este repo |
 
 Este documento refleja la integracion real y sus limites. No debe reescribirse como si ICEA+ estuviera clinicamente cerrado de punta a punta dentro de HANDOVER.
+
+## 10) Observabilidad operativa real HANDOVER ↔ ICEA+
+
+Las vistas operativas de supervisor/admin ya no dependen del `dashboard-summary` rico en datos clinicos para soporte ICEA. La app consulta ahora solo endpoints agregados y seguros servidos por HANDOVER:
+
+- `GET /api/icea/ops/summary`
+- `GET /api/icea/ops/events`
+- `GET /api/icea/ops/unit/<unitId>`
+
+Principios reales del contrato:
+
+- fuente de verdad: `IceaOutboundEvent`, `IceaBridgeRequest`, `IceaPipelineSnapshot` e `IceaPipelineEvent`
+- sin llamadas directas del frontend a ICEA+
+- sin nombres de paciente, `patientId`, texto clinico libre ni payloads FHIR completos
+- telemetria visible limitada a `requestId`, `bundleId`, `payloadHash`, estados, familias de error, contadores y timestamps
+- estados visibles limitados a `healthy`, `degraded`, `backlog`, `stale`, `failed`
+- si `ENABLE_ICEA_OPS_SUMMARY` o `ENABLE_ICEA_OPS_EVENTS` esta apagado, HANDOVER responde `available=false`, `enabled=false`, `unavailableReason` explicito y un shape estable parseable:
+  - `summary`: `units=[]`, `errors=[]`
+  - `events`: `results=[]`
+  - `unit`: `recentEvents=[]`, `shifts=[]`, `errors=[]`
+
+Que observa HANDOVER de forma honesta:
+
+- handovers exportados al outbox ICEA
+- outbox por estado (`queued`, `retry`, `delivered`, `failed`) y retries agregados
+- bridge por estado real (`queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`)
+- latencia derivable de `last_attempt_at -> delivered_at` y `sent_at -> received_at`
+- familias de error tipadas y redaccion segura
+- freshness por unidad y por shift cuando `IceaBridgeRequest.shift` existe
+
+Que NO debe interpretarse:
+
+- no es un panel nominal sobre personas
+- no es evaluacion individual ni ranking de desempeno
+- no prueba disponibilidad del upstream ICEA+ fuera de los datos que HANDOVER ya persistio

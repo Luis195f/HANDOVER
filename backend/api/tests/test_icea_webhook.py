@@ -127,9 +127,10 @@ class IceaWebhookUnitTests(TestCase):
         self.assertEqual(summary["request_id"], "tx-icea-summary")
         self.assertEqual(summary["idempotency_key"], "tx-icea-summary")
         self.assertNotEqual(summary["bundle_hash"], "bundle-sensitive")
-        self.assertNotEqual(summary["patient_hash"], "pat-sensitive")
         self.assertNotEqual(summary["unit_hash"], "icu-sensitive")
         self.assertEqual(summary["detail"], "http_503")
+        self.assertEqual(summary["error_family"], "remote_http")
+        self.assertNotIn("patient_hash", summary)
 
     @patch.dict(
         os.environ,

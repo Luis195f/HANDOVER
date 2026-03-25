@@ -113,3 +113,13 @@ Lo que debe quedar dicho:
 ## 8) Riesgo residual
 
 El mayor riesgo residual no es de consistencia local, sino de operacion: una credencial S2S mal gestionada expone PHI. Por eso este endpoint debe mantenerse limitado a tokens de servicio con `client_credentials`, scopes acotados y TLS extremo a extremo.
+
+## 9) Relacion con observabilidad operativa
+
+La observabilidad operativa agregada (`/api/icea/ops/*`) no reemplaza ni amplifica este endpoint ETL:
+
+- `GET /api/handover/{bundle_id}` sigue siendo la via autorizada para leer PHI clinica persistida
+- `/api/icea/ops/*` expone solo estados agregados, hashes tecnicos, contadores y timestamps
+- las vistas operativas de supervisor/admin no deben reutilizar ETL read para mostrar datos nominales en soporte ICEA
+
+En otras palabras: ETL sirve Bundle clinico autorizado; observabilidad ops sirve gobierno tecnico agregado y seguro.

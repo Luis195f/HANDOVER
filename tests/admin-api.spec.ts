@@ -19,116 +19,289 @@ vi.mock('@/src/lib/api', () => ({
 
 import { AdminDashboardApiError, fetchAdminDashboardData, refreshIceaDashboardSummary } from '@/src/lib/admin-api';
 
+function buildSummaryPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: '2026-03-08T10:00:00Z',
+    available: true,
+    enabled: true,
+    scope: 'summary',
+    state: 'degraded',
+    pendingCount: 4,
+    flags: { summaryEnabled: true, eventsEnabled: true, bridgeEnabled: true },
+    units: [
+      {
+        unitId: 'icu-a',
+        available: true,
+        state: 'backlog',
+        pendingCount: 4,
+        freshness: {},
+        counts: {
+          handoversExported: 8,
+          outbox: { total: 8, queued: 1, retry: 1, delivered: 6, failed: 0, retries: 2 },
+          bridge: {
+            total: 6,
+            queued: 0,
+            sent: 1,
+            accepted: 1,
+            pending: 1,
+            scored: 3,
+            failed: 0,
+            stale: 0,
+            retries: 1,
+            provisional: 2,
+            immediate: 4,
+            enriched: 2,
+            insufficientEvidence: 0,
+          },
+          pipeline: { snapshots: 8, running: 1, retry: 1, failed: 0, events: 5 },
+        },
+        latencies: {},
+        errors: [],
+        shifts: [],
+      },
+    ],
+    errors: [],
+    ...overrides,
+  };
+}
+
+function buildEventsPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: '2026-03-08T10:00:00Z',
+    available: true,
+    enabled: true,
+    scope: 'events',
+    count: 1,
+    results: [
+      {
+        eventId: 'outbox:1',
+        source: 'outbox',
+        requestId: 'req-1',
+        bundleId: 'bundle-1',
+        unitId: 'icu-a',
+        payloadHash: 'abcd1234',
+        status: 'retry',
+        statusFamily: null,
+        errorFamily: 'timeout',
+        attempts: 2,
+        httpStatus: null,
+        latencyMs: null,
+        detail: 'ConnectTimeout',
+        createdAt: '2026-03-08T09:45:00Z',
+        updatedAt: '2026-03-08T09:45:00Z',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function buildUnitPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: '2026-03-08T10:00:00Z',
+    enabled: true,
+    scope: 'unit',
+    unitId: 'icu-a',
+    available: true,
+    state: 'backlog',
+    pendingCount: 4,
+    freshness: {},
+    counts: {
+      handoversExported: 8,
+      outbox: { total: 8, queued: 1, retry: 1, delivered: 6, failed: 0, retries: 2 },
+      bridge: {
+        total: 6,
+        queued: 0,
+        sent: 1,
+        accepted: 1,
+        pending: 1,
+        scored: 3,
+        failed: 0,
+        stale: 0,
+        retries: 1,
+        provisional: 2,
+        immediate: 4,
+        enriched: 2,
+        insufficientEvidence: 0,
+      },
+      pipeline: { snapshots: 8, running: 1, retry: 1, failed: 0, events: 5 },
+    },
+    latencies: {},
+    errors: [],
+    shifts: [],
+    recentEvents: [],
+    ...overrides,
+  };
+}
+
 describe('admin-api', () => {
   beforeEach(() => {
     mockApiGet.mockReset();
     mockApiPost.mockReset();
   });
 
-  it('usa el endpoint ICEA real y conserva el contrato enriquecido', async () => {
-    mockApiGet.mockResolvedValue({
-      generatedAt: '2026-03-08T10:00:00Z',
-      source: 'live',
-      demoMode: false,
-      empty: false,
-      stale: false,
-      degraded: true,
-      degradationReasons: ['outbox_failed'],
-      latestActivityAt: '2026-03-08T09:45:00Z',
-      units: [
-        {
-          unitId: 'icu-a',
-          totalHandovers: 8,
-          accepted: 1,
-          queued: 1,
-          running: 1,
-          delivered: 2,
-          succeeded: 2,
-          retry: 1,
-          failed: 0,
-          lastUpdatedAt: '2026-03-08T09:00:00Z',
-          lastDashboardRefreshAt: '2026-03-08T09:30:00Z',
-          activity: { status: 'active', handoversLast24h: 4, eventsLast24h: 5, activePipeline: 2, lastActivityAt: '2026-03-08T09:45:00Z' },
-          outbox: { total: 8, queued: 1, retry: 0, delivered: 7, failed: 0, lastAttemptAt: null, lastDeliveredAt: null },
-          bridge: {
-            total: 6,
-            queued: 0,
-            sent: 0,
-            accepted: 1,
-            pending: 1,
-            scored: 4,
-            failed: 0,
-            stale: 0,
-            provisional: 2,
-            insufficientEvidence: 0,
-            lastUpdatedAt: null,
-          },
-          handoverTiming: [{ unitId: 'icu-a', sectionId: 'sbar', avgDurationMs: 1200, samples: 4 }],
-          alertsOpen: 1,
-          degraded: false,
-          degradationReasons: [],
-        },
-      ],
-      alerts: [
-        {
-          id: 'alert-1',
-          unitId: 'icu-a',
-          source: 'outbox',
-          severity: 'high',
-          status: 'failed',
-          title: 'Entrega ICEA con incidencia',
-          message: 'detalle',
-          requestId: 'req-1',
-          createdAt: '2026-03-08T09:40:00Z',
-        },
-      ],
-      outbox: {
-        enabled: true,
-        configured: true,
-        totals: { queued: 1, retry: 0, delivered: 7, failed: 0 },
-        lastAttemptAt: null,
-        lastDeliveredAt: null,
-      },
-      pipeline: {
-        configured: true,
-        remoteActionsEnabled: true,
-        remoteStatusEnabled: true,
-        bridgeEnabled: true,
-        bridgeConfigured: true,
-        snapshots: 8,
-        running: 1,
-        retry: 1,
-        failed: 0,
-        bridge: { queued: 0, sent: 0, accepted: 1, pending: 1, scored: 4, failed: 0, stale: 0, provisional: 2, insufficientEvidence: 0 },
-        lastEventAt: '2026-03-08T09:45:00Z',
-        degradationReasons: [],
-      },
-      recentEvents: [
-        {
-          id: 1,
-          requestId: 'req-1',
-          bundleId: 'bundle-1',
-          patientId: 'pat-1',
-          unitId: 'icu-a',
-          stage: 'normalize',
-          action: 'normalize',
-          status: 'running',
-          source: 'manual-action',
-          actorSub: 'auth0|admin-1',
-          detail: null,
-          httpStatus: 200,
-          payload: null,
-          createdAt: '2026-03-08T09:45:00Z',
-        },
-      ],
-    });
+  it('usa los endpoints ops reales del backend HANDOVER', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(buildSummaryPayload())
+      .mockResolvedValueOnce(buildEventsPayload())
+      .mockResolvedValueOnce(
+        buildUnitPayload({
+          shifts: [{ shift: 'morning', state: 'backlog', pendingCount: 2, lastUpdatedAt: '2026-03-08T09:40:00Z' }],
+        }),
+      );
 
     const result = await fetchAdminDashboardData('icu-a');
 
-    expect(mockApiGet).toHaveBeenCalledWith('/api/icea/dashboard-summary?unitId=icu-a');
-    expect(result.units[0].activity.status).toBe('active');
-    expect(result.alerts[0].source).toBe('outbox');
-    expect(result.pipeline.snapshots).toBe(8);
+    expect(mockApiGet).toHaveBeenNthCalledWith(1, '/api/icea/ops/summary');
+    expect(mockApiGet).toHaveBeenNthCalledWith(2, '/api/icea/ops/events?unitId=icu-a');
+    expect(mockApiGet).toHaveBeenNthCalledWith(3, '/api/icea/ops/unit/icu-a');
+    expect(result.summary.state).toBe('degraded');
+    expect(result.unit?.unitId).toBe('icu-a');
+    expect(result.events[0].payloadHash).toBe('abcd1234');
+  });
+
+  it('acepta summary disabled y mantiene events habilitados sin invalid_payload', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(
+        buildSummaryPayload({
+          available: false,
+          enabled: false,
+          state: undefined,
+          empty: true,
+          pendingCount: 0,
+          units: [],
+          errors: [],
+          unavailableReason: 'icea_ops_summary_disabled',
+        }),
+      )
+      .mockResolvedValueOnce(buildEventsPayload())
+      .mockResolvedValueOnce(
+        buildUnitPayload({
+          available: false,
+          enabled: false,
+          state: 'degraded',
+          pendingCount: 0,
+          errors: [],
+          shifts: [],
+          recentEvents: [],
+          unavailableReason: 'icea_ops_unit_disabled',
+        }),
+      );
+
+    const result = await fetchAdminDashboardData('icu-a');
+
+    expect(result.summary.available).toBe(false);
+    expect(result.summary.unavailableReason).toBe('icea_ops_summary_disabled');
+    expect(result.summary.units).toEqual([]);
+    expect(result.events).toHaveLength(1);
+  });
+
+  it('acepta events disabled y mantiene summary habilitado sin invalid_payload', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(buildSummaryPayload())
+      .mockResolvedValueOnce(
+        buildEventsPayload({
+          available: false,
+          enabled: false,
+          count: 0,
+          results: [],
+          unavailableReason: 'icea_ops_events_disabled',
+        }),
+      )
+      .mockResolvedValueOnce(buildUnitPayload());
+
+    const result = await fetchAdminDashboardData('icu-a');
+
+    expect(result.summary.available).toBe(true);
+    expect(result.events).toEqual([]);
+    expect(mockApiGet).toHaveBeenNthCalledWith(2, '/api/icea/ops/events?unitId=icu-a');
+  });
+
+  it('acepta unit unavailable sin datos y evita estado healthy falso', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(buildSummaryPayload({ empty: true, units: [] }))
+      .mockResolvedValueOnce(buildEventsPayload({ count: 0, results: [] }))
+      .mockResolvedValueOnce(
+        buildUnitPayload({
+          unitId: 'ward-z',
+          available: false,
+          state: undefined,
+          pendingCount: 0,
+          errors: [],
+          shifts: [],
+          recentEvents: [],
+          unavailableReason: 'icea_ops_unit_no_data',
+        }),
+      );
+
+    const result = await fetchAdminDashboardData('ward-z');
+
+    expect(result.unit?.available).toBe(false);
+    expect(result.unit?.state).toBe('degraded');
+    expect(result.unit?.unavailableReason).toBe('icea_ops_unit_no_data');
+  });
+
+  it('acepta summary vacio pero valido con arrays vacios', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(buildSummaryPayload({ empty: true, state: 'healthy', pendingCount: 0, units: [], errors: [] }))
+      .mockResolvedValueOnce(buildEventsPayload({ count: 0, results: [] }))
+      .mockResolvedValueOnce(null);
+
+    const result = await fetchAdminDashboardData();
+
+    expect(result.summary.empty).toBe(true);
+    expect(result.summary.units).toEqual([]);
+    expect(result.events).toEqual([]);
+  });
+
+  it('acepta payload unavailable con available=false, enabled=false y arrays vacios', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(
+        buildSummaryPayload({
+          available: false,
+          enabled: false,
+          state: undefined,
+          empty: true,
+          pendingCount: 0,
+          units: [],
+          errors: [],
+          unavailableReason: 'icea_ops_summary_disabled',
+        }),
+      )
+      .mockResolvedValueOnce(
+        buildEventsPayload({
+          available: false,
+          enabled: false,
+          count: 0,
+          results: [],
+          unavailableReason: 'icea_ops_events_disabled',
+        }),
+      )
+      .mockResolvedValueOnce(
+        buildUnitPayload({
+          available: false,
+          enabled: false,
+          state: 'degraded',
+          pendingCount: 0,
+          errors: [],
+          shifts: [],
+          recentEvents: [],
+          unavailableReason: 'icea_ops_unit_disabled',
+        }),
+      );
+
+    await expect(fetchAdminDashboardData('icu-a')).resolves.toMatchObject({
+      summary: {
+        available: false,
+        enabled: false,
+        unavailableReason: 'icea_ops_summary_disabled',
+      },
+      events: [],
+      unit: {
+        available: false,
+        enabled: false,
+        unavailableReason: 'icea_ops_unit_disabled',
+      },
+    });
   });
 
   it('usa fixtures solo en demo mode explicito', async () => {
@@ -136,9 +309,8 @@ describe('admin-api', () => {
 
     const result = await fetchAdminDashboardData(undefined, { demoMode: true });
 
-    expect(result.demoMode).toBe(true);
-    expect(result.source).toBe('demo');
-    expect(result.units.length).toBeGreaterThan(0);
+    expect(result.summary.available).toBe(true);
+    expect(result.summary.units.length).toBeGreaterThan(0);
   });
 
   it('expone errores tipados cuando el backend falla', async () => {

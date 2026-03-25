@@ -170,6 +170,9 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 ## Storage sensible
 
 - Ejecuta también `pytest backend/api/tests/test_handover_etl_read.py backend/api/tests/test_icea_transaction.py backend/api/tests/test_icea_bridge.py` cuando cambies retención, ETL readback o persistencia clínica.
+- Ejecuta tambien `pytest backend/api/tests/test_icea_ops_api.py backend/api/tests/test_icea_webhook.py` cuando cambies observabilidad operativa, redaccion segura o contratos `/api/icea/ops/*`.
+- Ejecuta tambien `pnpm exec vitest run tests/admin-api.spec.ts tests/AdminDashboardScreen.spec.tsx tests/screens/SupervisorDashboard.spec.tsx` cuando cambies la UX de supervisor/admin para observabilidad ICEA.
+- Si tocas degradacion por feature flags o `available=false`, verifica tambien los contratos disabled de `/api/icea/ops/summary`, `/api/icea/ops/events` y `/api/icea/ops/unit/<unitId>` para evitar regresiones a `invalid_payload`.
 - Las regresiones de retención, cifrado del Bundle clínico y pruning de artefactos sensibles deben cubrirse en tests backend focalizados.
 - La batería sensible debe cubrir compatibilidad backward de descifrado usando `encryption_metadata.key_source`, incluyendo bundles legacy `secret_key_derived` leídos después de activar `HANDOVER_BUNDLE_ENCRYPTION_KEY`.
 - En bridge retry y requeue, los tests deben distinguir `stored_bundle_unavailable` de `handover_bundle_not_found`.

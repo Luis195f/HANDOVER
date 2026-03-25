@@ -8,6 +8,7 @@ from .views_icea import (
     IceaPipelineEventsView,
     IceaPipelineStatusView,
 )
+from .views_icea_ops import IceaOpsEventsView, IceaOpsSummaryView, IceaOpsUnitView
 from .views_icea_bridge import (
     IceaBridgeRetryView,
     IceaBridgeStatusDetailView,
@@ -51,6 +52,12 @@ urlpatterns = [
     path("icea/events/", IceaPipelineEventsView.as_view(), name="icea-pipeline-events-slash"),
     path("icea/dashboard-summary", IceaDashboardSummaryView.as_view(), name="icea-dashboard-summary"),
     path("icea/dashboard-summary/", IceaDashboardSummaryView.as_view(), name="icea-dashboard-summary-slash"),
+    path("icea/ops/summary", IceaOpsSummaryView.as_view(), name="icea-ops-summary"),
+    path("icea/ops/summary/", IceaOpsSummaryView.as_view(), name="icea-ops-summary-slash"),
+    path("icea/ops/events", IceaOpsEventsView.as_view(), name="icea-ops-events"),
+    path("icea/ops/events/", IceaOpsEventsView.as_view(), name="icea-ops-events-slash"),
+    path("icea/ops/unit/<str:unit_id>", IceaOpsUnitView.as_view(), name="icea-ops-unit"),
+    path("icea/ops/unit/<str:unit_id>/", IceaOpsUnitView.as_view(), name="icea-ops-unit-slash"),
     path("icea/actions/<str:action>", IceaPipelineActionView.as_view(), name="icea-pipeline-action"),
     path("icea/actions/<str:action>/", IceaPipelineActionView.as_view(), name="icea-pipeline-action-slash"),
     path("icea/bridge/status", IceaBridgeStatusQueryView.as_view(), name="icea-bridge-status-query"),
