@@ -1,5 +1,11 @@
 # Arquitectura general (Django-only)
 
+> Estado del documento
+> - Estado: `implemented`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `backend/api/urls.py`, `backend/api/views.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
+> - Riesgos o lagunas abiertas: el documento describe la arquitectura vigente del repo, no una topología full-stack cerrada de despliegue ni un release publicado.
+
 HANDOVER mantiene una arquitectura **Django-only** en backend: no existe dependencia operativa de FastAPI para la API clínica principal.
 
 ## Resumen técnico

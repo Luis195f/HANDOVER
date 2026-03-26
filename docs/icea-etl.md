@@ -1,6 +1,10 @@
 # ICEA ETL read endpoint (Bundle clinico persistido)
 
-> Estado revisado el 2026-03-09. Este endpoint si esta implementado y testeado. Su rol es servir el Bundle clinico persistido desde HANDOVER a un consumidor ETL autorizado; no depende del exito del webhook o del bridge ICEA+ para responder.
+> Estado del documento
+> - Estado: `implemented`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `backend/api/views.py::HandoverEtlReadView`, `backend/api/icea_transaction.py`, `backend/api/tests/test_handover_etl_read.py`, `backend/api/tests/test_icea_transaction.py`.
+> - Riesgos o lagunas abiertas: el endpoint está implementado y testeado, pero sigue dependiendo de credenciales S2S bien custodiadas y TLS extremo a extremo para proteger PHI.
 
 ## 1) Source of truth real
 

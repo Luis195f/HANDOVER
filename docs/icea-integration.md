@@ -1,6 +1,12 @@
 # Integracion ICEA+ service-to-service (estado real)
 
-> Estado revisado el 2026-03-09. HANDOVER integra ICEA+ de forma desacoplada y no bloqueante. La evidencia disponible es suficiente para un piloto tecnico serio, pero no para afirmar un cierre regulatorio total ni una reconciliacion clinica downstream completa.
+> Estado del documento
+> - Estado: `pilot`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `backend/api/urls.py`, `backend/api/icea.py`, `backend/api/icea_bridge_service.py`, `backend/api/icea_ops.py`, `backend/api/tests/test_icea_webhook.py`, `backend/api/tests/test_icea_bridge.py`, `backend/api/tests/test_icea_ops_api.py`.
+> - Riesgos o lagunas abiertas: la integración y la observabilidad operativa están implementadas en HANDOVER, pero la disponibilidad/sémantica final del upstream ICEA+ y cualquier cierre regulatorio downstream siguen fuera del repo.
+
+> Verificación específica de Prompt 12 en este corte: `implementado` para la costura repo-local de observabilidad agregada HANDOVER ↔ ICEA+ (`/api/icea/ops/summary`, `/api/icea/ops/events`, `/api/icea/ops/unit/<unitId>`), con límites explícitos de piloto y sin convertirlo en monitor nominal o punitivo.
 
 ## 1) Principio operativo
 

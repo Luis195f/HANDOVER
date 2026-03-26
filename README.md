@@ -1,5 +1,11 @@
 # Handover Pro
 
+> Estado del documento
+> - Estado: `pilot`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: árbol actual del repo, [`docs/MASTER_GOVERNANCE_REGISTER.md`](docs/MASTER_GOVERNANCE_REGISTER.md), `git tag --list`, `.github/workflows/*`, `backend/api/urls.py`.
+> - Riesgos o lagunas abiertas: el único tag Git verificable en este corte es `v0.2.0-rc.0`; cualquier narrativa de `v0.4.0-rc.1` en el repo debe leerse como borrador documental no verificado hasta que exista un tag/publicación real.
+
 ![CI](./ci-badge.svg)
 ![Coverage](./coverage-badge.svg)
 
@@ -65,7 +71,7 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
     - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend Django/DRF.
       - `"off"` (por defecto): el backend reenviará los Bundles sin validarlos.
       - `"remote"`: se invocará `$validate` contra el servidor FHIR (`FHIR_BASE/Bundle/$validate`) antes de reenviar; si se detectan errores `error`/`fatal` se responderá `422` con detalles.
-2. Variables adicionales leídas desde Expo (`app.json > expo.extra`) o el entorno:
+2. Variables adicionales leídas desde Expo (`app.config.ts > extra`) o el entorno:
    - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`: `off | local | remote` controla la validación del cliente (por defecto `off` en desarrollo; en producción se recomienda `remote` para validar contra el servidor FHIR antes de enviar). Requiere que el backend tenga `HANDOVER_FHIR_VALIDATION_MODE=remote` para que el servidor valide.
    - `EXPO_PUBLIC_API_BASE_URL` (o `API_BASE_URL`) apunta al backend REST si se usa el servidor Django.
    - `EXPO_PUBLIC_STORAGE_NAMESPACE` personaliza el espacio de almacenamiento seguro y el aislamiento de datos offline.
@@ -90,8 +96,8 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
   - Dev Client: `exp+handover-pro://redirect`.
   - En Web se usan `--/redirect` y `--/logout` (ver `app.config.ts`).
 - `AuthProvider` llama `configureFHIRClient({ getToken, ensureFreshToken })` para que el FHIR client renueve tokens silenciosamente antes de cada request.
-- En Android se solicitan permisos para cámara, micrófono y notificaciones (ver `app.json`). El flujo de QR y notas de audio depende de `android.permission.CAMERA` y `android.permission.RECORD_AUDIO` respectivamente.
-- Para pruebas sin un proveedor OIDC real, puedes habilitar la pantalla mock en `src/screens/LoginMock.tsx` ajustando las banderas de características en `app.json`.
+- En Android se solicitan permisos para cámara, micrófono y notificaciones (ver `app.config.ts`). El flujo de QR y notas de audio depende de `android.permission.CAMERA` y `android.permission.RECORD_AUDIO` respectivamente.
+- Para pruebas sin un proveedor OIDC real, puedes habilitar la pantalla mock en `src/screens/LoginMock.tsx` ajustando las banderas de características en `app.config.ts`.
 - Las guardias RBAC reutilizables viven en `src/security/acl.ts`; usa `ensureRole` y `ensureUnit` para proteger nuevas pantallas.
 
 ## Offline y resiliencia de red
@@ -104,7 +110,7 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 ## Adjuntos y módulos Expo
 
 - Los adjuntos (imágenes, documentos, audio) se capturan con `expo-image-picker`, `expo-document-picker` y `expo-file-system`. Mantén estos paquetes en `dependencies` para asegurar compatibilidad con el SDK de Expo.
-- El flujo de audio utiliza `expo-audio` y permisos de micrófono definidos en `app.json`.
+- El flujo de audio utiliza `expo-audio` y permisos de micrófono definidos en `app.config.ts`.
 
 ## Voz, dictado y SBAR con IA
 
@@ -318,12 +324,18 @@ Se recomienda activar Dependabot para revisar automáticamente librerías fronte
 
 Consulta `docs/DEPLOY.md` para el estado real del despliegue. La topología automatizada prioritaria del repo es la exportación web estática en staging mediante `Dockerfile` + `docker-compose.yml` + `.github/workflows/deploy-staging.yml`; el backend Django sigue siendo un servicio separado con arranque `gunicorn` vía `Procfile`.
 
-Las notas de la versión RC actual están en `RELEASE_NOTES.md` y los cambios detallados en `CHANGELOG.md`. Para publicar una RC:
+El estado consolidado de gobierno técnico y documental está en [`docs/MASTER_GOVERNANCE_REGISTER.md`](docs/MASTER_GOVERNANCE_REGISTER.md). En este corte del repo:
+
+- el único tag Git verificable localmente es `v0.2.0-rc.0`;
+- `CHANGELOG.md` y `RELEASE_NOTES.md` conservan una narrativa heredada rotulada como `v0.4.0-rc.1`, pero esa etiqueta no está respaldada por un tag Git local verificable;
+- `package.json` y `app.config.ts` siguen en `1.0.0` como metadato de build, no como identificador fiable de release piloto.
+
+Para publicar una RC nueva sin deriva documental:
 
 1. Ejecuta los cheques (`pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm test`, `pnpm -w validate:fhir`).
 2. Genera los binarios siguiendo la guía de despliegue.
-3. Crea el tag `v0.4.0-rc.1` y sube artefactos + notas al repositorio.
-4. Trata el tag Git + `RELEASE_NOTES.md` como fuente de verdad del release piloto; `package.json` y `app.config.ts` no están sincronizados automáticamente con el identificador RC.
+3. Crea el tag que realmente vaya a publicarse y actualiza `CHANGELOG.md`, `RELEASE_NOTES.md` y el registro maestro en el mismo corte.
+4. Trata el tag Git + `RELEASE_NOTES.md` como fuente de verdad del release piloto; no asumas que `package.json` o `app.config.ts` reflejan ese identificador.
 
 ## Para desarrolladores
 Explora la documentación técnica para conocer la arquitectura, configuración y flujos clave antes de contribuir al proyecto.
