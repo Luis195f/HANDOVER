@@ -182,7 +182,7 @@ Ese comando es el mismo que declara el [`Procfile`](../Procfile). Si se usa ngin
 Runbooks nuevos del repo:
 
 - [`docs/backup-restore-drill.md`](./backup-restore-drill.md): backup cifrado por defecto, restore scratch-first y validación mínima reproducible.
-- [`docs/release-rehearsal.md`](./release-rehearsal.md): preflight, smoke post-deploy, criterios de aborto, rollback básico y evidencia mínima del piloto.
+- [`docs/release-rehearsal.md`](./release-rehearsal.md): preflight, smoke post-deploy, criterios de aborto, rollback básico y evidencia mínima del piloto. El stage `perf` usa una SQLite efímera local por defecto y no debe apuntar a una BD viva salvo override peligroso explícito.
 
 ## Política simple de release piloto
 
@@ -191,3 +191,4 @@ Runbooks nuevos del repo:
 - No declares “deploy listo” para full stack mientras el backend siga fuera de `docker-compose.yml`.
 - No reactives publicación a PyPI hasta que exista un contrato de paquete Python real en el repo.
 - El ensayo de release/piloto del repo es `scratch-first`: valida build, smoke, backup/restore y empaquetado; no sustituye rollback full-stack automatizado del backend porque esa topología no existe en este árbol.
+- Los backups con `BACKUP_REQUIRE_ENCRYPTION=true` ahora fallan cerrado: si falta passphrase o falla el cifrado, no debe quedar un artefacto persistente en claro en `BACKUP_DIR`.

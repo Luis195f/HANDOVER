@@ -40,6 +40,8 @@ Medición sintética local:
 python scripts/perf-smoke.py --iterations 5
 ```
 
+Por defecto, `scripts/perf-smoke.py` ignora cualquier `DJANGO_DB_*` del entorno y fuerza una SQLite efímera local bajo `tmp/` para no tocar staging/prod por accidente. Solo usa una BD no efímera si el operador habilita deliberadamente `PERF_SMOKE_ALLOW_NON_EPHEMERAL_DB=true`, y el script lo deja explícito en salida.
+
 Smoke reproducible de queue/sync:
 
 ```bash
@@ -49,6 +51,8 @@ pnpm exec vitest run tests/queue/offline-queue.spec.ts src/lib/__tests__/sync.of
 Limitación:
 
 - el smoke sintético mide la ruta local Django con upstream simulado y agregados locales;
+- por defecto trabaja solo sobre datos sintéticos y una DB efímera local;
+- el override `PERF_SMOKE_ALLOW_NON_EPHEMERAL_DB=true` es deliberado y peligroso;
 - no sustituye percentiles E2E con navegador, red, backend real y upstream ICEA/FHIR reales.
 
 ## 4) Backup/restore antes del go

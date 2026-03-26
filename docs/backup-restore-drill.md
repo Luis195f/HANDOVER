@@ -23,7 +23,8 @@
 ## 3) Defaults y prerequisitos
 
 - `BACKUP_ENCRYPTION_PASSPHRASE` es obligatoria por defecto.
-- Si falta, los scripts fallan salvo override explícito `BACKUP_REQUIRE_ENCRYPTION=false`.
+- Si falta y `BACKUP_REQUIRE_ENCRYPTION=true`, `scripts/backup-db.sh` y `scripts/backup-media.sh` fallan cerrado antes de dejar `*.gz` o `*.tar.gz` persistentes en claro.
+- Si se necesita desactivar cifrado, usar solo el override explícito `BACKUP_REQUIRE_ENCRYPTION=false`.
 - Para drill local sin remoto, usar `BACKUP_SKIP_REMOTE=true`.
 - Dependencias:
   - DB: `sqlite3` o `pg_dump`/`psql` según motor.
@@ -101,6 +102,7 @@ bash scripts/restore-media.sh backups/drill/media_<timestamp>.tar.gz.gpg
 - No guardar la passphrase de backup en `config/staging.env`, `.env.example` ni ZIPs compartidos.
 - No promover automáticamente el scratch restore sobre la DB/media viva; la promoción final queda fuera del repo y debe ser deliberada.
 - No usar el override `BACKUP_REQUIRE_ENCRYPTION=false` salvo drill controlado y sin PHI real.
+- Los scripts de backup usan temporales con cleanup; si el cifrado requerido falla o falta passphrase, no deben quedar dumps/archives huérfanos en claro en `BACKUP_DIR`.
 
 ## 7) Límites honestos
 

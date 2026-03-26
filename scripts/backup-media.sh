@@ -53,29 +53,46 @@ media_dir=${MEDIA_DIR:-uploads}
 skip_remote=${BACKUP_SKIP_REMOTE:-false}
 require_encryption=${BACKUP_REQUIRE_ENCRYPTION:-true}
 mkdir -p "$backup_root"
+passphrase=${BACKUP_ENCRYPTION_PASSPHRASE:-}
+
+if is_true "$require_encryption"; then
+  if [[ -z "$passphrase" ]]; then
+    log "BACKUP_ENCRYPTION_PASSPHRASE is required unless BACKUP_REQUIRE_ENCRYPTION=false is set explicitly"
+    exit 1
+  fi
+  require_command gpg
+fi
+
+temp_root=$(mktemp -d "$backup_root/.backup-media-${timestamp}-XXXXXX")
+cleanup() {
+  rm -rf "$temp_root"
+}
+trap cleanup EXIT
 
 if [[ ! -d "$media_dir" ]]; then
   log "Media directory not found at $media_dir"
   exit 1
 fi
 
-archive_path="$backup_root/media_${timestamp}.tar.gz"
+final_name="media_${timestamp}.tar.gz"
+archive_path="$temp_root/${final_name}"
 log "Archiving media from $media_dir to $archive_path"
 tar -czf "$archive_path" -C "$media_dir" .
 
 upload_path="$archive_path"
-if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
-  require_command gpg
+if [[ -n "$passphrase" ]]; then
   encrypted_path="${archive_path}.gpg"
-  log "Encrypting archive to $encrypted_path"
-  encrypt_file "$archive_path" "$encrypted_path" "$BACKUP_ENCRYPTION_PASSPHRASE"
+  final_upload_path="$backup_root/${final_name}.gpg"
+  log "Encrypting archive to $final_upload_path"
+  encrypt_file "$archive_path" "$encrypted_path" "$passphrase"
   rm -f "$archive_path"
-  upload_path="$encrypted_path"
-elif is_true "$require_encryption"; then
-  log "BACKUP_ENCRYPTION_PASSPHRASE is required unless BACKUP_REQUIRE_ENCRYPTION=false is set explicitly"
-  exit 1
+  mv "$encrypted_path" "$final_upload_path"
+  upload_path="$final_upload_path"
 else
   log "Encryption disabled by explicit override (BACKUP_REQUIRE_ENCRYPTION=false)"
+  final_upload_path="$backup_root/${final_name}"
+  mv "$archive_path" "$final_upload_path"
+  upload_path="$final_upload_path"
 fi
 
 checksum_path="${upload_path}.sha256"
