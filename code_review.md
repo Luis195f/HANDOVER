@@ -2,91 +2,57 @@
 
 ## Objetivo
 
-Checklist de revisión técnica, clínica y arquitectónica para cambios en HANDOVER.
-
----
+Checklist corto de revisión técnica, clínica y arquitectónica para HANDOVER.
 
 ## 1. Alcance
 
-- [ ] El cambio resuelve exactamente el objetivo pedido.
-- [ ] No hubo expansión innecesaria de alcance.
-- [ ] Se declara qué quedó fuera de este cambio.
+- [ ] Resuelve exactamente la tarea pedida.
+- [ ] No expande alcance sin justificación.
+- [ ] Declara explícitamente que no fue tocado.
 
 ## 2. Arquitectura
 
-- [ ] Respeta la arquitectura actual del repositorio.
-- [ ] No introduce microservicios ni frameworks paralelos.
-- [ ] Mantiene el flujo general cliente -> validación -> mapeo -> sync -> cliente FHIR -> servidor/HCE.
-- [ ] Reutiliza capas existentes antes de añadir nuevas.
+- [ ] Respeta React Native / Expo + TypeScript y Django + DRF.
+- [ ] Mantiene Core + UPP + SOP + MPAC + ICEA+ sin formularios paralelos.
+- [ ] No abre microservicios, backend paralelo ni flujos alternos.
+- [ ] Mantiene UI -> Zod -> FHIR -> queue/sync -> fhir-client -> servidor FHIR/HCE.
 
-## 3. Contratos de datos y FHIR
+## 3. Contratos sensibles
 
-- [ ] No rompe shapes de datos sin justificación explícita.
-- [ ] Si toca FHIR, mantiene o documenta claramente el contrato.
-- [ ] No introduce códigos clínicos hardcodeados cuando existe o debe existir una fuente central.
-- [ ] La validación FHIR o equivalente queda cubierta por tests o scripts.
+- [ ] No rompe contratos HTTP, FHIR, runtime, auth, RBAC, auditoría o bridge sin evidencia y docs.
+- [ ] Si toca perfiles, la precedence y compatibilidad quedan claras y probadas.
+- [ ] No expone PHI ni introduce fallbacks inseguros.
 
-## 4. Sync, queue y red
+## 4. Calidad del cambio
 
-- [ ] El flujo offline-first sigue siendo coherente.
-- [ ] Se diferencian errores reintentables y no reintentables.
-- [ ] No se introducen duplicados, loops ni reintentos ambiguos.
-- [ ] No se exponen datos sensibles en logs o mensajes.
+- [ ] El cambio es pequeño, entendible y reversible.
+- [ ] Reutiliza helpers, tipos y costuras existentes.
+- [ ] No introduce `any`, `@ts-ignore`, `@ts-nocheck` o casts forzados evitables.
 
-## 5. Seguridad, PHI y auditoría
+## 5. Validación
 
-- [ ] No se debilita auth, permisos, firma, auditoría o almacenamiento sensible.
-- [ ] No se crean fallbacks inseguros silenciosos.
-- [ ] Los errores o logs no contienen PHI.
-- [ ] La trazabilidad sigue siendo suficiente para revisión o auditoría.
+- [ ] Ejecuta validaciones proporcionales al seam tocado.
+- [ ] En módulos sensibles incluye typecheck, lint, tests relevantes y validación FHIR si aplica.
+- [ ] El resultado real de las pruebas queda declarado.
 
-## 6. Perfiles clínicos y runtime
+## 6. Documentación
 
-- [ ] Si toca perfiles, se mantiene la lógica de núcleo compartido.
-- [ ] No duplica formularios por unidad o especialidad sin justificación excepcional.
-- [ ] La precedence entre core, unit packs y overlays es clara.
-- [ ] Hay cobertura de tests para flags, visibility y compatibilidad cuando aplica.
+- [ ] Actualiza documentación si cambia comportamiento clínico, contrato, runtime o seguridad.
+- [ ] La documentación describe el estado real, no uno aspiracional.
 
-## 7. Tipado y mantenibilidad
-
-- [ ] No se introducen `any`, `@ts-ignore` o casts forzados evitables.
-- [ ] El cambio mejora o al menos no empeora la claridad del módulo.
-- [ ] El cambio es razonablemente reversible.
-- [ ] Los helpers nuevos son puros y reutilizables cuando corresponde.
-
-## 8. Pruebas
-
-- [ ] Pasa `pnpm -w typecheck` o equivalente real del repo.
-- [ ] Pasa `pnpm -w lint` o equivalente real del repo.
-- [ ] Pasa `pnpm -w test` o equivalente real del repo.
-- [ ] Si toca FHIR, perfiles, sync, auth o bridge, hay pruebas específicas.
-
-## 9. Documentación
-
-- [ ] Se actualizó documentación relevante si cambió comportamiento real.
-- [ ] La documentación describe el estado real y no uno aspiracional.
-- [ ] Se explicita impacto, riesgos y límites cuando corresponde.
-
-## 10. Riesgo clínico / operativo
-
-- [ ] El cambio no altera semántica clínica sin justificación.
-- [ ] El cambio no empeora la seguridad operativa del pase de turno.
-- [ ] Los riesgos residuales quedan declarados con honestidad.
-
-## 11. Veredicto final
+## 7. Veredicto
 
 Marca una sola opción:
 
-- [ ] Apto para PR
-- [ ] Apto con cambios menores
-- [ ] No apto para PR
+- [ ] Listo para PR
+- [ ] Listo con reservas
+- [ ] No listo para PR
 
-## 12. Resumen obligatorio del revisor
+## Resumen obligatorio
 
-Completar siempre:
 - Archivos sensibles tocados:
 - Contratos afectados:
 - Riesgos residuales:
-- Tests ejecutados:
-- Docs actualizadas:
+- Pruebas ejecutadas:
+- Documentación actualizada:
 - Recomendación final:

@@ -2,33 +2,46 @@
 
 ## Misión del repositorio
 
-HANDOVER es un sistema digital de entrega de turno de enfermería orientado a interoperabilidad clínica, trazabilidad, seguridad y operación offline-first. Trabaja siempre sobre el estado actual real del repositorio.
+HANDOVER es un sistema digital de entrega de turno de enfermería orientado a interoperabilidad clínica, trazabilidad, seguridad y operación offline-first. Trabaja siempre sobre el estado real actual del repositorio.
 
 ## Regla principal
 
 No reinventes la arquitectura.
 
+## Fuente vinculante
+
+- `AGENTS.md` define cómo trabajar.
+- `docs/clinical-profiles-framework.md` define la arquitectura clínico-funcional que no debe romperse.
+
+## Arquitectura operativa vigente
+
+- Frontend: React Native / Expo + TypeScript.
+- Backend: Django + DRF.
+- Interoperabilidad: FHIR transaction + lectura ETL + outbox ICEA.
+- Seguridad: OIDC / JWT / RBAC / auditoría.
+- Marco de producto: Core + UPP + SOP + MPAC + ICEA+.
+- Pipeline obligatorio: UI/Pantallas -> validación Zod -> mapeo FHIR -> queue/sync -> fhir-client -> servidor FHIR/HCE.
+
 ## Invariantes obligatorios
 
 - Mantener la arquitectura actual del proyecto.
-- Mantener el enfoque frontend React Native / Expo + TypeScript.
-- Mantener el backend y puentes existentes sin crear arquitecturas paralelas.
-- Mantener el pipeline clínico actual:
-  UI/Pantallas -> validación Zod -> mapeo FHIR -> queue/sync -> fhir-client -> servidor FHIR/HCE.
 - Mantener el enfoque offline-first.
-- Mantener la lógica de perfiles clínicos sobre un núcleo compartido, evitando duplicación innecesaria de formularios.
+- Mantener la lógica de perfiles clínicos sobre un núcleo compartido.
+- No crear formularios paralelos por unidad o especialidad.
 - Mantener compatibilidad razonable con contratos existentes salvo necesidad justificada.
+- Preservar el trust boundary FHIR y los contratos runtime existentes salvo necesidad demostrada.
 
 ## Prohibiciones
 
 - No crear microservicios nuevos.
 - No introducir un backend paralelo.
-- No introducir frameworks no autorizados para “resolver más rápido”.
-- No dejar TODO vacíos como cierre de trabajo.
+- No introducir FastAPI nuevo dentro de HANDOVER.
+- No introducir frameworks no autorizados para "resolver más rápido".
 - No reemplazar lógica real por mocks cuando el cambio pide comportamiento real.
 - No romper contratos FHIR, contratos HTTP, runtime clínico o sincronización sin pruebas y documentación.
 - No introducir nuevas dependencias de producción sin justificación fuerte.
 - No usar `any`, `@ts-ignore`, `@ts-nocheck` o casts forzados nuevos salvo imposibilidad técnica muy justificada y acotada.
+- No dejar TODOs vacios como cierre de trabajo.
 
 ## Zonas de alto riesgo
 
@@ -50,19 +63,16 @@ Trata estos módulos como sensibles y de alto impacto:
 
 ## Reglas de cambio
 
-### 1. Cambios pequeños y auditables
-- Prefiere cambios pequeños, idempotentes y reversibles.
-- Si el cambio es grande, divídelo por capas o por dominio.
-- Si el objetivo es ambiguo, planifica antes de codificar.
+### 1. Cirugía mínima
+- Prefiere cambios pequeños, auditables, idempotentes y reversibles.
+- Si el objetivo es ambiguo, primero diagnostica y luego propone.
+- Si hay más de una forma de hacerlo, elige la más conservadora.
+- No expandas alcance para "aprovechar" la intervención.
 
-### 2. Pruebas obligatorias
-Todo cambio en módulos sensibles exige pruebas o ajuste explícito de pruebas existentes.
-
-Como mínimo:
-- typecheck
-- lint
-- tests relevantes
-- validación FHIR si aplica
+### 2. Pruebas proporcionales
+- Todo cambio en módulos sensibles exige pruebas o ajuste explícito de pruebas existentes.
+- Ejecuta solo la validación necesaria para el seam tocado, pero no omitas lo crítico.
+- Como mínimo cuando aplique: typecheck, lint, tests relevantes y validación FHIR.
 
 ### 3. Documentación obligatoria
 Actualiza documentación cuando cambie cualquiera de estos puntos:
@@ -78,12 +88,13 @@ Actualiza documentación cuando cambie cualquiera de estos puntos:
 - No introduzcas fallbacks inseguros silenciosos.
 - Si detectas un compromiso entre seguridad y compatibilidad, hazlo explícito y documentado.
 
-### 5. Interoperabilidad
+### 5. Interoperabilidad y perfiles
 - Reutiliza diccionarios de terminología y helpers centralizados.
 - Evita hardcodes de códigos clínicos cuando exista una fuente central o deba existir.
-- Si refactorizas FHIR, conserva el contrato público o deja compatibilidad hacia atrás claramente documentada.
+- No dupliques el Core para resolver variaciones de unidad; usa configuración, UPP o SOP cuando ya exista esa costura.
+- Si refactorizas FHIR o runtime de perfiles, conserva el contrato público o deja compatibilidad hacia atrás claramente documentada.
 
-## Qué significa “hecho”
+## Qué significa "hecho"
 
 Un cambio solo está realmente hecho cuando:
 - resuelve el objetivo pedido
@@ -95,11 +106,10 @@ Un cambio solo está realmente hecho cuando:
 
 ## Qué hacer ante dudas
 
-Si hay más de una forma de implementar algo:
-- elige la más conservadora
-- favorece compatibilidad
-- favorece claridad y mantenibilidad
-- evita expansión de alcance
+Si no puedes identificar una única estrategia de bajo riesgo:
+- deten la implementación
+- explica la ambigüedad real
+- propone el siguiente paso mínimo verificable
 
 ## Regla de PR
 
@@ -107,4 +117,4 @@ Antes de considerar algo apto para PR:
 - revisa `code_review.md`
 - verifica contratos sensibles
 - enumera riesgos residuales
-- declara de forma explícita qué no fue tocado
+- declara de forma explícita que no fue tocado
