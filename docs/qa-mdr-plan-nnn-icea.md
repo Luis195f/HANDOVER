@@ -49,7 +49,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 - Demostracion de cumplimiento MDR integral.
 - Benchmark automatizado de mediana/P90 de time-to-complete por unidad.
 - Log persistente dedicado de aceptacion/rechazo clinico de sugerencias NNN/ICEA.
-- Evidencia automatizada de dependency scanning, pentest o restauracion de backups dentro de este paquete.
+- Evidencia automatizada de dependency scanning, pentest o DR full-stack fuera del repo.
 - Suite E2E clinica completa que recorra todo NNN + ICEA+ de punta a punta en UI real.
 
 ## 4) Evidencia tecnica disponible hoy
@@ -148,10 +148,13 @@ Cobertura real disponible:
 
 - instrumentacion por seccion y agregacion por unidad;
 - dashboard con `handoverTiming`.
+- smoke sintético local via `scripts/perf-smoke.py` para `fhir/transaction`, `icea/dashboard-summary` y `icea/ops/summary`;
+- smoke reproducible de offline queue/sync via `pnpm exec vitest run tests/queue/offline-queue.spec.ts src/lib/__tests__/sync.offline.spec.ts`.
 
 Limitacion:
 
 - el repo no calcula por si solo mediana, P90 ni abandono de handover completo;
+- el smoke sintético no sustituye una medicion E2E con red, navegador y backend real;
 - esos datos siguen siendo una tarea operativa/BI del piloto.
 
 ## 7) Riesgos residuales aceptados para piloto
@@ -171,6 +174,8 @@ Limitacion:
 - `docs/pilot-control-plane.md`
 - `docs/cybersecurity-checklist-nnn-icea.md`
 - `docs/performance-report-template-nnn-icea.md`
+- `docs/backup-restore-drill.md`
+- `docs/release-rehearsal.md`
 - `docs/clinical-decision-log-template-nnn-icea.md`
 - reporte de tests frontend NNN
 - reporte de tests backend ICEA/ETL

@@ -5,15 +5,23 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone sqlite3 gnupg
 
       - name: Configure rclone
         env:
@@ -31,18 +39,20 @@ jobs:
           BACKUP_REMOTE: ${{ secrets.BACKUP_REMOTE }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
           BACKUP_RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS }}
+          BACKUP_REQUIRE_ENCRYPTION: "true"
           DJANGO_DB_ENGINE: ${{ secrets.DJANGO_DB_ENGINE }}
           DJANGO_DB_NAME: ${{ secrets.DJANGO_DB_NAME }}
           DJANGO_DB_USER: ${{ secrets.DJANGO_DB_USER }}
           DJANGO_DB_PASSWORD: ${{ secrets.DJANGO_DB_PASSWORD }}
           DJANGO_DB_HOST: ${{ secrets.DJANGO_DB_HOST }}
           DJANGO_DB_PORT: ${{ secrets.DJANGO_DB_PORT }}
-        run: scripts/backup-db.sh
+        run: bash scripts/backup-db.sh
 
       - name: Backup media
         env:
           BACKUP_REMOTE: ${{ secrets.BACKUP_REMOTE }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
           BACKUP_RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS }}
+          BACKUP_REQUIRE_ENCRYPTION: "true"
           MEDIA_DIR: ${{ secrets.MEDIA_DIR }}
-        run: scripts/backup-media.sh
+        run: bash scripts/backup-media.sh

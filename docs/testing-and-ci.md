@@ -41,6 +41,27 @@ Usa este pipeline cuando toques auth, sync/queue, FHIR mapping, validación clí
   pnpm -w validate:fhir
   ```
 
+## Rehearsal preproducción
+
+Para rehearsal de release/piloto sin inventar un runner nuevo:
+
+- Preflight reproducible:
+  ```powershell
+  pwsh -File scripts/release-rehearsal.ps1 -Stage preflight
+  ```
+- Smoke sintético de performance local:
+  ```bash
+  python scripts/perf-smoke.py --iterations 5
+  ```
+- Empaquetado compartible:
+  ```powershell
+  pwsh -File scripts/release-rehearsal.ps1 -Stage package
+  ```
+- Cola offline/sync como smoke reproducible, no como benchmark:
+  ```bash
+  pnpm exec vitest run tests/queue/offline-queue.spec.ts src/lib/__tests__/sync.offline.spec.ts
+  ```
+
 ## Alcance del gate pilot-grade
 
 La configuración `vitest.pilot.config.ts` concentra suites reales para estos dominios:
@@ -182,3 +203,4 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 - Las regresiones de retención, cifrado del Bundle clínico y pruning de artefactos sensibles deben cubrirse en tests backend focalizados.
 - La batería sensible debe cubrir compatibilidad backward de descifrado usando `encryption_metadata.key_source`, incluyendo bundles legacy `secret_key_derived` leídos después de activar `HANDOVER_BUNDLE_ENCRYPTION_KEY`.
 - En bridge retry y requeue, los tests deben distinguir `stored_bundle_unavailable` de `handover_bundle_not_found`.
+- Si tocas backup/restore, rehearsal o empaquetado, añade además evidencia ejecutable del seam (`scripts/backup-*.sh`, `scripts/restore-*.sh`, `scripts/release-rehearsal.ps1`, `scripts/zip-project.ps1`, `docker compose --env-file config/staging.env config`).

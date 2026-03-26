@@ -3,7 +3,7 @@
 > Estado del documento
 > - Estado: `pilot`.
 > - Última revisión: 2026-03-26.
-> - Fuente de verdad / evidencia base: `.github/workflows/deploy-staging.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `git tag --list`.
+> - Fuente de verdad / evidencia base: `.github/workflows/deploy-staging.yml`, `.github/workflows/backup.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `scripts/release-rehearsal.ps1`, `docs/release-rehearsal.md`, `docs/backup-restore-drill.md`, `git tag --list`.
 > - Riesgos o lagunas abiertas: la topología documentada es real para la web estática de staging, pero el backend sigue fuera de `docker-compose.yml` y el versionado de release requiere tag Git verificable.
 
 Esta guía describe el estado real del despliegue en HANDOVER y deja una topología prioritaria explícita para el piloto.
@@ -34,6 +34,7 @@ Límite actual, explícito:
 Antes de generar artefactos o desplegar en piloto:
 
 ```bash
+git diff --check
 pnpm -w typecheck
 pnpm -w lint:ci
 pnpm test
@@ -42,6 +43,12 @@ pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost 
 ```
 
 Si solo cambias frontend web y documentación operativa, `pytest` sigue recomendado pero deja de ser bloqueante solo si el backend no fue tocado.
+
+Wrapper reproducible del repo:
+
+```powershell
+pwsh -File scripts/release-rehearsal.ps1 -Stage preflight
+```
 
 ## Variables de entorno y frontera de secretos
 
@@ -60,10 +67,22 @@ Si solo cambias frontend web y documentación operativa, `pytest` sigue recomend
 - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`
 - `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED`
 - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`
-- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`
-- `EXPO_PUBLIC_ENABLE_DEMO`
 - `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`
 - `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`
+- `EXPO_PUBLIC_HANDOVER_UNITS_JSON`
+- `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON`
+- `EXPO_PUBLIC_SHOW_NIC_CODING`
+- `EXPO_PUBLIC_SHOW_NOC_OUTCOMES`
+- `EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS`
+- `EXPO_PUBLIC_HIDE_LEGACY_FIELDS`
+- `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE`
+- `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING`
+- `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING`
+- `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK`
+- `EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY`
+- `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`
+- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`
+- `EXPO_PUBLIC_ENABLE_DEMO`
 - `OIDC_ISSUER`
 - `OIDC_CLIENT_ID`
 - `OIDC_AUDIENCE`
@@ -74,6 +93,9 @@ Regla operativa:
 
 - `config/staging.env` no debe almacenar secretos backend, claves privadas ni tokens privilegiados.
 - Los secretos de Django, firma, retención, DB y webhooks deben vivir fuera del repo en el entorno real del backend.
+- `config/staging.env` debe declarar explícitamente el modo de despliegue y los defaults públicos críticos del piloto para que la exportación web no caiga por omisión a valores distintos del backend.
+
+Inferencia desde [`src/config/pilotControl.ts`](../src/config/pilotControl.ts): si `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE=pilot` y `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` falta, el frontend cae a `rolloutStatus=pause` y `explicitShadowModeForIcea=true`; la ausencia del JSON no debe interpretarse como `go`.
 
 ### Backend Django
 
@@ -123,15 +145,12 @@ Limitacion operativa explicita:
 El flujo automatizado real del repo es:
 
 ```bash
+docker compose --env-file config/staging.env config
 docker compose --env-file config/staging.env pull
 docker compose --env-file config/staging.env up -d --build
 ```
 
-Eso coincide con el workflow de staging. Para validarlo localmente antes de empujar cambios:
-
-```bash
-docker compose --env-file config/staging.env config
-```
+Eso coincide con el workflow de staging, que ahora valida `docker compose ... config` antes del `up -d --build`.
 
 Notas:
 
@@ -157,8 +176,13 @@ Ese comando es el mismo que declara el [`Procfile`](../Procfile). Si se usa ngin
 ## Paquetes de compartición y release hygiene
 
 - [`scripts/zip-project.ps1`](../scripts/zip-project.ps1) genera ahora ZIPs `lite` y `full` saneados.
-- Ambos ZIPs excluyen secretos, bases locales, `.env.*` no-ejemplo, logs y artefactos runtime compartibles.
-- [`.gitignore`](../.gitignore) y [`.dockerignore`](../.dockerignore) también excluyen `db.sqlite3`, variantes `*.sqlite3-*`, `backend/.env`, claves y media local.
+- Ambos ZIPs excluyen secretos, bases locales, `.env.*` no-ejemplo, logs, `backups/`, `artifacts/`, `playwright-report/`, `test-results/` y artefactos runtime compartibles.
+- [`.gitignore`](../.gitignore) y [`.dockerignore`](../.dockerignore) también excluyen `db.sqlite3`, variantes `*.sqlite3-*`, `backend/.env`, claves, media local, `backups/` y artefactos temporales de rehearsal.
+
+Runbooks nuevos del repo:
+
+- [`docs/backup-restore-drill.md`](./backup-restore-drill.md): backup cifrado por defecto, restore scratch-first y validación mínima reproducible.
+- [`docs/release-rehearsal.md`](./release-rehearsal.md): preflight, smoke post-deploy, criterios de aborto, rollback básico y evidencia mínima del piloto.
 
 ## Política simple de release piloto
 
@@ -166,3 +190,4 @@ Ese comando es el mismo que declara el [`Procfile`](../Procfile). Si se usa ngin
 - `package.json` y `app.config.ts` conservan hoy `1.0.0` como versión de build local; no los trates como mecanismo automático de versionado de release.
 - No declares “deploy listo” para full stack mientras el backend siga fuera de `docker-compose.yml`.
 - No reactives publicación a PyPI hasta que exista un contrato de paquete Python real en el repo.
+- El ensayo de release/piloto del repo es `scratch-first`: valida build, smoke, backup/restore y empaquetado; no sustituye rollback full-stack automatizado del backend porque esa topología no existe en este árbol.

@@ -94,7 +94,8 @@ $SharedExcludeDirs = @(
   "node_modules", ".git", ".expo", ".parcel-cache", ".cache", "coverage",
   ".turbo", ".next", ".gradle", ".idea", ".vscode", "eas-build",
   ".venv", ".venv-stt", ".pytest_cache", "__pycache__", "media",
-  "backend\media", "uploads", "logs", "tmp", "temp"
+  "backend\media", "uploads", "logs", "tmp", "temp", "backups",
+  "artifacts", "playwright-report", "test-results", "htmlcov"
 )
 
 $LiteOnlyExcludeDirs = @(

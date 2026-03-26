@@ -49,7 +49,7 @@
 |---|---|---|---|---|
 | Cola offline cifrada en cliente | `src/lib/queue.ts`, `src/lib/sync.ts` | `tests/queue/offline-queue.spec.ts` | Implementado | La custodia de la clave sigue siendo responsabilidad del entorno del cliente |
 | Retencion de bundles locales con expiracion por defecto | `backend/api/models.py::HandoverBundleRecord.default_expiry()` | `backend/api/tests/test_handover_etl_read.py` | Parcial | No hay prueba de expurgo/borrado seguro en este paquete |
-| Backup/restore y borrado seguro | No hay evidencia en repo | No aplica | Pendiente | Requiere procedimiento de infraestructura y validacion fuera del repo |
+| Backup/restore y borrado seguro | `scripts/backup-db.sh`, `scripts/backup-media.sh`, `scripts/restore-db.sh`, `scripts/restore-media.sh`, `.github/workflows/backup.yml`, `docs/backup-restore-drill.md` | Drill local reproducible + workflow nocturno | Parcial | El restore del repo es scratch-first y no sustituye snapshots infra, vault ni borrado seguro del proveedor |
 
 ## 7) Dependencias, hardening e incident response
 
@@ -66,6 +66,6 @@
   - anti-replay obligatorio por entorno;
   - rotacion y custodia de secretos;
   - dependency scanning documentado;
-  - backup/restore y borrado seguro.
+  - DR de infraestructura y borrado seguro fuera del repo.
 
 Resultado recomendado para este paquete: `Aprobado con hallazgos abiertos controlados para piloto`, no `Aprobado definitivo`.
