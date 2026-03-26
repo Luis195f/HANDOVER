@@ -17,6 +17,7 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 .tmp/
+tmp/
 temp/
 
 # Build outputs
@@ -55,16 +56,23 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
+.venv*/
 .venv-stt/
 .pytest_cache/
 **/.pytest_cache/
 .coverage
+.coverage.*
 coverage.xml
+htmlcov/
 
 # Logs
 *.log
 logs/
 debug.log
+playwright-report/
+test-results/
+artifacts/
+backups/
 
 # OS files
 .DS_Store
@@ -87,6 +95,7 @@ scripts/
 
 # Local Python env / DB
 .venv/
+.venv*/
 backend/.env
 db.sqlite3
 *.sqlite3

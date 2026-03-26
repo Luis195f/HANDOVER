@@ -81,6 +81,12 @@
 - Mantener trazabilidad de cambios, evidencia de test y registro auditable de eventos críticos.
 - Diseñar documentación y controles para facilitar expediente técnico y actividades de vigilancia post-mercado.
 
+## Backups y artefactos operativos
+- Los scripts [`scripts/backup-db.sh`](../scripts/backup-db.sh) y [`scripts/backup-media.sh`](../scripts/backup-media.sh) exigen cifrado por defecto; si falta `BACKUP_ENCRYPTION_PASSPHRASE`, fallan salvo override explícito `BACKUP_REQUIRE_ENCRYPTION=false`.
+- Los artefactos de backup generan `*.sha256` y el restore verifica checksum cuando está disponible antes de descifrar o extraer.
+- Los restores del repo son `scratch-first`: [`scripts/restore-db.sh`](../scripts/restore-db.sh) y [`scripts/restore-media.sh`](../scripts/restore-media.sh) se niegan a sobrescribir DB/media existentes por defecto.
+- Los ZIPs y contextos Docker excluyen `.env` no-ejemplo, bases locales, media local, `backups/`, `artifacts/`, logs y reportes temporales para reducir fuga accidental de PHI o secretos.
+
 ## Retención y cifrado en reposo
 - Los Bundles clínicos persistidos para ETL ya no se guardan en claro en nuevas escrituras: se conservan con retención explícita (`HANDOVER_BUNDLE_RETENTION_DAYS`) y se cifran en reposo a nivel de aplicación antes de guardarse en base de datos.
 - Los artefactos técnicos ICEA (`IceaOutboundEvent`, snapshots/eventos pipeline y bridge requests terminales) deben expurgarse con `prune_sensitive_records` según `HANDOVER_TECHNICAL_RETENTION_DAYS`.
@@ -93,6 +99,7 @@
 - El cifrado fuerte en reposo del Bundle clínico depende de `HANDOVER_BUNDLE_ENCRYPTION_KEY`; si no se configura, HANDOVER deriva la clave desde `SECRET_KEY` como fallback de endurecimiento compatible con la arquitectura actual.
 - Ese fallback mejora confidencialidad frente a lectura accidental de base de datos, pero no sustituye KMS/HSM, rotación de claves ni separación fuerte de secretos.
 - Los modelos técnicos ICEA siguen guardando identificadores operativos mínimos (`request_id`, `bundle_id`, `patient_id`, `unit_id`) para trazabilidad y correlación clínica.
+- El repo deja ahora un drill de backup/restore verificable, pero no automatiza vault externo, snapshots inmutables ni restore full-stack del backend fuera del proceso scratch-first.
 
 ## Contratos controlados de bridge
 - `stored_bundle_unavailable` significa que el bundle persistido sigue presente localmente pero es ilegible o no puede descifrarse con las claves disponibles.

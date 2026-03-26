@@ -30,6 +30,7 @@ Estados usados en este registro:
 | NNN con BYO-license | `pilot` | `README.md`, `docs/fhir-and-interoperability.md`, `docs/qa-mdr-plan-nnn-icea.md`, `src/catalogs/governedCatalog.ts`, `backend/api/views_catalogs.py` | El repo no embebe corpus licenciados completos. |
 | CI y gates sensibles | `implemented` | `package.json`, `.github/workflows/ci.yml`, `.github/workflows/django.yml`, `docs/testing-and-ci.md` | El job principal de `CI` es bloqueante en este corte. |
 | Deploy web staging | `pilot` | `.github/workflows/deploy-staging.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `docs/DEPLOY.md` | La web estática sí está automatizada; el backend sigue como pieza separada. |
+| Backup/restore drill y rehearsal operativo | `pilot` | `.github/workflows/backup.yml`, `scripts/backup-db.sh`, `scripts/backup-media.sh`, `scripts/restore-db.sh`, `scripts/restore-media.sh`, `scripts/release-rehearsal.ps1`, `docs/backup-restore-drill.md`, `docs/release-rehearsal.md` | El repo deja backup cifrado y restore scratch-first verificable, pero no un DR full-stack automatizado. |
 
 ## 3. Estado documental del repo
 
@@ -82,6 +83,7 @@ Estados usados en este registro:
 | Prompt 13: armonización documental y registro maestro | `implemented` | Corrección de deriva de release/versionado, encabezados de estado ligeros y este registro maestro único | `README.md`, `CHANGELOG.md`, `RELEASE_NOTES.md`, `docs/MASTER_GOVERNANCE_REGISTER.md`, docs operativos tocados en este corte | Cierra la parte documental del seam verificado, sin inventar releases ni pasado. |
 | Workstream reciente: endurecimiento de contratos ops ICEA | `implemented` | Contratos y disabled states de observabilidad | `git log` commit `5d7ae37b`, `backend/api/icea_ops.py`, `backend/api/tests/test_icea_ops_api.py` | Corroborable por commit y código real. |
 | Workstream reciente: consistencia de CI, deploy y empaquetado | `implemented` | CI/deploy/docs de empaquetado | `git log` commit `ea50d5dd`, `.github/workflows/ci.yml`, `.github/workflows/deploy-staging.yml`, `docs/DEPLOY.md` | Corroborable por commit y workflows. |
+| Workstream reciente: hardening preproducción y release rehearsal | `pilot` | Backup cifrado por defecto, restore scratch-first, smoke sintético y runbooks operativos | `.github/workflows/backup.yml`, `scripts/backup-db.sh`, `scripts/restore-db.sh`, `scripts/release-rehearsal.ps1`, `scripts/perf-smoke.py`, `docs/backup-restore-drill.md`, `docs/release-rehearsal.md` | Añade disciplina operativa real sin prometer rollback full-stack fuera del repo. |
 | Workstream reciente: señales contextuales case-mix hacia ICEA | `implemented` | Proyección contextual en contrato ICEA | `git log` commit `41f47838`, `docs/icea-integration.md`, `backend/api/icea_payload_mapper.py` | Mantener lectura prudente; no convertir en causalidad clínica. |
 | Workstream reciente: first wave de unit profile packs | `pilot` | Packs operativos por unidad y regresión de perfiles | `git log` commit `52ed29d1`, `docs/profile-architecture.md`, `docs/profile-rollout-playbook.md`, fixtures de perfiles en `tests/fixtures/fhir/*` | Real en repo, pero sigue dentro de un rollout clínico progresivo. |
 
@@ -103,6 +105,7 @@ Estados usados en este registro:
 | Bridge ICEA enriquecido y status remoto | `provisional` | `ICEA_BRIDGE_MODEL_ID`, `ICEA_BRIDGE_STATUS_PATH` y disponibilidad upstream | `docs/icea-integration.md`, `backend/api/icea_bridge_service.py` |
 | Bedside `patient-risk` | `pilot` | Flags de despliegue y gobierno clínico local | `docs/icea-integration.md`, `backend/api/views_icea_bridge.py`, `backend/api/icea_clinical_feedback.py` |
 | Deploy backend full-stack automatizado | `pending` | El repo no trae `docker-compose` propio para Django | `docs/DEPLOY.md`, `Procfile` |
+| DR full-stack y rollback del backend fuera de staging web | `pending` | El repo solo cubre restore scratch-first y rollback documental de la web estática | `docs/backup-restore-drill.md`, `docs/release-rehearsal.md`, `Procfile` |
 | Cierre regulatorio MDR/QMS total | `pending` | Requiere evidencia externa, operación del piloto y revisión QMS formal | `docs/QMS_HANDOVER.md`, `docs/MDR_Anexo_II_HANDOVER.md`, `docs/qa-mdr-plan-nnn-icea.md` |
 
 ## 8. Riesgos abiertos de gobierno técnico
