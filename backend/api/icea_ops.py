@@ -18,6 +18,7 @@ from backend.api.icea_observability import (
 )
 from backend.api.icea_pipeline import load_icea_pipeline_settings
 from backend.api.models import IceaBridgeRequest, IceaOutboundEvent, IceaPipelineEvent, IceaPipelineSnapshot
+from backend.api.pilot_control import is_pilot_feature_enabled
 
 
 OPS_STALE_AFTER = timezone.timedelta(hours=6)
@@ -37,11 +38,11 @@ def _max_datetime(*values: Any):
 
 
 def ops_summary_enabled() -> bool:
-    return _env_bool(SUMMARY_FLAG, True)
+    return _env_bool(SUMMARY_FLAG, True) and is_pilot_feature_enabled("admin_analytics")
 
 
 def ops_events_enabled() -> bool:
-    return _env_bool(EVENTS_FLAG, True)
+    return _env_bool(EVENTS_FLAG, True) and is_pilot_feature_enabled("admin_analytics")
 
 
 def _ops_flags() -> dict[str, bool]:

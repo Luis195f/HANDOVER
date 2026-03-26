@@ -1402,6 +1402,102 @@ class IceaBridgeTransactionFlowTests(TestCase):
         self.assertEqual(bridge_request.last_error, 'ConnectTimeout')
         self.assertTrue(serialize_bridge_request(bridge_request)['lastError'])
 
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'HANDOVER_PILOT_CONTROL_JSON': json.dumps(
+                {
+                    'features': {
+                        'icea_bridge': {
+                            'mode': 'pilot',
+                            'enabledUnits': ['ward-z'],
+                            'environmentScope': ['test', 'pilot'],
+                        },
+                        'icea_immediate_scoring': {
+                            'mode': 'pilot',
+                            'enabledUnits': ['ward-z'],
+                            'environmentScope': ['test', 'pilot'],
+                        },
+                    }
+                }
+            ),
+        },
+        clear=False,
+    )
+    @patch('backend.api.views._create_audit_event_for_transaction', autospec=True)
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    @patch('backend.api.views._post_transaction_to_fhir')
+    def test_unit_scoped_bridge_rollout_does_not_queue_out_of_scope_unit(
+        self,
+        mock_fhir_post,
+        mock_bridge_request,
+        _mock_audit,
+    ):
+        mock_fhir_post.return_value = build_fhir_response()
+        mock_bridge_request.return_value = Mock()
+
+        response = self.client.post(
+            self.url,
+            data=build_bridge_bundle(),
+            format='json',
+            HTTP_IDEMPOTENCY_KEY='req-bridge-unit-scope',
+            HTTP_X_UNIT_ID='icu-a',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(IceaBridgeRequest.objects.filter(request_id='req-bridge-unit-scope').exists())
+        mock_bridge_request.assert_not_called()
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'HANDOVER_PILOT_CONTROL_JSON': json.dumps(
+                {
+                    'pilotMode': 'enabled',
+                    'rolloutStatus': 'no-go',
+                    'features': {
+                        'icea_bridge': {'mode': 'enabled'},
+                        'icea_immediate_scoring': {'mode': 'enabled'},
+                    },
+                }
+            ),
+        },
+        clear=False,
+    )
+    @patch('backend.api.views._create_audit_event_for_transaction', autospec=True)
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    @patch('backend.api.views._post_transaction_to_fhir')
+    def test_no_go_keeps_clinical_transaction_working_without_queueing_bridge(
+        self,
+        mock_fhir_post,
+        mock_bridge_request,
+        _mock_audit,
+    ):
+        mock_fhir_post.return_value = build_fhir_response()
+        mock_bridge_request.return_value = Mock()
+
+        response = self.client.post(
+            self.url,
+            data=build_bridge_bundle(),
+            format='json',
+            HTTP_IDEMPOTENCY_KEY='req-bridge-no-go',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(HandoverBundleRecord.objects.filter(request_id='req-bridge-no-go').count(), 1)
+        self.assertFalse(IceaBridgeRequest.objects.filter(request_id='req-bridge-no-go').exists())
+        mock_bridge_request.assert_not_called()
+
 
 
 
@@ -1559,6 +1655,64 @@ class IceaPatientRiskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()['code'], 'icea_patient_risk_disabled')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+            'HANDOVER_PILOT_CONTROL_JSON': json.dumps(
+                {
+                    'explicitShadowModeForIcea': True,
+                    'features': {
+                        'icea_patient_risk': {
+                            'mode': 'pilot',
+                            'enabledUnits': ['icu-a'],
+                            'allowedRoles': ['nurse', 'supervisor', 'admin'],
+                        }
+                    },
+                }
+            ),
+        },
+        clear=False,
+    )
+    def test_patient_risk_stays_disabled_in_explicit_shadow_mode(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001', 'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'shadow_mode')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+            'HANDOVER_PILOT_CONTROL_JSON': json.dumps(
+                {
+                    'pilotMode': 'enabled',
+                    'rolloutStatus': 'pause',
+                    'features': {
+                        'icea_patient_risk': {
+                            'mode': 'enabled',
+                            'enabledUnits': ['icu-a'],
+                            'allowedRoles': ['nurse', 'supervisor', 'admin'],
+                        }
+                    },
+                }
+            ),
+        },
+        clear=False,
+    )
+    def test_patient_risk_is_disabled_when_rollout_is_paused(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001', 'unitId': 'icu-a'})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_disabled')
+        self.assertEqual(response.json()['feature']['denialReason'], 'rollout_paused')
 
     @patch.dict(
         os.environ,

@@ -23,6 +23,7 @@ from backend.api.icea_pipeline import (
     IceaPipelineTransportError,
 )
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
+from backend.api.pilot_control import evaluate_pilot_feature, resolve_roles_from_request
 from backend.api.views import AuthenticatedAPIView
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
@@ -35,6 +36,23 @@ REFRESHABLE_STATUSES = {
     IceaBridgeRequest.STATUS_PENDING,
     IceaBridgeRequest.STATUS_STALE,
 }
+
+
+def _admin_analytics_gate_response(request, *, unit_id: str | None = None):
+    feature = evaluate_pilot_feature(
+        'admin_analytics',
+        unit_id=unit_id,
+        roles=resolve_roles_from_request(request),
+    )
+    if feature['enabled']:
+        return None
+    status = 403 if feature['denialReason'] == 'role_out_of_scope' else 503
+    return _error_response(
+        detail=feature['fallback'],
+        code=feature['denialReason'] or 'admin_analytics_disabled',
+        status=status,
+        feature=feature,
+    )
 
 
 def _truthy(value: str | None) -> bool:
@@ -232,6 +250,12 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
         except (TypeError, ValueError):
             limit = 20
         limit = max(1, min(limit, 100))
+        gate = _admin_analytics_gate_response(
+            request,
+            unit_id=str(request.query_params.get('unitId') or '').strip() or None,
+        )
+        if gate is not None:
+            return gate
         results = [serialize_bridge_request(item) for item in queryset.order_by('-updated_at')[:limit]]
         return Response({'results': results, 'count': len(results)}, status=200)
 
@@ -257,15 +281,25 @@ class IceaPatientRiskSummaryView(AuthenticatedAPIView):
         return [permission() for permission in self.permission_classes]
 
     def get(self, request):
-        if not icea_patient_risk_enabled():
+        unit_id = str(request.query_params.get('unitId') or '').strip() or None
+        feature = evaluate_pilot_feature(
+            'icea_patient_risk',
+            unit_id=unit_id,
+            roles=resolve_roles_from_request(request),
+        )
+        if not icea_patient_risk_enabled() or not feature['enabled']:
+            code = feature['denialReason'] or 'icea_patient_risk_disabled'
+            if code in {'kill_switch_disabled', 'pilot_control_disabled', 'rollout_paused', 'rollout_no_go'}:
+                code = 'icea_patient_risk_disabled'
+            status = 403 if feature['denialReason'] == 'role_out_of_scope' else 503
             return _error_response(
-                detail='ICEA patient risk support is disabled.',
-                code='icea_patient_risk_disabled',
-                status=503,
+                detail=feature['fallback'],
+                code=code,
+                status=status,
+                feature=feature,
             )
 
         patient_id = str(request.query_params.get('patientId') or '').strip() or None
-        unit_id = str(request.query_params.get('unitId') or '').strip() or None
         try:
             limit = int(request.query_params.get('limit') or 20)
         except (TypeError, ValueError):
@@ -304,7 +338,13 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
             return _error_response(detail='Unsupported scoring mode.', code='invalid_scoring_mode', status=400)
 
         settings = load_icea_bridge_settings()
-        if not settings.enabled or not settings.allows_mode(requested_mode):
+        scoring_feature = 'icea_enriched_scoring' if requested_mode == IceaBridgeRequest.SCORING_MODE_ENRICHED else 'icea_immediate_scoring'
+        if (
+            not settings.enabled
+            or not settings.allows_mode(requested_mode)
+            or not evaluate_pilot_feature('icea_bridge', unit_id=bridge_request.unit_id)['enabled']
+            or not evaluate_pilot_feature(scoring_feature, unit_id=bridge_request.unit_id)['enabled']
+        ):
             return _error_response(
                 detail='ICEA bridge is disabled for this scoring mode.',
                 code='icea_bridge_disabled',

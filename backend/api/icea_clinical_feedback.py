@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from backend.api.icea_bridge_service import load_icea_bridge_settings
 from backend.api.models import IceaBridgeRequest, IceaPipelineSnapshot
+from backend.api.pilot_control import is_pilot_feature_enabled
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -17,7 +18,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def icea_patient_risk_enabled() -> bool:
-    return _env_bool("ENABLE_ICEA_BRIDGE", False) and _env_bool("ENABLE_ICEA_PATIENT_RISK", False)
+    return (
+        _env_bool("ENABLE_ICEA_BRIDGE", False)
+        and _env_bool("ENABLE_ICEA_PATIENT_RISK", False)
+        and is_pilot_feature_enabled("icea_patient_risk")
+    )
 
 
 def icea_causal_summary_enabled() -> bool:

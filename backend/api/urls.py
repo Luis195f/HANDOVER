@@ -16,6 +16,7 @@ from .views_icea_bridge import (
     IceaBridgeSummaryView,
     IceaPatientRiskSummaryView,
 )
+from .views_pilot_control import PilotControlSummaryView
 
 from .views import (
     AuditLogView,
@@ -70,6 +71,8 @@ urlpatterns = [
     path("icea/bridge/retry/<int:bridge_id>/", IceaBridgeRetryView.as_view(), name="icea-bridge-retry-slash"),
     path("icea/patient-risk", IceaPatientRiskSummaryView.as_view(), name="icea-patient-risk"),
     path("icea/patient-risk/", IceaPatientRiskSummaryView.as_view(), name="icea-patient-risk-slash"),
+    path("pilot-control/summary", PilotControlSummaryView.as_view(), name="pilot-control-summary"),
+    path("pilot-control/summary/", PilotControlSummaryView.as_view(), name="pilot-control-summary-slash"),
     path("audit", AuditLogView.as_view(), name="audit-log"),
     path("audit/", AuditLogView.as_view(), name="audit-log-slash"),
     path("audit/events", AuditEventsIngestView.as_view(), name="audit-events"),

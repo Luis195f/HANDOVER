@@ -112,6 +112,8 @@ interface DiagnosisAutocompleteProps {
   name: DiagnosisArrayName;
   label: string;
   systemsAllowed?: DiagnosisSystem[];
+  enabled?: boolean;
+  disabledMessage?: string;
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -166,6 +168,8 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
   name,
   label,
   systemsAllowed,
+  enabled = true,
+  disabledMessage,
 }) => {
   const {
     control,
@@ -319,7 +323,16 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>
 
-      {supportsNandaCatalog && !fullNandaCatalogEnabled ? (
+      {!enabled ? (
+        <View style={styles.warningCard} testID="diagnosis-governance-disabled">
+          <Text style={styles.warningTitle}>Diagnóstico estructurado gobernado no disponible</Text>
+          <Text style={styles.helperText}>
+            {disabledMessage ?? 'Mantén el registro clínico base con texto libre mientras este bloque permanece desactivado.'}
+          </Text>
+        </View>
+      ) : null}
+
+      {enabled && supportsNandaCatalog && !fullNandaCatalogEnabled ? (
         <View style={styles.warningCard} testID="nanda-license-warning">
           <Text style={styles.warningTitle}>{NANDA_LICENSE_WARNING}</Text>
           <Text style={styles.helperText}>
@@ -346,29 +359,31 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
         </View>
       ) : null}
 
-      <TextInput
-        placeholder="Buscar diagnóstico..."
-        value={query}
-        onChangeText={(text) => {
-          setQuery(text);
-          if (nandaCatalogError) {
-            setNandaCatalogError(null);
-          }
-        }}
-        style={styles.input}
-      />
+      {enabled ? (
+        <TextInput
+          placeholder="Buscar diagnóstico..."
+          value={query}
+          onChangeText={(text) => {
+            setQuery(text);
+            if (nandaCatalogError) {
+              setNandaCatalogError(null);
+            }
+          }}
+          style={styles.input}
+        />
+      ) : null}
 
-      {query.trim() ? (
+      {enabled && query.trim() ? (
         <View>
           <Text style={styles.helperText}>{helperText}</Text>
         </View>
       ) : null}
 
-      {isSearching && query.trim() ? <Text style={styles.helperText}>Buscando en el catálogo...</Text> : null}
-      {validatingCode ? <Text style={styles.helperText}>Validando código SNOMED...</Text> : null}
+      {enabled && isSearching && query.trim() ? <Text style={styles.helperText}>Buscando en el catálogo...</Text> : null}
+      {enabled && validatingCode ? <Text style={styles.helperText}>Validando código SNOMED...</Text> : null}
       {fieldError ? <Text style={[styles.helperText, styles.errorText]}>{fieldError}</Text> : null}
 
-      {suggestions.length > 0 ? (
+      {enabled && suggestions.length > 0 ? (
         <FlatList
           data={suggestions}
           keyExtractor={(item) => `${item.system}-${item.code}`}

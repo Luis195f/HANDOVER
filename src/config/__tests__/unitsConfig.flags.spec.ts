@@ -262,4 +262,50 @@ describe('unitsConfig advanced flags by unit', () => {
       enablePediatricScales: true,
     });
   });
+
+  it('applies the governed NNN pilot gate on top of unit feature flags', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
+    process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
+    process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
+    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
+      features: {
+        governed_nnn: {
+          mode: 'pilot',
+          enabledUnits: ['nnn-unit'],
+          environmentScope: ['pilot'],
+        },
+      },
+    });
+    process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
+      {
+        id: 'nnn-unit',
+        name: 'Unidad NNN',
+        specialty: 'icu',
+        features: {
+          showNicCoding: true,
+          showNocOutcomes: true,
+        },
+      },
+      {
+        id: 'other-unit',
+        name: 'Otra unidad',
+        specialty: 'icu',
+        features: {
+          showNicCoding: true,
+          showNocOutcomes: true,
+        },
+      },
+    ]);
+
+    const { resolveUnitFeatureFlags } = await import('../unitsConfig');
+
+    expect(resolveUnitFeatureFlags('nnn-unit')).toMatchObject({
+      showNicCoding: true,
+      showNocOutcomes: true,
+    });
+    expect(resolveUnitFeatureFlags('other-unit')).toMatchObject({
+      showNicCoding: false,
+      showNocOutcomes: false,
+    });
+  });
 });

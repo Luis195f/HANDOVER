@@ -165,6 +165,7 @@ Limite clinico actual:
 
 - `ICEA_WEBHOOK_*` validado para el entorno;
 - `ICEA_API_*` y `ICEA_BRIDGE_MODEL_ID` validos si se habilita bridge;
+- `HANDOVER_PILOT_CONTROL_JSON` validado y con `explicitShadowModeForIcea=true` mientras el piloto siga en fase prudente;
 - roles/scopes verificados en `/api/icea/*` y ETL;
 - mensajes prudentes visibles en superficies clinicas activas;
 - outbox/bridge sin estados fallidos persistentes no aceptados.
@@ -173,6 +174,7 @@ Limite clinico actual:
 
 - app movil intentando acceso directo a ICEA+;
 - bridge activado con `ICEA_BRIDGE_MODEL_ID` vacio o invalido;
+- `patient-risk` habilitado fuera del scope definido por el control plane o fuera de `shadow` sin umbral de dato aceptado;
 - `patient-risk` habilitado sin control de unidad;
 - documentacion que trate el score como diagnostico autonomo o resultado clinico definitivo.
 
@@ -184,6 +186,7 @@ Limite clinico actual:
 | Bridge provisional interpretado como definitivo | el soporte prudente depende tambien del entrenamiento operativo del piloto |
 | Envelope contextual interpretado como causalidad | el contrato explicita observado vs derivado y mantiene campos pendientes para fuentes hospitalarias futuras |
 | Anti-replay no forzado | queda a configuracion del entorno webhook |
+| Cambio de estado del piloto sin auditoria propia en repo | el control plane actual es read-only por config/env y debe apoyarse en procedimiento institucional externo |
 | Dependencia del upstream ICEA+ | disponibilidad, semantica final y deduplicacion remota no viven en este repo |
 
 Este documento refleja la integracion real y sus limites. No debe reescribirse como si ICEA+ estuviera clinicamente cerrado de punta a punta dentro de HANDOVER.
@@ -195,6 +198,7 @@ Las vistas operativas de supervisor/admin ya no dependen del `dashboard-summary`
 - `GET /api/icea/ops/summary`
 - `GET /api/icea/ops/events`
 - `GET /api/icea/ops/unit/<unitId>`
+- `GET /api/pilot-control/summary`
 
 Principios reales del contrato:
 
@@ -207,6 +211,7 @@ Principios reales del contrato:
   - `summary`: `units=[]`, `errors=[]`
   - `events`: `results=[]`
   - `unit`: `recentEvents=[]`, `shifts=[]`, `errors=[]`
+- si el control plane pone `admin_analytics` en `disabled` o deja el rol/unidad fuera de scope, esas superficies responden degradadas o denegadas sin romper el flujo clinico base
 
 Que observa HANDOVER de forma honesta:
 

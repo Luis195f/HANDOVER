@@ -22,6 +22,7 @@ from backend.api.icea_pipeline import (
     IceaPipelineTransportError,
 )
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
+from backend.api.pilot_control import is_pilot_feature_enabled
 
 STORED_BUNDLE_UNAVAILABLE_ERROR = 'stored_bundle_unavailable'
 
@@ -129,6 +130,12 @@ def _score_configuration_error(settings: IceaBridgeSettings, *, scoring_mode: st
     return None
 
 
+def _scoring_feature_key(scoring_mode: str) -> str:
+    if scoring_mode == IceaBridgeRequest.SCORING_MODE_ENRICHED:
+        return 'icea_enriched_scoring'
+    return 'icea_immediate_scoring'
+
+
 def score_configuration_error_code(
     scoring_mode: str | None = None,
     *,
@@ -197,6 +204,7 @@ def enqueue_icea_bridge_request_for_transaction(
     scoring_mode: str = IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
 ) -> IceaBridgeRequest | None:
     settings = load_icea_bridge_settings()
+    request_unit_id = str(request.headers.get('X-Unit-Id') or '').strip() or None
     if not settings.enabled or not settings.allows_mode(scoring_mode):
         return None
     request_id = _extract_request_id(request)
@@ -206,8 +214,15 @@ def enqueue_icea_bridge_request_for_transaction(
         bundle,
         request_id=request_id,
         scoring_mode=scoring_mode,
-        unit_id=str(request.headers.get('X-Unit-Id') or ''),
+        unit_id=request_unit_id or '',
     )
+    payload_context = payload.get('context') if isinstance(payload.get('context'), dict) else {}
+    effective_unit_id = str(payload_context.get('unitId') or request_unit_id or '').strip() or None
+    if (
+        not is_pilot_feature_enabled('icea_bridge', unit_id=effective_unit_id)
+        or not is_pilot_feature_enabled(_scoring_feature_key(scoring_mode), unit_id=effective_unit_id)
+    ):
+        return None
     upsert_result = _upsert_bridge_request(
         request_id=request_id,
         scoring_mode=scoring_mode,
@@ -231,7 +246,12 @@ def enqueue_icea_bridge_request_for_bundle_record(
     force_delivery: bool = False,
 ) -> IceaBridgeRequest | None:
     settings = load_icea_bridge_settings()
-    if not settings.enabled or not settings.allows_mode(scoring_mode):
+    if (
+        not settings.enabled
+        or not settings.allows_mode(scoring_mode)
+        or not is_pilot_feature_enabled('icea_bridge', unit_id=record.unit_id)
+        or not is_pilot_feature_enabled(_scoring_feature_key(scoring_mode), unit_id=record.unit_id)
+    ):
         return None
     try:
         bundle = decrypt_bundle_document(record.bundle_json, encryption_metadata=record.encryption_metadata)

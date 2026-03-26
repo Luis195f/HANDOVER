@@ -56,6 +56,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 
 | Area | Implementacion principal | Tests en repo | Estado |
 |---|---|---|---|
+| Control plane de piloto | `backend/api/pilot_control.py`, `backend/api/views_pilot_control.py`, `src/config/pilotControl.ts`, `src/config/unitsConfig.ts` | `backend/api/tests/test_pilot_control_api.py`, `src/config/__tests__/pilotControl.spec.ts`, `src/config/__tests__/unitsConfig.flags.spec.ts` | Soportado, con limite explicito de control `env` read-only |
 | NNN opcional y no bloqueante | `src/validation/schemas.ts`, `src/screens/components/DiagnosisAutocomplete.tsx`, `src/screens/components/TreatmentsSection.tsx`, `src/screens/components/OutcomesSection.tsx`, `src/screens/handover/visibility.ts` | `tests/validation/handover-schema.spec.ts`, `src/screens/__tests__/handover.visibility.spec.ts`, `src/screens/__tests__/handover.sections.spec.tsx`, `src/screens/components/__tests__/DiagnosisAutocomplete.spec.tsx`, `src/screens/components/__tests__/TreatmentsSection.spec.tsx`, `src/screens/components/__tests__/OutcomesSection.spec.tsx` | Parcial: soporte real, sin E2E clinico completo |
 | Catalogos BYO-license | `src/catalogs/*.ts`, `src/catalogs/governedCatalog.ts`, `backend/api/views_catalogs.py` | `src/catalogs/__tests__/nandaCodes.spec.ts`, `src/catalogs/__tests__/nicCodes.spec.ts`, `src/catalogs/__tests__/nocCodes.spec.ts`, `backend/api/tests/test_governed_catalog_api.py`, `backend/api/tests/test_nanda_catalog_api.py` | Soportado |
 | FHIR NNN | `src/lib/fhir-map.ts`, `src/lib/fhir-map/nnn.ts`, `src/lib/fhir-terminology.ts` | `src/lib/__tests__/fhir-map.nnn.spec.ts`, `src/lib/__tests__/fhir-map.medications.spec.ts`, `tests/fhir-map.spec.ts` | Soportado con URNs locales y profiles no cerrados |
@@ -71,10 +72,12 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 ### Go tecnico minimo
 
 - Suites criticas de NNN + ICEA+ en verde para el corte del piloto.
+- `HANDOVER_PILOT_CONTROL_JSON` y `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` revisados contra el scope real por unidad/rol/entorno.
 - Variables de entorno del entorno piloto validadas:
   - catalogos NNN licenciados si se pretende usar catalogo completo;
   - `ICEA_WEBHOOK_*` para outbox tecnico;
   - `ICEA_API_*` y `ICEA_BRIDGE_MODEL_ID` si se habilita bridge/patient-risk.
+- `GET /api/pilot-control/summary` coherente con el estado esperado de rollout y kill switches.
 - Capa `/api/icea/*` accesible solo via HANDOVER con roles/scopes esperados.
 - Resumen bedside, si se habilita, visible como soporte prudente y no como diagnostico autonomo.
 - Checklist de ciberseguridad cerrado al menos sin hallazgos criticos abiertos.
@@ -90,6 +93,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 
 - `ICEA_BRIDGE_MODEL_ID` ausente o invalido cuando se exige score real.
 - Falta de filtros de unidad/rol para `patient-risk`.
+- ICEA activo fuera de `shadow` sin evidencia suficiente de calidad de dato HANDOVER.
 - Cualquier dependencia de llamada directa desde la app a ICEA+.
 - Cualquier despliegue piloto que dependa de `HANDOVER_SIGNATURE_DISABLED=true`, de firma cliente opcional o de cierre final sin firma clínica.
 - Documentacion que afirme cumplimiento regulatorio total o E2E clinico cerrado sin evidencia adicional.
@@ -118,10 +122,12 @@ Cobertura real disponible:
 - outbox con estados `queued/retry/delivered/failed`;
 - bridge con estados `queued/sent/accepted/pending/scored/failed/stale`;
 - resumen bedside prudente con filtros por rol/unidad.
+- control plane con modos `enabled/disabled/pilot/demo/shadow` y kill switches efectivos para analytics, insights y rollout por unidad.
 
 Limitacion:
 
 - el repo trata el estado local como fuente autoritativa cuando no existe `ICEA_BRIDGE_STATUS_PATH`; eso es intencionado, pero debe aceptarse como limite del piloto.
+- el estado formal `go/pause/no-go` es consultable, pero la auditoria de cambios de estado sigue siendo documental/procedimental fuera del repo.
 
 ### 6.3 Seguridad y PHI
 
@@ -152,6 +158,7 @@ Limitacion:
 
 | Riesgo residual | Delimitacion actual | Mitigacion disponible |
 |---|---|---|
+| Control plane sin write path auditable propio | El repo expone consulta efectiva del rollout, pero no registra desde UI cada cambio institucional de estado | usar `docs/pilot-control-plane.md`, `GET /api/pilot-control/summary` y acta operativa/QMS fuera del repo |
 | Interpretacion excesiva de ICEA+ | El bridge puede devolver resumen/provisional score, pero no existe writeback FHIR de un recurso clinico final ni una conciliacion downstream cerrada | copy prudente, flags, `patient-risk` con mensaje de "no sustituye juicio clinico", estado local autoritativo |
 | Uso de terminologia NNN sin licencia | El repo solo trae placeholders y no demuestra contrato de licencia | gate explicito, variables BYO-license, documentar licencia del operador |
 | Falta de log dedicado de decision clinica | No se persiste aun aceptacion/rechazo/modificacion de sugerencias | usar la plantilla `docs/clinical-decision-log-template-nnn-icea.md` como registro operativo separado |
@@ -161,6 +168,7 @@ Limitacion:
 ## 8) Evidencia a adjuntar por release/piloto
 
 - `docs/traceability-matrix-nnn-icea.md`
+- `docs/pilot-control-plane.md`
 - `docs/cybersecurity-checklist-nnn-icea.md`
 - `docs/performance-report-template-nnn-icea.md`
 - `docs/clinical-decision-log-template-nnn-icea.md`
@@ -179,6 +187,7 @@ Frontend:
 
 Backend:
 
+- `pytest backend/api/tests/test_pilot_control_api.py backend/api/tests/test_icea_ops_api.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py -q`
 - `pytest backend/api/tests/test_icea_webhook.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py backend/api/tests/test_handover_etl_read.py backend/api/tests/test_handover_timing_metrics.py -q`
 
 ## 10) Criterio de cierre de este paquete documental
