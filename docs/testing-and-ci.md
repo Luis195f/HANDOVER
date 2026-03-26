@@ -53,6 +53,7 @@ Para rehearsal de release/piloto sin inventar un runner nuevo:
   ```bash
   python scripts/perf-smoke.py --iterations 5
   ```
+  Ese smoke fuerza una SQLite efímera local por defecto y solo permite una BD no efímera con `PERF_SMOKE_ALLOW_NON_EPHEMERAL_DB=true`.
 - Empaquetado compartible:
   ```powershell
   pwsh -File scripts/release-rehearsal.ps1 -Stage package
@@ -204,3 +205,4 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 - La batería sensible debe cubrir compatibilidad backward de descifrado usando `encryption_metadata.key_source`, incluyendo bundles legacy `secret_key_derived` leídos después de activar `HANDOVER_BUNDLE_ENCRYPTION_KEY`.
 - En bridge retry y requeue, los tests deben distinguir `stored_bundle_unavailable` de `handover_bundle_not_found`.
 - Si tocas backup/restore, rehearsal o empaquetado, añade además evidencia ejecutable del seam (`scripts/backup-*.sh`, `scripts/restore-*.sh`, `scripts/release-rehearsal.ps1`, `scripts/zip-project.ps1`, `docker compose --env-file config/staging.env config`).
+- Si tocas `scripts/perf-smoke.py`, demuestra que por defecto ignora `DJANGO_DB_*` y corre sobre una SQLite efímera; si tocas `scripts/backup-*.sh`, demuestra que `BACKUP_REQUIRE_ENCRYPTION=true` falla cerrado sin dejar artefactos en claro.

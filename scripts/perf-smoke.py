@@ -4,23 +4,69 @@ import json
 import os
 import statistics
 import sys
+import tempfile
 import time
 from pathlib import Path
 from unittest.mock import patch
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TMP_ROOT = REPO_ROOT / "tmp"
+DANGEROUS_DB_OVERRIDE_ENV = "PERF_SMOKE_ALLOW_NON_EPHEMERAL_DB"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 os.environ.setdefault("PYTEST_CURRENT_TEST", "perf_smoke")
 os.environ.setdefault("FHIR_BASE", "https://example.invalid/fhir")
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+_EPHEMERAL_DB_DIR: tempfile.TemporaryDirectory[str] | None = None
+
+
+def is_truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def configure_perf_smoke_database() -> dict[str, object]:
+    global _EPHEMERAL_DB_DIR
+
+    override_enabled = is_truthy(os.environ.get(DANGEROUS_DB_OVERRIDE_ENV))
+    if override_enabled:
+        return {
+            "engine": os.environ.get("DJANGO_DB_ENGINE", "django.db.backends.sqlite3"),
+            "name": str(os.environ.get("DJANGO_DB_NAME", REPO_ROOT / "db.sqlite3")),
+            "ephemeral": False,
+            "overrideEnabled": True,
+            "note": (
+                f"{DANGEROUS_DB_OVERRIDE_ENV}=true bypasses the default ephemeral SQLite isolation. "
+                "Use only for deliberate local diagnostics against a non-ephemeral database."
+            ),
+        }
+
+    TMP_ROOT.mkdir(exist_ok=True)
+    _EPHEMERAL_DB_DIR = tempfile.TemporaryDirectory(prefix="handover-perf-smoke-", dir=TMP_ROOT)
+    db_path = Path(_EPHEMERAL_DB_DIR.name) / "perf-smoke.sqlite3"
+    os.environ["DJANGO_DB_ENGINE"] = "django.db.backends.sqlite3"
+    os.environ["DJANGO_DB_NAME"] = str(db_path)
+    return {
+        "engine": "django.db.backends.sqlite3",
+        "name": str(db_path),
+        "ephemeral": True,
+        "overrideEnabled": False,
+        "note": (
+            "Default isolated SQLite database for synthetic perf smoke. "
+            "Existing DJANGO_DB_* values are ignored unless the dangerous override is enabled."
+        ),
+    }
+
+
+PERF_SMOKE_DATABASE = configure_perf_smoke_database()
 
 import django
 
 django.setup()
 
 from django.core.management import call_command
+from django.db import connections
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -34,6 +80,12 @@ from backend.api.models import (
 )
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response, build_icea_bundle
 from backend.audit.models import AuditEvent
+
+
+def cleanup_ephemeral_database() -> None:
+    connections.close_all()
+    if _EPHEMERAL_DB_DIR is not None:
+        _EPHEMERAL_DB_DIR.cleanup()
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -220,42 +272,55 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     args = parser.parse_args()
 
-    call_command("migrate", interactive=False, verbosity=0)
+    try:
+        call_command("migrate", interactive=False, verbosity=0)
 
-    results = {
-        "generatedAt": timezone.now().isoformat(),
-        "iterations": args.iterations,
-        "measured": [
-            run_fhir_transaction(args.iterations),
-            run_dashboard_summary(args.iterations),
-            run_ops_summary(args.iterations),
-        ],
-        "scriptedOnly": [
-            {
-                "scenario": "offline_queue_sync",
-                "command": "pnpm exec vitest run tests/queue/offline-queue.spec.ts src/lib/__tests__/sync.offline.spec.ts",
-                "note": "The repo exposes a real queue/sync smoke but not an isolated latency probe for replay timing.",
-            }
-        ],
-    }
+        results = {
+            "generatedAt": timezone.now().isoformat(),
+            "iterations": args.iterations,
+            "database": PERF_SMOKE_DATABASE,
+            "measured": [
+                run_fhir_transaction(args.iterations),
+                run_dashboard_summary(args.iterations),
+                run_ops_summary(args.iterations),
+            ],
+            "scriptedOnly": [
+                {
+                    "scenario": "offline_queue_sync",
+                    "command": "pnpm exec vitest run tests/queue/offline-queue.spec.ts src/lib/__tests__/sync.offline.spec.ts",
+                    "note": "The repo exposes a real queue/sync smoke but not an isolated latency probe for replay timing.",
+                }
+            ],
+        }
 
-    if args.json:
-        print(json.dumps(results, indent=2))
-        return
+        if args.json:
+            print(json.dumps(results, indent=2))
+            return
 
-    print("HANDOVER synthetic perf smoke")
-    print(f"generatedAt: {results['generatedAt']}")
-    print(f"iterations: {args.iterations}")
-    for item in results["measured"]:
+        print("HANDOVER synthetic perf smoke")
+        print(f"generatedAt: {results['generatedAt']}")
+        print(f"iterations: {args.iterations}")
         print(
-            "- {scenario}: min={minMs}ms avg={avgMs}ms p95={p95Ms}ms max={maxMs}ms".format(
-                **item
+            "database: {engine} :: {name}".format(
+                engine=PERF_SMOKE_DATABASE["engine"],
+                name=PERF_SMOKE_DATABASE["name"],
             )
         )
-        print(f"  note: {item['note']}")
-    for item in results["scriptedOnly"]:
-        print(f"- {item['scenario']}: scripted only via `{item['command']}`")
-        print(f"  note: {item['note']}")
+        print(f"databaseNote: {PERF_SMOKE_DATABASE['note']}")
+        if PERF_SMOKE_DATABASE["overrideEnabled"]:
+            print(f"databaseSafetyOverride: {DANGEROUS_DB_OVERRIDE_ENV}=true")
+        for item in results["measured"]:
+            print(
+                "- {scenario}: min={minMs}ms avg={avgMs}ms p95={p95Ms}ms max={maxMs}ms".format(
+                    **item
+                )
+            )
+            print(f"  note: {item['note']}")
+        for item in results["scriptedOnly"]:
+            print(f"- {item['scenario']}: scripted only via `{item['command']}`")
+            print(f"  note: {item['note']}")
+    finally:
+        cleanup_ephemeral_database()
 
 
 if __name__ == "__main__":

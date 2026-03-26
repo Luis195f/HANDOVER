@@ -83,9 +83,14 @@
 
 ## Backups y artefactos operativos
 - Los scripts [`scripts/backup-db.sh`](../scripts/backup-db.sh) y [`scripts/backup-media.sh`](../scripts/backup-media.sh) exigen cifrado por defecto; si falta `BACKUP_ENCRYPTION_PASSPHRASE`, fallan salvo override explícito `BACKUP_REQUIRE_ENCRYPTION=false`.
+- Con `BACKUP_REQUIRE_ENCRYPTION=true`, ambos scripts usan temporales con cleanup y no deben dejar `*.gz` o `*.tar.gz` persistentes en claro si falta passphrase, falla `gpg` o el proceso aborta antes de publicar el artefacto final.
 - Los artefactos de backup generan `*.sha256` y el restore verifica checksum cuando está disponible antes de descifrar o extraer.
 - Los restores del repo son `scratch-first`: [`scripts/restore-db.sh`](../scripts/restore-db.sh) y [`scripts/restore-media.sh`](../scripts/restore-media.sh) se niegan a sobrescribir DB/media existentes por defecto.
 - Los ZIPs y contextos Docker excluyen `.env` no-ejemplo, bases locales, media local, `backups/`, `artifacts/`, logs y reportes temporales para reducir fuga accidental de PHI o secretos.
+
+## Perf smoke sintético
+- [`scripts/perf-smoke.py`](../scripts/perf-smoke.py) está aislado por defecto de cualquier BD viva: fuerza una SQLite efímera local y deja esa ruta explícita en la salida.
+- Solo usa una BD no efímera si el operador define deliberadamente `PERF_SMOKE_ALLOW_NON_EPHEMERAL_DB=true`; ese override es peligroso y no debe usarse en rehearsal rutinario.
 
 ## Retención y cifrado en reposo
 - Los Bundles clínicos persistidos para ETL ya no se guardan en claro en nuevas escrituras: se conservan con retención explícita (`HANDOVER_BUNDLE_RETENTION_DAYS`) y se cifran en reposo a nivel de aplicación antes de guardarse en base de datos.

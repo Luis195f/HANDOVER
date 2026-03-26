@@ -55,10 +55,27 @@ mkdir -p "$backup_root"
 
 engine=${DJANGO_DB_ENGINE:-django.db.backends.sqlite3}
 name=${DJANGO_DB_NAME:-db.sqlite3}
+passphrase=${BACKUP_ENCRYPTION_PASSPHRASE:-}
+
+if is_true "$require_encryption"; then
+  if [[ -z "$passphrase" ]]; then
+    log "BACKUP_ENCRYPTION_PASSPHRASE is required unless BACKUP_REQUIRE_ENCRYPTION=false is set explicitly"
+    exit 1
+  fi
+  require_command gpg
+fi
+
+temp_root=$(mktemp -d "$backup_root/.backup-db-${timestamp}-XXXXXX")
+cleanup() {
+  rm -rf "$temp_root"
+}
+trap cleanup EXIT
 
 backup_path=""
+final_name=""
 if [[ "$engine" == *"sqlite"* ]]; then
-  backup_path="$backup_root/backup_${timestamp}.sqlite3"
+  backup_path="$temp_root/backup_${timestamp}.sqlite3"
+  final_name="backup_${timestamp}.sqlite3.gz"
   if [[ ! -f "$name" ]]; then
     log "SQLite database not found at $name"
     exit 1
@@ -72,7 +89,8 @@ if [[ "$engine" == *"sqlite"* ]]; then
   fi
 elif [[ "$engine" == *"postgres"* ]]; then
   require_command pg_dump
-  backup_path="$backup_root/backup_${timestamp}.sql"
+  backup_path="$temp_root/backup_${timestamp}.sql"
+  final_name="backup_${timestamp}.sql.gz"
   pg_user=${DJANGO_DB_USER:-${DB_USER:-}}
   pg_host=${DJANGO_DB_HOST:-${DB_HOST:-}}
   pg_port=${DJANGO_DB_PORT:-${DB_PORT:-}}
@@ -95,24 +113,25 @@ else
   exit 1
 fi
 
-archive_path="${backup_path}.gz"
+archive_path="$temp_root/${final_name}"
 log "Compressing backup to $archive_path"
 gzip -c "$backup_path" > "$archive_path"
 rm -f "$backup_path"
 
 upload_path="$archive_path"
-if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
-  require_command gpg
+if [[ -n "$passphrase" ]]; then
   encrypted_path="${archive_path}.gpg"
-  log "Encrypting backup to $encrypted_path"
-  encrypt_file "$archive_path" "$encrypted_path" "$BACKUP_ENCRYPTION_PASSPHRASE"
+  final_upload_path="$backup_root/${final_name}.gpg"
+  log "Encrypting backup to $final_upload_path"
+  encrypt_file "$archive_path" "$encrypted_path" "$passphrase"
   rm -f "$archive_path"
-  upload_path="$encrypted_path"
-elif is_true "$require_encryption"; then
-  log "BACKUP_ENCRYPTION_PASSPHRASE is required unless BACKUP_REQUIRE_ENCRYPTION=false is set explicitly"
-  exit 1
+  mv "$encrypted_path" "$final_upload_path"
+  upload_path="$final_upload_path"
 else
   log "Encryption disabled by explicit override (BACKUP_REQUIRE_ENCRYPTION=false)"
+  final_upload_path="$backup_root/${final_name}"
+  mv "$archive_path" "$final_upload_path"
+  upload_path="$final_upload_path"
 fi
 
 checksum_path="${upload_path}.sha256"
