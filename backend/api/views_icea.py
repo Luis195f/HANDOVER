@@ -18,6 +18,7 @@ from backend.api.icea_pipeline import (
     serialize_pipeline_snapshot,
     _compact_payload_for_stage,
 )
+from backend.api.pilot_control import evaluate_pilot_feature, resolve_roles_from_request
 from backend.api.models import IceaPipelineEvent
 from backend.api.views import AuthenticatedAPIView
 from backend.security.permissions_roles import HasAnyRole
@@ -32,6 +33,25 @@ ALLOWED_ACTIONS = {
 }
 QUERY_ROLES = HasAnyRole.required("supervisor", "admin")
 ACTION_ROLES = HasAnyRole.required("admin")
+
+
+def _analytics_gate_response(request, *, unit_id: str | None = None):
+    feature = evaluate_pilot_feature(
+        "admin_analytics",
+        unit_id=unit_id,
+        roles=resolve_roles_from_request(request),
+    )
+    if feature["enabled"]:
+        return None
+    status = 403 if feature["denialReason"] == "role_out_of_scope" else 503
+    return Response(
+        {
+            "detail": feature["fallback"],
+            "code": feature["denialReason"] or "admin_analytics_disabled",
+            "feature": feature,
+        },
+        status=status,
+    )
 
 
 def _extract_actor_sub(request) -> str:
@@ -90,6 +110,9 @@ class IceaPipelineStatusView(AuthenticatedAPIView):
         return [permission() for permission in self.permission_classes]
 
     def get(self, request):
+        gate = _analytics_gate_response(request)
+        if gate is not None:
+            return gate
         selectors = _merge_snapshot_selectors(_build_selectors(request.query_params))
         if not any(selectors.get(key) for key in ("requestId", "bundleId", "patientId")):
             return Response({"detail": "requestId, bundleId or patientId is required.", "code": "missing_selector"}, status=400)
@@ -134,6 +157,9 @@ class IceaPipelineEventsView(AuthenticatedAPIView):
 
     def get(self, request):
         unit_id = str(request.query_params.get("unitId") or "").strip()
+        gate = _analytics_gate_response(request, unit_id=unit_id or None)
+        if gate is not None:
+            return gate
         stage = str(request.query_params.get("stage") or "").strip()
         try:
             limit = int(request.query_params.get("limit") or 20)
@@ -158,6 +184,9 @@ class IceaDashboardSummaryView(AuthenticatedAPIView):
 
     def get(self, request):
         unit_id = str(request.query_params.get("unitId") or "").strip() or None
+        gate = _analytics_gate_response(request, unit_id=unit_id)
+        if gate is not None:
+            return gate
         try:
             limit = int(request.query_params.get("eventsLimit") or 20)
         except (TypeError, ValueError):
@@ -178,6 +207,9 @@ class IceaPipelineActionView(AuthenticatedAPIView):
 
         payload = request.data if isinstance(request.data, dict) else {}
         selectors = _merge_snapshot_selectors(_build_selectors(payload))
+        gate = _analytics_gate_response(request, unit_id=selectors.get("unitId"))
+        if gate is not None:
+            return gate
         actor_sub = _extract_actor_sub(request)
 
         if normalized_action == "refresh-dashboard-summary":

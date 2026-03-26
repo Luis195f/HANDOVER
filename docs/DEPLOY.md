@@ -62,6 +62,8 @@ Si solo cambias frontend web y documentación operativa, `pytest` sigue recomend
 - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`
 - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`
 - `EXPO_PUBLIC_ENABLE_DEMO`
+- `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`
+- `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`
 - `OIDC_ISSUER`
 - `OIDC_CLIENT_ID`
 - `OIDC_AUDIENCE`
@@ -78,6 +80,7 @@ Regla operativa:
 Variables críticas documentadas en [`.env.example`](../.env.example) y [`backend/.env.example`](../backend/.env.example):
 
 - `HANDOVER_DEPLOYMENT_MODE`
+- `HANDOVER_PILOT_CONTROL_JSON`
 - `AUTH0_ISSUER_BASE_URL`
 - `AUTH0_AUDIENCE`
 - `HANDOVER_PRIVATE_KEY_PATH`
@@ -87,6 +90,33 @@ Variables críticas documentadas en [`.env.example`](../.env.example) y [`backen
 - `HANDOVER_TECHNICAL_RETENTION_DAYS`
 - `ICEA_WEBHOOK_*`
 - `ENABLE_ICEA_BRIDGE` e `ICEA_BRIDGE_*`
+
+## Control de piloto y rollout seguro
+
+El repo soporta un control plane minimo gobernado por entorno, no un panel mutable nuevo. La activacion efectiva del piloto depende de:
+
+- `HANDOVER_DEPLOYMENT_MODE` en backend;
+- `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE` en frontend web/app;
+- `HANDOVER_PILOT_CONTROL_JSON` en backend;
+- `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` en frontend.
+
+Reglas de despliegue para piloto:
+
+- no actives ICEA nominal por defecto; usa `explicitShadowModeForIcea=true` mientras el piloto siga en fase prudente;
+- si `HANDOVER_PILOT_CONTROL_JSON` restringe unidades o roles, valida el resultado con `GET /api/pilot-control/summary` antes del `go`;
+- si hay rollback, primero cambia el JSON de control y solo despues usa el kill switch duro (`ENABLE_ICEA_*`, `SHOW_*`, `AI_SUGGESTIONS_ENABLED`) si el corte debe ser inmediato;
+- el flujo clinico base debe poder seguir con analytics/admin/insights apagados.
+
+Ejemplo prudente de backend para piloto:
+
+```env
+HANDOVER_DEPLOYMENT_MODE=pilot
+HANDOVER_PILOT_CONTROL_JSON={"pilotMode":"pilot","rolloutStatus":"pause","enabledUnits":["icu-a"],"allowedRoles":["nurse","supervisor","admin"],"environmentScope":["pilot"],"explicitShadowModeForIcea":true,"features":{"icea_bridge":{"mode":"shadow","enabledUnits":["icu-a"]},"icea_patient_risk":{"mode":"disabled"},"admin_analytics":{"mode":"shadow","allowedRoles":["supervisor","admin"]},"governed_nnn":{"mode":"pilot","enabledUnits":["icu-a"]}}}
+```
+
+Limitacion operativa explicita:
+
+- el estado `go/pause/no-go` es consultable, pero la aprobacion y auditoria institucional del cambio siguen fuera del repo.
 
 ## Deploy web staging automatizado
 

@@ -159,4 +159,18 @@ describe('DiagnosisAutocomplete', () => {
       expect(getByText('No hay un catálogo NANDA licenciado configurado; se mantiene el catálogo local.')).toBeTruthy();
     });
   });
+
+  it('degrada a texto legacy cuando el bloque gobernado está desactivado', () => {
+    const { getByTestId, queryByPlaceholderText, queryByTestId } = renderWithForm({
+      name: 'dxNursingStructured',
+      label: 'Diagnósticos enfermería (NANDA)',
+      systemsAllowed: ['NANDA'],
+      enabled: false,
+      disabledMessage: 'NNN gobernado desactivado para esta unidad o entorno.',
+    });
+
+    expect(getByTestId('diagnosis-governance-disabled')).toBeTruthy();
+    expect(queryByPlaceholderText('Buscar diagnóstico...')).toBeNull();
+    expect(queryByTestId('nanda-license-warning')).toBeNull();
+  });
 });

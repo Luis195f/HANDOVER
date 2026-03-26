@@ -1,3 +1,4 @@
+import json
 import types
 from unittest.mock import Mock, patch
 
@@ -81,6 +82,60 @@ class IceaPipelineApiTests(TestCase):
         self.assertEqual(payload["snapshot"]["requestId"], "req-icea-001")
         self.assertEqual(payload["snapshot"]["visibleStatus"], "accepted")
         self.assertEqual(payload["remoteError"]["code"], "icea_pipeline_not_configured")
+
+    @patch.dict(
+        "os.environ",
+        {
+            "HANDOVER_PILOT_CONTROL_JSON": json.dumps(
+                {
+                    "features": {
+                        "admin_analytics": {
+                            "mode": "pilot",
+                            "allowedRoles": ["admin"],
+                        }
+                    }
+                }
+            )
+        },
+        clear=False,
+    )
+    def test_status_respects_role_scoped_admin_analytics_control_plane(self):
+        self._create_snapshot()
+        self._auth(roles=["supervisor"])
+
+        response = self.client.get(self.status_url, {"requestId": "req-icea-001"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "role_out_of_scope")
+
+    @patch.dict(
+        "os.environ",
+        {
+            "HANDOVER_PILOT_CONTROL_JSON": json.dumps(
+                {
+                    "pilotMode": "enabled",
+                    "rolloutStatus": "no-go",
+                    "features": {
+                        "admin_analytics": {
+                            "mode": "enabled",
+                            "allowedRoles": ["supervisor", "admin"],
+                        }
+                    },
+                }
+            ),
+            "ENABLE_ICEA_OPS_SUMMARY": "true",
+            "ENABLE_ICEA_OPS_EVENTS": "true",
+        },
+        clear=False,
+    )
+    def test_status_respects_rollout_no_go_and_disables_admin_analytics(self):
+        self._create_snapshot()
+        self._auth(roles=["supervisor"])
+
+        response = self.client.get(self.status_url, {"requestId": "req-icea-001"})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "rollout_no_go")
 
     @patch.dict(
         "os.environ",

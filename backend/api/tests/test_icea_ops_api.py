@@ -1,3 +1,4 @@
+import json
 import os
 import types
 from unittest.mock import patch
@@ -175,6 +176,36 @@ class IceaOpsApiTests(TestCase):
         self.assertTrue(payload["empty"])
         self.assertIn("flags", payload)
         self.assertEqual(payload["unavailableReason"], "icea_ops_summary_disabled")
+
+    @patch.dict(
+        os.environ,
+        {
+            "ENABLE_ICEA_OPS_SUMMARY": "true",
+            "ENABLE_ICEA_OPS_EVENTS": "true",
+            "HANDOVER_PILOT_CONTROL_JSON": json.dumps(
+                {
+                    "features": {
+                        "admin_analytics": {
+                            "mode": "disabled",
+                        }
+                    }
+                }
+            ),
+        },
+        clear=False,
+    )
+    def test_summary_control_plane_kill_switch_is_parseable(self):
+        self._auth(roles=["admin"])
+
+        response = self.client.get(self.summary_url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["available"])
+        self.assertFalse(payload["enabled"])
+        self.assertEqual(payload["scope"], "summary")
+        self.assertEqual(payload["unavailableReason"], "icea_ops_summary_disabled")
+        self.assertEqual(payload["units"], [])
 
     @patch.dict(os.environ, {"ENABLE_ICEA_OPS_EVENTS": "false"}, clear=False)
     def test_events_flag_disabled_returns_parseable_empty_contract(self):

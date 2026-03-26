@@ -23,6 +23,7 @@ import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
+import { isPilotFeatureEnabled } from '@/src/config/pilotControl';
 import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
 import { HANDOVER_SECTIONS_INFO, resolveHandoverProfileRuntime } from '@/src/lib/profile-runtime';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -1089,7 +1090,18 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
-  const aiSuggestionsEnabled = isOn('AI_SUGGESTIONS_ENABLED');
+  const pilotRoles = authSession?.roles ?? session?.roles ?? [];
+  const effectivePilotUnitId = unitIdParam ?? selectedUnitId ?? undefined;
+  const aiSuggestionsEnabled =
+    isOn('AI_SUGGESTIONS_ENABLED') &&
+    isPilotFeatureEnabled('ai_suggestions', {
+      unitId: effectivePilotUnitId,
+      roles: pilotRoles,
+    });
+  const governedNnnEnabled = isPilotFeatureEnabled('governed_nnn', {
+    unitId: effectivePilotUnitId,
+    roles: pilotRoles,
+  });
   const buildDraftSnomedCoding = (text: string): SnomedCoding => {
     const display = (text ?? '').trim();
 
@@ -1563,7 +1575,13 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
     [patientSummary, patientSummaryParam],
   );
   const bannerLoading = loadingPatient && !patientSummaryParam;
-  const showIceaPatientRisk = isOn('ENABLE_ICEA_PATIENT_RISK') && Boolean(trimmedPatientId);
+  const showIceaPatientRisk =
+    isOn('ENABLE_ICEA_PATIENT_RISK') &&
+    Boolean(trimmedPatientId) &&
+    isPilotFeatureEnabled('icea_patient_risk', {
+      unitId: effectivePilotUnitId,
+      roles: pilotRoles,
+    });
   const showIceaCausalSummary = isOn('ENABLE_ICEA_CAUSAL_SUMMARY');
   const { summary: iceaPatientRisk, loading: loadingIceaPatientRisk, error: iceaPatientRiskError } = useIceaPatientRisk(
     trimmedPatientId,
@@ -2797,6 +2815,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
               name="dxNursingStructured"
               label="Diagnósticos de enfermería (estructurados)"
               systemsAllowed={['NANDA']}
+              enabled={governedNnnEnabled}
+              disabledMessage="NNN gobernado desactivado para esta unidad o entorno. Usa el campo legacy mientras se reactiva el catálogo."
             />
             {/* END HANDOVER D3 – dxNursingStructured */}
           </View>

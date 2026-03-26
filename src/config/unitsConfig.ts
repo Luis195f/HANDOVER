@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS, type BedsideChecklistItem } from './bedsideChecklist';
 import { isOn } from './flags';
+import { resolvePilotFeatureState } from './pilotControl';
 import {
   normalizeSpecialtyOverlayId,
   normalizeUnitProfileId,
@@ -216,18 +217,24 @@ export const resolveUnitFeatureFlags = (unitId?: string | null): UnitFeatureFlag
   const base = { ...BASE_FEATURES };
   const normalizedUnitId = typeof unitId === 'string' ? unitId.trim() : '';
   const defaultUnit = UNITS_CONFIG.find((entry) => entry.default) ?? UNITS_CONFIG[0];
+  const effectiveUnitId = normalizedUnitId || defaultUnit?.id || '';
 
-  if (!normalizedUnitId) {
-    return {
-      ...base,
-      ...(defaultUnit?.features ?? {}),
-    };
-  }
-
-  const unit = UNITS_CONFIG.find((entry) => entry.id === normalizedUnitId) ?? defaultUnit;
-  return {
+  const unit = normalizedUnitId ? UNITS_CONFIG.find((entry) => entry.id === normalizedUnitId) ?? defaultUnit : defaultUnit;
+  const resolved = {
     ...base,
     ...(unit?.features ?? {}),
+  };
+  const governedNnnState = resolvePilotFeatureState('governed_nnn', {
+    unitId: effectiveUnitId,
+  });
+  const governedNnnEnabled =
+    governedNnnState.enabled ||
+    (governedNnnState.denialReason === 'kill_switch_disabled' &&
+      (Boolean(resolved.showNicCoding) || Boolean(resolved.showNocOutcomes)));
+  return {
+    ...resolved,
+    showNicCoding: Boolean(resolved.showNicCoding) && governedNnnEnabled,
+    showNocOutcomes: Boolean(resolved.showNocOutcomes) && governedNnnEnabled,
   };
 };
 
