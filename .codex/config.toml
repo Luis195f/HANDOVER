@@ -1,43 +1,7 @@
-# Project-scoped Codex configuration for HANDOVER
-# Keep this file conservative and repo-specific.
+# Minimal project-scoped Codex configuration for HANDOVER.
+# Keep this file conservative and limited to locally verified keys.
 
-model = "gpt-5.4"
-model_reasoning_effort = "medium"
-approval_policy = "on-request"
-sandbox_mode = "workspace-write"
-personality = "pragmatic"
-
-# Allow additional instruction filenames if ever used in this repo.
-project_doc_fallback_filenames = [".agents.md"]
-project_doc_max_bytes = 65536
-
-# Default profile for this project.
-profile = "handover-default"
-
-[profiles.handover-default]
-model = "gpt-5.4"
-model_reasoning_effort = "medium"
-approval_policy = "on-request"
-sandbox_mode = "workspace-write"
-personality = "pragmatic"
-
-[profiles.handover-deep-review]
 model = "gpt-5.4"
 model_reasoning_effort = "high"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
-personality = "pragmatic"
-
-[profiles.handover-readonly-review]
-model = "gpt-5.4"
-model_reasoning_effort = "high"
-approval_policy = "never"
-sandbox_mode = "read-only"
-personality = "pragmatic"
-
-[profiles.handover-safe-edit]
-model = "gpt-5.4"
-model_reasoning_effort = "medium"
-approval_policy = "untrusted"
-sandbox_mode = "workspace-write"
-personality = "pragmatic"
