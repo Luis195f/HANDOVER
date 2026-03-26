@@ -1,5 +1,11 @@
 # Seguridad, autenticación y PHI
 
+> Estado del documento
+> - Estado: `implemented`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `backend/security/*`, `backend/api/views.py`, `backend/api/urls.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
+> - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, firma y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend.
+
 ## Modelo de autenticación/autorización
 - Autenticación JWT OIDC mediante `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE`.
 - Todas las operaciones clínicas sensibles en DRF validan token Bearer.

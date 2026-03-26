@@ -1,6 +1,10 @@
 # Interoperabilidad FHIR (estado piloto-grade)
 
-> Estado revisado el 2026-03-19. El repo soporta mapeo FHIR real para NNN y transaccion clinica via Django/DRF, y exporta contexto clinico contextual aditivo sin declarar perfiles regulatorios cerrados ni terminologia oficial licenciada dentro del repositorio.
+> Estado del documento
+> - Estado: `pilot`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `src/lib/fhir-map.ts`, `src/lib/fhir-map/nnn.ts`, `backend/api/views.py`, `tests/fhir-map.spec.ts`, `backend/api/tests/test_handover_etl_read.py`.
+> - Riesgos o lagunas abiertas: el repo soporta mapeo FHIR real para NNN y transacción clínica vía Django/DRF, pero no declara perfiles regulatorios externos cerrados ni licencia NNN embebida en el repositorio.
 
 ## 1) Arquitectura real
 

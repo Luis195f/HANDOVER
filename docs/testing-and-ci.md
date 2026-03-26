@@ -1,5 +1,11 @@
 # Testing y CI (estado real del repo)
 
+> Estado del documento
+> - Estado: `implemented`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `package.json`, `.github/workflows/ci.yml`, `.github/workflows/django.yml`, `backend/api/tests/test_icea_ops_api.py`, `tests/admin-api.spec.ts`.
+> - Riesgos o lagunas abiertas: este documento refleja los runners y gates actuales del repo; no implica que todas las suites se hayan ejecutado en cada corte documental.
+
 ## Runner principal
 
 - `pnpm test` / `pnpm -w test` es el runner principal de tests JavaScript del repo.

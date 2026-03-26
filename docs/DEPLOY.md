@@ -1,5 +1,11 @@
 # Despliegue y release piloto
 
+> Estado del documento
+> - Estado: `pilot`.
+> - Última revisión: 2026-03-26.
+> - Fuente de verdad / evidencia base: `.github/workflows/deploy-staging.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `git tag --list`.
+> - Riesgos o lagunas abiertas: la topología documentada es real para la web estática de staging, pero el backend sigue fuera de `docker-compose.yml` y el versionado de release requiere tag Git verificable.
+
 Esta guía describe el estado real del despliegue en HANDOVER y deja una topología prioritaria explícita para el piloto.
 
 ## Topología objetivo prioritaria
