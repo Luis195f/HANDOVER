@@ -34,6 +34,10 @@ export interface HandoverUnitConfig {
   specialtyOverlayIds?: SpecialtyOverlayId[];
 }
 
+interface UnitFeatureContext {
+  roles?: string[] | null;
+}
+
 type BooleanLike = boolean | number | string | null | undefined;
 type LegacyHandoverUnitConfig = HandoverUnitConfig & {
   isPediatric?: BooleanLike;
@@ -213,7 +217,10 @@ function resolveUnitsConfig(): HandoverUnitConfig[] {
   }
 }
 
-export const resolveUnitFeatureFlags = (unitId?: string | null): UnitFeatureFlags => {
+export const resolveUnitFeatureFlags = (
+  unitId?: string | null,
+  context: UnitFeatureContext = {},
+): UnitFeatureFlags => {
   const base = { ...BASE_FEATURES };
   const normalizedUnitId = typeof unitId === 'string' ? unitId.trim() : '';
   const defaultUnit = UNITS_CONFIG.find((entry) => entry.default) ?? UNITS_CONFIG[0];
@@ -226,6 +233,7 @@ export const resolveUnitFeatureFlags = (unitId?: string | null): UnitFeatureFlag
   };
   const governedNnnState = resolvePilotFeatureState('governed_nnn', {
     unitId: effectiveUnitId,
+    roles: context.roles ?? [],
   });
   const governedNnnEnabled =
     governedNnnState.enabled ||

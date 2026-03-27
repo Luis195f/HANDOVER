@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const originalEnv = { ...process.env };
+const mockState = vi.hoisted(() => ({
+  apiGet: vi.fn(),
+}));
 
 vi.mock('expo-constants', () => ({
   default: {
@@ -9,15 +12,20 @@ vi.mock('expo-constants', () => ({
     },
   },
 }));
+vi.mock('@/src/lib/api', () => ({
+  apiGet: mockState.apiGet,
+}));
 
 describe('unitsConfig advanced flags by unit', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.clearAllMocks();
     process.env = { ...originalEnv };
     delete process.env.EXPO_PUBLIC_SHOW_NIC_CODING;
     delete process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES;
     delete process.env.EXPO_PUBLIC_SHOW_HANDOVER_TIMING_METRICS;
     delete process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS;
+    delete process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE;
     delete process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON;
     delete process.env.HANDOVER_UNITS_JSON;
     delete process.env.UNITS_CONFIG;
@@ -263,7 +271,7 @@ describe('unitsConfig advanced flags by unit', () => {
     });
   });
 
-  it('applies the governed NNN pilot gate on top of unit feature flags', async () => {
+  it('applies the backend-governed NNN gate on top of unit feature flags', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
@@ -296,14 +304,32 @@ describe('unitsConfig advanced flags by unit', () => {
         },
       },
     ]);
+    mockState.apiGet.mockResolvedValue({
+      generatedAt: '2026-03-27T10:00:00Z',
+      requestedContext: {
+        unitId: 'nnn-unit',
+        roles: ['nurse'],
+      },
+      features: {
+        icea_bridge: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_immediate_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_enriched_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_patient_risk: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'pilot', denialReason: 'rollout_paused' },
+        governed_nnn: { enabled: true, shadow: false, pilotMode: 'pilot', mode: 'pilot', denialReason: null },
+        admin_analytics: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: 'role_out_of_scope' },
+        ai_suggestions: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+      },
+    });
 
+    const { refreshPilotControlContext } = await import('../pilotControl');
+    await refreshPilotControlContext({ unitId: 'nnn-unit', roles: ['nurse'] });
     const { resolveUnitFeatureFlags } = await import('../unitsConfig');
 
-    expect(resolveUnitFeatureFlags('nnn-unit')).toMatchObject({
+    expect(resolveUnitFeatureFlags('nnn-unit', { roles: ['nurse'] })).toMatchObject({
       showNicCoding: true,
       showNocOutcomes: true,
     });
-    expect(resolveUnitFeatureFlags('other-unit')).toMatchObject({
+    expect(resolveUnitFeatureFlags('other-unit', { roles: ['nurse'] })).toMatchObject({
       showNicCoding: false,
       showNocOutcomes: false,
     });

@@ -185,12 +185,15 @@ def _default_feature_mode(feature_key: str, *, explicit_shadow_mode_for_icea: bo
 def _normalize_feature_rule(feature_key: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         value = {}
+    raw_shadow = value.get("shadow")
+    if raw_shadow is None:
+        raw_shadow = value.get("shadowMode")
     return {
         "mode": _normalize_mode(value.get("mode")),
         "enabledUnits": _normalize_text_list(value.get("enabledUnits")),
         "allowedRoles": _normalize_text_list(value.get("allowedRoles"), lower=True),
         "environmentScope": _normalize_environment_scope(value.get("environmentScope")),
-        "shadowMode": bool(value.get("shadowMode")),
+        "shadow": bool(raw_shadow),
     }
 
 
@@ -252,7 +255,7 @@ def _feature_scope(config: dict[str, Any], feature_key: str) -> dict[str, Any]:
         "enabledUnits": feature["enabledUnits"] or config["enabledUnits"],
         "allowedRoles": allowed_roles,
         "environmentScope": feature["environmentScope"] or config["environmentScope"],
-        "shadowMode": bool(feature["shadowMode"]) or mode == "shadow" or (
+        "shadow": bool(feature["shadow"]) or mode == "shadow" or (
             config["explicitShadowModeForIcea"] and FEATURE_METADATA[feature_key]["icea_related"]
         ),
     }
@@ -290,7 +293,7 @@ def evaluate_pilot_feature(
     enabled_units = scope["enabledUnits"]
     allowed_roles = scope["allowedRoles"]
     rollout_forces_shadow = rollout_status_explicit and rollout_status == "pause" and metadata["icea_related"]
-    effective_shadow_mode = bool(scope["shadowMode"]) or rollout_forces_shadow
+    effective_shadow_mode = bool(scope["shadow"]) or rollout_forces_shadow
 
     denial_reason = None
     enabled = True
@@ -401,4 +404,42 @@ def serialize_pilot_control_summary(
         "features": features,
         "killSwitches": kill_switches,
         "stateChangeAuditLimit": "env_backed_read_only_control_plane",
+    }
+
+
+def serialize_pilot_control_features(
+    *,
+    unit_id: str | None = None,
+    roles: list[str] | tuple[str, ...] | set[str] | None = None,
+    environment: str | None = None,
+) -> dict[str, Any]:
+    effective_environment = (environment or getattr(settings, "HANDOVER_DEPLOYMENT_MODE", "development")).strip().lower()
+    normalized_unit_id = (unit_id or "").strip() or None
+    normalized_roles = _normalize_text_list(roles or [], lower=True)
+    features = {
+        feature_key: evaluate_pilot_feature(
+            feature_key,
+            unit_id=normalized_unit_id,
+            roles=normalized_roles,
+            environment=effective_environment,
+        )
+        for feature_key in PILOT_FEATURE_KEYS
+    }
+    return {
+        "generatedAt": timezone.now().isoformat(),
+        "requestedContext": {
+            "unitId": normalized_unit_id,
+            "roles": normalized_roles,
+        },
+        "features": {
+            feature_key: {
+                "enabled": feature_state["enabled"],
+                "shadow": feature_state["shadowMode"],
+                "pilotMode": feature_state["pilotMode"],
+                "mode": feature_state["mode"],
+                "denialReason": feature_state["denialReason"],
+            }
+            for feature_key, feature_state in features.items()
+        },
+        "stateChangeAuditLimit": "backend_effective_read_only_control_plane",
     }

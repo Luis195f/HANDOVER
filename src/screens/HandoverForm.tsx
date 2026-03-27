@@ -23,7 +23,7 @@ import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
-import { isPilotFeatureEnabled } from '@/src/config/pilotControl';
+import { isPilotFeatureEnabled, usePilotControlContext } from '@/src/config/pilotControl';
 import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
 import { HANDOVER_SECTIONS_INFO, resolveHandoverProfileRuntime } from '@/src/lib/profile-runtime';
 import AudioAttach from '@/src/components/AudioAttach';
@@ -491,6 +491,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession, logout } = useAuth();
+  const pilotRoles = authSession?.roles ?? session?.roles ?? [];
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
@@ -601,11 +602,12 @@ const buildChecklistDefaults = (
   return next;
 };
 
-const defaultValues = useMemo<HandoverFormValues>(() => {
-  const initialProfileRuntime = resolveHandoverProfileRuntime({
-    unitId: unitIdParam ?? selectedUnitId,
-    specialtyId,
-  });
+  const defaultValues = useMemo<HandoverFormValues>(() => {
+    const initialProfileRuntime = resolveHandoverProfileRuntime({
+      unitId: unitIdParam ?? selectedUnitId,
+      specialtyId,
+      roles: pilotRoles,
+    });
 
   const checklistItems = normalizeChecklistItems(initialProfileRuntime.checklistItems);
 
@@ -706,6 +708,7 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   prefilledValuesParam,
   prefilledVitals,
   prefillMeta,
+  pilotRoles,
 ]);
 
   const form = useZodForm(zHandover, defaultValues);
@@ -742,8 +745,9 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
       resolveHandoverProfileRuntime({
         unitId: adminUnitId,
         specialtyId,
+        roles: pilotRoles,
       }),
-    [adminUnitId, specialtyId],
+    [adminUnitId, pilotRoles, specialtyId],
   );
   const { features } = profileRuntime;
   const handoverTiming = useHandoverTiming({ enabled: Boolean(features.showHandoverTimingMetrics) });
@@ -1090,8 +1094,11 @@ const defaultValues = useMemo<HandoverFormValues>(() => {
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
-  const pilotRoles = authSession?.roles ?? session?.roles ?? [];
   const effectivePilotUnitId = unitIdParam ?? selectedUnitId ?? undefined;
+  usePilotControlContext({
+    unitId: effectivePilotUnitId,
+    roles: pilotRoles,
+  });
   const aiSuggestionsEnabled =
     isOn('AI_SUGGESTIONS_ENABLED') &&
     isPilotFeatureEnabled('ai_suggestions', {

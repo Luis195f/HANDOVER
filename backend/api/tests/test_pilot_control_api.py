@@ -11,6 +11,7 @@ class PilotControlApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse("pilot-control-summary")
+        self.features_url = reverse("pilot-control-features")
 
     def _auth(self, *, roles):
         claims = {"sub": "auth0|pilot-control", "roles": roles, "permissions": ["handover:write"]}
@@ -24,6 +25,95 @@ class PilotControlApiTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 403)
+
+    def test_features_endpoint_returns_effective_backend_feature_map_for_authenticated_user(self):
+        self._auth(roles=["nurse"])
+        config = {
+            "pilotMode": "pilot",
+            "rolloutStatus": "pause",
+            "explicitShadowModeForIcea": True,
+            "features": {
+                "icea_bridge": {
+                    "mode": "shadow",
+                    "enabledUnits": ["icu-a"],
+                    "environmentScope": ["test", "pilot"],
+                },
+                "icea_patient_risk": {
+                    "mode": "pilot",
+                    "enabledUnits": ["icu-a"],
+                    "allowedRoles": ["nurse", "supervisor", "admin"],
+                    "environmentScope": ["test", "pilot"],
+                },
+                "governed_nnn": {
+                    "mode": "pilot",
+                    "enabledUnits": ["icu-a"],
+                    "allowedRoles": ["nurse", "supervisor", "admin"],
+                    "shadow": True,
+                },
+            },
+        }
+
+        with self.settings(HANDOVER_DEPLOYMENT_MODE="test"), patch.dict(
+            "os.environ",
+            {
+                "HANDOVER_PILOT_CONTROL_JSON": json.dumps(config),
+                "ENABLE_ICEA_BRIDGE": "true",
+                "ENABLE_ICEA_PATIENT_RISK": "true",
+                "SHOW_NIC_CODING": "true",
+                "SHOW_NOC_OUTCOMES": "true",
+            },
+            clear=False,
+        ):
+            response = self.client.get(self.features_url, {"unitId": "icu-a"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["requestedContext"]["unitId"], "icu-a")
+        self.assertEqual(payload["requestedContext"]["roles"], ["nurse"])
+        self.assertEqual(
+            payload["features"]["icea_bridge"],
+            {
+                "enabled": True,
+                "shadow": True,
+                "pilotMode": "pilot",
+                "mode": "shadow",
+                "denialReason": None,
+            },
+        )
+        self.assertEqual(payload["features"]["icea_patient_risk"]["shadow"], True)
+        self.assertFalse(payload["features"]["icea_patient_risk"]["enabled"])
+        self.assertEqual(payload["features"]["icea_patient_risk"]["denialReason"], "rollout_paused")
+        self.assertFalse(payload["features"]["governed_nnn"]["enabled"])
+        self.assertEqual(payload["features"]["governed_nnn"]["denialReason"], "shadow_mode")
+
+    def test_features_endpoint_ignores_role_override_query_params_and_uses_authenticated_roles(self):
+        self._auth(roles=["nurse"])
+        config = {
+            "pilotMode": "enabled",
+            "features": {
+                "admin_analytics": {
+                    "mode": "enabled",
+                    "allowedRoles": ["admin"],
+                },
+            },
+        }
+
+        with self.settings(HANDOVER_DEPLOYMENT_MODE="test"), patch.dict(
+            "os.environ",
+            {
+                "HANDOVER_PILOT_CONTROL_JSON": json.dumps(config),
+                "ENABLE_ICEA_OPS_SUMMARY": "true",
+                "ENABLE_ICEA_OPS_EVENTS": "true",
+            },
+            clear=False,
+        ):
+            response = self.client.get(self.features_url, {"role": "admin"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["requestedContext"]["roles"], ["nurse"])
+        self.assertFalse(payload["features"]["admin_analytics"]["enabled"])
+        self.assertEqual(payload["features"]["admin_analytics"]["denialReason"], "role_out_of_scope")
 
     def test_summary_returns_effective_flags_and_kill_switches(self):
         self._auth(roles=["admin"])
