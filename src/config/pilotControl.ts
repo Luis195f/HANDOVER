@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { getAppConfigExtra } from '@/src/config/app-config';
-import { apiGet } from '@/src/lib/api';
 
 export type PilotFeatureKey =
   | 'icea_bridge'
@@ -542,6 +541,7 @@ export async function refreshPilotControlContext(context: PilotFeatureContext = 
 
   const request = (async () => {
     try {
+      const { apiGet } = await import('@/src/lib/api');
       const response = await apiGet(buildPilotFeaturesPath(normalizedContext));
       const parsed = parseBackendPilotFeatureMap(response);
       if (!parsed) {
