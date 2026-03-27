@@ -3,8 +3,10 @@ from unittest.mock import Mock, patch
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.test import APIClient
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.test import APIClient, APIRequestFactory
 
+from backend.api.views import AuthenticatedAPIView
 from backend.security.auth import Auth0User
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
@@ -12,14 +14,70 @@ from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 class AuthEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.factory = APIRequestFactory()
         self.capabilities_url = reverse("me-capabilities")
         self.refresh_url = reverse("auth-refresh")
+
+    def _base_view(self) -> AuthenticatedAPIView:
+        view = AuthenticatedAPIView()
+        view.request = self.factory.get("/api/protected")
+        return view
 
     @override_settings(DEBUG=False)
     def test_me_capabilities_requires_bearer_token_in_production(self):
         response = self.client.get(self.capabilities_url)
 
         self.assertEqual(response.status_code, 401)
+
+    @override_settings(DEBUG=False, AUTH0_CONFIGURED=False)
+    def test_authenticated_api_view_fails_closed_when_auth0_missing_outside_local_test(self):
+        with patch.object(AuthenticatedAPIView, "_running_tests", return_value=False):
+            view = self._base_view()
+
+            permissions = view.get_permissions()
+            authenticators = view.get_authenticators()
+
+        self.assertEqual(len(permissions), 1)
+        self.assertIsInstance(permissions[0], IsAuthenticated)
+        self.assertEqual(len(authenticators), 1)
+        self.assertIsInstance(authenticators[0], view.authentication_classes[0])
+
+    @override_settings(DEBUG=True, AUTH0_CONFIGURED=False)
+    def test_authenticated_api_view_allows_explicit_local_debug_without_auth0(self):
+        with patch.object(AuthenticatedAPIView, "_running_tests", return_value=False):
+            view = self._base_view()
+
+            permissions = view.get_permissions()
+            authenticators = view.get_authenticators()
+
+        self.assertEqual(len(permissions), 1)
+        self.assertIsInstance(permissions[0], AllowAny)
+        self.assertEqual(authenticators, [])
+
+    @override_settings(DEBUG=False, AUTH0_CONFIGURED=False)
+    def test_authenticated_api_view_allows_only_explicit_test_bypass(self):
+        with patch.object(AuthenticatedAPIView, "_running_tests", return_value=True):
+            view = self._base_view()
+
+            permissions = view.get_permissions()
+            authenticators = view.get_authenticators()
+
+        self.assertEqual(len(permissions), 1)
+        self.assertIsInstance(permissions[0], AllowAny)
+        self.assertEqual(authenticators, [])
+
+    @override_settings(DEBUG=False, AUTH0_CONFIGURED=True)
+    def test_authenticated_api_view_keeps_normal_auth_flow_when_configured(self):
+        with patch.object(AuthenticatedAPIView, "_running_tests", return_value=False):
+            view = self._base_view()
+
+            permissions = view.get_permissions()
+            authenticators = view.get_authenticators()
+
+        self.assertEqual(len(permissions), 1)
+        self.assertIsInstance(permissions[0], IsAuthenticated)
+        self.assertEqual(len(authenticators), 1)
+        self.assertIsInstance(authenticators[0], view.authentication_classes[0])
 
     @override_settings(DEBUG=False)
     @patch(
