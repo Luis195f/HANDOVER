@@ -90,6 +90,12 @@ AUTH0_AUDIENCE = (
 
 AUTH0_CONFIGURED = bool(AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE)
 
+if not DEBUG and not RUNNING_TESTS and not AUTH0_CONFIGURED:
+    raise RuntimeError(
+        "AUTH0_ISSUER_BASE_URL (or OIDC_ISSUER) and AUTH0_AUDIENCE "
+        "(or OIDC_AUDIENCE) are required when DEBUG=false outside tests."
+    )
+
 # -----------------------------
 # Hosts / CORS / CSRF
 # -----------------------------

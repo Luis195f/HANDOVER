@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
@@ -12,16 +11,24 @@ from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
-AUTH0_ISSUER_BASE_URL = os.getenv("AUTH0_ISSUER_BASE_URL", "").rstrip("/")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
-
 ALGORITHMS = ["RS256"]
-JWKS_URL = f"{AUTH0_ISSUER_BASE_URL}/.well-known/jwks.json"
 
 # Cache simple de JWKS
 _JWKS_CACHE: Optional[Dict[str, Any]] = None
 _JWKS_CACHE_TS: float = 0.0
 _JWKS_TTL_SECONDS = 3600
+
+
+def _auth0_issuer_base_url() -> str:
+    return str(getattr(settings, "AUTH0_ISSUER_BASE_URL", "") or "").rstrip("/")
+
+
+def _auth0_audience() -> str:
+    return str(getattr(settings, "AUTH0_AUDIENCE", "") or "")
+
+
+def _jwks_url() -> str:
+    return f"{_auth0_issuer_base_url()}/.well-known/jwks.json"
 
 
 def _get_bearer_token(request) -> str:
@@ -39,7 +46,8 @@ def _get_bearer_token(request) -> str:
 def _get_jwks() -> Dict[str, Any]:
     global _JWKS_CACHE, _JWKS_CACHE_TS
 
-    if not AUTH0_ISSUER_BASE_URL:
+    issuer_base_url = _auth0_issuer_base_url()
+    if not issuer_base_url:
         raise AuthenticationFailed("Auth0 not configured: missing AUTH0_ISSUER_BASE_URL")
 
     now = time.time()
@@ -47,7 +55,7 @@ def _get_jwks() -> Dict[str, Any]:
         return _JWKS_CACHE
 
     try:
-        r = httpx.get(JWKS_URL, timeout=10)
+        r = httpx.get(_jwks_url(), timeout=10)
         r.raise_for_status()
         data = r.json()
     except Exception:
@@ -117,9 +125,12 @@ class Auth0JWTAuthentication(BaseAuthentication):
     """
 
     def authenticate(self, request) -> Optional[Tuple[Auth0User, Any]]:
-        # ✅ DEV: si Auth0 no está configurado, NO explotes; simplemente no autentiques.
-        # (El acceso lo controla DRF en settings/permissions)
-        if not AUTH0_ISSUER_BASE_URL or not AUTH0_AUDIENCE:
+        issuer_base_url = _auth0_issuer_base_url()
+        audience = _auth0_audience()
+
+        # Local-only escape hatch: tests bypass this authenticator upstream and
+        # DEBUG preserves the explicit dev contract without opening serious envs.
+        if not issuer_base_url or not audience:
             if settings.DEBUG:
                 return None
             raise AuthenticationFailed(
@@ -147,14 +158,14 @@ class Auth0JWTAuthentication(BaseAuthentication):
         jwk = _find_jwk_for_kid(jwks, kid)
         public_key = _jwk_to_public_key(jwk)
 
-        expected_issuer = f"{AUTH0_ISSUER_BASE_URL}/"
+        expected_issuer = f"{issuer_base_url}/"
 
         try:
             claims = jwt.decode(
                 token,
                 public_key,
                 algorithms=ALGORITHMS,
-                audience=AUTH0_AUDIENCE,
+                audience=audience,
                 issuer=expected_issuer,
                 options={
                     "verify_aud": True,

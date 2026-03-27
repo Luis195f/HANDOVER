@@ -8,6 +8,7 @@
 
 ## Modelo de autenticación/autorización
 - Autenticación JWT OIDC mediante `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE`.
+- Si `DEBUG=false` y faltan `AUTH0_ISSUER_BASE_URL` o `AUTH0_AUDIENCE` (o sus aliases `OIDC_ISSUER` / `OIDC_AUDIENCE`), el backend debe abortar startup; no existe fallback silencioso a `AllowAny` fuera de local/test explícitamente delimitado.
 - Todas las operaciones clínicas sensibles en DRF validan token Bearer.
 - El backend aplica:
   - **RBAC** por rol (ej. `nurse`, `supervisor`, `admin`).

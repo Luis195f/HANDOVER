@@ -50,6 +50,19 @@ class SecurityHardeningSettingsTests(TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("only accepts absolute http(s) origins", result.stderr)
 
+    def test_prod_requires_auth0_configuration(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "AUTH0_ISSUER_BASE_URL": "",
+            "AUTH0_AUDIENCE": "",
+            "OIDC_ISSUER": "",
+            "OIDC_AUDIENCE": "",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AUTH0_ISSUER_BASE_URL", result.stderr)
+        self.assertIn("AUTH0_AUDIENCE", result.stderr)
+
     def test_pilot_rejects_signature_disabled_flag(self):
         result = self._run_settings_import({
             "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
