@@ -3,7 +3,11 @@ from __future__ import annotations
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from backend.api.pilot_control import resolve_roles_from_request, serialize_pilot_control_summary
+from backend.api.pilot_control import (
+    resolve_roles_from_request,
+    serialize_pilot_control_features,
+    serialize_pilot_control_summary,
+)
 from backend.api.views import AuthenticatedAPIView
 from backend.security.permissions_roles import HasAnyRole
 
@@ -28,5 +32,20 @@ class PilotControlSummaryView(AuthenticatedAPIView):
         payload = serialize_pilot_control_summary(
             unit_id=unit_id,
             roles=_query_roles(request),
+        )
+        return Response(payload, status=200)
+
+
+class PilotControlFeaturesView(AuthenticatedAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        return [permission() for permission in self.permission_classes]
+
+    def get(self, request):
+        unit_id = str(request.query_params.get("unitId") or "").strip() or None
+        payload = serialize_pilot_control_features(
+            unit_id=unit_id,
+            roles=resolve_roles_from_request(request),
         )
         return Response(payload, status=200)

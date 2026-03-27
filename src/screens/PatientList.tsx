@@ -16,7 +16,7 @@ import Chip from "@/src/components/Chip";
 import PriorityBadge from "@/src/components/priority/PriorityBadge";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { isOn } from '@/src/config/flags';
-import { isPilotFeatureEnabled } from '@/src/config/pilotControl';
+import { isPilotFeatureEnabled, usePilotControlContext } from '@/src/config/pilotControl';
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { type PatientListItem } from "@/src/data/mockPatients";
 import type { RootStackParamList } from "@/src/navigation/types";
@@ -482,6 +482,10 @@ export default function PatientList({ navigation }: Props) {
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const { session } = useAuth();
   const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
+  usePilotControlContext({
+    unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
+    roles: session?.roles ?? [],
+  });
   const showIceaPatientRisk =
     isOn('ENABLE_ICEA_PATIENT_RISK') &&
     isPilotFeatureEnabled('icea_patient_risk', {

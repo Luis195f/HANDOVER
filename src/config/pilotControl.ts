@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
+
 import { getAppConfigExtra } from '@/src/config/app-config';
 
 export type PilotFeatureKey =
@@ -11,28 +13,42 @@ export type PilotFeatureKey =
 
 export type PilotFeatureMode = 'enabled' | 'disabled' | 'pilot' | 'demo' | 'shadow';
 export type PilotEnvironment = 'development' | 'demo' | 'test' | 'pilot' | 'production';
+export type PilotMode = 'enabled' | 'disabled' | 'pilot' | 'demo';
+export type PilotDenialReason =
+  | 'backend_unavailable'
+  | 'kill_switch_disabled'
+  | 'pilot_control_disabled'
+  | 'demo_only'
+  | 'environment_out_of_scope'
+  | 'unit_out_of_scope'
+  | 'role_out_of_scope'
+  | 'rollout_paused'
+  | 'rollout_no_go'
+  | 'shadow_mode'
+  | null;
 
 export interface PilotFeatureState {
   key: PilotFeatureKey;
   mode: PilotFeatureMode;
   enabled: boolean;
-  shadowMode: boolean;
-  pilotMode: 'enabled' | 'disabled' | 'pilot' | 'demo';
+  shadow: boolean;
+  pilotMode: PilotMode;
   environment: PilotEnvironment;
   enabledUnits: string[];
   allowedRoles: string[];
   environmentScope: PilotEnvironment[];
-  denialReason:
-    | 'kill_switch_disabled'
-    | 'pilot_control_disabled'
-    | 'demo_only'
-    | 'environment_out_of_scope'
-    | 'unit_out_of_scope'
-    | 'role_out_of_scope'
-    | 'rollout_paused'
-    | 'rollout_no_go'
-    | 'shadow_mode'
-    | null;
+  denialReason: PilotDenialReason;
+  source: 'backend' | 'fallback';
+}
+
+interface PilotFeatureContext {
+  unitId?: string | null;
+  roles?: string[] | null;
+}
+
+interface NormalizedPilotContext {
+  unitId: string | null;
+  roles: string[];
 }
 
 interface PilotControlFeatureRule {
@@ -40,11 +56,12 @@ interface PilotControlFeatureRule {
   enabledUnits?: string[];
   allowedRoles?: string[];
   environmentScope?: PilotEnvironment[];
-  shadowMode?: boolean;
+  shadow?: boolean;
 }
 
 interface PilotControlConfig {
-  pilotMode: 'enabled' | 'disabled' | 'pilot' | 'demo';
+  legacyPayloadPresent: boolean;
+  pilotMode: PilotMode;
   rolloutStatus: 'go' | 'pause' | 'no-go';
   rolloutStatusExplicit: boolean;
   enabledUnits: string[];
@@ -52,6 +69,14 @@ interface PilotControlConfig {
   environmentScope: PilotEnvironment[];
   explicitShadowModeForIcea: boolean;
   features: Record<PilotFeatureKey, PilotControlFeatureRule>;
+}
+
+interface BackendPilotFeatureState {
+  enabled: boolean;
+  shadow: boolean;
+  pilotMode: PilotMode;
+  mode: PilotFeatureMode;
+  denialReason: Exclude<PilotDenialReason, 'backend_unavailable'>;
 }
 
 const extra = getAppConfigExtra();
@@ -106,6 +131,40 @@ const FEATURE_METADATA: Record<
     shadowAccessible: false,
   },
 };
+const PILOT_DENIAL_REASONS = new Set<Exclude<PilotDenialReason, null>>([
+  'kill_switch_disabled',
+  'pilot_control_disabled',
+  'demo_only',
+  'environment_out_of_scope',
+  'unit_out_of_scope',
+  'role_out_of_scope',
+  'rollout_paused',
+  'rollout_no_go',
+  'shadow_mode',
+]);
+
+const backendFeatureCache = new Map<string, Record<PilotFeatureKey, BackendPilotFeatureState>>();
+const inflightBackendFetches = new Map<string, Promise<void>>();
+const backendFeatureSubscribers = new Set<() => void>();
+let backendFeatureSnapshot = 0;
+
+function notifyBackendFeatureSubscribers() {
+  backendFeatureSnapshot += 1;
+  for (const listener of backendFeatureSubscribers) {
+    listener();
+  }
+}
+
+function subscribeToBackendFeatures(listener: () => void) {
+  backendFeatureSubscribers.add(listener);
+  return () => {
+    backendFeatureSubscribers.delete(listener);
+  };
+}
+
+function getBackendFeatureSnapshot() {
+  return backendFeatureSnapshot;
+}
 
 function truthy(value: unknown): boolean {
   if (typeof value === 'boolean') return value;
@@ -161,6 +220,108 @@ function normalizeEnvironmentScope(value: unknown): PilotEnvironment[] {
   );
 }
 
+function normalizePilotContext(context: PilotFeatureContext = {}): NormalizedPilotContext {
+  const unitId = typeof context.unitId === 'string' ? context.unitId.trim() : '';
+  return {
+    unitId: unitId || null,
+    roles: [...normalizeTextList(context.roles ?? [], true)].sort(),
+  };
+}
+
+function getPilotContextCacheKey(context: PilotFeatureContext = {}): string {
+  const normalized = normalizePilotContext(context);
+  return `${normalized.unitId ?? ''}::${normalized.roles.join(',')}`;
+}
+
+function buildPilotFeaturesPath(context: NormalizedPilotContext): string {
+  if (!context.unitId) {
+    return '/api/pilot-control/features';
+  }
+  return `/api/pilot-control/features?unitId=${encodeURIComponent(context.unitId)}`;
+}
+
+function isPilotFeatureKey(value: string): value is PilotFeatureKey {
+  return FEATURE_KEYS.includes(value as PilotFeatureKey);
+}
+
+function isPilotMode(value: unknown): value is PilotMode {
+  return value === 'enabled' || value === 'disabled' || value === 'pilot' || value === 'demo';
+}
+
+function isPilotDenialReason(value: unknown): value is Exclude<PilotDenialReason, 'backend_unavailable' | null> {
+  return typeof value === 'string' && PILOT_DENIAL_REASONS.has(value as Exclude<PilotDenialReason, null>);
+}
+
+function parseBackendPilotFeatureState(value: unknown): BackendPilotFeatureState | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  const mode = normalizeMode(candidate.mode);
+  if (!mode) return null;
+  if (typeof candidate.enabled !== 'boolean') return null;
+  if (typeof candidate.shadow !== 'boolean') return null;
+  if (!isPilotMode(candidate.pilotMode)) return null;
+  const denialReason =
+    candidate.denialReason == null
+      ? null
+      : isPilotDenialReason(candidate.denialReason)
+        ? candidate.denialReason
+        : null;
+  if (candidate.denialReason != null && denialReason == null) return null;
+  return {
+    enabled: candidate.enabled,
+    shadow: candidate.shadow,
+    pilotMode: candidate.pilotMode,
+    mode,
+    denialReason,
+  };
+}
+
+function parseBackendPilotFeatureMap(value: unknown): Record<PilotFeatureKey, BackendPilotFeatureState> | null {
+  if (!value || typeof value !== 'object') return null;
+  const payload = value as Record<string, unknown>;
+  const features = payload.features;
+  if (!features || typeof features !== 'object') return null;
+
+  const normalized = {} as Record<PilotFeatureKey, BackendPilotFeatureState>;
+  for (const [rawKey, rawValue] of Object.entries(features as Record<string, unknown>)) {
+    if (!isPilotFeatureKey(rawKey)) continue;
+    const parsed = parseBackendPilotFeatureState(rawValue);
+    if (!parsed) return null;
+    normalized[rawKey] = parsed;
+  }
+
+  for (const featureKey of FEATURE_KEYS) {
+    if (!(featureKey in normalized)) {
+      return null;
+    }
+  }
+
+  return normalized;
+}
+
+function setBackendPilotFeatureMap(
+  cacheKey: string,
+  value: Record<PilotFeatureKey, BackendPilotFeatureState> | null,
+) {
+  if (value) {
+    backendFeatureCache.set(cacheKey, value);
+    notifyBackendFeatureSubscribers();
+    return;
+  }
+
+  if (backendFeatureCache.delete(cacheKey)) {
+    notifyBackendFeatureSubscribers();
+  }
+}
+
+function getBackendPilotFeatureState(
+  featureKey: PilotFeatureKey,
+  context: PilotFeatureContext = {},
+): BackendPilotFeatureState | null {
+  const cacheKey = getPilotContextCacheKey(context);
+  return backendFeatureCache.get(cacheKey)?.[featureKey] ?? null;
+}
+
 function baseSwitchEnabled(featureKey: PilotFeatureKey): boolean {
   if (featureKey === 'governed_nnn') {
     return truthy(process.env.EXPO_PUBLIC_SHOW_NIC_CODING) || truthy(process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES);
@@ -186,7 +347,7 @@ function resolveEnvironment(): PilotEnvironment {
   return 'development';
 }
 
-function defaultPilotMode(environment: PilotEnvironment): PilotControlConfig['pilotMode'] {
+function defaultPilotMode(environment: PilotEnvironment): PilotMode {
   if (environment === 'demo') return 'demo';
   if (environment === 'production') return 'enabled';
   if (environment === 'pilot' || environment === 'test') return 'pilot';
@@ -218,7 +379,7 @@ function loadPilotControlConfig(): PilotControlConfig {
   }
   const payload = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   const environment = resolveEnvironment();
-  const pilotMode = (normalizeMode(payload.pilotMode) as PilotControlConfig['pilotMode'] | null) ?? defaultPilotMode(environment);
+  const pilotMode = (normalizeMode(payload.pilotMode) as PilotMode | null) ?? defaultPilotMode(environment);
   const explicitShadowModeForIcea =
     typeof payload.explicitShadowModeForIcea === 'boolean'
       ? payload.explicitShadowModeForIcea
@@ -234,6 +395,7 @@ function loadPilotControlConfig(): PilotControlConfig {
           : 'go';
   const featuresPayload = payload.features && typeof payload.features === 'object' ? (payload.features as Record<string, unknown>) : {};
   return {
+    legacyPayloadPresent: raw.trim().length > 0,
     pilotMode,
     rolloutStatus,
     rolloutStatusExplicit: Object.prototype.hasOwnProperty.call(payload, 'rolloutStatus'),
@@ -242,27 +404,32 @@ function loadPilotControlConfig(): PilotControlConfig {
     environmentScope: normalizeEnvironmentScope(payload.environmentScope),
     explicitShadowModeForIcea,
     features: FEATURE_KEYS.reduce(
-      (acc, key) => ({
-        ...acc,
-        [key]:
+      (acc, key) => {
+        const featurePayload =
           featuresPayload[key] && typeof featuresPayload[key] === 'object'
+            ? (featuresPayload[key] as Record<string, unknown>)
+            : null;
+        return {
+          ...acc,
+          [key]: featurePayload
             ? {
-                mode: normalizeMode((featuresPayload[key] as Record<string, unknown>).mode) ?? undefined,
-                enabledUnits: normalizeTextList((featuresPayload[key] as Record<string, unknown>).enabledUnits),
-                allowedRoles: normalizeTextList((featuresPayload[key] as Record<string, unknown>).allowedRoles, true),
-                environmentScope: normalizeEnvironmentScope((featuresPayload[key] as Record<string, unknown>).environmentScope),
-                shadowMode: Boolean((featuresPayload[key] as Record<string, unknown>).shadowMode),
+                mode: normalizeMode(featurePayload.mode) ?? undefined,
+                enabledUnits: normalizeTextList(featurePayload.enabledUnits),
+                allowedRoles: normalizeTextList(featurePayload.allowedRoles, true),
+                environmentScope: normalizeEnvironmentScope(featurePayload.environmentScope),
+                shadow: Boolean(featurePayload.shadow ?? featurePayload.shadowMode),
               }
             : {},
-      }),
+        };
+      },
       {} as Record<PilotFeatureKey, PilotControlFeatureRule>,
     ),
   };
 }
 
-export function resolvePilotFeatureState(
+function resolveConservativeFallbackState(
   featureKey: PilotFeatureKey,
-  context: { unitId?: string | null; roles?: string[] | null } = {},
+  context: PilotFeatureContext = {},
 ): PilotFeatureState {
   const config = loadPilotControlConfig();
   const environment = resolveEnvironment();
@@ -279,16 +446,15 @@ export function resolvePilotFeatureState(
     feature.mode ?? defaultFeatureMode(featureKey, environment, config.explicitShadowModeForIcea);
   const rolloutForcesShadow =
     config.rolloutStatusExplicit && config.rolloutStatus === 'pause' && FEATURE_METADATA[featureKey].iceaRelated;
-  const shadowMode =
-    Boolean(feature.shadowMode) ||
+  const shadow =
+    Boolean(feature.shadow) ||
     mode === 'shadow' ||
     (config.explicitShadowModeForIcea && FEATURE_METADATA[featureKey].iceaRelated) ||
     rolloutForcesShadow;
-  const normalizedUnitId = context.unitId?.trim() ?? '';
-  const normalizedRoles = normalizeTextList(context.roles ?? [], true);
+  const normalizedContext = normalizePilotContext(context);
 
   let enabled = true;
-  let denialReason: PilotFeatureState['denialReason'] = null;
+  let denialReason: PilotDenialReason = null;
 
   if (!baseSwitchEnabled(featureKey)) {
     enabled = false;
@@ -305,34 +471,118 @@ export function resolvePilotFeatureState(
   } else if (environmentScope.length > 0 && !environmentScope.includes(environment)) {
     enabled = false;
     denialReason = 'environment_out_of_scope';
-  } else if (enabledUnits.length > 0 && normalizedUnitId && !enabledUnits.includes(normalizedUnitId)) {
+  } else if (enabledUnits.length > 0 && normalizedContext.unitId && !enabledUnits.includes(normalizedContext.unitId)) {
     enabled = false;
     denialReason = 'unit_out_of_scope';
-  } else if (allowedRoles.length > 0 && normalizedRoles.length > 0 && !normalizedRoles.some((role) => allowedRoles.includes(role))) {
+  } else if (
+    allowedRoles.length > 0 &&
+    normalizedContext.roles.length > 0 &&
+    !normalizedContext.roles.some((role) => allowedRoles.includes(role))
+  ) {
     enabled = false;
     denialReason = 'role_out_of_scope';
-  } else if (shadowMode && !FEATURE_METADATA[featureKey].shadowAccessible) {
+  } else if (shadow && !FEATURE_METADATA[featureKey].shadowAccessible) {
     enabled = false;
     denialReason = rolloutForcesShadow ? 'rollout_paused' : 'shadow_mode';
+  }
+
+  if (
+    enabled &&
+    (config.legacyPayloadPresent || environment === 'pilot' || environment === 'production' || environment === 'demo')
+  ) {
+    enabled = false;
+    denialReason = 'backend_unavailable';
   }
 
   return {
     key: featureKey,
     mode,
     enabled,
-    shadowMode,
+    shadow,
     pilotMode: config.pilotMode,
     environment,
     enabledUnits,
     allowedRoles,
     environmentScope,
     denialReason,
+    source: 'fallback',
   };
+}
+
+function resolveBackendState(
+  featureKey: PilotFeatureKey,
+  context: PilotFeatureContext = {},
+): PilotFeatureState | null {
+  const backendState = getBackendPilotFeatureState(featureKey, context);
+  if (!backendState) return null;
+  return {
+    key: featureKey,
+    mode: backendState.mode,
+    enabled: backendState.enabled,
+    shadow: backendState.shadow,
+    pilotMode: backendState.pilotMode,
+    environment: resolveEnvironment(),
+    enabledUnits: [],
+    allowedRoles: [],
+    environmentScope: [],
+    denialReason: backendState.denialReason,
+    source: 'backend',
+  };
+}
+
+export async function refreshPilotControlContext(context: PilotFeatureContext = {}): Promise<void> {
+  const normalizedContext = normalizePilotContext(context);
+  const cacheKey = getPilotContextCacheKey(normalizedContext);
+  const existing = inflightBackendFetches.get(cacheKey);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const request = (async () => {
+    try {
+      const { apiGet } = await import('@/src/lib/api');
+      const response = await apiGet(buildPilotFeaturesPath(normalizedContext));
+      const parsed = parseBackendPilotFeatureMap(response);
+      if (!parsed) {
+        throw new Error('invalid_pilot_control_features_payload');
+      }
+      setBackendPilotFeatureMap(cacheKey, parsed);
+    } catch {
+      setBackendPilotFeatureMap(cacheKey, null);
+    } finally {
+      inflightBackendFetches.delete(cacheKey);
+    }
+  })();
+
+  inflightBackendFetches.set(cacheKey, request);
+  await request;
+}
+
+export function usePilotControlContext(context: PilotFeatureContext = {}): void {
+  useSyncExternalStore(
+    subscribeToBackendFeatures,
+    getBackendFeatureSnapshot,
+    getBackendFeatureSnapshot,
+  );
+  const contextKey = getPilotContextCacheKey(context);
+  const normalizedContext = useMemo(() => normalizePilotContext(context), [contextKey]);
+
+  useEffect(() => {
+    void refreshPilotControlContext(normalizedContext);
+  }, [contextKey, normalizedContext]);
+}
+
+export function resolvePilotFeatureState(
+  featureKey: PilotFeatureKey,
+  context: PilotFeatureContext = {},
+): PilotFeatureState {
+  return resolveBackendState(featureKey, context) ?? resolveConservativeFallbackState(featureKey, context);
 }
 
 export function isPilotFeatureEnabled(
   featureKey: PilotFeatureKey,
-  context: { unitId?: string | null; roles?: string[] | null } = {},
+  context: PilotFeatureContext = {},
 ): boolean {
   return resolvePilotFeatureState(featureKey, context).enabled;
 }

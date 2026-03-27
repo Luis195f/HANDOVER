@@ -2,9 +2,9 @@
 
 > Estado del documento
 > - Estado: `pilot`.
-> - Ultima revision: 2026-03-26.
+> - Ultima revision: 2026-03-27.
 > - Fuente de verdad / evidencia base: `backend/api/pilot_control.py`, `backend/api/views_pilot_control.py`, `backend/api/views_icea.py`, `backend/api/views_icea_bridge.py`, `backend/api/icea_bridge_service.py`, `src/config/pilotControl.ts`, `src/config/unitsConfig.ts`, `src/screens/HandoverForm.tsx`, `src/screens/PatientList.tsx`.
-> - Limite abierto: el control plane actual es `env` + runtime config + endpoint de consulta solo lectura. No existe en el repo un panel mutable institucional ni una bitacora propia de cambios de estado escrita desde UI.
+> - Limite abierto: el control plane sigue siendo `env` read-only resuelto por backend y consumido por endpoint solo lectura. No existe en el repo un panel mutable institucional ni una bitacora propia de cambios de estado escrita desde UI.
 
 ## 1) Objetivo
 
@@ -111,8 +111,18 @@ Reglas operativas:
 - `explicitShadowModeForIcea=true` fuerza modo shadow para capacidades ICEA;
 - `governed_nnn` y `ai_suggestions` no se exponen en shadow mode;
 - `admin_analytics` queda separada de permisos asistenciales.
+- nombre canonico nuevo para el estado efectivo expuesto por API: `shadow`;
+- compatibilidad legacy: el JSON de entorno sigue aceptando `shadowMode`, pero frontend y backend lo degradan a alias de entrada y no como contrato efectivo de salida.
 
 ## 5) Kill switches efectivos y fallback honesto
+
+Principio operativo desde 2026-03-27:
+
+- backend resuelve el estado efectivo y es la unica fuente de verdad para habilitar superficies de piloto;
+- frontend consulta primero `GET /api/pilot-control/features`;
+- `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` queda como fallback subordinado y conservador;
+- si el endpoint falla o devuelve shape invalido, el cliente no habilita features por si solo;
+- el fallback local puede mantener `pilotMode`, `mode` o `shadow` como contexto de degradacion, pero no puede activar una superficie sin confirmacion backend.
 
 | Capacidad | Kill switch base | Resultado al apagar | Fallback clinico u operativo |
 |---|---|---|---|
@@ -160,7 +170,46 @@ Regla prudente:
 
 ## 7) Endpoint de consulta activa
 
-Ruta:
+Rutas:
+
+- `GET /api/pilot-control/features`
+- `GET /api/pilot-control/summary`
+
+### Endpoint canonico para cliente
+
+`GET /api/pilot-control/features`
+
+Caracteristicas:
+
+- solo lectura;
+- requiere autenticacion;
+- usa los roles autenticados reales del request como contexto efectivo;
+- admite `unitId` como query param;
+- devuelve un mapa estable por nombre canonico de feature;
+- cada feature expone al menos `enabled`, `shadow` y `pilotMode`;
+- es la fuente primaria consumida por `src/config/pilotControl.ts`.
+
+Shape efectivo esperado:
+
+```json
+{
+  "requestedContext": {
+    "unitId": "icu-a",
+    "roles": ["nurse"]
+  },
+  "features": {
+    "governed_nnn": {
+      "enabled": true,
+      "shadow": false,
+      "pilotMode": "pilot",
+      "mode": "pilot",
+      "denialReason": null
+    }
+  }
+}
+```
+
+### Endpoint operativo para supervisión
 
 - `GET /api/pilot-control/summary`
 
@@ -174,6 +223,7 @@ Caracteristicas:
 
 Uso previsto:
 
+- `features`: gating efectivo de frontend y comprobacion de que UI no habilita mas de lo autorizado por backend;
 - verificacion institucional del estado efectivo antes de `go`, `pause` o `no-go`;
 - soporte para runbooks y checklists de despliegue;
 - no sustituye una bitacora formal de aprobaciones del comite.
@@ -217,7 +267,7 @@ Rollback minimo y reversible:
 
 1. poner la feature afectada en `disabled` o `shadow` dentro de `HANDOVER_PILOT_CONTROL_JSON`;
 2. si hace falta corte duro, apagar el kill switch base correspondiente;
-3. revalidar `GET /api/pilot-control/summary`;
+3. revalidar `GET /api/pilot-control/features` y, si aplica, `GET /api/pilot-control/summary`;
 4. comprobar que el fallback visible coincide con el esperado en UI o endpoints admin;
 5. documentar fuera del repo la decision institucional si el cambio afecta el estado formal del piloto.
 
@@ -241,9 +291,9 @@ Rollback minimo y reversible:
 Secuencia minima:
 
 1. definir `HANDOVER_DEPLOYMENT_MODE` y `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`;
-2. cargar el JSON de control plane coherente en backend y frontend;
+2. cargar el JSON de control plane coherente en backend y, solo como compatibilidad subordinada, en frontend;
 3. validar kill switches base segun entorno;
-4. consultar `/api/pilot-control/summary`;
+4. consultar `/api/pilot-control/features` y usar `/api/pilot-control/summary` para verificacion operativa ampliada;
 5. ejecutar pruebas objetivo del seam;
 6. recien entonces pasar a `go` para las unidades previstas.
 

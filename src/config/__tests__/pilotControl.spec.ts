@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const originalEnv = { ...process.env };
+const mockState = vi.hoisted(() => ({
+  apiGet: vi.fn(),
+}));
 
 vi.mock('expo-constants', () => ({
   default: {
@@ -9,21 +12,27 @@ vi.mock('expo-constants', () => ({
     },
   },
 }));
+vi.mock('@/src/lib/api', () => ({
+  apiGet: mockState.apiGet,
+}));
 
 describe('pilotControl', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.clearAllMocks();
     process.env = { ...originalEnv };
     delete process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE;
     delete process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON;
     delete process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE;
     delete process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK;
+    delete process.env.EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING;
+    delete process.env.EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING;
     delete process.env.EXPO_PUBLIC_SHOW_NIC_CODING;
     delete process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES;
     delete process.env.EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED;
   });
 
-  it('keeps patient risk disabled in explicit ICEA shadow mode', async () => {
+  it('keeps patient risk disabled in explicit ICEA shadow mode when backend is unavailable', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE = 'true';
     process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK = 'true';
@@ -46,11 +55,12 @@ describe('pilotControl', () => {
     });
 
     expect(state.enabled).toBe(false);
-    expect(state.shadowMode).toBe(true);
+    expect(state.shadow).toBe(true);
     expect(state.denialReason).toBe('shadow_mode');
+    expect(state.source).toBe('fallback');
   });
 
-  it('supports unit-scoped governed NNN rollout without affecting other units', async () => {
+  it('keeps governed NNN disabled until backend confirms the effective state', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
@@ -66,57 +76,232 @@ describe('pilotControl', () => {
 
     const { resolvePilotFeatureState } = await import('../pilotControl');
 
-    expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-a' }).enabled).toBe(true);
+    expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-a' }).enabled).toBe(false);
+    expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-a' }).denialReason).toBe('backend_unavailable');
     expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-b' }).enabled).toBe(false);
     expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-b' }).denialReason).toBe('unit_out_of_scope');
   });
 
-  it('forces ICEA pause semantics into shadow and disables clinical ICEA surfaces', async () => {
+  it('uses the backend feature endpoint as the primary source of truth', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
-    process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE = 'true';
     process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK = 'true';
     process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      pilotMode: 'enabled',
-      rolloutStatus: 'pause',
       features: {
-        icea_bridge: {
-          mode: 'enabled',
-          enabledUnits: ['icu-a'],
-        },
         icea_patient_risk: {
-          mode: 'enabled',
+          mode: 'pilot',
           enabledUnits: ['icu-a'],
           allowedRoles: ['nurse'],
         },
       },
     });
+    mockState.apiGet.mockResolvedValue({
+      generatedAt: '2026-03-27T10:00:00Z',
+      requestedContext: {
+        unitId: 'icu-a',
+        roles: ['nurse'],
+      },
+      features: {
+        icea_bridge: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_immediate_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_enriched_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_patient_risk: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+        governed_nnn: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+        admin_analytics: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: 'role_out_of_scope' },
+        ai_suggestions: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+      },
+    });
 
-    const { resolvePilotFeatureState } = await import('../pilotControl');
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['nurse'] });
 
-    expect(resolvePilotFeatureState('icea_bridge', { unitId: 'icu-a' }).enabled).toBe(true);
-    expect(resolvePilotFeatureState('icea_bridge', { unitId: 'icu-a' }).shadowMode).toBe(true);
-    expect(resolvePilotFeatureState('icea_patient_risk', { unitId: 'icu-a', roles: ['nurse'] }).enabled).toBe(false);
-    expect(resolvePilotFeatureState('icea_patient_risk', { unitId: 'icu-a', roles: ['nurse'] }).denialReason).toBe('rollout_paused');
+    const state = resolvePilotFeatureState('icea_patient_risk', {
+      unitId: 'icu-a',
+      roles: ['nurse'],
+    });
+
+    expect(mockState.apiGet).toHaveBeenCalledWith('/api/pilot-control/features?unitId=icu-a');
+    expect(state.enabled).toBe(false);
+    expect(state.mode).toBe('disabled');
+    expect(state.denialReason).toBe('pilot_control_disabled');
+    expect(state.source).toBe('backend');
   });
 
-  it('disables pilot features on rollout no-go', async () => {
+  it('rejects invalid endpoint payloads and falls back conservatively', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'production';
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      pilotMode: 'enabled',
-      rolloutStatus: 'no-go',
+    mockState.apiGet.mockResolvedValue({
       features: {
-        governed_nnn: {
+        icea_bridge: { enabled: true, pilotMode: 'enabled', mode: 'enabled', denialReason: null, shadowMode: false },
+      },
+    });
+
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['nurse'] });
+    const state = resolvePilotFeatureState('governed_nnn', { unitId: 'icu-a', roles: ['nurse'] });
+
+    expect(state.enabled).toBe(false);
+    expect(state.denialReason).toBe('backend_unavailable');
+    expect(state.source).toBe('fallback');
+  });
+
+  it('maps canonical backend shadow naming into frontend state and keeps the shape stable', async () => {
+    mockState.apiGet.mockResolvedValue({
+      generatedAt: '2026-03-27T10:00:00Z',
+      requestedContext: {
+        unitId: 'icu-a',
+        roles: ['nurse'],
+      },
+      features: {
+        icea_bridge: { enabled: true, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_immediate_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_enriched_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_patient_risk: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'pilot', denialReason: 'rollout_paused' },
+        governed_nnn: { enabled: true, shadow: false, pilotMode: 'pilot', mode: 'pilot', denialReason: null },
+        admin_analytics: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: 'role_out_of_scope' },
+        ai_suggestions: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+      },
+    });
+
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['nurse'] });
+
+    const state = resolvePilotFeatureState('icea_bridge', { unitId: 'icu-a', roles: ['nurse'] });
+
+    expect(state.shadow).toBe(true);
+    expect(state.pilotMode).toBe('pilot');
+    expect(state.mode).toBe('shadow');
+    expect(state.source).toBe('backend');
+  });
+
+  it('does not share cached backend state across different role sets in the same unit', async () => {
+    mockState.apiGet
+      .mockResolvedValueOnce({
+        generatedAt: '2026-03-27T10:00:00Z',
+        requestedContext: {
+          unitId: 'icu-a',
+          roles: ['admin'],
+        },
+        features: {
+          icea_bridge: { enabled: true, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+          icea_immediate_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+          icea_enriched_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+          icea_patient_risk: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+          governed_nnn: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+          admin_analytics: { enabled: true, shadow: false, pilotMode: 'pilot', mode: 'enabled', denialReason: null },
+          ai_suggestions: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+        },
+      })
+      .mockRejectedValueOnce(new Error('network down'));
+
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['admin'] });
+    const adminState = resolvePilotFeatureState('admin_analytics', {
+      unitId: 'icu-a',
+      roles: ['admin'],
+    });
+    expect(adminState.enabled).toBe(true);
+    expect(adminState.source).toBe('backend');
+
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['nurse'] });
+    const nurseState = resolvePilotFeatureState('admin_analytics', {
+      unitId: 'icu-a',
+      roles: ['nurse'],
+    });
+    expect(nurseState.enabled).toBe(false);
+    expect(nurseState.source).toBe('fallback');
+    expect(nurseState.denialReason).toBe('role_out_of_scope');
+
+    expect(mockState.apiGet).toHaveBeenCalledTimes(2);
+    expect(mockState.apiGet).toHaveBeenNthCalledWith(1, '/api/pilot-control/features?unitId=icu-a');
+    expect(mockState.apiGet).toHaveBeenNthCalledWith(2, '/api/pilot-control/features?unitId=icu-a');
+  });
+
+  it('never exposes admin analytics to nurse via cached admin state contamination', async () => {
+    mockState.apiGet
+      .mockResolvedValueOnce({
+        generatedAt: '2026-03-27T10:00:00Z',
+        requestedContext: {
+          unitId: 'icu-a',
+          roles: ['admin'],
+        },
+        features: {
+          icea_bridge: { enabled: true, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+          icea_immediate_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+          icea_enriched_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+          icea_patient_risk: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+          governed_nnn: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+          admin_analytics: { enabled: true, shadow: false, pilotMode: 'pilot', mode: 'enabled', denialReason: null },
+          ai_suggestions: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+        },
+      });
+
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['admin'] });
+    const nurseState = resolvePilotFeatureState('admin_analytics', {
+      unitId: 'icu-a',
+      roles: ['nurse'],
+    });
+
+    expect(nurseState.enabled).toBe(false);
+    expect(nurseState.source).toBe('fallback');
+  });
+
+  it('treats the same role set with different order as the same cache key', async () => {
+    mockState.apiGet.mockResolvedValue({
+      generatedAt: '2026-03-27T10:00:00Z',
+      requestedContext: {
+        unitId: 'icu-a',
+        roles: ['admin', 'supervisor'],
+      },
+      features: {
+        icea_bridge: { enabled: true, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_immediate_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_enriched_scoring: { enabled: false, shadow: true, pilotMode: 'pilot', mode: 'shadow', denialReason: null },
+        icea_patient_risk: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+        governed_nnn: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+        admin_analytics: { enabled: true, shadow: false, pilotMode: 'pilot', mode: 'enabled', denialReason: null },
+        ai_suggestions: { enabled: false, shadow: false, pilotMode: 'pilot', mode: 'disabled', denialReason: 'pilot_control_disabled' },
+      },
+    });
+
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['supervisor', 'admin', 'admin'] });
+
+    const state = resolvePilotFeatureState('admin_analytics', {
+      unitId: 'icu-a',
+      roles: ['admin', 'supervisor'],
+    });
+
+    expect(state.enabled).toBe(true);
+    expect(state.source).toBe('backend');
+    expect(mockState.apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the conservative fallback intact when the endpoint request fails', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'production';
+    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
+      features: {
+        admin_analytics: {
           mode: 'enabled',
         },
       },
     });
+    mockState.apiGet.mockRejectedValue(new Error('pilot-control unavailable'));
 
-    const { resolvePilotFeatureState } = await import('../pilotControl');
-    const state = resolvePilotFeatureState('governed_nnn', { unitId: 'icu-a' });
+    const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');
+
+    await refreshPilotControlContext({ unitId: 'icu-a', roles: ['nurse'] });
+    const state = resolvePilotFeatureState('admin_analytics', {
+      unitId: 'icu-a',
+      roles: ['nurse'],
+    });
 
     expect(state.enabled).toBe(false);
-    expect(state.denialReason).toBe('rollout_no_go');
+    expect(state.source).toBe('fallback');
+    expect(state.denialReason).toBe('role_out_of_scope');
   });
 });

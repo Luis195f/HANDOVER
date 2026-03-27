@@ -487,9 +487,11 @@ const resolveSectionVisibility = (
 export const resolveHandoverProfileRuntime = ({
   unitId,
   specialtyId,
+  roles,
 }: {
   unitId?: string | null;
   specialtyId?: string | null;
+  roles?: string[] | null;
 }): HandoverProfileRuntime => {
   const normalizedRequestedUnitId = normalizeUnitId(unitId);
   const normalizedRequestedSpecialtyId = normalizeUnitId(specialtyId);
@@ -515,7 +517,7 @@ export const resolveHandoverProfileRuntime = ({
     unitId: effectiveUnitId,
     specialtyId: effectiveSpecialtyId,
   });
-  const features = resolveUnitFeatureFlags(effectiveUnitId);
+  const features = resolveUnitFeatureFlags(effectiveUnitId, { roles });
   const compatibilityProfileId =
     context.unitProfileId == null
       ? (context.catalogUnitProfileId ?? effectiveUnitConfig?.profileId ?? null)
