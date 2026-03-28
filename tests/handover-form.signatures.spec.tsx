@@ -8,9 +8,19 @@ import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 vi.mock('react-hook-form', async () => {
   const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
+  let currentContext: Record<string, unknown> | undefined;
   return {
     ...actual,
     Controller: () => null,
+    FormProvider: ({ children, ...ctx }: React.PropsWithChildren<Record<string, unknown>>) => {
+      currentContext = {
+        register: vi.fn(),
+        clearErrors: vi.fn(),
+        setFocus: vi.fn(),
+        ...ctx,
+      };
+      return <>{children}</>;
+    },
     useFieldArray: () => ({
       fields: [],
       append: vi.fn(),
@@ -29,17 +39,7 @@ vi.mock('react-hook-form', async () => {
       },
       fieldState: { error: undefined },
     }),
-    useFormContext: () => ({
-      control: {},
-      register: vi.fn(),
-      setValue: vi.fn(),
-      getValues: vi.fn(),
-      watch: vi.fn(),
-      formState: { errors: {} },
-      trigger: vi.fn(),
-      clearErrors: vi.fn(),
-      setFocus: vi.fn(),
-    }),
+    useFormContext: () => currentContext,
     useWatch: vi.fn(() => undefined),
   };
 });
