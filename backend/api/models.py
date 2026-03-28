@@ -1,4 +1,5 @@
 from datetime import timedelta
+import uuid
 
 from django.conf import settings
 from django.db import models
@@ -35,6 +36,48 @@ class ClientAuditEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"ClientAuditEvent(type={self.type}, user_id={self.user_id})"
+
+
+class ClinicalDecisionEvent(models.Model):
+    DECISION_ACCEPTED = "accepted"
+    DECISION_APPLIED = "applied"
+    DECISION_REJECTED = "rejected"
+    DECISION_DISMISSED = "dismissed"
+    DECISION_CHOICES = [
+        (DECISION_ACCEPTED, "Accepted"),
+        (DECISION_APPLIED, "Applied"),
+        (DECISION_REJECTED, "Rejected"),
+        (DECISION_DISMISSED, "Dismissed"),
+    ]
+
+    decision_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
+    handover_id = models.CharField(max_length=255, blank=True, db_index=True)
+    patient_id = models.CharField(max_length=255, db_index=True)
+    unit_id = models.CharField(max_length=255, db_index=True)
+    actor_id = models.CharField(max_length=255, db_index=True)
+    actor_role = models.CharField(max_length=64, blank=True)
+    suggestion_source = models.CharField(max_length=64, db_index=True)
+    suggestion_version = models.CharField(max_length=64, blank=True)
+    decision = models.CharField(max_length=16, choices=DECISION_CHOICES, db_index=True)
+    reason_code = models.CharField(max_length=64, blank=True)
+    note = models.CharField(max_length=240, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["unit_id", "created_at"], name="idx_clin_dec_unit_created"),
+            models.Index(fields=["patient_id", "created_at"], name="idx_clin_dec_patient_created"),
+            models.Index(fields=["suggestion_source", "created_at"], name="idx_clin_dec_source_created"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        return (
+            "ClinicalDecisionEvent("
+            f"decision_id={self.decision_id}, suggestion_source={self.suggestion_source}, decision={self.decision}"
+            ")"
+        )
 
 
 class DemoPatient(models.Model):

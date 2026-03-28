@@ -11,6 +11,7 @@ from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.http import HttpRequest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from rest_framework import serializers
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -18,14 +19,23 @@ from rest_framework.response import Response
 from backend.ai_client import (
     ClinicalContext,
     OPENAI_MODEL_SBAR,
+    OPENAI_MODEL_SUGGESTIONS,
     generate_intervention_suggestions,
     generate_sbar,
     transcribe_audio,
     is_openai_enabled,
 )
+from backend.api.models import ClinicalDecisionEvent
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
-from .views import AuthenticatedAPIView, FHIR_BASE, get_fhir_headers, _get_authenticated_user_sub
+from backend.security.roles import extract_roles
+from .views import (
+    AuthenticatedAPIView,
+    FHIR_BASE,
+    get_fhir_headers,
+    _get_authenticated_user_sub,
+    _resolve_patient_unit_scope,
+)
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.scope_permissions import HasAnyScope
 
@@ -46,6 +56,154 @@ DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
 AI_SUGGESTIONS_ENABLED = os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
+
+CLINICAL_DECISION_ALLOWED_SOURCES = (
+    "ai_generate_sbar",
+    "ai_refine_sbar",
+    "ai_nic_suggestions",
+    "ai_noc_suggestions",
+)
+CLINICAL_DECISION_ALLOWED_REASONS = (
+    "direct_apply",
+    "selection_applied",
+    "replace_existing",
+    "user_discarded_batch",
+    "not_relevant",
+    "insufficient_quality",
+    "other",
+)
+CLINICAL_DECISION_ALLOWED_METADATA_KEYS = {
+    "selectedCodes",
+    "selectedCount",
+    "section",
+    "suggestionCount",
+    "suggestionHashes",
+    "replaceExisting",
+}
+CLINICAL_DECISION_ALLOWED_SECTIONS = {"sbar", "treatments", "outcomes"}
+
+
+def _suggestion_version_for_source(source: str) -> str:
+    source_key = (source or "").strip().lower()
+    if source_key in {"ai_generate_sbar", "ai_refine_sbar"}:
+        return OPENAI_MODEL_SBAR
+    if source_key in {"ai_nic_suggestions", "ai_noc_suggestions"}:
+        return OPENAI_MODEL_SUGGESTIONS
+    return ""
+
+
+def _extract_actor_role(request: HttpRequest) -> str:
+    claims = request.auth if isinstance(request.auth, dict) else getattr(getattr(request, "user", None), "claims", None)
+    if not isinstance(claims, dict):
+        return ""
+
+    roles = extract_roles(claims)
+    for role in ("admin", "supervisor", "nurse"):
+        if role in roles:
+            return role
+    return ""
+
+
+class ClinicalDecisionCreateSerializer(serializers.Serializer):
+    patientId = serializers.CharField(max_length=255)
+    unitId = serializers.CharField(max_length=255)
+    handoverId = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    suggestionSource = serializers.ChoiceField(choices=CLINICAL_DECISION_ALLOWED_SOURCES)
+    suggestionVersion = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    decision = serializers.ChoiceField(choices=[choice for choice, _label in ClinicalDecisionEvent.DECISION_CHOICES])
+    reasonCode = serializers.ChoiceField(
+        choices=CLINICAL_DECISION_ALLOWED_REASONS,
+        required=False,
+        allow_blank=True,
+    )
+    note = serializers.CharField(max_length=240, required=False, allow_blank=True)
+    metadata = serializers.JSONField(required=False)
+
+    def validate_patientId(self, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise serializers.ValidationError("patientId is required.")
+        return normalized
+
+    def validate_unitId(self, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise serializers.ValidationError("unitId is required.")
+        return normalized
+
+    def validate_handoverId(self, value: str) -> str:
+        return value.strip()
+
+    def validate_suggestionVersion(self, value: str) -> str:
+        return value.strip()
+
+    def validate_note(self, value: str) -> str:
+        return value.strip()
+
+    def validate_metadata(self, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("metadata must be an object.")
+
+        unexpected_keys = sorted(set(value.keys()) - CLINICAL_DECISION_ALLOWED_METADATA_KEYS)
+        if unexpected_keys:
+            raise serializers.ValidationError(f"Unsupported metadata keys: {', '.join(unexpected_keys)}")
+
+        normalized: dict[str, Any] = {}
+
+        if "selectedCodes" in value:
+            raw_codes = value.get("selectedCodes")
+            if not isinstance(raw_codes, list):
+                raise serializers.ValidationError("metadata.selectedCodes must be a list.")
+            normalized_codes: list[str] = []
+            for raw_code in raw_codes[:10]:
+                if not isinstance(raw_code, str):
+                    raise serializers.ValidationError("metadata.selectedCodes must contain strings.")
+                code = raw_code.strip()
+                if not code or len(code) > 64:
+                    raise serializers.ValidationError("metadata.selectedCodes entries must be 1-64 chars.")
+                normalized_codes.append(code)
+            normalized["selectedCodes"] = normalized_codes
+
+        for key in ("selectedCount", "suggestionCount"):
+            if key not in value:
+                continue
+            raw_number = value.get(key)
+            if type(raw_number) is not int or raw_number < 0 or raw_number > 20:
+                raise serializers.ValidationError(f"metadata.{key} must be an integer between 0 and 20.")
+            normalized[key] = raw_number
+
+        if "section" in value:
+            raw_section = value.get("section")
+            if not isinstance(raw_section, str):
+                raise serializers.ValidationError("metadata.section must be a string.")
+            section = raw_section.strip().lower()
+            if section not in CLINICAL_DECISION_ALLOWED_SECTIONS:
+                raise serializers.ValidationError("metadata.section is invalid.")
+            normalized["section"] = section
+
+        if "suggestionHashes" in value:
+            raw_hashes = value.get("suggestionHashes")
+            if not isinstance(raw_hashes, list):
+                raise serializers.ValidationError("metadata.suggestionHashes must be a list.")
+            normalized_hashes: list[str] = []
+            for raw_hash in raw_hashes[:10]:
+                if not isinstance(raw_hash, str):
+                    raise serializers.ValidationError("metadata.suggestionHashes must contain strings.")
+                suggestion_hash = raw_hash.strip().lower()
+                if len(suggestion_hash) != 64 or any(ch not in "0123456789abcdef" for ch in suggestion_hash):
+                    raise serializers.ValidationError("metadata.suggestionHashes entries must be 64-char hex strings.")
+                normalized_hashes.append(suggestion_hash)
+            normalized["suggestionHashes"] = normalized_hashes
+
+        if "replaceExisting" in value:
+            raw_replace_existing = value.get("replaceExisting")
+            if not isinstance(raw_replace_existing, bool):
+                raise serializers.ValidationError("metadata.replaceExisting must be a boolean.")
+            normalized["replaceExisting"] = raw_replace_existing
+
+        return normalized
 
 
 def _get_max_audio_bytes() -> int:
@@ -556,6 +714,93 @@ class SuggestInterventionsView(ProtectedAIAPIView):
             return Response({"detail": "Error al generar sugerencias con IA"}, status=502)
 
         return Response(payload.model_dump(), status=200)
+
+
+class ClinicalDecisionView(ProtectedAIAPIView):
+    permission_classes = [
+        IsAuthenticated,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
+        HasAnyScope.required("handover:write"),
+    ]
+    parser_classes = [JSONParser]
+
+    def post(self, request: HttpRequest) -> Response:
+        serializer = ClinicalDecisionCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {
+                    "detail": "Invalid clinical decision payload.",
+                    "code": "invalid_clinical_decision_payload",
+                    "errors": serializer.errors,
+                },
+                status=400,
+            )
+
+        validated = serializer.validated_data
+        unit_id = str(validated["unitId"])
+        _, scope_error = _resolve_patient_unit_scope(request, requested_unit=unit_id)
+        if scope_error is not None:
+            return scope_error
+
+        actor_id = _get_authenticated_user_sub(request)
+        if not actor_id:
+            return Response(
+                {
+                    "detail": "Authenticated actor could not be resolved.",
+                    "code": "clinical_decision_actor_unavailable",
+                },
+                status=401,
+            )
+
+        decision_event = ClinicalDecisionEvent.objects.create(
+            handover_id=str(validated.get("handoverId") or ""),
+            patient_id=str(validated["patientId"]),
+            unit_id=unit_id,
+            actor_id=actor_id,
+            actor_role=_extract_actor_role(request),
+            suggestion_source=str(validated["suggestionSource"]),
+            suggestion_version=str(validated.get("suggestionVersion") or _suggestion_version_for_source(str(validated["suggestionSource"]))),
+            decision=str(validated["decision"]),
+            reason_code=str(validated.get("reasonCode") or ""),
+            note=str(validated.get("note") or ""),
+            metadata=validated.get("metadata") or {},
+        )
+
+        emit_audit_event(
+            event_type="clinical_decision_logged",
+            action="create",
+            status="success",
+            http_status=201,
+            request=request,
+            user_sub=actor_id,
+            resource_type="ClinicalDecisionEvent",
+            resource_id=str(decision_event.decision_id),
+            payload_obj={
+                "decisionId": str(decision_event.decision_id),
+                "patientId": decision_event.patient_id,
+                "unitId": decision_event.unit_id,
+                "suggestionSource": decision_event.suggestion_source,
+                "decision": decision_event.decision,
+                "reasonCode": decision_event.reason_code,
+                "metadata": decision_event.metadata,
+            },
+            meta={
+                "suggestionSource": decision_event.suggestion_source,
+                "decision": decision_event.decision,
+                "reasonCode": decision_event.reason_code or None,
+            },
+        )
+
+        return Response(
+            {
+                "decisionId": str(decision_event.decision_id),
+                "status": "recorded",
+                "decision": decision_event.decision,
+                "suggestionSource": decision_event.suggestion_source,
+                "createdAt": decision_event.created_at.isoformat().replace("+00:00", "Z"),
+            },
+            status=201,
+        )
 
 
 class AudioToFHIRView(ProtectedAIAPIView):

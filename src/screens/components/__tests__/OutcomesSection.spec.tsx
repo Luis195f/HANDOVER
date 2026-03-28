@@ -7,6 +7,11 @@ import * as nocCatalogModule from '@/src/catalogs/nocCodes';
 import OutcomesSection from '../OutcomesSection';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
+import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
+
+vi.mock('@/src/lib/clinical-decision-log', () => ({
+  logClinicalDecision: vi.fn(async () => undefined),
+}));
 
 const defaultValues: HandoverFormValues = {
   administrativeData: {
@@ -156,5 +161,110 @@ describe('OutcomesSection', () => {
       expect(outcome?.baseline).toBe(1);
       expect(outcome?.target).toBe(5);
     });
+  });
+
+  it('requires explicit apply for AI NOC suggestions and logs the decision', async () => {
+    const suggestInterventions = vi.fn().mockResolvedValue({
+      section: 'outcomes' as const,
+      interventions: [],
+      outcomes: [
+        {
+          nocCode: '0402',
+          nocDisplay: 'Estado respiratorio: permeabilidad de las vías aéreas',
+          baseline: 2,
+          target: 4,
+        },
+      ],
+    });
+
+    const { getByTestId, methods, queryByTestId } = renderWithForm({
+      enableAiSuggestions: true,
+      suggestInterventions,
+      clinicalDecisionContext: { patientId: 'pat-001', unitId: 'icu-a' },
+    });
+
+    await act(async () => {
+      fireEvent.press(getByTestId('noc-outcomes-suggest-button'));
+    });
+
+    await waitFor(() => {
+      expect(getByTestId('noc-pending-suggestions')).toBeTruthy();
+      expect(methods.getValues('outcomes')).toEqual([]);
+    });
+
+    fireEvent.press(getByTestId('noc-apply-suggestions'));
+
+    await waitFor(() => {
+      expect(queryByTestId('noc-pending-suggestions')).toBeNull();
+      expect(methods.getValues('outcomes')).toHaveLength(1);
+    });
+    expect(logClinicalDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patientId: 'pat-001',
+        unitId: 'icu-a',
+        suggestionSource: 'ai_noc_suggestions',
+        decision: 'applied',
+        metadata: expect.objectContaining({
+          section: 'outcomes',
+          suggestionCount: 1,
+          selectedCount: 1,
+          selectedCodes: ['0402'],
+          suggestionHashes: expect.any(Array),
+        }),
+      }),
+    );
+    const appliedMetadata = vi.mocked(logClinicalDecision).mock.calls.at(-1)?.[0]?.metadata;
+    expect(appliedMetadata?.suggestionHashes).toHaveLength(1);
+  });
+
+  it('allows dismissing pending AI NOC suggestions', async () => {
+    const suggestInterventions = vi.fn().mockResolvedValue({
+      section: 'outcomes' as const,
+      interventions: [],
+      outcomes: [
+        {
+          nocCode: '0402',
+          nocDisplay: 'Estado respiratorio: permeabilidad de las vías aéreas',
+          baseline: 2,
+          target: 4,
+        },
+      ],
+    });
+
+    const { getByTestId, queryByTestId, methods } = renderWithForm({
+      enableAiSuggestions: true,
+      suggestInterventions,
+      clinicalDecisionContext: { patientId: 'pat-001', unitId: 'icu-a' },
+    });
+
+    await act(async () => {
+      fireEvent.press(getByTestId('noc-outcomes-suggest-button'));
+    });
+
+    await waitFor(() => {
+      expect(getByTestId('noc-dismiss-suggestions')).toBeTruthy();
+    });
+
+    fireEvent.press(getByTestId('noc-dismiss-suggestions'));
+
+    await waitFor(() => {
+      expect(queryByTestId('noc-pending-suggestions')).toBeNull();
+      expect(methods.getValues('outcomes')).toEqual([]);
+    });
+    expect(logClinicalDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestionSource: 'ai_noc_suggestions',
+        decision: 'dismissed',
+        metadata: expect.objectContaining({
+          section: 'outcomes',
+          suggestionCount: 1,
+          selectedCount: 0,
+        }),
+      }),
+    );
+    const dismissedMetadata = vi.mocked(logClinicalDecision).mock.calls.at(-1)?.[0]?.metadata;
+    expect(dismissedMetadata).toBeDefined();
+    expect(dismissedMetadata?.selectedCodes).toBeUndefined();
+    expect(dismissedMetadata?.suggestionHashes).toBeUndefined();
   });
 });

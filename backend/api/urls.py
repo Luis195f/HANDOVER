@@ -1,7 +1,14 @@
 from django.urls import path
 
 from backend.audit.views import AuditEventsIngestView
-from .views_ai import AudioToFHIRView, RefineSbarView, SuggestInterventionsView, SummarizeSbarView, TranscribeView
+from .views_ai import (
+    AudioToFHIRView,
+    ClinicalDecisionView,
+    RefineSbarView,
+    SuggestInterventionsView,
+    SummarizeSbarView,
+    TranscribeView,
+)
 from .views_icea import (
     IceaDashboardSummaryView,
     IceaPipelineActionView,
@@ -95,6 +102,8 @@ urlpatterns = [
     path("ai/refine-sbar/", RefineSbarView.as_view(), name="ai-refine-sbar-slash"),
     path("ai/suggest-interventions", SuggestInterventionsView.as_view(), name="ai-suggest-interventions"),
     path("ai/suggest-interventions/", SuggestInterventionsView.as_view(), name="ai-suggest-interventions-slash"),
+    path("ai/clinical-decision", ClinicalDecisionView.as_view(), name="ai-clinical-decision"),
+    path("ai/clinical-decision/", ClinicalDecisionView.as_view(), name="ai-clinical-decision-slash"),
     path("upload/audio-to-fhir", AudioToFHIRView.as_view(), name="upload-audio-to-fhir"),
     path("upload/audio-to-fhir/", AudioToFHIRView.as_view(), name="upload-audio-to-fhir-slash"),
 ]
