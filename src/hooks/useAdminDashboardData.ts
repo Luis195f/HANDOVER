@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { AdminDashboardApiError, fetchAdminDashboardData, refreshIceaDashboardSummary } from '../lib/admin-api';
-import type { IceaOpsDashboardData } from '../types/admin';
+import type { ClinicalDecisionGovernanceFilters } from '../types/admin';
+import type { AdminDashboardData } from '../lib/admin-api';
 
 interface UseAdminDashboardDataOptions {
   unitId?: string;
   demoMode?: boolean;
+  includeClinicalDecisionSummary?: boolean;
+  clinicalDecisionFilters?: Partial<ClinicalDecisionGovernanceFilters>;
 }
 
 interface UseAdminDashboardData {
-  data: IceaOpsDashboardData | null;
+  data: AdminDashboardData | null;
   loading: boolean;
   error: AdminDashboardApiError | null;
   reload: () => void;
@@ -19,7 +22,7 @@ interface UseAdminDashboardData {
 }
 
 export function useAdminDashboardData(enabled = true, options?: UseAdminDashboardDataOptions): UseAdminDashboardData {
-  const [data, setData] = useState<IceaOpsDashboardData | null>(null);
+  const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<AdminDashboardApiError | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -37,7 +40,11 @@ export function useAdminDashboardData(enabled = true, options?: UseAdminDashboar
     async function load() {
       try {
         setLoading(true);
-        const result = await fetchAdminDashboardData(options?.unitId, { demoMode: options?.demoMode });
+        const result = await fetchAdminDashboardData(options?.unitId, {
+          demoMode: options?.demoMode,
+          includeClinicalDecisionSummary: options?.includeClinicalDecisionSummary,
+          clinicalDecisionFilters: options?.clinicalDecisionFilters,
+        });
         if (!cancelled) {
           setData(result);
           setError(null);
@@ -58,7 +65,7 @@ export function useAdminDashboardData(enabled = true, options?: UseAdminDashboar
     return () => {
       cancelled = true;
     };
-  }, [enabled, nonce, options?.demoMode, options?.unitId]);
+  }, [enabled, nonce, options?.clinicalDecisionFilters, options?.demoMode, options?.includeClinicalDecisionSummary, options?.unitId]);
 
   const reload = () => setNonce((n) => n + 1);
 

@@ -1,6 +1,13 @@
 import { ApiClientError, apiGet, apiPost } from '@/src/lib/api';
 import { buildDemoAdminDashboardSummary } from '@/src/mock/admin/dashboard-fixture';
 import type {
+  ClinicalDecisionGovernanceDecisionCounts,
+  ClinicalDecisionGovernanceFilters,
+  ClinicalDecisionGovernanceSectionRow,
+  ClinicalDecisionGovernanceSourceRow,
+  ClinicalDecisionGovernanceSummary,
+  ClinicalDecisionGovernanceTimelineRow,
+  ClinicalDecisionGovernanceUnitRow,
   IceaOpsDashboardData,
   IceaOpsEventSummary,
   IceaOpsEventsResponse,
@@ -9,10 +16,14 @@ import type {
   IceaOpsUnitSummary,
 } from '@/src/types/admin';
 
-export type AdminDashboardData = IceaOpsDashboardData;
+export interface AdminDashboardData extends IceaOpsDashboardData {
+  clinicalDecisionSummary?: ClinicalDecisionGovernanceSummary | null;
+}
 
 export interface AdminDashboardRequestOptions {
   demoMode?: boolean;
+  includeClinicalDecisionSummary?: boolean;
+  clinicalDecisionFilters?: Partial<ClinicalDecisionGovernanceFilters>;
 }
 
 export class AdminDashboardApiError extends Error {
@@ -362,14 +373,213 @@ function demoDashboardData(): IceaOpsDashboardData {
   return buildDemoAdminDashboardSummary();
 }
 
-export async function fetchAdminDashboardData(unitId?: string, options?: AdminDashboardRequestOptions): Promise<IceaOpsDashboardData> {
+function normalizeDecisionCounts(payload: unknown): ClinicalDecisionGovernanceDecisionCounts {
+  return {
+    accepted:
+      typeof (payload as { accepted?: unknown })?.accepted === 'number' ? (payload as { accepted: number }).accepted : 0,
+    applied:
+      typeof (payload as { applied?: unknown })?.applied === 'number' ? (payload as { applied: number }).applied : 0,
+    rejected:
+      typeof (payload as { rejected?: unknown })?.rejected === 'number' ? (payload as { rejected: number }).rejected : 0,
+    dismissed:
+      typeof (payload as { dismissed?: unknown })?.dismissed === 'number'
+        ? (payload as { dismissed: number }).dismissed
+        : 0,
+  };
+}
+
+function normalizeClinicalDecisionUnitRows(payload: unknown): ClinicalDecisionGovernanceUnitRow[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((item): ClinicalDecisionGovernanceUnitRow[] => {
+    if (!item || typeof item !== 'object') return [];
+    const unitId = typeof (item as { unitId?: unknown }).unitId === 'string' ? (item as { unitId: string }).unitId : '';
+    if (!unitId) return [];
+    return [
+      {
+        unitId,
+        count: typeof (item as { count?: unknown }).count === 'number' ? (item as { count: number }).count : 0,
+      },
+    ];
+  });
+}
+
+function normalizeClinicalDecisionSourceRows(payload: unknown): ClinicalDecisionGovernanceSourceRow[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((item): ClinicalDecisionGovernanceSourceRow[] => {
+    if (!item || typeof item !== 'object') return [];
+    const suggestionSource =
+      typeof (item as { suggestionSource?: unknown }).suggestionSource === 'string'
+        ? (item as { suggestionSource: string }).suggestionSource
+        : '';
+    if (!suggestionSource) return [];
+    return [
+      {
+        suggestionSource,
+        count: typeof (item as { count?: unknown }).count === 'number' ? (item as { count: number }).count : 0,
+        decisions: normalizeDecisionCounts((item as { decisions?: unknown }).decisions),
+      },
+    ];
+  });
+}
+
+function normalizeClinicalDecisionSectionRows(payload: unknown): ClinicalDecisionGovernanceSectionRow[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((item): ClinicalDecisionGovernanceSectionRow[] => {
+    if (!item || typeof item !== 'object') return [];
+    const section = typeof (item as { section?: unknown }).section === 'string' ? (item as { section: string }).section : '';
+    if (!section) return [];
+    return [
+      {
+        section,
+        count: typeof (item as { count?: unknown }).count === 'number' ? (item as { count: number }).count : 0,
+        decisions: normalizeDecisionCounts((item as { decisions?: unknown }).decisions),
+      },
+    ];
+  });
+}
+
+function normalizeClinicalDecisionTimelineRows(payload: unknown): ClinicalDecisionGovernanceTimelineRow[] {
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((item): ClinicalDecisionGovernanceTimelineRow[] => {
+    if (!item || typeof item !== 'object') return [];
+    const date = typeof (item as { date?: unknown }).date === 'string' ? (item as { date: string }).date : '';
+    if (!date) return [];
+    return [
+      {
+        date,
+        count: typeof (item as { count?: unknown }).count === 'number' ? (item as { count: number }).count : 0,
+        decisions: normalizeDecisionCounts((item as { decisions?: unknown }).decisions),
+      },
+    ];
+  });
+}
+
+function normalizeClinicalDecisionSummary(payload: unknown): ClinicalDecisionGovernanceSummary | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const candidate = payload as Record<string, unknown>;
+  if (typeof candidate.generatedAt !== 'string') return null;
+  if (typeof candidate.available !== 'boolean' || typeof candidate.enabled !== 'boolean') return null;
+  if (!candidate.filters || typeof candidate.filters !== 'object') return null;
+  if (!candidate.totals || typeof candidate.totals !== 'object') return null;
+  if (!candidate.feature || typeof candidate.feature !== 'object') return null;
+  if (!Array.isArray(candidate.byDecision) || !Array.isArray(candidate.byUnit)) return null;
+  if (!Array.isArray(candidate.bySuggestionSource) || !Array.isArray(candidate.bySection) || !Array.isArray(candidate.timeline)) return null;
+
+  return {
+    generatedAt: candidate.generatedAt,
+    available: candidate.available,
+    enabled: candidate.enabled,
+    scope: typeof candidate.scope === 'string' ? candidate.scope : 'clinical_decisions_summary',
+    filters: {
+      unitId: typeof (candidate.filters as { unitId?: unknown }).unitId === 'string' ? ((candidate.filters as { unitId: string }).unitId || null) : null,
+      suggestionSource:
+        typeof (candidate.filters as { suggestionSource?: unknown }).suggestionSource === 'string'
+          ? (((candidate.filters as { suggestionSource: string }).suggestionSource || null) as ClinicalDecisionGovernanceFilters['suggestionSource'])
+          : null,
+      decision:
+        typeof (candidate.filters as { decision?: unknown }).decision === 'string'
+          ? (((candidate.filters as { decision: string }).decision || null) as ClinicalDecisionGovernanceFilters['decision'])
+          : null,
+      section:
+        typeof (candidate.filters as { section?: unknown }).section === 'string'
+          ? (((candidate.filters as { section: string }).section || null) as ClinicalDecisionGovernanceFilters['section'])
+          : null,
+      dateFrom:
+        typeof (candidate.filters as { dateFrom?: unknown }).dateFrom === 'string'
+          ? ((candidate.filters as { dateFrom: string }).dateFrom || null)
+          : null,
+      dateTo:
+        typeof (candidate.filters as { dateTo?: unknown }).dateTo === 'string'
+          ? ((candidate.filters as { dateTo: string }).dateTo || null)
+          : null,
+    },
+    queryBounds:
+      candidate.queryBounds && typeof candidate.queryBounds === 'object'
+        ? {
+            createdAtGte:
+              typeof (candidate.queryBounds as { createdAtGte?: unknown }).createdAtGte === 'string'
+                ? ((candidate.queryBounds as { createdAtGte: string }).createdAtGte || null)
+                : null,
+            createdAtLt:
+              typeof (candidate.queryBounds as { createdAtLt?: unknown }).createdAtLt === 'string'
+                ? ((candidate.queryBounds as { createdAtLt: string }).createdAtLt || null)
+                : null,
+          }
+        : undefined,
+    empty: Boolean(candidate.empty),
+    unavailableReason:
+      typeof candidate.unavailableReason === 'string' ? candidate.unavailableReason : undefined,
+    feature: {
+      key: typeof (candidate.feature as { key?: unknown }).key === 'string' ? (candidate.feature as { key: string }).key : 'admin_analytics',
+      mode: typeof (candidate.feature as { mode?: unknown }).mode === 'string' ? (candidate.feature as { mode: string }).mode : 'enabled',
+      pilotMode:
+        typeof (candidate.feature as { pilotMode?: unknown }).pilotMode === 'string'
+          ? (candidate.feature as { pilotMode: string }).pilotMode
+          : 'pilot',
+      shadowMode:
+        typeof (candidate.feature as { shadowMode?: unknown }).shadowMode === 'boolean'
+          ? (candidate.feature as { shadowMode: boolean }).shadowMode
+          : false,
+    },
+    totals: {
+      events: typeof (candidate.totals as { events?: unknown }).events === 'number' ? (candidate.totals as { events: number }).events : 0,
+      units: typeof (candidate.totals as { units?: unknown }).units === 'number' ? (candidate.totals as { units: number }).units : 0,
+      suggestionSources:
+        typeof (candidate.totals as { suggestionSources?: unknown }).suggestionSources === 'number'
+          ? (candidate.totals as { suggestionSources: number }).suggestionSources
+          : 0,
+      sections:
+        typeof (candidate.totals as { sections?: unknown }).sections === 'number'
+          ? (candidate.totals as { sections: number }).sections
+          : 0,
+    },
+    byDecision: (candidate.byDecision as unknown[]).flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const decision = typeof (item as { decision?: unknown }).decision === 'string' ? (item as { decision: string }).decision : '';
+      if (!decision) return [];
+      return [
+        {
+          decision: decision as ClinicalDecisionGovernanceSummary['byDecision'][number]['decision'],
+          count: typeof (item as { count?: unknown }).count === 'number' ? (item as { count: number }).count : 0,
+        },
+      ];
+    }),
+    byUnit: normalizeClinicalDecisionUnitRows(candidate.byUnit),
+    bySuggestionSource: normalizeClinicalDecisionSourceRows(candidate.bySuggestionSource),
+    bySection: normalizeClinicalDecisionSectionRows(candidate.bySection),
+    timeline: normalizeClinicalDecisionTimelineRows(candidate.timeline),
+    limitations: Array.isArray(candidate.limitations)
+      ? candidate.limitations.filter((item): item is string => typeof item === 'string')
+      : [],
+  };
+}
+
+function buildClinicalDecisionSummaryQuery(filters?: Partial<ClinicalDecisionGovernanceFilters>): string {
+  if (!filters) return '';
+  const params = new URLSearchParams();
+  if (filters.unitId?.trim()) params.set('unitId', filters.unitId.trim());
+  if (filters.suggestionSource) params.set('suggestionSource', filters.suggestionSource);
+  if (filters.decision) params.set('decision', filters.decision);
+  if (filters.section) params.set('section', filters.section);
+  if (filters.dateFrom?.trim()) params.set('dateFrom', filters.dateFrom.trim());
+  if (filters.dateTo?.trim()) params.set('dateTo', filters.dateTo.trim());
+  const serialized = params.toString();
+  return serialized ? `?${serialized}` : '';
+}
+
+export async function fetchAdminDashboardData(unitId?: string, options?: AdminDashboardRequestOptions): Promise<AdminDashboardData> {
   try {
-    const [summaryResponse, eventsResponse, unitResponse] = await Promise.all([
+    const [summaryResponse, eventsResponse, unitResponse, clinicalDecisionSummaryResponse] = await Promise.all([
       apiGet('/api/icea/ops/summary') as Promise<Partial<IceaOpsSummary> | { mode?: string } | null | undefined>,
       apiGet(`/api/icea/ops/events${unitId ? `?unitId=${encodeURIComponent(unitId)}` : ''}`) as Promise<
         Partial<IceaOpsEventsResponse> | null | undefined
       >,
       unitId ? (apiGet(`/api/icea/ops/unit/${encodeURIComponent(unitId)}`) as Promise<Partial<IceaOpsUnitDetail> | null | undefined>) : Promise.resolve(null),
+      options?.includeClinicalDecisionSummary
+        ? (apiGet(`/api/clinical-decisions/summary${buildClinicalDecisionSummaryQuery(options.clinicalDecisionFilters)}`) as Promise<
+            ClinicalDecisionGovernanceSummary | null | undefined
+          >)
+        : Promise.resolve(null),
     ]);
 
     if (options?.demoMode && typeof summaryResponse === 'object' && summaryResponse && (summaryResponse as { mode?: string }).mode === 'demo') {
@@ -384,13 +594,19 @@ export async function fetchAdminDashboardData(unitId?: string, options?: AdminDa
     const summary = normalizeSummary(summaryResponse);
     const unit = normalizeUnit(unitResponse);
     const events = normalizeEvents(eventsResponse.results);
+    const clinicalDecisionSummary = options?.includeClinicalDecisionSummary
+      ? normalizeClinicalDecisionSummary(clinicalDecisionSummaryResponse)
+      : null;
     if (!summary.generatedAt && !options?.demoMode) {
       throw new AdminDashboardApiError('invalid_payload', 'El backend devolvio un contrato ops incompleto.');
     }
-    return { summary, unit, events };
+    if (options?.includeClinicalDecisionSummary && !clinicalDecisionSummary) {
+      throw new AdminDashboardApiError('invalid_payload', 'El backend devolvio un contrato agregado invalido.');
+    }
+    return { summary, unit, events, clinicalDecisionSummary };
   } catch (error) {
     if (options?.demoMode) {
-      return demoDashboardData();
+      return { ...demoDashboardData(), clinicalDecisionSummary: null };
     }
     throw mapApiError(error);
   }

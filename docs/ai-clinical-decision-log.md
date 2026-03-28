@@ -32,7 +32,7 @@ Este registro:
 - evaluacion de productividad individual;
 - ranking, fairness dashboard o vigilancia laboral.
 
-## Endpoint
+## Endpoints
 
 - `POST /api/ai/clinical-decision`
 - auth requerida;
@@ -41,20 +41,37 @@ Este registro:
 - la unidad se valida con el mismo control de scope endurecido del backend;
 - el modelo es append-only a nivel semantico: cada decision crea un evento nuevo.
 
+- `GET /api/clinical-decisions/summary`
+- lectura agregada y no nominal para gobernanza piloto;
+- roles permitidos: `supervisor`, `admin`;
+- `supervisor` queda limitado a sus `unitIds` autorizadas; sin `unitId` solo recibe agregado de sus unidades accesibles;
+- `admin` mantiene lectura agregada global segun el patron administrativo vigente del repo;
+- reutiliza el mismo control plane read-only de `admin_analytics`;
+- filtros soportados: `unitId`, `suggestionSource`, `decision`, `section`, `dateFrom`, `dateTo`;
+- `filters.dateTo` refleja el valor solicitado por la UI; el bound exclusivo interno se expone aparte en `queryBounds.createdAtLt`;
+- devuelve solo contadores agregados por decision, unidad, fuente, seccion y serie diaria;
+- no devuelve `actor_id`, notas, texto clinico libre ni metadata cruda.
+
 ## Cobertura actual
 
 Cubierto en esta iteracion:
 - aplicacion de SBAR generada o refinada con IA;
 - aplicacion o descarte explicito de sugerencias NIC;
 - aplicacion o descarte explicito de sugerencias NOC pendientes de revision.
+- lectura agregada piloto-grade para comite/supervision sin ranking individual.
 
 Fuera de esta iteracion:
 - sugerencias solo visualizadas sin accion humana;
-- panel administrativo de lectura;
 - mezcla con ICEA scoring, submit FHIR, queue/sync u otras superficies no tocadas.
+- cualquier uso nominal, retributivo o punitivo.
 
 ## Comportamiento ante fallo
 
 El fallo del logger no bloquea el handover ni altera `submit`.
 
 La persistencia del log es best-effort desde frontend y validada/autenticada en backend.
+
+La lectura agregada de gobernanza es observacional:
+- mide decisiones registradas sobre superficies IA ya cableadas;
+- no infiere calidad clinica, causalidad ni rendimiento profesional;
+- no debe usarse para ranking individual ni vigilancia laboral.
