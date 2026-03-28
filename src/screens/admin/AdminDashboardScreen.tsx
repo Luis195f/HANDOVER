@@ -48,14 +48,35 @@ const GOVERNANCE_SECTION_OPTIONS: Array<{ value: GovernanceFilterDraft['section'
 
 function formatDate(value: string | null | undefined) {
   if (!value) return 'Sin datos';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map((part) => Number.parseInt(part, 10));
+    if ([year, month, day].every((part) => Number.isFinite(part))) {
+      return new Intl.DateTimeFormat('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }).format(new Date(Date.UTC(year, month - 1, day)));
+    }
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString('es-ES');
 }
 
+function toLocalDateInputValue(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function defaultGovernanceFilters(): GovernanceFilterDraft {
-  const dateTo = new Date().toISOString().slice(0, 10);
-  const dateFrom = new Date(Date.now() - 29 * DAY_IN_MS).toISOString().slice(0, 10);
+  const currentDate = new Date();
+  const dateTo = toLocalDateInputValue(currentDate);
+  const dateFromValue = new Date(currentDate);
+  dateFromValue.setDate(dateFromValue.getDate() - 29);
+  const dateFrom = toLocalDateInputValue(dateFromValue);
   return {
     unitId: '',
     suggestionSource: 'all',

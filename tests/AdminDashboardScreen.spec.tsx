@@ -225,7 +225,7 @@ describe('AdminDashboardScreen', () => {
     expect(getByText(/no punitiva/)).toBeTruthy();
     expect(getByText('Sugerencias NIC')).toBeTruthy();
     expect(getByText('icu-a')).toBeTruthy();
-    expect(getByText(/hasta .*28.*2026/)).toBeTruthy();
+    expect(getByText('Corte: 01/03/2026 hasta 28/03/2026')).toBeTruthy();
     expect(getByText(/Familias de error/)).toBeTruthy();
     expect(getByText(/payload_hash: abcd1234/)).toBeTruthy();
     expect(getByText(/no expone identificadores nominales/i)).toBeTruthy();
