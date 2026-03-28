@@ -16,9 +16,16 @@ if ENV_PATH.exists():
 # -----------------------------
 # Flags de entorno
 # -----------------------------
+def _argv_mentions(fragment: str) -> bool:
+    normalized = fragment.strip().lower()
+    if not normalized:
+        return False
+    return any(normalized in str(arg).strip().lower() for arg in sys.argv if str(arg).strip())
+
+
 RUNNING_TESTS = (
-    "test" in sys.argv
-    or "pytest" in sys.argv
+    any(str(arg).strip().lower() == "test" for arg in sys.argv if str(arg).strip())
+    or _argv_mentions("pytest")
     or os.environ.get("PYTEST_CURRENT_TEST") is not None
 )
 
@@ -42,8 +49,11 @@ def _raise_startup_validation_errors() -> None:
     raise RuntimeError(f"Startup hardening validation failed:\n{joined}")
 
 
-def _resolve_handover_deployment_mode() -> str:
-    raw_mode = (os.getenv("HANDOVER_DEPLOYMENT_MODE") or "").strip().lower()
+RAW_HANDOVER_DEPLOYMENT_MODE = (os.getenv("HANDOVER_DEPLOYMENT_MODE") or "").strip().lower()
+HANDOVER_DEPLOYMENT_MODE_EXPLICIT = bool(RAW_HANDOVER_DEPLOYMENT_MODE)
+
+
+def _resolve_handover_deployment_mode(raw_mode: str) -> str:
     aliases = {
         "dev": "development",
         "prod": "production",
@@ -65,8 +75,14 @@ def _resolve_handover_deployment_mode() -> str:
     return normalized
 
 
-HANDOVER_DEPLOYMENT_MODE = _resolve_handover_deployment_mode()
+HANDOVER_DEPLOYMENT_MODE = _resolve_handover_deployment_mode(RAW_HANDOVER_DEPLOYMENT_MODE)
 HANDOVER_STRICT_SECURITY_MODE = HANDOVER_DEPLOYMENT_MODE in {"pilot", "production"}
+HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED = (
+    HANDOVER_DEPLOYMENT_MODE_EXPLICIT
+    and HANDOVER_DEPLOYMENT_MODE in {"development", "demo"}
+    and DEBUG
+)
+HANDOVER_TEST_AUTH_BYPASS_ALLOWED = RUNNING_TESTS
 
 HANDOVER_PRIVATE_KEY_PATH = os.getenv("HANDOVER_PRIVATE_KEY_PATH")
 HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
@@ -104,10 +120,16 @@ AUTH0_AUDIENCE = (
 
 AUTH0_CONFIGURED = bool(AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE)
 
-if not DEBUG and not RUNNING_TESTS and not AUTH0_CONFIGURED:
+if DEBUG and not HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED and not RUNNING_TESTS:
+    _record_startup_validation_error(
+        "DJANGO_DEBUG=true is only allowed for explicit local development/demo runs "
+        "(HANDOVER_DEPLOYMENT_MODE=development|demo). Use DJANGO_DEBUG=false outside local/test."
+    )
+
+if not AUTH0_CONFIGURED and not HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED and not HANDOVER_TEST_AUTH_BYPASS_ALLOWED:
     _record_startup_validation_error(
         "AUTH0_ISSUER_BASE_URL (or OIDC_ISSUER) and AUTH0_AUDIENCE "
-        "(or OIDC_AUDIENCE) are required when DEBUG=false outside tests."
+        "(or OIDC_AUDIENCE) are required outside explicit local debug or real test runs."
     )
 
 # -----------------------------
@@ -244,10 +266,10 @@ INSTALLED_APPS = [
 ]
 
 # ✅ DRF defaults:
-# - TESTS: AllowAny para que CI no dependa de Auth0 ni headers
-# - DEV sin Auth0 config: AllowAny para que puedas probar local sin bloquearte
-# - PROD (o dev con Auth0): Auth0 + IsAuthenticated
-if RUNNING_TESTS or (DEBUG and not AUTH0_CONFIGURED):
+# - TESTS reales: AllowAny para que CI no dependa de Auth0 ni headers
+# - Local explícito (development/demo + DEBUG): AllowAny solo si Auth0 no está configurado
+# - Resto: Auth0 + IsAuthenticated fail-closed
+if HANDOVER_TEST_AUTH_BYPASS_ALLOWED or (HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED and not AUTH0_CONFIGURED):
     REST_FRAMEWORK = {
         "DEFAULT_AUTHENTICATION_CLASSES": [],
         "DEFAULT_PERMISSION_CLASSES": [

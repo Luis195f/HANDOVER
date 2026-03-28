@@ -72,13 +72,15 @@ class AuthenticatedAPIView(APIView):
     def _running_tests() -> bool:
         return (
             "PYTEST_CURRENT_TEST" in os.environ
-            or "pytest" in sys.argv
-            or "test" in sys.argv
+            or any("pytest" in str(arg).strip().lower() for arg in sys.argv if str(arg).strip())
+            or any(str(arg).strip().lower() == "test" for arg in sys.argv if str(arg).strip())
         )
 
     @staticmethod
-    def _auth0_configured() -> bool:
-        return bool(getattr(settings, "AUTH0_CONFIGURED", False))
+    def _local_auth_bypass_allowed() -> bool:
+        return bool(getattr(settings, "HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED", False)) and not bool(
+            getattr(settings, "AUTH0_CONFIGURED", False)
+        )
 
     def get_permissions(self):
         # Tests remain the only non-local bypass for this base view.
@@ -86,7 +88,7 @@ class AuthenticatedAPIView(APIView):
             return [AllowAny()]
 
         # Local debug may stay open explicitly, but never serious envs.
-        if settings.DEBUG and not self._auth0_configured():
+        if self._local_auth_bypass_allowed():
             return [AllowAny()]
 
         return super().get_permissions()
@@ -95,7 +97,7 @@ class AuthenticatedAPIView(APIView):
         if self._running_tests():
             return []
 
-        if settings.DEBUG and not self._auth0_configured():
+        if self._local_auth_bypass_allowed():
             return []
 
         classes = [a for a in self.authentication_classes if a is not None]

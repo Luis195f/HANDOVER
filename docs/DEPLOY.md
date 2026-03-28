@@ -113,6 +113,12 @@ Variables críticas documentadas en [`.env.example`](../.env.example) y [`backen
 - `ICEA_WEBHOOK_*`
 - `ENABLE_ICEA_BRIDGE` e `ICEA_BRIDGE_*`
 
+Contrato operativo de auth para backend:
+
+- fuera de tests reales, `DJANGO_DEBUG=true` solo es admisible con `HANDOVER_DEPLOYMENT_MODE=development|demo`;
+- en `pilot`/`production` y en cualquier despliegue no local explícito, el backend debe arrancar con `DJANGO_DEBUG=false`;
+- fuera de ese perímetro local explícito, `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE` son obligatorios y la ausencia de cualquiera de ambos debe abortar startup en fail-closed.
+
 ## Control de piloto y rollout seguro
 
 El repo soporta un control plane minimo gobernado por entorno, no un panel mutable nuevo. La activacion efectiva del piloto depende de:

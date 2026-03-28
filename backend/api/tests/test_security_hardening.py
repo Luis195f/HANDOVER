@@ -63,6 +63,45 @@ class SecurityHardeningSettingsTests(TestCase):
         self.assertIn("AUTH0_ISSUER_BASE_URL", result.stderr)
         self.assertIn("AUTH0_AUDIENCE", result.stderr)
 
+    def test_non_local_debug_true_fails_fast_even_with_auth0_configured(self):
+        result = self._run_settings_import({
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "DJANGO_DEBUG": "true",
+            "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+            "AUTH0_AUDIENCE": "handover-api",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DJANGO_DEBUG=true is only allowed", result.stderr)
+
+    def test_explicit_local_debug_can_run_without_auth0(self):
+        result = self._run_settings_import({
+            "HANDOVER_DEPLOYMENT_MODE": "development",
+            "DJANGO_DEBUG": "true",
+            "HANDOVER_ALLOWED_ORIGINS": "",
+            "AUTH0_ISSUER_BASE_URL": "",
+            "AUTH0_AUDIENCE": "",
+            "OIDC_ISSUER": "",
+            "OIDC_AUDIENCE": "",
+        })
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_test_deployment_mode_without_real_test_runner_still_requires_auth0(self):
+        result = self._run_settings_import({
+            "HANDOVER_DEPLOYMENT_MODE": "test",
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "AUTH0_ISSUER_BASE_URL": "",
+            "AUTH0_AUDIENCE": "",
+            "OIDC_ISSUER": "",
+            "OIDC_AUDIENCE": "",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AUTH0_ISSUER_BASE_URL", result.stderr)
+        self.assertIn("AUTH0_AUDIENCE", result.stderr)
+
     def test_prod_reports_multiple_strict_startup_failures_without_masking_later_checks(self):
         result = self._run_settings_import({
             "HANDOVER_ALLOWED_ORIGINS": "",
