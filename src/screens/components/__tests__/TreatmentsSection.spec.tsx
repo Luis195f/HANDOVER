@@ -163,8 +163,24 @@ describe('TreatmentsSection NIC suggestions', () => {
         unitId: 'icu-a',
         suggestionSource: 'ai_nic_suggestions',
         decision: 'applied',
+        metadata: expect.objectContaining({
+          section: 'treatments',
+          suggestionCount: 4,
+          selectedCount: 3,
+          selectedCodes: ['2210'],
+          suggestionHashes: expect.any(Array),
+        }),
       }),
     );
+    expect(logClinicalDecision).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          suggestionHashes: expect.arrayContaining([expect.any(String)]),
+        }),
+      }),
+    );
+    const appliedMetadata = vi.mocked(logClinicalDecision).mock.calls.at(-1)?.[0]?.metadata;
+    expect(appliedMetadata?.suggestionHashes).toHaveLength(3);
 
     const nicTreatment = methods.getValues('treatments').find((item) => item.code?.system === 'NIC');
     expect(nicTreatment?.code?.code).toBe('2210');
@@ -211,7 +227,16 @@ describe('TreatmentsSection NIC suggestions', () => {
       expect.objectContaining({
         suggestionSource: 'ai_nic_suggestions',
         decision: 'dismissed',
+        metadata: expect.objectContaining({
+          section: 'treatments',
+          suggestionCount: 2,
+          selectedCount: 0,
+        }),
       }),
     );
+    const dismissedMetadata = vi.mocked(logClinicalDecision).mock.calls.at(-1)?.[0]?.metadata;
+    expect(dismissedMetadata).toBeDefined();
+    expect(dismissedMetadata?.selectedCodes).toBeUndefined();
+    expect(dismissedMetadata?.suggestionHashes).toBeUndefined();
   });
 });

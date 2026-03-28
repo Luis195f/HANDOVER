@@ -421,6 +421,7 @@ export function TreatmentsSection({
     const selectedCodes = selectedSuggestions
       .map((suggestion) => extractNicCoding(suggestion)?.code)
       .filter((code): code is string => typeof code === 'string' && code.trim().length > 0);
+    const suggestionHashes = selectedSuggestions.map((suggestion) => hashHex(normalizeSuggestion(suggestion)));
 
     void logClinicalDecision({
       patientId,
@@ -432,8 +433,8 @@ export function TreatmentsSection({
         section: 'treatments',
         suggestionCount: input.suggestions.length,
         selectedCount: selectedSuggestions.length,
-        suggestionHashes: selectedSuggestions.map((suggestion) => hashHex(normalizeSuggestion(suggestion))),
         ...(selectedCodes.length > 0 ? { selectedCodes } : {}),
+        ...(suggestionHashes.length > 0 ? { suggestionHashes } : {}),
       },
     });
   };
@@ -490,7 +491,7 @@ export function TreatmentsSection({
       decision: 'dismissed',
       reasonCode: 'user_discarded_batch',
       suggestions: suggestedInterventions,
-      selectedSuggestions: selectedInterventions,
+      selectedSuggestions: [],
     });
     setSuggestionsError(null);
     setSelectedInterventions([]);

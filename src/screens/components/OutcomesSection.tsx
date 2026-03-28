@@ -299,10 +299,14 @@ export function OutcomesSection({
     decision: 'applied' | 'dismissed';
     reasonCode: 'selection_applied' | 'user_discarded_batch' | 'replace_existing';
     suggestions: OutcomeItem[];
+    selectedSuggestions?: OutcomeItem[];
   }) => {
     const patientId = clinicalDecisionContext?.patientId?.trim();
     const unitId = clinicalDecisionContext?.unitId?.trim();
     if (!patientId || !unitId) return;
+    const selectedSuggestions = input.selectedSuggestions ?? input.suggestions;
+    const selectedCodes = selectedSuggestions.map((item) => item.nocCode).filter((code) => code.trim().length > 0);
+    const suggestionHashes = selectedSuggestions.map((item) => hashHex(`${item.nocCode}:${item.nocDisplay}`));
 
     void logClinicalDecision({
       patientId,
@@ -313,9 +317,9 @@ export function OutcomesSection({
       metadata: {
         section: 'outcomes',
         suggestionCount: input.suggestions.length,
-        selectedCount: input.suggestions.length,
-        selectedCodes: input.suggestions.map((item) => item.nocCode).filter((code) => code.trim().length > 0),
-        suggestionHashes: input.suggestions.map((item) => hashHex(`${item.nocCode}:${item.nocDisplay}`)),
+        selectedCount: selectedSuggestions.length,
+        ...(selectedCodes.length > 0 ? { selectedCodes } : {}),
+        ...(suggestionHashes.length > 0 ? { suggestionHashes } : {}),
         replaceExisting: Boolean((outcomes ?? []).length),
       },
     });
@@ -423,6 +427,7 @@ export function OutcomesSection({
       decision: 'dismissed',
       reasonCode: 'user_discarded_batch',
       suggestions: pendingSuggestedOutcomes,
+      selectedSuggestions: [],
     });
     setPendingSuggestedOutcomes([]);
   };

@@ -204,8 +204,17 @@ describe('OutcomesSection', () => {
         unitId: 'icu-a',
         suggestionSource: 'ai_noc_suggestions',
         decision: 'applied',
+        metadata: expect.objectContaining({
+          section: 'outcomes',
+          suggestionCount: 1,
+          selectedCount: 1,
+          selectedCodes: ['0402'],
+          suggestionHashes: expect.any(Array),
+        }),
       }),
     );
+    const appliedMetadata = vi.mocked(logClinicalDecision).mock.calls.at(-1)?.[0]?.metadata;
+    expect(appliedMetadata?.suggestionHashes).toHaveLength(1);
   });
 
   it('allows dismissing pending AI NOC suggestions', async () => {
@@ -246,7 +255,16 @@ describe('OutcomesSection', () => {
       expect.objectContaining({
         suggestionSource: 'ai_noc_suggestions',
         decision: 'dismissed',
+        metadata: expect.objectContaining({
+          section: 'outcomes',
+          suggestionCount: 1,
+          selectedCount: 0,
+        }),
       }),
     );
+    const dismissedMetadata = vi.mocked(logClinicalDecision).mock.calls.at(-1)?.[0]?.metadata;
+    expect(dismissedMetadata).toBeDefined();
+    expect(dismissedMetadata?.selectedCodes).toBeUndefined();
+    expect(dismissedMetadata?.suggestionHashes).toBeUndefined();
   });
 });
