@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Button,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,7 +16,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Controller, FormProvider, useWatch, type Path, type Control } from 'react-hook-form';
+import { Controller, FormProvider, type Path } from 'react-hook-form';
 import type { FieldErrors } from 'react-hook-form';
 import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
@@ -62,10 +61,9 @@ import { AI_BACKEND_ENABLED, AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { ensureUnitAccess } from '@/src/security/acl';
 import { ensureFreshAccessToken, getSession, useAuth, type Session } from '@/src/security/auth';
-import type { HandoverUser } from '@/src/security/auth-types';
 import { ALL_UNITS_OPTION, useSelectedUnitId } from '@/src/state/filterStore';
-import { SHIFT_TYPES, type AdministrativeData } from '@/src/types/administrative';
-import type { HandoverSignature, HandoverStructuredDiagnosis, RiskItem } from '@/src/types/handover';
+import type { AdministrativeData } from '@/src/types/administrative';
+import type { HandoverSignature, HandoverStructuredDiagnosis } from '@/src/types/handover';
 import type { SBARSummary } from '@/src/types/sbar';
 import {
   normalizeLegacySnomedCoding,
@@ -75,14 +73,12 @@ import {
 } from '@/src/data/snomed-dict';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import { useIceaPatientRisk } from '@/src/hooks/useIceaPatientRisk';
-import type { PrefillOutput } from '@/src/lib/prefill';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues } from '@/src/validation/schemas';
 import { normalizeLegacyHandoverPayload } from '@/src/validation/normalization';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
-import AutocompleteSnomedCoding from '@/src/components/AutocompleteSnomedCoding';
-import { SignaturePad, type SignaturePadValue } from '@/src/components/SignaturePad';
+import type { SignaturePadValue } from '@/src/components/SignaturePad';
 import BotonPrimario from '../components/BotonPrimario';
 import { useThemeTokens } from '../theme';
 import { t } from '@/src/i18n';
@@ -93,20 +89,16 @@ type HandoverFormValues = HandoverValues;
 import { flushHandoverTimingBestEffort } from '@/src/lib/handover-timing-submit';
 // END HANDOVER D4 – Form imports
 import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
-import { PatientBanner } from './components/PatientBanner';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { BedsideChecklistModal } from './components/BedsideChecklistModal';
-import { BedsideChecklistSection } from './components/BedsideChecklistSection';
 import PendingTasksSection from './components/PendingTasksSection';
-import TurnContextSection from './components/TurnContextSection';
 import EliminationSection from './components/EliminationSection';
 import FluidBalanceSection from './components/FluidBalanceSection';
 import MobilitySkinSection from './components/MobilitySkinSection';
 import NutritionSection from './components/NutritionSection';
 import PsychosocialSection from './components/PsychosocialSection';
 import ClinicalScalesSection from './components/ClinicalScalesSection';
-import { SignaturesSection, type SignatureUser } from './components/SignaturesSection';
 import MedicationSection from './components/MedicationSection';
 import ExamsProceduresSection from './components/ExamsProceduresSection';
 import TreatmentsSection from './components/TreatmentsSection';
@@ -114,20 +106,38 @@ import OutcomesSection from './components/OutcomesSection';
 import SafetySection from './components/SafetySection';
 // END HANDOVER D2 – VitalTrends imports
 import { CollapsibleSection } from './components/CollapsibleSection';
-import { SidebarIndex, type SectionInfo } from './components/SidebarIndex';
+import { SidebarIndex } from './components/SidebarIndex';
 import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
-import { AdministrativeSection } from '@/src/components/handover/AdministrativeSection';
-import { PatientSection } from '@/src/components/handover/PatientSection';
 import { VitalsSection } from '@/src/components/handover/VitalsSection';
-import { SummarySection } from '@/src/components/handover/SummarySection';
 import OxygenGroupSection from './components/OxygenGroupSection';
 import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from '@/src/lib/bedsideChecklist';
 import { SbarSection } from './handover/SbarSection';
 import * as SecureStore from 'expo-secure-store';
-import { HandoverFormActions } from './handover/HandoverFormActions';
 import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 import { useHandoverTiming } from '@/src/hooks/useHandoverTiming';
+import { HandoverClosureSections } from './handover/HandoverClosureSections';
+import { HandoverContextSections } from './handover/HandoverContextSections';
+import {
+  baseChecklistDefaults,
+  buildChecklistDefaults,
+  buildCompletedChecklist,
+  compactNumberMap,
+  compactObject,
+  deriveInitialRisksStructured,
+  deriveShiftCode,
+  deriveShiftType,
+  findActiveSection,
+  getSessionUser,
+  mergeDictationText,
+  normalizeChecklistItems,
+  normalizeSignatureUser,
+  resolveCanonicalPilotContextUnitId,
+  resolveEffectiveHandoverUnitId,
+  safeJsonParse,
+  truncateNote,
+} from './handover/formUtils';
+import { HandoverOverview } from './handover/HandoverOverview';
 import {
   buildHandoverInputPayload,
   buildProfileTraceInput,
@@ -141,41 +151,6 @@ import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
   normalizeLegacyHandoverPayload(value) as T;
-
-function safeJsonParse<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeOptionalText(value?: string | null): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function resolveEffectiveHandoverUnitId(...values: Array<string | null | undefined>): string | undefined {
-  for (const value of values) {
-    const normalized = normalizeOptionalText(value);
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return undefined;
-}
-
-function resolveCanonicalPilotContextUnitId(...values: Array<string | null | undefined>): string | undefined {
-  for (const value of values) {
-    const normalized = normalizeUnitSelection(value, ALL_UNITS_OPTION);
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return undefined;
-}
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -316,16 +291,6 @@ type HandoverRouteName = "HandoverForm" | "HandoverMain";
 type Props = NativeStackScreenProps<RootStackParamList, HandoverRouteName>;
 type HandoverFormErrors = FieldErrors<HandoverFormValues>;
 
-const deriveShiftType = (shiftStartValue?: string | null) => {
-  if (!shiftStartValue) return SHIFT_TYPES[0];
-  const date = new Date(shiftStartValue);
-  const hours = date.getHours();
-  if (Number.isNaN(hours)) return SHIFT_TYPES[0];
-  if (hours >= 6 && hours < 14) return 'Mañana';
-  if (hours >= 14 && hours < 22) return 'Tarde';
-  return 'Noche';
-};
-
 export type DictationField =
   | 'dxMedical'
   | 'dxNursing'
@@ -345,107 +310,6 @@ const TIMED_SECTIONS_BY_KEY: Partial<Record<SectionKey, 'sbar' | 'vitals' | 'dia
   medicacion: 'treatments',
 };
 
-const mergeDictationText = (currentValue: string | undefined, dictated: string) => {
-  const addition = dictated.trim();
-  if (!addition) {
-    return currentValue ?? '';
-  }
-  if (!currentValue) {
-    return addition;
-  }
-  const base = currentValue.trimEnd();
-  if (!base) {
-    return addition;
-  }
-  return `${base}\n${addition}`;
-};
-
-const findActiveSection = (
-  offset: number,
-  positions: Partial<Record<SectionKey, number>>,
-  sectionsInfo: readonly SectionInfo[],
-): SectionKey | null => {
-  const entries = sectionsInfo
-    .map(({ key }) => ({ key, y: positions[key] }))
-    .filter((entry): entry is { key: SectionKey; y: number } => typeof entry.y === 'number')
-    .sort((a, b) => a.y - b.y);
-
-  if (entries.length === 0) return null;
-
-  let current: SectionKey = entries[0].key;
-  for (const entry of entries) {
-    if (offset >= entry.y - 24) {
-      current = entry.key;
-    } else {
-      break;
-    }
-  }
-
-  return current;
-};
-
-function deriveInitialRisksStructured(values: HandoverFormValues): RiskItem[] {
-  if (Array.isArray(values.risksStructured) && values.risksStructured.length > 0) {
-    return values.risksStructured.map((item) => ({
-      ...item,
-      actions: item.actions ?? [],
-      notes: typeof item.notes === 'string' ? item.notes : undefined,
-    }));
-  }
-
-  const items: RiskItem[] = [];
-  if (values.risks?.fall) {
-    items.push({ type: 'fall', present: true, notes: undefined, actions: [] });
-  }
-  if (values.risks?.pressureUlcer) {
-    items.push({ type: 'pressureUlcer', present: true, notes: undefined, actions: [] });
-  }
-  if (values.risks?.isolation) {
-    items.push({ type: 'isolation', present: true, notes: undefined, actions: [] });
-  }
-
-  return items;
-}
-
-function asStringArray(value: unknown[] | undefined): string[] | undefined {
-  if (!value) return undefined;
-  const normalized = value.filter((item): item is string => typeof item === 'string');
-  return normalized.length ? normalized : undefined;
-}
-
-function getSessionUser(session?: (Session & { user?: HandoverUser | null }) | null): HandoverUser | null {
-  if (!session) return null;
-  if (session.user) return session.user;
-  return {
-    id: session.userId,
-    userId: session.userId,
-    displayName: session.displayName,
-    fullName: session.displayName,
-    name: session.displayName,
-    roles: session.roles,
-    units: session.units,
-  };
-}
-
-function normalizeSignatureUser(session?: (Session & { user?: HandoverUser | null }) | null): SignatureUser | null {
-  const base = getSessionUser(session);
-  if (!base) return null;
-
-  const roles = asStringArray(base.roles) ?? (base.role ? [base.role] : undefined);
-  const units = asStringArray(base.units);
-
-  return {
-    id: base.id ?? base.userId ?? session?.userId,
-    userId: base.userId ?? base.id ?? session?.userId,
-    name: base.name ?? base.displayName ?? base.fullName ?? session?.displayName,
-    fullName: base.fullName ?? base.name ?? base.displayName ?? session?.displayName,
-    displayName: base.displayName ?? base.name ?? base.fullName ?? session?.displayName,
-    role: base.role ?? roles?.[0],
-    roles,
-    units,
-    activeUnitId: base.activeUnitId ?? units?.[0],
-  };
-}
 
 function DictationMicButton({
   active,
@@ -583,51 +447,6 @@ export default function HandoverForm({ navigation, route }: Props) {
   display: "",
 };
 
-type BedsideChecklistValue = HandoverFormValues["bedsideChecklist"];
-
-// ✅ Deja el tipo como union de strings (NO string | number)
-const BEDSIDE_CHECKLIST_KEYS = [
-  "patientIdentityConfirmed",
-  "allergiesReviewed",
-  "linesAndDevicesChecked",
-  "medicationPlanReviewed",
-  "safetyMeasuresApplied",
-  "questionsAnswered",
-] as const;
-
-type BedsideChecklistKey = (typeof BEDSIDE_CHECKLIST_KEYS)[number];
-
-const isBedsideChecklistKey = (k: string): k is BedsideChecklistKey => {
-  return (BEDSIDE_CHECKLIST_KEYS as readonly string[]).includes(k);
-};
-
-// ✅ base común (queda en scope para defaultValues Y handleE2EChecklistComplete)
-const baseChecklistDefaults: BedsideChecklistValue = {
-  patientIdentityConfirmed: false,
-  allergiesReviewed: false,
-  linesAndDevicesChecked: false,
-  medicationPlanReviewed: false,
-  safetyMeasuresApplied: false,
-  questionsAnswered: false,
-  bedsideNotes: "",
-};
-
-const normalizeChecklistItems = (rawItems: unknown): { key: BedsideChecklistKey }[] => {
-  const list = Array.isArray(rawItems) ? rawItems : [];
-  return list
-    .map((it) => ({ key: String((it as any)?.key ?? "") }))
-    .filter((it): it is { key: BedsideChecklistKey } => isBedsideChecklistKey(it.key));
-};
-
-const buildChecklistDefaults = (
-  checklistItems: { key: BedsideChecklistKey }[],
-  base: BedsideChecklistValue,
-): BedsideChecklistValue => {
-  const next: BedsideChecklistValue = { ...base };
-  for (const item of checklistItems) next[item.key] = false;
-  return next;
-};
-
   const defaultValues = useMemo<HandoverFormValues>(() => {
     const initialAdministrativeUnitId = resolveEffectiveHandoverUnitId(
       administrativeDataParam?.unit,
@@ -759,7 +578,6 @@ const buildChecklistDefaults = (
   const dxNursingError = errors.dxNursing?.message as string | undefined;
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
-  const statusValue = form.watch('status');
   const activeUnitId = administrativeUnitValue || signatureUser?.activeUnitId || signatureUser?.units?.[0];
   const canSignOutgoing = Boolean(
     signatureUser &&
@@ -820,19 +638,12 @@ const buildChecklistDefaults = (
   }, [collapsedSections, features.showHandoverTimingMetrics, handoverTiming, isSectionVisible]);
 
   // END HANDOVER D4 – Get active unit
-  const signaturesValue = form.watch('signatures');
-  const outgoingSignature = signaturesValue?.outgoing;
-  const signatureErrors = errors.signatures ?? {};
-  const outgoingSignatureError = signatureErrors.outgoing?.message as string | undefined;
-  const incomingSignatureError = signatureErrors.incoming?.message as string | undefined;
   const [watchedVitals, watchedBraden, watchedOxygen] = form.watch([
     'vitals',
     'braden',
     'oxygenTherapy',
   ]);
   const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
-  
-  const bedsideChecklistRef = useRef<HandoverFormValues['bedsideChecklist'] | null>(null);
   const watchedValues = form.watch();
 
   useEffect(() => {
@@ -900,11 +711,12 @@ const buildChecklistDefaults = (
       ...built,
       method: (built.method ?? 'session') as OutgoingSig['method'],
     };
+    const currentSignatures = form.getValues('signatures');
 
     form.setValue(
       'signatures',
       {
-        ...(signaturesValue ?? {}),
+        ...(currentSignatures ?? {}),
         outgoing: nextSignature,
       },
       { shouldDirty: true, shouldValidate: true },
@@ -912,25 +724,12 @@ const buildChecklistDefaults = (
   };
 
   const handleE2EChecklistComplete = () => {
-  const currentChecklist =
-    (form.getValues("bedsideChecklist") ?? {}) as Partial<BedsideChecklistValue>;
+    const currentChecklist = form.getValues('bedsideChecklist');
+    const runtimeChecklistItems = normalizeChecklistItems(profileRuntime.checklistItems);
+    const completed = buildCompletedChecklist(currentChecklist, runtimeChecklistItems);
 
-  const checklistItems = normalizeChecklistItems(profileRuntime.checklistItems);
-
-  const completed: BedsideChecklistValue = { ...baseChecklistDefaults };
-
-  for (const [key, value] of Object.entries(currentChecklist)) {
-    if (value !== undefined) {
-      (completed as any)[key] = value;
-    }
-  }
-
-  for (const item of checklistItems) {
-    completed[item.key] = true;
-  }
-
-  form.setValue("bedsideChecklist", completed, { shouldDirty: true, shouldValidate: true });
-};
+    form.setValue('bedsideChecklist', completed, { shouldDirty: true, shouldValidate: true });
+  };
 
   const dxText = (value: unknown): string => {
     if (typeof value === 'string') return value.trim();
@@ -1637,16 +1436,6 @@ const buildChecklistDefaults = (
   } = useVitalTrends(shouldLoadVitalTrends ? trimmedPatientId : undefined);
   // END HANDOVER D2 – VitalTrends hook usage
 
-  const deriveShiftCode = (shiftStartValue?: string | null) => {
-    if (!shiftStartValue) return undefined;
-    const date = new Date(shiftStartValue);
-    const hours = date.getHours();
-    if (Number.isNaN(hours)) return undefined;
-    if (hours >= 6 && hours < 14) return 'MORNING';
-    if (hours >= 14 && hours < 22) return 'AFTERNOON';
-    return 'NIGHT';
-  };
-
   useEffect(() => {
     const targetPatientId = typeof patientIdValue === 'string' ? patientIdValue.trim() : '';
     if (!targetPatientId || auditedPatientsRef.current.has(targetPatientId)) return;
@@ -1701,35 +1490,6 @@ const buildChecklistDefaults = (
       typeof formErrors?.root?.message === 'string' ? formErrors.root.message : t('handover.saveErrorMessageFallback');
     Alert.alert(t('common.error'), message);
   };
-
-  const truncateNote = (value?: string | null, maxLength = 400) => {
-    if (typeof value !== 'string') return undefined;
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    return trimmed.slice(0, maxLength);
-  };
-
- const compactObject = <T extends Record<string, unknown>>(input: T): Partial<T> => {
-    const out: Partial<T> = {};
-    (Object.keys(input) as Array<keyof T>).forEach((key) => {
-    const value = input[key];
-    if (value !== undefined && value !== null) {
-      out[key] = value;
-    }
-   });
-  return out;
-};
-
-const compactNumberMap = <T extends Record<string, number | undefined | null>>(input: T) => {
-    const out: Partial<Record<keyof T, number>> = {};
-    (Object.keys(input) as Array<keyof T>).forEach((key) => {
-    const value = input[key];
-    if (typeof value === 'number') {
-      out[key] = value;
-    }
-   });
-  return out;
-};
 
   const buildClinicalContext = (section: 'vitals' | 'diagnosis'): ClinicalContext => {
     const vitals = watchedVitals ?? {};
@@ -2203,33 +1963,6 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
     fontSize: fontSizes.sm,
     fontWeight: '600',
   };
-  const syncNoticeCopy = useMemo(() => {
-    switch (handoverSyncStatus) {
-      case 'queued':
-        return t('handover.syncQueuedMessage');
-      case 'syncing':
-        return t('handover.syncSyncingMessage');
-      case 'synced':
-        return t('handover.syncSyncedMessage');
-      case 'error':
-        return t('handover.syncErrorMessage', { error: handoverSyncError ?? t('sync.syncErrorTitle') });
-      case 'idle':
-      default:
-        return '';
-    }
-  }, [handoverSyncError, handoverSyncStatus, t]);
-  const syncNoticeColors = useMemo(() => {
-    if (handoverSyncStatus === 'error') {
-      return { backgroundColor: `${colors.danger}12`, borderColor: colors.danger, textColor: colors.danger };
-    }
-    if (handoverSyncStatus === 'synced') {
-      return { backgroundColor: `${colors.success}12`, borderColor: colors.success, textColor: colors.success };
-    }
-    if (handoverSyncStatus === 'syncing' || handoverSyncStatus === 'queued') {
-      return { backgroundColor: `${colors.warning}12`, borderColor: colors.warning, textColor: colors.warning };
-    }
-    return { backgroundColor: `${colors.info}12`, borderColor: colors.info, textColor: colors.info };
-  }, [colors, handoverSyncStatus]);
 
   return (
     <FormProvider {...form}>
@@ -2248,154 +1981,62 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
           onScroll={handleScroll}
           scrollEventThrottle={16}
         >
-        {/* BEGIN HANDOVER D6 – HandoverForm PatientBanner */}
-        <PatientBanner
-          summary={bannerSummary}
-          loading={bannerLoading}
-          error={patientSummaryError}
-          iceaRisk={iceaPatientRisk}
-          iceaRiskLoading={loadingIceaPatientRisk}
-          iceaRiskError={iceaPatientRiskError?.message ?? null}
-          showIceaRisk={showIceaPatientRisk}
-          showIceaCausalSummary={showIceaCausalSummary}
-        />
-        {/* END HANDOVER D6 – HandoverForm PatientBanner */}
-        {handoverSyncStatus !== 'idle' ? (
-          <View
-            style={[
-              styles.syncNotice,
-              { backgroundColor: syncNoticeColors.backgroundColor, borderColor: syncNoticeColors.borderColor },
-            ]}
-          >
-            <Text style={[styles.syncNoticeTitle, { color: syncNoticeColors.textColor }]}>{t('sync.syncTitle')}</Text>
-            <Text style={[styles.syncNoticeMessage, { color: colors.text }]}>{syncNoticeCopy}</Text>
-            <View style={styles.syncNoticeActions}>
-              {handoverSyncStatus === 'error' ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => {
-                    void forceSync();
-                  }}
-                >
-                  <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.retryNow')}</Text>
-                </Pressable>
-              ) : null}
-              {syncSnapshot.status === 'paused' ? (
-                <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Login')}>
-                  <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.loginCta')}</Text>
-                </Pressable>
-              ) : null}
-              <Pressable accessibilityRole="button" onPress={() => navigation.navigate('SyncCenter')}>
-                <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.openSyncCenter')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-        {isE2E ? (
-          <View style={styles.e2eControls} testID="e2e-controls">
-            <Text style={styles.e2eTitle}>E2E controles</Text>
-            <View style={styles.e2eActions}>
-              <Button
-                title="Forzar estado final"
-                onPress={() => form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true })}
-                testID="e2e-set-final"
-              />
-              <Button title="Añadir firma mock" onPress={handleE2ESignature} testID="e2e-add-signature" />
-              <Button title="Completar checklist" onPress={handleE2EChecklistComplete} testID="e2e-complete-checklist" />
-            </View>
-          </View>
-        ) : null}
-        <View style={styles.profileCard} testID="handover-profile-runtime">
-          <Text style={styles.profileCardTitle}>
-            {profileRuntime.context.usesCoreFallback
-              ? 'HANDOVER Core activo'
-              : `Perfil de unidad activo: ${profileRuntime.basePack.label}`}
-          </Text>
-          <Text style={styles.profileCardMeta}>
-            {profileRuntime.context.usesCoreFallback
-              ? 'No hay un UPP activo para esta unidad; el formulario cae al Core sin abrir una pantalla paralela.'
-              : `Unidad resuelta: ${profileRuntime.basePack.label}.`}
-          </Text>
-          {profileRuntime.activeOverlays.length > 0 ? (
-            <Text style={styles.profileCardMeta}>
-              {`SOP activos: ${profileRuntime.activeOverlays.map((overlay) => overlay.label).join(' · ')}`}
-            </Text>
-          ) : null}
-          {profileRuntime.context.hasHumanSpecialtyOverride ? (
-            <Text style={styles.profileCardMeta}>
-              {`Override humano de especialidad activo: ${profileRuntime.context.requestedSpecialtyId ?? profileRuntime.context.specialtyId ?? 'sin especialidad'}.`}
-            </Text>
-          ) : null}
-          {profileRuntime.focusAreas.length > 0 ? (
-            <Text style={styles.profileCardMeta}>
-              {`Foco clinico: ${profileRuntime.focusAreas.join(' · ')}`}
-            </Text>
-          ) : null}
-          {profileRuntime.requiredExtraFields.length > 0 ? (
-            <Text style={styles.profileCardMeta}>
-              {`Campos extra minimos: ${profileRuntime.requiredExtraFields.join(' · ')}`}
-            </Text>
-          ) : null}
-          {profileRuntime.sentinelEvents.length > 0 ? (
-            <Text style={styles.profileCardMeta}>
-              {`Eventos criticos: ${profileRuntime.sentinelEvents.join(' · ')}`}
-            </Text>
-          ) : null}
-          {profileRuntime.explanations.length > 0 ? (
-            <Text style={styles.profileCardMeta}>
-              {`Explicacion visible: ${profileRuntime.explanations.join(' · ')}`}
-            </Text>
-          ) : null}
-          <Text style={styles.profileCardMeta}>
-            {`Merge aplicado: ${profileRuntime.mergeTrace.map((entry) => entry.label).join(' -> ')}`}
-          </Text>
-          {profileRuntime.visibleOutputs.length > 0 ? (
-            <Text style={styles.profileCardMeta}>
-              {`Salidas visibles: ${profileRuntime.visibleOutputs.join(' · ')}`}
-            </Text>
-          ) : null}
-        </View>
-        <View
-          ref={sectionRefs.turno}
-          onLayout={handleSectionLayout('turno')}
-          style={styles.section}
-        >
-          <CollapsibleSection
-            title="Datos del turno"
-            isCollapsed={collapsedSections.turno}
-            onToggle={() => toggleSection('turno')}
-          >
-            <AdministrativeSection
-              styles={styles}
-              parseNumericInput={parseNumericInput}
-              dictationState={{
-                activeDictationField,
-                sttStatus,
-                dictationUnavailable,
-                renderDictationStatus,
-                handleDictationPress,
-              }}
-              DictationMicButton={DictationMicButton}
-            />
-            <View style={{ marginTop: 24 }}>
-              <TurnContextSection />
-            </View>
-          </CollapsibleSection>
-        </View>
+          <HandoverOverview
+            styles={styles}
+            colors={{
+              text: colors.text,
+              primary: colors.primary,
+              danger: colors.danger,
+              success: colors.success,
+              warning: colors.warning,
+              info: colors.info,
+            }}
+            handoverSyncStatus={handoverSyncStatus}
+            handoverSyncError={handoverSyncError}
+            syncSnapshot={syncSnapshot}
+            onRetrySync={() => {
+              void forceSync();
+            }}
+            onOpenLogin={() => navigation.navigate('Login')}
+            onOpenSyncCenter={() => navigation.navigate('SyncCenter')}
+            isE2E={isE2E}
+            onSetFinalStatus={() => form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true })}
+            onAddSignature={handleE2ESignature}
+            onCompleteChecklist={handleE2EChecklistComplete}
+            profileRuntime={profileRuntime}
+            bannerSummary={bannerSummary}
+            bannerLoading={bannerLoading}
+            patientSummaryError={patientSummaryError}
+            iceaPatientRisk={iceaPatientRisk}
+            loadingIceaPatientRisk={loadingIceaPatientRisk}
+            iceaPatientRiskError={iceaPatientRiskError?.message ?? null}
+            showIceaPatientRisk={showIceaPatientRisk}
+            showIceaCausalSummary={showIceaCausalSummary}
+          />
 
-        <View
-          ref={sectionRefs.paciente}
-          onLayout={handleSectionLayout('paciente')}
-          style={styles.section}
-        >
-          <CollapsibleSection
-            title="Paciente"
-            isCollapsed={collapsedSections.paciente}
-            onToggle={() => toggleSection('paciente')}
-          >
-            <PatientSection styles={styles} onScanPress={onScanPress} />
-          </CollapsibleSection>
-        </View>
+          <HandoverContextSections
+            styles={styles}
+            sectionRefs={{
+              turno: sectionRefs.turno,
+              paciente: sectionRefs.paciente,
+            }}
+            collapsedSections={{
+              turno: collapsedSections.turno,
+              paciente: collapsedSections.paciente,
+            }}
+            onLayout={handleSectionLayout}
+            onToggle={toggleSection}
+            onScanPress={onScanPress}
+            parseNumericInput={parseNumericInput}
+            dictationState={{
+              activeDictationField,
+              sttStatus,
+              dictationUnavailable,
+              renderDictationStatus,
+              handleDictationPress,
+            }}
+            DictationMicButton={DictationMicButton}
+          />
 
       {isOn('SHOW_SBAR') && isSectionVisible('sbar') && (
         <View
@@ -2990,170 +2631,44 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         </CollapsibleSection>
       </View>
 
-      <View
-        ref={sectionRefs.resumen}
-        onLayout={handleSectionLayout('resumen')}
-        style={styles.section}
-      >
-        <CollapsibleSection
-          title="Resumen / cierre de turno"
-          isCollapsed={collapsedSections.resumen}
-          onToggle={() => toggleSection('resumen')}
-        >
-          <SummarySection
-            styles={styles}
-            dictationState={{
-              activeDictationField,
-              sttStatus,
-              dictationUnavailable,
-              renderDictationStatus,
-              handleDictationPress,
-            }}
-            DictationMicButton={DictationMicButton}
-            sbarPreview={sbarPreview}
-            onGenerateSbar={handleGenerateSbar}
-            onInsertSbar={handleInsertSbar}
-            onCloseSbarPreview={handleCloseSbarPreview}
-          />
-        </CollapsibleSection>
-      </View>
-
-      <View
-        ref={sectionRefs.bedsideChecklist}
-        onLayout={handleSectionLayout('bedsideChecklist')}
-        style={styles.section}
-      >
-        <CollapsibleSection
-          title="Bedside Checklist"
-          isCollapsed={collapsedSections.bedsideChecklist}
-          onToggle={() => toggleSection('bedsideChecklist')}
-          lazy
-          sectionKey="bedsideChecklist"
-        >
-          <BedsideChecklistSection items={checklistItems} />
-        </CollapsibleSection>
-      </View>
-
-      {/* BEGIN HANDOVER: SIGNATURES_DUAL_UI */}
-      <View
-        ref={sectionRefs.firmas}
-        onLayout={handleSectionLayout('firmas')}
-        style={styles.section}
-      >
-        <CollapsibleSection
-          title="Firmas"
-          isCollapsed={collapsedSections.firmas}
-          onToggle={() => toggleSection('firmas')}
-        >
-          {statusValue === 'final' ? (
-            <View style={styles.signaturePadSection}>
-              <SignaturePad
-                value={
-                  outgoingSignature?.imageBase64
-                    ? { imageBase64: outgoingSignature.imageBase64, signedAt: outgoingSignature.signedAt }
-                    : undefined
-                }
-                onChange={(payload) => {
-                  if (!payload) {
-                    const nextSignatures = { ...(signaturesValue ?? {}) } as NonNullable<
-                      HandoverValues['signatures']
-                    >;
-                    if ('outgoing' in nextSignatures) {
-                      delete nextSignatures.outgoing;
-                    }
-                    form.setValue(
-                      'signatures',
-                      Object.keys(nextSignatures).length > 0 ? nextSignatures : undefined,
-                      { shouldDirty: true, shouldValidate: true },
-                    );
-                    return;
-                  }
-
-                  const built = buildOutgoingSignature(payload);
-                  if (!built) return;
-
-                  // Tipado fuerte: el schema espera method obligatorio.
-                  type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
-
-                  const nextSignature = {
-                    ...built,
-                    method: (built.method ?? 'session') as OutgoingSig['method'],
-                  } as OutgoingSig;
-
-                  form.setValue(
-                    'signatures',
-                    {
-                      ...(signaturesValue ?? {}),
-                      outgoing: nextSignature,
-                    },
-                    { shouldDirty: true, shouldValidate: true },
-                  );
-                }}
-                disabled={!canSignOutgoing}
-              />
-
-{!canSignOutgoing ? (
-  <Text style={styles.signaturePadHint}>{t('signatures.signaturePadDisabledHint')}</Text>
-) : null}
-
-</View>
-) : null}
-
-{(() => {
-  // Normalización defensiva: SignaturesSection no puede recibir outgoing.method undefined
-  type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
-
-  const normalizedSignaturesValue = signaturesValue?.outgoing
-    ? ({
-        ...signaturesValue,
-        outgoing: {
-          ...signaturesValue.outgoing,
-          method: ((signaturesValue.outgoing as any).method ?? 'session') as OutgoingSig['method'],
-        } as OutgoingSig,
-      } as typeof signaturesValue)
-    : signaturesValue;
-
-  return (
-    <SignaturesSection
-      value={normalizedSignaturesValue}
-      onChange={(next) => {
-        const normalizedNext =
-          next?.outgoing
-            ? ({
-                ...next,
-                outgoing: {
-                  ...next.outgoing,
-                  method: (((next.outgoing as any).method ?? 'session') as OutgoingSig['method']),
-                } as OutgoingSig,
-              } as typeof next)
-            : next;
-
-        form.setValue('signatures', normalizedNext, { shouldDirty: true, shouldValidate: true });
-      }}
-      currentUser={signatureUser}
-      administrativeUnitId={administrativeUnitValue}
-      getSignaturePayload={() => form.getValues()}
-      disableOutgoingAction
-    />
-  );
-})()}
-
-{outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
-{incomingSignatureError ? <Text style={styles.error}>{incomingSignatureError}</Text> : null}
-</CollapsibleSection>
-</View>
-{/* END HANDOVER: SIGNATURES_DUAL_UI */}
-
-      <View style={styles.buttonRow}>
-        <HandoverFormActions
-          styles={styles}
-          onSaveDraft={handleSaveDraft}
-          onFinalize={handleFinalize}
-          finalizeDisabled={formState.isSubmitting || hasValidationErrors}
-          handover={form.getValues()}
-          onBeforeExport={handleValidateForExport}
-        />
-      </View>
+      <HandoverClosureSections
+        styles={styles}
+        sectionRefs={{
+          resumen: sectionRefs.resumen,
+          bedsideChecklist: sectionRefs.bedsideChecklist,
+          firmas: sectionRefs.firmas,
+        }}
+        collapsedSections={{
+          resumen: collapsedSections.resumen,
+          bedsideChecklist: collapsedSections.bedsideChecklist,
+          firmas: collapsedSections.firmas,
+        }}
+        onLayout={handleSectionLayout}
+        onToggle={toggleSection}
+        dictationState={{
+          activeDictationField,
+          sttStatus,
+          dictationUnavailable,
+          renderDictationStatus,
+          handleDictationPress,
+        }}
+        DictationMicButton={DictationMicButton}
+        sbarPreview={sbarPreview}
+        onGenerateSbar={handleGenerateSbar}
+        onInsertSbar={handleInsertSbar}
+        onCloseSbarPreview={handleCloseSbarPreview}
+        checklistItems={checklistItems}
+        currentUser={signatureUser}
+        administrativeUnitId={administrativeUnitValue}
+        canSignOutgoing={canSignOutgoing}
+        buildOutgoingSignature={buildOutgoingSignature}
+        outgoingSignatureError={errors.signatures?.outgoing?.message as string | undefined}
+        incomingSignatureError={errors.signatures?.incoming?.message as string | undefined}
+        onSaveDraft={handleSaveDraft}
+        onFinalize={handleFinalize}
+        finalizeDisabled={formState.isSubmitting || hasValidationErrors}
+        onBeforeExport={handleValidateForExport}
+      />
       </ScrollView>
       </View>
 

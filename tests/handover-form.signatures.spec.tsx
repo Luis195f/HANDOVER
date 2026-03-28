@@ -8,9 +8,19 @@ import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 
 vi.mock('react-hook-form', async () => {
   const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
+  let currentContext: Record<string, unknown> | undefined;
   return {
     ...actual,
     Controller: () => null,
+    FormProvider: ({ children, ...ctx }: React.PropsWithChildren<Record<string, unknown>>) => {
+      currentContext = {
+        register: vi.fn(),
+        clearErrors: vi.fn(),
+        setFocus: vi.fn(),
+        ...ctx,
+      };
+      return <>{children}</>;
+    },
     useFieldArray: () => ({
       fields: [],
       append: vi.fn(),
@@ -29,17 +39,7 @@ vi.mock('react-hook-form', async () => {
       },
       fieldState: { error: undefined },
     }),
-    useFormContext: () => ({
-      control: {},
-      register: vi.fn(),
-      setValue: vi.fn(),
-      getValues: vi.fn(),
-      watch: vi.fn(),
-      formState: { errors: {} },
-      trigger: vi.fn(),
-      clearErrors: vi.fn(),
-      setFocus: vi.fn(),
-    }),
+    useFormContext: () => currentContext,
     useWatch: vi.fn(() => undefined),
   };
 });
@@ -132,6 +132,7 @@ vi.mock('@/src/validation/form-hooks', () => ({
 
 describe('HandoverForm signatures', () => {
   beforeEach(() => {
+    delete process.env.EXPO_PUBLIC_E2E;
     enqueueBundle.mockReset();
     buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
@@ -274,6 +275,49 @@ describe('HandoverForm signatures', () => {
       delete process.env.HANDOVER_SIGNATURE_DISABLED;
     } else {
       process.env.HANDOVER_SIGNATURE_DISABLED = originalFlag;
+    }
+  });
+
+  it('ejecuta los controles E2E de firma y checklist sin abrir seams clínicos', async () => {
+    const originalE2E = process.env.EXPO_PUBLIC_E2E;
+    process.env.EXPO_PUBLIC_E2E = 'true';
+
+    formValues.bedsideChecklist = {
+      patientIdentityConfirmed: false,
+      allergiesReviewed: false,
+      linesAndDevicesChecked: false,
+      medicationPlanReviewed: false,
+      safetyMeasuresApplied: false,
+      questionsAnswered: false,
+    };
+
+    const { getByTestId } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '5', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    fireEvent.press(getByTestId('e2e-add-signature'));
+    fireEvent.press(getByTestId('e2e-complete-checklist'));
+
+    await waitFor(() => {
+      expect(formValues.signatures?.outgoing?.imageBase64).toContain('data:image/png;base64,');
+      expect(formValues.signatures?.outgoing?.unitId).toBe('unit-1');
+      expect(formValues.bedsideChecklist).toMatchObject({
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      });
+    });
+
+    if (originalE2E === undefined) {
+      delete process.env.EXPO_PUBLIC_E2E;
+    } else {
+      process.env.EXPO_PUBLIC_E2E = originalE2E;
     }
   });
 });
