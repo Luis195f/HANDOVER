@@ -166,3 +166,89 @@ export interface IceaOpsDashboardData {
   unit: IceaOpsUnitDetail | null;
   events: IceaOpsEventSummary[];
 }
+
+export type ClinicalDecisionGovernanceValue = 'accepted' | 'applied' | 'rejected' | 'dismissed';
+export type ClinicalDecisionGovernanceSection = 'sbar' | 'treatments' | 'outcomes';
+export type ClinicalDecisionGovernanceSource =
+  | 'ai_generate_sbar'
+  | 'ai_refine_sbar'
+  | 'ai_nic_suggestions'
+  | 'ai_noc_suggestions';
+
+export interface ClinicalDecisionGovernanceDecisionCounts {
+  accepted: number;
+  applied: number;
+  rejected: number;
+  dismissed: number;
+}
+
+export interface ClinicalDecisionGovernanceFilters {
+  unitId: string | null;
+  suggestionSource: ClinicalDecisionGovernanceSource | null;
+  decision: ClinicalDecisionGovernanceValue | null;
+  section: ClinicalDecisionGovernanceSection | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+}
+
+export interface ClinicalDecisionGovernanceFeatureState {
+  key: string;
+  mode: string;
+  pilotMode: string;
+  shadowMode: boolean;
+}
+
+export interface ClinicalDecisionGovernanceDecisionRow {
+  decision: ClinicalDecisionGovernanceValue;
+  count: number;
+}
+
+export interface ClinicalDecisionGovernanceUnitRow {
+  unitId: string;
+  count: number;
+}
+
+export interface ClinicalDecisionGovernanceSourceRow {
+  suggestionSource: ClinicalDecisionGovernanceSource | string;
+  count: number;
+  decisions: ClinicalDecisionGovernanceDecisionCounts;
+}
+
+export interface ClinicalDecisionGovernanceSectionRow {
+  section: ClinicalDecisionGovernanceSection | string;
+  count: number;
+  decisions: ClinicalDecisionGovernanceDecisionCounts;
+}
+
+export interface ClinicalDecisionGovernanceTimelineRow {
+  date: string;
+  count: number;
+  decisions: ClinicalDecisionGovernanceDecisionCounts;
+}
+
+export interface ClinicalDecisionGovernanceSummary {
+  generatedAt: string;
+  available: boolean;
+  enabled: boolean;
+  scope: string;
+  filters: ClinicalDecisionGovernanceFilters;
+  queryBounds?: {
+    createdAtGte: string | null;
+    createdAtLt: string | null;
+  };
+  empty: boolean;
+  unavailableReason?: string;
+  feature: ClinicalDecisionGovernanceFeatureState;
+  totals: {
+    events: number;
+    units: number;
+    suggestionSources: number;
+    sections: number;
+  };
+  byDecision: ClinicalDecisionGovernanceDecisionRow[];
+  byUnit: ClinicalDecisionGovernanceUnitRow[];
+  bySuggestionSource: ClinicalDecisionGovernanceSourceRow[];
+  bySection: ClinicalDecisionGovernanceSectionRow[];
+  timeline: ClinicalDecisionGovernanceTimelineRow[];
+  limitations: string[];
+}

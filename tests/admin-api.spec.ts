@@ -133,6 +133,70 @@ function buildUnitPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildClinicalDecisionSummaryPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: '2026-03-28T10:00:00Z',
+    available: true,
+    enabled: true,
+    scope: 'clinical_decisions_summary',
+    filters: {
+      unitId: 'icu-a',
+      suggestionSource: 'ai_nic_suggestions',
+      decision: null,
+      section: 'treatments',
+      dateFrom: '2026-03-01',
+      dateTo: '2026-03-28',
+    },
+    queryBounds: {
+      createdAtGte: '2026-03-01T00:00:00+00:00',
+      createdAtLt: '2026-03-29T00:00:00+00:00',
+    },
+    empty: false,
+    feature: {
+      key: 'admin_analytics',
+      mode: 'enabled',
+      pilotMode: 'pilot',
+      shadowMode: false,
+    },
+    totals: {
+      events: 5,
+      units: 1,
+      suggestionSources: 1,
+      sections: 1,
+    },
+    byDecision: [
+      { decision: 'applied', count: 3 },
+      { decision: 'dismissed', count: 2 },
+    ],
+    byUnit: [{ unitId: 'icu-a', count: 5 }],
+    bySuggestionSource: [
+      {
+        suggestionSource: 'ai_nic_suggestions',
+        count: 5,
+        decisions: { accepted: 0, applied: 3, rejected: 0, dismissed: 2 },
+      },
+    ],
+    bySection: [
+      {
+        section: 'treatments',
+        count: 5,
+        decisions: { accepted: 0, applied: 3, rejected: 0, dismissed: 2 },
+      },
+    ],
+    timeline: [
+      {
+        date: '2026-03-28',
+        count: 2,
+        decisions: { accepted: 0, applied: 1, rejected: 0, dismissed: 1 },
+      },
+    ],
+    limitations: [
+      'Lectura agregada y piloto-grade; no expone identificadores nominales ni admite benchmarking individual.',
+    ],
+    ...overrides,
+  };
+}
+
 describe('admin-api', () => {
   beforeEach(() => {
     mockApiGet.mockReset();
@@ -157,6 +221,34 @@ describe('admin-api', () => {
     expect(result.summary.state).toBe('degraded');
     expect(result.unit?.unitId).toBe('icu-a');
     expect(result.events[0].payloadHash).toBe('abcd1234');
+  });
+
+  it('incluye el resumen agregado de decision log cuando la pantalla admin lo solicita', async () => {
+    mockApiGet
+      .mockResolvedValueOnce(buildSummaryPayload())
+      .mockResolvedValueOnce(buildEventsPayload())
+      .mockResolvedValueOnce(buildUnitPayload())
+      .mockResolvedValueOnce(buildClinicalDecisionSummaryPayload());
+
+    const result = await fetchAdminDashboardData('icu-a', {
+      includeClinicalDecisionSummary: true,
+      clinicalDecisionFilters: {
+        unitId: 'icu-a',
+        suggestionSource: 'ai_nic_suggestions',
+        section: 'treatments',
+        dateFrom: '2026-03-01',
+        dateTo: '2026-03-28',
+      },
+    });
+
+    expect(mockApiGet).toHaveBeenNthCalledWith(
+      4,
+      '/api/clinical-decisions/summary?unitId=icu-a&suggestionSource=ai_nic_suggestions&section=treatments&dateFrom=2026-03-01&dateTo=2026-03-28',
+    );
+    expect(result.clinicalDecisionSummary?.totals.events).toBe(5);
+    expect(result.clinicalDecisionSummary?.filters.dateTo).toBe('2026-03-28');
+    expect(result.clinicalDecisionSummary?.queryBounds?.createdAtLt).toBe('2026-03-29T00:00:00+00:00');
+    expect(result.clinicalDecisionSummary?.bySuggestionSource[0].decisions.dismissed).toBe(2);
   });
 
   it('acepta summary disabled y mantiene events habilitados sin invalid_payload', async () => {
