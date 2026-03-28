@@ -33,6 +33,7 @@ import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import { generateSbarViaBackend, refineSBARWithAI } from '@/src/lib/ai-sbar';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
+import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import useDraftAutosave from '@/src/lib/useDraftAutosave';
 import {
@@ -1290,6 +1291,9 @@ export default function HandoverForm({ navigation, route }: Props) {
     return base.trim() ? `${base}\n\n${notice}` : notice;
   };
 
+  const buildSbarDecisionHash = (summary: Pick<SBARSummary, 'situation' | 'background' | 'assessment' | 'recommendation'>) =>
+    hashHex([summary.situation, summary.background, summary.assessment, summary.recommendation].join('\n'));
+
   const handleRefineSbarWithAi = async () => {
     const values = form.getValues();
 
@@ -1307,6 +1311,19 @@ export default function HandoverForm({ navigation, route }: Props) {
         form.setValue('sbarAssessment', refined.assessment, { shouldDirty: true, shouldValidate: true });
         form.setValue('sbarRecommendation', refined.recommendation, { shouldDirty: true, shouldValidate: true });
         form.setValue('closingSummary', buildSbarFullText(refined), { shouldDirty: true, shouldValidate: true });
+        void logClinicalDecision({
+          patientId: values.patientId,
+          unitId: effectivePilotUnitId ?? '',
+          suggestionSource: 'ai_refine_sbar',
+          decision: 'applied',
+          reasonCode: 'direct_apply',
+          metadata: {
+            section: 'sbar',
+            suggestionCount: 1,
+            suggestionHashes: [buildSbarDecisionHash(refined)],
+            replaceExisting: Boolean((values.closingSummary ?? '').trim()),
+          },
+        });
         setSbarHelperMessage(t('handover.sbarRefinedHelper'));
       } else {
         setSbarAiError(t('handover.sbarAiUnavailable'));
@@ -1332,6 +1349,26 @@ export default function HandoverForm({ navigation, route }: Props) {
       form.setValue('sbarAssessment', result.assessment, { shouldDirty: true, shouldValidate: true });
       form.setValue('sbarRecommendation', result.recommendation, { shouldDirty: true, shouldValidate: true });
       form.setValue('closingSummary', result.fullText, { shouldDirty: true, shouldValidate: true });
+      void logClinicalDecision({
+        patientId: values.patientId,
+        unitId: effectivePilotUnitId ?? '',
+        suggestionSource: 'ai_generate_sbar',
+        decision: 'applied',
+        reasonCode: 'direct_apply',
+        metadata: {
+          section: 'sbar',
+          suggestionCount: 1,
+          suggestionHashes: [
+            buildSbarDecisionHash({
+              situation: result.situation,
+              background: result.background,
+              assessment: result.assessment,
+              recommendation: result.recommendation,
+            }),
+          ],
+          replaceExisting: Boolean((values.closingSummary ?? '').trim()),
+        },
+      });
       setSbarHelperMessage(t('handover.sbarGeneratedAiHelper'));
     } catch {
       setSbarAiError(t('handover.sbarAiGenerateError'));
@@ -2325,6 +2362,7 @@ export default function HandoverForm({ navigation, route }: Props) {
                 control={control}
                 enableNicCoding={Boolean(features.showNicCoding)}
                 quickPicks={profileRuntime.treatmentQuickPicks}
+                clinicalDecisionContext={{ patientId: patientIdValue ?? undefined, unitId: effectivePilotUnitId }}
               />
             </View>
             {showLegacyMedicationText ? (
@@ -2568,6 +2606,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             <OutcomesSection
               control={control}
               enableAiSuggestions={aiSuggestionsEnabled}
+              clinicalDecisionContext={{ patientId: patientIdValue ?? undefined, unitId: effectivePilotUnitId }}
             />
           </CollapsibleSection>
         </View>

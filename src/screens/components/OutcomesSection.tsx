@@ -7,6 +7,8 @@ import {
   type ClinicalContext,
   type NocOutcomeSuggestion,
 } from '@/src/lib/ai-suggestions';
+import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
+import { hashHex } from '@/src/lib/crypto';
 import {
   getNocPlaceholderCatalog,
   loadNocCatalog,
@@ -29,6 +31,10 @@ type Props = {
   name?: 'outcomes';
   enableAiSuggestions?: boolean;
   suggestInterventions?: typeof fetchInterventionsSuggestions;
+  clinicalDecisionContext?: {
+    patientId?: string;
+    unitId?: string;
+  };
 };
 
 type OutcomeItem = NonNullable<HandoverFormValues['outcomes']>[number];
@@ -256,12 +262,14 @@ export function OutcomesSection({
   name = 'outcomes',
   enableAiSuggestions = true,
   suggestInterventions = fetchInterventionsSuggestions,
+  clinicalDecisionContext,
 }: Props) {
   const { getValues } = useFormContext<HandoverFormValues>();
   const { fields, append, remove, replace } = useFieldArray({ control, name });
   const outcomes = useWatch({ control, name }) as HandoverFormValues['outcomes'];
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [pendingSuggestedOutcomes, setPendingSuggestedOutcomes] = useState<OutcomeItem[]>([]);
   const [nocCatalogQuery, setNocCatalogQuery] = useState('');
   const placeholderNocCatalog = useMemo(() => getNocPlaceholderCatalog(), []);
   const [nocCatalog, setNocCatalog] = useState<NocCatalogPayload>(placeholderNocCatalog);
@@ -285,6 +293,33 @@ export function OutcomesSection({
   const nocCatalogHelperText = fullNocCatalogEnabled
     ? `Catálogo NOC licenciado cargado (${nocCatalog.codes.length} resultados)`
     : `Sugerencias limitadas al catálogo local (${nocCatalog.codes.length} resultados)`;
+  const hasPendingSuggestions = pendingSuggestedOutcomes.length > 0;
+
+  const logNocDecision = (input: {
+    decision: 'applied' | 'dismissed';
+    reasonCode: 'selection_applied' | 'user_discarded_batch' | 'replace_existing';
+    suggestions: OutcomeItem[];
+  }) => {
+    const patientId = clinicalDecisionContext?.patientId?.trim();
+    const unitId = clinicalDecisionContext?.unitId?.trim();
+    if (!patientId || !unitId) return;
+
+    void logClinicalDecision({
+      patientId,
+      unitId,
+      suggestionSource: 'ai_noc_suggestions',
+      decision: input.decision,
+      reasonCode: input.reasonCode,
+      metadata: {
+        section: 'outcomes',
+        suggestionCount: input.suggestions.length,
+        selectedCount: input.suggestions.length,
+        selectedCodes: input.suggestions.map((item) => item.nocCode).filter((code) => code.trim().length > 0),
+        suggestionHashes: input.suggestions.map((item) => hashHex(`${item.nocCode}:${item.nocDisplay}`)),
+        replaceExisting: Boolean((outcomes ?? []).length),
+      },
+    });
+  };
 
   const addOutcome = () => {
     if (!canAddMore) return;
@@ -363,12 +398,33 @@ export function OutcomesSection({
         return;
       }
 
-      replace(normalized);
+      setPendingSuggestedOutcomes(normalized);
     } catch {
       setSuggestionsError('No se pudieron obtener sugerencias NOC en este momento.');
     } finally {
       setSuggestionsLoading(false);
     }
+  };
+
+  const applySuggestedOutcomes = () => {
+    if (!pendingSuggestedOutcomes.length) return;
+    replace(pendingSuggestedOutcomes);
+    logNocDecision({
+      decision: 'applied',
+      reasonCode: (outcomes ?? []).length > 0 ? 'replace_existing' : 'selection_applied',
+      suggestions: pendingSuggestedOutcomes,
+    });
+    setPendingSuggestedOutcomes([]);
+  };
+
+  const dismissSuggestedOutcomes = () => {
+    if (!pendingSuggestedOutcomes.length) return;
+    logNocDecision({
+      decision: 'dismissed',
+      reasonCode: 'user_discarded_batch',
+      suggestions: pendingSuggestedOutcomes,
+    });
+    setPendingSuggestedOutcomes([]);
   };
 
   return (
@@ -447,6 +503,37 @@ export function OutcomesSection({
       ) : null}
 
       {suggestionsError ? <Text style={styles.errorText}>{suggestionsError}</Text> : null}
+
+      {hasPendingSuggestions ? (
+        <View style={styles.warningCard} testID="noc-pending-suggestions">
+          <Text style={styles.warningTitle}>Resultados sugeridos pendientes de revisión</Text>
+          <View style={styles.catalogSuggestions}>
+            {pendingSuggestedOutcomes.map((item, index) => (
+              <View key={`${item.nocCode}-${index}`} style={styles.catalogSuggestion}>
+                <Text style={styles.catalogSuggestionText}>{`${item.nocDisplay} (${item.nocCode})`}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.actionsRow}>
+            <Pressable
+              accessibilityRole="button"
+              testID="noc-apply-suggestions"
+              style={styles.button}
+              onPress={applySuggestedOutcomes}
+            >
+              <Text style={styles.buttonText}>Aplicar resultados sugeridos</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              testID="noc-dismiss-suggestions"
+              style={[styles.button, styles.secondaryButton]}
+              onPress={dismissSuggestedOutcomes}
+            >
+              <Text style={styles.secondaryButtonText}>Descartar sugerencias</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {fields.map((field, index) => (
         <View key={field.id} style={styles.card} testID={`noc-outcome-card-${index}`}>

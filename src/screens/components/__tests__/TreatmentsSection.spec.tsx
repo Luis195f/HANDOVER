@@ -7,6 +7,11 @@ import * as flagsModule from '@/src/config/flags';
 import * as nicCatalogModule from '@/src/catalogs/nicCodes';
 import TreatmentsSection from '../TreatmentsSection';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
+
+vi.mock('@/src/lib/clinical-decision-log', () => ({
+  logClinicalDecision: vi.fn(async () => undefined),
+}));
 
 const defaultValues: HandoverFormValues = {
   administrativeData: {
@@ -135,6 +140,7 @@ describe('TreatmentsSection NIC suggestions', () => {
     const { getByTestId, getByText, getByPlaceholderText, methods } = renderWithForm({
       enableNicCoding: true,
       suggestInterventions,
+      clinicalDecisionContext: { patientId: 'pat-001', unitId: 'icu-a' },
     });
 
     await act(async () => {
@@ -151,6 +157,14 @@ describe('TreatmentsSection NIC suggestions', () => {
     await waitFor(() => {
       expect(methods.getValues('treatments')).toHaveLength(3);
     });
+    expect(logClinicalDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patientId: 'pat-001',
+        unitId: 'icu-a',
+        suggestionSource: 'ai_nic_suggestions',
+        decision: 'applied',
+      }),
+    );
 
     const nicTreatment = methods.getValues('treatments').find((item) => item.code?.system === 'NIC');
     expect(nicTreatment?.code?.code).toBe('2210');
@@ -166,5 +180,38 @@ describe('TreatmentsSection NIC suggestions', () => {
     await waitFor(() => {
       expect(methods.getValues('treatments')[0]?.description).toBe('Intervención ajustada por enfermería');
     });
+  });
+
+  it('permite descartar el lote sugerido y registra decision dismissed', async () => {
+    const suggestInterventions = vi.fn().mockResolvedValue({
+      section: 'other' as const,
+      interventions: ['NIC 2210: Administración de analgésicos', 'Vigilancia respiratoria'],
+    });
+
+    const { getByTestId, queryByTestId } = renderWithForm({
+      enableNicCoding: true,
+      suggestInterventions,
+      clinicalDecisionContext: { patientId: 'pat-001', unitId: 'icu-a' },
+    });
+
+    await act(async () => {
+      fireEvent.press(getByTestId('nic-suggest-button'));
+    });
+
+    await waitFor(() => {
+      expect(getByTestId('nic-dismiss-suggestions')).toBeTruthy();
+    });
+
+    fireEvent.press(getByTestId('nic-dismiss-suggestions'));
+
+    await waitFor(() => {
+      expect(queryByTestId('nic-suggestions-list')).toBeNull();
+    });
+    expect(logClinicalDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestionSource: 'ai_nic_suggestions',
+        decision: 'dismissed',
+      }),
+    );
   });
 });

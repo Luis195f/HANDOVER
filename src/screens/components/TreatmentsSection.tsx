@@ -12,6 +12,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { isOn } from '@/src/config/flags';
 import { fetchInterventionsSuggestions, type ClinicalContext } from '@/src/lib/ai-suggestions';
+import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
+import { hashHex } from '@/src/lib/crypto';
 import {
   getNicPlaceholderCatalog,
   loadNicCatalog,
@@ -146,6 +148,10 @@ type Props = {
   enableNicCoding?: boolean;
   suggestInterventions?: typeof fetchInterventionsSuggestions;
   quickPicks?: readonly ProfileRuntimeTreatmentQuickPick[];
+  clinicalDecisionContext?: {
+    patientId?: string;
+    unitId?: string;
+  };
 };
 
 type EditingState = { index: number; isNew?: boolean } | null;
@@ -208,6 +214,7 @@ export function TreatmentsSection({
   enableNicCoding,
   suggestInterventions = fetchInterventionsSuggestions,
   quickPicks = [],
+  clinicalDecisionContext,
 }: Props) {
   const { trigger, formState, getValues, setValue } = useFormContext<HandoverFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name });
@@ -400,6 +407,37 @@ export function TreatmentsSection({
     });
   };
 
+  const logNicDecision = (input: {
+    decision: 'applied' | 'dismissed';
+    reasonCode: 'selection_applied' | 'user_discarded_batch';
+    suggestions: string[];
+    selectedSuggestions?: string[];
+  }) => {
+    const patientId = clinicalDecisionContext?.patientId?.trim();
+    const unitId = clinicalDecisionContext?.unitId?.trim();
+    if (!patientId || !unitId) return;
+
+    const selectedSuggestions = input.selectedSuggestions ?? input.suggestions;
+    const selectedCodes = selectedSuggestions
+      .map((suggestion) => extractNicCoding(suggestion)?.code)
+      .filter((code): code is string => typeof code === 'string' && code.trim().length > 0);
+
+    void logClinicalDecision({
+      patientId,
+      unitId,
+      suggestionSource: 'ai_nic_suggestions',
+      decision: input.decision,
+      reasonCode: input.reasonCode,
+      metadata: {
+        section: 'treatments',
+        suggestionCount: input.suggestions.length,
+        selectedCount: selectedSuggestions.length,
+        suggestionHashes: selectedSuggestions.map((suggestion) => hashHex(normalizeSuggestion(suggestion))),
+        ...(selectedCodes.length > 0 ? { selectedCodes } : {}),
+      },
+    });
+  };
+
   const applySelectedSuggestions = () => {
     if (!selectedInterventions.length) return;
 
@@ -434,6 +472,26 @@ export function TreatmentsSection({
     }
 
     append(additions);
+    logNicDecision({
+      decision: 'applied',
+      reasonCode: 'selection_applied',
+      suggestions: suggestedInterventions,
+      selectedSuggestions: selectedInterventions,
+    });
+    setSuggestionsError(null);
+    setSelectedInterventions([]);
+    setSuggestedInterventions([]);
+  };
+
+  const dismissSuggestedInterventions = () => {
+    if (!suggestedInterventions.length) return;
+
+    logNicDecision({
+      decision: 'dismissed',
+      reasonCode: 'user_discarded_batch',
+      suggestions: suggestedInterventions,
+      selectedSuggestions: selectedInterventions,
+    });
     setSuggestionsError(null);
     setSelectedInterventions([]);
     setSuggestedInterventions([]);
@@ -696,6 +754,14 @@ export function TreatmentsSection({
                 <Text style={canAddSelectedSuggestions ? styles.buttonText : styles.secondaryButtonText}>
                   Añadir sugerencias seleccionadas
                 </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.button, styles.secondaryButton]}
+                onPress={dismissSuggestedInterventions}
+                accessibilityRole="button"
+                testID="nic-dismiss-suggestions"
+              >
+                <Text style={styles.secondaryButtonText}>Descartar sugerencias</Text>
               </Pressable>
             </View>
           ) : null}

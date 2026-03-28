@@ -45,6 +45,17 @@ def _post(case: str, client: APIClient):
             data={"language": "es", "section": "other", "notes": "Paciente estable"},
             format="json",
         )
+    if case == "clinical-decision":
+        return client.post(
+            "/api/ai/clinical-decision",
+            data={
+                "patientId": "p-123",
+                "unitId": "icu-a",
+                "suggestionSource": "ai_nic_suggestions",
+                "decision": "applied",
+            },
+            format="json",
+        )
     if case == "upload":
         upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
         return client.post(
@@ -59,7 +70,7 @@ def _post(case: str, client: APIClient):
 def test_ai_endpoints_require_auth_even_with_debug_enabled():
     client = APIClient()
 
-    for case in ("transcribe", "summarize", "refine", "suggest", "upload"):
+    for case in ("transcribe", "summarize", "refine", "suggest", "clinical-decision", "upload"):
         response = _post(case, client)
         assert response.status_code == 401, (case, response.status_code, getattr(response, "data", None))
 
@@ -68,7 +79,7 @@ def test_ai_endpoints_require_auth_even_with_debug_enabled():
 def test_ai_endpoints_require_auth_without_debug_bypass():
     client = APIClient()
 
-    for case in ("transcribe", "summarize", "refine", "suggest", "upload"):
+    for case in ("transcribe", "summarize", "refine", "suggest", "clinical-decision", "upload"):
         response = _post(case, client)
         assert response.status_code == 401, (case, response.status_code, getattr(response, "data", None))
 
