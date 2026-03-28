@@ -151,6 +151,22 @@ function safeJsonParse<T>(raw: string | null): T | null {
   }
 }
 
+function normalizeOptionalText(value?: string | null): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function resolveEffectiveHandoverUnitId(...values: Array<string | null | undefined>): string | undefined {
+  for (const value of values) {
+    const normalized = normalizeOptionalText(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   container: { flexGrow: 1, padding: 16 },
@@ -603,8 +619,15 @@ const buildChecklistDefaults = (
 };
 
   const defaultValues = useMemo<HandoverFormValues>(() => {
+    const initialAdministrativeUnitId = resolveEffectiveHandoverUnitId(
+      administrativeDataParam?.unit,
+      unitIdParam,
+      selectedUnitId,
+      prefillMeta?.unit,
+      prefilledValuesParam?.location,
+    );
     const initialProfileRuntime = resolveHandoverProfileRuntime({
-      unitId: unitIdParam ?? selectedUnitId,
+      unitId: initialAdministrativeUnitId,
       specialtyId,
       roles: pilotRoles,
     });
@@ -619,12 +642,7 @@ const buildChecklistDefaults = (
 
     const administrativeDefaults: AdministrativeData = {
       unit:
-        administrativeDataParam?.unit ??
-        unitIdParam ??
-        selectedUnitId ??
-        prefillMeta?.unit ??
-        prefilledValuesParam?.location ??
-        '',
+        initialAdministrativeUnitId ?? '',
       census: administrativeDataParam?.census ?? 0,
       staffIn: administrativeDataParam?.staffIn ?? [],
       staffOut: administrativeDataParam?.staffOut ?? [],
@@ -739,15 +757,20 @@ const buildChecklistDefaults = (
   );
   
   // BEGIN HANDOVER D4 – Get active unit
-  const adminUnitId = typeof administrativeUnitValue === 'string' ? administrativeUnitValue.trim() || undefined : undefined;
+  const adminUnitId = resolveEffectiveHandoverUnitId(administrativeUnitValue);
+  const effectivePilotUnitId = resolveEffectiveHandoverUnitId(administrativeUnitValue, unitIdParam, selectedUnitId);
+  const pilotControlSnapshot = usePilotControlContext({
+    unitId: effectivePilotUnitId,
+    roles: pilotRoles,
+  });
   const profileRuntime = useMemo(
     () =>
       resolveHandoverProfileRuntime({
-        unitId: adminUnitId,
+        unitId: effectivePilotUnitId,
         specialtyId,
         roles: pilotRoles,
       }),
-    [adminUnitId, pilotRoles, specialtyId],
+    [effectivePilotUnitId, pilotControlSnapshot, pilotRoles, specialtyId],
   );
   const { features } = profileRuntime;
   const handoverTiming = useHandoverTiming({ enabled: Boolean(features.showHandoverTimingMetrics) });
@@ -1094,11 +1117,6 @@ const buildChecklistDefaults = (
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
-  const effectivePilotUnitId = unitIdParam ?? selectedUnitId ?? undefined;
-  usePilotControlContext({
-    unitId: effectivePilotUnitId,
-    roles: pilotRoles,
-  });
   const aiSuggestionsEnabled =
     isOn('AI_SUGGESTIONS_ENABLED') &&
     isPilotFeatureEnabled('ai_suggestions', {

@@ -13,9 +13,9 @@ from rest_framework.exceptions import AuthenticationFailed
 
 ALGORITHMS = ["RS256"]
 
-# Cache simple de JWKS
-_JWKS_CACHE: Optional[Dict[str, Any]] = None
-_JWKS_CACHE_TS: float = 0.0
+# Cache JWKS particionado por issuer/JWKS URL para evitar contaminación cruzada.
+_JWKS_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_JWKS_CACHE_TS: Dict[Tuple[str, str], float] = {}
 _JWKS_TTL_SECONDS = 3600
 
 
@@ -29,6 +29,11 @@ def _auth0_audience() -> str:
 
 def _jwks_url() -> str:
     return f"{_auth0_issuer_base_url()}/.well-known/jwks.json"
+
+
+def _jwks_cache_key() -> Tuple[str, str]:
+    issuer_base_url = _auth0_issuer_base_url()
+    return (issuer_base_url, _jwks_url())
 
 
 def _get_bearer_token(request) -> str:
@@ -50,9 +55,12 @@ def _get_jwks() -> Dict[str, Any]:
     if not issuer_base_url:
         raise AuthenticationFailed("Auth0 not configured: missing AUTH0_ISSUER_BASE_URL")
 
+    cache_key = _jwks_cache_key()
     now = time.time()
-    if _JWKS_CACHE and (now - _JWKS_CACHE_TS) < _JWKS_TTL_SECONDS:
-        return _JWKS_CACHE
+    cached = _JWKS_CACHE.get(cache_key)
+    cached_at = _JWKS_CACHE_TS.get(cache_key)
+    if cached and cached_at is not None and (now - cached_at) < _JWKS_TTL_SECONDS:
+        return cached
 
     try:
         r = httpx.get(_jwks_url(), timeout=10)
@@ -65,8 +73,8 @@ def _get_jwks() -> Dict[str, Any]:
     if not isinstance(data, dict) or "keys" not in data:
         raise AuthenticationFailed("Invalid JWKS payload")
 
-    _JWKS_CACHE = data
-    _JWKS_CACHE_TS = now
+    _JWKS_CACHE[cache_key] = data
+    _JWKS_CACHE_TS[cache_key] = now
     return data
 
 

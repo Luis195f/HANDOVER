@@ -63,6 +63,21 @@ class SecurityHardeningSettingsTests(TestCase):
         self.assertIn("AUTH0_ISSUER_BASE_URL", result.stderr)
         self.assertIn("AUTH0_AUDIENCE", result.stderr)
 
+    def test_prod_reports_multiple_strict_startup_failures_without_masking_later_checks(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "",
+            "AUTH0_ISSUER_BASE_URL": "",
+            "AUTH0_AUDIENCE": "",
+            "OIDC_ISSUER": "",
+            "OIDC_AUDIENCE": "",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Startup hardening validation failed", result.stderr)
+        self.assertIn("HANDOVER_ALLOWED_ORIGINS is required in production", result.stderr)
+        self.assertIn("AUTH0_ISSUER_BASE_URL", result.stderr)
+        self.assertIn("AUTH0_AUDIENCE", result.stderr)
+
     def test_pilot_rejects_signature_disabled_flag(self):
         result = self._run_settings_import({
             "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
