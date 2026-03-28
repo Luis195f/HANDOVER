@@ -77,10 +77,11 @@ export function buildHandoverInputPayload(
 
 export function buildSubmissionAdministrativeData(
   values: FormHandoverValues,
-  unitEffective: string | undefined,
+  technicalUnitId: string | undefined,
 ): AdministrativeData {
   return {
-    unit: unitEffective ?? values.administrativeData.unit,
+    // Keep the submitted administrative unit aligned with the resolved technical unit whenever one exists.
+    unit: technicalUnitId ?? values.administrativeData.unit,
     census: values.administrativeData.census ?? 0,
     staffIn: (values.administrativeData.staffIn ?? []).filter(Boolean),
     staffOut: (values.administrativeData.staffOut ?? []).filter(Boolean),

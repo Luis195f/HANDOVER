@@ -11,11 +11,29 @@ const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
+const flushHandoverTimingBestEffort = vi.fn(async () => undefined);
+const appendAuditEvent = vi.fn(async () => undefined);
+const makeAuditEvent = vi.fn((payload?: Record<string, unknown>) => ({
+  id: 'evt-1',
+  type: payload?.type ?? 'handover_draft',
+  userId: 'nurse-1',
+  patientId: 'pat-1',
+  unitId: payload?.unitId,
+  at: '2024-01-01T00:00:00Z',
+}));
+const sendAuditEvent = vi.fn(async () => undefined);
 const mockUseZodForm = vi.fn();
 const pilotRuntimeState = vi.hoisted(() => ({
   pilotControlVersion: 0,
   pilotContextCalls: [] as Array<{ unitId?: string; roles?: string[] }>,
   runtimeCalls: [] as Array<{ unitId?: string | null; specialtyId?: string | null; roles?: string[] | null }>,
+}));
+const signaturesUiState = vi.hoisted(() => ({
+  lastAdministrativeUnitId: undefined as string | undefined,
+}));
+const signaturePadState = vi.hoisted(() => ({
+  lastDisabled: undefined as boolean | undefined,
+  lastOnChange: undefined as ((value: { imageBase64: string; signedAt: string } | null) => void) | undefined,
 }));
 
 let HandoverForm: any;
@@ -174,15 +192,12 @@ vi.mock('@/src/lib/fhir-validation', () => ({ validateBundle: (...args: unknown[
 // ✅ FIX: agregar sendAuditEvent y hacer appendAuditEvent async + makeAuditEvent consistente
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
-  appendAuditEvent: vi.fn(async () => undefined),
-  makeAuditEvent: vi.fn(() => ({
-    id: 'evt-1',
-    type: 'handover_draft',
-    userId: 'nurse-1',
-    patientId: 'pat-1',
-    at: '2024-01-01T00:00:00Z',
-  })),
-  sendAuditEvent: vi.fn(async () => undefined),
+  appendAuditEvent: (...args: unknown[]) => appendAuditEvent(...args),
+  makeAuditEvent: (...args: unknown[]) => makeAuditEvent(...args),
+  sendAuditEvent: (...args: unknown[]) => sendAuditEvent(...args),
+}));
+vi.mock('@/src/lib/handover-timing-submit', () => ({
+  flushHandoverTimingBestEffort: (...args: unknown[]) => flushHandoverTimingBestEffort(...args),
 }));
 
 vi.mock('@/src/lib/stt', () => ({
@@ -209,6 +224,25 @@ vi.mock('@/src/hooks/usePatientSummary', () => ({
 
 vi.mock('@/src/lib/hooks/useVitalTrends', () => ({
   useVitalTrends: () => ({ loading: false, error: null, data: [] }),
+}));
+vi.mock('@/src/components/SignaturePad', () => ({
+  SignaturePad: ({
+    onChange,
+    disabled,
+  }: {
+    onChange: (value: { imageBase64: string; signedAt: string } | null) => void;
+    disabled?: boolean;
+  }) => {
+    signaturePadState.lastDisabled = disabled;
+    signaturePadState.lastOnChange = onChange;
+    return null;
+  },
+}));
+vi.mock('@/src/screens/components/SignaturesSection', () => ({
+  SignaturesSection: ({ administrativeUnitId }: { administrativeUnitId?: string }) => {
+    signaturesUiState.lastAdministrativeUnitId = administrativeUnitId;
+    return null;
+  },
 }));
 
 vi.mock('@/src/components/AudioAttach', () => ({ default: () => null }));
@@ -327,10 +361,17 @@ describe('HandoverForm drafts', () => {
     buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
     confirmHighRiskSubmission.mockClear();
+    flushHandoverTimingBestEffort.mockClear();
+    appendAuditEvent.mockClear();
+    makeAuditEvent.mockClear();
+    sendAuditEvent.mockClear();
     mockUseZodForm.mockReset();
     pilotRuntimeState.pilotControlVersion = 0;
     pilotRuntimeState.pilotContextCalls.length = 0;
     pilotRuntimeState.runtimeCalls.length = 0;
+    signaturesUiState.lastAdministrativeUnitId = undefined;
+    signaturePadState.lastDisabled = undefined;
+    signaturePadState.lastOnChange = undefined;
     mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
   });
 
@@ -481,6 +522,114 @@ describe('HandoverForm drafts', () => {
     expect(pilotRuntimeState.pilotContextCalls.slice(-1)[0]?.unitId).toBe('route-unit');
     expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
     expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'route-unit')).toBe(true);
+  });
+
+  it('alinea submit, queue, timing y audit con la misma unidad técnica canónica aunque el texto administrativo difiera', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    enqueueBundle.mockResolvedValueOnce({ id: 'tx-1' });
+
+    const view = render(
+      <HandoverForm
+        navigation={navigation}
+        route={{
+          key: 'submit-unit-consistency',
+          name: 'HandoverForm',
+          params: {
+            patientId: 'pat-1',
+            unitId: 'route-unit',
+            administrativeData: { ...baseValues.administrativeData, unit: 'Unidad escrita a mano' },
+          },
+        } as any}
+      />,
+    );
+
+    fireEvent.press(view.getByText('Guardar borrador'));
+
+    await waitFor(() => {
+      expect(enqueueBundle).toHaveBeenCalledTimes(1);
+    });
+
+    expect(ensureUnitAccess).toHaveBeenCalledWith(expect.anything(), 'route-unit');
+    const [handoverInput] = buildHandoverBundleAsync.mock.calls[0];
+    expect(handoverInput.administrativeData.unit).toBe('route-unit');
+
+    const [, enqueueMeta] = enqueueBundle.mock.calls[0];
+    expect(enqueueMeta).toEqual(
+      expect.objectContaining({
+        patientId: 'pat-1',
+        unitId: 'route-unit',
+        unitProfileId: 'profile:route-unit',
+      }),
+    );
+
+    expect(flushHandoverTimingBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unitId: 'route-unit',
+        requestId: 'tx-1',
+      }),
+    );
+    expect(makeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'patient_edit',
+        unitId: 'route-unit',
+      }),
+    );
+    expect(alertSpy).toHaveBeenCalledWith('OK', expect.stringContaining('Entrega encolada'));
+  });
+
+  it('alinea la firma saliente y SignaturesSection con la misma unidad técnica canónica cuando el texto administrativo difiere', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+    let signatureFormInstance: ReturnType<typeof buildFormMock> | undefined;
+    mockUseZodForm.mockImplementationOnce((_: unknown, defaultValues: HandoverFormData) => {
+      signatureFormInstance = buildFormMock({
+        ...defaultValues,
+        status: 'final',
+        administrativeData: {
+          ...defaultValues.administrativeData,
+          unit: 'Unidad escrita a mano',
+        },
+      });
+      return signatureFormInstance;
+    });
+
+    render(
+      <HandoverForm
+        navigation={navigation}
+        route={{
+          key: 'signature-unit-consistency',
+          name: 'HandoverForm',
+          params: {
+            patientId: 'pat-1',
+            unitId: 'route-unit',
+            administrativeData: { ...baseValues.administrativeData, unit: 'Unidad escrita a mano' },
+          },
+        } as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(signaturesUiState.lastAdministrativeUnitId).toBe('route-unit');
+    });
+
+    await act(async () => {
+      signaturePadState.lastOnChange?.({
+        imageBase64: 'mock-signature',
+        signedAt: '2025-01-05T10:30:00.000Z',
+      });
+    });
+
+    await waitFor(() => {
+      expect(signatureFormInstance?.setValue).toHaveBeenCalledWith(
+        'signatures',
+        expect.objectContaining({
+          outgoing: expect.objectContaining({
+            unitId: 'route-unit',
+          }),
+        }),
+        expect.objectContaining({ shouldDirty: true, shouldValidate: true }),
+      );
+    });
   });
 
   it('no genera churn de contexto backend cuando cambia el texto libre de la unidad', async () => {

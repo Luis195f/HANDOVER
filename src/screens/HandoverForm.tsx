@@ -167,7 +167,7 @@ function resolveEffectiveHandoverUnitId(...values: Array<string | null | undefin
   return undefined;
 }
 
-function resolveCanonicalPilotContextUnitId(...values: Array<string | null | undefined>): string | undefined {
+function resolveCanonicalTechnicalUnitId(...values: Array<string | null | undefined>): string | undefined {
   for (const value of values) {
     const normalized = normalizeUnitSelection(value, ALL_UNITS_OPTION);
     if (normalized) {
@@ -636,9 +636,9 @@ const buildChecklistDefaults = (
       prefillMeta?.unit,
       prefilledValuesParam?.location,
     );
-    const initialPilotUnitId = resolveCanonicalPilotContextUnitId(unitIdParam, selectedUnitId);
+    const initialTechnicalUnitId = resolveCanonicalTechnicalUnitId(unitIdParam, selectedUnitId);
     const initialProfileRuntime = resolveHandoverProfileRuntime({
-      unitId: initialPilotUnitId,
+      unitId: initialTechnicalUnitId,
       specialtyId,
       roles: pilotRoles,
     });
@@ -760,16 +760,11 @@ const buildChecklistDefaults = (
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const statusValue = form.watch('status');
-  const activeUnitId = administrativeUnitValue || signatureUser?.activeUnitId || signatureUser?.units?.[0];
-  const canSignOutgoing = Boolean(
-    signatureUser &&
-      (signatureUser.roles ?? (signatureUser.role ? [signatureUser.role] : [])).includes('nurse') &&
-      activeUnitId,
-  );
   
   // BEGIN HANDOVER D4 – Get active unit
   // Pilot-control and runtime must use a stable route/store unit id, not the free-text administrative field.
-  const effectivePilotUnitId = resolveCanonicalPilotContextUnitId(unitIdParam, selectedUnitId);
+  const canonicalTechnicalUnitId = resolveCanonicalTechnicalUnitId(unitIdParam, selectedUnitId);
+  const effectivePilotUnitId = canonicalTechnicalUnitId;
   const pilotControlSnapshot = usePilotControlContext({
     unitId: effectivePilotUnitId,
     roles: pilotRoles,
@@ -782,6 +777,16 @@ const buildChecklistDefaults = (
         roles: pilotRoles,
       }),
     [effectivePilotUnitId, pilotControlSnapshot, pilotRoles, specialtyId],
+  );
+  const activeUnitId =
+    profileRuntime.context.unitId ??
+    canonicalTechnicalUnitId ??
+    signatureUser?.activeUnitId ??
+    signatureUser?.units?.[0];
+  const canSignOutgoing = Boolean(
+    signatureUser &&
+      (signatureUser.roles ?? (signatureUser.role ? [signatureUser.role] : [])).includes('nurse') &&
+      activeUnitId,
   );
   const { features } = profileRuntime;
   const handoverTiming = useHandoverTiming({ enabled: Boolean(features.showHandoverTimingMetrics) });
@@ -1824,10 +1829,8 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
   const submitHandover = async (values: HandoverFormValues, attempt = 0): Promise<void> => {
     try {
       const status = values.status ?? 'draft';
-      const unitFromForm = normalizeUnitSelection(values.administrativeData?.unit, ALL_UNITS_OPTION);
-      const unitFromNav = normalizeUnitSelection(unitIdParam ?? route.params?.unitId, ALL_UNITS_OPTION);
-      const unitFromStore = normalizeUnitSelection(selectedUnitId, ALL_UNITS_OPTION);
-      const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
+      // Submission metadata must stay aligned with the runtime unit, never with the free-text administrative field.
+      const technicalUnitId = profileRuntime.context.unitId ?? canonicalTechnicalUnitId;
       const riskBeforeSubmit = deriveRiskEvaluationFromValues(
         values.vitals,
         values.braden,
@@ -1841,7 +1844,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
 
       const activeSession = session ?? (await getSession());
       try {
-        ensureUnitAccess(activeSession, unitEffective ?? '');
+        ensureUnitAccess(activeSession, technicalUnitId ?? '');
       } catch {
         Alert.alert(t('handover.unitAccessDeniedTitle'));
         return;
@@ -1875,7 +1878,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
 
       const audioAttachment = await buildAudioAttachment(values.audioUri);
 
-      const administrativeData: AdministrativeData = buildSubmissionAdministrativeData(values, unitEffective);
+      const administrativeData: AdministrativeData = buildSubmissionAdministrativeData(values, technicalUnitId);
 
       const nowIso = new Date().toISOString();
       const handoverInput = buildHandoverInput(values, {
@@ -1947,7 +1950,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
 
       const queuedTx = await enqueueBundle(bundle, {
         patientId: values.patientId,
-        unitId: administrativeData.unit,
+        unitId: technicalUnitId,
         specialtyId,
         unitProfileId: profileRuntime.context.unitProfileId ?? undefined,
         specialtyOverlayIds: profileRuntime.context.specialtyOverlayIds,
@@ -1959,7 +1962,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       await flushHandoverTimingBestEffort({
         enabled: Boolean(features.showHandoverTimingMetrics) && Boolean(timingRequestId),
         flush: handoverTiming.flush,
-        unitId: administrativeData.unit,
+        unitId: technicalUnitId,
         requestId: timingRequestId,
       });
 
@@ -1967,11 +1970,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
       setHandoverSyncError(null);
 
       const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
-      const auditUnitId =
-        activeSessionUser?.activeUnitId ??
-        activeSessionUser?.units?.[0] ??
-        activeSession?.units?.[0] ??
-        administrativeData.unit;
+      const auditUnitId = technicalUnitId;
       if (auditUserId && values.patientId) {
         const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
         const auditEvent = makeAuditEvent({
@@ -3131,7 +3130,7 @@ const compactNumberMap = <T extends Record<string, number | undefined | null>>(i
         form.setValue('signatures', normalizedNext, { shouldDirty: true, shouldValidate: true });
       }}
       currentUser={signatureUser}
-      administrativeUnitId={administrativeUnitValue}
+      administrativeUnitId={activeUnitId}
       getSignaturePayload={() => form.getValues()}
       disableOutgoingAction
     />
