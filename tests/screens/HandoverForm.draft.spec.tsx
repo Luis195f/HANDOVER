@@ -458,7 +458,7 @@ describe('HandoverForm drafts', () => {
     expect(defaultValues.administrativeData.unit).toBe('unit-prefill');
   });
 
-  it('alinea la unidad efectiva entre el fetch de pilot-control y la resolución del profile runtime', async () => {
+  it('alinea la unidad técnica canónica entre pilot-control y profile runtime aunque el texto administrativo difiera', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
 
     await act(async () => {
@@ -478,9 +478,68 @@ describe('HandoverForm drafts', () => {
       );
     });
 
-    expect(pilotRuntimeState.pilotContextCalls.slice(-1)[0]?.unitId).toBe('admin-unit');
+    expect(pilotRuntimeState.pilotContextCalls.slice(-1)[0]?.unitId).toBe('route-unit');
     expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
-    expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'admin-unit')).toBe(true);
+    expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'route-unit')).toBe(true);
+  });
+
+  it('no genera churn de contexto backend cuando cambia el texto libre de la unidad', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+    useSelectedUnitId.mockReturnValue('unit-1');
+
+    const screen = render(
+      <HandoverForm
+        navigation={navigation}
+        route={{
+          key: 'pilot-typed-unit',
+          name: 'HandoverForm',
+          params: {
+            patientId: 'pat-1',
+            administrativeData: { ...baseValues.administrativeData, unit: 'U' },
+          },
+        } as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(pilotRuntimeState.pilotContextCalls.length).toBeGreaterThan(0);
+    });
+
+    pilotRuntimeState.pilotContextCalls.length = 0;
+    pilotRuntimeState.runtimeCalls.length = 0;
+
+    for (const typedUnit of ['UC', 'UCI', 'UCI Adulto']) {
+      mockUseZodForm.mockImplementationOnce((_: unknown, defaultValues: HandoverFormData) =>
+        buildFormMock({
+          ...defaultValues,
+          administrativeData: {
+            ...defaultValues.administrativeData,
+            unit: typedUnit,
+          },
+        }),
+      );
+
+      await act(async () => {
+        screen.update(
+          <HandoverForm
+            navigation={navigation}
+            route={{
+              key: 'pilot-typed-unit',
+              name: 'HandoverForm',
+              params: {
+                patientId: 'pat-1',
+                administrativeData: { ...baseValues.administrativeData, unit: typedUnit },
+              },
+            } as any}
+          />,
+        );
+      });
+    }
+
+    expect(pilotRuntimeState.pilotContextCalls.length).toBeGreaterThan(0);
+    expect(new Set(pilotRuntimeState.pilotContextCalls.map((call) => call.unitId))).toEqual(new Set(['unit-1']));
+    expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
+    expect(new Set(pilotRuntimeState.runtimeCalls.map((call) => call.unitId))).toEqual(new Set(['unit-1']));
   });
 
   it('recomputa el profile runtime cuando cambia el snapshot backend-driven relevante', async () => {

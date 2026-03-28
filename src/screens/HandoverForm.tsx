@@ -167,6 +167,16 @@ function resolveEffectiveHandoverUnitId(...values: Array<string | null | undefin
   return undefined;
 }
 
+function resolveCanonicalPilotContextUnitId(...values: Array<string | null | undefined>): string | undefined {
+  for (const value of values) {
+    const normalized = normalizeUnitSelection(value, ALL_UNITS_OPTION);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   container: { flexGrow: 1, padding: 16 },
@@ -626,8 +636,9 @@ const buildChecklistDefaults = (
       prefillMeta?.unit,
       prefilledValuesParam?.location,
     );
+    const initialPilotUnitId = resolveCanonicalPilotContextUnitId(unitIdParam, selectedUnitId);
     const initialProfileRuntime = resolveHandoverProfileRuntime({
-      unitId: initialAdministrativeUnitId,
+      unitId: initialPilotUnitId,
       specialtyId,
       roles: pilotRoles,
     });
@@ -757,8 +768,8 @@ const buildChecklistDefaults = (
   );
   
   // BEGIN HANDOVER D4 – Get active unit
-  const adminUnitId = resolveEffectiveHandoverUnitId(administrativeUnitValue);
-  const effectivePilotUnitId = resolveEffectiveHandoverUnitId(administrativeUnitValue, unitIdParam, selectedUnitId);
+  // Pilot-control and runtime must use a stable route/store unit id, not the free-text administrative field.
+  const effectivePilotUnitId = resolveCanonicalPilotContextUnitId(unitIdParam, selectedUnitId);
   const pilotControlSnapshot = usePilotControlContext({
     unitId: effectivePilotUnitId,
     roles: pilotRoles,
