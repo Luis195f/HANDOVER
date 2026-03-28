@@ -85,6 +85,14 @@ export function getPatientListAccessState(
   };
 }
 
+export function getDeniedPatientLoadState(currentRequestId: number) {
+  return {
+    nextRequestId: currentRequestId + 1,
+    patients: [] as PatientListItem[],
+    isLoadingPatients: false,
+  };
+}
+
 export function filterPatients(
   patients: PatientListItem[],
   unitsById: Record<string, Unit>,
@@ -275,12 +283,18 @@ export default function PatientList({ navigation }: Props) {
 
   const loadPatients = useCallback(async () => {
     if (!selectedUnitId) {
-      setPatients([]);
+      const deniedState = getDeniedPatientLoadState(loadPatientsRequestRef.current);
+      loadPatientsRequestRef.current = deniedState.nextRequestId;
+      setIsLoadingPatients(deniedState.isLoadingPatients);
+      setPatients(deniedState.patients);
       return;
     }
 
     if (!canQuerySelectedUnit(session, selectedUnitId)) {
-      setPatients([]);
+      const deniedState = getDeniedPatientLoadState(loadPatientsRequestRef.current);
+      loadPatientsRequestRef.current = deniedState.nextRequestId;
+      setIsLoadingPatients(deniedState.isLoadingPatients);
+      setPatients(deniedState.patients);
       return;
     }
 

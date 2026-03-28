@@ -12,6 +12,11 @@ const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
 const mockUseZodForm = vi.fn();
+const pilotRuntimeState = vi.hoisted(() => ({
+  pilotControlVersion: 0,
+  pilotContextCalls: [] as Array<{ unitId?: string; roles?: string[] }>,
+  runtimeCalls: [] as Array<{ unitId?: string | null; specialtyId?: string | null; roles?: string[] | null }>,
+}));
 
 let HandoverForm: any;
 
@@ -50,6 +55,96 @@ vi.mock('react-hook-form', async () => {
 vi.mock('@/src/config/flags', () => ({ isOn: () => false }));
 const useSelectedUnitId = vi.fn(() => 'unit-1');
 vi.mock('@/src/state/filterStore', () => ({ useSelectedUnitId, ALL_UNITS_OPTION: '__all__' }));
+vi.mock('@/src/config/pilotControl', () => ({
+  isPilotFeatureEnabled: vi.fn(() => false),
+  usePilotControlContext: vi.fn((context: { unitId?: string; roles?: string[] }) => {
+    pilotRuntimeState.pilotContextCalls.push(context);
+    return pilotRuntimeState.pilotControlVersion;
+  }),
+}));
+vi.mock('@/src/lib/profile-runtime', () => {
+  const HANDOVER_SECTIONS_INFO = [
+    { key: 'turno', title: 'Datos del turno' },
+    { key: 'paciente', title: 'Paciente' },
+    { key: 'sbar', title: 'SBAR' },
+    { key: 'signos', title: 'Signos vitales' },
+    { key: 'oxigenoterapia', title: 'Oxigenoterapia' },
+    { key: 'dispositivos', title: 'Dispositivos médicos' },
+    { key: 'seguridad', title: 'Seguridad y riesgos' },
+    { key: 'alertas', title: 'Alertas' },
+    { key: 'nutrition', title: 'Nutrición' },
+    { key: 'elimination', title: 'Eliminación' },
+    { key: 'fluidBalance', title: 'Balance hídrico' },
+    { key: 'mobilitySkin', title: 'Movilidad y piel' },
+    { key: 'psychosocial', title: 'Psicosocial' },
+    { key: 'escalas', title: 'Escalas clínicas' },
+    { key: 'examenes', title: 'Exámenes y procedimientos' },
+    { key: 'medicacion', title: 'Medicación y tratamientos' },
+    { key: 'adjuntos', title: 'Adjuntos' },
+    { key: 'diagnosticos', title: 'Diagnósticos médicos/enfermería' },
+    { key: 'outcomes', title: 'Resultados esperados (NOC)' },
+    { key: 'evolucion', title: 'Evolución' },
+    { key: 'resumen', title: 'Resumen / cierre de turno' },
+    { key: 'bedsideChecklist', title: 'Bedside Checklist' },
+    { key: 'firmas', title: 'Firmas' },
+  ];
+  return {
+    HANDOVER_SECTIONS_INFO,
+    resolveHandoverProfileRuntime: vi.fn((args: { unitId?: string | null; specialtyId?: string | null; roles?: string[] | null }) => {
+      pilotRuntimeState.runtimeCalls.push(args);
+      return {
+        context: {
+          unitId: args.unitId ?? null,
+          requestedSpecialtyId: args.specialtyId ?? null,
+          specialtyId: args.specialtyId ?? null,
+          specialtySource: 'requested',
+          catalogUnitProfileId: null,
+          unitProfileId: args.unitId ? `profile:${args.unitId}` : null,
+          overlaySelections: [],
+          catalogSpecialtyOverlayIds: [],
+          specialtyOverlayIds: [],
+          activeProfileIds: [],
+          hasHumanSpecialtyOverride: false,
+          usesCoreFallback: false,
+        },
+        pack: { id: 'mock-pack', label: 'Mock Pack' },
+        basePack: { id: 'mock-pack', label: 'Mock Pack' },
+        overlayPacks: [],
+        activeOverlays: [],
+        mergeTrace: [],
+        sectionVisibility: HANDOVER_SECTIONS_INFO.reduce(
+          (acc, section) => ({ ...acc, [section.key]: true }),
+          {} as Record<string, boolean>,
+        ),
+        fieldVisibility: {
+          'legacy-sbar-narrative': true,
+          'legacy-medication-text': true,
+          'legacy-nursing-diagnosis-text': true,
+          'nic-coding-hint': false,
+          'handover-timing-hint': false,
+          'noc-outcomes': false,
+        },
+        features: {
+          showHandoverTimingMetrics: false,
+          showNicCoding: false,
+          showNocOutcomes: false,
+          hideLegacyFields: false,
+        },
+        checklistItems: [],
+        requiredExtraFields: [],
+        optionalExtraFields: [],
+        focusAreas: [],
+        explanations: [],
+        suggestedScales: [],
+        sentinelEvents: [],
+        visibleOutputs: [],
+        notes: [],
+        medicationQuickPicks: [],
+        treatmentQuickPicks: [],
+      };
+    }),
+  };
+});
 
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({
@@ -125,6 +220,7 @@ vi.mock('@/src/screens/components/PsychosocialSection', () => ({ default: () => 
 vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ExportPdfButton', () => ({ ExportPdfButton: () => null }));
 vi.mock('@/src/screens/components/PatientBanner', () => ({ PatientBanner: () => null }));
+vi.mock('@/src/screens/components/OutcomesSection', () => ({ default: () => null }));
 
 vi.mock('@/src/validation/form-hooks', () => ({
   useZodForm: (...args: unknown[]) => mockUseZodForm(...args),
@@ -202,6 +298,9 @@ function buildFormMock(values: HandoverFormData = baseValues) {
       if (Array.isArray(fields)) {
         return fields.map((field) => getByPath(currentValues, field));
       }
+      if (typeof fields === 'string') {
+        return getByPath(currentValues, fields);
+      }
       return currentValues;
     },
     getValues: (field?: string) => {
@@ -229,6 +328,9 @@ describe('HandoverForm drafts', () => {
     ensureUnitAccess.mockReset();
     confirmHighRiskSubmission.mockClear();
     mockUseZodForm.mockReset();
+    pilotRuntimeState.pilotControlVersion = 0;
+    pilotRuntimeState.pilotContextCalls.length = 0;
+    pilotRuntimeState.runtimeCalls.length = 0;
     mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
   });
 
@@ -354,5 +456,60 @@ describe('HandoverForm drafts', () => {
 
     const [, defaultValues] = mockUseZodForm.mock.calls[0];
     expect(defaultValues.administrativeData.unit).toBe('unit-prefill');
+  });
+
+  it('alinea la unidad efectiva entre el fetch de pilot-control y la resolución del profile runtime', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+
+    await act(async () => {
+      render(
+        <HandoverForm
+          navigation={navigation}
+          route={{
+            key: 'pilot-unit',
+            name: 'HandoverForm',
+            params: {
+              patientId: 'pat-1',
+              unitId: 'route-unit',
+              administrativeData: { ...baseValues.administrativeData, unit: 'admin-unit' },
+            },
+          } as any}
+        />,
+      );
+    });
+
+    expect(pilotRuntimeState.pilotContextCalls.slice(-1)[0]?.unitId).toBe('admin-unit');
+    expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
+    expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'admin-unit')).toBe(true);
+  });
+
+  it('recomputa el profile runtime cuando cambia el snapshot backend-driven relevante', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+
+    const screen = render(
+      <HandoverForm
+        navigation={navigation}
+        route={{ key: 'pilot-refresh', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
+    });
+
+    pilotRuntimeState.runtimeCalls.length = 0;
+    pilotRuntimeState.pilotControlVersion = 1;
+
+    await act(async () => {
+      screen.update(
+        <HandoverForm
+          navigation={navigation}
+          route={{ key: 'pilot-refresh', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any}
+        />,
+      );
+    });
+
+    expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
+    expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'unit-1')).toBe(true);
   });
 });

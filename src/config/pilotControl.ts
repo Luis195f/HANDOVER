@@ -559,8 +559,8 @@ export async function refreshPilotControlContext(context: PilotFeatureContext = 
   await request;
 }
 
-export function usePilotControlContext(context: PilotFeatureContext = {}): void {
-  useSyncExternalStore(
+export function usePilotControlContext(context: PilotFeatureContext = {}): number {
+  const snapshot = useSyncExternalStore(
     subscribeToBackendFeatures,
     getBackendFeatureSnapshot,
     getBackendFeatureSnapshot,
@@ -571,6 +571,8 @@ export function usePilotControlContext(context: PilotFeatureContext = {}): void 
   useEffect(() => {
     void refreshPilotControlContext(normalizedContext);
   }, [contextKey, normalizedContext]);
+
+  return snapshot;
 }
 
 export function resolvePilotFeatureState(

@@ -47,6 +47,16 @@ describe('PatientList deny-first authz seam', () => {
     expect(state.emptyStateMessageKey).toBe('patientList.noAccessMessage');
   });
 
+  it('resets pending patient loading state when deny-first short-circuits a stale request', async () => {
+    const { getDeniedPatientLoadState } = await import('@/src/screens/PatientList');
+
+    expect(getDeniedPatientLoadState(4)).toEqual({
+      nextRequestId: 5,
+      patients: [],
+      isLoadingPatients: false,
+    });
+  });
+
   it('keeps patient-risk enabled for allowed all-units access only when the role is privileged', async () => {
     const { ALL_UNITS_OPTION, getPatientListAccessState } = await import('@/src/screens/PatientList');
 

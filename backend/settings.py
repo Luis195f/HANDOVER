@@ -27,6 +27,20 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 # DEBUG controlable por env (default True para dev)
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 
+STARTUP_VALIDATION_ERRORS: list[str] = []
+
+
+def _record_startup_validation_error(message: str) -> None:
+    if message not in STARTUP_VALIDATION_ERRORS:
+        STARTUP_VALIDATION_ERRORS.append(message)
+
+
+def _raise_startup_validation_errors() -> None:
+    if not STARTUP_VALIDATION_ERRORS:
+        return
+    joined = "\n".join(f"- {message}" for message in STARTUP_VALIDATION_ERRORS)
+    raise RuntimeError(f"Startup hardening validation failed:\n{joined}")
+
 
 def _resolve_handover_deployment_mode() -> str:
     raw_mode = (os.getenv("HANDOVER_DEPLOYMENT_MODE") or "").strip().lower()
@@ -59,7 +73,7 @@ HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
 HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").lower() == "true"
 
 if HANDOVER_STRICT_SECURITY_MODE and HANDOVER_SIGNATURE_DISABLED:
-    raise RuntimeError(
+    _record_startup_validation_error(
         "HANDOVER_SIGNATURE_DISABLED cannot be enabled in pilot/production. "
         "Use HANDOVER_DEPLOYMENT_MODE=development|demo|test for controlled insecure runs."
     )
@@ -67,7 +81,7 @@ if HANDOVER_STRICT_SECURITY_MODE and HANDOVER_SIGNATURE_DISABLED:
 if HANDOVER_STRICT_SECURITY_MODE and (
     not HANDOVER_PRIVATE_KEY_PATH or not HANDOVER_PUBLIC_KEY_PATH
 ):
-    raise RuntimeError(
+    _record_startup_validation_error(
         "HANDOVER_PRIVATE_KEY_PATH and HANDOVER_PUBLIC_KEY_PATH are required in pilot/production."
     )
 # -----------------------------
@@ -91,7 +105,7 @@ AUTH0_AUDIENCE = (
 AUTH0_CONFIGURED = bool(AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE)
 
 if not DEBUG and not RUNNING_TESTS and not AUTH0_CONFIGURED:
-    raise RuntimeError(
+    _record_startup_validation_error(
         "AUTH0_ISSUER_BASE_URL (or OIDC_ISSUER) and AUTH0_AUDIENCE "
         "(or OIDC_AUDIENCE) are required when DEBUG=false outside tests."
     )
@@ -117,10 +131,11 @@ def _parse_origins(raw_origins: str) -> list[str]:
     for origin in (item.strip() for item in raw_origins.split(",") if item.strip()):
         p = urlparse(origin)
         if p.scheme not in {"http", "https"} or not p.hostname:
-            raise RuntimeError(
+            _record_startup_validation_error(
                 "HANDOVER_ALLOWED_ORIGINS only accepts absolute http(s) origins. "
                 f"Invalid value: {origin!r}"
             )
+            continue
         parsed.append(f"{p.scheme}://{p.netloc}")
     return parsed
 
@@ -169,12 +184,12 @@ if DEBUG or RUNNING_TESTS:
 
 # En producción, evita arrancar sin orígenes (te protege de CORS/CSRF mal configurado)
 if not DEBUG and not RUNNING_TESTS and not CORS_ALLOWED_ORIGINS:
-    raise RuntimeError(
+    _record_startup_validation_error(
         "HANDOVER_ALLOWED_ORIGINS is required in production (set allowed https origins)."
     )
 
 if not DEBUG and not RUNNING_TESTS and not ALLOWED_HOSTS:
-    raise RuntimeError(
+    _record_startup_validation_error(
         "ALLOWED_HOSTS resolved empty in production. Set HANDOVER_ALLOWED_ORIGINS with public client domains."
     )
 
@@ -206,7 +221,10 @@ if not SECRET_KEY:
     if DEBUG or RUNNING_TESTS:
         SECRET_KEY = "django-insecure-placeholder"
     else:
-        raise RuntimeError("SECRET_KEY is required in production.")
+        _record_startup_validation_error("SECRET_KEY is required in production.")
+        SECRET_KEY = "django-insecure-placeholder"
+
+_raise_startup_validation_errors()
 
 # -----------------------------
 # Apps / DRF
