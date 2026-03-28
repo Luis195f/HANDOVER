@@ -253,4 +253,8 @@ export function ensureUnitAccess(session: AuthSession | null, unitId: string): v
     throw new AclError(result.reason);
   }
 }
+
+export function hasUnitAccess(session: AuthSession | null, unitId: string): boolean {
+  return evaluateUnitAccess(session, unitId).ok;
+}
 // END HANDOVER_AUTH

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AuthSession } from '@/src/security/auth-types';
-import { ensureRole, ensureUnitAccess, hasRole } from '@/src/security/acl';
+import { ensureRole, ensureUnitAccess, hasRole, hasUnitAccess } from '@/src/security/acl';
 
 const baseSession: AuthSession = {
   accessToken: 'token',
@@ -30,6 +30,12 @@ describe('ACL helpers', () => {
     expect(() => ensureUnitAccess(baseSession, 'oncology')).toThrowError('FORBIDDEN_UNIT');
     expect(() => ensureUnitAccess({ ...baseSession, roles: ['supervisor'] }, 'oncology')).not.toThrow();
     expect(() => ensureUnitAccess(baseSession, '')).toThrowError('INVALID_UNIT');
+  });
+
+  it('hasUnitAccess mirrors the deny-first unit decision used by guarded screens', () => {
+    expect(hasUnitAccess(baseSession, 'icu-a')).toBe(true);
+    expect(hasUnitAccess(baseSession, 'oncology')).toBe(false);
+    expect(hasUnitAccess({ ...baseSession, roles: ['supervisor'] }, 'oncology')).toBe(true);
   });
 });
 

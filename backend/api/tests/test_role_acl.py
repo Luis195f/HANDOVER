@@ -30,6 +30,20 @@ def _auth_client(claims: dict) -> APIClient:
     return client
 
 
+def _patient_resource(patient_id: str, unit_id: str) -> dict:
+    return {
+        "resourceType": "Patient",
+        "id": patient_id,
+        "name": [{"use": "official", "family": "Test", "given": ["Paciente"]}],
+        "extension": [
+            {
+                "url": "https://handover.dev/fhir/StructureDefinition/unit-id",
+                "valueString": unit_id,
+            }
+        ],
+    }
+
+
 class RoleAclTests(TestCase):
     """
     Django TestCase (unittest runner compatible) to validate:
@@ -96,6 +110,7 @@ class RoleAclTests(TestCase):
                 "sub": "auth0|viewer-1",
                 "roles": ["viewer"],
                 "permissions": ["patients:read"],
+                "unitIds": ["icu-a"],
             }
         )
         url = reverse("patient")
@@ -103,7 +118,7 @@ class RoleAclTests(TestCase):
         with patch("backend.api.views.httpx.get", autospec=True) as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 200
-            mock_resp.json.return_value = {"resourceType": "Patient", "id": "pat-1"}
+            mock_resp.json.return_value = _patient_resource("pat-1", "icu-a")
             mock_resp.text = '{"resourceType":"Patient","id":"pat-1"}'
             mock_get.return_value = mock_resp
 
@@ -220,6 +235,7 @@ class RoleAclTests(TestCase):
                 "sub": "auth0|nurse-demo",
                 "roles": ["nurse"],
                 "permissions": ["patients:read"],
+                "unitIds": ["icu-a"],
             }
         )
         url = reverse("patients")
@@ -249,6 +265,7 @@ class RoleAclTests(TestCase):
                 "sub": "auth0|nurse-local",
                 "roles": ["nurse"],
                 "permissions": ["patients:read"],
+                "unitIds": ["icu-a"],
             }
         )
         url = reverse("patients")
@@ -288,6 +305,7 @@ class RoleAclTests(TestCase):
                 "sub": "auth0|nurse-filter",
                 "roles": ["nurse"],
                 "permissions": ["patients:read"],
+                "unitIds": ["icu-a"],
             }
         )
         url = reverse("patients")
@@ -313,3 +331,78 @@ class RoleAclTests(TestCase):
         response = client.get(url)
 
         self.assertEqual(response.status_code, 403)
+
+    def test_patient_search_requires_explicit_unit_for_multi_unit_token(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-multi-unit",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+                "unitIds": ["icu-a", "icu-b"],
+            }
+        )
+        url = reverse("patient")
+
+        with patch("backend.api.views.httpx.get", autospec=True) as mock_get:
+            response = client.get(url)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "patients_unit_filter_required")
+        mock_get.assert_not_called()
+
+    def test_patient_read_rejects_remote_patient_outside_authorized_unit(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-single-unit",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+                "unitIds": ["icu-a"],
+            }
+        )
+        url = reverse("patient")
+
+        with patch("backend.api.views.httpx.get", autospec=True) as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = _patient_resource("pat-out", "icu-b")
+            mock_resp.text = '{"resourceType":"Patient","id":"pat-out"}'
+            mock_get.return_value = mock_resp
+
+            response = client.get(url, data={"id": "pat-out"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "patients_forbidden_unit")
+
+    def test_patient_search_filters_upstream_bundle_to_authorized_unit(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-bundle-filter",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+                "unitIds": ["icu-a"],
+            }
+        )
+        url = reverse("patient")
+
+        with patch("backend.api.views.httpx.get", autospec=True) as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "total": 2,
+                "entry": [
+                    {"resource": _patient_resource("pat-allowed", "icu-a")},
+                    {"resource": _patient_resource("pat-leak", "icu-b")},
+                ],
+            }
+            mock_resp.text = '{"resourceType":"Bundle","type":"searchset"}'
+            mock_get.return_value = mock_resp
+
+            response = client.get(url, data={"unit": "icu-a"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("total"), 1)
+        resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
+        self.assertEqual([resource.get("id") for resource in resources], ["pat-allowed"])
