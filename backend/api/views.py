@@ -133,6 +133,170 @@ def _has_valid_etl_access(request: HttpRequest) -> bool:
     return bool(scopes & ETL_REQUIRED_SCOPES)
 
 
+def _claims_text_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.replace(",", " ").split() if item.strip()]
+    return []
+
+
+def _extract_authorized_unit_ids(claims: dict[str, Any]) -> set[str]:
+    authorized_units: set[str] = set()
+    for key in ("unitIds", "units", "https://handover/unitIds", "https://handoverpro/unitIds"):
+        for unit_id in _claims_text_list(claims.get(key)):
+            authorized_units.add(unit_id)
+    return authorized_units
+
+
+def _unit_scope_error_response(*, detail: str, code: str, status: int = 403) -> Response:
+    return Response({"detail": detail, "code": code}, status=status)
+
+
+def _build_empty_searchset_bundle() -> dict[str, Any]:
+    return {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": 0,
+        "entry": [],
+    }
+
+
+def _extract_patient_resource_unit_ids(resource: object) -> set[str]:
+    if not isinstance(resource, dict):
+        return set()
+
+    unit_ids: set[str] = set()
+    direct_unit = str(resource.get("unit") or "").strip()
+    if direct_unit:
+        unit_ids.add(direct_unit)
+
+    managing_organization = resource.get("managingOrganization")
+    if isinstance(managing_organization, dict):
+        identifier = managing_organization.get("identifier")
+        if isinstance(identifier, dict):
+            value = str(identifier.get("value") or "").strip()
+            if value:
+                unit_ids.add(value)
+
+        reference = str(managing_organization.get("reference") or "").strip()
+        if reference:
+            _, _, ref_id = reference.rpartition("/")
+            if ref_id:
+                unit_ids.add(ref_id.strip())
+
+        display = str(managing_organization.get("display") or "").strip()
+        if display:
+            unit_ids.add(display)
+
+    for extension in resource.get("extension") or []:
+        if not isinstance(extension, dict):
+            continue
+        url = str(extension.get("url") or "").strip().lower()
+        if not url.endswith("/unit-id"):
+            continue
+        for key in ("valueString", "valueCode", "valueId"):
+            value = str(extension.get(key) or "").strip()
+            if value:
+                unit_ids.add(value)
+
+    return unit_ids
+
+
+def _filter_patient_bundle_to_authorized_units(
+    bundle: object,
+    *,
+    authorized_unit_ids: set[str] | None,
+) -> dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return _build_empty_searchset_bundle()
+    if authorized_unit_ids is None:
+        return bundle
+
+    filtered_entries: list[dict[str, Any]] = []
+    seen_resource_ids: set[str] = set()
+    for entry in bundle.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        resource_unit_ids = _extract_patient_resource_unit_ids(resource)
+        if not resource_unit_ids or resource_unit_ids.isdisjoint(authorized_unit_ids):
+            continue
+
+        resource_id = ""
+        if isinstance(resource, dict):
+            resource_id = str(resource.get("id") or "").strip()
+        if resource_id and resource_id in seen_resource_ids:
+            continue
+        if resource_id:
+            seen_resource_ids.add(resource_id)
+        filtered_entries.append(entry)
+
+    filtered_bundle = dict(bundle)
+    filtered_bundle["type"] = str(bundle.get("type") or "searchset")
+    filtered_bundle["entry"] = filtered_entries
+    filtered_bundle["total"] = len(filtered_entries)
+    return filtered_bundle
+
+
+def _merge_patient_search_bundles(bundles: list[dict[str, Any]]) -> dict[str, Any]:
+    merged_bundle = _build_empty_searchset_bundle()
+    merged_entries: list[dict[str, Any]] = []
+    seen_resource_ids: set[str] = set()
+
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        for entry in bundle.get("entry") or []:
+            if not isinstance(entry, dict):
+                continue
+            resource = entry.get("resource")
+            resource_id = ""
+            if isinstance(resource, dict):
+                resource_id = str(resource.get("id") or "").strip()
+            if resource_id and resource_id in seen_resource_ids:
+                continue
+            if resource_id:
+                seen_resource_ids.add(resource_id)
+            merged_entries.append(entry)
+
+    merged_bundle["entry"] = merged_entries
+    merged_bundle["total"] = len(merged_entries)
+    return merged_bundle
+
+
+def _resolve_patient_unit_scope(
+    request: HttpRequest,
+    *,
+    requested_unit: str | None,
+) -> tuple[set[str] | None, Response | None]:
+    claims = _get_claims_from_request(request) or {}
+    if not isinstance(claims, dict):
+        return None, _unit_scope_error_response(
+            detail="Patient scope could not be resolved for this token.",
+            code="patients_unit_scope_unavailable",
+        )
+
+    roles = extract_roles(claims)
+    if roles & {"supervisor", "admin"}:
+        return None, None
+
+    authorized_unit_ids = _extract_authorized_unit_ids(claims)
+    if not authorized_unit_ids:
+        return None, _unit_scope_error_response(
+            detail="Patient scope could not be resolved for this token.",
+            code="patients_unit_scope_unavailable",
+        )
+
+    if requested_unit and requested_unit not in authorized_unit_ids:
+        return None, _unit_scope_error_response(
+            detail="Requested unit is outside your authorized scope.",
+            code="patients_forbidden_unit",
+        )
+
+    return authorized_unit_ids, None
+
+
 def _post_transaction_to_fhir(*args, **kwargs):
     return httpx.post(*args, **kwargs)
 
@@ -1231,6 +1395,27 @@ class PatientView(AuthenticatedAPIView):
 
         params = dict(request.query_params.items())
         patient_id = params.pop("id", None) or params.pop("patientId", None)
+        requested_unit = str(params.get("unit") or params.get("unitId") or "").strip() or None
+        authorized_unit_ids, scope_error = _resolve_patient_unit_scope(
+            request,
+            requested_unit=requested_unit,
+        )
+        if scope_error is not None:
+            return scope_error
+
+        if requested_unit:
+            params["unit"] = requested_unit
+            params.pop("unitId", None)
+        elif authorized_unit_ids is not None and not patient_id:
+            if len(authorized_unit_ids) == 1:
+                params["unit"] = next(iter(authorized_unit_ids))
+                params.pop("unitId", None)
+            else:
+                return _unit_scope_error_response(
+                    detail="Explicit unit is required for multi-unit FHIR patient lookups.",
+                    code="patients_unit_filter_required",
+                )
+
         base_url = f"{FHIR_BASE.rstrip('/')}/Patient"
         url = f"{base_url}/{patient_id}" if patient_id else base_url
 
@@ -1239,6 +1424,10 @@ class PatientView(AuthenticatedAPIView):
         except httpx.HTTPError as exc:
             logger.error("Error al leer Patient desde FHIR (%s): %s", url, exc)
             demo_bundle = _build_demo_patient_bundle(patient_id=patient_id)
+            demo_bundle = _filter_patient_bundle_to_authorized_units(
+                demo_bundle,
+                authorized_unit_ids=authorized_unit_ids,
+            )
             if demo_bundle.get("total", 0) > 0:
                 return Response(demo_bundle, status=200)
             return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
@@ -1250,6 +1439,25 @@ class PatientView(AuthenticatedAPIView):
             payload = resp.json()
         except Exception:
             return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
+
+        if authorized_unit_ids is not None:
+            if isinstance(payload, dict) and payload.get("resourceType") == "Patient":
+                patient_unit_ids = _extract_patient_resource_unit_ids(payload)
+                if not patient_unit_ids:
+                    return _unit_scope_error_response(
+                        detail="Patient unit could not be resolved for this lookup.",
+                        code="patients_unit_scope_unavailable",
+                    )
+                if patient_unit_ids.isdisjoint(authorized_unit_ids):
+                    return _unit_scope_error_response(
+                        detail="Requested patient is outside your authorized scope.",
+                        code="patients_forbidden_unit",
+                    )
+            elif isinstance(payload, dict) and payload.get("resourceType") == "Bundle":
+                payload = _filter_patient_bundle_to_authorized_units(
+                    payload,
+                    authorized_unit_ids=authorized_unit_ids,
+                )
 
         return Response(payload, status=resp.status_code)
 
@@ -1314,9 +1522,17 @@ class PatientsView(AuthenticatedAPIView):
 
     def get_permissions(self):
         if self.request.method == "GET":
-            return [IsAuthenticated(), HasAnyScope.required("patients:read")()]
+            return [
+                IsAuthenticated(),
+                HasAnyRole.required("viewer", "nurse", "supervisor", "admin")(),
+                HasAnyScope.required("patients:read")(),
+            ]
         if self.request.method == "POST":
-            return [IsAuthenticated(), HasAnyScope.required("patients:write")()]
+            return [
+                IsAuthenticated(),
+                HasAnyRole.required("nurse", "supervisor", "admin")(),
+                HasAnyScope.required("patients:write")(),
+            ]
         return [IsAuthenticated()]
 
     @staticmethod
@@ -1381,12 +1597,23 @@ class PatientsView(AuthenticatedAPIView):
         return cleaned, errors
 
     def get(self, request: HttpRequest) -> Response:
+        requested_unit = str(
+            request.query_params.get("unit") or request.query_params.get("unitId") or ""
+        ).strip() or None
+        authorized_unit_ids, scope_error = _resolve_patient_unit_scope(
+            request,
+            requested_unit=requested_unit,
+        )
+        if scope_error is not None:
+            return scope_error
+
         # 1) Prefer local patients if present (pilot autonomous mode)
         try:
             queryset = LocalPatient.objects.all()
-            unit = request.query_params.get("unit")
-            if unit not in (None, "", "all"):
-                queryset = queryset.filter(unit=unit)
+            if requested_unit:
+                queryset = queryset.filter(unit=requested_unit)
+            elif authorized_unit_ids is not None:
+                queryset = queryset.filter(unit__in=sorted(authorized_unit_ids))
 
             if queryset.exists():
                 entries = [{"resource": self._serialize_patient(p)} for p in queryset]
@@ -1405,26 +1632,95 @@ class PatientsView(AuthenticatedAPIView):
             raise
 
         # 2) If no local patients yet, try remote FHIR (legacy behavior)
-        params = dict(request.query_params.items())
         url = f"{FHIR_BASE.rstrip('/')}/Patient"
+        params = dict(request.query_params.items())
+        if requested_unit:
+            params["unit"] = requested_unit
+            params.pop("unitId", None)
+        elif authorized_unit_ids is not None:
+            if len(authorized_unit_ids) == 1:
+                params["unit"] = next(iter(authorized_unit_ids))
+                params.pop("unitId", None)
+            else:
+                remote_bundles: list[dict[str, Any]] = []
+                for unit_id in sorted(authorized_unit_ids):
+                    unit_params = dict(params)
+                    unit_params["unit"] = unit_id
+                    unit_params.pop("unitId", None)
+                    try:
+                        resp = httpx.get(
+                            url,
+                            params=unit_params,
+                            headers=get_fhir_headers(request),
+                            timeout=30,
+                        )
+                    except httpx.HTTPError:
+                        return Response(
+                            _filter_patient_bundle_to_authorized_units(
+                                _build_demo_patient_bundle(patient_id=None),
+                                authorized_unit_ids=authorized_unit_ids,
+                            ),
+                            status=200,
+                        )
+
+                    if resp.status_code >= 400:
+                        return Response(
+                            {"errors": ["FHIR server rejected the request."]},
+                            status=resp.status_code,
+                        )
+
+                    try:
+                        remote_bundles.append(resp.json())
+                    except Exception:
+                        return Response({"errors": ["FHIR server response is not JSON."]}, status=502)
+
+                return Response(
+                    _filter_patient_bundle_to_authorized_units(
+                        _merge_patient_search_bundles(remote_bundles),
+                        authorized_unit_ids=authorized_unit_ids,
+                    ),
+                    status=200,
+                )
         try:
             resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
         except httpx.HTTPError:
             # 3) If FHIR is down, fallback to demo bundle (RoleAclTests expects Bundle)
-            return Response(_build_demo_patient_bundle(patient_id=None), status=200)
+            return Response(
+                _filter_patient_bundle_to_authorized_units(
+                    _build_demo_patient_bundle(patient_id=None),
+                    authorized_unit_ids=authorized_unit_ids,
+                ),
+                status=200,
+            )
 
         if resp.status_code >= 400:
             return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
 
         try:
-            return Response(resp.json(), status=resp.status_code)
+            payload = resp.json()
         except Exception:
             return Response({"errors": ["FHIR server response is not JSON."]}, status=502)
+
+        return Response(
+            _filter_patient_bundle_to_authorized_units(
+                payload,
+                authorized_unit_ids=authorized_unit_ids,
+            ),
+            status=resp.status_code,
+        )
 
     def post(self, request: HttpRequest) -> Response:
         payload, errors = self._validate_payload(request.data)
         if errors:
             return Response({"errors": errors}, status=400)
+
+        requested_unit = str(payload.get("unit") or "").strip() or None
+        _, scope_error = _resolve_patient_unit_scope(
+            request,
+            requested_unit=requested_unit,
+        )
+        if scope_error is not None:
+            return scope_error
 
         try:
             patient = LocalPatient.objects.create(**payload)

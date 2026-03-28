@@ -2,7 +2,7 @@
 
 > Estado del documento
 > - Estado: `implemented`.
-> - Última revisión: 2026-03-26.
+> - Última revisión: 2026-03-28.
 > - Fuente de verdad / evidencia base: `backend/security/*`, `backend/api/views.py`, `backend/api/urls.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
 > - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, firma y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend.
 
@@ -29,6 +29,16 @@
 - `POST /api/ai/refine-sbar`
 - `POST /api/ai/suggest-interventions`
 - `POST /api/upload/audio-to-fhir`
+
+## Endpoints de pacientes con scope y unidad
+- `GET /api/patients` requiere autenticación válida y scope `patients:read`.
+- `POST /api/patients` requiere autenticación válida y scope `patients:write`.
+- `GET /api/patients` además exige un rol permitido (`viewer`, `nurse`, `supervisor`, `admin`); `POST /api/patients` exige rol clínico operativo (`nurse`, `supervisor`, `admin`).
+- Para roles no privilegiados, las consultas y altas de pacientes quedan limitadas a las unidades declaradas en claims (`unitIds` / `units` y aliases soportados).
+- Si una unidad pedida o enviada queda fuera de alcance, la API responde `403` con código estable; no debe degradar a éxito vacío ambiguo fuera del scope explícito.
+- Cuando `GET /api/patients` cae al FHIR remoto y el token no privilegiado cubre varias unidades, el backend hace fan-out por cada unidad autorizada y filtra la respuesta por unidad; no debe responder `200` vacío solo porque el upstream no soporte agregación multi-unit.
+- Si el FHIR remoto falla y se usa el bundle demo como fallback, ese fallback también queda filtrado por unidades autorizadas; no debe reabrir visibilidad lateral por demo data.
+- `GET /api/fhir/patient` mantiene el mismo perímetro deny-first: para roles no privilegiados exige unidad explícita en búsquedas multi-unit y valida que la respuesta quede dentro de las unidades autorizadas; una lectura cuyo `unit` no pueda resolverse responde `403` con código controlado en lugar de exponer datos ambiguos.
 
 ## Credencial requerida para AI/STT/uploads
 - Requieren `Authorization: Bearer <access-token>` válido.

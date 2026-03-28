@@ -20,7 +20,7 @@ import { isPilotFeatureEnabled, usePilotControlContext } from '@/src/config/pilo
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
 import { type PatientListItem } from "@/src/data/mockPatients";
 import type { RootStackParamList } from "@/src/navigation/types";
-import { ensureUnitAccess, hasRole } from "@/src/security/acl";
+import { ensureUnitAccess, hasRole, hasUnitAccess } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
 import { listOfflineQueue, summarizePatientQueueState, type SyncStatus } from "@/src/lib/queue";
@@ -46,6 +46,45 @@ export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
 
 export const ALL_SPECIALTIES_OPTION = "all";
+export function canQuerySelectedUnit(
+  session: ReturnType<typeof useAuth>['session'] | null | undefined,
+  unitId: string,
+) {
+  return unitId === ALL_UNITS_OPTION || hasUnitAccess(session ?? null, unitId);
+}
+
+export function getPatientListAccessState(
+  session: ReturnType<typeof useAuth>['session'] | null | undefined,
+  selectedUnitId: string,
+  {
+    canViewSupervisorDashboard,
+    showIceaPatientRisk,
+    isLoadingPatients,
+  }: {
+    canViewSupervisorDashboard: boolean;
+    showIceaPatientRisk: boolean;
+    isLoadingPatients: boolean;
+  },
+) {
+  const canAccessSelectedUnit = canQuerySelectedUnit(session, selectedUnitId);
+  const canQueryPatients = Boolean(selectedUnitId) && canAccessSelectedUnit;
+  const canQueryIceaPatientRisk =
+    showIceaPatientRisk &&
+    canAccessSelectedUnit &&
+    (selectedUnitId !== ALL_UNITS_OPTION || canViewSupervisorDashboard);
+  const emptyStateMessageKey =
+    !isLoadingPatients && selectedUnitId !== ALL_UNITS_OPTION && !canAccessSelectedUnit
+      ? "patientList.noAccessMessage"
+      : "patientList.emptyList";
+
+  return {
+    canAccessSelectedUnit,
+    canQueryPatients,
+    canQueryIceaPatientRisk,
+    emptyStateMessageKey,
+  };
+}
+
 export function filterPatients(
   patients: PatientListItem[],
   unitsById: Record<string, Unit>,
@@ -206,6 +245,7 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 export default function PatientList({ navigation }: Props) {
   const { colors } = useThemeTokens();
   const { i18n } = useTranslation();
+  const { session } = useAuth();
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriorityOverride, setSortByPriorityOverride] = useState<boolean | null>(null);
@@ -239,6 +279,11 @@ export default function PatientList({ navigation }: Props) {
       return;
     }
 
+    if (!canQuerySelectedUnit(session, selectedUnitId)) {
+      setPatients([]);
+      return;
+    }
+
     const requestId = ++loadPatientsRequestRef.current;
     setIsLoadingPatients(true);
     try {
@@ -265,7 +310,7 @@ export default function PatientList({ navigation }: Props) {
         setIsLoadingPatients(false);
       }
     }
-  }, [selectedUnitId]);
+  }, [selectedUnitId, session]);
 
   const resetNewPatientForm = useCallback(() => {
     setNewPatientForm({
@@ -480,19 +525,24 @@ export default function PatientList({ navigation }: Props) {
   );
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
-  const { session } = useAuth();
   const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
+  const accessState = getPatientListAccessState(session, selectedUnitId, {
+    canViewSupervisorDashboard,
+    showIceaPatientRisk:
+      isOn('ENABLE_ICEA_PATIENT_RISK') &&
+      isPilotFeatureEnabled('icea_patient_risk', {
+        unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
+        roles: session?.roles ?? [],
+      }),
+    isLoadingPatients,
+  });
+  const canAccessSelectedUnit = accessState.canAccessSelectedUnit;
+  const emptyStateMessage = t(accessState.emptyStateMessageKey);
   usePilotControlContext({
     unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
     roles: session?.roles ?? [],
   });
-  const showIceaPatientRisk =
-    isOn('ENABLE_ICEA_PATIENT_RISK') &&
-    isPilotFeatureEnabled('icea_patient_risk', {
-      unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
-      roles: session?.roles ?? [],
-    });
-  const canQueryIceaPatientRisk = showIceaPatientRisk && (selectedUnitId !== ALL_UNITS_OPTION || canViewSupervisorDashboard);
+  const canQueryIceaPatientRisk = accessState.canQueryIceaPatientRisk;
   const { data: iceaPatientRiskData } = useIceaPatientRiskSummaries(canQueryIceaPatientRisk, {
     unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
     limit: Math.max(patients.length, 20),
@@ -664,6 +714,7 @@ export default function PatientList({ navigation }: Props) {
       selectedSpecialtyId,
       selectedUnitId,
       actionablePriorityCount,
+      emptyStateMessage,
       effectiveSortByPriority,
       priorityCounts.critical,
       priorityCounts.high,
@@ -685,7 +736,7 @@ export default function PatientList({ navigation }: Props) {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {isLoadingPatients ? "Cargando pacientes…" : t("patientList.emptyList")}
+              {isLoadingPatients ? "Cargando pacientes…" : emptyStateMessage}
             </Text>
           </View>
         }
