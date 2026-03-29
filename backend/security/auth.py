@@ -27,6 +27,12 @@ def _auth0_audience() -> str:
     return str(getattr(settings, "AUTH0_AUDIENCE", "") or "")
 
 
+def _local_auth_bypass_allowed() -> bool:
+    return bool(getattr(settings, "HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED", False)) and not bool(
+        getattr(settings, "AUTH0_CONFIGURED", False)
+    )
+
+
 def _jwks_url() -> str:
     return f"{_auth0_issuer_base_url()}/.well-known/jwks.json"
 
@@ -136,10 +142,9 @@ class Auth0JWTAuthentication(BaseAuthentication):
         issuer_base_url = _auth0_issuer_base_url()
         audience = _auth0_audience()
 
-        # Local-only escape hatch: tests bypass this authenticator upstream and
-        # DEBUG preserves the explicit dev contract without opening serious envs.
+        # Local-only escape hatch: serious envs must fail closed when Auth0 is missing.
         if not issuer_base_url or not audience:
-            if settings.DEBUG:
+            if _local_auth_bypass_allowed():
                 return None
             raise AuthenticationFailed(
                 "Auth0 not configured. Set AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE."

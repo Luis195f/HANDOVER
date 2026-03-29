@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.test import APIClient, APIRequestFactory
 
 from backend.api.views import AuthenticatedAPIView
-from backend.security.auth import Auth0User
+from backend.security.auth import Auth0JWTAuthentication, Auth0User
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
 
@@ -42,7 +42,32 @@ class AuthEndpointTests(TestCase):
         self.assertEqual(len(authenticators), 1)
         self.assertIsInstance(authenticators[0], view.authentication_classes[0])
 
-    @override_settings(DEBUG=True, AUTH0_CONFIGURED=False)
+    @override_settings(
+        DEBUG=True,
+        AUTH0_CONFIGURED=False,
+        HANDOVER_DEPLOYMENT_MODE="pilot",
+        HANDOVER_DEPLOYMENT_MODE_EXPLICIT=True,
+        HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED=False,
+    )
+    def test_authenticated_api_view_debug_alone_does_not_open_api_outside_explicit_local_mode(self):
+        with patch.object(AuthenticatedAPIView, "_running_tests", return_value=False):
+            view = self._base_view()
+
+            permissions = view.get_permissions()
+            authenticators = view.get_authenticators()
+
+        self.assertEqual(len(permissions), 1)
+        self.assertIsInstance(permissions[0], IsAuthenticated)
+        self.assertEqual(len(authenticators), 1)
+        self.assertIsInstance(authenticators[0], view.authentication_classes[0])
+
+    @override_settings(
+        DEBUG=True,
+        AUTH0_CONFIGURED=False,
+        HANDOVER_DEPLOYMENT_MODE="development",
+        HANDOVER_DEPLOYMENT_MODE_EXPLICIT=True,
+        HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED=True,
+    )
     def test_authenticated_api_view_allows_explicit_local_debug_without_auth0(self):
         with patch.object(AuthenticatedAPIView, "_running_tests", return_value=False):
             view = self._base_view()
@@ -78,6 +103,33 @@ class AuthEndpointTests(TestCase):
         self.assertIsInstance(permissions[0], IsAuthenticated)
         self.assertEqual(len(authenticators), 1)
         self.assertIsInstance(authenticators[0], view.authentication_classes[0])
+
+    @override_settings(
+        DEBUG=True,
+        AUTH0_CONFIGURED=False,
+        AUTH0_ISSUER_BASE_URL="",
+        AUTH0_AUDIENCE="",
+        HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED=False,
+    )
+    def test_authenticator_rejects_missing_auth0_when_debug_is_not_explicit_local_mode(self):
+        request = self.factory.get("/api/protected", HTTP_AUTHORIZATION="Bearer local-token")
+
+        with self.assertRaises(AuthenticationFailed) as exc:
+            Auth0JWTAuthentication().authenticate(request)
+
+        self.assertIn("Auth0 not configured", str(exc.exception))
+
+    @override_settings(
+        DEBUG=True,
+        AUTH0_CONFIGURED=False,
+        AUTH0_ISSUER_BASE_URL="",
+        AUTH0_AUDIENCE="",
+        HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED=True,
+    )
+    def test_authenticator_allows_only_explicit_local_bypass_when_auth0_missing(self):
+        request = self.factory.get("/api/protected", HTTP_AUTHORIZATION="Bearer local-token")
+
+        self.assertIsNone(Auth0JWTAuthentication().authenticate(request))
 
     @override_settings(DEBUG=False)
     @patch(

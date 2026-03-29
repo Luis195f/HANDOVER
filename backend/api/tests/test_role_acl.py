@@ -332,6 +332,71 @@ class RoleAclTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_patients_endpoint_accepts_scope_claim_without_permissions_array(self):
+        Patient.objects.create(
+            first_name="Scope",
+            last_name="Only",
+            identifier="pat-scope-only",
+            unit="icu-a",
+            service="critical-care",
+            room="A-102",
+            active=True,
+        )
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-scope-only",
+                "roles": ["nurse"],
+                "scope": "patients:read",
+                "unitIds": ["icu-a"],
+            }
+        )
+        url = reverse("patients")
+
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("total"), 1)
+
+    def test_patients_endpoint_accepts_scp_claim_without_permissions_array(self):
+        Patient.objects.create(
+            first_name="Scp",
+            last_name="Only",
+            identifier="pat-scp-only",
+            unit="icu-a",
+            service="critical-care",
+            room="A-103",
+            active=True,
+        )
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-scp-only",
+                "roles": ["nurse"],
+                "scp": ["patients:read"],
+                "unitIds": ["icu-a"],
+            }
+        )
+        url = reverse("patients")
+
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("total"), 1)
+
+    def test_patients_endpoint_scope_claim_does_not_relax_role_checks(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|service-scope-only",
+                "roles": ["service_etl"],
+                "scope": "patients:read",
+                "unitIds": ["icu-a"],
+            }
+        )
+        url = reverse("patients")
+
+        response = client.get(url)
+
+        self.assertEqual(response.status_code, 403)
+
     def test_patient_search_requires_explicit_unit_for_multi_unit_token(self):
         client = _auth_client(
             {
