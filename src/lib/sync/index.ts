@@ -88,6 +88,34 @@ type FlushResult = { processed: number; remaining: number };
 
 // Global guard to coalesce concurrent flushes (prevents races).
 let _currentFlush: Promise<FlushResult> | null = null;
+const RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS = 5 * 60_000;
+const recentlySyncedQueueItems = new Map<string, number>();
+
+function pruneRecentlySyncedQueueItems(now = Date.now()): void {
+  for (const [id, expiresAt] of recentlySyncedQueueItems.entries()) {
+    if (expiresAt <= now) {
+      recentlySyncedQueueItems.delete(id);
+    }
+  }
+}
+
+function rememberRecentlySyncedQueueItem(id: string): void {
+  const now = Date.now();
+  pruneRecentlySyncedQueueItems(now);
+  recentlySyncedQueueItems.set(id, now + RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS);
+}
+
+export function consumeRecentlySyncedQueueItem(id: string): boolean {
+  const now = Date.now();
+  pruneRecentlySyncedQueueItems(now);
+  const expiresAt = recentlySyncedQueueItems.get(id);
+  if (!expiresAt || expiresAt <= now) {
+    recentlySyncedQueueItems.delete(id);
+    return false;
+  }
+  recentlySyncedQueueItems.delete(id);
+  return true;
+}
 
 // --- Main API: send immediately or enqueue when offline or on error. ---
 export async function syncBundleOrEnqueue(
@@ -197,6 +225,7 @@ function createFlusher(opts: SyncOpts) {
         });
         if (resp.ok || isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
           processed++;
+          rememberRecentlySyncedQueueItem(tx.id);
         }
         return { ok: resp.ok, status: resp.status };
       } catch (err: unknown) {

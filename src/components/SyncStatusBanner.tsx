@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getSyncSnapshot, subscribeSyncStatus, type SyncSnapshot } from '@/src/lib/sync';
+import { getQueueSize } from '@/src/lib/sync/index';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { useThemeTokens } from '@/src/theme';
 import { useTranslation } from '@/src/i18n';
@@ -11,13 +12,15 @@ type Props = {
   onOpenSyncCenter?: () => void;
 };
 
+const SYNC_BANNER_QUEUE_REFRESH_MS = 3_000;
+
 // Params i18n: solo string | number | undefined (no unknown)
 type TranslateFn = (key: string, params?: Record<string, string | number | undefined>) => string;
 
-function resolveStatusMessage(snapshot: SyncSnapshot, t: TranslateFn, now: number) {
+function resolveStatusMessage(snapshot: SyncSnapshot, pendingCount: number, t: TranslateFn, now: number) {
   switch (snapshot.status) {
     case 'running':
-      return t('sync.runningMessage', { count: snapshot.pendingCount });
+      return t('sync.runningMessage', { count: pendingCount });
 
     case 'backoff': {
       const nextRetryAt = snapshot.nextRetryAt ?? now;
@@ -30,6 +33,9 @@ function resolveStatusMessage(snapshot: SyncSnapshot, t: TranslateFn, now: numbe
 
     case 'idle':
     default:
+      if (pendingCount > 0) {
+        return t('sync.runningMessage', { count: pendingCount });
+      }
       return t('sync.idleMessage');
   }
 }
@@ -55,9 +61,30 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
   const tt = t as unknown as TranslateFn;
 
   const [snapshot, setSnapshot] = React.useState(getSyncSnapshot());
+  const [canonicalPendingCount, setCanonicalPendingCount] = React.useState(0);
   const [now, setNow] = React.useState(Date.now());
 
   React.useEffect(() => subscribeSyncStatus(setSnapshot), []);
+
+  React.useEffect(() => {
+    let active = true;
+
+    const refreshQueueCount = async () => {
+      const count = await getQueueSize().catch(() => -1);
+      if (!active) return;
+      setCanonicalPendingCount(count < 0 ? 0 : count);
+    };
+
+    void refreshQueueCount();
+    const interval = setInterval(() => {
+      void refreshQueueCount();
+    }, SYNC_BANNER_QUEUE_REFRESH_MS);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (snapshot.status !== 'backoff') return;
@@ -65,10 +92,11 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
     return () => clearInterval(interval);
   }, [snapshot.status]);
 
-  const shouldShow = snapshot.status !== 'idle' || snapshot.pendingCount > 0 || !!snapshot.lastError;
+  const effectivePendingCount = Math.max(snapshot.pendingCount, canonicalPendingCount);
+  const shouldShow = snapshot.status !== 'idle' || effectivePendingCount > 0 || !!snapshot.lastError;
   if (!shouldShow) return null;
 
-  const message = resolveStatusMessage(snapshot, tt, now);
+  const message = resolveStatusMessage(snapshot, effectivePendingCount, tt, now);
 
   const errorText = toErrorText(snapshot.lastError);
   const hasError = errorText.length > 0;
@@ -113,9 +141,9 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
           </Text>
         ) : null}
 
-        {snapshot.pendingCount > 0 ? (
+        {effectivePendingCount > 0 ? (
           <Text style={[styles.detail, { color: colors.text }]}>
-            {tt('sync.pendingCountMessage', { count: snapshot.pendingCount })}
+            {tt('sync.pendingCountMessage', { count: effectivePendingCount })}
           </Text>
         ) : null}
       </View>

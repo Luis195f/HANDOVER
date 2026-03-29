@@ -88,6 +88,7 @@ describe('legacy sync runtime auth seam', () => {
     postBundleMock.mockResolvedValue({ ok: true, status: 200 });
     runQueueFlushMock.mockImplementation(async (sender: (tx: unknown) => Promise<unknown>) => {
       await sender({
+        id: 'queued-1',
         key: 'queued-1',
         tries: 0,
         payload: {
@@ -109,5 +110,27 @@ describe('legacy sync runtime auth seam', () => {
       token: 'session-token',
       headers: { 'Idempotency-Key': 'idem-1' },
     });
+  });
+
+  it('does not record success evidence when a queue item has no bundle payload', async () => {
+    readQueueMock.mockResolvedValue([]);
+    runQueueFlushMock.mockImplementation(async (sender: (tx: unknown) => Promise<unknown>) => {
+      await sender({
+        id: 'queued-empty',
+        key: 'queued-empty',
+        tries: 0,
+        payload: {},
+      });
+    });
+
+    const { consumeRecentlySyncedQueueItem, flushQueue } = await loadSyncIndex();
+    const result = await flushQueue({
+      fhirBaseUrl: 'https://fhir.test/api',
+      getToken: async () => 'session-token',
+    });
+
+    expect(result).toEqual({ processed: 1, remaining: 0 });
+    expect(consumeRecentlySyncedQueueItem('queued-empty')).toBe(false);
+    expect(postBundleMock).not.toHaveBeenCalled();
   });
 });
