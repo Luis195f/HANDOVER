@@ -19,6 +19,8 @@ Principios aplicados:
 5. La entrega a ICEA+ se intenta de forma desacoplada y best-effort desde `backend/api/icea_bridge_service.py`.
 6. El scheduler del bridge tiene una sola fuente de verdad: el service programa entregas nuevas al crear el request y evita reprogramar una request ya `queued`; los retries admin reutilizan el mismo helper con `force=true`.
 7. HANDOVER persiste el ultimo estado visible (`queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`) y un resumen minimo del score si ICEA+ lo devuelve.
+8. Los fallos retryables del submit del bridge se reintentan de forma acotada y con backoff; si se agotan, la request termina en `failed` con el ultimo error persistido.
+9. Cualquier `accepted` o `pending` que no alcance resolucion dentro de la ventana configurada expira a `stale`, de modo que no queda un pending indefinido.
 
 ## Payload analitico v1
 
@@ -169,9 +171,16 @@ Modelo principal: `backend/api/models.py::IceaBridgeRequest`
 Campos visibles y auditables:
 - linkage: `request_id`, `bundle_id`, `patient_id`, `unit_id`, `encounter_id`, `episode_id`;
 - trazabilidad: `bridge_request_id`, `idempotency_key`, `payload_hash`, `payload_json`;
-- estado: `status`, `attempts`, `last_error`, `last_http_status`, `sent_at`, `received_at`;
+- estado: `status`, `attempts`, `last_error`, `last_http_status`, `sent_at`, `received_at`, `next_retry_at`;
 - resultado minimo: `provisional`, `insufficient_evidence`, `contract_version`, `formula_version`, `score_summary_json`, `warnings_json`, `remote_refs_json`; cuando cambia el payload se resetean `formula_version`, `score_summary_json`, `remote_refs_json`, `sent_at`, `received_at`, `attempts`, `last_error` y `last_http_status` para iniciar una corrida limpia;
-- trazabilidad explicable expuesta por API: `bridgeRequestId`, `requestId`, `payloadHash`, `attempts` y `remoteRefs`.
+- trazabilidad explicable expuesta por API: `bridgeRequestId`, `requestId`, `payloadHash`, `attempts`, `remoteRefs`, `lastAttemptAt`, `nextRetryAt`, `retryScheduled` y `terminal`.
+
+Politica operativa minima:
+- timeout de red del bridge: `ICEA_BRIDGE_TIMEOUT_MS` (si no se define, cae en `ICEA_API_TIMEOUT_MS`);
+- retry de submit: `ICEA_BRIDGE_RETRY_MAX` con backoff exponencial entre `ICEA_BRIDGE_RETRY_BASE_SECONDS` y `ICEA_BRIDGE_RETRY_MAX_DELAY_SECONDS`;
+- estados HTTP retryables: `ICEA_BRIDGE_RETRYABLE_STATUS_CODES` o el set por defecto `408,409,425,429,500,502,503,504`;
+- terminalidad por limbo remoto: `ICEA_BRIDGE_STALE_AFTER_SECONDS` marca `accepted/pending` como `stale` si no hubo resolucion observable.
+- si un proceso cae antes del timer en memoria, el seam materializa de forma durable cualquier `sent/accepted/pending` vencido a `stale` antes de leer, filtrar o accionar requests del bridge; el timer queda solo como acelerador best-effort.
 
 ## Endpoints backend
 
@@ -196,6 +205,11 @@ Backend:
 - `ENABLE_ICEA_IMMEDIATE_SCORING`
 - `ENABLE_ICEA_ENRICHED_SCORING` (por defecto `false`; solo se activa explicitamente)
 - `ICEA_BRIDGE_MODEL_ID` (UUID obligatorio para score real; si falta o es invalido HANDOVER deja error explicito y no intenta entrega ambigua)
+- `ICEA_BRIDGE_TIMEOUT_MS` (timeout explicito del submit y refresh del bridge; por defecto hereda `ICEA_API_TIMEOUT_MS`)
+- `ICEA_BRIDGE_RETRY_MAX`
+- `ICEA_BRIDGE_RETRY_BASE_SECONDS`
+- `ICEA_BRIDGE_RETRY_MAX_DELAY_SECONDS`
+- `ICEA_BRIDGE_RETRYABLE_STATUS_CODES`
 - `ICEA_BRIDGE_SCORE_PATH` (por defecto `'/api/v1/icea-plus/score/'`, alineado con el upstream real)
 - `ICEA_BRIDGE_STATUS_PATH` (opcional; por defecto vacio porque el upstream ICEA+ actual no expone un endpoint real de status para score)
 - `ICEA_BRIDGE_STALE_AFTER_SECONDS`

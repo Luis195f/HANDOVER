@@ -13,6 +13,7 @@ from rest_framework.test import APIClient
 from backend.api.clinical_storage import ENCRYPTED_BUNDLE_MARKER
 
 from backend.api.icea_bridge_service import (
+    REMOTE_STATUS_TIMEOUT_ERROR,
     STORED_BUNDLE_UNAVAILABLE_ERROR,
     _apply_remote_payload,
     _build_icea_plus_score_row,
@@ -20,6 +21,8 @@ from backend.api.icea_bridge_service import (
     _normalize_remote_payload,
     _persist_bridge_request_update,
     attempt_icea_bridge_delivery,
+    deliver_icea_bridge_request,
+    expire_icea_bridge_request,
     enqueue_icea_bridge_request_for_bundle_record,
     load_icea_bridge_settings,
     refresh_icea_bridge_request,
@@ -600,6 +603,268 @@ class IceaBridgeServiceTests(TestCase):
         {
             'ENABLE_ICEA_BRIDGE': 'true',
             'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'ICEA_BRIDGE_RETRY_MAX': '3',
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.schedule_icea_bridge_delivery')
+    @patch('backend.api.icea_bridge_service.httpx.request', side_effect=httpx.ConnectTimeout('icea down'))
+    def test_retryable_timeout_requeues_with_traceability_and_same_idempotency_key(self, _mock_request, mock_schedule):
+        payload = build_icea_bridge_payload(
+            build_bridge_bundle(),
+            request_id='req-bridge-001',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            unit_id='icu-a',
+        )
+        payload_hash = compute_payload_hash(payload)
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-001:immediate_provisional',
+            request_id='req-bridge-001',
+            bundle_id='bundle-bridge-001',
+            patient_id='pat-bridge-001',
+            unit_id='icu-a',
+            episode_id='enc-bridge-001',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key=f'req-bridge-001:{IceaBridgeRequest.SCORING_MODE_IMMEDIATE}:{payload_hash[:16]}',
+            payload_hash=payload_hash,
+            payload_json=payload,
+            status=IceaBridgeRequest.STATUS_QUEUED,
+        )
+
+        original_idempotency_key = bridge_request.idempotency_key
+        result = attempt_icea_bridge_delivery(bridge_request)
+        bridge_request.refresh_from_db()
+        serialized = serialize_bridge_request(bridge_request)
+
+        self.assertEqual(result.status, IceaBridgeRequest.STATUS_QUEUED)
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_QUEUED)
+        self.assertEqual(bridge_request.attempts, 1)
+        self.assertEqual(bridge_request.last_error, 'ConnectTimeout')
+        self.assertEqual(bridge_request.idempotency_key, original_idempotency_key)
+        self.assertIsNotNone(bridge_request.next_retry_at)
+        self.assertFalse(serialized['terminal'])
+        self.assertTrue(serialized['retryScheduled'])
+        self.assertEqual(serialized['requestId'], self.record.request_id)
+        self.assertEqual(serialized['idempotencyKey'], original_idempotency_key)
+        mock_schedule.assert_called_once()
+        self.assertEqual(mock_schedule.call_args.args[0], bridge_request.id)
+        self.assertIn('delay_seconds', mock_schedule.call_args.kwargs)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'ICEA_BRIDGE_RETRY_MAX': '2',
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.httpx.request', side_effect=httpx.ConnectTimeout('icea down'))
+    def test_timeout_retries_are_bounded_and_end_in_failed_terminal(self, mock_request):
+        bridge_request = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        bridge_request.refresh_from_db()
+        serialized = serialize_bridge_request(bridge_request)
+
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_FAILED)
+        self.assertEqual(bridge_request.attempts, 2)
+        self.assertEqual(bridge_request.last_error, 'ConnectTimeout')
+        self.assertIsNone(bridge_request.next_retry_at)
+        self.assertTrue(serialized['terminal'])
+        self.assertFalse(serialized['retryScheduled'])
+        self.assertEqual(serialized['lastError'], 'ConnectTimeout')
+        self.assertEqual(mock_request.call_count, 2)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'ICEA_BRIDGE_RETRY_MAX': '2',
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    def test_retryable_remote_error_exhausts_to_failed_terminal(self, mock_request):
+        remote = Mock()
+        remote.status_code = 503
+        remote.text = '{"detail":"temporarily unavailable"}'
+        remote.headers = {'Content-Type': 'application/json'}
+        remote.json.return_value = {'detail': 'temporarily unavailable'}
+        mock_request.return_value = remote
+
+        bridge_request = enqueue_icea_bridge_request_for_bundle_record(
+            record=self.record,
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+        )
+        bridge_request.refresh_from_db()
+
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_FAILED)
+        self.assertEqual(bridge_request.attempts, 2)
+        self.assertEqual(bridge_request.last_http_status, 503)
+        self.assertEqual(bridge_request.last_error, 'temporarily unavailable')
+        self.assertIsNone(bridge_request.next_retry_at)
+        self.assertTrue(serialize_bridge_request(bridge_request)['terminal'])
+        self.assertEqual(mock_request.call_count, 2)
+
+    def test_expire_accepted_request_marks_stale_terminal_without_overwriting_traceability(self):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-expire:immediate_provisional',
+            request_id='req-bridge-expire',
+            bundle_id='bundle-bridge-expire',
+            patient_id='pat-bridge-expire',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-expire:immediate_provisional:expire',
+            payload_hash='expire' * 16,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_ACCEPTED,
+            attempts=1,
+            last_http_status=202,
+            sent_at=timezone.now() - datetime.timedelta(minutes=5),
+        )
+
+        result = expire_icea_bridge_request(
+            bridge_request.id,
+            expected_payload_hash=bridge_request.payload_hash,
+            expected_idempotency_key=bridge_request.idempotency_key,
+        )
+        bridge_request.refresh_from_db()
+        serialized = serialize_bridge_request(bridge_request)
+
+        self.assertEqual(result.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(bridge_request.last_error, REMOTE_STATUS_TIMEOUT_ERROR)
+        self.assertEqual(bridge_request.last_http_status, 202)
+        self.assertTrue(serialized['terminal'])
+        self.assertEqual(serialized['nextRetryAt'], None)
+
+    def test_serialize_bridge_request_lazily_expires_overdue_pending_request(self):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-lazy-stale:immediate_provisional',
+            request_id='req-bridge-lazy-stale',
+            bundle_id='bundle-bridge-lazy-stale',
+            patient_id='pat-bridge-lazy-stale',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-lazy-stale:immediate_provisional:lazy',
+            payload_hash='lazy' * 16,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_PENDING,
+            attempts=1,
+            last_http_status=202,
+        )
+        IceaBridgeRequest.objects.filter(id=bridge_request.id).update(
+            updated_at=timezone.now() - datetime.timedelta(hours=1),
+        )
+        bridge_request.refresh_from_db()
+
+        serialized = serialize_bridge_request(bridge_request)
+        bridge_request.refresh_from_db()
+
+        self.assertEqual(serialized['status'], IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(serialized['lastError'], REMOTE_STATUS_TIMEOUT_ERROR)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'ICEA_BRIDGE_STATUS_PATH': '/api/v1/icea-plus/status/',
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    def test_refresh_does_not_reopen_overdue_pending_request(self, mock_request):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-refresh-due:immediate_provisional',
+            request_id='req-bridge-refresh-due',
+            bundle_id='bundle-bridge-refresh-due',
+            patient_id='pat-bridge-refresh-due',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-refresh-due:immediate_provisional:due',
+            payload_hash='due' * 16,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_PENDING,
+            attempts=1,
+            last_http_status=202,
+        )
+        IceaBridgeRequest.objects.filter(id=bridge_request.id).update(
+            updated_at=timezone.now() - datetime.timedelta(minutes=10),
+        )
+        bridge_request.refresh_from_db()
+
+        result = refresh_icea_bridge_request(bridge_request)
+        bridge_request.refresh_from_db()
+
+        self.assertEqual(result.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(result.detail, REMOTE_STATUS_TIMEOUT_ERROR)
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(bridge_request.last_error, REMOTE_STATUS_TIMEOUT_ERROR)
+        mock_request.assert_not_called()
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
+        },
+        clear=False,
+    )
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    def test_deliver_does_not_keep_overdue_accepted_request_alive(self, mock_request):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-deliver-due:immediate_provisional',
+            request_id='req-bridge-deliver-due',
+            bundle_id='bundle-bridge-deliver-due',
+            patient_id='pat-bridge-deliver-due',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-deliver-due:immediate_provisional:due',
+            payload_hash='dues' * 16,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_ACCEPTED,
+            attempts=1,
+            last_http_status=202,
+        )
+        IceaBridgeRequest.objects.filter(id=bridge_request.id).update(
+            updated_at=timezone.now() - datetime.timedelta(minutes=10),
+        )
+
+        result = deliver_icea_bridge_request(bridge_request.id)
+        bridge_request.refresh_from_db()
+
+        self.assertEqual(result.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(bridge_request.last_error, REMOTE_STATUS_TIMEOUT_ERROR)
+        mock_request.assert_not_called()
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
             'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
         },
         clear=False,
@@ -1111,6 +1376,29 @@ class IceaBridgeApiTests(TestCase):
         os.environ,
         {
             'ENABLE_ICEA_BRIDGE': 'true',
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
+        },
+        clear=False,
+    )
+    def test_query_view_materializes_overdue_pending_before_status_filtering(self):
+        self._auth(roles=['supervisor'])
+        IceaBridgeRequest.objects.filter(id=self.bridge_request.id).update(
+            status=IceaBridgeRequest.STATUS_PENDING,
+            updated_at=timezone.now() - datetime.timedelta(minutes=10),
+        )
+
+        response = self.client.get(self.status_query_url, {'unitId': 'icu-a', 'status': 'pending'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 0)
+        self.bridge_request.refresh_from_db()
+        self.assertEqual(self.bridge_request.status, IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(self.bridge_request.last_error, REMOTE_STATUS_TIMEOUT_ERROR)
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
             'ICEA_API_BASE_URL': 'https://icea.example',
             'ICEA_API_BEARER_TOKEN': 'svc-token',
             'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
@@ -1129,6 +1417,27 @@ class IceaBridgeApiTests(TestCase):
         self.assertTrue(response.json()['localStatusIsAuthoritative'])
         self.assertEqual(response.json()['remoteError']['code'], 'icea_bridge_status_not_configured')
         self.assertEqual(response.json()['bridgeRequest']['status'], 'pending')
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
+        },
+        clear=False,
+    )
+    def test_detail_view_materializes_overdue_pending_as_stale(self):
+        self._auth(roles=['nurse'])
+        IceaBridgeRequest.objects.filter(id=self.bridge_request.id).update(
+            status=IceaBridgeRequest.STATUS_PENDING,
+            updated_at=timezone.now() - datetime.timedelta(minutes=10),
+        )
+
+        response = self.client.get(self.status_detail_url, {'refresh': 'false'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['bridgeRequest']['status'], IceaBridgeRequest.STATUS_STALE)
+        self.assertEqual(response.json()['bridgeRequest']['lastError'], REMOTE_STATUS_TIMEOUT_ERROR)
 
     def test_retry_returns_400_for_invalid_scoring_mode(self):
         self._auth(roles=['admin'])
@@ -1597,6 +1906,31 @@ class IceaPatientRiskApiTests(TestCase):
         summary = response.json()['results'][0]
         self.assertTrue(summary['stale'])
         self.assertIn('desactualizado', summary['message'].lower())
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+            'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
+        },
+        clear=False,
+    )
+    def test_patient_risk_treats_stale_without_score_as_failed_support(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+        IceaBridgeRequest.objects.filter(id=self.bridge_request.id).update(
+            status=IceaBridgeRequest.STATUS_STALE,
+            score_summary_json=None,
+            updated_at=timezone.now() - datetime.timedelta(minutes=10),
+        )
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()['results'][0]
+        self.assertEqual(summary['clinicalStatus'], 'failed')
+        self.assertTrue(summary['stale'])
+        self.assertIn('no se pudo recuperar', summary['message'].lower())
 
     @patch.dict(
         os.environ,

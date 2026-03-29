@@ -266,6 +266,7 @@ class IceaBridgeRequest(models.Model):
     attempts = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True)
     last_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     received_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -277,6 +278,7 @@ class IceaBridgeRequest(models.Model):
             models.Index(fields=["unit_id", "updated_at"], name="idx_icea_bridge_unit_upd"),
             models.Index(fields=["bundle_id", "updated_at"], name="idx_icea_bridge_bundle_upd"),
             models.Index(fields=["status", "scoring_mode"], name="idx_icea_bridge_status_mode"),
+            models.Index(fields=["status", "next_retry_at"], name="idx_icea_bridge_retry"),
         ]
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
