@@ -980,6 +980,7 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
   const payload = {
     bundle: maybeSignedBundle,
     meta: {
+      hash: key,
       patientId,
       unitId: meta.unitId,
       specialtyId: meta.specialtyId,
@@ -990,7 +991,17 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
     },
     enqueuedAt: new Date().toISOString(),
   };
-  return enqueueTx({ key, payload, type: "handover-bundle" });
+
+  // Canonical handover write path: UI, sync.ts and sync/index.ts must observe the
+  // same secure offline queue instead of splitting across tx_queue and
+  // handover_offline_queue.
+  return enqueueOfflineQueueItem({
+    id: key,
+    patientId,
+    payload,
+    payloadType: "handover-bundle",
+    syncStatus: "pending",
+  });
 }
 
 // Tests only: returns raw rows from the transaction queue.

@@ -114,10 +114,6 @@ function parseEnvelope(payload: unknown): StoredPayloadEnvelope {
   }
   const input = payload as Record<string, unknown>;
 
-  if ('bundle' in input && input.bundle && typeof input.bundle === 'object') {
-    return parseEnvelope(input.bundle);
-  }
-
   if ('payload' in input) {
     return {
       payload: input.payload,
@@ -129,6 +125,14 @@ function parseEnvelope(payload: unknown): StoredPayloadEnvelope {
         ? (input.validationErrors as ValidationErrorDetail[]).filter(isValidationError)
         : undefined,
     };
+  }
+
+  if ('bundle' in input && input.bundle && typeof input.bundle === 'object') {
+    const nested = input.bundle as Record<string, unknown>;
+    if ('payload' in nested) {
+      return parseEnvelope(nested);
+    }
+    return { payload: input };
   }
 
   return { payload };
