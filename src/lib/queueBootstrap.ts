@@ -1,6 +1,15 @@
 import { configureFHIRClient, postBundle } from './fhir-client';
 import { ENV, FHIR_BASE_URL } from '../config/env';
 import { startSyncDaemon, flushQueue, type SyncOpts } from './sync/index';
+import { ensureFreshAccessToken } from '../security/auth';
+
+async function getLegacyBootstrapSessionToken(): Promise<string | null> {
+  try {
+    return (await ensureFreshAccessToken('fhir')) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export async function postTransactionBundle(
   bundle: any,
@@ -25,7 +34,7 @@ export type QueueSyncOptions = {
 export function installQueueSync(options: QueueSyncOptions = {}) {
   const syncOpts: SyncOpts = {
     fhirBaseUrl: options.fhirBaseOverride ?? ENV.FHIR_BASE_URL ?? FHIR_BASE_URL,
-    getToken: async () => options.token ?? null,
+    getToken: getLegacyBootstrapSessionToken,
     backoff: {
       retries: options.maxTries ?? 5,
       minMs: options.intervalMs ?? 1500,
@@ -39,7 +48,7 @@ export function installQueueSync(options: QueueSyncOptions = {}) {
 export async function flushNow() {
   const opts: SyncOpts = {
     fhirBaseUrl: ENV.FHIR_BASE_URL ?? FHIR_BASE_URL,
-    getToken: async () => null,
+    getToken: getLegacyBootstrapSessionToken,
   };
   await flushQueue(opts);
 }

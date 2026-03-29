@@ -122,6 +122,7 @@ async function sendWithRetry(bundle: unknown, idemKey: string, opts: SyncOpts) {
     async (attempt) => {
       mark('sync.http.request', { attempt, idemKey });
       const resp = await postBundle(bundle, {
+        token: await resolveSessionToken(opts),
         headers: { 'Idempotency-Key': idemKey },
       });
       mark('sync.http.response', { status: resp.status, attempt });
@@ -151,6 +152,15 @@ async function hasInternet(): Promise<boolean> {
   return !!(s.isConnected && (s.isInternetReachable ?? true));
 }
 
+async function resolveSessionToken(opts: SyncOpts): Promise<string | undefined> {
+  try {
+    const token = await opts.getToken();
+    return typeof token === 'string' && token.trim().length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Builds a reusable flush function for both the daemon and manual actions. */
 function createFlusher(opts: SyncOpts) {
   configureFHIRClient({
@@ -160,6 +170,11 @@ function createFlusher(opts: SyncOpts) {
 
   return async function flushImpl(): Promise<FlushResult> {
     mark('sync.flush.start');
+    const token = await resolveSessionToken(opts);
+    if (!token) {
+      return { processed: 0, remaining: (await readQueue()).length };
+    }
+
     let processed = 0;
 
     await runQueueFlush(async (tx) => {
@@ -176,7 +191,10 @@ function createFlusher(opts: SyncOpts) {
       }
 
       try {
-        const resp = await sendWithRetry(bundle, hash, opts);
+        const resp = await sendWithRetry(bundle, hash, {
+          ...opts,
+          getToken: async () => token,
+        });
         if (resp.ok || isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
           processed++;
         }
