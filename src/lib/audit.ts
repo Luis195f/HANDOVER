@@ -14,7 +14,7 @@ export interface AuditEvent {
   id: string; // UUID
   type: AuditEventType;
   at: string; // ISO 8601
-  patientId?: string; // ID pseudonimizado, nunca nombre
+  patientId?: string; // ID tecnico del paciente; nunca nombre
   userId: string; // ID del usuario autenticado
   unitId?: string; // unidad de enfermería
   shiftCode?: string; // ej. 'NIGHT', 'MORNING', 'AFTERNOON'

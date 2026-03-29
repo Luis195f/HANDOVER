@@ -11,7 +11,7 @@ HANDOVER commits to consistent software quality by enforcing controlled changes,
 ## Software Lifecycle Management (IEC 62304)
 
 - **Planning & requirements** are maintained in documented architecture and security references in `/docs` and are reflected in code modules for FHIR handling, offline queueing, and access control. (`docs/overview-architecture.md`, `docs/fhir-and-interoperability.md`, `docs/offline-sync-and-queue.md`, `backend/api/views.py`, `src/lib/queue.ts`, `src/lib/sync.ts`)
-- **Software design & implementation** follows a separation of mobile frontend and Django backend, with clear API boundaries and security components. (`backend/api/urls.py`, `backend/api/views.py`, `backend/security/auth.py`, `src/App.tsx`)
+- **Software design & implementation** follows a separation of mobile frontend and Django backend, with clear API boundaries and security components. (`backend/api/urls.py`, `backend/api/views.py`, `backend/security/auth.py`, `App.tsx`)
 - **Maintenance** is governed by PR-based change control and CI checks before integration. (`.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/ci.yml`, `.github/workflows/django.yml`)
 
 ## Change Management (GitHub PR-based)

@@ -77,7 +77,7 @@ export default function AuditLogScreen() {
   return (
     <View style={[styles.container, { backgroundColor }]}> 
       <Text style={[styles.title, { color: palette.textPrimary }]}>Registros de auditoría</Text>
-      <Text style={[styles.subtitle, { color: palette.textSecondary }]}>Solo IDs pseudonimizados.</Text>
+      <Text style={[styles.subtitle, { color: palette.textSecondary }]}>Solo IDs tecnicos; nunca nombres.</Text>
       {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
       <FlatList
         data={logs}

@@ -9,13 +9,14 @@
 ## Sanitización de errores y PHI
 
 - **Cliente**: se elimina el log de roles/modo de sesión en navegación para evitar exposición accidental de datos sensibles en consola.【F:src/navigation/RootNavigator.tsx†L80-L100】
-- **Servidor**: la auditoría registra hashes/tamaño de payload, no contenido clínico. Esto aplica a eventos de auditoría estándar y a los nuevos eventos de IA (hash + metadatos de modelo).【F:backend/audit/service.py†L31-L180】【F:main.py†L211-L343】
+- **Servidor (`AuditEvent`)**: la auditoría backend registra hash/tamaño de payload, no contenido clínico. Esto aplica a eventos de auditoría estándar y a los nuevos eventos de IA (hash + metadatos de modelo).【F:backend/audit/service.py†L31-L180】【F:backend/api/views_ai.py†L430-L620】
+- **Log clínico de UI (`/api/audit`)**: persiste IDs técnicos y metadatos mínimos del evento; no debe presentarse como un flujo hash-only. Evidencia actual en `src/lib/audit.ts`, `src/screens/AuditLogScreen.tsx` y `backend/api/views.py`.
 
 ## Seguridad de API y validaciones finales
 
 - **Validación mínima de Bundle**: se valida estructura mínima (resourceType, type=transaction, entries con resourceType) antes de aceptar transacciones FHIR; errores son 422 con estructura consistente y código de error `INVALID_BUNDLE`.【F:backend/api/views.py†L186-L231】【F:backend/api/views.py†L508-L574】
 - **Scopes clínicos**: se define catálogo mínimo de scopes y se expone en `/api/me/capabilities` junto con perfiles FHIR soportados.【F:backend/security/scopes.py†L1-L19】【F:backend/api/views.py†L329-L369】
-- **Auditoría de IA**: cada resumen SBAR genera evento de auditoría (`ai_summary_generated`) con hash del input y metadatos (modelo, versión).【F:main.py†L211-L343】
+- **Auditoría de IA**: cada resumen/refinado SBAR genera evento de auditoría (`ai_summary_generated`) con hash del input y metadatos (modelo, versión).【F:backend/api/views_ai.py†L430-L620】
 
 ## CSP (django-csp)
 

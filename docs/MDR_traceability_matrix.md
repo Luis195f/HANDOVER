@@ -5,7 +5,7 @@
 | MDR Requirement | Description | Implementation | Evidence |
 | --- | --- | --- | --- |
 | Annex II §1.1 | Device description and intended purpose | Frontend + backend architecture, FHIR transaction handling | `docs/overview-architecture.md`, `backend/api/views.py`, `backend/api/urls.py` |
-| Annex II §1.3 | Design and development information | Separation of React Native client and Django API | `src/App.tsx`, `backend/api/views.py` |
+| Annex II §1.3 | Design and development information | Separation of React Native client and Django API | `App.tsx`, `backend/api/views.py` |
 | Annex II §1.4 | Access control | Auth0 JWT validation + role/scope enforcement | `backend/security/auth.py`, `backend/security/permissions.py`, `backend/security/permissions_roles.py`, `backend/security/scope_permissions.py` |
 | Annex II §1.4 | Capabilities disclosure | `/api/me/capabilities` exposes role/scope permissions | `backend/api/views.py`, `backend/api/urls.py` |
 | Annex II §1.5 | Risk control (data integrity) | FHIR bundle validation and transaction type enforcement | `backend/api/views.py` |
