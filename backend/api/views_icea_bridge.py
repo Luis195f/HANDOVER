@@ -8,8 +8,10 @@ from rest_framework.response import Response
 
 from backend.api.icea_bridge_service import (
     STORED_BUNDLE_UNAVAILABLE_ERROR,
+    expire_icea_bridge_request_if_due,
     enqueue_icea_bridge_request_for_bundle_record,
     load_icea_bridge_settings,
+    materialize_icea_bridge_requests_if_due,
     refresh_icea_bridge_request,
     score_configuration_error_code,
     score_configuration_error_detail,
@@ -63,6 +65,7 @@ def _latest_bridge_request(*, handover_id: str, scoring_mode: str | None = None)
     queryset = IceaBridgeRequest.objects.filter(bundle_id=handover_id)
     if scoring_mode:
         queryset = queryset.filter(scoring_mode=scoring_mode)
+    materialize_icea_bridge_requests_if_due(queryset)
     return queryset.order_by('-updated_at').first()
 
 
@@ -232,6 +235,7 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
 
     def get(self, request):
         queryset = IceaBridgeRequest.objects.all()
+        requested_status = ''
         for query_keys, model_key in (
             (('bridgeRequestId',), 'bridge_request_id'),
             (('requestId',), 'request_id'),
@@ -239,12 +243,15 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
             (('patientId',), 'patient_id'),
             (('unitId',), 'unit_id'),
             (('shift',), 'shift'),
-            (('status',), 'status'),
             (('scoringMode',), 'scoring_mode'),
         ):
             value = _first_query_param(request, *query_keys)
             if value:
                 queryset = queryset.filter(**{model_key: value})
+        requested_status = _first_query_param(request, 'status')
+        materialize_icea_bridge_requests_if_due(queryset)
+        if requested_status:
+            queryset = queryset.filter(status=requested_status)
         try:
             limit = int(request.query_params.get('limit') or 20)
         except (TypeError, ValueError):
@@ -328,6 +335,7 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         bridge_request = IceaBridgeRequest.objects.filter(id=bridge_id).first()
         if bridge_request is None:
             return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
+        bridge_request = expire_icea_bridge_request_if_due(bridge_request)
 
         payload = request.data if isinstance(request.data, dict) else {}
         requested_mode = str(payload.get('scoringMode') or '').strip() or bridge_request.scoring_mode

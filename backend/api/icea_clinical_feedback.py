@@ -5,7 +5,11 @@ from typing import Any
 
 from django.utils import timezone
 
-from backend.api.icea_bridge_service import load_icea_bridge_settings
+from backend.api.icea_bridge_service import (
+    expire_icea_bridge_request_if_due,
+    load_icea_bridge_settings,
+    materialize_icea_bridge_requests_if_due,
+)
 from backend.api.models import IceaBridgeRequest, IceaPipelineSnapshot
 from backend.api.pilot_control import is_pilot_feature_enabled
 
@@ -93,6 +97,10 @@ def _clinical_status(bridge_request: IceaBridgeRequest) -> str:
         IceaBridgeRequest.STATUS_PENDING,
     }:
         return "pending"
+    if bridge_request.status == IceaBridgeRequest.STATUS_STALE and not (
+        isinstance(bridge_request.score_summary_json, dict) and bridge_request.score_summary_json
+    ):
+        return "failed"
     if bridge_request.insufficient_evidence:
         return "insufficient_evidence"
     if bridge_request.provisional:
@@ -172,6 +180,7 @@ def serialize_patient_risk_summary(
     bridge_request: IceaBridgeRequest,
     snapshot: IceaPipelineSnapshot | None = None,
 ) -> dict[str, Any]:
+    bridge_request = expire_icea_bridge_request_if_due(bridge_request)
     clinical_status = _clinical_status(bridge_request)
     stale = _is_stale(bridge_request)
     score_summary = _score_summary(bridge_request)
@@ -216,6 +225,7 @@ def list_patient_risk_summaries(
         queryset = queryset.exclude(patient_id__in=["", "unknown"])
     if unit_id:
         queryset = queryset.filter(unit_id=unit_id)
+    materialize_icea_bridge_requests_if_due(queryset)
 
     selected: list[IceaBridgeRequest] = []
     seen_patient_ids: set[str] = set()
