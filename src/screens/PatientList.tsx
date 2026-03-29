@@ -23,7 +23,7 @@ import type { RootStackParamList } from "@/src/navigation/types";
 import { ensureUnitAccess, hasRole, hasUnitAccess } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
 import { mark } from "@/src/lib/otel";
-import { listOfflineQueue, summarizePatientQueueState, type SyncStatus } from "@/src/lib/queue";
+import { listOfflineQueue, summarizePatientQueueState, type QueueItem, type SyncStatus } from "@/src/lib/queue";
 import { computePriority, computePriorityList, type PrioritizedPatient } from "@/src/lib/priority";
 import { buildPriorityUiModel, getPriorityToneStyles, hasActionablePrioritySignal, type PriorityUiTone } from "@/src/lib/priority-ui";
 import { buildPriorityInputs, normalizePatientListResponse } from "@/src/lib/patientListData";
@@ -109,6 +109,19 @@ export function filterPatients(
     if (!isAllUnits && patient.unitId !== selectedUnitId) return false;
     return true;
   });
+}
+
+export function buildPatientSyncStatusMap(queue: QueueItem[]): Record<string, SyncStatus> {
+  const groupedItems = queue.reduce<Record<string, QueueItem[]>>((acc, item) => {
+    if (!acc[item.patientId]) acc[item.patientId] = [];
+    acc[item.patientId]?.push(item);
+    return acc;
+  }, {});
+
+  return Object.entries(groupedItems).reduce<Record<string, SyncStatus>>((acc, [patientId, items]) => {
+    acc[patientId] = summarizePatientQueueState(items);
+    return acc;
+  }, {});
 }
 
 type Props = NativeStackScreenProps<RootStackParamList, "PatientList">;
@@ -267,18 +280,7 @@ export default function PatientList({ navigation }: Props) {
 
   const refreshSyncStatuses = useCallback(async () => {
     const queue = await listOfflineQueue();
-    const groupedItems = queue.reduce<Record<string, typeof queue>>((acc, item) => {
-      if (!acc[item.patientId]) acc[item.patientId] = [];
-      acc[item.patientId]?.push(item);
-      return acc;
-    }, {});
-
-    const nextStatuses = Object.entries(groupedItems).reduce<Record<string, SyncStatus>>((acc, [patientId, items]) => {
-      acc[patientId] = summarizePatientQueueState(items);
-      return acc;
-    }, {});
-
-    setPatientSyncStatuses(nextStatuses);
+    setPatientSyncStatuses(buildPatientSyncStatusMap(queue));
   }, []);
 
   const loadPatients = useCallback(async () => {

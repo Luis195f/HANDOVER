@@ -142,7 +142,13 @@ type OfflineQueuePayload = {
   headers?: Record<string, string>;
 };
 
-let queueSendHandler: QueueSendHandler = async () => ({ ok: true });
+let queueSendHandler: QueueSendHandler = async () => ({
+  ok: false,
+  kind: 'auth',
+  status: 401,
+  recoverable: false,
+  message: 'Sync engine not configured',
+});
 
 export function setQueueSendHandler(handler: QueueSendHandler): void {
   queueSendHandler = handler;
@@ -296,7 +302,16 @@ function extractOfflinePayload(payload: unknown): OfflineQueuePayload | null {
   }
 
   if (!candidate || typeof candidate !== 'object') return null;
+  if ('payload' in (candidate as Record<string, unknown>)) {
+    const nested = (candidate as { payload?: unknown }).payload;
+    if (nested !== undefined) {
+      return extractOfflinePayload(nested);
+    }
+  }
   const bundle = (candidate as { bundle?: unknown }).bundle;
+  if (bundle && typeof bundle === 'object' && 'payload' in (bundle as Record<string, unknown>)) {
+    return extractOfflinePayload(bundle);
+  }
   return {
     bundle: bundle as Bundle | undefined,
     txId:

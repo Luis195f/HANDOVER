@@ -1,4 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearOfflineQueue, enqueueBundle, listOfflineQueue } from '@/src/lib/queue';
+
+vi.mock('expo-sqlite', () => ({
+  openDatabaseSync: undefined,
+  openDatabase: undefined,
+}));
 
 const mocked = vi.hoisted(() => ({
   hasUnitAccess: vi.fn(),
@@ -11,8 +17,18 @@ vi.mock('@/src/security/acl', () => ({
 }));
 
 describe('PatientList deny-first authz seam', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mocked.hasUnitAccess.mockReset();
+    vi.stubGlobal('__DEV__', true);
+    process.env.NODE_ENV = 'test';
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    await clearOfflineQueue();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.NODE_ENV;
   });
 
   it('canQuerySelectedUnit denies a selected unit outside scope and allows all-units aggregate view', async () => {
@@ -83,5 +99,18 @@ describe('PatientList deny-first authz seam', () => {
     expect(nurseState.canQueryIceaPatientRisk).toBe(false);
     expect(supervisorState.canQueryPatients).toBe(true);
     expect(supervisorState.canQueryIceaPatientRisk).toBe(true);
+  });
+
+  it('derives queued patient sync status from the canonical offline queue', async () => {
+    await clearOfflineQueue();
+    await enqueueBundle(
+      { resourceType: 'Bundle', type: 'transaction', entry: [] },
+      { patientId: 'pat-patient-list' },
+    );
+
+    const { buildPatientSyncStatusMap } = await import('@/src/screens/PatientList');
+    const statuses = buildPatientSyncStatusMap(await listOfflineQueue());
+
+    expect(statuses).toEqual({ 'pat-patient-list': 'pending' });
   });
 });

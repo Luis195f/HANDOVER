@@ -5,6 +5,7 @@
 
 ## Queue and synchronization
 - `src/lib/queue.ts` persists bundles in SQLite alongside retry metadata.
+- `handover_offline_queue` is the canonical operational queue for clinical handover bundles. `tx_queue` remains only as a legacy compatibility path and must not be treated as the UI/sync source of truth for handover runtime state.
 - `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses and treats `409/412` as already-delivered duplicates.
 - Storage can be encrypted; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` can disable encryption in development, but the queue now emits an explicit warning when plaintext storage is enabled.
   - Each item keeps `firstEnqueuedAt`, `lastAttemptAt`, and `attemptCount`/`attempts` to compute retry windows.

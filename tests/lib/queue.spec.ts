@@ -86,6 +86,7 @@ const resetEnv = () => {
 const loadQueue = async () => {
   const queue = await import('@/src/lib/queue');
   await queue.clearTxQueue();
+  await queue.clearOfflineQueue();
   return queue;
 };
 
@@ -101,6 +102,7 @@ describe('tx queue (sqlite + fallback)', () => {
   afterEach(async () => {
     const queue = await import('@/src/lib/queue');
     await queue.clearTxQueue();
+    await queue.clearOfflineQueue();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     secureStore.__reset?.();
@@ -244,10 +246,11 @@ describe('tx queue (sqlite + fallback)', () => {
       signerId: 'nurse-123',
     });
 
-    const snapshot = await queue.getQueueSnapshot();
-    const signedBundle = snapshot[0]?.payload as { signature?: any };
+    const snapshot = await queue.listOfflineQueue();
+    const signedBundle = (snapshot[0]?.payload as { bundle?: { signature?: any } } | undefined)?.bundle;
     expect(signedBundle?.signature?.who?.identifier?.value).toBe('nurse-123');
     expect(signedBundle?.signature?.who?.identifier?.system).toBe('urn:handover:user-id');
+    expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
   });
 
   it('skips bundle signature when signing flag is disabled', async () => {
@@ -257,9 +260,26 @@ describe('tx queue (sqlite + fallback)', () => {
     const queue = await loadQueue();
     await queue.enqueueBundle({ resourceType: 'Bundle', type: 'transaction', entry: [] }, { patientId: 'pat-nosign' });
 
-    const snapshot = await queue.getQueueSnapshot();
-    const unsignedBundle = snapshot[0]?.payload as { signature?: any };
+    const snapshot = await queue.listOfflineQueue();
+    const unsignedBundle = (snapshot[0]?.payload as { bundle?: { signature?: any } } | undefined)?.bundle;
     expect(unsignedBundle?.signature).toBeUndefined();
+    expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
+  });
+
+  it('stores handover bundles in the canonical offline queue instead of tx_queue', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+
+    const queue = await loadQueue();
+    const item = await queue.enqueueBundle({ resourceType: 'Bundle', type: 'transaction', entry: [] }, { patientId: 'pat-canonical' });
+
+    expect(item.id).toMatch(/^handover:/);
+    expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
+
+    const offlineItems = await queue.listOfflineQueue();
+    expect(offlineItems).toHaveLength(1);
+    expect(offlineItems[0]?.id).toBe(item.id);
+    expect(offlineItems[0]?.patientId).toBe('pat-canonical');
+    expect(offlineItems[0]?.syncStatus).toBe('pending');
   });
 
   it('reads legacy plaintext entries without errors even when encryption is enabled', async () => {

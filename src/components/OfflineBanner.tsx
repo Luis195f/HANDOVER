@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, useColorScheme } from 'react-native';
 import { useNetInfo } from '@/src/lib/netinfo';
-import { getQueueSize } from '@/src/lib/sync';
+import { getQueueSize } from '@/src/lib/sync/index';
 
 type Props = { onPress?: () => void };
 
