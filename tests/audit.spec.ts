@@ -1,11 +1,19 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
+const mockApiPost = vi.fn();
+
+vi.mock('@/src/lib/api', () => ({
+  apiPost: (...args: unknown[]) => mockApiPost(...args),
+}));
+
 import {
   appendAuditEvent,
+  buildAuditPatientKey,
   createAsyncStorageAuditStorage,
   groupByShift,
   makeAuditEvent,
   pruneOldEvents,
+  sendAuditEvent,
   type AuditEvent,
 } from '@/src/lib/audit';
 
@@ -13,15 +21,16 @@ describe('audit module', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    mockApiPost.mockReset();
   });
 
   describe('makeAuditEvent', () => {
-    it('creates events without PHI and stable timestamps', () => {
+    it('creates events with deterministic patient keys and stable timestamps', () => {
       const fixedNow = () => new Date('2025-01-01T08:00:00Z');
       const event = makeAuditEvent(
         {
           type: 'patient_open',
-          patientId: 'pat-001',
+          patientId: 'Patient/pat-001',
           userId: 'user-1',
           unitId: 'UCI',
         },
@@ -32,6 +41,7 @@ describe('audit module', () => {
       expect(event.id.length).toBeGreaterThan(0);
       expect(event.at).toBe('2025-01-01T08:00:00.000Z');
       expect(event.type).toBe('patient_open');
+      expect(event.patientKey).toBe(buildAuditPatientKey('pat-001'));
       expect(event.userId).toBe('user-1');
       expect(event.unitId).toBe('UCI');
       expect(event.meta).toBeUndefined();
@@ -94,7 +104,7 @@ describe('audit module', () => {
         type: 'patient_edit',
         at: new Date(base + idx * 1000).toISOString(),
         userId: 'u',
-        patientId: 'pat-123',
+        patientKey: buildAuditPatientKey('pat-123'),
       }));
 
       const pruned = pruneOldEvents(events, { maxAgeDays: 365, maxPerPatient: 3 });
@@ -132,7 +142,7 @@ describe('audit module', () => {
       const storage = createAsyncStorageAuditStorage('test:audit');
       const events: AuditEvent[] = [
         { id: '1', type: 'patient_open', at: '2024-01-01T00:00:00Z', userId: 'u1' },
-        { id: '2', type: 'patient_edit', at: '2024-01-01T01:00:00Z', userId: 'u1', patientId: 'pat' },
+        { id: '2', type: 'patient_edit', at: '2024-01-01T01:00:00Z', userId: 'u1', patientKey: buildAuditPatientKey('pat') },
       ];
 
       await storage.save(events);
@@ -150,6 +160,28 @@ describe('audit module', () => {
 
       expect(loaded).toHaveLength(1);
       expect(loaded[0]).toEqual(event);
+    });
+  });
+
+  describe('transport', () => {
+    beforeEach(() => {
+      mockApiPost.mockResolvedValue(undefined);
+    });
+
+    it('posts pseudonymized payloads without raw patient identifiers', async () => {
+      const event = makeAuditEvent({
+        type: 'patient_edit',
+        patientId: 'pat-sensitive-77',
+        userId: 'user-9',
+      });
+
+      await sendAuditEvent(event);
+
+      expect(mockApiPost).toHaveBeenCalledWith('/api/audit/', { body: expect.any(String) });
+      const body = String(mockApiPost.mock.calls[0]?.[1]?.body ?? '');
+      expect(body).toContain('"patientKey"');
+      expect(body).not.toContain('pat-sensitive-77');
+      expect(body).not.toContain('"patientId"');
     });
   });
 });

@@ -9,7 +9,7 @@
 ## Sanitización de errores y PHI
 
 - **Cliente**: se elimina el log de roles/modo de sesión en navegación para evitar exposición accidental de datos sensibles en consola.【F:src/navigation/RootNavigator.tsx†L80-L100】
-- **Servidor**: la auditoría registra hashes/tamaño de payload, no contenido clínico. Esto aplica a eventos de auditoría estándar y a los nuevos eventos de IA (hash + metadatos de modelo).【F:backend/audit/service.py†L31-L180】【F:main.py†L211-L343】
+- **Servidor y ruta móvil `/api/audit`**: la auditoría registra hashes/tamaño de payload y, para el log móvil legado, solo `patientKey` seudonimizado y estable; no contenido clínico, nombres ni IDs técnicos crudos de paciente. Esto aplica a eventos de auditoría estándar y a los nuevos eventos de IA (hash + metadatos de modelo).【F:backend/audit/service.py†L31-L180】【F:backend/api/views.py†L2046-L2135】【F:src/lib/audit.ts†L1-L214】【F:main.py†L211-L343】
 
 ## Seguridad de API y validaciones finales
 

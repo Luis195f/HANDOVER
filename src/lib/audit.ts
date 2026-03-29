@@ -7,6 +7,11 @@ import {
   getAsyncStorageAdapter,
   type AsyncStorageAdapter,
 } from './encryptedStorage';
+import { hashHex } from './crypto';
+
+const AUDIT_PATIENT_KEY_PREFIX = 'ptk_';
+const AUDIT_PATIENT_KEY_LENGTH = 24;
+const AUDIT_PATIENT_KEY_PATTERN = new RegExp(`^${AUDIT_PATIENT_KEY_PREFIX}[a-f0-9]{${AUDIT_PATIENT_KEY_LENGTH}}$`);
 
 export type AuditEventType = 'patient_open' | 'patient_edit' | 'handover_signed';
 
@@ -14,7 +19,7 @@ export interface AuditEvent {
   id: string; // UUID
   type: AuditEventType;
   at: string; // ISO 8601
-  patientId?: string; // ID pseudonimizado, nunca nombre
+  patientKey?: string; // token de correlacion estable, nunca nombre ni ID tecnico crudo
   userId: string; // ID del usuario autenticado
   unitId?: string; // unidad de enfermería
   shiftCode?: string; // ej. 'NIGHT', 'MORNING', 'AFTERNOON'
@@ -29,11 +34,30 @@ export interface AuditStorage {
 
 export interface MakeAuditEventInput {
   type: AuditEventType;
-  patientId?: string;
+  patientId?: string; // entrada tecnica interna; se transforma a patientKey antes de persistir/enviar
   userId: string;
   unitId?: string;
   shiftCode?: string;
   meta?: Record<string, unknown>;
+}
+
+function normalizeAuditPatientId(patientId: string): string {
+  const trimmed = patientId.trim();
+  if (!trimmed) return '';
+  if (AUDIT_PATIENT_KEY_PATTERN.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('Patient/')) {
+    const normalized = trimmed.slice('Patient/'.length).trim();
+    return normalized || trimmed;
+  }
+  return trimmed;
+}
+
+export function buildAuditPatientKey(patientId?: string): string | undefined {
+  if (!patientId) return undefined;
+  const normalized = normalizeAuditPatientId(patientId);
+  if (!normalized) return undefined;
+  if (AUDIT_PATIENT_KEY_PATTERN.test(normalized)) return normalized;
+  return `${AUDIT_PATIENT_KEY_PREFIX}${hashHex(`handover.audit.patient.v1:${normalized}`, AUDIT_PATIENT_KEY_LENGTH)}`;
 }
 
 function assertSafeMeta(meta: Record<string, unknown> | undefined) {
@@ -51,7 +75,7 @@ export function makeAuditEvent(input: MakeAuditEventInput, now: () => Date = () 
     id: uuidv4(),
     type: input.type,
     at: now().toISOString(),
-    patientId: input.patientId,
+    patientKey: buildAuditPatientKey(input.patientId),
     userId: input.userId,
     unitId: input.unitId,
     shiftCode: input.shiftCode,
@@ -92,7 +116,7 @@ export function pruneOldEvents(events: AuditEvent[], options: PruneOptions): Aud
 
   const perPatient = new Map<string, AuditEvent[]>();
   recent.forEach((event) => {
-    const key = event.patientId ?? '__unknown__';
+    const key = event.patientKey ?? '__unknown__';
     const current = perPatient.get(key) ?? [];
     current.push(event);
     perPatient.set(key, current);
