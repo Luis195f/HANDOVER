@@ -22,7 +22,7 @@ type AuditLogItem = {
   type: string;
   at: string;
   userId: string;
-  patientId?: string | null;
+  patientKey?: string | null;
   unitId?: string | null;
   shiftCode?: string | null;
 };
@@ -77,7 +77,9 @@ export default function AuditLogScreen() {
   return (
     <View style={[styles.container, { backgroundColor }]}> 
       <Text style={[styles.title, { color: palette.textPrimary }]}>Registros de auditoría</Text>
-      <Text style={[styles.subtitle, { color: palette.textSecondary }]}>Solo IDs pseudonimizados.</Text>
+      <Text style={[styles.subtitle, { color: palette.textSecondary }]}>
+        Solo seudónimos estables; nunca nombres ni IDs clínicos.
+      </Text>
       {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
       <FlatList
         data={logs}
@@ -107,7 +109,7 @@ export default function AuditLogScreen() {
               {item.userId}
             </Text>
             <Text style={[styles.cell, { color: palette.textPrimary }]} numberOfLines={1}>
-              {item.patientId ?? '—'}
+              {item.patientKey ?? '—'}
             </Text>
             <Text style={[styles.cell, { color: palette.textPrimary }]} numberOfLines={2}>
               {resolveActionLabel(item.type)}

@@ -1,3 +1,4 @@
+import hashlib
 from datetime import timezone as dt_timezone
 from unittest.mock import patch
 
@@ -8,6 +9,11 @@ from django.utils import timezone
 
 from backend.api.models import ClientAuditEvent
 from backend.audit.models import AuditEvent
+
+
+def _expected_patient_key(patient_id: str) -> str:
+    digest = hashlib.sha256(f"handover.audit.patient.v1:{patient_id}".encode("utf-8")).hexdigest()
+    return f"ptk_{digest[:24]}"
 
 
 class AuditEventModelIsolationTests(TestCase):
@@ -69,3 +75,34 @@ class AuditLogViewTests(TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(len(list_response.data), 1)
         self.assertEqual(list_response.data[0]["type"], "patient_open")
+        self.assertEqual(list_response.data[0]["patientKey"], _expected_patient_key("pat-42"))
+        self.assertNotIn("patientId", list_response.data[0])
+        self.assertEqual(ClientAuditEvent.objects.get().patient_id, _expected_patient_key("pat-42"))
+
+    def test_get_masks_historical_raw_patient_ids(self):
+        ClientAuditEvent.objects.create(
+            type="patient_open",
+            user_id="clinician-legacy",
+            patient_id="pat-legacy-7",
+            occurred_at=timezone.datetime(2026, 1, 1, 10, 0, tzinfo=dt_timezone.utc),
+        )
+
+        list_response = self.client.get(self.url)
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data[0]["patientKey"], _expected_patient_key("pat-legacy-7"))
+        self.assertNotIn("patientId", list_response.data[0])
+
+    def test_post_accepts_handover_signed_and_returns_patient_key(self):
+        payload = {
+            "type": "handover_signed",
+            "userId": "supervisor-1",
+            "patientKey": _expected_patient_key("pat-88"),
+            "at": "2026-01-01T10:00:00Z",
+        }
+
+        create_response = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data["type"], "handover_signed")
+        self.assertEqual(create_response.data["patientKey"], _expected_patient_key("pat-88"))
