@@ -156,6 +156,40 @@ describe('useHandoverSyncStatus', () => {
     expect(view.getByTestId('error').props.children).toBe('sync.syncErrorTitle');
   });
 
+  it('keeps the handover out of synced when a retry finishes without explicit success evidence', async () => {
+    const queued = await enqueueBundle(
+      { resourceType: 'Bundle', type: 'transaction', entry: [] },
+      { patientId: 'pat-handover-retry-without-evidence' },
+    );
+
+    const view = render(<HookHarness queueId={queued.id} />);
+
+    await waitFor(() => {
+      expect(view.getByTestId('status').props.children).toBe('queued');
+    });
+
+    await deleteOfflineQueueItem(queued.id);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    await waitFor(() => {
+      expect(view.getByTestId('status').props.children).toBe('error');
+    });
+
+    ensureFreshAccessTokenMock.mockResolvedValueOnce('session-token');
+    flushQueueMock.mockResolvedValueOnce({ processed: 0, remaining: 0 });
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId('retry'));
+    });
+
+    await waitFor(() => {
+      expect(view.getByTestId('status').props.children).toBe('error');
+    });
+    expect(view.getByTestId('status').props.children).not.toBe('synced');
+  });
+
   it('retries through the bootstrap auth seam and surfaces auth-required when the session token is missing', async () => {
     const queued = await enqueueBundle(
       { resourceType: 'Bundle', type: 'transaction', entry: [] },

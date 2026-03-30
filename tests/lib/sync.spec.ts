@@ -316,6 +316,41 @@ describe('sync engine state machine', () => {
     expect(item?.attempts).toBe(1);
     expect(item?.errorMessage).toBe('Error al analizar el payload offline');
   });
+
+  it('marks items without a clinical bundle as error instead of treating local disappearance as success', async () => {
+    await createOfflineQueueItem({
+      payload: { bundle: undefined, meta: { hash: 'missing-bundle' } },
+      patientId: 'pat-missing-bundle',
+    });
+    configureSyncEngine({ getToken: async () => 'token', isOnline });
+
+    await forceSync();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(postBundleMock).not.toHaveBeenCalled();
+    const [item] = await listOfflineQueue();
+    expect(item?.syncStatus).toBe('error');
+    expect(item?.errorStatus).toBe(422);
+  });
+
+  it.each([409, 412])('treats HTTP %s as explicit idempotent acceptance in the default sender', async (status) => {
+    postBundleMock.mockResolvedValue({ ok: false, status, body: {} });
+
+    await createOfflineQueueItem({
+      payload: {
+        bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] },
+        txId: `dup-${status}`,
+      },
+      patientId: `pat-dup-${status}`,
+    });
+    configureSyncEngine({ getToken: async () => 'token', isOnline });
+
+    await forceSync();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(postBundleMock).toHaveBeenCalled();
+    expect(await listOfflineQueue()).toHaveLength(0);
+  });
 });
 
 describe('offline encryption integration', () => {

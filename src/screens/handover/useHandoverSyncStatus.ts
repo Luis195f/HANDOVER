@@ -109,7 +109,14 @@ export function useHandoverSyncStatus() {
   }, [handoverSyncStatus, refreshTrackedQueue, trackedQueueId]);
 
   useEffect(() => {
-    if (handoverSyncStatus === 'idle' || handoverSyncStatus === 'error' || trackedQueueId) return;
+    if (
+      handoverSyncStatus === 'idle' ||
+      handoverSyncStatus === 'error' ||
+      handoverSyncStatus === 'synced' ||
+      trackedQueueId
+    ) {
+      return;
+    }
     if (syncSnapshot.lastError) {
       setHandoverSyncStatus('error');
       setHandoverSyncError(syncSnapshot.lastError);
@@ -121,10 +128,10 @@ export function useHandoverSyncStatus() {
       return;
     }
     if (syncSnapshot.status === 'idle' && syncSnapshot.pendingCount === 0) {
-      setHandoverSyncStatus('synced');
-      setHandoverSyncError(null);
+      setHandoverSyncStatus('error');
+      setHandoverSyncError(manualSyncBlock ?? t('sync.syncErrorTitle'));
     }
-  }, [handoverSyncStatus, syncSnapshot, trackedQueueId]);
+  }, [handoverSyncStatus, manualSyncBlock, syncSnapshot, trackedQueueId]);
 
   return {
     syncSnapshot,

@@ -367,7 +367,13 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
   return async (item) => {
     const parsed = extractOfflinePayload(item.payload);
     if (!parsed?.bundle) {
-      return { ok: true };
+      return {
+        ok: false,
+        kind: 'validation',
+        status: 422,
+        recoverable: false,
+        message: 'Offline payload missing clinical bundle',
+      };
     }
 
     let token: string;

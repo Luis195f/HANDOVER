@@ -214,8 +214,7 @@ function createFlusher(opts: SyncOpts) {
       const hash = payload.meta?.hash ?? tx.key;
 
       if (!bundle) {
-        processed++;
-        return { ok: true, status: 204 };
+        return { ok: false, status: 422 };
       }
 
       try {
