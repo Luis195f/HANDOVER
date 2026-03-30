@@ -56,7 +56,6 @@ import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
 import { validateBundle } from '@/src/lib/fhir-validation';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
-import { forceSync } from '@/src/lib/sync';
 import { getValidationErrorDetails } from '@/src/lib/sync-errors';
 import { AI_BACKEND_ENABLED, AI_SBAR_ENABLED } from '@/src/config/env';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -1016,8 +1015,10 @@ export default function HandoverForm({ navigation, route }: Props) {
     syncSnapshot,
     handoverSyncStatus,
     handoverSyncError,
+    retrySync,
     setHandoverSyncStatus,
     setHandoverSyncError,
+    setTrackedQueueId,
   } = useHandoverSyncStatus();
   const aiSbarAvailable = AI_SBAR_ENABLED;
   const aiSbarGenerationAvailable = AI_BACKEND_ENABLED;
@@ -1762,6 +1763,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
       setHandoverSyncStatus('queued');
       setHandoverSyncError(null);
+      setTrackedQueueId(typeof queuedTx?.id === 'string' ? queuedTx.id : null);
 
       const auditUserId = activeSessionUser?.userId ?? activeSessionUser?.id ?? activeSession?.userId;
       const auditUnitId =
@@ -2032,7 +2034,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             handoverSyncError={handoverSyncError}
             syncSnapshot={syncSnapshot}
             onRetrySync={() => {
-              void forceSync();
+              void retrySync();
             }}
             onOpenLogin={() => navigation.navigate('Login')}
             onOpenSyncCenter={() => navigation.navigate('SyncCenter')}
