@@ -759,7 +759,7 @@ export default function PatientList({ navigation }: Props) {
         renderItem={({ item }) => {
           const basePatient = patientById.get(item.patientId);
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;
-          const syncState = patientSyncStatuses[item.patientId] ?? "synced";
+          const syncState = patientSyncStatuses[item.patientId];
           const alerts = alertsByPatient[item.patientId] ?? [];
           const iceaRisk = iceaPatientRiskByPatientId.get(item.patientId);
           const hasCriticalAlert = alerts.some(alert => alert.severity === 'critical');
@@ -778,36 +778,38 @@ export default function PatientList({ navigation }: Props) {
               <Text style={[styles.patientMeta, { color: colors.muted }]}> 
                 {unit?.name ?? basePatient?.unitId ?? t("patientList.unknownUnitFallback")}
               </Text>
-              <View style={styles.syncRow}>
-                <Text
-                  style={[
-                    styles.syncBadge,
-                    syncState === "error"
-                      ? { backgroundColor: `${colors.danger}22`, color: colors.danger }
-                      : syncState === "pending"
-                      ? { backgroundColor: colors.warning, color: colors.text }
-                      : { backgroundColor: "#DCFCE7", color: colors.success },
-                  ]}
-                >
-                  {syncState === "error"
-                    ? t("patientList.syncError")
-                    : syncState === "pending"
-                    ? t("patientList.syncQueued")
-                    : t("patientList.syncSynced")}
-                </Text>
-                {syncState !== "synced" ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t("patientList.syncDetailsAccessibility")}
-                    onPress={() => navigation.navigate("SyncCenter")}
-                    style={styles.syncLink}
+              {syncState ? (
+                <View style={styles.syncRow}>
+                  <Text
+                    style={[
+                      styles.syncBadge,
+                      syncState === "error"
+                        ? { backgroundColor: `${colors.danger}22`, color: colors.danger }
+                        : syncState === "pending"
+                        ? { backgroundColor: colors.warning, color: colors.text }
+                        : { backgroundColor: "#DCFCE7", color: colors.success },
+                    ]}
                   >
-                    <Text style={[styles.syncLinkText, { color: colors.info }]}> 
-                      {t("patientList.syncDetails")}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
+                    {syncState === "error"
+                      ? t("patientList.syncError")
+                      : syncState === "pending"
+                      ? t("patientList.syncQueued")
+                      : t("patientList.syncSynced")}
+                  </Text>
+                  {syncState !== "synced" ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t("patientList.syncDetailsAccessibility")}
+                      onPress={() => navigation.navigate("SyncCenter")}
+                      style={styles.syncLink}
+                    >
+                      <Text style={[styles.syncLinkText, { color: colors.info }]}> 
+                        {t("patientList.syncDetails")}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
               <View style={styles.prioritySection}>
                 <View style={styles.priorityRow}>
                   <PriorityBadge level={item.level} testID={`priority-badge-${item.patientId}`} />

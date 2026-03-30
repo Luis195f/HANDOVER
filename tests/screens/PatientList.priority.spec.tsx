@@ -113,4 +113,11 @@ describe('PatientList deny-first authz seam', () => {
 
     expect(statuses).toEqual({ 'pat-patient-list': 'pending' });
   });
+
+  it('does not invent a synced badge when there is no canonical queue evidence for the patient', async () => {
+    const { buildPatientSyncStatusMap } = await import('@/src/screens/PatientList');
+    const statuses = buildPatientSyncStatusMap(await listOfflineQueue());
+
+    expect(statuses['pat-without-queue-entry']).toBeUndefined();
+  });
 });

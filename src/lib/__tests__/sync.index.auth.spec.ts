@@ -113,7 +113,7 @@ describe('legacy sync runtime auth seam', () => {
   });
 
   it('does not record success evidence when a queue item has no bundle payload', async () => {
-    readQueueMock.mockResolvedValue([]);
+    readQueueMock.mockResolvedValue([{ key: 'queued-empty' }]);
     runQueueFlushMock.mockImplementation(async (sender: (tx: unknown) => Promise<unknown>) => {
       await sender({
         id: 'queued-empty',
@@ -129,7 +129,7 @@ describe('legacy sync runtime auth seam', () => {
       getToken: async () => 'session-token',
     });
 
-    expect(result).toEqual({ processed: 1, remaining: 0 });
+    expect(result).toEqual({ processed: 0, remaining: 1 });
     expect(consumeRecentlySyncedQueueItem('queued-empty')).toBe(false);
     expect(postBundleMock).not.toHaveBeenCalled();
   });
