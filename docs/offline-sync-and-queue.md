@@ -12,6 +12,14 @@
   - Each item keeps `firstEnqueuedAt`, `lastAttemptAt`, and `attemptCount`/`attempts` to compute retry windows.
   - A maximum number of attempts is enforced (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Items that exceed the limit are marked with `syncStatus="error"`.
 
+## Runtime source of truth
+- `index.ts` is the only active Expo/mobile entrypoint in this repo cut. It registers the root component from `App.tsx`.
+- `App.tsx` is the active mobile bootstrap path. It mounts auth/navigation providers and installs queue replay through `src/lib/queueBootstrap.ts`.
+- `src/lib/sync.ts` is the canonical sync runtime for queue state, retry scheduling, and `SyncSnapshot`.
+- `src/lib/sync/index.ts` remains a legacy compatibility facade with residual runtime dependencies from `src/lib/queueBootstrap.ts`, `src/screens/SyncCenter.tsx`, `src/screens/handover/useHandoverSyncStatus.ts`, `src/components/SyncStatusBanner.tsx`, and `src/components/OfflineBanner.tsx`. It is not the source of truth for queue state.
+- `src/lib/offlineQueue.ts` is a residual compatibility adapter over the canonical queue storage in `src/lib/queue.ts`; keep it only while those `sync/index.ts` callers exist.
+- `main.py` is absent from the current repository state. The active Python/Django operational entrypoints are `manage.py`, `Procfile` (`gunicorn backend.wsgi ...`), `.github/workflows/django.yml` (`python manage.py migrate`, `pytest`), and `docker-compose.yml` (web export build only; Django is documented as a separate Procfile-compatible service).
+
 ## Transaction identifiers (txId)
 - `ensureBundleTx` (`src/lib/sync.ts`) assigns a transaction identifier when one is missing using UUID v4 to guarantee global uniqueness.
 - The transaction identifier is attached to every entry via `attachTxIdToEntry`, which adds a conditional create token (`ifNoneExist`) so retries remain idempotent.

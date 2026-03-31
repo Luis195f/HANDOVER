@@ -3,6 +3,8 @@ import { ENV, FHIR_BASE_URL } from '../config/env';
 import { startSyncDaemon, flushQueue, type SyncOpts } from './sync/index';
 import { ensureFreshAccessToken } from '../security/auth';
 
+// Legacy bootstrap adapter kept only because the active App.tsx still wires the
+// older replay facade from src/lib/sync/index.ts during app startup.
 async function getLegacyBootstrapSessionToken(): Promise<string | null> {
   try {
     return (await ensureFreshAccessToken('fhir')) ?? null;

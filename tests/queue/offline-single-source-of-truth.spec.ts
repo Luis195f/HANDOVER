@@ -80,8 +80,8 @@ describe('offline sync single source of truth', () => {
       getToken: async () => 'token',
     });
 
-    expect(first).toEqual({ processed: 1, remaining: 0 });
-    expect(second).toEqual({ processed: 0, remaining: 0 });
+    expect(first).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(second).toEqual({ processed: 0, remaining: 0, outcome: 'success', status: undefined });
     expect(client.postBundle).toHaveBeenCalledTimes(1);
     expect(client.postBundle).toHaveBeenCalledWith(
       storedBundle,

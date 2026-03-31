@@ -1,13 +1,19 @@
 // FILE: src/lib/sync/index.ts
 // ---------------------------------------------------------------------
-// FHIR sync with offline-first behavior, backoff, and idempotency.
-// Includes telemetry (mark) and UI helpers (flushQueue / getQueueSize).
+// Legacy sync compatibility facade.
 //
-// Exports:
-//   - syncBundleOrEnqueue(bundle, opts): 'sent' | 'queued'
-//   - startSyncDaemon(opts): () => void   (subscribes to network changes and drains)
-//   - flushQueue(opts): { processed, remaining }     (manual "Retry now" action)
-//   - getQueueSize(): Promise<number>     (for banners/indicators)
+// Source of truth:
+//   - src/lib/queue.ts stores the canonical offline queue.
+//   - src/lib/sync.ts owns the canonical sync engine and sync snapshot state.
+//
+// Residual dependency:
+//   - queueBootstrap.ts and some UI screens still import this module for the
+//     older offlineQueue-based replay flow.
+//
+// Guardrail:
+//   - Do not treat this module as the canonical queue/runtime source of truth.
+//   - Do not add new runtime entrypoints here; migrate callers to src/lib/sync.ts
+//     when a focused follow-up is approved.
 // ---------------------------------------------------------------------
 
 import NetInfo from '@/src/lib/netinfo';
