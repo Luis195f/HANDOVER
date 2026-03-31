@@ -89,6 +89,24 @@ describe('legacy sync runtime auth seam', () => {
     expect(postBundleMock).not.toHaveBeenCalled();
   });
 
+  it('preserves auth-failed when the token refresher throws and does not drain the queue', async () => {
+    readQueueMock.mockResolvedValue([{ key: 'queued-1' }]);
+    const getToken = vi.fn(async () => {
+      throw new Error('refresh exploded');
+    });
+
+    const { flushQueue } = await loadSyncIndex();
+    const result = await flushQueue({
+      fhirBaseUrl: 'https://fhir.test/api',
+      getToken,
+    });
+
+    expect(result).toEqual({ processed: 0, remaining: 1, outcome: 'auth-failed', status: 401 });
+    expect(getToken).toHaveBeenCalledTimes(1);
+    expect(runQueueFlushMock).not.toHaveBeenCalled();
+    expect(postBundleMock).not.toHaveBeenCalled();
+  });
+
   it('uses a fresh session token per replay item and not EXPO_PUBLIC_AUTH_TOKEN', async () => {
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'public-token';
     readQueueMock.mockResolvedValue([]);

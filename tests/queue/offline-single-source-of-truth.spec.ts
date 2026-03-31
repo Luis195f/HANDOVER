@@ -75,6 +75,9 @@ describe('offline sync single source of truth', () => {
       fhirBaseUrl: 'https://example.test',
       getToken: async () => 'token',
     });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+
     const second = await syncIndex.flushQueue({
       fhirBaseUrl: 'https://example.test',
       getToken: async () => 'token',
