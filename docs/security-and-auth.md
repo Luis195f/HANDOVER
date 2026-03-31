@@ -82,6 +82,7 @@
 - Usar hashing/HMAC para correlación técnica de eventos.
 - Limitar logs a metadatos mínimos (estado, tipo de evento, tamaño, hash, timestamp).
 - Mantener separación entre datos identificativos y telemetría operativa.
+- En `POST /api/audit`, la correlación de paciente del log móvil usa `patientKey` determinista generado server-side; si llegan `patientId` o referencias equivalentes en top-level o en campos anidados equivalentes dentro de `meta`, el backend los transforma a `patientKey` y descarta blobs de alto riesgo (`payload`, `context`, `details`, `patient`, `note`, `text`, `sbar`) antes de persistir. La proyección pública de `GET /api/audit` no serializa `meta` y no debe interpretarse como anonimización.
 
 ### Gestión de errores y respuesta segura
 - Preferir respuestas estándar y estructuradas (`OperationOutcome` en contexto FHIR).

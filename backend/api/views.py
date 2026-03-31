@@ -34,6 +34,7 @@ from backend.signature import (
     sign_bundle,
     verify_bundle_signature,
 )
+from backend.api.audit_pseudonymization import build_audit_patient_key, sanitize_client_audit_meta
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
@@ -2044,35 +2045,6 @@ class HandoverEtlReadView(AuthenticatedAPIView):
         return response
 
 
-AUDIT_PATIENT_KEY_PREFIX = "ptk_"
-AUDIT_PATIENT_KEY_HASH_LENGTH = 24
-AUDIT_PATIENT_KEY_PATTERN = re.compile(r"^ptk_[0-9a-f]{24}$")
-AUDIT_PATIENT_KEY_NAMESPACE = "handover.audit.patient.v1:"
-
-
-def _normalize_audit_patient_identifier(value: Any) -> str:
-    candidate = str(value or "").strip()
-    if not candidate:
-        return ""
-    if AUDIT_PATIENT_KEY_PATTERN.fullmatch(candidate):
-        return candidate
-    if candidate.startswith("Patient/"):
-        _, _, suffix = candidate.partition("/")
-        normalized = suffix.strip()
-        return normalized or candidate
-    return candidate
-
-
-def _build_audit_patient_key(value: Any) -> str:
-    normalized = _normalize_audit_patient_identifier(value)
-    if not normalized:
-        return ""
-    if AUDIT_PATIENT_KEY_PATTERN.fullmatch(normalized):
-        return normalized
-    digest = hashlib.sha256(f"{AUDIT_PATIENT_KEY_NAMESPACE}{normalized}".encode("utf-8")).hexdigest()
-    return f"{AUDIT_PATIENT_KEY_PREFIX}{digest[:AUDIT_PATIENT_KEY_HASH_LENGTH]}"
-
-
 class AuditLogView(AuthenticatedAPIView):
     permission_classes = [
         IsAuthenticated,
@@ -2134,10 +2106,10 @@ class AuditLogView(AuthenticatedAPIView):
         event = ClientAuditEvent.objects.create(
             type=str(event_type),
             user_id=str(user_id),
-            patient_id=_build_audit_patient_key(data.get("patientKey") or data.get("patientId")),
+            patient_id=build_audit_patient_key(data.get("patientKey") or data.get("patientId")),
             unit_id=str(data.get("unitId") or ""),
             shift_code=str(data.get("shiftCode") or ""),
-            meta=data.get("meta") if isinstance(data.get("meta"), dict) else None,
+            meta=sanitize_client_audit_meta(data.get("meta")),
             occurred_at=occurred_at,
         )
 
@@ -2159,7 +2131,7 @@ class AuditLogView(AuthenticatedAPIView):
             "id": event.id,
             "type": event.type,
             "userId": event.user_id,
-            "patientKey": _build_audit_patient_key(event.patient_id) or None,
+            "patientKey": build_audit_patient_key(event.patient_id) or None,
             "unitId": event.unit_id or None,
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
