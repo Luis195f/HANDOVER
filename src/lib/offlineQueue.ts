@@ -42,7 +42,9 @@ export interface EnqueuePayload {
   dedupKey?: string;
 }
 
-export type SendFn = (tx: OfflineQueueItem) => Promise<Response | { ok: boolean; status: number }>;
+export type SendResult = Response | { ok: boolean; status: number; stop?: boolean };
+
+export type SendFn = (tx: OfflineQueueItem) => Promise<SendResult>;
 
 /** @deprecated kept for backwards compatibility with legacy tests/imports. */
 export const OFFLINE_QUEUE_KEY = 'handover_offline_queue_v1';
@@ -174,16 +176,20 @@ export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): bool
   return now - item.lastAttemptAt >= RETRY_DELAYS_MS[delayIndex];
 }
 
-function isSuccessfulResponse(res: Response | { ok: boolean; status: number }): boolean {
+function isSuccessfulResponse(res: SendResult): boolean {
   const status = 'status' in res ? res.status : (res as Response).status;
   const okFlag = 'ok' in res ? res.ok : (res as Response).ok;
   return okFlag === true || status === 200 || status === 201 || status === 412;
 }
 
-function getStatus(res: Response | { ok: boolean; status: number }): number {
+function getStatus(res: SendResult): number {
   if ('status' in res && typeof res.status === 'number') return res.status;
   if (res instanceof Response) return res.status;
   return 0;
+}
+
+function shouldStopFlush(res: SendResult): boolean {
+  return 'stop' in res && res.stop === true;
 }
 
 export async function enqueueTx(input: EnqueuePayload): Promise<OfflineQueueItem> {
@@ -251,6 +257,9 @@ export async function flushQueue(sender: SendFn): Promise<void> {
         syncStatus: isFinalClientError || attempts >= MAX_ATTEMPTS ? 'error' : 'pending',
         errorStatus: status || undefined,
       });
+      if (shouldStopFlush(response)) {
+        break;
+      }
     } catch (error: unknown) {
       const attempts = item.attempts + 1;
       await updateOfflineQueueItem(item.key, {

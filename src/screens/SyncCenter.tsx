@@ -34,12 +34,16 @@ type QueueItemMeta = {
   errorIssuesJson?: string | null;
 };
 
+function getAuthReplayMessage(outcome: 'auth-required' | 'auth-failed'): string {
+  return outcome === 'auth-failed' ? t('sync.authFailedMessage') : t('sync.authRequiredMessage');
+}
+
 function resolveSyncOpts(): SyncOpts | null {
   if (!FHIR_BASE_URL) return null;
 
   return {
     fhirBaseUrl: FHIR_BASE_URL,
-    getToken: async () => (await ensureFreshAccessToken()) ?? null,
+    getToken: () => ensureFreshAccessToken('fhir'),
     backoff: { retries: 5, minMs: 500, maxMs: 15000 },
   };
 }
@@ -66,7 +70,7 @@ export default function SyncCenter() {
   const [items, setItems] = React.useState<QueueItemMeta[]>([]);
   const [refreshing, setRefreshing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [authRequired, setAuthRequired] = React.useState(false);
+  const [authMessage, setAuthMessage] = React.useState<string | null>(null);
 
   // Auto-retry
   const [autoRetry, setAutoRetry] = React.useState(true);
@@ -125,23 +129,19 @@ export default function SyncCenter() {
     const opts = resolveSyncOpts();
     if (!opts) {
       Alert.alert(t('sync.syncTitle'), t('sync.configMissingMessage'));
-      return { processed: 0, remaining: -1 };
+      return { processed: 0, remaining: -1, outcome: 'client-error' as const };
     }
-    let token: string | null = null;
-    try {
-      token = await opts.getToken?.();
-    } catch {
-      token = null;
-    }
-    if (!token) {
-      setAuthRequired(true);
-      Alert.alert(t('sync.syncTitle'), t('sync.authRequiredMessage'));
-      return { processed: 0, remaining: -1 };
-    }
-    setAuthRequired(false);
+    setAuthMessage(null);
     setBusy(true);
     try {
       const res = await flushQueue(opts);
+      if (res.outcome === 'auth-required' || res.outcome === 'auth-failed') {
+        const message = getAuthReplayMessage(res.outcome);
+        setAuthMessage(message);
+        Alert.alert(t('sync.syncTitle'), message);
+        return res;
+      }
+      setAuthMessage(null);
       await refresh();
       setLastRun(new Date().toLocaleTimeString());
       return res;
@@ -202,9 +202,9 @@ export default function SyncCenter() {
           />
         </View>
       </View>
-      {authRequired && (
+      {authMessage && (
         <Text allowFontScaling style={[styles.authWarning, { color: palette.stateError }]}>
-          {t('sync.authRequiredMessage')}
+          {authMessage}
         </Text>
       )}
 

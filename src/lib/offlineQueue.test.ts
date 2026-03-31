@@ -51,4 +51,19 @@ describe('offline queue', () => {
     const remaining = await readQueue();
     expect(remaining.map((it) => it.key)).toEqual([i3.key, i4.key]);
   });
+
+  it('flushQueue stops draining after an auth stop response', async () => {
+    const first = await enqueueTx({ payload: { auth: true } });
+    const second = await enqueueTx({ payload: { later: true } });
+
+    const sender: SendFn = async (tx) => {
+      if ((tx as any).payload.auth) return { ok: false, status: 401, stop: true };
+      return { ok: true, status: 200 };
+    };
+
+    await flushQueue(sender);
+
+    const remaining = await readQueue();
+    expect(remaining.map((it) => it.key)).toEqual([first.key, second.key]);
+  });
 });

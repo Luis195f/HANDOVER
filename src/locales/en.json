@@ -269,6 +269,7 @@
     "validationFailedMessage": "Sync stopped: remote validation failed (422).",
     "configMissingMessage": "FHIR_BASE or AuthService config not available.",
     "authRequiredMessage": "Authentication required.",
+    "authFailedMessage": "Authentication refresh failed. Sign in again.",
     "retrying": "Retrying…",
     "retryNow": "Retry now",
     "viewAudit": "View audit",

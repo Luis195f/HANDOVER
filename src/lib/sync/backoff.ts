@@ -18,6 +18,9 @@ export async function retryWithBackoff<T>(
       return await fn(attempt);
     } catch (err) {
       lastErr = err;
+      if ((err as { nonRetryable?: boolean } | null | undefined)?.nonRetryable) {
+        break;
+      }
       if (attempt === retries) break;
       const exp = Math.min(maxMs, Math.pow(2, attempt) * minMs);
       const jitter = Math.random() * exp; // full jitter
