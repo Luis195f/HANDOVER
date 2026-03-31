@@ -9,7 +9,7 @@
 ## Sanitización de errores y PHI
 
 - **Cliente**: se elimina el log de roles/modo de sesión en navegación para evitar exposición accidental de datos sensibles en consola.【F:src/navigation/RootNavigator.tsx†L80-L100】
-- **Servidor y ruta móvil `/api/audit`**: la auditoría registra hashes/tamaño de payload y, para el log móvil legado, solo `patientKey` seudonimizado y estable; no contenido clínico, nombres ni IDs técnicos crudos de paciente. Esto aplica a eventos de auditoría estándar y a los nuevos eventos de IA (hash + metadatos de modelo).【F:backend/audit/service.py†L31-L180】【F:backend/api/views.py†L2046-L2135】【F:src/lib/audit.ts†L1-L214】【F:main.py†L211-L343】
+- **Servidor y ruta móvil `/api/audit`**: la auditoría registra hashes/tamaño de payload y, para el log móvil legado, usa `patientKey` seudonimizado de forma determinista y generado server-side. `POST /api/audit` transforma `patientId`/referencias equivalentes a `patientKey`, sanea campos anidados equivalentes dentro de `meta` y descarta blobs de alto riesgo (`payload`, `context`, `details`, `patient`, `note`, `text`, `sbar`). La respuesta pública del endpoint devuelve `patientKey` y no serializa `meta`. Esto reduce exposición de identificadores técnicos crudos dentro de esta ruta, pero sigue siendo seudonimización para correlación operativa, no anonimización. Esto aplica a eventos de auditoría estándar y a los nuevos eventos de IA (hash + metadatos de modelo).【F:backend/audit/service.py†L31-L180】【F:backend/api/audit_pseudonymization.py†L1-L91】【F:backend/api/views.py†L2052-L2144】【F:backend/api/migrations/0015_sanitize_client_audit_event_meta.py†L1-L106】【F:src/lib/audit.ts†L1-L214】【F:main.py†L211-L343】
 
 ## Seguridad de API y validaciones finales
 

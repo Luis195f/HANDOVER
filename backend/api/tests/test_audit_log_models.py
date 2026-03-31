@@ -1,4 +1,3 @@
-import hashlib
 from datetime import timezone as dt_timezone
 from unittest.mock import patch
 
@@ -7,13 +6,13 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from backend.api.audit_pseudonymization import build_audit_patient_key, sanitize_client_audit_meta
 from backend.api.models import ClientAuditEvent
 from backend.audit.models import AuditEvent
 
 
 def _expected_patient_key(patient_id: str) -> str:
-    digest = hashlib.sha256(f"handover.audit.patient.v1:{patient_id}".encode("utf-8")).hexdigest()
-    return f"ptk_{digest[:24]}"
+    return build_audit_patient_key(patient_id)
 
 
 class AuditEventModelIsolationTests(TestCase):
@@ -106,3 +105,65 @@ class AuditLogViewTests(TestCase):
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(create_response.data["type"], "handover_signed")
         self.assertEqual(create_response.data["patientKey"], _expected_patient_key("pat-88"))
+
+    def test_patient_key_is_deterministic_for_raw_ids_and_patient_references(self):
+        direct = build_audit_patient_key("pat-42")
+        reference = build_audit_patient_key("Patient/pat-42")
+        self.assertEqual(direct, reference)
+        self.assertEqual(direct, _expected_patient_key("pat-42"))
+
+    def test_post_sanitizes_nested_patient_identifiers_and_drops_risky_meta_blobs(self):
+        payload = {
+            "type": "patient_edit",
+            "userId": "clinician-2",
+            "patientId": "pat-77",
+            "meta": {
+                "ui": "timeline",
+                "patientId": "pat-77",
+                "selectedPatientId": "Patient/pat-77",
+                "context": {"patientId": "pat-context"},
+                "details": {"patientReference": "Patient/pat-details"},
+                "nested": {"patient_reference": "Patient/pat-77", "safe": True},
+                "events": [{"step": "open", "patientRef": "Patient/pat-77"}],
+            },
+        }
+
+        response = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        event = ClientAuditEvent.objects.get()
+        expected_patient_key = _expected_patient_key("pat-77")
+        self.assertEqual(event.patient_id, expected_patient_key)
+        self.assertEqual(
+            event.meta,
+            {
+                "ui": "timeline",
+                "patientKey": expected_patient_key,
+                "nested": {"patientKey": expected_patient_key, "safe": True},
+                "events": [{"step": "open", "patientKey": expected_patient_key}],
+            },
+        )
+        self.assertNotIn("patientId", str(event.meta))
+        self.assertNotIn("pat-context", str(event.meta))
+        self.assertNotIn("pat-details", str(event.meta))
+
+    def test_get_does_not_expose_legacy_raw_patient_ids_from_meta(self):
+        ClientAuditEvent.objects.create(
+            type="patient_open",
+            user_id="clinician-legacy",
+            patient_id="pat-legacy-11",
+            meta={"patientId": "pat-legacy-11", "context": {"patientId": "pat-legacy-context"}},
+            occurred_at=timezone.datetime(2026, 1, 1, 10, 0, tzinfo=dt_timezone.utc),
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["patientKey"], _expected_patient_key("pat-legacy-11"))
+        self.assertNotIn("patientId", str(response.data[0]))
+        self.assertNotIn("pat-legacy-context", str(response.data[0]))
+
+
+class AuditMetaSanitizationTests(TestCase):
+    def test_sanitize_client_audit_meta_returns_none_for_invalid_root(self):
+        self.assertIsNone(sanitize_client_audit_meta("not-a-dict"))
