@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearOfflineQueue, deleteOfflineQueueItem, enqueueBundle } from '@/src/lib/queue';
@@ -68,7 +68,7 @@ vi.mock('@/src/lib/sync', () => ({
   },
 }));
 
-function HookHarness({ queueId }: { queueId: string | null }) {
+function HookHarness({ queueId, initializeQueued = true }: { queueId: string | null; initializeQueued?: boolean }) {
   const {
     handoverSyncStatus,
     handoverSyncError,
@@ -76,17 +76,20 @@ function HookHarness({ queueId }: { queueId: string | null }) {
     setHandoverSyncStatus,
     setTrackedQueueId,
   } = useHandoverSyncStatus();
+  const initializedRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     setTrackedQueueId(queueId);
-    setHandoverSyncStatus(queueId ? 'queued' : 'idle');
-  }, [queueId, setHandoverSyncStatus, setTrackedQueueId]);
+    setHandoverSyncStatus(queueId && initializeQueued ? 'queued' : 'idle');
+  }, [initializeQueued, queueId, setHandoverSyncStatus, setTrackedQueueId]);
 
   return (
     <View>
       <Text testID="status">{handoverSyncStatus}</Text>
       <Text testID="error">{handoverSyncError ?? ''}</Text>
-      <Pressable testID="retry" onPress={() => void retrySync()} />
+      <Pressable testID="retry" onPress={retrySync} />
     </View>
   );
 }
@@ -181,7 +184,7 @@ describe('useHandoverSyncStatus', () => {
     flushQueueMock.mockResolvedValueOnce({ processed: 0, remaining: 0 });
 
     await act(async () => {
-      fireEvent.press(view.getByTestId('retry'));
+      await view.getByTestId('retry').props.onPress();
     });
 
     await waitFor(() => {
@@ -190,39 +193,78 @@ describe('useHandoverSyncStatus', () => {
     expect(view.getByTestId('status').props.children).not.toBe('synced');
   });
 
-  it('retries through the bootstrap auth seam and surfaces auth-required when the session token is missing', async () => {
+  it('passes the canonical auth refresher to flushQueue and never snapshots the token', async () => {
     const queued = await enqueueBundle(
       { resourceType: 'Bundle', type: 'transaction', entry: [] },
       { patientId: 'pat-handover-retry' },
     );
 
-    const view = render(<HookHarness queueId={queued.id} />);
+    const view = render(<HookHarness queueId={queued.id} initializeQueued={false} />);
 
     ensureFreshAccessTokenMock.mockResolvedValueOnce(null);
+    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+      const token = await opts.getToken();
+      return { processed: 0, remaining: 0, outcome: token ? 'success' : 'auth-required' };
+    });
     await act(async () => {
-      fireEvent.press(view.getByTestId('retry'));
+      await view.getByTestId('retry').props.onPress();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
     });
 
-    expect(flushQueueMock).not.toHaveBeenCalled();
-    expect(view.getByTestId('status').props.children).toBe('error');
-    expect(view.getByTestId('error').props.children).toBe('sync.authRequiredMessage');
+    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(1, 'fhir');
 
-    ensureFreshAccessTokenMock.mockResolvedValueOnce('session-token');
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string> }) => {
-      expect(await opts.getToken()).toBe('session-token');
+    ensureFreshAccessTokenMock
+      .mockResolvedValueOnce('fresh-replay-token-1')
+      .mockResolvedValueOnce('fresh-replay-token-2');
+    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+      await opts.getToken();
+      await opts.getToken();
       recentlySyncedQueueIds.add(queued.id);
       await deleteOfflineQueueItem(queued.id);
-      return { processed: 1, remaining: 0 };
+      return { processed: 1, remaining: 0, outcome: 'success' };
     });
 
     await act(async () => {
-      fireEvent.press(view.getByTestId('retry'));
+      await view.getByTestId('retry').props.onPress();
     });
 
-    expect(ensureFreshAccessTokenMock).toHaveBeenLastCalledWith('fhir');
-    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(2, 'fhir');
+    expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(3, 'fhir');
+    expect(flushQueueMock).toHaveBeenCalledTimes(2);
     await waitFor(() => {
       expect(view.getByTestId('status').props.children).toBe('synced');
     });
+  });
+
+  it('preserves auth-failed semantics by passing a throwing refresher into flushQueue', async () => {
+    const queued = await enqueueBundle(
+      { resourceType: 'Bundle', type: 'transaction', entry: [] },
+      { patientId: 'pat-handover-refresh-failed' },
+    );
+
+    const view = render(<HookHarness queueId={queued.id} initializeQueued={false} />);
+
+    ensureFreshAccessTokenMock.mockRejectedValueOnce(new Error('refresh failed'));
+    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+      try {
+        await opts.getToken();
+        return { processed: 0, remaining: 0, outcome: 'success' };
+      } catch {
+        return { processed: 0, remaining: 0, outcome: 'auth-failed' };
+      }
+    });
+
+    await act(async () => {
+      await view.getByTestId('retry').props.onPress();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(ensureFreshAccessTokenMock).toHaveBeenCalledWith('fhir');
   });
 });

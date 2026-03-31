@@ -84,7 +84,33 @@ export type SyncOpts = {
   backoff?: { retries?: number; minMs?: number; maxMs?: number };
 };
 
-type FlushResult = { processed: number; remaining: number };
+export type FlushOutcome =
+  | 'success'
+  | 'auth-required'
+  | 'auth-failed'
+  | 'network-error'
+  | 'server-error'
+  | 'client-error';
+
+export type FlushResult = {
+  processed: number;
+  remaining: number;
+  outcome: FlushOutcome;
+  status?: number;
+};
+
+class QueueReplayAuthError extends Error {
+  readonly nonRetryable = true;
+
+  constructor(
+    readonly outcome: Extract<FlushOutcome, 'auth-required' | 'auth-failed'>,
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'QueueReplayAuthError';
+  }
+}
 
 // Global guard to coalesce concurrent flushes (prevents races).
 let _currentFlush: Promise<FlushResult> | null = null;
@@ -149,19 +175,29 @@ async function sendWithRetry(bundle: unknown, idemKey: string, opts: SyncOpts) {
   return await retryWithBackoff(
     async (attempt) => {
       mark('sync.http.request', { attempt, idemKey });
+      const token = await requireFreshSessionToken(opts);
       const resp = await postBundle(bundle, {
-        token: await resolveSessionToken(opts),
+        token,
         headers: { 'Idempotency-Key': idemKey },
       });
       mark('sync.http.response', { status: resp.status, attempt });
 
+      if (resp.status === 401 || resp.status === 403) {
+        throw new QueueReplayAuthError('auth-required', resp.status, `HTTP ${resp.status}`);
+      }
       if (isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
         return resp;
       }
-      if (isRetryable(resp.status)) throw new Error(`Retryable ${resp.status}`);
+      if (isRetryable(resp.status)) {
+        const error = new Error(`Retryable ${resp.status}`) as Error & { status?: number };
+        error.status = resp.status;
+        throw error;
+      }
 
       const body = resp.body ? JSON.stringify(resp.body) : '';
-      throw new Error(`Non-retryable HTTP ${resp.status} ${body}`);
+      const error = new Error(`Non-retryable HTTP ${resp.status} ${body}`) as Error & { status?: number };
+      error.status = resp.status;
+      throw error;
     },
     opts.backoff
   );
@@ -180,13 +216,31 @@ async function hasInternet(): Promise<boolean> {
   return !!(s.isConnected && (s.isInternetReachable ?? true));
 }
 
-async function resolveSessionToken(opts: SyncOpts): Promise<string | undefined> {
+async function requireFreshSessionToken(opts: SyncOpts): Promise<string> {
+  let token: string | null;
   try {
-    const token = await opts.getToken();
-    return typeof token === 'string' && token.trim().length > 0 ? token : undefined;
-  } catch {
-    return undefined;
+    token = await opts.getToken();
+  } catch (error) {
+    throw new QueueReplayAuthError(
+      'auth-failed',
+      401,
+      error instanceof Error ? error.message : 'Failed to refresh bearer for queue replay',
+    );
   }
+
+  if (typeof token !== 'string' || token.trim().length === 0) {
+    throw new QueueReplayAuthError('auth-required', 401, 'Fresh bearer required for queue replay');
+  }
+
+  return token;
+}
+
+function resolveFlushOutcome(status?: number): FlushOutcome {
+  if (status === 401 || status === 403) return 'auth-required';
+  if (status == null || status === 0) return 'network-error';
+  if (status >= 500) return 'server-error';
+  if (status >= 400) return 'client-error';
+  return 'success';
 }
 
 /** Builds a reusable flush function for both the daemon and manual actions. */
@@ -198,12 +252,28 @@ function createFlusher(opts: SyncOpts) {
 
   return async function flushImpl(): Promise<FlushResult> {
     mark('sync.flush.start');
-    const token = await resolveSessionToken(opts);
-    if (!token) {
-      return { processed: 0, remaining: (await readQueue()).length };
+    try {
+      await requireFreshSessionToken(opts);
+    } catch (error) {
+      if (error instanceof QueueReplayAuthError) {
+        return {
+          processed: 0,
+          remaining: (await readQueue()).length,
+          outcome: error.outcome,
+          status: error.status,
+        };
+      }
+      return {
+        processed: 0,
+        remaining: (await readQueue()).length,
+        outcome: 'auth-failed',
+        status: 401,
+      };
     }
 
     let processed = 0;
+    let outcome: FlushOutcome = 'success';
+    let status: number | undefined;
 
     await runQueueFlush(async (tx) => {
       const payload =
@@ -214,26 +284,52 @@ function createFlusher(opts: SyncOpts) {
       const hash = payload.meta?.hash ?? tx.key;
 
       if (!bundle) {
+        if (outcome === 'success') {
+          outcome = 'client-error';
+          status = 422;
+        }
         return { ok: false, status: 422 };
       }
 
       try {
-        const resp = await sendWithRetry(bundle, hash, {
-          ...opts,
-          getToken: async () => token,
-        });
+        const resp = await sendWithRetry(bundle, hash, opts);
         if (resp.ok || isSuccessStatus(resp.status) || isDuplicateSkip(resp.status)) {
           processed++;
           rememberRecentlySyncedQueueItem(tx.id);
+        } else if (outcome === 'success') {
+          outcome = resolveFlushOutcome(resp.status);
+          status = resp.status;
         }
         return { ok: resp.ok, status: resp.status };
       } catch (err: unknown) {
+        if (err instanceof QueueReplayAuthError) {
+          outcome = err.outcome;
+          status = err.status;
+          mark('sync.flush.error', {
+            reason: err.message,
+            tries: tx.tries,
+            id: tx.key,
+          });
+          return { ok: false, status: err.status, stop: true };
+        }
+
+        const errorStatus =
+          typeof err === 'object' &&
+          err !== null &&
+          'status' in err &&
+          typeof (err as { status?: unknown }).status === 'number'
+            ? (err as { status: number }).status
+            : 0;
+        if (outcome === 'success') {
+          outcome = resolveFlushOutcome(errorStatus);
+          status = errorStatus || undefined;
+        }
         mark('sync.flush.error', {
           reason: err instanceof Error ? err.message : String(err),
           tries: tx.tries,
           id: tx.key,
         });
-        return { ok: false, status: 500 };
+        return { ok: false, status: errorStatus || 500 };
       }
     });
 
@@ -245,7 +341,7 @@ function createFlusher(opts: SyncOpts) {
         remaining,
       });
     }
-    return { processed, remaining };
+    return { processed, remaining, outcome, status };
   };
 }
 

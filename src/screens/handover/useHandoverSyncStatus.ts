@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { FHIR_BASE_URL } from '@/src/config/env';
 import { t } from '@/src/i18n';
@@ -11,20 +11,33 @@ export type HandoverSyncStatus = 'idle' | 'queued' | 'syncing' | 'synced' | 'err
 
 const HANDOVER_SYNC_POLL_MS = 2_000;
 
+function getAuthReplayMessage(outcome: 'auth-required' | 'auth-failed'): string {
+  return outcome === 'auth-failed' ? t('sync.authFailedMessage') : t('sync.authRequiredMessage');
+}
+
 export function useHandoverSyncStatus() {
   const [syncSnapshot, setSyncSnapshot] = useState(getSyncSnapshot());
   const [handoverSyncStatus, setHandoverSyncStatus] = useState<HandoverSyncStatus>('idle');
   const [handoverSyncError, setHandoverSyncError] = useState<string | null>(null);
   const [trackedQueueId, setTrackedQueueId] = useState<string | null>(null);
   const [manualSyncBlock, setManualSyncBlock] = useState<string | null>(null);
+  const manualRetryInFlightRef = useRef(false);
+  const manualSyncBlockRef = useRef<string | null>(null);
 
   const refreshTrackedQueue = useCallback(async () => {
     if (!trackedQueueId || handoverSyncStatus === 'idle') return;
+    if (manualRetryInFlightRef.current) return;
 
     const queueItem = await getOfflineQueueItem(trackedQueueId);
+    if (manualSyncBlockRef.current) {
+      setHandoverSyncStatus('error');
+      setHandoverSyncError(manualSyncBlockRef.current);
+      return;
+    }
     if (!queueItem) {
       setTrackedQueueId(null);
       if (consumeRecentlySyncedQueueItem(trackedQueueId)) {
+        manualSyncBlockRef.current = null;
         setManualSyncBlock(null);
         setHandoverSyncStatus('synced');
         setHandoverSyncError(null);
@@ -62,38 +75,45 @@ export function useHandoverSyncStatus() {
     setTrackedQueueId(null);
     setHandoverSyncStatus('synced');
     setHandoverSyncError(null);
-  }, [handoverSyncStatus, manualSyncBlock, syncSnapshot.lastError, trackedQueueId]);
+  }, [handoverSyncStatus, manualSyncBlock, syncSnapshot.lastError, trackedQueueId, manualRetryInFlightRef]);
 
   const retrySync = useCallback(async () => {
     if (!FHIR_BASE_URL) {
       const message = t('sync.configMissingMessage');
+      manualSyncBlockRef.current = message;
       setManualSyncBlock(message);
       setHandoverSyncStatus('error');
       setHandoverSyncError(message);
       return;
     }
 
-    const token = await ensureFreshAccessToken('fhir').catch(() => null);
-    if (!token) {
-      const message = t('sync.authRequiredMessage');
-      setManualSyncBlock(message);
-      setHandoverSyncStatus('error');
-      setHandoverSyncError(message);
-      return;
-    }
-
+    manualSyncBlockRef.current = null;
     setManualSyncBlock(null);
     setHandoverSyncStatus('syncing');
     setHandoverSyncError(null);
 
-    await flushQueue({
-      fhirBaseUrl: FHIR_BASE_URL,
-      getToken: async () => token,
-      backoff: { retries: 5, minMs: 500, maxMs: 15_000 },
-    });
+    manualRetryInFlightRef.current = true;
+    try {
+      const result = await flushQueue({
+        fhirBaseUrl: FHIR_BASE_URL,
+        getToken: () => ensureFreshAccessToken('fhir'),
+        backoff: { retries: 5, minMs: 500, maxMs: 15_000 },
+      });
 
-    await refreshTrackedQueue();
-  }, [refreshTrackedQueue]);
+      if (result.outcome === 'auth-required' || result.outcome === 'auth-failed') {
+        const message = getAuthReplayMessage(result.outcome);
+        manualSyncBlockRef.current = message;
+        setManualSyncBlock(message);
+        setHandoverSyncStatus('error');
+        setHandoverSyncError(message);
+        return;
+      }
+
+      await refreshTrackedQueue();
+    } finally {
+      manualRetryInFlightRef.current = false;
+    }
+  }, [manualRetryInFlightRef, refreshTrackedQueue]);
 
   useEffect(() => subscribeSyncStatus(setSyncSnapshot), []);
 

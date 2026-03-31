@@ -269,6 +269,7 @@
     "validationFailedMessage": "Sincronización detenida: validación remota fallida (422).",
     "configMissingMessage": "Config FHIR_BASE o AuthService no disponible.",
     "authRequiredMessage": "Autenticación requerida.",
+    "authFailedMessage": "Falló la actualización de autenticación. Inicia sesión de nuevo.",
     "retrying": "Reintentando…",
     "retryNow": "Reintentar ahora",
     "viewAudit": "Ver auditoría",
