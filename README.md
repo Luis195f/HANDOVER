@@ -52,7 +52,7 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 - Node.js 20
 - pnpm 10
 - Expo CLI (`pnpm dlx expo install` instala dependencias nativas cuando se añaden paquetes)
-- (Opcional) Python 3.10+ y PostgreSQL/SQLite si se desea correr el backend incluido en `backend/`
+- Python 3.10+ y SQLite/PostgreSQL si vas a ejecutar localmente el backend operativo Django/DRF incluido en `backend/`
 
 ## Configuración de entorno
 
@@ -143,6 +143,15 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 
 Se retiró el servidor auxiliar FastAPI de STT para unificar validación y seguridad en el backend Django/DRF.
 
+Fuente de verdad operativa del backend en este corte:
+
+- `manage.py` fija `backend.settings`
+- `backend/api/urls.py` publica la API clínica operativa
+- `Procfile` arranca `gunicorn backend.wsgi`
+- en esta rama no hay `main.py` trackeado en la raíz y, por tanto, no forma parte de la ruta operativa actual
+
+La decisión queda registrada en [`docs/adr/0001-backend-source-of-truth.md`](docs/adr/0001-backend-source-of-truth.md).
+
 ### Endpoints principales
 
 | Método | Ruta | Descripción | Auth |
@@ -172,7 +181,7 @@ python manage.py transcribe_audio ./audio.m4a --language es
    ```bash
    pnpm -w install
    ```
-2. Levanta el backend opcional (Django) si necesitas un API REST local:
+2. Levanta el backend operativo Django/DRF si necesitas un API REST local o validar la ruta clínica end-to-end:
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -341,6 +350,7 @@ Para publicar una RC nueva sin deriva documental:
 Explora la documentación técnica para conocer la arquitectura, configuración y flujos clave antes de contribuir al proyecto.
 
 - [Arquitectura general](docs/overview-architecture.md)
+- [ADR-0001: backend source of truth](docs/adr/0001-backend-source-of-truth.md)
 - [Contrato base de perfiles clínicos](docs/profile-architecture.md)
 - [Playbook de rollout y gate de reanudación](docs/profile-rollout-playbook.md)
 - [Guía de onboarding](docs/dev-onboarding.md)

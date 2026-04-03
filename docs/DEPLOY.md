@@ -23,9 +23,9 @@ Límite actual, explícito:
 - El backend sigue siendo una pieza separada y su arranque documentado real es el comando del [`Procfile`](../Procfile).
 - `config/nginx/handover.conf` es un template de reverse proxy hacia `127.0.0.1:8000`; no forma parte del contenedor web exportado.
 
-## Topologías secundarias o residuales
+## Topologías secundarias o no automatizadas
 
-- Backend Django manual o PaaS-compatible: residual pero vigente, usando `gunicorn` según [`Procfile`](../Procfile).
+- Backend Django manual o PaaS-compatible: operativo y vigente, usando `gunicorn` según [`Procfile`](../Procfile).
 - Publicación a PyPI: desactivada de forma explícita. El repo no tiene `pyproject.toml`, `setup.py` ni `setup.cfg`, así que [`.github/workflows/python-publish.yml`](../.github/workflows/python-publish.yml) quedó como residual manual sin publicación real.
 - Android e iOS: siguen siendo artefactos de release, no un deploy automatizado dentro de este repo.
 
@@ -164,9 +164,9 @@ Notas:
 - El contenedor final solo sirve archivos estáticos con nginx.
 - Las variables de runtime del servicio `web` no se usan para reconfigurar la app ya exportada; la configuración efectiva entra en build time.
 
-## Backend Django residual y explícito
+## Backend Django operativo y explícito
 
-El backend no tiene `Dockerfile` ni `docker-compose` propio en este repo. La vía documentada real sigue siendo:
+El backend no tiene `Dockerfile` ni `docker-compose` propio en este repo. Sigue siendo, aun así, la única fuente operativa de verdad del servidor clínico. La vía documentada real sigue siendo:
 
 ```bash
 python -m venv .venv
@@ -178,6 +178,8 @@ gunicorn backend.wsgi --preload --bind 0.0.0.0:${PORT:-8000}
 ```
 
 Ese comando es el mismo que declara el [`Procfile`](../Procfile). Si se usa nginx frontal, [`config/nginx/handover.conf`](../config/nginx/handover.conf) asume ese upstream en `127.0.0.1:8000`.
+
+En esta rama no hay `main.py` trackeado en la raíz; por eso no forma parte del arranque operativo documentado y la decisión de backend source of truth queda fijada en [`docs/adr/0001-backend-source-of-truth.md`](adr/0001-backend-source-of-truth.md).
 
 ## Paquetes de compartición y release hygiene
 
