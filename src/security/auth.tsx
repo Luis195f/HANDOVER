@@ -130,6 +130,8 @@ type LogoutOptions = {
   message?: string;
 };
 
+type SessionIdentitySnapshot = Pick<HandoverSession, 'userId' | 'accessToken' | 'mode'>;
+
 function toIsoExpiresAt(value: string | number | undefined): string | undefined {
   if (value == null) return undefined;
   if (typeof value === 'number') {
@@ -286,6 +288,18 @@ function toAuthTokens(session: HandoverSession): { accessToken: string; refreshT
 
 function isLocalSession(session: HandoverSession): boolean {
   return Boolean(session.refreshToken?.startsWith('local-refresh-') || session.accessToken?.startsWith('local-'));
+}
+
+function isSameSessionIdentity(
+  session: HandoverSession | null,
+  snapshot: SessionIdentitySnapshot,
+): boolean {
+  return Boolean(
+    session &&
+      session.userId === snapshot.userId &&
+      session.accessToken === snapshot.accessToken &&
+      session.mode === snapshot.mode,
+  );
 }
 
 async function persistSession(session: HandoverSession | null): Promise<void> {
@@ -892,9 +906,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let alive = true;
 
     (async () => {
+      const sessionIdentity: SessionIdentitySnapshot | null = session
+        ? {
+            userId: session.userId,
+            accessToken: session.accessToken,
+            mode: session.mode,
+          }
+        : null;
       const currentUserId = session?.userId ?? null;
       const previousUserId = previousUserIdRef.current;
       const userChanged = previousUserId !== null && previousUserId !== currentUserId;
+      const isActiveSession = () =>
+        alive && sessionIdentity !== null && isSameSessionIdentity(currentSession, sessionIdentity);
 
       if (!session) {
         setCapabilitiesState(null);
@@ -910,24 +933,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       previousUserIdRef.current = currentUserId;
 
       if (session.mode === "demo") {
-        setCapabilitiesState(await getDemoCapabilitiesLazy(session.userId));
+        const demoCapabilities = await getDemoCapabilitiesLazy(session.userId);
+        if (!isActiveSession()) return;
+        setCapabilitiesState(demoCapabilities);
         return;
       }
 
       try {
         const caps = await fetchCapabilitiesLazy();
-        if (!alive) return;
+        if (!isActiveSession()) return;
         setCapabilitiesState(caps ?? createDeniedCapabilities(session.userId));
       } catch (error) {
         const status = (error as { status?: number }).status;
         if (status === 401 || status === 403) {
+          if (!isActiveSession()) return;
           await logoutAndClear({
             skipRemote: true,
             message: t('auth.sessionExpiredMessage'),
           });
           return;
         }
-        if (alive) {
+        if (isActiveSession()) {
           setCapabilitiesState(createDeniedCapabilities(session.userId));
         }
       }

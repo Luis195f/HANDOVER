@@ -149,6 +149,7 @@ class Auth0JWTAuthentication(BaseAuthentication):
     """
 
     def authenticate(self, request) -> Optional[Tuple[Auth0User, Any]]:
+        token = _get_bearer_token(request)
         issuer_base_url = _auth0_issuer_base_url()
         audience = _auth0_audience()
 
@@ -159,8 +160,6 @@ class Auth0JWTAuthentication(BaseAuthentication):
             raise AuthFailed(
                 "Auth0 not configured. Set AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE."
             )
-
-        token = _get_bearer_token(request)
 
         try:
             from jose import jwt

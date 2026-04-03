@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.test import APIClient, APIRequestFactory
 
 from backend.api.views import AuthenticatedAPIView
-from backend.security.auth import Auth0JWTAuthentication, Auth0User, AuthFailed
+from backend.security.auth import Auth0JWTAuthentication, Auth0User, AuthFailed, AuthRequired
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
 
@@ -119,6 +119,21 @@ class AuthEndpointTests(TestCase):
             Auth0JWTAuthentication().authenticate(request)
 
         self.assertIn("Auth0 not configured", str(exc.exception))
+
+    @override_settings(
+        DEBUG=False,
+        AUTH0_CONFIGURED=False,
+        AUTH0_ISSUER_BASE_URL="",
+        AUTH0_AUDIENCE="",
+        HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED=False,
+    )
+    def test_authenticator_without_bearer_returns_auth_required_before_auth0_config_validation(self):
+        request = self.factory.get("/api/protected")
+
+        with self.assertRaises(AuthRequired) as exc:
+            Auth0JWTAuthentication().authenticate(request)
+
+        self.assertEqual(exc.exception.get_codes(), "auth-required")
 
     @override_settings(
         DEBUG=True,
