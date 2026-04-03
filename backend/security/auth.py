@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 from django.conf import settings
 from rest_framework.authentication import BaseAuthentication
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 
 ALGORITHMS = ["RS256"]
 
@@ -17,6 +17,16 @@ ALGORITHMS = ["RS256"]
 _JWKS_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _JWKS_CACHE_TS: Dict[Tuple[str, str], float] = {}
 _JWKS_TTL_SECONDS = 3600
+
+
+class AuthRequired(NotAuthenticated):
+    default_detail = "Authentication credentials were not provided."
+    default_code = "auth-required"
+
+
+class AuthFailed(AuthenticationFailed):
+    default_detail = "Authentication failed."
+    default_code = "auth-failed"
 
 
 def _auth0_issuer_base_url() -> str:
@@ -45,11 +55,11 @@ def _jwks_cache_key() -> Tuple[str, str]:
 def _get_bearer_token(request) -> str:
     auth = request.META.get("HTTP_AUTHORIZATION", "")
     if not auth:
-        raise AuthenticationFailed("Missing Authorization header")
+        raise AuthRequired()
 
     parts = auth.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise AuthenticationFailed("Invalid Authorization header (expected: Bearer <token>)")
+        raise AuthFailed("Invalid Authorization header (expected: Bearer <token>)")
 
     return parts[1]
 
@@ -59,7 +69,7 @@ def _get_jwks() -> Dict[str, Any]:
 
     issuer_base_url = _auth0_issuer_base_url()
     if not issuer_base_url:
-        raise AuthenticationFailed("Auth0 not configured: missing AUTH0_ISSUER_BASE_URL")
+        raise AuthFailed("Auth0 not configured: missing AUTH0_ISSUER_BASE_URL")
 
     cache_key = _jwks_cache_key()
     now = time.time()
@@ -74,10 +84,10 @@ def _get_jwks() -> Dict[str, Any]:
         data = r.json()
     except Exception:
         # Mensaje neutro (evita filtrar detalles internos)
-        raise AuthenticationFailed("Unable to fetch JWKS")
+        raise AuthFailed("Unable to fetch JWKS")
 
     if not isinstance(data, dict) or "keys" not in data:
-        raise AuthenticationFailed("Invalid JWKS payload")
+        raise AuthFailed("Invalid JWKS payload")
 
     _JWKS_CACHE[cache_key] = data
     _JWKS_CACHE_TS[cache_key] = now
@@ -89,7 +99,7 @@ def _find_jwk_for_kid(jwks: Dict[str, Any], kid: str) -> Dict[str, Any]:
     for k in keys:
         if isinstance(k, dict) and k.get("kid") == kid:
             return k
-    raise AuthenticationFailed("No matching JWK for token kid")
+    raise AuthFailed("No matching JWK for token kid")
 
 
 def _b64url_to_int(val: str) -> int:
@@ -101,9 +111,9 @@ def _jwk_to_public_key(jwk: Dict[str, Any]):
     from cryptography.hazmat.primitives.asymmetric import rsa
 
     if jwk.get("kty") != "RSA":
-        raise AuthenticationFailed("Unsupported JWK type (expected RSA)")
+        raise AuthFailed("Unsupported JWK type (expected RSA)")
     if "n" not in jwk or "e" not in jwk:
-        raise AuthenticationFailed("Invalid RSA JWK (missing n/e)")
+        raise AuthFailed("Invalid RSA JWK (missing n/e)")
 
     n = _b64url_to_int(jwk["n"])
     e = _b64url_to_int(jwk["e"])
@@ -146,7 +156,7 @@ class Auth0JWTAuthentication(BaseAuthentication):
         if not issuer_base_url or not audience:
             if _local_auth_bypass_allowed():
                 return None
-            raise AuthenticationFailed(
+            raise AuthFailed(
                 "Auth0 not configured. Set AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE."
             )
 
@@ -155,17 +165,17 @@ class Auth0JWTAuthentication(BaseAuthentication):
         try:
             from jose import jwt
         except Exception:
-            raise AuthenticationFailed("Missing dependency: python-jose")
+            raise AuthFailed("Missing dependency: python-jose")
 
         try:
             unverified_header = jwt.get_unverified_header(token)
             kid = unverified_header.get("kid")
             if not kid:
-                raise AuthenticationFailed("Token header missing kid")
-        except AuthenticationFailed:
+                raise AuthFailed("Token header missing kid")
+        except (AuthenticationFailed, NotAuthenticated):
             raise
         except Exception:
-            raise AuthenticationFailed("Invalid token header")
+            raise AuthFailed("Invalid token header")
 
         jwks = _get_jwks()
         jwk = _find_jwk_for_kid(jwks, kid)
@@ -187,11 +197,11 @@ class Auth0JWTAuthentication(BaseAuthentication):
                 },
             )
         except Exception:
-            raise AuthenticationFailed("Invalid token")
+            raise AuthFailed("Invalid token")
 
         sub = claims.get("sub")
         if not sub:
-            raise AuthenticationFailed("Token missing sub")
+            raise AuthFailed("Token missing sub")
 
         user = Auth0User(sub=str(sub), claims=claims)
         request.auth_token = token

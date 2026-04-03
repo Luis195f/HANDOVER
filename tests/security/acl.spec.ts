@@ -60,10 +60,10 @@ describe('ACL env flags and edge cases', () => {
     expect(() => ensureRole(null, 'nurse')).toThrowError('NO_SESSION');
   });
 
-  it('bypasses unit and role checks when bypass flag is enabled with session', () => {
+  it('ignores bypass env flags and keeps role/unit checks closed', () => {
     process.env.BYPASS_SCOPE = 'true';
-    expect(() => ensureRole(baseSession, 'admin')).not.toThrow();
-    expect(() => ensureUnitAccess(baseSession, 'any-unit')).not.toThrow();
+    expect(() => ensureRole(baseSession, 'admin')).toThrowError('FORBIDDEN_ROLE');
+    expect(() => ensureUnitAccess(baseSession, 'any-unit')).toThrowError('FORBIDDEN_UNIT');
   });
 
 
@@ -72,9 +72,9 @@ describe('ACL env flags and edge cases', () => {
     expect(() => ensureRole(baseSession, 'admin')).toThrowError('FORBIDDEN_ROLE');
   });
 
-  it('allows all units when allow-all flag is set', () => {
+  it('ignores allow-all-units env and keeps unit checks closed', () => {
     process.env.ALLOW_ALL_UNITS = 'true';
-    expect(() => ensureUnitAccess({ ...baseSession, roles: ['nurse'] }, 'new-unit')).not.toThrow();
+    expect(() => ensureUnitAccess({ ...baseSession, roles: ['nurse'] }, 'new-unit')).toThrowError('FORBIDDEN_UNIT');
   });
 
   it('respects allowed units allow-list', () => {

@@ -113,11 +113,10 @@ describe('capabilities cache TTL', () => {
     );
     mockState.apiGet.mockRejectedValue(new Error('403 Forbidden'));
 
-    const result = await fetchCapabilities();
+    await expect(fetchCapabilities()).rejects.toThrow('403 Forbidden');
 
     expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
     expect(mockState.secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
-    expect(result).toBeNull();
   });
 
   it('invalidación borra cache y fuerza fetch remoto', async () => {

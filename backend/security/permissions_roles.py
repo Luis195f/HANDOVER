@@ -6,7 +6,8 @@ from backend.security.roles import extract_roles
 
 
 class HasAnyRole(BasePermission):
-    message = "No tienes permisos suficientes."
+    message = "Authenticated user is missing one of the required roles."
+    code = "forbidden-role"
     required_roles: set[str] = set()
 
     def has_permission(self, request, view) -> bool:

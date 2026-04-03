@@ -12,7 +12,12 @@ export type GuardPermission = string;
 const ALLOWED_ROLES: ReadonlySet<GuardRole> = new Set(['nurse', 'supervisor', 'admin', 'viewer']);
 const PRIVILEGED_ROLES: ReadonlySet<GuardRole> = new Set(['admin', 'supervisor']);
 
-export type AclErrorReason = 'NO_SESSION' | 'FORBIDDEN_ROLE' | 'FORBIDDEN_UNIT' | 'INVALID_UNIT';
+export type AclErrorReason =
+  | 'NO_SESSION'
+  | 'FORBIDDEN_ROLE'
+  | 'FORBIDDEN_PERMISSION'
+  | 'FORBIDDEN_UNIT'
+  | 'INVALID_UNIT';
 
 export class AclError extends Error {
   reason: AclErrorReason;
@@ -62,25 +67,6 @@ export function getSessionRoles(session: AuthSession | null): GuardRole[] {
 
 function hasPrivilegedRole(roles: GuardRole[]): boolean {
   return roles.some((role) => PRIVILEGED_ROLES.has(role));
-}
-
-function parseBooleanEnv(name: string, allowPublic = true): boolean {
-  const value = allowPublic
-    ? (process.env[`EXPO_PUBLIC_${name}`] ?? process.env[name])
-    : process.env[name];
-  if (typeof value !== 'string') return false;
-  return ['1', 'true', 'yes'].includes(value.toLowerCase());
-}
-
-function isBypassEnabled(): boolean {
-  if (process.env.NODE_ENV === 'production') {
-    return false;
-  }
-  return parseBooleanEnv('BYPASS_SCOPE', false);
-}
-
-function isAllowAllUnits(): boolean {
-  return parseBooleanEnv('ALLOW_ALL_UNITS', false);
 }
 
 function getAllowedUnits(): string[] {
@@ -158,9 +144,6 @@ function evaluateRole(session: AuthSession | null, roles: RoleInput): AccessResu
   if (!session) {
     return { ok: false, reason: 'NO_SESSION' };
   }
-  if (isBypassEnabled()) {
-    return { ok: true };
-  }
   const required = normalizeRoles(roles);
   const userRoles = new Set<GuardRole>(sanitizeSessionRoles(session));
   return required.some((role) => userRoles.has(role))
@@ -193,7 +176,6 @@ export function ensureRole(session: AuthSession | null, roles: RoleInput): void 
  */
 export function can(session: AuthSession | null, perms: PermissionInput): boolean {
   if (!session) return false;
-  if (isBypassEnabled()) return true;
 
   const required = normalizePermissions(perms);
   if (required.length === 0) return true;
@@ -211,10 +193,8 @@ export function ensurePermission(session: AuthSession | null, perms: PermissionI
   if (!session) {
     throw new AclError('NO_SESSION');
   }
-  if (isBypassEnabled()) return;
-
   if (!can(session, perms)) {
-    throw new AclError('FORBIDDEN_ROLE', 'FORBIDDEN_PERMISSION');
+    throw new AclError('FORBIDDEN_PERMISSION');
   }
 }
 
@@ -222,18 +202,12 @@ function evaluateUnitAccess(session: AuthSession | null, unitId: string): Access
   if (!session) {
     return { ok: false, reason: 'NO_SESSION' };
   }
-  if (isBypassEnabled()) {
-    return { ok: true };
-  }
   const normalized = unitId?.trim();
   if (!normalized) {
     return { ok: false, reason: 'INVALID_UNIT' };
   }
   const roles = sanitizeSessionRoles(session);
   if (hasPrivilegedRole(roles)) {
-    return { ok: true };
-  }
-  if (isAllowAllUnits()) {
     return { ok: true };
   }
   const allowedUnits = getAllowedUnits();

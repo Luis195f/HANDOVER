@@ -275,6 +275,7 @@ if HANDOVER_TEST_AUTH_BYPASS_ALLOWED or (HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED and 
         "DEFAULT_PERMISSION_CLASSES": [
             "rest_framework.permissions.AllowAny",
         ],
+        "EXCEPTION_HANDLER": "backend.security.drf_exceptions.handover_exception_handler",
     }
 else:
     REST_FRAMEWORK = {
@@ -284,6 +285,7 @@ else:
         "DEFAULT_PERMISSION_CLASSES": [
             "rest_framework.permissions.IsAuthenticated",
         ],
+        "EXCEPTION_HANDLER": "backend.security.drf_exceptions.handover_exception_handler",
     }
 
 MIDDLEWARE = [

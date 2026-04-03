@@ -61,6 +61,23 @@ type Capabilities = {
   fhir?: FhirCapabilities;
 };
 
+const EMPTY_CAPABILITY_PERMISSIONS: CapabilityPermissions = {
+  canWriteHandover: false,
+  canSignHandover: false,
+  canViewAudit: false,
+  canSendAuditEvents: false,
+  isAdmin: false,
+};
+
+function createDeniedCapabilities(userSub = ''): Capabilities {
+  return {
+    userSub,
+    roles: [],
+    scopes: [],
+    permissions: EMPTY_CAPABILITY_PERMISSIONS,
+  };
+}
+
 type AuthWarnCode =
   | 'AUTH_RUNTIME_CONFIG'
   | 'AUTH_OIDC_MISCONFIG'
@@ -504,7 +521,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: ["admin"],
+      roles: ['nurse'],
       units: [],
       mode: 'demo',
     };
@@ -656,13 +673,17 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   const refreshToken = session.refreshToken;
   if (!refreshToken) {
     warnAuth('AUTH_REFRESH_SKIP', { reason: 'no-refresh-token' });
-    return accessToken;
+    await logoutAndClear({
+      skipRemote: true,
+      message: t('auth.sessionExpiredMessage'),
+    });
+    return null;
   }
 
   // Single-flight
   if (refreshInFlight) {
     const inFlightSession = await refreshInFlight;
-    return inFlightSession?.accessToken ?? accessToken;
+    return inFlightSession?.accessToken ?? null;
   }
 
   refreshInFlight = (async () => {
@@ -672,7 +693,11 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
       const refreshed = await refreshOAuthTokens(refreshToken);
       if (!refreshed) {
         warnAuth('AUTH_REFRESH_NO_TOKEN_ENDPOINT');
-        return session;
+        await logoutAndClear({
+          skipRemote: true,
+          message: t('auth.sessionExpiredMessage'),
+        });
+        return null;
       }
 
       const nextSession: HandoverSession = {
@@ -889,8 +914,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const caps = await fetchCapabilitiesLazy();
-      if (alive) setCapabilitiesState(caps);
+      try {
+        const caps = await fetchCapabilitiesLazy();
+        if (!alive) return;
+        setCapabilitiesState(caps ?? createDeniedCapabilities(session.userId));
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403) {
+          await logoutAndClear({
+            skipRemote: true,
+            message: t('auth.sessionExpiredMessage'),
+          });
+          return;
+        }
+        if (alive) {
+          setCapabilitiesState(createDeniedCapabilities(session.userId));
+        }
+      }
     })();
 
     return () => {
@@ -941,9 +981,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCapabilitiesState(demoCaps);
       return demoCaps;
     }
-    const caps = await fetchCapabilitiesLazy({ forceRefresh: true });
-    setCapabilitiesState(caps);
-    return caps;
+    try {
+      const caps = await fetchCapabilitiesLazy({ forceRefresh: true });
+      const resolved = caps ?? createDeniedCapabilities(session.userId);
+      setCapabilitiesState(resolved);
+      return resolved;
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        await logoutAndClear({
+          skipRemote: true,
+          message: t('auth.sessionExpiredMessage'),
+        });
+        return null;
+      }
+      const denied = createDeniedCapabilities(session.userId);
+      setCapabilitiesState(denied);
+      return denied;
+    }
   }, [session]);
 
   // ✅ IMPORTANTE: incluye loginDemo/logout en deps (no rompe nada; evita bugs por closures)

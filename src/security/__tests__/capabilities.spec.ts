@@ -38,4 +38,8 @@ describe('canAccess', () => {
     expect(canAccess('AdminDashboard', adminCapabilities)).toBe(true);
     expect(canAccess('HandoverForm', adminCapabilities)).toBe(true);
   });
+
+  test('rutas no listadas fallan cerrado', () => {
+    expect(canAccess('NotARealRoute' as never, adminCapabilities)).toBe(false);
+  });
 });

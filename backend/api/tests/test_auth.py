@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.test import APIClient, APIRequestFactory
 
 from backend.api.views import AuthenticatedAPIView
-from backend.security.auth import Auth0JWTAuthentication, Auth0User
+from backend.security.auth import Auth0JWTAuthentication, Auth0User, AuthFailed
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
 
@@ -28,6 +28,7 @@ class AuthEndpointTests(TestCase):
         response = self.client.get(self.capabilities_url)
 
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "auth-required")
 
     @override_settings(DEBUG=False, AUTH0_CONFIGURED=False)
     def test_authenticated_api_view_fails_closed_when_auth0_missing_outside_local_test(self):
@@ -134,7 +135,7 @@ class AuthEndpointTests(TestCase):
     @override_settings(DEBUG=False)
     @patch(
         "backend.api.views.Auth0JWTAuthentication.authenticate",
-        side_effect=AuthenticationFailed("Invalid token"),
+        side_effect=AuthFailed("Invalid token"),
     )
     def test_me_capabilities_rejects_invalid_token(self, _mock_authenticate):
         response = self.client.get(
@@ -143,6 +144,7 @@ class AuthEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "auth-failed")
 
     @override_settings(DEBUG=False)
     @patch("backend.api.views.Auth0JWTAuthentication.authenticate")

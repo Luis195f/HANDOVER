@@ -102,6 +102,25 @@ class RoleAclTests(TestCase):
             response = client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "forbidden-role")
+        mock_post.assert_not_called()
+
+    def test_fhir_transaction_missing_scope_forbidden(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-no-fhir-scope",
+                "roles": ["nurse"],
+                "permissions": ["patients:read"],
+            }
+        )
+        url = reverse("fhir-transaction")
+        payload = {"resourceType": "Bundle", "type": "transaction", "entry": []}
+
+        with patch("backend.api.views.httpx.post", autospec=True) as mock_post:
+            response = client.post(url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "forbidden-scope")
         mock_post.assert_not_called()
 
     def test_patient_read_viewer_allowed(self):
@@ -141,6 +160,7 @@ class RoleAclTests(TestCase):
             response = client.post(url, data=payload, format="json")
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "forbidden-role")
         mock_post.assert_not_called()
 
     def test_me_capabilities_for_supervisor(self):
@@ -208,6 +228,7 @@ class RoleAclTests(TestCase):
         response = client.get(url)
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "forbidden-role")
 
     def test_dashboard_role_none_forbidden(self):
         client = _auth_client(
@@ -221,6 +242,7 @@ class RoleAclTests(TestCase):
         response = client.get(url)
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "forbidden-role")
 
     def test_patients_endpoint_returns_demo_data_for_nurse_when_fhir_unavailable(self):
         DemoPatient.objects.create(
@@ -331,6 +353,7 @@ class RoleAclTests(TestCase):
         response = client.get(url)
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "forbidden-scope")
 
     def test_patients_endpoint_accepts_scope_claim_without_permissions_array(self):
         Patient.objects.create(

@@ -39,11 +39,11 @@ describe('ACL bypass scope in production', () => {
     expect(can(nurseSession, 'handover:audit')).toBe(false);
   });
 
-  it('mantiene bypass fuera de production', () => {
+  it('no permite bypass fuera de production', () => {
     process.env.NODE_ENV = 'development';
     process.env.BYPASS_SCOPE = 'true';
 
-    expect(hasRole(nurseSession, 'admin')).toBe(true);
-    expect(can(nurseSession, 'handover:audit')).toBe(true);
+    expect(hasRole(nurseSession, 'admin')).toBe(false);
+    expect(can(nurseSession, 'handover:audit')).toBe(false);
   });
 });

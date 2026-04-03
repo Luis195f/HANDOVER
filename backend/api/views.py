@@ -945,51 +945,14 @@ def _emit_bundle_audit(
 
 class CapabilitiesView(APIView):
     """
-    Devuelve las capacidades efectivas del usuario actual.
-
-    DEV (DEBUG):
-      - Si NO hay Authorization: devuelve guest (sin intentar Auth0)
-      - Si HAY Authorization: intenta Auth0 y devuelve capacidades reales
-
-    PROD:
-      - Requiere JWT Auth0 válido
+    Devuelve las capacidades efectivas del usuario autenticado actual.
+    Siempre falla cerrado cuando falta o falla el bearer.
     """
-    permission_classes = [AllowAny]
-    authentication_classes = [Auth0JWTAuthentication]  # en DEBUG lo controlamos vía get_authenticators()
 
-    def get_permissions(self):
-        if settings.DEBUG:
-            return [AllowAny()]
-        return [IsAuthenticated()]
-
-    def get_authenticators(self):
-        # En DEBUG, si no hay Bearer token, no intentes Auth0 (evita 401/403 por config/token)
-        if settings.DEBUG:
-            auth = self.request.META.get("HTTP_AUTHORIZATION", "")
-            if not auth or not auth.lower().startswith("bearer "):
-                return []
-        return super().get_authenticators()
+    authentication_classes = [Auth0JWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # DEV fallback
-        if settings.DEBUG and (not getattr(request, "user", None) or not request.user.is_authenticated):
-            payload = {
-                "userSub": "guest",
-                "roles": ["guest"],
-                "scopes": [],
-                "permissions": {
-                    "canWriteHandover": False,
-                    "canSignHandover": False,
-                    "canViewAudit": False,
-                    "canSendAuditEvents": False,
-                    "isAdmin": False,
-                },
-                "scopeCatalog": CLINICAL_SCOPES,
-                "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
-            }
-            return Response(payload, status=200)
-
-        # Normal authenticated flow (con token)
         claims = _get_claims_from_request(request) or {}
         roles = sorted(extract_roles(claims))
         scopes = sorted(_extract_permissions_from_request(request))
@@ -1994,18 +1957,21 @@ class HandoverEtlReadView(AuthenticatedAPIView):
     def get(self, request: HttpRequest, bundle_id: str) -> HttpResponse:
         auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip().lower()
         if not auth_header.startswith("bearer "):
-            return Response({"detail": "Authentication credentials were not provided."}, status=401)
+            return Response(
+                {"detail": "Authentication credentials were not provided.", "code": "auth-required"},
+                status=401,
+            )
 
         if not getattr(request.user, "is_authenticated", False):
-            return Response({"detail": "Invalid or expired token"}, status=401)
+            return Response({"detail": "Invalid or expired token", "code": "auth-failed"}, status=401)
 
         claims = _get_claims_from_request(request) or {}
         grant_type = str((claims.get("gty") if isinstance(claims, dict) else "") or "").strip().lower()
         if grant_type != "client-credentials":
-            return Response({"detail": "Forbidden"}, status=403)
+            return Response({"detail": "Forbidden", "code": "forbidden-grant-type"}, status=403)
 
         if not _has_valid_etl_access(request):
-            return Response({"detail": "Forbidden"}, status=403)
+            return Response({"detail": "Forbidden", "code": "forbidden-scope"}, status=403)
 
         record = (
             HandoverBundleRecord.objects.filter(bundle_id=bundle_id)

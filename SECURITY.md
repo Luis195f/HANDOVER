@@ -16,6 +16,13 @@ La superficie operativa de HANDOVER incluye frontend Expo/React Native, backend 
 - Nunca compartas credenciales activas.
 - Indica si el hallazgo afecta autenticación, autorización, FHIR, cola offline, firma, auditoría o CI/CD.
 
+## Semántica mínima de auth/RBAC
+
+- Las rutas protegidas deben fallar cerrado: sin bearer debe devolverse `401` con código `auth-required`.
+- Un bearer inválido, expirado o no verificable debe devolverse como `401` con código `auth-failed`.
+- Un usuario autenticado sin rol o scope suficiente debe devolverse como `403` con códigos explícitos como `forbidden-role` o `forbidden-scope`.
+- Los controles de unidad no deben degradarse a `allow all` por defaults client-side ni por fallbacks silenciosos.
+
 ## Soporte
 
 La referencia técnica vigente para triage es `main` y la documentación de gobierno en `AGENTS.md`, `docs/MASTER_GOVERNANCE_REGISTER.md` y `docs/clinical-profiles-framework.md`.
