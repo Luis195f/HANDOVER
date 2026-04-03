@@ -23,7 +23,7 @@ Estados usados en este registro:
 
 | Bloque | Estado | Fuentes verificables | Nota de gobierno |
 | --- | --- | --- | --- |
-| Arquitectura backend Django-only | `implemented` | `docs/overview-architecture.md`, `backend/api/urls.py`, `backend/api/views.py` | No hay FastAPI operativa en la API clínica principal. |
+| Arquitectura backend Django-only | `implemented` | `docs/overview-architecture.md`, `docs/adr/0001-backend-source-of-truth.md`, `backend/api/urls.py`, `backend/api/views.py` | No hay FastAPI operativa en la API clínica principal y esta rama no contiene un `main.py` trackeado como entrypoint vigente. |
 | Pipeline clínico principal UI -> Zod -> FHIR -> queue/sync -> backend | `implemented` | `AGENTS.md`, `docs/clinical-profiles-framework.md`, `src/validation/schemas.ts`, `src/lib/fhir-map.ts`, `src/lib/sync.ts`, `backend/api/views.py` | Sigue siendo la costura obligatoria del producto. |
 | HANDOVER como capa operativa principal | `implemented` | `docs/clinical-profiles-framework.md`, `docs/overview-architecture.md`, `docs/icea-integration.md` | La operación clínica vive en HANDOVER; ICEA no reemplaza el relevo. |
 | ICEA+ como capa analítica agregada y observacional | `pilot` | `docs/clinical-profiles-framework.md`, `docs/icea-integration.md`, `backend/api/icea_clinical_feedback.py` | Debe mantenerse prudente, no punitiva y no nominal. |
@@ -91,7 +91,7 @@ Estados usados en este registro:
 
 | ID | Decisión verificable | Estado | Fuentes | Comentario |
 | --- | --- | --- | --- | --- |
-| D-001 | Django/DRF es la única capa API clínica operativa del repo. | `implemented` | `docs/overview-architecture.md`, `backend/api/urls.py`, `backend/api/views.py` | No reintroducir backend paralelo. |
+| D-001 | Django/DRF es la única capa API clínica operativa del repo. | `implemented` | `docs/overview-architecture.md`, `docs/adr/0001-backend-source-of-truth.md`, `backend/api/urls.py`, `backend/api/views.py` | No reintroducir backend paralelo ni reinterpretar el `main.py` histórico como ruta vigente en ramas futuras. |
 | D-002 | HANDOVER es la intervención operativa principal; ICEA+ queda como capa analítica agregada, prudente y no punitiva. | `implemented` | `docs/clinical-profiles-framework.md`, `docs/icea-integration.md`, `backend/api/icea_clinical_feedback.py` | Esta tesis debe preservarse en documentación y UX. |
 | D-003 | La observabilidad operativa de supervisor/admin usa endpoints agregados `/api/icea/ops/*`, no dashboards ricos en PHI. | `implemented` | `backend/api/urls.py`, `backend/api/icea_ops.py`, `docs/icea-integration.md` | Reduce exposición y evita panel nominal. |
 | D-004 | El release piloto se gobierna por tag Git real + release notes, no por `package.json` ni `app.config.ts`. | `implemented` | `README.md`, `docs/DEPLOY.md`, `package.json`, `app.config.ts`, `git tag --list` | Esta decisión corrige la deriva documental observada. |

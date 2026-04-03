@@ -8,6 +8,8 @@
 
 HANDOVER mantiene una arquitectura **Django-only** en backend: no existe dependencia operativa de FastAPI para la API clínica principal.
 
+La fuente de verdad operativa del backend en este corte está compuesta por `manage.py`, `backend/api/urls.py`, `Procfile` y `.github/workflows/django.yml`. En esta rama no hay `main.py` trackeado en la raíz y no forma parte de la ruta clínica operativa actual. La decisión queda fijada en [`docs/adr/0001-backend-source-of-truth.md`](adr/0001-backend-source-of-truth.md).
+
 ## Resumen técnico
 - **Frontend**: React Native + Expo (TypeScript).
 - **Backend**: Django + Django REST Framework (DRF) como única capa API.

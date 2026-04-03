@@ -52,14 +52,25 @@ ios/
 
 # Python / backend
 __pycache__/
+**/__pycache__/
 *.pyc
+*.py[cod]
+**/*.py[cod]
+*.pyc.*
 *.pyo
 *.pyd
 .venv/
 .venv*/
+**/.venv/
+**/.venv*/
 .venv-stt/
 .pytest_cache/
 **/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
 .coverage
 .coverage.*
 coverage.xml
@@ -100,6 +111,9 @@ backend/.env
 db.sqlite3
 *.sqlite3
 *.sqlite3-*
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
 *.db
 *.db-*
 media/
