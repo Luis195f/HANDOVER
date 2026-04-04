@@ -27,6 +27,8 @@ export interface AuditEvent {
   meta?: Record<string, unknown>; // solo flags técnicos, nunca texto libre
 }
 
+type AuditEventTransportPayload = Omit<AuditEvent, 'id'>;
+
 export interface AuditStorage {
   load(): Promise<AuditEvent[]>;
   save(events: AuditEvent[]): Promise<void>;
@@ -218,8 +220,10 @@ export async function appendAuditEvent(storage: AuditStorage, event: AuditEvent)
 }
 
 export async function sendAuditEvent(event: AuditEvent): Promise<boolean> {
+  const { id: _localId, ...payload } = event;
+  const transportPayload: AuditEventTransportPayload = payload;
   try {
-    await apiPost('/api/audit/', { body: JSON.stringify(event) });
+    await apiPost('/api/audit/', { body: JSON.stringify(transportPayload) });
     return true;
   } catch (e: any) {
     const status = e?.status ?? e?.response?.status;
