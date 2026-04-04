@@ -77,7 +77,7 @@ function isSuccessStatus(status: number) {
   return status === 200 || status === 201 || status === 202 || status === 204;
 }
 function isDuplicateSkip(status: number) {
-  return status === 412; // If-None-Exist -> duplicado saltado (OK lógico)
+  return status === 409 || status === 412; // Idempotent replay already accepted remotely.
 }
 function isRetryable(status: number) {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
@@ -121,11 +121,11 @@ class QueueReplayAuthError extends Error {
 // Global guard to coalesce concurrent flushes (prevents races).
 let _currentFlush: Promise<FlushResult> | null = null;
 const RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS = 5 * 60_000;
-const recentlySyncedQueueItems = new Map<string, number>();
+const recentlySyncedQueueItems = new Map<string, { completedAt: number }>();
 
 function pruneRecentlySyncedQueueItems(now = Date.now()): void {
-  for (const [id, expiresAt] of recentlySyncedQueueItems.entries()) {
-    if (expiresAt <= now) {
+  for (const [id, evidence] of recentlySyncedQueueItems.entries()) {
+    if (evidence.completedAt + RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS <= now) {
       recentlySyncedQueueItems.delete(id);
     }
   }
@@ -134,14 +134,21 @@ function pruneRecentlySyncedQueueItems(now = Date.now()): void {
 function rememberRecentlySyncedQueueItem(id: string): void {
   const now = Date.now();
   pruneRecentlySyncedQueueItems(now);
-  recentlySyncedQueueItems.set(id, now + RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS);
+  recentlySyncedQueueItems.set(id, { completedAt: now });
 }
 
-export function consumeRecentlySyncedQueueItem(id: string): boolean {
+export function consumeRecentlySyncedQueueItem(
+  id: string,
+  opts?: { minCompletedAt?: number },
+): boolean {
   const now = Date.now();
   pruneRecentlySyncedQueueItems(now);
-  const expiresAt = recentlySyncedQueueItems.get(id);
-  if (!expiresAt || expiresAt <= now) {
+  const evidence = recentlySyncedQueueItems.get(id);
+  if (!evidence) {
+    recentlySyncedQueueItems.delete(id);
+    return false;
+  }
+  if (typeof opts?.minCompletedAt === 'number' && evidence.completedAt < opts.minCompletedAt) {
     recentlySyncedQueueItems.delete(id);
     return false;
   }
@@ -201,8 +208,12 @@ async function sendWithRetry(bundle: unknown, idemKey: string, opts: SyncOpts) {
       }
 
       const body = resp.body ? JSON.stringify(resp.body) : '';
-      const error = new Error(`Non-retryable HTTP ${resp.status} ${body}`) as Error & { status?: number };
+      const error = new Error(`Non-retryable HTTP ${resp.status} ${body}`) as Error & {
+        status?: number;
+        nonRetryable?: boolean;
+      };
       error.status = resp.status;
+      error.nonRetryable = true;
       throw error;
     },
     opts.backoff

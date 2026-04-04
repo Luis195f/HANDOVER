@@ -1,5 +1,5 @@
 // src/lib/fhir-client.ts
-import { HTTPError, fetchWithRetry } from './net';
+import { HTTPError, NetworkError, TimeoutError, fetchWithRetry } from './net';
 import { getValidationErrorsFromBundle, validateBundleWithZod as validateFhirBundle } from './fhir-validation';
 import { formatIssuesForUser, isOperationOutcome, type OperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { GeneratedPdf } from './export/export-pdf';
@@ -684,15 +684,28 @@ const idempotencyKey =
 
     return { ok: true, status: result.response.status, json: result.data, location };
   } catch (error: any) {
-    const isUnauthorized = String(error?.message ?? error).toLowerCase().includes('unauthorized');
-    const code = isUnauthorized ? 'login' : 'invalid';
+    const errorMessage = String(error?.message ?? error);
+    const isAbortError = (error as { name?: string } | undefined)?.name === 'AbortError';
+    const isTransportFailure =
+      error instanceof NetworkError ||
+      error instanceof TimeoutError ||
+      isAbortError ||
+      /network request failed|failed to fetch|network error|timeout/i.test(errorMessage);
+    const isUnauthorized = errorMessage.toLowerCase().includes('unauthorized');
+    const status =
+      typeof error?.status === 'number'
+        ? error.status
+        : isUnauthorized
+          ? 401
+          : 0;
+    const code = isUnauthorized ? 'login' : status === 0 || isTransportFailure ? 'network' : 'invalid';
     return {
       ok: false,
-      status: isUnauthorized ? 401 : 400,
-      issues: [{ severity: 'error', code, diagnostics: String(error?.message ?? error) }],
-      issue: [{ severity: 'error', code, diagnostics: String(error?.message ?? error) }],
-      json: { error: String(error?.message ?? error) },
-      body: { error: String(error?.message ?? error) },
+      status,
+      issues: [{ severity: 'error', code, diagnostics: errorMessage }],
+      issue: [{ severity: 'error', code, diagnostics: errorMessage }],
+      json: { error: errorMessage },
+      body: { error: errorMessage },
     };
   }
 }

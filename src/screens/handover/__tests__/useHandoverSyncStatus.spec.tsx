@@ -8,7 +8,7 @@ import { useHandoverSyncStatus } from '@/src/screens/handover/useHandoverSyncSta
 
 const ensureFreshAccessTokenMock = vi.fn();
 const flushQueueMock = vi.fn();
-const recentlySyncedQueueIds = new Set<string>();
+const recentlySyncedQueueIds = new Map<string, number>();
 const originalNodeEnv = process.env.NODE_ENV;
 const originalOfflineEncryptionDisabled = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
 
@@ -31,12 +31,16 @@ vi.mock('@/src/security/auth', () => ({
 
 vi.mock('@/src/lib/sync/index', () => ({
   flushQueue: (...args: unknown[]) => flushQueueMock(...args),
-  consumeRecentlySyncedQueueItem: (id: string) => {
-    const found = recentlySyncedQueueIds.has(id);
-    if (found) {
-      recentlySyncedQueueIds.delete(id);
+  consumeRecentlySyncedQueueItem: (id: string, opts?: { minCompletedAt?: number }) => {
+    const completedAt = recentlySyncedQueueIds.get(id);
+    if (completedAt == null) {
+      return false;
     }
-    return found;
+    recentlySyncedQueueIds.delete(id);
+    if (typeof opts?.minCompletedAt === 'number' && completedAt < opts.minCompletedAt) {
+      return false;
+    }
+    return true;
   },
 }));
 
@@ -125,7 +129,7 @@ describe('useHandoverSyncStatus', () => {
       expect(view.getByTestId('status').props.children).toBe('queued');
     });
 
-    recentlySyncedQueueIds.add(queued.id);
+    recentlySyncedQueueIds.set(queued.id, Date.now());
     await deleteOfflineQueueItem(queued.id);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
@@ -157,6 +161,30 @@ describe('useHandoverSyncStatus', () => {
       expect(view.getByTestId('status').props.children).toBe('error');
     });
     expect(view.getByTestId('error').props.children).toBe('sync.syncErrorTitle');
+  });
+
+  it('ignores stale success evidence from an older replay for the same deterministic queue id', async () => {
+    const queued = await enqueueBundle(
+      { resourceType: 'Bundle', type: 'transaction', entry: [] },
+      { patientId: 'pat-handover-stale-evidence' },
+    );
+
+    recentlySyncedQueueIds.set(queued.id, Date.now() - 60_000);
+
+    const view = render(<HookHarness queueId={queued.id} />);
+
+    await waitFor(() => {
+      expect(view.getByTestId('status').props.children).toBe('queued');
+    });
+
+    await deleteOfflineQueueItem(queued.id);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    await waitFor(() => {
+      expect(view.getByTestId('status').props.children).toBe('error');
+    });
   });
 
   it('keeps the handover out of synced when a retry finishes without explicit success evidence', async () => {
@@ -222,7 +250,7 @@ describe('useHandoverSyncStatus', () => {
     flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       await opts.getToken();
       await opts.getToken();
-      recentlySyncedQueueIds.add(queued.id);
+      recentlySyncedQueueIds.set(queued.id, Date.now());
       await deleteOfflineQueueItem(queued.id);
       return { processed: 1, remaining: 0, outcome: 'success' };
     });

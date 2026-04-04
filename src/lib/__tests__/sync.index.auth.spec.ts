@@ -210,4 +210,30 @@ describe('legacy sync runtime auth seam', () => {
     expect(authResult).toEqual({ processed: 0, remaining: 1, outcome: 'auth-required', status: 401 });
     expect(serverResult).toEqual({ processed: 0, remaining: 1, outcome: 'server-error', status: 503 });
   });
+
+  it('treats 409 idempotent conflicts as remote success evidence without retry loops', async () => {
+    readQueueMock.mockResolvedValueOnce([]);
+    runQueueFlushMock.mockImplementation(async (sender: (tx: unknown) => Promise<unknown>) => {
+      await sender({
+        id: 'queued-409',
+        key: 'queued-409',
+        tries: 0,
+        payload: {
+          bundle,
+          meta: { hash: 'idem-409' },
+        },
+      });
+    });
+    postBundleMock.mockResolvedValueOnce({ ok: false, status: 409, body: {} });
+
+    const { flushQueue } = await loadSyncIndex();
+    const result = await flushQueue({
+      fhirBaseUrl: 'https://fhir.test/api',
+      getToken: async () => 'session-token',
+      backoff: { retries: 3, minMs: 0, maxMs: 0 },
+    });
+
+    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(postBundleMock).toHaveBeenCalledTimes(1);
+  });
 });
