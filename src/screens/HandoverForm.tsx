@@ -44,10 +44,9 @@ import {
   type SttStatus,
 } from '@/src/lib/stt';
 import {
-  appendAuditEvent,
   createAsyncStorageAuditStorage,
   makeAuditEvent,
-  sendAuditEvent,
+  queueAndFlushAuditEvent,
   type AuditStorage,
 } from '@/src/lib/audit';
 import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
@@ -1495,9 +1494,10 @@ export default function HandoverForm({ navigation, route }: Props) {
         unitId: unitId ?? undefined,
         shiftCode,
       });
-      await appendAuditEvent(auditStorageRef.current, event);
-      void sendAuditEvent(event);
-      auditedPatientsRef.current.add(targetPatientId);
+      const delivered = await queueAndFlushAuditEvent(auditStorageRef.current, event);
+      if (delivered) {
+        auditedPatientsRef.current.add(targetPatientId);
+      }
     })();
   }, [form, patientIdValue, session]);
 
@@ -1780,8 +1780,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           unitId: auditUnitId ?? undefined,
           shiftCode,
         });
-        await appendAuditEvent(auditStorageRef.current, auditEvent);
-        void sendAuditEvent(auditEvent);
+        await queueAndFlushAuditEvent(auditStorageRef.current, auditEvent);
       }
 
       if (status === 'final' && auditUserId && values.patientId && values.signatures?.outgoing) {
@@ -1799,9 +1798,10 @@ export default function HandoverForm({ navigation, route }: Props) {
             },
             () => new Date(signedAt),
           );
-          await appendAuditEvent(auditStorageRef.current, auditEvent);
-          void sendAuditEvent(auditEvent);
-          auditedSignedRef.current.add(auditKey);
+          const delivered = await queueAndFlushAuditEvent(auditStorageRef.current, auditEvent);
+          if (delivered) {
+            auditedSignedRef.current.add(auditKey);
+          }
         }
       }
 

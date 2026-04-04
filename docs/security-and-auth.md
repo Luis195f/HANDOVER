@@ -82,7 +82,7 @@
 - Usar hashing/HMAC para correlación técnica de eventos.
 - Limitar logs a metadatos mínimos (estado, tipo de evento, tamaño, hash, timestamp).
 - Mantener separación entre datos identificativos y telemetría operativa.
-- En `POST /api/audit`, la correlación de paciente del log móvil usa `patientKey` determinista generado server-side; si llegan `patientId` o referencias equivalentes en top-level o en campos anidados equivalentes dentro de `meta`, el backend los transforma a `patientKey` y descarta blobs de alto riesgo (`payload`, `context`, `details`, `patient`, `note`, `text`, `sbar`) antes de persistir. La proyección pública de `GET /api/audit` no serializa `meta` y no debe interpretarse como anonimización.
+- En `POST /api/audit`, la persistencia/lectura canónica de paciente del log móvil usa `patientKey` `ptk2_*` determinista y secreto-derivado en servidor. El cliente móvil todavía transporta un seudónimo de compatibilidad `ptk_` calculado localmente; el backend lo acepta solo por compatibilidad, lo canoniza a `ptk2_*` al persistir y devuelve `ptk2_*` en `GET /api/audit`. El endpoint rechaza `patientId` crudo o referencias equivalentes en payload/meta y no serializa `meta` en la proyección pública. Esto reduce exposición de PHI, pero no equivale todavía a una transición end-to-end donde el transporte móvil ya emita `ptk2_*`.
 
 ### Gestión de errores y respuesta segura
 - Preferir respuestas estándar y estructuradas (`OperationOutcome` en contexto FHIR).
@@ -116,6 +116,7 @@
 ## Límites del endurecimiento actual
 - El cifrado fuerte en reposo del Bundle clínico depende de `HANDOVER_BUNDLE_ENCRYPTION_KEY`; si no se configura, HANDOVER deriva la clave desde `SECRET_KEY` como fallback de endurecimiento compatible con la arquitectura actual.
 - Ese fallback mejora confidencialidad frente a lectura accidental de base de datos, pero no sustituye KMS/HSM, rotación de claves ni separación fuerte de secretos.
+- La pseudonimización y el payload hashing de auditoría usan `AUDIT_HASH_SECRET`; si no se configura, HANDOVER cae a `SECRET_KEY`. Ese fallback mantiene compatibilidad operativa, pero acopla estabilidad de hashes/pseudónimos a la rotación de `SECRET_KEY` y no debe tratarse como postura final de producción.
 - Los modelos técnicos ICEA siguen guardando identificadores operativos mínimos (`request_id`, `bundle_id`, `patient_id`, `unit_id`) para trazabilidad y correlación clínica.
 - El repo deja ahora un drill de backup/restore verificable, pero no automatiza vault externo, snapshots inmutables ni restore full-stack del backend fuera del proceso scratch-first.
 

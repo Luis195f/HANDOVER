@@ -83,3 +83,4 @@ def test_audit_event_with_dual_signatures():
         if detail.get("type") == "signature-status"
     ]
     assert signature_status == ["outgoingSigned;incomingSigned"]
+    assert "pat-sign-001" not in str(audit_payload)

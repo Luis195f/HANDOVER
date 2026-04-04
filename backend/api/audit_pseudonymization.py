@@ -1,12 +1,16 @@
 import hashlib
+import hmac
 import re
 from typing import Any
 
+from django.conf import settings
 
-AUDIT_PATIENT_KEY_PREFIX = "ptk_"
+
+AUDIT_PATIENT_KEY_PREFIX = "ptk2_"
 AUDIT_PATIENT_KEY_HASH_LENGTH = 24
-AUDIT_PATIENT_KEY_PATTERN = re.compile(r"^ptk_[0-9a-f]{24}$")
-AUDIT_PATIENT_KEY_NAMESPACE = "handover.audit.patient.v1:"
+AUDIT_PATIENT_KEY_PATTERN = re.compile(r"^ptk2_[0-9a-f]{24}$")
+LEGACY_AUDIT_PATIENT_KEY_PATTERN = re.compile(r"^ptk_[0-9a-f]{24}$")
+AUDIT_PATIENT_KEY_NAMESPACE = "handover.audit.patient.v2:"
 
 _AUDIT_META_FORBIDDEN_KEYS = {
     "payload",
@@ -32,6 +36,8 @@ def normalize_audit_patient_identifier(value: Any) -> str:
         return ""
     if AUDIT_PATIENT_KEY_PATTERN.fullmatch(candidate):
         return candidate
+    if LEGACY_AUDIT_PATIENT_KEY_PATTERN.fullmatch(candidate):
+        return candidate
     if candidate.startswith("Patient/"):
         _, _, suffix = candidate.partition("/")
         normalized = suffix.strip()
@@ -45,7 +51,12 @@ def build_audit_patient_key(value: Any) -> str:
         return ""
     if AUDIT_PATIENT_KEY_PATTERN.fullmatch(normalized):
         return normalized
-    digest = hashlib.sha256(f"{AUDIT_PATIENT_KEY_NAMESPACE}{normalized}".encode("utf-8")).hexdigest()
+    secret = getattr(settings, "AUDIT_HASH_SECRET", "") or getattr(settings, "SECRET_KEY", "")
+    digest = hmac.new(
+        secret.encode("utf-8"),
+        f"{AUDIT_PATIENT_KEY_NAMESPACE}{normalized}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     return f"{AUDIT_PATIENT_KEY_PREFIX}{digest[:AUDIT_PATIENT_KEY_HASH_LENGTH]}"
 
 

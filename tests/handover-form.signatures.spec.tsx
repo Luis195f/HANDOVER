@@ -77,7 +77,7 @@ vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(),
   makeAuditEvent: vi.fn(),
-  sendAuditEvent: vi.fn(),
+  queueAndFlushAuditEvent: vi.fn(async () => true),
 }));
 
 vi.mock('@/src/lib/stt', () => ({

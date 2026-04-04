@@ -1,4 +1,5 @@
 import types
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from rest_framework.test import APIClient
 from backend.audit.models import AuditEvent
 from backend.audit.service import emit_audit_event
 from backend.audit.views import AuditEventsIngestView
+from backend.api.audit_pseudonymization import build_audit_patient_key
 
 
 @pytest.mark.django_db
@@ -67,6 +69,26 @@ def test_audit_event_stores_hash_only():
     assert event.payload_hash
     assert event.payload_size
     assert "payload" not in (event.meta or {})
+
+
+@pytest.mark.django_db
+def test_audit_event_logs_do_not_expose_meta_or_raw_patient_ids():
+    with patch("backend.audit.service.logger.info") as mock_logger:
+        emit_audit_event(
+            event_type="patient_access",
+            action="read",
+            status="success",
+            resource_type="Patient",
+            resource_id="pat-log-001",
+            meta={"client": {"deviceId": "dev-1"}},
+        )
+
+    mock_logger.assert_called_once()
+    logged_payload = json.loads(mock_logger.call_args.args[0])
+    assert logged_payload["resource_id"] == build_audit_patient_key("pat-log-001")
+    assert "pat-log-001" not in mock_logger.call_args.args[0]
+    assert "meta" not in logged_payload
+    assert logged_payload["has_meta"] is True
 
 
 @pytest.mark.django_db

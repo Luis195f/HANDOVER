@@ -14,6 +14,7 @@
 - `HANDOVER_SIGNATURE_DISABLED`: solo válido en `development`/`demo`/`test` controlado; `pilot`/`production` fallan al arrancar si se activa.
 - `HANDOVER_MAX_AUDIO_BYTES`: límite de tamaño de audio para `/api/ai/transcribe`.
 - `HANDOVER_BUNDLE_ENCRYPTION_KEY`: clave opcional de cifrado en reposo para Bundles clínicos persistidos. Si falta, HANDOVER mantiene compatibilidad usando una clave derivada de `SECRET_KEY`.
+- `AUDIT_HASH_SECRET`: secreto dedicado para HMAC de payloads/pseudónimos de auditoría. Si falta, HANDOVER usa `SECRET_KEY` como fallback operativo.
 
 ## Auth / OIDC
 - `AUTH0_ISSUER_BASE_URL`: issuer base de Auth0/OIDC.
@@ -31,6 +32,9 @@
 En GitHub Actions se usan valores dummy para asegurar que CI **no realiza llamadas externas**.
 - `OPENAI_API_KEY=dummy`
 - `OPENAI_BASE_URL=http://127.0.0.1:9/v1`
+
+## Notas de endurecimiento
+- En producción, `AUDIT_HASH_SECRET` debe configurarse como secreto dedicado y estable. Si se deja caer a `SECRET_KEY`, la rotación de `SECRET_KEY` cambia hashes/pseudónimos de auditoría y acopla dos dominios de secreto que conviene separar.
 - `AUTH0_ISSUER_BASE_URL=https://example.invalid`
 - `FHIR_BASE=http://127.0.0.1:9/fhir`
 - además de bloqueo de sockets en pytest (`--disable-socket`).

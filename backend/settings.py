@@ -397,6 +397,7 @@ CONTENT_SECURITY_POLICY = {
 # Auditoría
 # -----------------------------
 AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
+# Prefer a dedicated secret so audit hashes/pseudonyms do not depend on Django SECRET_KEY rotation.
 AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET") or SECRET_KEY
 HANDOVER_BUNDLE_RETENTION_DAYS = max(int(os.getenv("HANDOVER_BUNDLE_RETENTION_DAYS", "30")), 1)
 HANDOVER_TECHNICAL_RETENTION_DAYS = max(int(os.getenv("HANDOVER_TECHNICAL_RETENTION_DAYS", "30")), 1)

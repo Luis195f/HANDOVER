@@ -10,9 +10,11 @@ import {
   appendAuditEvent,
   buildAuditPatientKey,
   createAsyncStorageAuditStorage,
+  flushPendingAuditEvents,
   groupByShift,
   makeAuditEvent,
   pruneOldEvents,
+  queueAndFlushAuditEvent,
   sendAuditEvent,
   type AuditEvent,
 } from '@/src/lib/audit';
@@ -56,6 +58,24 @@ describe('audit module', () => {
           meta: { debug: longString },
         }),
       ).toThrow('META_STRING_TOO_LONG');
+    });
+
+    it('rejects meta with patient identifiers or patient references', () => {
+      expect(() =>
+        makeAuditEvent({
+          type: 'patient_edit',
+          userId: 'user-3',
+          meta: { patientId: 'pat-sensitive-1' },
+        }),
+      ).toThrow('META_CONTAINS_IDENTIFIER');
+
+      expect(() =>
+        makeAuditEvent({
+          type: 'patient_edit',
+          userId: 'user-4',
+          meta: { nested: { reference: 'Patient/pat-sensitive-2' } },
+        }),
+      ).toThrow('META_CONTAINS_IDENTIFIER');
     });
   });
 
@@ -168,20 +188,38 @@ describe('audit module', () => {
       mockApiPost.mockResolvedValue(undefined);
     });
 
-    it('posts pseudonymized payloads without raw patient identifiers', async () => {
+    it('posts a legacy compatibility pseudonym without raw patient identifiers', async () => {
       const event = makeAuditEvent({
         type: 'patient_edit',
         patientId: 'pat-sensitive-77',
         userId: 'user-9',
       });
 
-      await sendAuditEvent(event);
+      await expect(sendAuditEvent(event)).resolves.toBe(true);
 
       expect(mockApiPost).toHaveBeenCalledWith('/api/audit/', { body: expect.any(String) });
       const body = String(mockApiPost.mock.calls[0]?.[1]?.body ?? '');
       expect(body).toContain('"patientKey"');
+      expect(body).toContain('"ptk_');
       expect(body).not.toContain('pat-sensitive-77');
       expect(body).not.toContain('"patientId"');
+    });
+
+    it('keeps pending audit events until delivery succeeds', async () => {
+      const storage = createAsyncStorageAuditStorage('test:audit:pending');
+      const event = makeAuditEvent({
+        type: 'patient_open',
+        patientId: 'pat-pending-1',
+        userId: 'user-10',
+      });
+
+      mockApiPost.mockRejectedValueOnce(new Error('offline'));
+      await expect(queueAndFlushAuditEvent(storage, event)).resolves.toBe(false);
+      await expect(storage.load()).resolves.toEqual([event]);
+
+      mockApiPost.mockResolvedValueOnce(undefined);
+      await expect(flushPendingAuditEvents(storage)).resolves.toEqual([event.id]);
+      await expect(storage.load()).resolves.toEqual([]);
     });
   });
 });
