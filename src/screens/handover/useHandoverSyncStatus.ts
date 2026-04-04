@@ -19,10 +19,16 @@ export function useHandoverSyncStatus() {
   const [syncSnapshot, setSyncSnapshot] = useState(getSyncSnapshot());
   const [handoverSyncStatus, setHandoverSyncStatus] = useState<HandoverSyncStatus>('idle');
   const [handoverSyncError, setHandoverSyncError] = useState<string | null>(null);
-  const [trackedQueueId, setTrackedQueueId] = useState<string | null>(null);
+  const [trackedQueueId, setTrackedQueueIdState] = useState<string | null>(null);
   const [manualSyncBlock, setManualSyncBlock] = useState<string | null>(null);
   const manualRetryInFlightRef = useRef(false);
   const manualSyncBlockRef = useRef<string | null>(null);
+  const trackedQueueStartedAtRef = useRef<number | null>(null);
+
+  const setTrackedQueueId = useCallback((nextTrackedQueueId: string | null) => {
+    trackedQueueStartedAtRef.current = nextTrackedQueueId ? Date.now() : null;
+    setTrackedQueueIdState(nextTrackedQueueId);
+  }, []);
 
   const refreshTrackedQueue = useCallback(async () => {
     if (!trackedQueueId || handoverSyncStatus === 'idle') return;
@@ -35,8 +41,14 @@ export function useHandoverSyncStatus() {
       return;
     }
     if (!queueItem) {
+      const trackedQueueStartedAt = trackedQueueStartedAtRef.current;
       setTrackedQueueId(null);
-      if (consumeRecentlySyncedQueueItem(trackedQueueId)) {
+      if (
+        consumeRecentlySyncedQueueItem(trackedQueueId, {
+          minCompletedAt: trackedQueueStartedAt ?? undefined,
+        })
+      ) {
+        trackedQueueStartedAtRef.current = null;
         manualSyncBlockRef.current = null;
         setManualSyncBlock(null);
         setHandoverSyncStatus('synced');
@@ -73,9 +85,10 @@ export function useHandoverSyncStatus() {
     }
 
     setTrackedQueueId(null);
+    trackedQueueStartedAtRef.current = null;
     setHandoverSyncStatus('synced');
     setHandoverSyncError(null);
-  }, [handoverSyncStatus, manualSyncBlock, syncSnapshot.lastError, trackedQueueId, manualRetryInFlightRef]);
+  }, [handoverSyncStatus, manualSyncBlock, setTrackedQueueId, syncSnapshot.lastError, trackedQueueId]);
 
   const retrySync = useCallback(async () => {
     if (!FHIR_BASE_URL) {

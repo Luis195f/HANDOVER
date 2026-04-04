@@ -63,6 +63,8 @@ export default function SyncCenter() {
     btnDisabled: colors.muted,
     btnText: colors.onPrimary,
     statePending: colors.warning,
+    stateSyncing: colors.info,
+    stateSynced: colors.success,
     stateError: colors.danger,
   };
 
@@ -86,7 +88,7 @@ export default function SyncCenter() {
         const meta: QueueItemMeta[] = queue.map((item) => ({
           id: item.id,
           createdAt: item.createdAt,
-          attempts: item.attempts ?? 0,
+          attempts: item.attemptCount ?? item.attempts ?? 0,
           hash: item.id,
           syncStatus: item.syncStatus,
           errorMessage: item.errorMessage,
@@ -294,7 +296,19 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
   const { subtitle, title, message } = resolveErrorCopy(item.errorStatus);
   const statusLabel = isError
     ? subtitle
-    : t(`sync.status.${item.syncStatus ?? 'pending'}`);
+    : item.syncStatus === 'inFlight'
+      ? t('sync.status.running')
+      : item.syncStatus === 'synced'
+        ? t('sync.status.synced')
+        : t('sync.status.pending');
+  const statusColor =
+    item.syncStatus === 'synced'
+      ? C.stateSynced
+      : item.syncStatus === 'inFlight'
+        ? C.stateSyncing
+        : isError
+          ? C.stateError
+          : C.statePending;
 
   const rowStyle = [
     styles.row,
@@ -370,7 +384,7 @@ function ItemRow({ item, C }: { item: QueueItemMeta; C: Colors }) {
           {short(item.hash, 24) || t('common.notAvailable')}
         </Text>
         <Text
-          style={[styles.state, { color: isError ? C.stateError : C.statePending }]}
+          style={[styles.state, { color: statusColor }]}
           numberOfLines={2}
           allowFontScaling
         >
@@ -394,6 +408,8 @@ type Colors = {
   btnDisabled: string;
   btnText: string;
   statePending: string;
+  stateSyncing: string;
+  stateSynced: string;
   stateError: string;
 };
 

@@ -39,6 +39,7 @@ describe('postBundle', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
   });
 
   it('returns an error when token is missing', async () => {
@@ -163,5 +164,18 @@ describe('postBundle', () => {
     expect(fetchMock).toHaveBeenCalled();
     expect(result.ok).toBe(true);
     expect(result.status).toBe(201);
+  });
+
+  it('preserves transport failures as status 0 so replay can retry them', async () => {
+    process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS = '0';
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Network request failed'));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { postBundle } = await loadClient();
+
+    const result = await postBundle(bundle, { token: 'tk' });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(0);
+    expect(result.issue?.[0]?.code).toBe('network');
   });
 });

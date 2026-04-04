@@ -1,6 +1,4 @@
 // src/lib/sync.ts
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
 import NetInfo from './netinfo';
 import { NetworkError, TimeoutError, HTTPError } from './net';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,6 +23,7 @@ import {
   type QueueItem as OfflineQueueItem,
 } from './queue';
 import { signBundleIfEnabled } from '../security/crypto';
+import { secureGetSensitiveItem, secureSetSensitiveItem } from '../security/secure-storage';
 import { notifySyncStopped } from './notifications';
 import { resolveSyncErrorMessage } from './sync-errors';
 import {
@@ -906,39 +905,12 @@ function ensureBundleTx(
   };
 }
 
-/**
- * SecureStore helpers:
- * - On Android, falls back to an in-memory map for dev/test when SecureStore fails.
- * - On iOS, uses secure storage by default.
- */
 async function safeSetItemAsync(key: string, value: string) {
-  try {
-    await SecureStore.setItemAsync(key, value, {
-      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
-    });
-  } catch (e) {
-    if (Platform.OS === 'android') {
-      // Some Android dev builds fail; fall back to an in-memory store.
-      (globalThis as any).__insecureKV ??= new Map<string, string>();
-      (globalThis as any).__insecureKV.set(key, value);
-      return;
-    }
-    throw e;
-  }
+  await secureSetSensitiveItem(key, value);
 }
 
 async function safeGetItemAsync(key: string) {
-  try {
-    const v = await SecureStore.getItemAsync(key);
-    if (v != null) return v;
-  } catch (e) {
-    if (Platform.OS !== 'android') throw e;
-  }
-  if (Platform.OS === 'android') {
-    const map: Map<string, string> | undefined = (globalThis as any).__insecureKV;
-    return map?.get(key) ?? null;
-  }
-  return null;
+  return secureGetSensitiveItem(key);
 }
 
 const SECURE_QUEUE_KEY = 'handover.queue.v1';
