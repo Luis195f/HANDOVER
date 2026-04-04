@@ -199,13 +199,15 @@ describe('audit module', () => {
 
       expect(mockApiPost).toHaveBeenCalledWith('/api/audit/', { body: expect.any(String) });
       const body = String(mockApiPost.mock.calls[0]?.[1]?.body ?? '');
+      const parsedBody = JSON.parse(body) as Record<string, unknown>;
+      expect(parsedBody).not.toHaveProperty('id');
+      expect(parsedBody).not.toHaveProperty('patientId');
       expect(body).toContain('"patientKey"');
       expect(body).toContain('"ptk_');
       expect(body).not.toContain('pat-sensitive-77');
-      expect(body).not.toContain('"patientId"');
     });
 
-    it('keeps pending audit events until delivery succeeds', async () => {
+    it('keeps pending audit events until delivery succeeds and then removes them by local id', async () => {
       const storage = createAsyncStorageAuditStorage('test:audit:pending');
       const event = makeAuditEvent({
         type: 'patient_open',

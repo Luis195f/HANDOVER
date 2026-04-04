@@ -157,6 +157,19 @@ class AuditLogViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ClientAuditEvent.objects.count(), 0)
 
+    def test_post_rejects_extra_top_level_fields_like_client_local_id(self):
+        payload = {
+            "type": "patient_edit",
+            "userId": "clinician-3",
+            "patientKey": build_audit_patient_key("pat-77"),
+            "id": "9d17d2da-9f48-4ca5-8742-8b7047cc936b",
+        }
+
+        response = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ClientAuditEvent.objects.count(), 0)
+
     def test_get_does_not_expose_legacy_raw_patient_ids_from_meta(self):
         ClientAuditEvent.objects.create(
             type="patient_open",
