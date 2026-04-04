@@ -18,6 +18,7 @@ from django.db import IntegrityError, OperationalError, connection
 from django.db.models import CharField, Count, FloatField, Sum
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Lower
+from rest_framework import serializers
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied
@@ -34,7 +35,12 @@ from backend.signature import (
     sign_bundle,
     verify_bundle_signature,
 )
-from backend.api.audit_pseudonymization import build_audit_patient_key, sanitize_client_audit_meta
+from backend.api.audit_pseudonymization import (
+    AUDIT_PATIENT_KEY_PATTERN,
+    LEGACY_AUDIT_PATIENT_KEY_PATTERN,
+    build_audit_patient_key,
+    sanitize_client_audit_meta,
+)
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
@@ -114,8 +120,89 @@ ETL_REQUIRED_SCOPES = {"icea:etl:read", "handover:etl:read"}
 FHIR_TRANSACTION_ALLOWED_ROLES = ("nurse", "supervisor", "admin")
 FHIR_TRANSACTION_REQUIRED_SCOPES = ("fhir:transaction", "handover:write")
 
+CLIENT_AUDIT_ALLOWED_FIELDS = {"type", "at", "patientKey", "userId", "unitId", "shiftCode", "meta"}
+CLIENT_AUDIT_FORBIDDEN_FIELDS = {"patientid", "patient", "payload", "sbar", "note", "text", "details", "context"}
+CLIENT_AUDIT_ALLOWED_TYPES = {"patient_open", "patient_edit", "handover_signed"}
+
 
 _persist_handover_bundle_record = persist_handover_bundle_record
+
+
+def _normalize_client_audit_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _contains_forbidden_audit_meta(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, raw_value in value.items():
+            normalized_key = _normalize_client_audit_key(key)
+            if normalized_key in CLIENT_AUDIT_FORBIDDEN_FIELDS:
+                return True
+            if normalized_key.endswith(("patientid", "patientkey", "patientreference", "patientref")):
+                return True
+            if _contains_forbidden_audit_meta(raw_value):
+                return True
+        return False
+
+    if isinstance(value, list):
+        return any(_contains_forbidden_audit_meta(item) for item in value)
+
+    if isinstance(value, str):
+        return value.strip().startswith("Patient/")
+
+    return False
+
+
+class ClientAuditEventWriteSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=sorted(CLIENT_AUDIT_ALLOWED_TYPES))
+    at = serializers.DateTimeField(required=False)
+    patientKey = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    userId = serializers.CharField(max_length=255)
+    unitId = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    shiftCode = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    meta = serializers.JSONField(required=False)
+
+    default_error_messages = {
+        "invalid_payload": "Invalid audit payload.",
+    }
+
+    def validate_patientKey(self, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            return ""
+        # Compatibilidad temporal: el móvil aún emite ptk_ legacy y el backend lo canoniza a ptk2_* al persistir.
+        if AUDIT_PATIENT_KEY_PATTERN.fullmatch(candidate) or LEGACY_AUDIT_PATIENT_KEY_PATTERN.fullmatch(candidate):
+            return candidate
+        self.fail("invalid_payload")
+
+    def validate_meta(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            self.fail("invalid_payload")
+        if _contains_forbidden_audit_meta(value):
+            self.fail("invalid_payload")
+
+        sanitized = sanitize_client_audit_meta(value)
+        if sanitized is None and not value:
+            return None
+        if sanitized != value:
+            self.fail("invalid_payload")
+        return sanitized
+
+    def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(self.initial_data, dict):
+            self.fail("invalid_payload")
+        extra = set(self.initial_data.keys()) - CLIENT_AUDIT_ALLOWED_FIELDS
+        if extra:
+            self.fail("invalid_payload")
+        forbidden_hits = [
+            key for key in self.initial_data if _normalize_client_audit_key(key) in CLIENT_AUDIT_FORBIDDEN_FIELDS
+        ]
+        if forbidden_hits:
+            self.fail("invalid_payload")
+        return attrs
+
 
 def _resolve_persisted_handover_bundle(record: HandoverBundleRecord) -> dict[str, Any]:
     try:
@@ -126,6 +213,7 @@ def _resolve_persisted_handover_bundle(record: HandoverBundleRecord) -> dict[str
             extra={"bundle_id": record.bundle_id, "request_id": record.request_id},
         )
         raise
+
 
 def _has_valid_etl_access(request: HttpRequest) -> bool:
     claims = _get_claims_from_request(request) or {}
@@ -598,7 +686,16 @@ def _create_audit_event_for_transaction(
         audit["agent"].append(incoming_agent)
 
     if patient_id:
-        audit["entity"] = [{"what": {"reference": f"Patient/{patient_id}"}}]
+        patient_key = build_audit_patient_key(patient_id)
+        if patient_key:
+            audit["entity"] = [{
+                "what": {
+                    "identifier": {
+                        "system": "urn:handover:audit:patient-key",
+                        "value": patient_key,
+                    }
+                }
+            }]
 
     if composition:
         composition_id = composition.get("id") or "unknown"
@@ -2017,7 +2114,6 @@ class AuditLogView(AuthenticatedAPIView):
         ClinicianAuditPermission,
         HasAnyScope.required("audit:read", "handover:audit"),
     ]
-    allowed_types = {"patient_open", "patient_edit", "handover_signed"}
 
     def get(self, request: HttpRequest) -> Response:
         try:
@@ -2054,28 +2150,27 @@ class AuditLogView(AuthenticatedAPIView):
             )
             return invalid_payload
         data = request.data if isinstance(request.data, dict) else {}
-        event_type = data.get("type")
-        if event_type not in self.allowed_types:
+        serializer = ClientAuditEventWriteSerializer(data=data)
+        if not serializer.is_valid():
             return Response({"errors": ["Invalid audit payload."]}, status=400)
+        validated = serializer.validated_data
 
-        user_id = data.get("userId")
-        if not user_id:
-            return Response({"errors": ["Invalid audit payload."]}, status=400)
-
-        raw_at = data.get("at")
+        raw_at = validated.get("at")
         occurred_at = parse_datetime(raw_at) if isinstance(raw_at, str) else None
+        if occurred_at is None and raw_at is not None and hasattr(raw_at, "tzinfo"):
+            occurred_at = raw_at
         if occurred_at is None:
             occurred_at = timezone.now()
         if timezone.is_naive(occurred_at):
             occurred_at = timezone.make_aware(occurred_at, timezone.get_current_timezone())
 
         event = ClientAuditEvent.objects.create(
-            type=str(event_type),
-            user_id=str(user_id),
-            patient_id=build_audit_patient_key(data.get("patientKey") or data.get("patientId")),
-            unit_id=str(data.get("unitId") or ""),
-            shift_code=str(data.get("shiftCode") or ""),
-            meta=sanitize_client_audit_meta(data.get("meta")),
+            type=str(validated["type"]),
+            user_id=str(validated["userId"]),
+            patient_id=build_audit_patient_key(validated.get("patientKey")),
+            unit_id=str(validated.get("unitId") or ""),
+            shift_code=str(validated.get("shiftCode") or ""),
+            meta=validated.get("meta"),
             occurred_at=occurred_at,
         )
 

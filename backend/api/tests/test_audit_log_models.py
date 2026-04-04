@@ -59,7 +59,7 @@ class AuditLogViewTests(TestCase):
         payload = {
             "type": "patient_open",
             "userId": "clinician-1",
-            "patientId": "pat-42",
+            "patientKey": build_audit_patient_key("pat-42"),
             "unitId": "icu",
             "shiftCode": "N",
             "meta": {"ui": "timeline"},
@@ -77,6 +77,22 @@ class AuditLogViewTests(TestCase):
         self.assertEqual(list_response.data[0]["patientKey"], _expected_patient_key("pat-42"))
         self.assertNotIn("patientId", list_response.data[0])
         self.assertEqual(ClientAuditEvent.objects.get().patient_id, _expected_patient_key("pat-42"))
+
+    def test_post_accepts_legacy_transport_key_but_persists_canonical_ptk2(self):
+        payload = {
+            "type": "patient_open",
+            "userId": "clinician-compat",
+            "patientKey": "ptk_abc123abc123abc123abc123",
+            "at": "2026-01-01T10:00:00Z",
+        }
+
+        response = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        persisted = ClientAuditEvent.objects.get()
+        self.assertTrue(persisted.patient_id.startswith("ptk2_"))
+        self.assertNotEqual(persisted.patient_id, payload["patientKey"])
+        self.assertEqual(response.data["patientKey"], persisted.patient_id)
 
     def test_get_masks_historical_raw_patient_ids(self):
         ClientAuditEvent.objects.create(
@@ -112,40 +128,34 @@ class AuditLogViewTests(TestCase):
         self.assertEqual(direct, reference)
         self.assertEqual(direct, _expected_patient_key("pat-42"))
 
-    def test_post_sanitizes_nested_patient_identifiers_and_drops_risky_meta_blobs(self):
+    def test_post_rejects_payloads_with_raw_patient_identifier_fields(self):
         payload = {
             "type": "patient_edit",
             "userId": "clinician-2",
-            "patientId": "pat-77",
+            "patientKey": build_audit_patient_key("pat-77"),
             "meta": {
                 "ui": "timeline",
                 "patientId": "pat-77",
-                "selectedPatientId": "Patient/pat-77",
-                "context": {"patientId": "pat-context"},
-                "details": {"patientReference": "Patient/pat-details"},
-                "nested": {"patient_reference": "Patient/pat-77", "safe": True},
-                "events": [{"step": "open", "patientRef": "Patient/pat-77"}],
+                "nested": {"patient_reference": "Patient/pat-77"},
             },
         }
 
         response = self.client.post(self.url, data=payload, format="json")
 
-        self.assertEqual(response.status_code, 201)
-        event = ClientAuditEvent.objects.get()
-        expected_patient_key = _expected_patient_key("pat-77")
-        self.assertEqual(event.patient_id, expected_patient_key)
-        self.assertEqual(
-            event.meta,
-            {
-                "ui": "timeline",
-                "patientKey": expected_patient_key,
-                "nested": {"patientKey": expected_patient_key, "safe": True},
-                "events": [{"step": "open", "patientKey": expected_patient_key}],
-            },
-        )
-        self.assertNotIn("patientId", str(event.meta))
-        self.assertNotIn("pat-context", str(event.meta))
-        self.assertNotIn("pat-details", str(event.meta))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ClientAuditEvent.objects.count(), 0)
+
+    def test_post_rejects_raw_patient_id_top_level_field(self):
+        payload = {
+            "type": "patient_edit",
+            "userId": "clinician-3",
+            "patientId": "pat-77",
+        }
+
+        response = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ClientAuditEvent.objects.count(), 0)
 
     def test_get_does_not_expose_legacy_raw_patient_ids_from_meta(self):
         ClientAuditEvent.objects.create(

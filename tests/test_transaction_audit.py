@@ -11,6 +11,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 from rest_framework.test import APIClient
 
+from backend.api.audit_pseudonymization import build_audit_patient_key
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response
 
 
@@ -64,7 +65,13 @@ def test_proxy_and_auditevent_include_authenticated_actor_and_entities():
     assert primary_agent["who"]["identifier"]["value"] == "auth0|audit-user"
     assert primary_agent["network"]["address"] == "192.0.2.55"
     assert primary_agent["location"]["identifier"]["value"] == "ward-a"
-    assert {entity["what"]["reference"] for entity in audit_payload["entity"]} == {
-        "Patient/pat-audit-001",
+    patient_entities = [
+        entity["what"]["identifier"]["value"]
+        for entity in audit_payload["entity"]
+        if entity.get("what", {}).get("identifier", {}).get("system") == "urn:handover:audit:patient-key"
+    ]
+    assert patient_entities == [build_audit_patient_key("pat-audit-001")]
+    assert {entity["what"]["reference"] for entity in audit_payload["entity"] if entity.get("what", {}).get("reference")} == {
         "Composition/comp-audit-001",
     }
+    assert "pat-audit-001" not in str(audit_payload)

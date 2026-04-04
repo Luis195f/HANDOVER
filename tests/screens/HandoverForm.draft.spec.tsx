@@ -171,7 +171,7 @@ vi.mock('@/src/lib/fhir-map', () => ({
 }));
 vi.mock('@/src/lib/fhir-validation', () => ({ validateBundle: (...args: unknown[]) => validateBundle(...args) }));
 
-// ✅ FIX: agregar sendAuditEvent y hacer appendAuditEvent async + makeAuditEvent consistente
+// ✅ FIX: mantener el seam de auditoría sin disparar la red real
 vi.mock('@/src/lib/audit', () => ({
   createAsyncStorageAuditStorage: () => ({ type: 'mock' }),
   appendAuditEvent: vi.fn(async () => undefined),
@@ -182,7 +182,7 @@ vi.mock('@/src/lib/audit', () => ({
     patientId: 'pat-1',
     at: '2024-01-01T00:00:00Z',
   })),
-  sendAuditEvent: vi.fn(async () => undefined),
+  queueAndFlushAuditEvent: vi.fn(async () => true),
 }));
 
 vi.mock('@/src/lib/stt', () => ({

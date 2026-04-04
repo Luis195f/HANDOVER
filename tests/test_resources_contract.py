@@ -11,6 +11,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
 from rest_framework.test import APIClient
 
+from backend.api.audit_pseudonymization import build_audit_patient_key
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response
 
 
@@ -62,7 +63,13 @@ def test_transaction_resources_contract_and_audit():
 
     audit_payload = mock_audit_post.call_args.kwargs["json"]
     assert audit_payload["resourceType"] == "AuditEvent"
-    assert {entity["what"]["reference"] for entity in audit_payload["entity"]} == {
-        "Patient/pat-contract-001",
+    patient_entities = [
+        entity["what"]["identifier"]["value"]
+        for entity in audit_payload["entity"]
+        if entity.get("what", {}).get("identifier", {}).get("system") == "urn:handover:audit:patient-key"
+    ]
+    assert patient_entities == [build_audit_patient_key("pat-contract-001")]
+    assert {entity["what"]["reference"] for entity in audit_payload["entity"] if entity.get("what", {}).get("reference")} == {
         "Composition/comp-contract-001",
     }
+    assert "pat-contract-001" not in str(audit_payload)

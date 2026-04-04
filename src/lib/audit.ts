@@ -12,6 +12,7 @@ import { hashHex } from './crypto';
 const AUDIT_PATIENT_KEY_PREFIX = 'ptk_';
 const AUDIT_PATIENT_KEY_LENGTH = 24;
 const AUDIT_PATIENT_KEY_PATTERN = new RegExp(`^${AUDIT_PATIENT_KEY_PREFIX}[a-f0-9]{${AUDIT_PATIENT_KEY_LENGTH}}$`);
+const AUDIT_META_FORBIDDEN_KEY_PATTERN = /(patient(id|key|reference|ref)?|payload|sbar|note|text|details|context)$/i;
 
 export type AuditEventType = 'patient_open' | 'patient_edit' | 'handover_signed';
 
@@ -19,7 +20,7 @@ export interface AuditEvent {
   id: string; // UUID
   type: AuditEventType;
   at: string; // ISO 8601
-  patientKey?: string; // token de correlacion estable, nunca nombre ni ID tecnico crudo
+  patientKey?: string; // seudonimo de transporte cliente; backend lo canoniza a ptk2_* al persistir
   userId: string; // ID del usuario autenticado
   unitId?: string; // unidad de enfermería
   shiftCode?: string; // ej. 'NIGHT', 'MORNING', 'AFTERNOON'
@@ -34,7 +35,7 @@ export interface AuditStorage {
 
 export interface MakeAuditEventInput {
   type: AuditEventType;
-  patientId?: string; // entrada tecnica interna; se transforma a patientKey antes de persistir/enviar
+  patientId?: string; // entrada tecnica interna; se transforma a compat token ptk_ antes de enviar
   userId: string;
   unitId?: string;
   shiftCode?: string;
@@ -57,16 +58,39 @@ export function buildAuditPatientKey(patientId?: string): string | undefined {
   const normalized = normalizeAuditPatientId(patientId);
   if (!normalized) return undefined;
   if (AUDIT_PATIENT_KEY_PATTERN.test(normalized)) return normalized;
+  // Compatibilidad temporal: el cliente no puede derivar ptk2_* sin el secreto del servidor.
   return `${AUDIT_PATIENT_KEY_PREFIX}${hashHex(`handover.audit.patient.v1:${normalized}`, AUDIT_PATIENT_KEY_LENGTH)}`;
+}
+
+function assertSafeMetaValue(value: unknown) {
+  if (Array.isArray(value)) {
+    value.forEach(assertSafeMetaValue);
+    return;
+  }
+
+  if (value && typeof value === 'object') {
+    Object.entries(value as Record<string, unknown>).forEach(([key, nestedValue]) => {
+      if (AUDIT_META_FORBIDDEN_KEY_PATTERN.test(key.replace(/[^a-z0-9]+/gi, ''))) {
+        throw new Error('META_CONTAINS_IDENTIFIER');
+      }
+      assertSafeMetaValue(nestedValue);
+    });
+    return;
+  }
+
+  if (typeof value === 'string') {
+    if (value.length > 100) {
+      throw new Error('META_STRING_TOO_LONG');
+    }
+    if (value.trim().startsWith('Patient/')) {
+      throw new Error('META_CONTAINS_IDENTIFIER');
+    }
+  }
 }
 
 function assertSafeMeta(meta: Record<string, unknown> | undefined) {
   if (!meta) return;
-  Object.values(meta).forEach((value) => {
-    if (typeof value === 'string' && value.length > 100) {
-      throw new Error('META_STRING_TOO_LONG');
-    }
-  });
+  assertSafeMetaValue(meta);
 }
 
 export function makeAuditEvent(input: MakeAuditEventInput, now: () => Date = () => new Date()): AuditEvent {
@@ -193,18 +217,38 @@ export async function appendAuditEvent(storage: AuditStorage, event: AuditEvent)
   await storage.save(events);
 }
 
-export async function sendAuditEvent(event: AuditEvent): Promise<void> {
+export async function sendAuditEvent(event: AuditEvent): Promise<boolean> {
   try {
     await apiPost('/api/audit/', { body: JSON.stringify(event) });
+    return true;
   } catch (e: any) {
     const status = e?.status ?? e?.response?.status;
-
-    // Auditoría nunca debe bloquear UX
-    if (status === 401 || status === 403) return;
-
-    // best-effort: no bloqueamos la app por fallos de red/offline/500/etc.
-    return;
+    return status >= 200 && status < 300;
   }
+}
+
+export async function flushPendingAuditEvents(storage: AuditStorage): Promise<string[]> {
+  const pending = await storage.load();
+  const deliveredIds: string[] = [];
+
+  for (const event of pending) {
+    const delivered = await sendAuditEvent(event);
+    if (!delivered) continue;
+    deliveredIds.push(event.id);
+  }
+
+  if (deliveredIds.length > 0) {
+    const deliveredSet = new Set(deliveredIds);
+    await storage.save(pending.filter((event) => !deliveredSet.has(event.id)));
+  }
+
+  return deliveredIds;
+}
+
+export async function queueAndFlushAuditEvent(storage: AuditStorage, event: AuditEvent): Promise<boolean> {
+  await appendAuditEvent(storage, event);
+  const deliveredIds = await flushPendingAuditEvents(storage);
+  return deliveredIds.includes(event.id);
 }
 
 export async function clearAuditStorage(key = 'handover:audit:v1'): Promise<void> {
