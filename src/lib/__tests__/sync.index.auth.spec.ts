@@ -236,4 +236,32 @@ describe('legacy sync runtime auth seam', () => {
     expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
     expect(postBundleMock).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps transport status 0 retryable inside replay backoff', async () => {
+    readQueueMock.mockResolvedValueOnce([]);
+    runQueueFlushMock.mockImplementation(async (sender: (tx: unknown) => Promise<unknown>) => {
+      await sender({
+        id: 'queued-network',
+        key: 'queued-network',
+        tries: 0,
+        payload: {
+          bundle,
+          meta: { hash: 'idem-network' },
+        },
+      });
+    });
+    postBundleMock
+      .mockResolvedValueOnce({ ok: false, status: 0, body: { error: 'network down' } })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+
+    const { flushQueue } = await loadSyncIndex();
+    const result = await flushQueue({
+      fhirBaseUrl: 'https://fhir.test/api',
+      getToken: async () => 'session-token',
+      backoff: { retries: 1, minMs: 0, maxMs: 0 },
+    });
+
+    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(postBundleMock).toHaveBeenCalledTimes(2);
+  });
 });

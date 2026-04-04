@@ -179,7 +179,7 @@ export function shouldAttemptNow(item: OfflineQueueItem, now = Date.now()): bool
 function isSuccessfulResponse(res: SendResult): boolean {
   const status = 'status' in res ? res.status : (res as Response).status;
   const okFlag = 'ok' in res ? res.ok : (res as Response).ok;
-  return okFlag === true || status === 200 || status === 201 || status === 412;
+  return okFlag === true || status === 200 || status === 201 || status === 409 || status === 412;
 }
 
 function getStatus(res: SendResult): number {
