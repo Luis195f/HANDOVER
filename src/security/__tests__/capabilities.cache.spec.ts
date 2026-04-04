@@ -23,6 +23,7 @@ vi.mock('@/src/security/secure-storage', () => ({
 vi.mock('@/src/lib/api', () => ({ apiGet: mockState.apiGet }));
 
 import {
+  clearCapabilitiesCache,
   fetchCapabilities,
   invalidateCapabilitiesCache,
   type Capabilities,
@@ -84,6 +85,16 @@ describe('capabilities cache TTL', () => {
     expect(mockState.apiGet).not.toHaveBeenCalled();
   });
 
+  it('rehidrata payload legacy sin cachedAt', async () => {
+    mockState.storage.set(CAPABILITIES_KEY, JSON.stringify(baseCapabilities));
+    mockState.apiGet.mockResolvedValue(refreshedCapabilities);
+
+    const result = await fetchCapabilities();
+
+    expect(result).toEqual(refreshedCapabilities);
+    expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
+  });
+
   it('con cache stale refresca y actualiza cache', async () => {
     mockState.storage.set(
       CAPABILITIES_KEY,
@@ -106,6 +117,16 @@ describe('capabilities cache TTL', () => {
     expect(stored.cachedAt).toBe(Date.now());
   });
 
+  it('ignora cache corrupta y vuelve a pedir capacidades remotas', async () => {
+    mockState.storage.set(CAPABILITIES_KEY, '{invalid-json');
+    mockState.apiGet.mockResolvedValue(refreshedCapabilities);
+
+    const result = await fetchCapabilities();
+
+    expect(result).toEqual(refreshedCapabilities);
+    expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
+  });
+
   it('invalida cache cuando /api/me/capabilities responde 403', async () => {
     mockState.storage.set(
       CAPABILITIES_KEY,
@@ -113,11 +134,46 @@ describe('capabilities cache TTL', () => {
     );
     mockState.apiGet.mockRejectedValue(new Error('403 Forbidden'));
 
-    const result = await fetchCapabilities();
+    await expect(fetchCapabilities()).rejects.toThrow('403 Forbidden');
 
     expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
     expect(mockState.secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
-    expect(result).toBeNull();
+  });
+
+  it('comparte una sola llamada remota cuando dos fetches concurrentes coinciden', async () => {
+    let resolveFetch: ((value: Capabilities) => void) | undefined;
+    mockState.apiGet.mockImplementation(
+      () =>
+        new Promise<Capabilities>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    const first = fetchCapabilities({ forceRefresh: true });
+    const second = fetchCapabilities();
+
+    resolveFetch?.(refreshedCapabilities);
+
+    await expect(first).resolves.toEqual(refreshedCapabilities);
+    await expect(second).resolves.toEqual(refreshedCapabilities);
+    expect(mockState.apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('mantiene cache en memoria ante fallo de red no autenticado', async () => {
+    const deleteCallsBefore = mockState.secureDeleteItem.mock.calls.length;
+    mockState.storage.set(
+      CAPABILITIES_KEY,
+      JSON.stringify({
+        capabilities: baseCapabilities,
+        cachedAt: Date.now() - 10 * 60 * 1000,
+      }),
+    );
+    mockState.apiGet.mockRejectedValue(new Error('network down'));
+
+    const result = await fetchCapabilities();
+
+    expect(result).toEqual(baseCapabilities);
+    expect(mockState.secureDeleteItem.mock.calls.length).toBe(deleteCallsBefore);
   });
 
   it('invalidación borra cache y fuerza fetch remoto', async () => {
@@ -133,5 +189,16 @@ describe('capabilities cache TTL', () => {
     expect(mockState.secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
     expect(mockState.apiGet).toHaveBeenCalledWith('/api/me/capabilities');
     expect(result).toEqual(refreshedCapabilities);
+  });
+
+  it('clearCapabilitiesCache delega a la invalidacion persistente', async () => {
+    mockState.storage.set(
+      CAPABILITIES_KEY,
+      JSON.stringify({ capabilities: baseCapabilities, cachedAt: Date.now() }),
+    );
+
+    await clearCapabilitiesCache();
+
+    expect(mockState.secureDeleteItem).toHaveBeenCalledWith(CAPABILITIES_KEY);
   });
 });

@@ -16,32 +16,11 @@ class CapabilitiesViewTests(TestCase):
         self.url = reverse("me-capabilities")
 
     @override_settings(DEBUG=True)
-    def test_debug_without_authorization_returns_guest_contract(self):
+    def test_debug_without_authorization_fails_closed(self):
         response = self.client.get(self.url)
 
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-
-        self.assertEqual(
-            set(data.keys()),
-            {"userSub", "roles", "scopes", "permissions", "scopeCatalog", "fhir"},
-        )
-        self.assertEqual(data["userSub"], "guest")
-        self.assertEqual(data["roles"], ["guest"])
-        self.assertEqual(data["scopes"], [])
-        self.assertEqual(data["scopeCatalog"], CLINICAL_SCOPES)
-        self.assertEqual(
-            data["permissions"],
-            {
-                "canWriteHandover": False,
-                "canSignHandover": False,
-                "canViewAudit": False,
-                "canSendAuditEvents": False,
-                "isAdmin": False,
-            },
-        )
-        self.assertEqual(set(data["fhir"].keys()), {"version", "transaction", "profiles"})
-        self.assertEqual(data["fhir"], {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "auth-required")
 
     @override_settings(DEBUG=True)
     def test_debug_with_authorization_returns_authenticated_capabilities(self):
@@ -84,4 +63,5 @@ class CapabilitiesViewTests(TestCase):
     def test_prod_requires_authentication_without_token(self):
         response = self.client.get(self.url)
 
-        self.assertIn(response.status_code, (401, 403))
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "auth-required")

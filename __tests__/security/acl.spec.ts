@@ -55,19 +55,19 @@ describe('acl guards', () => {
     expect(() => ensureUnitAccess(supervisor, 'Trauma')).not.toThrow();
   });
 
-  it('bypass scope omite filtros de rol y unidad', () => {
+  it('ignora bypass scope y mantiene filtros de rol y unidad', () => {
     process.env.EXPO_PUBLIC_BYPASS_SCOPE = 'true';
     const viewer = createSession(['viewer'], []);
 
-    expect(() => ensureRole(viewer, 'nurse')).not.toThrow();
-    expect(() => ensureUnitAccess(viewer, 'UCI')).not.toThrow();
+    expectAclError(() => ensureRole(viewer, 'nurse'), 'FORBIDDEN_ROLE');
+    expectAclError(() => ensureUnitAccess(viewer, 'UCI'), 'FORBIDDEN_UNIT');
   });
 
-  it('allow all units habilita acceso independientemente de las unidades del usuario', () => {
+  it('ignora allow all units y mantiene control por unidad', () => {
     process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS = 'true';
     const viewer = createSession(['viewer'], ['UCI']);
 
-    expect(() => ensureUnitAccess(viewer, 'Cardiología')).not.toThrow();
+    expectAclError(() => ensureUnitAccess(viewer, 'Cardiología'), 'FORBIDDEN_UNIT');
   });
 
   it('filtra por lista de unidades permitidas y por unidades del usuario', () => {

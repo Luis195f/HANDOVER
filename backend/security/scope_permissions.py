@@ -83,6 +83,8 @@ class HasAnyScope(BasePermission):
     """
 
     required_scopes: Set[str] = set()
+    message = "Authenticated user is missing one of the required scopes."
+    code = "forbidden-scope"
 
     def has_permission(self, request: Request, view) -> bool:
         token_scopes = _extract_permissions_from_request(request)
@@ -103,6 +105,8 @@ class HasAllScopes(BasePermission):
     """
 
     required_scopes: Set[str] = set()
+    message = "Authenticated user is missing one of the required scopes."
+    code = "forbidden-scope"
 
     def has_permission(self, request: Request, view) -> bool:
         token_scopes = _extract_permissions_from_request(request)

@@ -149,4 +149,45 @@ describe('ensureFreshToken', () => {
     expect(token).toBeNull();
     expect(resetTo).toHaveBeenCalledWith('Login');
   });
+
+  it('logs out when token is expiring and no refresh token is available', async () => {
+    const expSoon = Math.floor(Date.now() / 1000) + 60;
+    const accessToken = buildJwt(expSoon);
+
+    await setCurrentSession({
+      accessToken,
+      userId: 'user-3',
+      displayName: 'User',
+      roles: ['nurse'],
+      units: [],
+    });
+
+    const token = await ensureFreshToken();
+
+    expect(token).toBeNull();
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(resetTo).toHaveBeenCalledWith('Login');
+  });
+
+  it('logs out when refresh endpoint returns no replacement token', async () => {
+    const expSoon = Math.floor(Date.now() / 1000) + 60;
+    const accessToken = buildJwt(expSoon);
+    const refreshToken = 'refresh-token';
+
+    (refreshTokens as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    await setCurrentSession({
+      accessToken,
+      refreshToken,
+      userId: 'user-4',
+      displayName: 'User',
+      roles: ['nurse'],
+      units: [],
+    });
+
+    const token = await ensureFreshToken();
+
+    expect(token).toBeNull();
+    expect(resetTo).toHaveBeenCalledWith('Login');
+  });
 });

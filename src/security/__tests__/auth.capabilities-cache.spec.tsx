@@ -88,10 +88,21 @@ vi.mock('react-native', async () => {
   };
 });
 
-import { AuthProvider, setCurrentSession } from '@/src/security/auth';
+import { AuthProvider, getCurrentSession, setCurrentSession } from '@/src/security/auth';
+import { resetTo } from '@/src/navigation/navigation';
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('AuthProvider capabilities cache invalidation', () => {
@@ -136,6 +147,74 @@ describe('AuthProvider capabilities cache invalidation', () => {
 
     expect(capabilityMocks.clearCapabilitiesCache.mock.calls.length).toBe(callsBeforeSwitch + 1);
     expect(capabilityMocks.fetchCapabilities).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignora un 401 tardio de una sesion vieja y conserva la sesion activa', async () => {
+    const staleFailure = deferred<never>();
+    capabilityMocks.fetchCapabilities
+      .mockImplementationOnce(() => staleFailure.promise)
+      .mockImplementationOnce(async () => ({
+        userSub: 'auth0|u2',
+        roles: ['nurse'],
+        scopes: ['handover:write'],
+        permissions: {
+          canWriteHandover: true,
+          canSignHandover: false,
+          canViewAudit: false,
+          canSendAuditEvents: true,
+          isAdmin: false,
+        },
+      }));
+
+    let renderer: ReturnType<typeof create> | null = null;
+
+    await act(async () => {
+      renderer = create(
+        <AuthProvider>
+          <></>
+        </AuthProvider>,
+      );
+      await flush();
+    });
+
+    await act(async () => {
+      await setCurrentSession({
+        accessToken: 'token-1',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        userId: 'user-1',
+        displayName: 'User 1',
+        roles: ['nurse'],
+        units: [],
+      });
+      await flush();
+    });
+
+    await act(async () => {
+      await setCurrentSession({
+        accessToken: 'token-2',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        userId: 'user-2',
+        displayName: 'User 2',
+        roles: ['nurse'],
+        units: [],
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      staleFailure.reject(Object.assign(new Error('401 Unauthorized'), { status: 401 }));
+      await flush();
+      await flush();
+    });
+
+    await expect(getCurrentSession()).resolves.toMatchObject({ userId: 'user-2' });
+    expect(resetTo).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer?.unmount();
+      await flush();
+    });
   });
 });
 

@@ -5,7 +5,13 @@ import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/s
 import type { AuthSession as StoredAuthSession, HandoverSession, UserRole } from './auth-types';
 import AuthService from './AuthService';
 
+const DEPLOYMENT_MODE = (process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE ?? '').trim().toLowerCase();
+const LOCAL_AUTH_BYPASS_ALLOWED =
+  (typeof __DEV__ !== 'undefined' && __DEV__) &&
+  (DEPLOYMENT_MODE === '' || DEPLOYMENT_MODE === 'development' || DEPLOYMENT_MODE === 'demo');
+
 export const AUTH_DISABLED =
+  LOCAL_AUTH_BYPASS_ALLOWED &&
   (process.env.EXPO_PUBLIC_AUTH_DISABLED ?? '').trim().toLowerCase() === 'true';
 
 const AUTH0_DOMAIN =

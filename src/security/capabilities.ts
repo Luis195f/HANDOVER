@@ -172,6 +172,7 @@ export async function fetchCapabilities(
 
       if (isAuthError) {
         await invalidateCapabilitiesCache();
+        throw error;
       }
 
       // keep cached capabilities if network fails
@@ -224,6 +225,6 @@ export function canAccess(route: RouteName, capabilities: Capabilities | null | 
     case 'PrivacyPolicy':
       return true;
     default:
-      return true;
+      return false;
   }
 }

@@ -44,7 +44,8 @@ class RequireRolesPermission(BasePermission):
     """
     Permiso base DRF-safe para comprobar roles.
     """
-    message = "No tienes permisos suficientes."
+    message = "Authenticated user is missing one of the required roles."
+    code = "forbidden-role"
     allowed_roles: tuple[str, ...] = ()
 
     def has_permission(self, request, view) -> bool:
@@ -73,7 +74,8 @@ class ClinicianAuditPermission(RequireRolesPermission):
 class IsAdminOrSupervisor(BasePermission):
     """Permite acceso únicamente a usuarios admin o supervisor."""
 
-    message = "Solo administradores o supervisores pueden acceder a este recurso."
+    message = "Authenticated user requires admin or supervisor role."
+    code = "forbidden-role"
 
     def has_permission(self, request, view) -> bool:
         user = getattr(request, "user", None)

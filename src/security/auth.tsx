@@ -61,6 +61,23 @@ type Capabilities = {
   fhir?: FhirCapabilities;
 };
 
+const EMPTY_CAPABILITY_PERMISSIONS: CapabilityPermissions = {
+  canWriteHandover: false,
+  canSignHandover: false,
+  canViewAudit: false,
+  canSendAuditEvents: false,
+  isAdmin: false,
+};
+
+function createDeniedCapabilities(userSub = ''): Capabilities {
+  return {
+    userSub,
+    roles: [],
+    scopes: [],
+    permissions: EMPTY_CAPABILITY_PERMISSIONS,
+  };
+}
+
 type AuthWarnCode =
   | 'AUTH_RUNTIME_CONFIG'
   | 'AUTH_OIDC_MISCONFIG'
@@ -112,6 +129,8 @@ type LogoutOptions = {
   skipRemote?: boolean;
   message?: string;
 };
+
+type SessionIdentitySnapshot = Pick<HandoverSession, 'userId' | 'accessToken' | 'mode'>;
 
 function toIsoExpiresAt(value: string | number | undefined): string | undefined {
   if (value == null) return undefined;
@@ -269,6 +288,18 @@ function toAuthTokens(session: HandoverSession): { accessToken: string; refreshT
 
 function isLocalSession(session: HandoverSession): boolean {
   return Boolean(session.refreshToken?.startsWith('local-refresh-') || session.accessToken?.startsWith('local-'));
+}
+
+function isSameSessionIdentity(
+  session: HandoverSession | null,
+  snapshot: SessionIdentitySnapshot,
+): boolean {
+  return Boolean(
+    session &&
+      session.userId === snapshot.userId &&
+      session.accessToken === snapshot.accessToken &&
+      session.mode === snapshot.mode,
+  );
 }
 
 async function persistSession(session: HandoverSession | null): Promise<void> {
@@ -504,7 +535,7 @@ export async function loginDemo(): Promise<SessionModel> {
       expiresAt: normalizeExpiresAt(Math.floor(Date.now() / 1000) + 3600),
       userId: 'demo-user',
       displayName: 'Demo User',
-      roles: ["admin"],
+      roles: ['nurse'],
       units: [],
       mode: 'demo',
     };
@@ -656,13 +687,17 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
   const refreshToken = session.refreshToken;
   if (!refreshToken) {
     warnAuth('AUTH_REFRESH_SKIP', { reason: 'no-refresh-token' });
-    return accessToken;
+    await logoutAndClear({
+      skipRemote: true,
+      message: t('auth.sessionExpiredMessage'),
+    });
+    return null;
   }
 
   // Single-flight
   if (refreshInFlight) {
     const inFlightSession = await refreshInFlight;
-    return inFlightSession?.accessToken ?? accessToken;
+    return inFlightSession?.accessToken ?? null;
   }
 
   refreshInFlight = (async () => {
@@ -672,7 +707,11 @@ export async function ensureFreshToken(audience?: string): Promise<string | null
       const refreshed = await refreshOAuthTokens(refreshToken);
       if (!refreshed) {
         warnAuth('AUTH_REFRESH_NO_TOKEN_ENDPOINT');
-        return session;
+        await logoutAndClear({
+          skipRemote: true,
+          message: t('auth.sessionExpiredMessage'),
+        });
+        return null;
       }
 
       const nextSession: HandoverSession = {
@@ -867,9 +906,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let alive = true;
 
     (async () => {
+      const sessionIdentity: SessionIdentitySnapshot | null = session
+        ? {
+            userId: session.userId,
+            accessToken: session.accessToken,
+            mode: session.mode,
+          }
+        : null;
       const currentUserId = session?.userId ?? null;
       const previousUserId = previousUserIdRef.current;
       const userChanged = previousUserId !== null && previousUserId !== currentUserId;
+      const isActiveSession = () =>
+        alive && sessionIdentity !== null && isSameSessionIdentity(currentSession, sessionIdentity);
 
       if (!session) {
         setCapabilitiesState(null);
@@ -885,12 +933,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       previousUserIdRef.current = currentUserId;
 
       if (session.mode === "demo") {
-        setCapabilitiesState(await getDemoCapabilitiesLazy(session.userId));
+        const demoCapabilities = await getDemoCapabilitiesLazy(session.userId);
+        if (!isActiveSession()) return;
+        setCapabilitiesState(demoCapabilities);
         return;
       }
 
-      const caps = await fetchCapabilitiesLazy();
-      if (alive) setCapabilitiesState(caps);
+      try {
+        const caps = await fetchCapabilitiesLazy();
+        if (!isActiveSession()) return;
+        setCapabilitiesState(caps ?? createDeniedCapabilities(session.userId));
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403) {
+          if (!isActiveSession()) return;
+          await logoutAndClear({
+            skipRemote: true,
+            message: t('auth.sessionExpiredMessage'),
+          });
+          return;
+        }
+        if (isActiveSession()) {
+          setCapabilitiesState(createDeniedCapabilities(session.userId));
+        }
+      }
     })();
 
     return () => {
@@ -941,9 +1007,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCapabilitiesState(demoCaps);
       return demoCaps;
     }
-    const caps = await fetchCapabilitiesLazy({ forceRefresh: true });
-    setCapabilitiesState(caps);
-    return caps;
+    try {
+      const caps = await fetchCapabilitiesLazy({ forceRefresh: true });
+      const resolved = caps ?? createDeniedCapabilities(session.userId);
+      setCapabilitiesState(resolved);
+      return resolved;
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        await logoutAndClear({
+          skipRemote: true,
+          message: t('auth.sessionExpiredMessage'),
+        });
+        return null;
+      }
+      const denied = createDeniedCapabilities(session.userId);
+      setCapabilitiesState(denied);
+      return denied;
+    }
   }, [session]);
 
   // ✅ IMPORTANTE: incluye loginDemo/logout en deps (no rompe nada; evita bugs por closures)
