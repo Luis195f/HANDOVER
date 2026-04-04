@@ -95,4 +95,55 @@ describe('offline sync single source of truth', () => {
     expect(await queue.listOfflineQueue()).toHaveLength(0);
     expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
   });
+
+  it('sync/index consumes a 409 idempotent replay as delivered and removes the canonical queue item', async () => {
+    const queue = await import('@/src/lib/queue');
+    const sync = await import('@/src/lib/sync');
+    const syncIndex = await import('@/src/lib/sync/index');
+    const client = await import('@/src/lib/fhir-client');
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-sync-index-409' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-sync-index-409' });
+    (client.postBundle as unknown as Mock).mockResolvedValue({ ok: false, status: 409, body: {} });
+
+    const result = await syncIndex.flushQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'token',
+      backoff: { retries: 0, minMs: 0, maxMs: 0 },
+    });
+
+    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
+    expect(client.postBundle).toHaveBeenCalledTimes(1);
+    expect(await queue.listOfflineQueue()).toHaveLength(0);
+    expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
+  });
+
+  it('sync/index retries transport status 0 before leaving the canonical queue pending', async () => {
+    const queue = await import('@/src/lib/queue');
+    const sync = await import('@/src/lib/sync');
+    const syncIndex = await import('@/src/lib/sync/index');
+    const client = await import('@/src/lib/fhir-client');
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-sync-index-network' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-sync-index-network' });
+    (client.postBundle as unknown as Mock)
+      .mockResolvedValueOnce({ ok: false, status: 0, body: { error: 'network down' } })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+
+    const result = await syncIndex.flushQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'token',
+      backoff: { retries: 1, minMs: 0, maxMs: 0 },
+    });
+
+    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
+    expect(client.postBundle).toHaveBeenCalledTimes(2);
+    expect(await queue.listOfflineQueue()).toHaveLength(0);
+  });
 });

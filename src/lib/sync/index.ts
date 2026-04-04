@@ -80,7 +80,7 @@ function isDuplicateSkip(status: number) {
   return status === 409 || status === 412; // Idempotent replay already accepted remotely.
 }
 function isRetryable(status: number) {
-  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+  return status === 0 || status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
 // --- Public types ---
@@ -346,7 +346,7 @@ function createFlusher(opts: SyncOpts) {
           tries: tx.tries,
           id: tx.key,
         });
-        return { ok: false, status: errorStatus || 500 };
+        return { ok: false, status: errorStatus };
       }
     });
 
