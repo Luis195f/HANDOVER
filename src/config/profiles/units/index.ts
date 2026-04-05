@@ -1,9 +1,9 @@
 import type { BedsideChecklistItem } from '../../../config/bedsideChecklist';
 import { MEDICATIONS_QUICKPICK_ICU } from '../../../lib/codes';
 import type { UnitProfileId, UnitProfileRuntimePack } from '../../../types/profile';
-import { HANDOVER_CORE_RUNTIME_PACK } from './core';
+import { HANDOVER_SHARED_CORE_RUNTIME_PACK } from './core';
 
-const SHARED_CORE_SECTIONS = HANDOVER_CORE_RUNTIME_PACK.enabledSections ?? [];
+const SHARED_CORE_SECTIONS = HANDOVER_SHARED_CORE_RUNTIME_PACK.enabledSections ?? [];
 
 const createPack = (
   pack: UnitProfileRuntimePack & { id: UnitProfileId },
@@ -299,4 +299,8 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
   }),
 };
 
-export { HANDOVER_CORE_RUNTIME_PACK };
+export {
+  HANDOVER_CORE_FALLBACK_ONLY_SECTIONS,
+  HANDOVER_CORE_RUNTIME_PACK,
+  HANDOVER_SHARED_CORE_RUNTIME_PACK,
+} from './core';

@@ -1,7 +1,7 @@
 from datetime import timezone as dt_timezone
+import types
 from unittest.mock import patch
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -45,8 +45,13 @@ class AuditLogViewTests(TestCase):
         self.client = APIClient()
         self.url = reverse("audit-log")
 
-        user = get_user_model().objects.create_user(username="audit-user", password="testpass")
-        self.client.force_authenticate(user=user)
+        user = types.SimpleNamespace(
+            is_authenticated=True,
+            sub="audit-user",
+            username="audit-user",
+            claims={"sub": "audit-user"},
+        )
+        self.client.force_authenticate(user=user, token=user.claims)
 
         self._perm_patcher = patch.object(AuditLogView, "permission_classes", [AllowAny])
         self._auth_patcher = patch.object(AuditLogView, "authentication_classes", [])
@@ -58,7 +63,7 @@ class AuditLogViewTests(TestCase):
     def test_post_and_get_audit_log_uses_client_audit_event_model(self):
         payload = {
             "type": "patient_open",
-            "userId": "clinician-1",
+            "userId": "audit-user",
             "patientKey": build_audit_patient_key("pat-42"),
             "unitId": "icu",
             "shiftCode": "N",
@@ -81,7 +86,7 @@ class AuditLogViewTests(TestCase):
     def test_post_accepts_legacy_transport_key_but_persists_canonical_ptk2(self):
         payload = {
             "type": "patient_open",
-            "userId": "clinician-compat",
+            "userId": "audit-user",
             "patientKey": "ptk_abc123abc123abc123abc123",
             "at": "2026-01-01T10:00:00Z",
         }
@@ -111,7 +116,7 @@ class AuditLogViewTests(TestCase):
     def test_post_accepts_handover_signed_and_returns_patient_key(self):
         payload = {
             "type": "handover_signed",
-            "userId": "supervisor-1",
+            "userId": "audit-user",
             "patientKey": _expected_patient_key("pat-88"),
             "at": "2026-01-01T10:00:00Z",
         }
@@ -131,7 +136,7 @@ class AuditLogViewTests(TestCase):
     def test_post_rejects_payloads_with_raw_patient_identifier_fields(self):
         payload = {
             "type": "patient_edit",
-            "userId": "clinician-2",
+            "userId": "audit-user",
             "patientKey": build_audit_patient_key("pat-77"),
             "meta": {
                 "ui": "timeline",
@@ -148,7 +153,7 @@ class AuditLogViewTests(TestCase):
     def test_post_rejects_raw_patient_id_top_level_field(self):
         payload = {
             "type": "patient_edit",
-            "userId": "clinician-3",
+            "userId": "audit-user",
             "patientId": "pat-77",
         }
 
@@ -160,7 +165,7 @@ class AuditLogViewTests(TestCase):
     def test_post_rejects_extra_top_level_fields_like_client_local_id(self):
         payload = {
             "type": "patient_edit",
-            "userId": "clinician-3",
+            "userId": "audit-user",
             "patientKey": build_audit_patient_key("pat-77"),
             "id": "9d17d2da-9f48-4ca5-8742-8b7047cc936b",
         }
@@ -185,6 +190,20 @@ class AuditLogViewTests(TestCase):
         self.assertEqual(response.data[0]["patientKey"], _expected_patient_key("pat-legacy-11"))
         self.assertNotIn("patientId", str(response.data[0]))
         self.assertNotIn("pat-legacy-context", str(response.data[0]))
+
+    def test_post_rejects_actor_mismatch_against_authenticated_user(self):
+        payload = {
+            "type": "handover_signed",
+            "userId": "spoofed-user",
+            "patientKey": _expected_patient_key("pat-88"),
+            "at": "2026-01-01T10:00:00Z",
+        }
+
+        response = self.client.post(self.url, data=payload, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["errors"], ["Authenticated audit actor mismatch."])
+        self.assertEqual(ClientAuditEvent.objects.count(), 0)
 
 
 class AuditMetaSanitizationTests(TestCase):

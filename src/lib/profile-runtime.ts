@@ -7,6 +7,7 @@ import {
 import { SPECIALTY_OVERLAY_RUNTIME_PACKS } from '../config/profiles/overlays';
 import {
   HANDOVER_CORE_RUNTIME_PACK,
+  HANDOVER_SHARED_CORE_RUNTIME_PACK,
   UNIT_PROFILE_CHECKLIST_ITEMS,
   UNIT_PROFILE_RUNTIME_PACKS,
 } from '../config/profiles/units';
@@ -276,12 +277,12 @@ const mergeIntoRuntimePack = (
 const mergeBasePackWithCore = (pack: UnitProfileRuntimePack): RuntimePackMergeResult =>
   mergeIntoRuntimePack(
     {
-      ...HANDOVER_CORE_RUNTIME_PACK,
+      ...HANDOVER_SHARED_CORE_RUNTIME_PACK,
       id: pack.id,
       label: pack.label,
       quickPicks: {
-        medications: HANDOVER_CORE_RUNTIME_PACK.quickPicks?.medications ?? [],
-        treatments: HANDOVER_CORE_RUNTIME_PACK.quickPicks?.treatments ?? [],
+        medications: HANDOVER_SHARED_CORE_RUNTIME_PACK.quickPicks?.medications ?? [],
+        treatments: HANDOVER_SHARED_CORE_RUNTIME_PACK.quickPicks?.treatments ?? [],
       },
     },
     pack,
@@ -298,7 +299,7 @@ const resolveUnitRuntimePack = (profileId?: UnitProfileId | null): UnitProfileRu
   if (!pack) {
     return definition
       ? {
-          ...HANDOVER_CORE_RUNTIME_PACK,
+          ...HANDOVER_SHARED_CORE_RUNTIME_PACK,
           id: profileId,
           label: definition.label,
         }

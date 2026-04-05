@@ -58,6 +58,19 @@ describe('resolveHandoverProfileRuntime', () => {
     );
   });
 
+  it('exposes pilot-critical continuity sections only in the pure HANDOVER Core fallback', async () => {
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'unknown-unit', specialtyId: 'unknown-specialty' });
+
+    expect(runtime.context.usesCoreFallback).toBe(true);
+    expect(runtime.pack.id).toBe('handover-core');
+    expect(runtime.basePack.id).toBe('handover-core');
+    expect(runtime.sectionVisibility.oxigenoterapia).toBe(true);
+    expect(runtime.sectionVisibility.escalas).toBe(true);
+    expect(runtime.sectionVisibility.examenes).toBe(true);
+  });
+
   it('uses the configured default unit runtime when the selected unit is unknown', async () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       defaultUnit: 'uci-adulto',
@@ -155,6 +168,32 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.requiredExtraFields).toEqual(
       expect.arrayContaining(['Dependencia funcional y fragilidad', 'Peso y edad', 'Comunicacion con familia']),
     );
+  });
+
+  it('does not leak fallback-only continuity sections into known maternal-perinatal runtime packs', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['maternal-perinatal'],
+    });
+    process.env.UNITS_CONFIG = JSON.stringify({
+      units: [
+        { id: 'ob-floor', name: 'Obstetricia', specialty: 'obs', profileId: 'maternal-perinatal' },
+      ],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+    const { UNIT_PROFILE_RUNTIME_PACKS } = await import('@/src/config/profiles/units');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'ob-floor', specialtyId: 'obs' });
+
+    expect(UNIT_PROFILE_RUNTIME_PACKS['maternal-perinatal'].enabledSections).not.toEqual(
+      expect.arrayContaining(['oxigenoterapia', 'escalas', 'examenes']),
+    );
+    expect(runtime.context.unitProfileId).toBe('maternal-perinatal');
+    expect(runtime.pack.id).toBe('maternal-perinatal');
+    expect(runtime.sectionVisibility.psychosocial).toBe(true);
+    expect(runtime.sectionVisibility.oxigenoterapia).toBe(false);
+    expect(runtime.sectionVisibility.escalas).toBe(false);
+    expect(runtime.sectionVisibility.examenes).toBe(false);
   });
 
   it('resolves an active critical-care UPP with profile-driven scales and quick-picks', async () => {

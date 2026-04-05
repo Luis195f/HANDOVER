@@ -16,7 +16,7 @@ from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhi
 
 def test_audit_event_with_dual_signatures():
     client = APIClient()
-    authenticate_api_client(client, sub="auth0|signed-user")
+    authenticate_api_client(client, sub="auth0|nurse-in")
     bundle = {
         "resourceType": "Bundle",
         "type": "transaction",
@@ -35,7 +35,7 @@ def test_audit_event_with_dual_signatures():
                     "subject": {"reference": "Patient/pat-sign-001"},
                     "attester": [
                         {"party": {"identifier": {"value": "nurse-out"}, "display": "Outgoing nurse"}},
-                        {"party": {"identifier": {"value": "nurse-in"}, "display": "Incoming nurse"}},
+                        {"party": {"identifier": {"value": "auth0|nurse-in"}, "display": "Incoming nurse"}},
                     ],
                 },
             },

@@ -67,10 +67,14 @@ function buildSignatureFromUser(
   signatureHash?: string,
   signedAt?: string,
 ): HandoverSignature {
+  const resolvedRole =
+    (user.roles?.[0] as HandoverSignature['role']) ??
+    (user.role as HandoverSignature['role']) ??
+    'nurse';
   return {
     userId: user.id ?? user.userId ?? user.displayName ?? 'unknown-user',
     fullName: user.fullName ?? user.name ?? user.displayName ?? user.userId ?? t('signatures.unknownUser'),
-    role: (user.roles?.[0] as HandoverSignature['role']) ?? (user.role as HandoverSignature['role']),
+    role: resolvedRole,
     unitId,
     signedAt: signedAt ?? new Date().toISOString(),
     signatureHash,

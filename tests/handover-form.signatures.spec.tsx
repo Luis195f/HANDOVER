@@ -230,8 +230,8 @@ describe('HandoverForm signatures', () => {
 
     await waitFor(() => {
       expect(alertSpy).toHaveBeenCalledWith(
-        'Falta firma',
-        'Para finalizar la entrega falta la firma de enfermera saliente.',
+        'Falta atestación',
+        'Para finalizar la entrega falta la atestación y la evidencia local de la enfermera saliente.',
       );
     });
     expect(buildHandoverBundleAsync).not.toHaveBeenCalled();
@@ -264,8 +264,8 @@ describe('HandoverForm signatures', () => {
 
     await waitFor(() => {
       expect(alertSpy).toHaveBeenCalledWith(
-        'Falta firma',
-        'Para finalizar la entrega falta la firma de enfermera saliente.',
+        'Falta atestación',
+        'Para finalizar la entrega falta la atestación y la evidencia local de la enfermera saliente.',
       );
     });
     expect(buildHandoverBundleAsync).not.toHaveBeenCalled();
@@ -319,5 +319,88 @@ describe('HandoverForm signatures', () => {
     } else {
       process.env.EXPO_PUBLIC_E2E = originalE2E;
     }
+  });
+
+  it('bloquea finalización sin atestación entrante', async () => {
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => 0);
+
+    formValues.status = 'final';
+    formValues.bedsideChecklist = {
+      patientIdentityConfirmed: true,
+      allergiesReviewed: true,
+      linesAndDevicesChecked: true,
+      medicationPlanReviewed: true,
+      safetyMeasuresApplied: true,
+      questionsAnswered: true,
+    };
+
+    const { getByText } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '6', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getByText('Capturar firma')).toBeTruthy();
+    });
+    fireEvent.press(getByText('Capturar firma'));
+    fireEvent.press(getByText('Finalizar entrega'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Falta atestación',
+        'Para finalizar la entrega falta la atestación autenticada de la enfermera entrante.',
+      );
+    });
+
+    alertSpy.mockRestore();
+  });
+
+  it('rechaza doble atestación con el mismo actor', async () => {
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => 0);
+
+    formValues.status = 'final';
+    formValues.bedsideChecklist = {
+      patientIdentityConfirmed: true,
+      allergiesReviewed: true,
+      linesAndDevicesChecked: true,
+      medicationPlanReviewed: true,
+      safetyMeasuresApplied: true,
+      questionsAnswered: true,
+    };
+
+    const { getByText } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '7', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getByText('Capturar firma')).toBeTruthy();
+    });
+
+    fireEvent.press(getByText('Capturar firma'));
+    formValues.signatures = {
+      ...formValues.signatures,
+      incoming: {
+        userId: 'nurse-1',
+        fullName: 'Nurse One',
+        unitId: 'unit-1',
+        signedAt: '2025-01-05T10:35:00.000Z',
+        method: 'session',
+      },
+    };
+    fireEvent.press(getByText('Finalizar entrega'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Falta atestación',
+        'La doble atestación del relevo requiere profesionales distintos.',
+      );
+    });
+
+    alertSpy.mockRestore();
   });
 });

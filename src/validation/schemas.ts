@@ -789,7 +789,14 @@ export const zHandoverBase = zHandoverObject.superRefine((value, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["signatures", "outgoing"],
-      message: "La entrega final debe tener firma de enfermera saliente.",
+      message: "El cierre final requiere attestation de la enfermera saliente.",
+    });
+  }
+  if (value.status === "final" && !value.signatures?.incoming) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["signatures", "incoming"],
+      message: "El cierre final requiere attestation autenticada de la enfermera entrante.",
     });
   }
   if (
@@ -800,7 +807,19 @@ export const zHandoverBase = zHandoverObject.superRefine((value, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["signatures", "outgoing", "imageBase64"],
-      message: "La firma manuscrita es obligatoria para el cierre legal.",
+      message: "La evidencia de firma local de la enfermera saliente es obligatoria en el flujo actual de cierre.",
+    });
+  }
+  if (
+    value.status === "final" &&
+    value.signatures?.outgoing?.userId &&
+    value.signatures?.incoming?.userId &&
+    value.signatures.outgoing.userId === value.signatures.incoming.userId
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["signatures", "incoming", "userId"],
+      message: "La doble attestation del relevo requiere actores distintos.",
     });
   }
 });

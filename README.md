@@ -156,7 +156,7 @@ La decisión queda registrada en [`docs/adr/0001-backend-source-of-truth.md`](do
 
 | Método | Ruta | Descripción | Auth |
 |---|---|---|---|
-| POST | `/api/fhir/transaction` | Transacción Bundle FHIR con validación remota opcional, firma/verificación digital y creación de `AuditEvent`. | JWT + rol/scope clínico |
+| POST | `/api/fhir/transaction` | Transacción Bundle FHIR con validación remota opcional, attestation de cierre para relevos finales, firma/verificación digital de transporte y creación de `AuditEvent`. | JWT + rol/scope clínico |
 | POST | `/api/ai/transcribe` | Transcripción de audio (STT) con `multipart/form-data`. | JWT + `handover:write` |
 | POST | `/api/ai/summarize-sbar` | Resume notas clínicas en formato SBAR. | JWT + `handover:write` |
 | POST | `/api/ai/suggest-interventions` | Genera sugerencias de intervenciones de enfermería. | JWT + `handover:write` |
@@ -227,7 +227,8 @@ python manage.py transcribe_audio ./audio.m4a --language es
   export HANDOVER_PUBLIC_KEY_PATH=$PWD/public.pem
   ```
 - El backend (`/fhir/transaction`) firma los Bundles antes de reenviarlos al servidor FHIR cuando ambas rutas están definidas y `HANDOVER_SIGNATURE_DISABLED` no es `true`. Si el cliente ya envía `bundle.signature`, se verifica con la clave pública y se rechaza con `400` si la firma es inválida.
-- La firma se serializa en `bundle.signature` como recurso FHIR Signature (ECDSA + SHA-256) y se registra un hash único en la tabla `HandoverSignatureAudit` junto con `user_id`, `signed_at` y el `data` base64.
+- En cierres finales, HANDOVER exige checklist completo, attestation de enfermera saliente, attestation autenticada de enfermera entrante y actores distintos; el actor entrante debe coincidir con el usuario autenticado que envía la transacción.
+- La evidencia criptográfica de transporte se serializa en `bundle.signature` y se registra con hash único en `HandoverSignatureAudit`; esta evidencia no debe presentarse como firma profesional cualificada/eIDAS del relevo clínico.
 - En entornos de desarrollo se puede desactivar la firma criptográfica exportando `HANDOVER_SIGNATURE_DISABLED=true`. Cuando la librería `cryptography` no está disponible, el backend recurre a `openssl dgst` para firmar/verificar usando las claves PEM configuradas.
 
 ## Pruebas

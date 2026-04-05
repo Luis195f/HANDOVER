@@ -1,4 +1,4 @@
-import { HANDOVER_CORE_PROFILE_ID, type UnitProfileRuntimePack } from '../../../types/profile';
+import { HANDOVER_CORE_PROFILE_ID, type HandoverSectionKey, type UnitProfileRuntimePack } from '../../../types/profile';
 
 export const HANDOVER_CORE_RUNTIME_PACK: UnitProfileRuntimePack = {
   id: HANDOVER_CORE_PROFILE_ID,
@@ -34,4 +34,19 @@ export const HANDOVER_CORE_RUNTIME_PACK: UnitProfileRuntimePack = {
     'noc-outcomes': false,
   },
   visibleOutputs: ['Resumen de turno', 'Pendientes priorizados', 'Checklist de cabecera'],
+};
+
+export const HANDOVER_CORE_FALLBACK_ONLY_SECTIONS = [
+  'oxigenoterapia',
+  'escalas',
+  'examenes',
+] as const satisfies readonly HandoverSectionKey[];
+
+const HANDOVER_CORE_FALLBACK_ONLY_SECTION_SET = new Set<HandoverSectionKey>(HANDOVER_CORE_FALLBACK_ONLY_SECTIONS);
+
+export const HANDOVER_SHARED_CORE_RUNTIME_PACK: UnitProfileRuntimePack = {
+  ...HANDOVER_CORE_RUNTIME_PACK,
+  enabledSections: (HANDOVER_CORE_RUNTIME_PACK.enabledSections ?? []).filter(
+    (section): section is HandoverSectionKey => !HANDOVER_CORE_FALLBACK_ONLY_SECTION_SET.has(section as HandoverSectionKey),
+  ),
 };

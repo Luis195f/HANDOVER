@@ -36,6 +36,7 @@ type Props = {
   administrativeUnitId?: string;
   canSignOutgoing: boolean;
   buildOutgoingSignature: (payload: SignaturePadValue) => HandoverSignature | null;
+  onAttestationCaptured: (kind: 'outgoing' | 'incoming', signature: HandoverSignature) => void;
   outgoingSignatureError?: string;
   incomingSignatureError?: string;
   onSaveDraft: () => void;
@@ -61,6 +62,7 @@ export function HandoverClosureSections({
   administrativeUnitId,
   canSignOutgoing,
   buildOutgoingSignature,
+  onAttestationCaptured,
   outgoingSignatureError,
   incomingSignatureError,
   onSaveDraft,
@@ -103,6 +105,7 @@ export function HandoverClosureSections({
       }),
       { shouldDirty: true, shouldValidate: true },
     );
+    onAttestationCaptured('outgoing', nextOutgoing);
   };
 
   return (
@@ -139,7 +142,7 @@ export function HandoverClosureSections({
 
       <View ref={sectionRefs.firmas} onLayout={onLayout('firmas')} style={styles.section}>
         <CollapsibleSection
-          title="Firmas"
+          title={t('signatures.sectionTitle')}
           isCollapsed={collapsedSections.firmas}
           onToggle={() => onToggle('firmas')}
         >
@@ -163,7 +166,13 @@ export function HandoverClosureSections({
           <SignaturesSection
             value={normalizedSignaturesValue}
             onChange={(next) => {
-              form.setValue('signatures', normalizeSignatureInfo(next), { shouldDirty: true, shouldValidate: true });
+              const normalized = normalizeSignatureInfo(next);
+              const previousIncomingSignedAt = signaturesValue?.incoming?.signedAt;
+              const nextIncoming = normalized?.incoming;
+              form.setValue('signatures', normalized, { shouldDirty: true, shouldValidate: true });
+              if (nextIncoming && nextIncoming.signedAt !== previousIncomingSignedAt) {
+                onAttestationCaptured('incoming', nextIncoming);
+              }
             }}
             currentUser={currentUser}
             administrativeUnitId={administrativeUnitId}
