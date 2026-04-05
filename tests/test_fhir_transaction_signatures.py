@@ -86,7 +86,7 @@ def test_audit_event_with_dual_signatures():
     assert "pat-sign-001" not in str(audit_payload)
 
 
-def test_audit_event_normalizes_reference_attester_and_skips_extra_professional_attester():
+def test_audit_event_normalizes_reference_attester_and_keeps_legacy_clinical_pair_with_extra_professional_attesters():
     client = APIClient()
     authenticate_api_client(client, sub="auth0|nurse-in")
     bundle = {
@@ -108,14 +108,16 @@ def test_audit_event_normalizes_reference_attester_and_skips_extra_professional_
                     "attester": [
                         {
                             "mode": "professional",
-                            "party": {"identifier": {"value": "observer-1"}, "display": "Observer"},
+                            "party": {"identifier": {"value": "observer-1"}, "display": "Observer 1"},
                         },
                         {
                             "mode": "professional",
+                            "party": {"identifier": {"value": "observer-2"}, "display": "Observer 2"},
+                        },
+                        {
                             "party": {"identifier": {"value": "nurse-out"}, "display": "Outgoing nurse"},
                         },
                         {
-                            "mode": "professional",
                             "party": {
                                 "reference": "Practitioner/auth0%7Cnurse-in",
                                 "display": "Incoming nurse",
