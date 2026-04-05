@@ -38,7 +38,18 @@ import type {
 import { zHandover } from '../validation/schemas';
 import { getSpecialtyOverlayDefinition, getUnitProfileDefinition } from '../config/profiles';
 import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, FHIR_EXTENSION_URLS, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
-import { NOC_OUTCOME_CATEGORY } from './fhir-terminology';
+import {
+  FHIR_CORE_PROFILE_URLS,
+  FHIR_ENCOUNTER_CLASS_CODES,
+  HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES,
+  HANDOVER_COMPOSITION_SECTION_CODES,
+  HANDOVER_COMPOSITION_TYPE,
+  HANDOVER_IDENTIFIER_SYSTEMS,
+  HANDOVER_LOCAL_CODE_SYSTEMS,
+  HANDOVER_OBSERVATION_CODES,
+  HANDOVER_SIGNATURE_TYPE,
+  NOC_OUTCOME_CATEGORY,
+} from './fhir-terminology';
 import {
   buildNicProcedure,
   buildNocOutcomeObservation,
@@ -541,52 +552,17 @@ const TEST_LOINC = {
   O2_FLOW: LOINC.o2Flow,
 } as const;
 
-const PROFILE_VITAL_SIGNS = 'http://hl7.org/fhir/StructureDefinition/vitalsigns';
-const PROFILE_BLOOD_PRESSURE = 'http://hl7.org/fhir/StructureDefinition/bp';
-const PROFILE_OBSERVATION = 'http://hl7.org/fhir/StructureDefinition/Observation';
+const PROFILE_VITAL_SIGNS = FHIR_CORE_PROFILE_URLS.vitalSigns;
+const PROFILE_BLOOD_PRESSURE = FHIR_CORE_PROFILE_URLS.bloodPressure;
+const PROFILE_OBSERVATION = FHIR_CORE_PROFILE_URLS.observation;
 const DEFAULT_COMPOSITION_TYPE: CodeableConcept = {
   coding: [
-    {
-      system: 'urn:handover-pro:composition-type',
-      code: 'handover-shift',
-      display: 'Nursing shift handover',
-    },
+    HANDOVER_COMPOSITION_TYPE,
   ],
   text: 'Clinical handover',
 };
 
-const COMPOSITION_SECTION_CODES = {
-  administrative: {
-    system: 'urn:handover-pro:composition-section',
-    code: 'administrative',
-    display: 'Administrative',
-  },
-  vitals: {
-    system: TERMINOLOGY_SYSTEMS.LOINC,
-    code: LOINC.vitalSignsPanel,
-    display: 'Vital signs',
-  },
-  care: {
-    system: 'urn:handover-pro:composition-section',
-    code: 'care-treatments',
-    display: 'Care / Treatments',
-  },
-  sbar: {
-    system: 'urn:handover-pro:composition-section',
-    code: 'sbar',
-    display: 'SBAR',
-  },
-  bedsideChecklist: {
-    system: 'urn:handover-pro:composition-section',
-    code: 'bedside-checklist',
-    display: 'Bedside checklist',
-  },
-  notes: {
-    system: 'urn:handover-pro:composition-section',
-    code: 'notes-summary',
-    display: 'Notes / Summary',
-  },
-} as const;
+const COMPOSITION_SECTION_CODES = HANDOVER_COMPOSITION_SECTION_CODES;
 
 // ---------------------------------------------------------------------------
 // Terminology systems (local URNs)
@@ -610,29 +586,6 @@ const HANDOVER_BOOLEAN_SYSTEM: TerminologySystem =
   TERMINOLOGY_SYSTEMS.HANDOVER_BOOLEAN;
 
 // Códigos Observation (TIPADOS con TerminologyCode)
-const HANDOVER_OBSERVATION_CODES = {
-  administrative: {
-    system: TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES,
-    code: 'administrative',
-    display: 'Administrative overview',
-  },
-  sbar: {
-    system: TERMINOLOGY_SYSTEMS.HANDOVER_SBAR,
-    code: 'sbar',
-    display: 'SBAR summary',
-  },
-  bedsideChecklist: {
-    system: TERMINOLOGY_SYSTEMS.HANDOVER_BEDSIDE_CHECKLIST,
-    code: 'bedside-checklist',
-    display: 'Bedside checklist',
-  },
-  notes: {
-    system: TERMINOLOGY_SYSTEMS.HANDOVER_OBSERVATION_CODES,
-    code: 'handover-notes',
-    display: 'Handover notes',
-  },
-} as const satisfies Record<string, TerminologyCode>;
-
 // Helper para secciones del Composition
 const compositionSectionConcept = (code: string, display: string): CodeableConcept =>
   codeableConceptFromCode(
@@ -1189,14 +1142,8 @@ function mapClinicalContextObservation(
   const components: ObservationComponent[] = [
     {
       code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
-            code: 'core-profile',
-            display: 'Core profile',
-          },
-        ],
-        text: 'Core profile',
+        coding: [HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.coreProfile],
+        text: HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.coreProfile.display,
       },
       valueString: clinicalContext.coreProfile.label,
     },
@@ -1205,14 +1152,8 @@ function mapClinicalContextObservation(
   if (clinicalContext.unitProfile) {
     components.push({
       code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
-            code: 'unit-profile',
-            display: 'Unit profile',
-          },
-        ],
-        text: 'Unit profile',
+        coding: [HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.unitProfile],
+        text: HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.unitProfile.display,
       },
       valueString: `${clinicalContext.unitProfile.label} (${clinicalContext.unitProfile.id})`,
     });
@@ -1221,14 +1162,8 @@ function mapClinicalContextObservation(
   clinicalContext.specialtyOverlays.forEach((overlay) => {
     components.push({
       code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
-            code: 'specialty-overlay',
-            display: 'Specialty overlay',
-          },
-        ],
-        text: 'Specialty overlay',
+        coding: [HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.specialtyOverlay],
+        text: HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.specialtyOverlay.display,
       },
       valueString: `${overlay.label} (${overlay.id})`,
     });
@@ -1237,14 +1172,8 @@ function mapClinicalContextObservation(
   clinicalContext.prioritySignals.forEach((signal) => {
     components.push({
       code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
-            code: 'priority-signal',
-            display: 'Contextual priority signal',
-          },
-        ],
-        text: 'Contextual priority signal',
+        coding: [HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.prioritySignal],
+        text: HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.prioritySignal.display,
       },
       valueString: signal.label,
     });
@@ -1253,14 +1182,8 @@ function mapClinicalContextObservation(
   if (clinicalContext.pendingCriticalTasks.length > 0) {
     components.push({
       code: {
-        coding: [
-          {
-            system: TERMINOLOGY_SYSTEMS.HANDOVER_COMPONENT,
-            code: 'pending-critical-task-count',
-            display: 'Pending critical task count',
-          },
-        ],
-        text: 'Pending critical task count',
+        coding: [HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.pendingCriticalTaskCount],
+        text: HANDOVER_CLINICAL_CONTEXT_COMPONENT_CODES.pendingCriticalTaskCount.display,
       },
       valueInteger: clinicalContext.pendingCriticalTasks.length,
     });
@@ -1405,7 +1328,7 @@ function patientReference(patientId: string): Reference {
   return {
     reference: `Patient/${normalized}`,
     type: 'Patient',
-    identifier: { system: 'urn:handover-pro:patient-id', value: normalized },
+    identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.patient, value: normalized },
   };
 }
 
@@ -1415,7 +1338,7 @@ function encounterReference(encounterId?: string): Reference | undefined {
   return {
     reference: `Encounter/${normalized}`,
     type: 'Encounter',
-    identifier: { system: 'urn:handover-pro:encounter-id', value: normalized },
+    identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.encounter, value: normalized },
   };
 }
 
@@ -1462,7 +1385,7 @@ function ensureAuthorReference(values: { author?: AuthorInput }): Reference {
     reference: `Practitioner/${id}`,
     type: 'Practitioner',
     display: author?.display ?? 'Handover Practitioner',
-    identifier: { system: 'urn:handover-pro:practitioner-id', value: id },
+    identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.practitioner, value: id },
   };
 }
 
@@ -1521,7 +1444,7 @@ function attestersFromSignatures(signatures?: HandoverSignatures): AttesterInput
       mode: 'professional',
       time: signature.signedAt,
       partyDisplay: signature.fullName,
-      partyIdentifier: { system: 'urn:handover:user-id', value: signature.userId },
+      partyIdentifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.user, value: signature.userId },
     };
   };
 
@@ -1537,7 +1460,7 @@ function buildSignatureResource(signature?: HandoverSignature | null): Signature
   // Usamos un reference estable y "local" (no depende de que exista un Practitioner real en servidor).
   const who: Reference = {
     reference: `Practitioner/${encodeURIComponent(signature.userId)}`,
-    identifier: { system: 'urn:handover:user-id', value: signature.userId },
+    identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.user, value: signature.userId },
     display: signature.fullName,
     type: 'Practitioner',
   };
@@ -1545,14 +1468,14 @@ function buildSignatureResource(signature?: HandoverSignature | null): Signature
   const onBehalfOf: Reference | undefined = signature.unitId
     ? {
         reference: `Organization/${encodeURIComponent(signature.unitId)}`,
-        identifier: { system: 'urn:handover:unit-id', value: signature.unitId },
+        identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.unit, value: signature.unitId },
         display: signature.unitId,
         type: 'Organization',
       }
     : undefined;
 
   return {
-    type: [{ system: 'urn:handover:signature-type', code: 'signature', display: 'Signature' }],
+    type: [HANDOVER_SIGNATURE_TYPE],
     when: signature.signedAt,
     who,
     onBehalfOf,
@@ -2079,7 +2002,7 @@ export function buildHandoverBundle(
   const patient: Patient = {
     resourceType: 'Patient',
     id: normalizedPatientId,
-    identifier: [{ system: 'urn:handover-pro:patient-id', value: normalizedPatientId }],
+    identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.patient, value: normalizedPatientId }],
   };
 
   const { resource: patientWithId, fullUrl: patientFullUrl } = assignStableIds(
@@ -2089,14 +2012,14 @@ export function buildHandoverBundle(
   const patientSubjectReference: Reference = {
     reference: `Patient/${patientWithId.id ?? normalizedPatientId}`,
     type: 'Patient',
-    identifier: { system: 'urn:handover-pro:patient-id', value: normalizedPatientId },
+    identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.patient, value: normalizedPatientId },
   };
   const practitionerId =
     resolveReferenceId(values.author?.reference, 'Practitioner') ?? values.author?.id ?? 'handover-app';
   const practitioner: Practitioner = {
     resourceType: 'Practitioner',
     id: practitionerId,
-    identifier: [{ system: 'urn:handover-pro:practitioner-id', value: practitionerId }],
+    identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.practitioner, value: practitionerId }],
     name: [{ text: values.author?.display ?? 'Handover Practitioner' }],
   };
   const encounterId = normalizeId(values.encounterId, fhirId('enc-', normalizedPatientId));
@@ -2112,11 +2035,7 @@ export function buildHandoverBundle(
         resourceType: 'Encounter',
         id: encounterId,
         status: 'finished',
-        class: {
-          system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
-          code: 'IMP',
-          display: 'inpatient encounter',
-        },
+        class: FHIR_ENCOUNTER_CLASS_CODES.inpatient,
         subject: patientSubjectReference,
         period: encounterPeriod,
       }
@@ -2128,7 +2047,7 @@ export function buildHandoverBundle(
       ? {
           reference: `Encounter/${encounterId}`,
           type: 'Encounter',
-          identifier: { system: 'urn:handover-pro:encounter-id', value: encounterId },
+          identifier: { system: HANDOVER_IDENTIFIER_SYSTEMS.encounter, value: encounterId },
         }
       : undefined,
     effectiveDateTime: nowIso,
@@ -2438,7 +2357,7 @@ export function buildHandoverBundle(
       applyProfiles({
         resourceType: 'Practitioner',
         id,
-        identifier: [{ system: 'urn:handover-pro:practitioner-id', value: id }],
+        identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.practitioner, value: id }],
         name: [{ text: id }],
       }),
       id,
@@ -3097,7 +3016,7 @@ function mapDiagnoses(
       code: {
         coding: [
           {
-            system: item.system === 'OTHER' ? 'urn:handover-pro:diagnosis' : item.system,
+            system: item.system === 'OTHER' ? HANDOVER_LOCAL_CODE_SYSTEMS.diagnosis : item.system,
             code: item.code,
             display: item.display,
           },
@@ -3279,7 +3198,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const patient: Patient = {
     resourceType: 'Patient',
     id: data.patientId,
-    identifier: [{ system: 'urn:handover-pro:patient-id', value: data.patientId }],
+    identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.patient, value: data.patientId }],
   };
 
   const patientEntry = createTransactionEntry(applyProfiles(patient), uuidv4());
@@ -3289,7 +3208,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
   const practitioner: Practitioner = {
     resourceType: 'Practitioner',
     id: practitionerId,
-    identifier: [{ system: 'urn:handover-pro:practitioner-id', value: practitionerId }],
+    identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.practitioner, value: practitionerId }],
     name: [{ text: (data as { authorName?: string }).authorName ?? 'Handover Practitioner' }],
   };
   const encounter: Encounter | undefined = encounterId
@@ -3297,11 +3216,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         resourceType: 'Encounter',
         id: encounterId,
         status: 'finished',
-        class: {
-          system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
-          code: 'IMP',
-          display: 'inpatient encounter',
-        },
+        class: FHIR_ENCOUNTER_CLASS_CODES.inpatient,
         subject: patientReference(data.patientId),
       }
     : undefined;
@@ -3318,7 +3233,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
       applyProfiles({
         resourceType: 'Practitioner',
         id,
-        identifier: [{ system: 'urn:handover-pro:practitioner-id', value: id }],
+        identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.practitioner, value: id }],
         name: [{ text: id }],
       }),
       id,

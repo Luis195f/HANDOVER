@@ -110,6 +110,8 @@ describe('postBundle', () => {
     expect(result.status).toBe(400);
     expect(result.issue).toEqual(outcome.issue);
     expect(result.json).toEqual(outcome);
+    expect(result.outcome).toEqual(outcome);
+    expect(result.message).toContain('Bad data');
   });
 
   it('returns json undefined when error body cannot be parsed', async () => {
