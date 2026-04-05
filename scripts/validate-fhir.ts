@@ -43,8 +43,11 @@ function printSuccess(
   summary: {
     entries: number;
     observations: number;
-    medications: number;
+    conditions: number;
+    medicationStatements: number;
+    procedures: number;
     deviceUses: number;
+    devices: number;
     documents: number;
     compositions: number;
   },
@@ -52,8 +55,11 @@ function printSuccess(
   const stats = [
     `${summary.entries} entries`,
     `${summary.observations} observations`,
-    `${summary.medications} medication statements`,
+    `${summary.conditions} conditions`,
+    `${summary.medicationStatements} medication statements`,
+    `${summary.procedures} procedures`,
     `${summary.deviceUses} device use statements`,
+    `${summary.devices} devices`,
     `${summary.documents} document references`,
     `${summary.compositions} compositions`,
   ].join(', ');
@@ -148,14 +154,27 @@ async function validateSource(source: string) {
     (acc, entry) => {
       const rt = entry?.resource?.resourceType;
       if (rt === 'Observation') acc.observations += 1;
-      if (rt === 'MedicationStatement') acc.medications += 1;
-      if (rt === 'DeviceUseStatement' || rt === 'Procedure') acc.deviceUses += 1;
+      if (rt === 'Condition') acc.conditions += 1;
+      if (rt === 'MedicationStatement') acc.medicationStatements += 1;
+      if (rt === 'Procedure') acc.procedures += 1;
+      if (rt === 'DeviceUseStatement') acc.deviceUses += 1;
+      if (rt === 'Device') acc.devices += 1;
       if (rt === 'DocumentReference') acc.documents += 1;
       if (rt === 'Composition') acc.compositions += 1;
       acc.entries += 1;
       return acc;
     },
-    { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
+    {
+      entries: 0,
+      observations: 0,
+      conditions: 0,
+      medicationStatements: 0,
+      procedures: 0,
+      deviceUses: 0,
+      devices: 0,
+      documents: 0,
+      compositions: 0,
+    },
   );
 
   printSuccess(label, counts);
@@ -211,14 +230,27 @@ async function main() {
           (acc, entry) => {
             const rt = entry?.resource?.resourceType;
             if (rt === 'Observation') acc.observations += 1;
-            if (rt === 'MedicationStatement') acc.medications += 1;
-            if (rt === 'DeviceUseStatement' || rt === 'Procedure') acc.deviceUses += 1;
+            if (rt === 'Condition') acc.conditions += 1;
+            if (rt === 'MedicationStatement') acc.medicationStatements += 1;
+            if (rt === 'Procedure') acc.procedures += 1;
+            if (rt === 'DeviceUseStatement') acc.deviceUses += 1;
+            if (rt === 'Device') acc.devices += 1;
             if (rt === 'DocumentReference') acc.documents += 1;
             if (rt === 'Composition') acc.compositions += 1;
             acc.entries += 1;
             return acc;
           },
-          { entries: 0, observations: 0, medications: 0, deviceUses: 0, documents: 0, compositions: 0 },
+          {
+            entries: 0,
+            observations: 0,
+            conditions: 0,
+            medicationStatements: 0,
+            procedures: 0,
+            deviceUses: 0,
+            devices: 0,
+            documents: 0,
+            compositions: 0,
+          },
         );
         printSuccess('stdin', counts);
         return;

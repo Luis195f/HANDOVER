@@ -942,13 +942,12 @@ def _validate_remotely(
             )
         return None
 
-    try:
-        data = resp.json()
-    except Exception:
-        logger.warning("Respuesta de validación no es JSON para %s", resource_type)
-        return None
-
-    if not isinstance(data, dict) or data.get("resourceType") != "OperationOutcome":
+    data = _extract_operation_outcome_payload(resp)
+    if data is None:
+        try:
+            resp.json()
+        except Exception:
+            logger.warning("Respuesta de validación no es JSON para %s", resource_type)
         return None
 
     issues = data.get("issue") or []
@@ -963,6 +962,25 @@ def _validate_remotely(
         return Response(data, status=422)
 
     return None
+
+
+def _extract_operation_outcome_payload(response: Any) -> Optional[dict[str, Any]]:
+    try:
+        data = response.json()
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    issues = data.get("issue")
+    if not isinstance(issues, list):
+        return None
+
+    if data.get("resourceType") == "OperationOutcome":
+        return data
+
+    return {"resourceType": "OperationOutcome", "issue": issues}
 
 
 def _post_to_fhir(request: HttpRequest, resource: Dict[str, Any], resource_type: str) -> Response:
@@ -1999,6 +2017,9 @@ class BundleView(AuthenticatedAPIView):
                 resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
                 meta=meta,
             )
+            outcome_payload = _extract_operation_outcome_payload(resp)
+            if outcome_payload is not None:
+                return Response(outcome_payload, status=resp.status_code)
             return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
 
         try:

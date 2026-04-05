@@ -1,6 +1,7 @@
 import type { HandoverStructuredDiagnosis, NocOutcomeItem, TreatmentItem } from '@/src/types/handover';
 
 import {
+  HANDOVER_IDENTIFIER_SYSTEMS,
   MINIMUM_VIABLE_NNN_MAPPING,
   NOC_SCORE_COMPONENT_CODES,
 } from '@/src/lib/fhir-terminology';
@@ -153,7 +154,7 @@ export function buildNicProcedure(
 
   const procedure: Procedure = {
     resourceType: 'Procedure',
-    identifier: [{ system: 'urn:handover-pro:treatment-item', value: treatment.id }],
+    identifier: [{ system: HANDOVER_IDENTIFIER_SYSTEMS.treatmentItem, value: treatment.id }],
     status: treatment.done ? 'completed' : 'in-progress',
     code: {
       coding: [

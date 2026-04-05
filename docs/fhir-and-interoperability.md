@@ -36,6 +36,7 @@ Tests principales:
 - `src/lib/__tests__/fhir-map.nnn.spec.ts`
 - `src/lib/__tests__/fhir-map.medications.spec.ts`
 - `tests/fhir-map.spec.ts`
+- `tests/fhir-representative-bundle.spec.ts`
 - `backend/api/tests/test_handover_etl_read.py`
 
 ## 3) Mapping minimo viable NNN
@@ -157,11 +158,13 @@ Lo que no hace el repo:
   - `HANDOVER_FHIR_VALIDATION_MODE = off | remote`
   - cierres finales requieren firma clínica saliente en el Bundle
   - `pilot/production` requieren firma criptográfica fuerte backend-managed (`HANDOVER_PRIVATE_KEY_PATH` + `HANDOVER_PUBLIC_KEY_PATH`) y no aceptan `HANDOVER_SIGNATURE_DISABLED=true`
+  - `BundleView` preserva `OperationOutcome.issue[]` del FHIR server cuando la transaccion es rechazada, para que frontend/sync muestren errores estructurados y no solo strings genéricos
 - reenvio a FHIR con `Prefer: return=representation`
 
 Notas de alcance:
 
 - la validacion FHIR remota existe;
+- `pnpm -w validate:fhir` valida tambien el fixture `tests/fixtures/fhir/representative-transaction-bundle.json` para cubrir diagnostico, medicacion, tratamiento, dispositivo, adjunto y escalas en un mismo Bundle;
 - la validacion terminologica oficial para NNN no esta cerrada en este repo;
 - el ETL lee el Bundle persistido, no un recurso writeback nuevo de ICEA.
 

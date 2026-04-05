@@ -106,6 +106,7 @@ const observationSchemaBase = z
     effectiveDateTime: isoDateTime,
     issued: isoDateTime.optional(),
     valueQuantity: quantitySchema.optional(),
+    valueInteger: z.number().int().optional(),
     valueCodeableConcept: codeableConceptSchema.optional(),
     valueString: z.string().optional(),
     component: z
@@ -114,6 +115,7 @@ const observationSchemaBase = z
           .object({
             code: codeableConceptSchema,
             valueQuantity: quantitySchema.optional(),
+            valueInteger: z.number().int().optional(),
             valueCodeableConcept: codeableConceptSchema.optional(),
             valueString: z.string().optional(),
           })
@@ -127,6 +129,7 @@ const observationSchemaBase = z
 const observationSchema = observationSchemaBase.superRefine((value, ctx) => {
     const hasValue =
       value.valueQuantity !== undefined ||
+      value.valueInteger !== undefined ||
       value.valueCodeableConcept !== undefined ||
       value.valueString !== undefined ||
       (value.component !== undefined && value.component.length > 0) ||

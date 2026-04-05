@@ -60,6 +60,18 @@ describe('validateResource', () => {
     expect(result).toEqual({ isValid: true, errors: [] });
   });
 
+  it('accepts Observation resources that use valueInteger for supported scales', () => {
+    const integerObservation = {
+      ...baseObservation,
+      valueQuantity: undefined,
+      valueInteger: 7,
+    };
+
+    const result: ValidationResult = validateResourceWithZod(integerObservation);
+
+    expect(result).toEqual({ isValid: true, errors: [] });
+  });
+
   it('surfaces readable errors for an Observation missing required values', () => {
     const invalid = { ...baseObservation, valueQuantity: undefined };
 
@@ -171,6 +183,28 @@ describe('validateBundle', () => {
       type: 'transaction' as const,
       entry: [
         { fullUrl: 'urn:uuid:1', resource: validObservation },
+        { fullUrl: 'urn:uuid:2', resource: validDeviceUseStatement },
+        { fullUrl: 'urn:uuid:3', resource: validComposition },
+      ],
+    };
+
+    const result = validateBundleWithZod(bundle);
+
+    expect(result).toEqual({ isValid: true, errors: [] });
+  });
+
+  it('passes validation for bundles with scale observations that use valueInteger', () => {
+    const scaleObservation = {
+      ...validObservation,
+      valueQuantity: undefined,
+      valueInteger: 16,
+    };
+
+    const bundle = {
+      resourceType: 'Bundle' as const,
+      type: 'transaction' as const,
+      entry: [
+        { fullUrl: 'urn:uuid:1', resource: scaleObservation },
         { fullUrl: 'urn:uuid:2', resource: validDeviceUseStatement },
         { fullUrl: 'urn:uuid:3', resource: validComposition },
       ],

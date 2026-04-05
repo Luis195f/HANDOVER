@@ -39,3 +39,45 @@ def test_remote_validation_blocks_on_error():
     assert response.status_code == 422
     assert response.json()["resourceType"] == "OperationOutcome"
     assert mock_validate.call_args.args[0].endswith("/Bundle/$validate")
+
+
+def test_transaction_passthrough_preserves_operation_outcome():
+    client = APIClient()
+    authenticate_api_client(client)
+
+    tx_response = Mock()
+    tx_response.status_code = 422
+    tx_response.json.return_value = {
+        "resourceType": "OperationOutcome",
+        "issue": [
+            {
+                "severity": "error",
+                "code": "invalid",
+                "diagnostics": "Bundle.entry[4].resource.subject.reference does not resolve",
+                "expression": ["Bundle.entry[4].resource.subject.reference"],
+            }
+        ],
+    }
+    tx_response.text = '{"resourceType":"OperationOutcome"}'
+
+    with (
+        patch("backend.api.views.HANDOVER_FHIR_VALIDATION_MODE", "off"),
+        patch("backend.api.views._post_transaction_to_fhir", autospec=True, return_value=tx_response),
+        patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True) as mock_side_effects,
+        patch("backend.api.views._create_audit_event_for_transaction", autospec=True) as mock_audit,
+    ):
+        response = client.post(
+            "/api/fhir/transaction",
+            data={
+                "resourceType": "Bundle",
+                "type": "transaction",
+                "entry": [{"resource": {"resourceType": "Patient", "id": "pat-1"}}],
+            },
+            format="json",
+        )
+
+    assert response.status_code == 422
+    assert response.json()["resourceType"] == "OperationOutcome"
+    assert response.json()["issue"][0]["expression"] == ["Bundle.entry[4].resource.subject.reference"]
+    mock_side_effects.assert_not_called()
+    mock_audit.assert_not_called()
