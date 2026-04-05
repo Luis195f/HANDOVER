@@ -142,6 +142,13 @@ const baseValidData: HandoverFormData = {
       imageBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
       method: "session",
     },
+    incoming: {
+      userId: "nurse-in",
+      fullName: "Enfermera Entrante",
+      unitId: "UCI-1",
+      signedAt: "2024-01-01T16:07:00.000Z",
+      method: "session",
+    },
   },
   audioUri: "https://example.com/audio.m4a",
 };
@@ -204,6 +211,38 @@ describe("zHandover", () => {
     const messages = result.success ? [] : result.error.issues.map((i) => i.message);
     expect(messages).toContain("Frecuencia cardiaca fuera de rango");
     expect(messages).toContain("SpO₂ fuera de rango");
+  });
+
+  it("rechaza cierre final sin attestation entrante", () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      signatures: {
+        outgoing: baseValidData.signatures!.outgoing,
+      },
+    };
+
+    const result = zHandover.safeParse(invalid);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+    expect(messages).toContain("El cierre final requiere attestation autenticada de la enfermera entrante.");
+  });
+
+  it("rechaza cierre final cuando saliente y entrante son el mismo actor", () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      signatures: {
+        outgoing: baseValidData.signatures!.outgoing,
+        incoming: {
+          ...baseValidData.signatures!.incoming!,
+          userId: baseValidData.signatures!.outgoing!.userId,
+        },
+      },
+    };
+
+    const result = zHandover.safeParse(invalid);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+    expect(messages).toContain("La doble attestation del relevo requiere actores distintos.");
   });
 
   it("acepta diagnósticos SNOMED válidos", () => {

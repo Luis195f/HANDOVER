@@ -4,7 +4,7 @@
 > - Estado: `implemented`.
 > - Última revisión: 2026-03-28.
 > - Fuente de verdad / evidencia base: `backend/security/*`, `backend/api/views.py`, `backend/api/urls.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
-> - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, firma y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend.
+> - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, attestation clínica, firma criptográfica de transporte y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend.
 
 ## Modelo de autenticación/autorización
 - Autenticación JWT OIDC mediante `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE`.
@@ -21,7 +21,7 @@
 - Requiere `Authorization: Bearer <access-token>` válido.
 - Requiere rol clínico `nurse`, `supervisor` o `admin`.
 - Requiere ambos scopes `fhir:transaction` y `handover:write`.
-- Responde `400` cuando un cierre final no trae firma clínica requerida o la firma criptográfica es inválida, `401` sin credenciales válidas, `403` con rol/scope insuficiente y `422` cuando el Bundle es inválido.
+- Responde `400` cuando un cierre final no trae la attestation clínica requerida o la firma criptográfica de transporte es inválida, `401` sin credenciales válidas, `403` con rol/scope insuficiente y `422` cuando el Bundle es inválido.
 - No existe bypass silencioso por `DEBUG` ni por ausencia de configuración Auth0 para este endpoint.
 
 ## Endpoints AI/STT/uploads protegidos
@@ -53,7 +53,7 @@
 - En `POST /api/ai/refine-sbar`, `handover` también debe ser un objeto JSON si viene explícitamente; otros tipos responden `400` con `code=invalid_refine_handover` y `detail=handover must be an object.`.
 
 ## Identidad clínica y anti-spoofing
-- La identidad de usuario usada para firma/auditoría se deriva del claim `sub` del JWT validado.
+- La identidad de usuario usada para attestation clínica y auditoría se deriva del claim `sub` del JWT validado.
 - No se confía en cabeceras cliente para identidad de usuario final.
 - Política explícita: tratar `X-User-Id` (u otras cabeceras equivalentes) como no autoritativas para evitar spoofing.
 
@@ -66,11 +66,11 @@
 - `HANDOVER_DEPLOYMENT_MODE` delimita el contrato operativo:
   - `development`, `demo`, `test`: pueden ejecutar flujos inseguros solo con delimitación explícita.
   - `pilot`, `production`: exigen defaults cerrados y no aceptan `HANDOVER_SIGNATURE_DISABLED=true`.
-- En cierres finales, la firma clínica saliente es obligatoria en el Bundle antes de reenviar la transacción.
+- En cierres finales, el backend exige checklist completo, attestation saliente con evidencia local, attestation autenticada entrante y actores distintos antes de reenviar la transacción.
 - La firma criptográfica fuerte del backend requiere `HANDOVER_PRIVATE_KEY_PATH` y `HANDOVER_PUBLIC_KEY_PATH` en `pilot/production`.
 - Si llega una firma criptográfica de transporte inválida, la API responde `400` y no reenvía el Bundle.
 - Si la firma fuerte del backend no está disponible en un entorno serio, el despliegue debe fallar en startup; no existe fallback silencioso a unsigned.
-- La evidencia criptográfica se registra en auditoría sin sobreescribir la firma clínica del handover dentro del payload clínico.
+- La evidencia criptográfica se registra en auditoría sin sobreescribir la attestation clínica del handover dentro del payload clínico y sin afirmar firma cualificada/eIDAS del relevo.
 
 ## PHI y Seguridad (política formal)
 ### Prohibiciones operativas
@@ -90,7 +90,7 @@
 - En uploads/AI no se debe reenviar texto crudo de errores upstream que pueda contener PHI; responder con detalle seguro y código de error estable.
 
 ### Enfoque regulatorio (MDR/AEMPS-ready)
-- Aplicar defense-in-depth (authn + authz + validación + auditoría + firma).
+- Aplicar defense-in-depth (authn + authz + validación + auditoría + attestation clínica + firma criptográfica de transporte).
 - Mantener trazabilidad de cambios, evidencia de test y registro auditable de eventos críticos.
 - Diseñar documentación y controles para facilitar expediente técnico y actividades de vigilancia post-mercado.
 

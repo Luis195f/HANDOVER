@@ -617,8 +617,7 @@ def _create_audit_event_for_transaction(
 ) -> None:
     patient_id = None
     composition = None
-    outgoing_attester = None
-    incoming_attester = None
+    outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle)
     try:
         for e in (bundle.get("entry") or []):
             r = (e or {}).get("resource") or {}
@@ -626,11 +625,6 @@ def _create_audit_event_for_transaction(
                 patient_id = r.get("id")
             if r.get("resourceType") == "Composition" and not composition:
                 composition = r
-                attesters = r.get("attester") or []
-                if attesters:
-                    outgoing_attester = attesters[0]
-                    if len(attesters) > 1:
-                        incoming_attester = attesters[1]
     except Exception:
         pass
 
@@ -730,6 +724,60 @@ def _bundle_has_clinician_signature(bundle: Dict[str, Any]) -> bool:
     return any(isinstance(item.get("data"), str) and item.get("data").strip() for item in _bundle_signature_list(bundle))
 
 
+def _extract_final_handover_attesters(bundle: Dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    for entry in bundle.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if not isinstance(resource, dict):
+            continue
+        if resource.get("resourceType") != "Composition":
+            continue
+        if str(resource.get("status") or "").strip().lower() != "final":
+            continue
+        attesters = resource.get("attester") or []
+        if not isinstance(attesters, list):
+            return None, None
+        outgoing = attesters[0] if len(attesters) > 0 and isinstance(attesters[0], dict) else None
+        incoming = attesters[1] if len(attesters) > 1 and isinstance(attesters[1], dict) else None
+        return outgoing, incoming
+    return None, None
+
+
+def _attester_actor_id(attester: Dict[str, Any] | None) -> str | None:
+    if not isinstance(attester, dict):
+        return None
+    party = attester.get("party") or {}
+    if not isinstance(party, dict):
+        return None
+    identifier = party.get("identifier") or {}
+    if isinstance(identifier, dict):
+        value = identifier.get("value")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    reference = party.get("reference")
+    if isinstance(reference, str) and reference.strip():
+        return reference.strip()
+    return None
+
+
+def _attester_record(attester: Dict[str, Any] | None) -> Dict[str, str] | None:
+    actor_id = _attester_actor_id(attester)
+    if not actor_id:
+        return None
+    party = attester.get("party") or {}
+    party_identifier = party.get("identifier") if isinstance(party, dict) else {}
+    system = ""
+    if isinstance(party_identifier, dict):
+        system = str(party_identifier.get("system") or "")
+    return {
+        "actorId": actor_id,
+        "display": str((party or {}).get("display") or actor_id),
+        "time": str(attester.get("time") or ""),
+        "identifierSystem": system,
+    }
+
+
 def _bundle_has_transport_signature(bundle: Dict[str, Any]) -> bool:
     return isinstance(bundle.get("signature"), dict)
 
@@ -754,8 +802,21 @@ def _bundle_is_final_handover(bundle: Dict[str, Any]) -> bool:
 
 
 def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Optional[Response]:
-    if _bundle_is_final_handover(bundle) and not _bundle_has_clinician_signature(bundle):
-        return Response({"errors": ["Final handover bundle requires an outgoing clinical signature."]}, status=400)
+    if _bundle_is_final_handover(bundle):
+        outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle)
+        outgoing_actor = _attester_actor_id(outgoing_attester)
+        incoming_actor = _attester_actor_id(incoming_attester)
+
+        if not _bundle_has_clinician_signature(bundle):
+            return Response({"errors": ["Final handover bundle requires outgoing attestation evidence."]}, status=400)
+        if not outgoing_actor:
+            return Response({"errors": ["Final handover bundle requires an outgoing nurse attestation."]}, status=400)
+        if not incoming_actor:
+            return Response({"errors": ["Final handover bundle requires an incoming nurse attestation."]}, status=400)
+        if outgoing_actor == incoming_actor:
+            return Response({"errors": ["Final handover bundle requires distinct outgoing and incoming actors."]}, status=400)
+        if user_id and incoming_actor != user_id:
+            return Response({"errors": ["Authenticated user must match the incoming handover attestation."]}, status=403)
 
     if _bundle_has_transport_signature(bundle):
         try:
@@ -800,6 +861,44 @@ def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Opt
             signed_at=_parse_signature_when(signature.fhir_signature.get("when")),
         )
     return None
+
+
+def _emit_handover_closure_attestation_event(
+    request: HttpRequest,
+    *,
+    bundle: Dict[str, Any],
+    user_id: str,
+    unit_id: str | None,
+) -> None:
+    if not _bundle_is_final_handover(bundle):
+        return
+
+    outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle)
+    outgoing_record = _attester_record(outgoing_attester)
+    incoming_record = _attester_record(incoming_attester)
+    if not outgoing_record or not incoming_record:
+        return
+
+    emit_audit_event(
+        event_type="handover_closure_attestation",
+        action="create",
+        status="success",
+        http_status=201,
+        request=request,
+        user_sub=user_id,
+        resource_type="Bundle",
+        resource_id=_get_bundle_identifier_value(bundle),
+        meta={
+            "closureAttestation": {
+                "outgoing": outgoing_record,
+                "incoming": incoming_record,
+                "actorsDistinct": outgoing_record["actorId"] != incoming_record["actorId"],
+                "unitId": str(unit_id or ""),
+                "transportSignaturePresent": _bundle_has_transport_signature(bundle),
+                "clinicalSignaturePresent": _bundle_has_clinician_signature(bundle),
+            }
+        },
+    )
 
 def _ensure_secure_url(url: str) -> str:
     if url.startswith("https://"):
@@ -2048,6 +2147,12 @@ class BundleView(AuthenticatedAPIView):
             user_id=user_id,
             unit_id=unit_id,
         )
+        _emit_handover_closure_attestation_event(
+            request,
+            bundle=bundle,
+            user_id=user_id,
+            unit_id=unit_id,
+        )
         persist_successful_transaction_icea_side_effects(
             bundle=bundle,
             request=request,
@@ -2175,6 +2280,20 @@ class AuditLogView(AuthenticatedAPIView):
         if not serializer.is_valid():
             return Response({"errors": ["Invalid audit payload."]}, status=400)
         validated = serializer.validated_data
+        authenticated_user_sub = _get_authenticated_user_sub(request)
+        payload_user_id = str(validated["userId"])
+        if authenticated_user_sub and payload_user_id != authenticated_user_sub:
+            emit_audit_event(
+                event_type="audit_access",
+                action="create",
+                status="fail",
+                http_status=403,
+                request=request,
+                resource_type="ClientAuditEvent",
+                resource_id="",
+                meta={"errorCode": "ACTOR_MISMATCH"},
+            )
+            return Response({"errors": ["Authenticated audit actor mismatch."]}, status=403)
 
         raw_at = validated.get("at")
         occurred_at = parse_datetime(raw_at) if isinstance(raw_at, str) else None
@@ -2187,7 +2306,7 @@ class AuditLogView(AuthenticatedAPIView):
 
         event = ClientAuditEvent.objects.create(
             type=str(validated["type"]),
-            user_id=str(validated["userId"]),
+            user_id=payload_user_id,
             patient_id=build_audit_patient_key(validated.get("patientKey")),
             unit_id=str(validated.get("unitId") or ""),
             shift_code=str(validated.get("shiftCode") or ""),

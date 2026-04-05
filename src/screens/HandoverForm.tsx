@@ -385,7 +385,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
   const auditedPatientsRef = useRef<Set<string>>(new Set());
-  const auditedSignedRef = useRef<Set<string>>(new Set());
+  const auditedAttestationsRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<ScrollView>(null);
   const { colors, fontSizes, spacing, radius } = useThemeTokens();
   const { width } = useWindowDimensions();
@@ -679,7 +679,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       signatureUser.userId ??
       t('signatures.unknownUser');
     const role = (signatureUser.roles?.[0] as HandoverSignature['role']) ??
-      (signatureUser.role as HandoverSignature['role']);
+      (signatureUser.role as HandoverSignature['role']) ??
+      'nurse';
     const userId = signatureUser.id ?? signatureUser.userId ?? signatureUser.displayName ?? 'unknown-user';
     const contentToSign = JSON.stringify(form.getValues());
     const signatureHash = hashHex(`${contentToSign}${payload.signedAt}${payload.imageBase64}`);
@@ -695,6 +696,41 @@ export default function HandoverForm({ navigation, route }: Props) {
       method: 'session',
     };
   };
+
+  const recordClosureAttestation = useCallback(
+    async (kind: 'outgoing' | 'incoming', signature: HandoverSignature) => {
+      const patientId = form.getValues('patientId');
+      if (!patientId) return;
+
+      const auditKey = `${patientId}|${kind}|${signature.userId}|${signature.signedAt}`;
+      if (auditedAttestationsRef.current.has(auditKey)) {
+        return;
+      }
+
+      const shiftCode = deriveShiftCode(form.getValues('administrativeData')?.shiftStart);
+      const auditEvent = makeAuditEvent(
+        {
+          type: 'handover_signed',
+          patientId,
+          userId: signature.userId,
+          unitId: signature.unitId,
+          shiftCode,
+          meta: {
+            attestationRole: kind,
+            actorRole: signature.role ?? 'nurse',
+            method: signature.method ?? 'session',
+            capture: 'closure',
+          },
+        },
+        () => new Date(signature.signedAt),
+      );
+      const delivered = await queueAndFlushAuditEvent(auditStorageRef.current, auditEvent);
+      if (delivered) {
+        auditedAttestationsRef.current.add(auditKey);
+      }
+    },
+    [form],
+  );
 
   const handleE2ESignature = () => {
     const payload: SignaturePadValue = {
@@ -721,6 +757,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       },
       { shouldDirty: true, shouldValidate: true },
     );
+    void recordClosureAttestation('outgoing', nextSignature);
   };
 
   const handleE2EChecklistComplete = () => {
@@ -1518,11 +1555,40 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
+  const getFinalizationAttestationAlert = () => {
+    const signatures = form.getValues('signatures');
+    const outgoing = signatures?.outgoing;
+    const incoming = signatures?.incoming;
+
+    if (!outgoing || !outgoing.imageBase64) {
+      return {
+        title: t('handover.signatureMissingTitle'),
+        message: t('handover.signatureMissingMessage'),
+      };
+    }
+
+    if (!incoming) {
+      return {
+        title: t('handover.signatureMissingTitle'),
+        message: t('handover.incomingAttestationMissingMessage'),
+      };
+    }
+
+    if (incoming.userId === outgoing.userId) {
+      return {
+        title: t('handover.signatureMissingTitle'),
+        message: t('handover.distinctAttestationRequiredMessage'),
+      };
+    }
+
+    return null;
+  };
+
   const handleInvalidSubmit = (formErrors: HandoverFormErrors) => {
     const currentStatus = form.getValues('status');
-    const hasOutgoing = form.getValues('signatures')?.outgoing;
-    if (currentStatus === 'final' && (!hasOutgoing || !hasOutgoing.imageBase64)) {
-      Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
+    const attestationAlert = currentStatus === 'final' ? getFinalizationAttestationAlert() : null;
+    if (attestationAlert) {
+      Alert.alert(attestationAlert.title, attestationAlert.message);
       return;
     }
     const message =
@@ -1784,28 +1850,6 @@ export default function HandoverForm({ navigation, route }: Props) {
         await queueAndFlushAuditEvent(auditStorageRef.current, auditEvent);
       }
 
-      if (status === 'final' && auditUserId && values.patientId && values.signatures?.outgoing) {
-        const signedAt = values.signatures.outgoing.signedAt;
-        const auditKey = `${values.patientId}|${signedAt}`;
-        if (!auditedSignedRef.current.has(auditKey)) {
-          const shiftCode = deriveShiftCode(values.administrativeData?.shiftStart);
-          const auditEvent = makeAuditEvent(
-            {
-              type: 'handover_signed',
-              patientId: values.patientId,
-              userId: auditUserId,
-              unitId: auditUnitId ?? undefined,
-              shiftCode,
-            },
-            () => new Date(signedAt),
-          );
-          const delivered = await queueAndFlushAuditEvent(auditStorageRef.current, auditEvent);
-          if (delivered) {
-            auditedSignedRef.current.add(auditKey);
-          }
-        }
-      }
-
       let successMessage = t('handover.submitQueuedMessage');
       if (isOn('ENABLE_ALERTS')) {
         const alerts: string[] = [];
@@ -1910,7 +1954,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     return isValid;
   };
 
-  const confirmLegalClosure = () =>
+  const confirmClosureAttestation = () =>
     new Promise<boolean>((resolve) => {
       Alert.alert(t('handover.legalConfirmTitle'), t('handover.legalConfirmMessage'), [
         { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
@@ -1920,12 +1964,12 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const finalizeSubmission = async () => {
     form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
-    const outgoing = form.getValues('signatures')?.outgoing;
-    if (!outgoing || !outgoing.imageBase64) {
-      Alert.alert(t('handover.signatureMissingTitle'), t('handover.signatureMissingMessage'));
+    const attestationAlert = getFinalizationAttestationAlert();
+    if (attestationAlert) {
+      Alert.alert(attestationAlert.title, attestationAlert.message);
       return;
     }
-    const confirmed = await confirmLegalClosure();
+    const confirmed = await confirmClosureAttestation();
     if (!confirmed) return;
     onSubmit();
   };
@@ -2707,6 +2751,9 @@ export default function HandoverForm({ navigation, route }: Props) {
         administrativeUnitId={administrativeUnitValue}
         canSignOutgoing={canSignOutgoing}
         buildOutgoingSignature={buildOutgoingSignature}
+        onAttestationCaptured={(kind, signature) => {
+          void recordClosureAttestation(kind, signature);
+        }}
         outgoingSignatureError={errors.signatures?.outgoing?.message as string | undefined}
         incomingSignatureError={errors.signatures?.incoming?.message as string | undefined}
         onSaveDraft={handleSaveDraft}

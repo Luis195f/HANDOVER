@@ -55,6 +55,24 @@ FINAL_BUNDLE_WITH_SIGNATURE = {
                 "id": "comp-test-001",
                 "status": "final",
                 "author": [{"reference": "Practitioner/nurse-1"}],
+                "attester": [
+                    {
+                        "mode": "professional",
+                        "time": "2026-03-10T10:55:00Z",
+                        "party": {
+                            "identifier": {"system": "urn:handover:user-id", "value": "nurse-1"},
+                            "display": "Nurse Out",
+                        },
+                    },
+                    {
+                        "mode": "professional",
+                        "time": "2026-03-10T11:00:00Z",
+                        "party": {
+                            "identifier": {"system": "urn:handover:user-id", "value": "auth0|test-user"},
+                            "display": "Nurse In",
+                        },
+                    },
+                ],
                 "subject": {"reference": "Patient/pat-test-001"},
                 "type": {"text": "handover"},
                 "date": "2026-03-10T11:00:00Z",
@@ -79,9 +97,9 @@ def _post_fhir(api_client, payload):
     )
 
 
-def _authorized_client(*, roles=("nurse",), scopes=("fhir:transaction", "handover:write")):
+def _authorized_client(*, sub="auth0|test-user", roles=("nurse",), scopes=("fhir:transaction", "handover:write")):
     client = APIClient()
-    authenticate_api_client(client, roles=list(roles), scopes=list(scopes))
+    authenticate_api_client(client, sub=sub, roles=list(roles), scopes=list(scopes))
     return client
 
 
@@ -123,7 +141,40 @@ def test_final_bundle_without_clinician_signature_returns_400():
     response = _post_fhir(client, unsigned_final)
 
     assert response.status_code == 400
-    assert response.json()["errors"] == ["Final handover bundle requires an outgoing clinical signature."]
+    assert response.json()["errors"] == ["Final handover bundle requires outgoing attestation evidence."]
+
+
+def test_final_bundle_without_incoming_attestation_returns_400():
+    client = _authorized_client()
+    unsigned_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    unsigned_final["entry"][1]["resource"]["attester"] = unsigned_final["entry"][1]["resource"]["attester"][:1]
+
+    response = _post_fhir(client, unsigned_final)
+
+    assert response.status_code == 400
+    assert response.json()["errors"] == ["Final handover bundle requires an incoming nurse attestation."]
+
+
+def test_final_bundle_with_same_actor_attesters_returns_400():
+    client = _authorized_client()
+    unsigned_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    unsigned_final["entry"][1]["resource"]["attester"][1]["party"]["identifier"]["value"] = "nurse-1"
+
+    response = _post_fhir(client, unsigned_final)
+
+    assert response.status_code == 400
+    assert response.json()["errors"] == ["Final handover bundle requires distinct outgoing and incoming actors."]
+
+
+def test_final_bundle_rejects_incoming_actor_mismatch():
+    client = _authorized_client(sub="auth0|incoming-real")
+    unsigned_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    unsigned_final["entry"][1]["resource"]["attester"][1]["party"]["identifier"]["value"] = "auth0|different-user"
+
+    response = _post_fhir(client, unsigned_final)
+
+    assert response.status_code == 403
+    assert response.json()["errors"] == ["Authenticated user must match the incoming handover attestation."]
 
 
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
@@ -195,5 +246,5 @@ def test_later_final_composition_still_requires_clinician_signature():
     response = _post_fhir(client, unsigned_final)
 
     assert response.status_code == 400
-    assert response.json()['errors'] == ['Final handover bundle requires an outgoing clinical signature.']
+    assert response.json()['errors'] == ['Final handover bundle requires outgoing attestation evidence.']
 
