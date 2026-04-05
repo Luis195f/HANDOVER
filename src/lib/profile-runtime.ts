@@ -46,7 +46,7 @@ export const HANDOVER_SECTIONS_INFO = [
   { key: 'mobilitySkin', title: 'Movilidad y piel' },
   { key: 'psychosocial', title: 'Psicosocial' },
   { key: 'escalas', title: 'Escalas clínicas' },
-  { key: 'examenes', title: 'Exámenes y procedimientos' },
+  { key: 'examenes', title: 'Pendientes, exámenes y plan' },
   { key: 'medicacion', title: 'Medicación y tratamientos' },
   { key: 'adjuntos', title: 'Adjuntos' },
   { key: 'diagnosticos', title: 'Diagnósticos médicos/enfermería' },

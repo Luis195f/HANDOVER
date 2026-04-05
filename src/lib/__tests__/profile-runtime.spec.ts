@@ -50,6 +50,14 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.activeOverlays).toEqual([]);
   });
 
+  it('keeps pilot-critical continuity sections wired in HANDOVER Core', async () => {
+    const { HANDOVER_CORE_RUNTIME_PACK } = await import('@/src/config/profiles/units');
+
+    expect(HANDOVER_CORE_RUNTIME_PACK.enabledSections).toEqual(
+      expect.arrayContaining(['oxigenoterapia', 'escalas', 'examenes']),
+    );
+  });
+
   it('uses the configured default unit runtime when the selected unit is unknown', async () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       defaultUnit: 'uci-adulto',

@@ -2,11 +2,14 @@ import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
 
+import { ContingencyPlanSection } from '../components/BedsideChecklistSection';
 import ClinicalScalesSection from '../components/ClinicalScalesSection';
 import EliminationSection from '../components/EliminationSection';
+import ExamsProceduresSection from '../components/ExamsProceduresSection';
 import FluidBalanceSection from '../components/FluidBalanceSection';
 import MobilitySkinSection from '../components/MobilitySkinSection';
 import NutritionSection from '../components/NutritionSection';
+import PendingTasksSection from '../components/PendingTasksSection';
 import PsychosocialSection from '../components/PsychosocialSection';
 import type { HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
@@ -37,8 +40,16 @@ const defaultValues: HandoverFormValues = {
   },
   medications: [],
   treatments: [],
+  pendingTasks: [],
   exams: [],
   procedures: [],
+  contingencyPlan: {
+    watchItems: [],
+    immediateActions: [],
+    escalationCriteria: [],
+    escalationContact: '',
+    fallbackPlan: '',
+  },
   meds: '',
   devices: [],
   risksStructured: [],
@@ -169,6 +180,104 @@ describe('Nursing sections', () => {
     await waitFor(() => {
       expect(getByText('12')).toBeTruthy();
       expect(getByText('Moderado')).toBeTruthy();
+    });
+  });
+
+  it('registra pendientes criticos con escalado operativo', async () => {
+    const { getByLabelText, getByText, methods } = renderWithForm(<PendingTasksSection />);
+
+    fireEvent.press(getByLabelText('Tipo pendiente Escalado'));
+    fireEvent.press(getByLabelText('Prioridad pendiente Crítico'));
+    fireEvent.changeText(getByLabelText('Detalle de pendiente'), 'Avisar si cae la PAM');
+    fireEvent.changeText(getByLabelText('Hora objetivo del pendiente'), '2026-03-19T10:30:00Z');
+    fireEvent.changeText(getByLabelText('Responsable del pendiente'), 'Médico de guardia');
+    fireEvent.changeText(
+      getByLabelText('Criterio de escalado del pendiente'),
+      'Avisar si PAM < 65 mmHg sostenida',
+    );
+    fireEvent.changeText(getByLabelText('Notas del pendiente'), 'Revisar perfusión y vasoactivos');
+    fireEvent.press(getByText('Añadir pendiente'));
+
+    await waitFor(() => {
+      expect(methods.getValues('pendingTasks')).toEqual([
+        expect.objectContaining({
+          category: 'escalation',
+          priority: 'critical',
+          title: 'Avisar si cae la PAM',
+          dueBy: '2026-03-19T10:30:00Z',
+          owner: 'Médico de guardia',
+          escalationCriteria: 'Avisar si PAM < 65 mmHg sostenida',
+          notes: 'Revisar perfusión y vasoactivos',
+        }),
+      ]);
+    });
+  });
+
+  it('captura contingencias, examenes y procedimientos sin duplicar el cierre', async () => {
+    const { getByLabelText, getByText, methods } = renderWithForm(
+      <>
+        <ContingencyPlanSection />
+        <ExamsProceduresSection />
+      </>,
+    );
+
+    fireEvent.changeText(getByLabelText('Qué vigilar'), 'SatO2\nDiuresis');
+    fireEvent.changeText(getByLabelText('Qué hacer primero'), 'Reevaluar VM\nConfirmar balance');
+    fireEvent.changeText(
+      getByLabelText('Criterios de escalado'),
+      'SatO2 < 92%\nDiuresis < 0.5 ml/kg/h',
+    );
+    fireEvent.changeText(getByLabelText('Contacto de escalado'), 'Médico intensivista');
+    fireEvent.changeText(
+      getByLabelText('Plan de contingencia'),
+      'Si no responde, preparar gases y avisar a supervisor',
+    );
+
+    fireEvent.press(getByLabelText('Seleccionar estado Pendiente'));
+    fireEvent.press(getByLabelText('Prioridad examen Crítico'));
+    fireEvent.changeText(getByLabelText('Descripción de examen'), 'Gasometría arterial');
+    fireEvent.changeText(getByLabelText('Hora objetivo de examen'), '2026-03-19T11:00:00Z');
+    fireEvent.changeText(getByLabelText('Responsable de examen'), 'Laboratorio');
+    fireEvent.press(getByText('Añadir examen'));
+
+    fireEvent.changeText(getByLabelText('Descripción de procedimiento'), 'Cambio de curación');
+    fireEvent.press(getByLabelText('Prioridad procedimiento Urgente'));
+    fireEvent.changeText(getByLabelText('Hora de procedimiento'), '2026-03-19T12:00:00Z');
+    fireEvent.changeText(getByLabelText('Responsable de procedimiento'), 'Enfermería');
+    fireEvent.changeText(
+      getByLabelText('Criterio de escalado de procedimiento'),
+      'Avisar si sangrado activo',
+    );
+    fireEvent.press(getByText('Añadir procedimiento'));
+
+    await waitFor(() => {
+      expect(methods.getValues('contingencyPlan')).toEqual({
+        watchItems: ['SatO2', 'Diuresis'],
+        immediateActions: ['Reevaluar VM', 'Confirmar balance'],
+        escalationCriteria: ['SatO2 < 92%', 'Diuresis < 0.5 ml/kg/h'],
+        escalationContact: 'Médico intensivista',
+        fallbackPlan: 'Si no responde, preparar gases y avisar a supervisor',
+      });
+
+      expect(methods.getValues('exams')).toEqual([
+        expect.objectContaining({
+          state: 'pending',
+          priority: 'critical',
+          description: 'Gasometría arterial',
+          dueBy: '2026-03-19T11:00:00Z',
+          responsible: 'Laboratorio',
+        }),
+      ]);
+
+      expect(methods.getValues('procedures')).toEqual([
+        expect.objectContaining({
+          description: 'Cambio de curación',
+          priority: 'urgent',
+          scheduledFor: '2026-03-19T12:00:00Z',
+          responsible: 'Enfermería',
+          escalationCriteria: 'Avisar si sangrado activo',
+        }),
+      ]);
     });
   });
 });
