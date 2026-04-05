@@ -9,6 +9,7 @@ import sys
 import uuid
 import httpx
 from typing import Any, Dict, Optional, Tuple, Type
+from urllib.parse import unquote
 
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
@@ -617,7 +618,7 @@ def _create_audit_event_for_transaction(
 ) -> None:
     patient_id = None
     composition = None
-    outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle)
+    outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle, user_id=user_id)
     try:
         for e in (bundle.get("entry") or []):
             r = (e or {}).get("resource") or {}
@@ -632,9 +633,7 @@ def _create_audit_event_for_transaction(
         if not attester:
             return None
         party = attester.get("party") or {}
-        identifier = (party.get("identifier") or {}).get("value")
-        reference = party.get("reference")
-        who_value = identifier or reference
+        who_value = _attester_actor_id(attester)
         if not who_value:
             return None
         display = party.get("display") or who_value
@@ -724,7 +723,44 @@ def _bundle_has_clinician_signature(bundle: Dict[str, Any]) -> bool:
     return any(isinstance(item.get("data"), str) and item.get("data").strip() for item in _bundle_signature_list(bundle))
 
 
-def _extract_final_handover_attesters(bundle: Dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _normalize_actor_reference(reference: Any) -> str | None:
+    if not isinstance(reference, str):
+        return None
+    raw = reference.strip()
+    if not raw:
+        return None
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1].strip()
+    if not raw:
+        return None
+    normalized = unquote(raw).strip()
+    return normalized or None
+
+
+def _signature_actor_ids(bundle: Dict[str, Any]) -> list[str]:
+    actor_ids: list[str] = []
+    for signature in _bundle_signature_list(bundle):
+        who = signature.get("who") or {}
+        if not isinstance(who, dict):
+            continue
+        actor_id = None
+        identifier = who.get("identifier") or {}
+        if isinstance(identifier, dict):
+            value = identifier.get("value")
+            if isinstance(value, str) and value.strip():
+                actor_id = value.strip()
+        if not actor_id:
+            actor_id = _normalize_actor_reference(who.get("reference"))
+        if actor_id and actor_id not in actor_ids:
+            actor_ids.append(actor_id)
+    return actor_ids
+
+
+def _extract_final_handover_attesters(
+    bundle: Dict[str, Any],
+    *,
+    user_id: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     for entry in bundle.get("entry") or []:
         if not isinstance(entry, dict):
             continue
@@ -738,8 +774,49 @@ def _extract_final_handover_attesters(bundle: Dict[str, Any]) -> tuple[dict[str,
         attesters = resource.get("attester") or []
         if not isinstance(attesters, list):
             return None, None
-        outgoing = attesters[0] if len(attesters) > 0 and isinstance(attesters[0], dict) else None
-        incoming = attesters[1] if len(attesters) > 1 and isinstance(attesters[1], dict) else None
+        candidates = [attester for attester in attesters if isinstance(attester, dict)]
+        professional_candidates = [
+            attester
+            for attester in candidates
+            if str(attester.get("mode") or "").strip().lower() == "professional"
+        ]
+        if len(professional_candidates) >= 2:
+            candidates = professional_candidates
+
+        outgoing = None
+        incoming = None
+        signature_actor_ids = set(_signature_actor_ids(bundle))
+
+        for attester in candidates:
+            actor_id = _attester_actor_id(attester)
+            if actor_id and actor_id in signature_actor_ids:
+                outgoing = attester
+                break
+
+        if user_id:
+            for attester in candidates:
+                if attester is outgoing:
+                    continue
+                if _attester_actor_id(attester) == user_id:
+                    incoming = attester
+                    break
+
+        if not incoming:
+            for attester in candidates:
+                if attester is outgoing:
+                    continue
+                if _attester_actor_id(attester):
+                    incoming = attester
+                    break
+
+        if not outgoing:
+            for attester in candidates:
+                if attester is incoming:
+                    continue
+                if _attester_actor_id(attester):
+                    outgoing = attester
+                    break
+
         return outgoing, incoming
     return None, None
 
@@ -755,10 +832,7 @@ def _attester_actor_id(attester: Dict[str, Any] | None) -> str | None:
         value = identifier.get("value")
         if isinstance(value, str) and value.strip():
             return value.strip()
-    reference = party.get("reference")
-    if isinstance(reference, str) and reference.strip():
-        return reference.strip()
-    return None
+    return _normalize_actor_reference(party.get("reference"))
 
 
 def _attester_record(attester: Dict[str, Any] | None) -> Dict[str, str] | None:
@@ -803,7 +877,7 @@ def _bundle_is_final_handover(bundle: Dict[str, Any]) -> bool:
 
 def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Optional[Response]:
     if _bundle_is_final_handover(bundle):
-        outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle)
+        outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle, user_id=user_id)
         outgoing_actor = _attester_actor_id(outgoing_attester)
         incoming_actor = _attester_actor_id(incoming_attester)
 
@@ -873,7 +947,7 @@ def _emit_handover_closure_attestation_event(
     if not _bundle_is_final_handover(bundle):
         return
 
-    outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle)
+    outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle, user_id=user_id)
     outgoing_record = _attester_record(outgoing_attester)
     incoming_record = _attester_record(incoming_attester)
     if not outgoing_record or not incoming_record:
