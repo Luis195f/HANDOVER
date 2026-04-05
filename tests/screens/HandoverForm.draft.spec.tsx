@@ -11,11 +11,15 @@ const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
+const flagState = vi.hoisted(() => ({
+  values: {} as Record<string, boolean>,
+}));
 const mockUseZodForm = vi.fn();
 const pilotRuntimeState = vi.hoisted(() => ({
   pilotControlVersion: 0,
   pilotContextCalls: [] as Array<{ unitId?: string; roles?: string[] }>,
   runtimeCalls: [] as Array<{ unitId?: string | null; specialtyId?: string | null; roles?: string[] | null }>,
+  runtimeOverride: null as null | Record<string, unknown>,
 }));
 
 let HandoverForm: any;
@@ -52,7 +56,9 @@ vi.mock('react-hook-form', async () => {
   };
 });
 
-vi.mock('@/src/config/flags', () => ({ isOn: () => false }));
+vi.mock('@/src/config/flags', () => ({
+  isOn: (name: string) => flagState.values[name] ?? false,
+}));
 const useSelectedUnitId = vi.fn(() => 'unit-1');
 vi.mock('@/src/state/filterStore', () => ({ useSelectedUnitId, ALL_UNITS_OPTION: '__all__' }));
 vi.mock('@/src/config/pilotControl', () => ({
@@ -78,7 +84,7 @@ vi.mock('@/src/lib/profile-runtime', () => {
     { key: 'mobilitySkin', title: 'Movilidad y piel' },
     { key: 'psychosocial', title: 'Psicosocial' },
     { key: 'escalas', title: 'Escalas clínicas' },
-    { key: 'examenes', title: 'Exámenes y procedimientos' },
+    { key: 'examenes', title: 'Pendientes, exámenes y plan' },
     { key: 'medicacion', title: 'Medicación y tratamientos' },
     { key: 'adjuntos', title: 'Adjuntos' },
     { key: 'diagnosticos', title: 'Diagnósticos médicos/enfermería' },
@@ -92,7 +98,7 @@ vi.mock('@/src/lib/profile-runtime', () => {
     HANDOVER_SECTIONS_INFO,
     resolveHandoverProfileRuntime: vi.fn((args: { unitId?: string | null; specialtyId?: string | null; roles?: string[] | null }) => {
       pilotRuntimeState.runtimeCalls.push(args);
-      return {
+      const runtime = {
         context: {
           unitId: args.unitId ?? null,
           requestedSpecialtyId: args.specialtyId ?? null,
@@ -142,6 +148,37 @@ vi.mock('@/src/lib/profile-runtime', () => {
         medicationQuickPicks: [],
         treatmentQuickPicks: [],
       };
+
+      return pilotRuntimeState.runtimeOverride
+        ? {
+            ...runtime,
+            ...pilotRuntimeState.runtimeOverride,
+            context: {
+              ...runtime.context,
+              ...(pilotRuntimeState.runtimeOverride.context as Record<string, unknown> | undefined),
+            },
+            pack: {
+              ...runtime.pack,
+              ...(pilotRuntimeState.runtimeOverride.pack as Record<string, unknown> | undefined),
+            },
+            basePack: {
+              ...runtime.basePack,
+              ...(pilotRuntimeState.runtimeOverride.basePack as Record<string, unknown> | undefined),
+            },
+            sectionVisibility: {
+              ...runtime.sectionVisibility,
+              ...(pilotRuntimeState.runtimeOverride.sectionVisibility as Record<string, boolean> | undefined),
+            },
+            fieldVisibility: {
+              ...runtime.fieldVisibility,
+              ...(pilotRuntimeState.runtimeOverride.fieldVisibility as Record<string, boolean> | undefined),
+            },
+            features: {
+              ...runtime.features,
+              ...(pilotRuntimeState.runtimeOverride.features as Record<string, unknown> | undefined),
+            },
+          }
+        : runtime;
     }),
   };
 });
@@ -218,6 +255,9 @@ vi.mock('@/src/screens/components/MobilitySkinSection', () => ({ default: () => 
 vi.mock('@/src/screens/components/NutritionSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/PsychosocialSection', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/ClinicalScalesSection', () => ({ default: () => null }));
+vi.mock('@/src/screens/components/OxygenGroupSection', () => ({
+  default: () => <React.Fragment>Bloque de oxigenoterapia</React.Fragment>,
+}));
 vi.mock('@/src/screens/components/ExportPdfButton', () => ({ ExportPdfButton: () => null }));
 vi.mock('@/src/screens/components/PatientBanner', () => ({ PatientBanner: () => null }));
 vi.mock('@/src/screens/components/OutcomesSection', () => ({ default: () => null }));
@@ -331,6 +371,8 @@ describe('HandoverForm drafts', () => {
     pilotRuntimeState.pilotControlVersion = 0;
     pilotRuntimeState.pilotContextCalls.length = 0;
     pilotRuntimeState.runtimeCalls.length = 0;
+    pilotRuntimeState.runtimeOverride = null;
+    flagState.values = {};
     mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
   });
 
@@ -570,5 +612,71 @@ describe('HandoverForm drafts', () => {
 
     expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
     expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'unit-1')).toBe(true);
+  });
+
+  it('en fallback Core muestra los dominios recuperados para piloto sin duplicar contingencias en el cierre', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+
+    flagState.values = {
+      SHOW_OXY: true,
+    };
+    pilotRuntimeState.runtimeOverride = {
+      context: {
+        unitId: 'unknown-unit',
+        unitProfileId: null,
+        usesCoreFallback: true,
+        activeProfileIds: ['handover-core'],
+      },
+      pack: { id: 'handover-core', label: 'HANDOVER Core' },
+      basePack: { id: 'handover-core', label: 'HANDOVER Core' },
+      sectionVisibility: {
+        turno: true,
+        paciente: true,
+        sbar: true,
+        signos: true,
+        oxigenoterapia: true,
+        dispositivos: true,
+        seguridad: true,
+        alertas: true,
+        nutrition: false,
+        elimination: false,
+        fluidBalance: false,
+        mobilitySkin: false,
+        psychosocial: false,
+        escalas: true,
+        examenes: true,
+        medicacion: false,
+        adjuntos: false,
+        diagnosticos: true,
+        outcomes: false,
+        evolucion: true,
+        resumen: true,
+        bedsideChecklist: true,
+        firmas: true,
+      },
+    };
+
+    const view = render(
+      <HandoverForm
+        navigation={navigation}
+        route={{
+          key: 'core-fallback',
+          name: 'HandoverForm',
+          params: { patientId: 'pat-1', unitId: 'unknown-unit' },
+        } as any}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(view.getByText('HANDOVER Core activo')).toBeTruthy();
+      expect(view.getByText('Oxigenoterapia')).toBeTruthy();
+      expect(view.getByText('Escalas clínicas')).toBeTruthy();
+      expect(view.getByText('Pendientes, exámenes y plan')).toBeTruthy();
+      expect(view.getByText('Plan inmediato y contingencias')).toBeTruthy();
+      expect(view.getByText('Checklist de cabecera de cama')).toBeTruthy();
+    });
+
+    const renderedTree = JSON.stringify(view.toJSON());
+    expect(renderedTree.match(/Plan inmediato y contingencias/g) ?? []).toHaveLength(1);
   });
 });

@@ -161,6 +161,7 @@ La PRE-03 agrega una capa runtime aditiva para el formulario unico:
 - `src/config/profiles/units/core.ts` y `src/config/profiles/units/index.ts` declaran secciones visibles, campos legacy, escalas sugeridas, eventos centinela, quick-picks y salidas visibles por UPP.
 - En PRE-08 la Wave 1 operativa queda afinada in place para `critical-care`, `general-inpatient` y `emergency` con foco clinico, explicaciones visibles, quick-picks, checklist de cabecera contextual y eventos a anticipar, sin abrir formularios paralelos.
 - `src/lib/profile-runtime.ts` entrega un mapa puro de visibilidad y ayudas contextuales para `HandoverForm`, sin abrir pantallas paralelas ni cambiar el payload clinico runtime.
+- Para piloto, el fallback Core mantiene visible el bloque comun de oxigenoterapia, escalas y pendientes/examenes; el plan inmediato y las contingencias siguen en el formulario unico pero fuera del checklist de cierre para reducir omisiones operativas.
 
 ## 8. Runtime SOP PRE-04 a PRE-10
 

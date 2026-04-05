@@ -142,12 +142,28 @@ export function BedsideChecklistSection({
         )}
       />
 
-      <Text style={styles.subsectionTitle}>Plan inmediato y contingencias</Text>
+      {checklistMessage ? <Text style={styles.error}>{checklistMessage}</Text> : null}
+      {checklistErrors?.bedsideNotes?.message ? (
+        <Text style={styles.error}>{checklistErrors.bedsideNotes.message as string}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+export function ContingencyPlanSection() {
+  const { control } = useFormContext<HandoverValues>();
+
+  return (
+    <View>
+      <Text style={styles.sectionTitle}>Plan inmediato y contingencias</Text>
+      <Text style={styles.helper}>
+        Registra solo vigilancias, acciones y escalados que cambian la continuidad del turno.
+      </Text>
       <LineArrayField
         label="Qué vigilar"
         name="contingencyPlan.watchItems"
         placeholder="Una señal por línea"
-        helper="Registra solo señales que cambian la conducta del turno."
+        helper="Evita duplicar lo ya documentado si no cambia la conducta del turno."
       />
       <LineArrayField
         label="Qué hacer primero"
@@ -196,11 +212,6 @@ export function BedsideChecklistSection({
           </View>
         )}
       />
-
-      {checklistMessage ? <Text style={styles.error}>{checklistMessage}</Text> : null}
-      {checklistErrors?.bedsideNotes?.message ? (
-        <Text style={styles.error}>{checklistErrors.bedsideNotes.message as string}</Text>
-      ) : null}
     </View>
   );
 }

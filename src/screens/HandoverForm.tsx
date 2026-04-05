@@ -91,6 +91,7 @@ import DiagnosisAutocomplete from './components/DiagnosisAutocomplete';
 // BEGIN HANDOVER D2 – VitalTrends imports
 import { useVitalTrends } from '@/src/lib/hooks/useVitalTrends';
 import { BedsideChecklistModal } from './components/BedsideChecklistModal';
+import { ContingencyPlanSection } from './components/BedsideChecklistSection';
 import PendingTasksSection from './components/PendingTasksSection';
 import EliminationSection from './components/EliminationSection';
 import FluidBalanceSection from './components/FluidBalanceSection';
@@ -2335,11 +2336,14 @@ export default function HandoverForm({ navigation, route }: Props) {
         style={styles.section}
       >
         <CollapsibleSection
-          title="Exámenes y procedimientos"
+          title="Pendientes, exámenes y plan"
           isCollapsed={collapsedSections.examenes}
           onToggle={() => toggleSection('examenes')}
         >
           <PendingTasksSection />
+          <View style={{ marginTop: 24 }}>
+            <ContingencyPlanSection />
+          </View>
           <View style={{ marginTop: 24 }}>
             <ExamsProceduresSection />
           </View>
