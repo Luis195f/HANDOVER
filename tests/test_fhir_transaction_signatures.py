@@ -84,3 +84,85 @@ def test_audit_event_with_dual_signatures():
     ]
     assert signature_status == ["outgoingSigned;incomingSigned"]
     assert "pat-sign-001" not in str(audit_payload)
+
+
+def test_audit_event_normalizes_reference_attester_and_skips_extra_professional_attester():
+    client = APIClient()
+    authenticate_api_client(client, sub="auth0|nurse-in")
+    bundle = {
+        "resourceType": "Bundle",
+        "type": "transaction",
+        "identifier": {"system": "urn:handover:bundle", "value": "bundle-sign-002"},
+        "entry": [
+            {
+                "request": {"method": "POST", "url": "Patient"},
+                "resource": {"resourceType": "Patient", "id": "pat-sign-002"},
+            },
+            {
+                "request": {"method": "POST", "url": "Composition"},
+                "resource": {
+                    "resourceType": "Composition",
+                    "id": "comp-sign-002",
+                    "status": "final",
+                    "subject": {"reference": "Patient/pat-sign-002"},
+                    "attester": [
+                        {
+                            "mode": "professional",
+                            "party": {"identifier": {"value": "observer-1"}, "display": "Observer"},
+                        },
+                        {
+                            "mode": "professional",
+                            "party": {"identifier": {"value": "nurse-out"}, "display": "Outgoing nurse"},
+                        },
+                        {
+                            "mode": "professional",
+                            "party": {
+                                "reference": "Practitioner/auth0%7Cnurse-in",
+                                "display": "Incoming nurse",
+                            },
+                        },
+                    ],
+                },
+            },
+        ],
+        "signature": [
+            {
+                "type": [{"code": "signature"}],
+                "when": "2026-03-10T11:00:00Z",
+                "who": {"identifier": {"value": "nurse-out"}},
+                "data": "clinician-signature-base64",
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "backend.api.views._post_transaction_to_fhir",
+            autospec=True,
+            return_value=build_fhir_response(status_code=200),
+        ) as mock_fhir_post,
+        patch("backend.api.views.httpx.post", autospec=True) as mock_audit_post,
+        patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True),
+    ):
+        response = client.post(
+            "/api/fhir/transaction",
+            data=bundle,
+            format="json",
+            REMOTE_ADDR="10.0.0.11",
+            HTTP_X_UNIT_ID="icu-a",
+        )
+
+    assert response.status_code == 200
+    mock_fhir_post.assert_called_once()
+    mock_audit_post.assert_called_once()
+
+    audit_payload = mock_audit_post.call_args.kwargs["json"]
+    attester_agents = {
+        agent["type"]["text"]: agent["who"]["identifier"]["value"]
+        for agent in audit_payload["agent"]
+        if agent.get("type", {}).get("text") in {"outgoing-nurse-signature", "incoming-nurse-signature"}
+    }
+    assert attester_agents == {
+        "outgoing-nurse-signature": "nurse-out",
+        "incoming-nurse-signature": "auth0|nurse-in",
+    }

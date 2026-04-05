@@ -179,6 +179,56 @@ def test_final_bundle_rejects_incoming_actor_mismatch():
 
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_final_bundle_accepts_normalized_reference_for_incoming_attestation(
+    mock_fhir_post,
+    _mock_audit,
+    _mock_side_effects,
+):
+    client = _authorized_client()
+    normalized_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    incoming_party = normalized_final["entry"][1]["resource"]["attester"][1]["party"]
+    incoming_party.pop("identifier", None)
+    incoming_party["reference"] = "Practitioner/auth0%7Ctest-user"
+    mock_fhir_post.return_value = build_fhir_response(status_code=200)
+
+    response = _post_fhir(client, normalized_final)
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "transaction-response"
+
+
+@patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
+@patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_final_bundle_accepts_extra_attesters_before_clinical_pair(
+    mock_fhir_post,
+    _mock_audit,
+    _mock_side_effects,
+):
+    client = _authorized_client()
+    extra_attester_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    extra_attester_final["entry"][1]["resource"]["attester"].insert(
+        0,
+        {
+            "mode": "professional",
+            "time": "2026-03-10T10:50:00Z",
+            "party": {
+                "identifier": {"system": "urn:handover:user-id", "value": "observer-1"},
+                "display": "Observer",
+            },
+        },
+    )
+    mock_fhir_post.return_value = build_fhir_response(status_code=200)
+
+    response = _post_fhir(client, extra_attester_final)
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "transaction-response"
+
+
+@patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
+@patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views.verify_bundle_signature", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
 def test_invalid_transport_signature_returns_400(
