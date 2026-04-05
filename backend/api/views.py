@@ -775,13 +775,6 @@ def _extract_final_handover_attesters(
         if not isinstance(attesters, list):
             return None, None
         candidates = [attester for attester in attesters if isinstance(attester, dict)]
-        professional_candidates = [
-            attester
-            for attester in candidates
-            if str(attester.get("mode") or "").strip().lower() == "professional"
-        ]
-        if len(professional_candidates) >= 2:
-            candidates = professional_candidates
 
         outgoing = None
         incoming = None

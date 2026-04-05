@@ -229,6 +229,56 @@ def test_final_bundle_accepts_extra_attesters_before_clinical_pair(
 
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_final_bundle_accepts_legacy_clinical_attesters_without_mode_even_with_extra_professional_attesters(
+    mock_fhir_post,
+    _mock_audit,
+    _mock_side_effects,
+):
+    client = _authorized_client()
+    legacy_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    legacy_final["entry"][1]["resource"]["attester"] = [
+        {
+            "mode": "professional",
+            "time": "2026-03-10T10:45:00Z",
+            "party": {
+                "identifier": {"system": "urn:handover:user-id", "value": "observer-1"},
+                "display": "Observer 1",
+            },
+        },
+        {
+            "mode": "professional",
+            "time": "2026-03-10T10:50:00Z",
+            "party": {
+                "identifier": {"system": "urn:handover:user-id", "value": "observer-2"},
+                "display": "Observer 2",
+            },
+        },
+        {
+            "time": "2026-03-10T10:55:00Z",
+            "party": {
+                "identifier": {"system": "urn:handover:user-id", "value": "nurse-1"},
+                "display": "Nurse Out",
+            },
+        },
+        {
+            "time": "2026-03-10T11:00:00Z",
+            "party": {
+                "reference": "Practitioner/auth0%7Ctest-user",
+                "display": "Nurse In",
+            },
+        },
+    ]
+    mock_fhir_post.return_value = build_fhir_response(status_code=200)
+
+    response = _post_fhir(client, legacy_final)
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "transaction-response"
+
+
+@patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
+@patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views.verify_bundle_signature", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
 def test_invalid_transport_signature_returns_400(
