@@ -53,7 +53,9 @@ switch ($Stage) {
     Invoke-Step "Git diff check" { Invoke-External "git" @("diff", "--check") }
     Invoke-Step "Typecheck" { Invoke-External "pnpm" @("-w", "typecheck") }
     Invoke-Step "Lint" { Invoke-External "pnpm" @("-w", "lint:ci") }
-    Invoke-Step "Frontend tests" { Invoke-External "pnpm" @("test") }
+    Invoke-Step "Sensitive any guard" { Invoke-External "pnpm" @("-w", "gate:any-sensitive") }
+    Invoke-Step "Pilot-grade frontend coverage" { Invoke-External "pnpm" @("-w", "test:pilot:coverage") }
+    Invoke-Step "End-to-end tests" { Invoke-External "pnpm" @("-w", "test:e2e") }
     Invoke-Step "FHIR validation fixtures" { Invoke-External "pnpm" @("-w", "validate:fhir") }
     if (-not $SkipPytest) {
       Invoke-Step "Backend pytest" {

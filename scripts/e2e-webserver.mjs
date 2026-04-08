@@ -15,6 +15,21 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function resolvePnpmLaunch() {
+  const npmExecPath = process.env.npm_execpath;
+  const npmNodeExecPath = process.env.npm_node_execpath || process.execPath;
+
+  if (!npmExecPath) {
+    return { command: "pnpm", prefixArgs: [] };
+  }
+
+  if (/\.(cjs|js)$/i.test(npmExecPath)) {
+    return { command: npmNodeExecPath, prefixArgs: [npmExecPath] };
+  }
+
+  return { command: npmExecPath, prefixArgs: [] };
+}
+
 async function fetchText(url) {
   const res = await fetch(url, { redirect: "follow" });
   const text = await res.text().catch(() => "");
@@ -83,22 +98,27 @@ async function waitForReady(timeoutMs = 180_000) {
 }
 
 function startExpo() {
-  const filterName = process.env.E2E_APP_FILTER || "handover-pro";
-  const pnpmArgs = [
-    "--filter",
-    filterName,
-    "web",
-    "--",
-    "--no-dev",
-    "--minify",
-    "--port",
-    String(port),
-    "--host",
-    "localhost",
-  ];
+  const filterName = process.env.E2E_APP_FILTER?.trim();
+  const { command, prefixArgs } = resolvePnpmLaunch();
+  const pnpmArgs = filterName
+    ? [
+        "--filter",
+        filterName,
+        "web",
+        "--",
+        "--no-dev",
+        "--minify",
+        "--port",
+        String(port),
+        "--host",
+        "localhost",
+      ]
+    : ["web", "--", "--no-dev", "--minify", "--port", String(port), "--host", "localhost"];
 
-  console.log(`[e2e-webserver] Starting Expo web on ${baseURL} (filter=${filterName})`);
-  const child = spawn("pnpm", pnpmArgs, {
+  console.log(
+    `[e2e-webserver] Starting Expo web on ${baseURL}${filterName ? ` (filter=${filterName})` : ""}`,
+  );
+  const child = spawn(command, [...prefixArgs, ...pnpmArgs], {
     stdio: "inherit",
     env: {
       ...process.env,
@@ -107,6 +127,10 @@ function startExpo() {
       CI: process.env.CI ? "1" : process.env.CI,
       E2E_PORT: String(port),
     },
+  });
+  child.on("error", (error) => {
+    console.error(`[e2e-webserver] Failed to start package manager process: ${error.message}`);
+    process.exit(1);
   });
 
   const shutdown = () => {

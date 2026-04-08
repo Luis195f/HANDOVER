@@ -11,10 +11,12 @@
 - `pnpm test` / `pnpm -w test` es el runner principal de tests JavaScript del repo.
 - Ese comando ejecuta `vitest.pilot.config.ts`, la bateria pilot-grade que ya respalda el gate sensible de CI.
 - Para el backend Django/DRF, el runner vigente sigue siendo `pytest`; no se introduce un cuarto sistema.
+- La reproducibilidad del toolchain queda anclada en el repo con `.nvmrc` (`20.17.0`), `packageManager=pnpm@10.17.1` y `vitest` / `@vitest/coverage-v8` fijados en la misma version exacta.
 
 ## Cuándo usar runners secundarios
 
 - `pnpm -w test:pilot:coverage:ci`: misma bateria pilot-grade, pero con reportes `lcov` + `cobertura` para CI.
+- `pnpm -w quality:pilot:ci`: espejo local del gate JS principal de CI (`typecheck` + `lint:ci` + `gate:any-sensitive` + cobertura pilot-grade + `test:e2e` + `validate:fhir`).
 - `pnpm -w test:unit`: Vitest general para explorar regresiones fuera del gate pilot-grade o ampliar cobertura durante desarrollo.
 - `pnpm -w test:smoke:forms`: smoke rápido del flujo crítico de `HandoverForm`.
 - `pnpm -w test:legacy`: Jest legacy solo para `jest-tests/**` o cuando se toca compatibilidad histórica que todavía no migró a Vitest.
@@ -28,6 +30,11 @@ Usa este pipeline cuando toques auth, sync/queue, FHIR mapping, validación clí
   ```bash
   pnpm -w quality:pilot
   ```
+- Espejo local del gate JS de CI con artefactos de cobertura:
+  ```bash
+  pnpm -w quality:pilot:ci
+  ```
+  Incluye tambien `pnpm -w test:e2e`, igual que el workflow `CI`.
 - Gate de `any` en zonas sensibles:
   ```bash
   pnpm -w gate:any-sensitive
@@ -153,8 +160,11 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 ## Política mínima del workflow CI principal
 
 - El workflow `CI` instala dependencias con `pnpm install --frozen-lockfile` tanto en `pull_request` como en `push`.
+- `CI` usa `pnpm/action-setup` fijado en `10.17.1` y `actions/setup-node` leyendo `.nvmrc`, para que el runner comparta la misma base documentada del repo.
 - El paso JS principal de CI usa `pnpm -w test:pilot:coverage:ci`, que es la misma batería que `pnpm test` con reportes extra para artefactos.
 - `lint:ci` es el comando de referencia para lint estricto en CI.
+- `CI` publica evidencia reutilizable de RC: `coverage-badge`, `coverage-pilot` (lcov + Cobertura + HTML), `playwright-evidence` (HTML + JUnit cuando existe) y `fhir-validation`.
+- La evidencia backend sigue viviendo en el workflow separado `Django CI`, que publica `backend-coverage-xml`.
 
 ## Topología de runners vigente
 
@@ -163,6 +173,7 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 - `pnpm -w test:legacy` sigue existiendo por historia del repo, pero no sustituye la batería moderna bajo `tests/**`, `src/**/__tests__/**` y `src/security/__tests__/**`.
 - `pytest` sigue siendo la fuente de verdad para backend Django/DRF.
 - No elimines Jest o jobs existentes sin demostrar antes que su cobertura histórica ya quedó absorbida por Vitest o `pytest`.
+- Si se exige un gate de PR realmente bloqueante en GitHub, eso requiere branch protection fuera del repo para marcar como required checks al menos `CI` y `Django CI`; documentarlo no equivale a haberlo aplicado.
 
 ## Suites frontend sensibles recomendadas
 

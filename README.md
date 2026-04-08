@@ -239,6 +239,7 @@ La automatización usa Vitest como runner principal de frontend y `pytest` para 
 - Linter estricto: `pnpm -w lint:ci`
 - Runner principal JS: `pnpm test`
 - Suites pilot-grade sensibles con cobertura: `pnpm -w test:pilot:coverage`
+- Espejo local del gate JS de CI (incluye `test:e2e`): `pnpm -w quality:pilot:ci`
 - Runner secundario Vitest general: `pnpm -w test:unit`
 - Runner legacy de compatibilidad: `pnpm -w test:legacy`
 - Runner backend: `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
@@ -249,7 +250,9 @@ En local, `pnpm -w test:pilot:coverage` deja `lcov.info` bajo `coverage/pilot-gr
 
 ### CI y resiliencia del registry
 
-El workflow `CI` usa Node 20 y pnpm 10. En el estado actual del repo, el job de Node es bloqueante: instala dependencias, ejecuta `pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage:ci`, instala Playwright, corre `pnpm -w test:e2e` y valida bundles con `pnpm -w validate:fhir`.
+El workflow `CI` usa `.nvmrc` (`20.17.0`) y `packageManager=pnpm@10.17.1` para fijar el toolchain del gate JS. En el estado actual del repo, el job de Node es bloqueante: instala dependencias con `pnpm install --frozen-lockfile`, ejecuta `pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage:ci`, instala Playwright, corre `pnpm -w test:e2e` y valida bundles con `pnpm -w validate:fhir`.
+
+La evidencia de RC publicada por `CI` incluye `coverage-badge`, `coverage-pilot`, `playwright-evidence` y `fhir-validation`. La evidencia backend (`backend-coverage-xml`) sigue en el workflow separado `Django CI`.
 
 ### Feature flags avanzadas por unidad (HANDOVER_UNITS_JSON)
 
@@ -342,10 +345,11 @@ El estado consolidado de gobierno técnico y documental está en [`docs/MASTER_G
 
 Para publicar una RC nueva sin deriva documental:
 
-1. Ejecuta los cheques (`pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm test`, `pnpm -w validate:fhir`).
+1. Ejecuta los cheques del gate sensible (`pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage`, `pnpm -w test:e2e`, `pnpm -w validate:fhir`, `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`).
 2. Genera los binarios siguiendo la guía de despliegue.
 3. Crea el tag que realmente vaya a publicarse y actualiza `CHANGELOG.md`, `RELEASE_NOTES.md` y el registro maestro en el mismo corte.
-4. Trata el tag Git + `RELEASE_NOTES.md` como fuente de verdad del release piloto; no asumas que `package.json` o `app.config.ts` reflejan ese identificador.
+4. Trata el tag Git + `RELEASE_NOTES.md` + los artefactos CI del corte como fuente de verdad del release piloto; no asumas que `package.json` o `app.config.ts` reflejan ese identificador.
+5. Si quieres bloquear merges o tags sin ese gate, configura branch protection / required checks en GitHub como follow-up manual; este repo solo puede documentarlo.
 
 ## Para desarrolladores
 Explora la documentación técnica para conocer la arquitectura, configuración y flujos clave antes de contribuir al proyecto.

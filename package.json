@@ -1,6 +1,7 @@
 {
   "name": "handover-pro",
   "version": "1.0.0",
+  "packageManager": "pnpm@10.17.1",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -18,7 +19,7 @@
     "test:unit:cov": "vitest run --coverage",
     "test:pilot": "vitest run --config vitest.pilot.config.ts",
     "test:pilot:coverage": "vitest run --config vitest.pilot.config.ts --coverage",
-    "test:pilot:coverage:ci": "vitest run --config vitest.pilot.config.ts --reporter=verbose --coverage --coverage.reporter=lcov --coverage.reporter=cobertura --coverage.reportsDirectory=coverage",
+    "test:pilot:coverage:ci": "vitest run --config vitest.pilot.config.ts --reporter=verbose --coverage --coverage.reporter=html --coverage.reporter=lcov --coverage.reporter=cobertura --coverage.reportsDirectory=coverage",
     "test:smoke:forms": "vitest run src/screens/__tests__/handover.sections.spec.tsx src/screens/__tests__/handover.visibility.spec.ts src/screens/handover/__tests__/submission.spec.ts tests/screens/HandoverForm.draft.spec.tsx tests/screens/HandoverForm.network-errors.spec.tsx tests/screens/HandoverForm.patientHeader.spec.tsx tests/screens/HandoverForm.sbar.spec.tsx",
     "precommit": "pnpm typecheck && pnpm lint && pnpm test",
     "validate:fhir": "tsx scripts/validate-fhir.ts",
@@ -26,6 +27,7 @@
     "gate:any-sensitive": "tsx scripts/check-sensitive-anys.ts",
     "gate:any-sensitive:write": "tsx scripts/check-sensitive-anys.ts --write-baseline",
     "quality:pilot": "pnpm typecheck && pnpm lint:ci && pnpm gate:any-sensitive && pnpm test:pilot:coverage && pnpm validate:fhir",
+    "quality:pilot:ci": "pnpm -w typecheck && pnpm -w lint:ci && pnpm -w gate:any-sensitive && pnpm -w test:pilot:coverage:ci && pnpm -w test:e2e && pnpm -w validate:fhir",
     "test:e2e": "playwright test",
     "lint:ci": "eslint . --max-warnings=0"
   },
@@ -94,7 +96,7 @@
     "@types/node": "^20.14.10",
     "@types/react": "~19.1.10",
     "@types/react-test-renderer": "^19.1.0",
-    "@vitest/coverage-v8": "2.1.4",
+    "@vitest/coverage-v8": "2.1.9",
     "babel-plugin-module-resolver": "^5.0.2",
     "babel-preset-expo": "^54.0.10",
     "eslint": "^9.39.1",
@@ -107,7 +109,7 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.0.0",
     "typescript": "5.9.3",
-    "vitest": "^2.1.4"
+    "vitest": "2.1.9"
   },
   "pnpm": {
     "overrides": {}
