@@ -196,8 +196,8 @@ importers:
         specifier: ^19.1.0
         version: 19.1.0
       '@vitest/coverage-v8':
-        specifier: 2.1.4
-        version: 2.1.4(vitest@2.1.9(@types/node@20.19.25)(jsdom@27.2.0)(lightningcss@1.30.2)(terser@5.44.1))
+        specifier: 2.1.9
+        version: 2.1.9(vitest@2.1.9(@types/node@20.19.25)(jsdom@27.2.0)(lightningcss@1.30.2)(terser@5.44.1))
       babel-plugin-module-resolver:
         specifier: ^5.0.2
         version: 5.0.2
@@ -235,7 +235,7 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^2.1.4
+        specifier: 2.1.9
         version: 2.1.9(@types/node@20.19.25)(jsdom@27.2.0)(lightningcss@1.30.2)(terser@5.44.1)
 
 packages:
@@ -2130,11 +2130,11 @@ packages:
     peerDependencies:
       '@urql/core': ^5.0.0
 
-  '@vitest/coverage-v8@2.1.4':
-    resolution: {integrity: sha512-FPKQuJfR6VTfcNMcGpqInmtJuVXFSCd9HQltYncfR01AzXhLucMEtQ5SinPdZxsT5x/5BK7I5qFJ5/ApGCmyTQ==}
+  '@vitest/coverage-v8@2.1.9':
+    resolution: {integrity: sha512-Z2cOr0ksM00MpEfyVE8KXIYPEcBFxdbLSs56L8PO0QQMxt/6bDj45uQfxoc96v05KW3clk7vvgP0qfDit9DmfQ==}
     peerDependencies:
-      '@vitest/browser': 2.1.4
-      vitest: 2.1.4
+      '@vitest/browser': 2.1.9
+      vitest: 2.1.9
     peerDependenciesMeta:
       '@vitest/browser':
         optional: true
@@ -8620,7 +8620,7 @@ snapshots:
       '@urql/core': 5.2.0
       wonka: 6.3.5
 
-  '@vitest/coverage-v8@2.1.4(vitest@2.1.9(@types/node@20.19.25)(jsdom@27.2.0)(lightningcss@1.30.2)(terser@5.44.1))':
+  '@vitest/coverage-v8@2.1.9(vitest@2.1.9(@types/node@20.19.25)(jsdom@27.2.0)(lightningcss@1.30.2)(terser@5.44.1))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@bcoe/v8-coverage': 0.2.3

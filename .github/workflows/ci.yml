@@ -14,11 +14,11 @@ jobs:
 
       - uses: pnpm/action-setup@v2
         with:
-          version: 10
+          version: 10.17.1
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
 
       - uses: actions/setup-python@v5
@@ -41,6 +41,13 @@ jobs:
       # para publicar artefactos lcov + Cobertura sin abrir otro runner JS.
       - name: Primary JS test runner (pilot-grade, with coverage)
         run: pnpm -w test:pilot:coverage:ci
+
+      - name: Verify pilot coverage evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f coverage/lcov.info
+          test -f coverage/cobertura-coverage.xml
 
       # Python deps para genbadge (FIX: pin setuptools para recuperar pkg_resources)
       - name: Install python deps for genbadge
@@ -74,6 +81,26 @@ jobs:
         with:
           name: coverage-badge
           path: coverage-badge.svg
+          retention-days: 7
+
+      - name: Publish pilot coverage summary
+        shell: bash
+        run: |
+          {
+            echo "## Pilot-grade JS coverage"
+            echo
+            python -c 'import xml.etree.ElementTree as ET; rate=float(ET.parse("coverage/cobertura-coverage.xml").getroot().get("line-rate", "0"))*100; print(f"- Line coverage: {rate:.2f}%")'
+            echo "- Evidence: coverage/lcov.info, coverage/cobertura-coverage.xml, coverage HTML report"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload pilot coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-pilot
+          path: coverage
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
@@ -81,12 +108,42 @@ jobs:
       - name: End-to-end tests
         run: pnpm -w test:e2e
 
-      - name: Validate representative FHIR bundles
-        run: pnpm -w validate:fhir
-
-      - name: Upload pilot coverage
+      - name: Upload Playwright evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-pilot
-          path: coverage/lcov.info
+          name: playwright-evidence
+          path: |
+            playwright-report
+            test-results/playwright
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Validate representative FHIR bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          pnpm -w validate:fhir | tee artifacts/fhir-validation.txt
+
+      - name: Upload FHIR validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fhir-validation
+          path: artifacts/fhir-validation.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish pilot gate summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Pilot gate evidence"
+            echo
+            echo "- JS gate commands: pnpm -w typecheck, pnpm -w lint:ci, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
+            echo "- Uploaded artifacts: coverage-badge, coverage-pilot, playwright-evidence, fhir-validation"
+            echo "- Backend pytest and backend coverage remain in the separate Django CI workflow by design."
+          } >> "$GITHUB_STEP_SUMMARY"
 

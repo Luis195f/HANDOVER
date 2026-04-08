@@ -37,7 +37,9 @@ Antes de generar artefactos o desplegar en piloto:
 git diff --check
 pnpm -w typecheck
 pnpm -w lint:ci
-pnpm test
+pnpm -w gate:any-sensitive
+pnpm -w test:pilot:coverage
+pnpm -w test:e2e
 pnpm -w validate:fhir
 pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
 ```
@@ -49,6 +51,8 @@ Wrapper reproducible del repo:
 ```powershell
 pwsh -File scripts/release-rehearsal.ps1 -Stage preflight
 ```
+
+Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:ci`, `gate:any-sensitive`, cobertura pilot-grade, `test:e2e` y `validate:fhir`) antes de pasar a `pytest` y `docker compose config`.
 
 ## Variables de entorno y frontera de secretos
 
@@ -195,8 +199,10 @@ Runbooks nuevos del repo:
 ## Política simple de release piloto
 
 - La fuente de verdad del identificador de release piloto es el tag Git más [`RELEASE_NOTES.md`](../RELEASE_NOTES.md).
+- La fuente de verdad de evidencia técnica para un RC es: tag Git verificable + `RELEASE_NOTES.md` + artefactos CI versionados por ejecución (`coverage-pilot`, `playwright-evidence`, `fhir-validation`, `backend-coverage-xml`).
 - `package.json` y `app.config.ts` conservan hoy `1.0.0` como versión de build local; no los trates como mecanismo automático de versionado de release.
 - No declares “deploy listo” para full stack mientras el backend siga fuera de `docker-compose.yml`.
 - No reactives publicación a PyPI hasta que exista un contrato de paquete Python real en el repo.
 - El ensayo de release/piloto del repo es `scratch-first`: valida build, smoke, backup/restore y empaquetado; no sustituye rollback full-stack automatizado del backend porque esa topología no existe en este árbol.
 - Los backups con `BACKUP_REQUIRE_ENCRYPTION=true` ahora fallan cerrado: si falta passphrase o falla el cifrado, no debe quedar un artefacto persistente en claro en `BACKUP_DIR`.
+- Si se quiere que GitHub bloquee merges o tags sin ese gate, la configuracion de branch protection / required checks sigue siendo un follow-up manual fuera del repo.
