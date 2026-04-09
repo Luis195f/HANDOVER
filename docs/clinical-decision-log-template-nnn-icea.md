@@ -1,6 +1,6 @@
 # Registro operativo de decisiones clinicas de IA (NNN + ICEA+)
 
-> Estado real del repo: HANDOVER no persiste todavia un log dedicado de `accepted/rejected/modified` para sugerencias NNN o ICEA+. Este documento es una plantilla operativa para el piloto, anclada a IDs tecnicos que el repo si genera.
+> Estado real del repo: HANDOVER ya persiste eventos dedicados de decision clinica para superficies IA cableadas en SBAR/NIC/NOC mediante `ClinicalDecisionEvent` y `/api/ai/clinical-decision`, pero todavia no persiste un feedback clinico dedicado para salidas ICEA+ ni cubre automaticamente cualquier sugerencia futura fuera de esas superficies. Esta plantilla sigue siendo util como complemento operativo del piloto y para correlacion con IDs tecnicos del repo.
 
 ## 1) Que si existe hoy para correlacion
 
@@ -16,15 +16,15 @@
 
 ## 2) Que no existe hoy
 
-- No hay modelo backend dedicado a "decision clinica de sugerencia".
-- La UI NNN no guarda automaticamente si una sugerencia NIC/NOC/NANDA fue aceptada, rechazada o modificada.
-- ICEA+ expone estado y resumen, pero no una entidad de feedback clinico persistente en este repo.
+- No existe todavia una entidad dedicada de feedback clinico persistente para salidas ICEA+.
+- La cobertura automatizada del decision log sigue limitada a superficies IA ya cableadas (SBAR/NIC/NOC), no a cualquier sugerencia futura o flujo operativo externo.
+- Esta plantilla sigue siendo necesaria cuando el piloto requiera conciliacion manual fuera de esas superficies o correlacion transversal con procesos institucionales.
 
 Por tanto, para un piloto:
 
-1. el registro debe mantenerse fuera de banda o en una exportacion controlada;
+1. el registro puede apoyarse en el log dedicado del repo para SBAR/NIC/NOC, pero debe mantenerse fuera de banda o en una exportacion controlada cuando el caso sea ICEA+ o una superficie no cableada;
 2. cada fila debe enlazarse a `request_id` y, si aplica, `bridge_request_id`;
-3. no debe afirmarse que este log ya esta automatizado por HANDOVER.
+3. no debe afirmarse que toda la gobernanza NNN + ICEA+ ya esta automatizada de punta a punta por HANDOVER.
 
 ## 3) Estructura minima recomendada
 
