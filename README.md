@@ -382,10 +382,12 @@ Que no hace HANDOVER:
 - no permite llamadas directas desde la app movil a ICEA+.
 
 Flags principales:
-- Backend: `ENABLE_ICEA_BRIDGE`, `ENABLE_ICEA_IMMEDIATE_SCORING`, `ENABLE_ICEA_ENRICHED_SCORING=false` por defecto, `ICEA_BRIDGE_MODEL_ID` obligatorio para score real, `ICEA_BRIDGE_SCORE_PATH=/api/v1/icea-plus/score/`, `ICEA_BRIDGE_STATUS_PATH` opcional
-- Frontend: `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE`, `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING`, `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING=false` por defecto
+- Backend: `ENABLE_ICEA_BRIDGE`, `ENABLE_ICEA_IMMEDIATE_SCORING=false` por defecto, `ENABLE_ICEA_ENRICHED_SCORING=false` por defecto, `ENABLE_ICEA_PATIENT_RISK=false`, `ENABLE_ICEA_CAUSAL_SUMMARY=false`, `ICEA_BRIDGE_MODEL_ID` obligatorio para score real, `ICEA_BRIDGE_SCORE_PATH=/api/v1/icea-plus/score/`, `ICEA_BRIDGE_STATUS_PATH` opcional
+- Frontend: `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE`, `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING=false` por defecto, `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING=false` por defecto, `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK=false`, `EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY=false`
 
 Mientras el upstream ICEA+ no publique un endpoint real de status para score, HANDOVER no inventa polling: el estado local visible pasa a ser la fuente operativa y solo se intenta refresh remoto cuando el cliente pide `refresh=true` y existe `ICEA_BRIDGE_STATUS_PATH` configurado.
+
+En postura de piloto prudente, HANDOVER conserva la trazabilidad tecnica del bridge pero suprime cualquier salida ICEA paciente-a-paciente en la UI operativa, incluido score individual, resumen causal y soporte bedside visible.
 
 Documentacion relacionada:
 - [Bridge analitico ICEA+](docs/icea-bridge.md)

@@ -76,7 +76,6 @@ import {
   type SnomedCoding,
 } from '@/src/data/snomed-dict';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
-import { useIceaPatientRisk } from '@/src/hooks/useIceaPatientRisk';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
 import { zHandover, type HandoverValues } from '@/src/validation/schemas';
@@ -1632,21 +1631,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     [patientSummary, patientSummaryParam],
   );
   const bannerLoading = loadingPatient && !patientSummaryParam;
-  const showIceaPatientRisk =
-    isOn('ENABLE_ICEA_PATIENT_RISK') &&
-    Boolean(trimmedPatientId) &&
-    isPilotFeatureEnabled('icea_patient_risk', {
-      unitId: effectivePilotUnitId,
-      roles: pilotRoles,
-    });
-  const showIceaCausalSummary = isOn('ENABLE_ICEA_CAUSAL_SUMMARY');
-  const { summary: iceaPatientRisk, loading: loadingIceaPatientRisk, error: iceaPatientRiskError } = useIceaPatientRisk(
-    trimmedPatientId,
-    {
-      unitId: unitIdParam ?? selectedUnitId ?? undefined,
-      enabled: showIceaPatientRisk,
-    },
-  );
   // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
@@ -2238,11 +2222,6 @@ export default function HandoverForm({ navigation, route }: Props) {
             bannerSummary={bannerSummary}
             bannerLoading={bannerLoading}
             patientSummaryError={patientSummaryError}
-            iceaPatientRisk={iceaPatientRisk}
-            loadingIceaPatientRisk={loadingIceaPatientRisk}
-            iceaPatientRiskError={iceaPatientRiskError?.message ?? null}
-            showIceaPatientRisk={showIceaPatientRisk}
-            showIceaCausalSummary={showIceaCausalSummary}
           />
 
           <HandoverContextSections

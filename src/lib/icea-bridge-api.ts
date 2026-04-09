@@ -61,12 +61,20 @@ function normalizeBridgeRequest(payload: Partial<IceaBridgeRequest> | null | und
     provisional: Boolean(payload?.provisional),
     insufficientEvidence: Boolean(payload?.insufficientEvidence),
     scoreSummary: payload?.scoreSummary && typeof payload.scoreSummary === 'object' ? payload.scoreSummary : null,
+    scoreSummaryRedacted: typeof payload?.scoreSummaryRedacted === 'boolean' ? payload.scoreSummaryRedacted : false,
     warnings: normalizeWarnings(payload?.warnings),
     attempts: typeof payload?.attempts === 'number' ? payload.attempts : 0,
     remoteRefs: normalizeRecord(payload?.remoteRefs),
     lastError: typeof payload?.lastError === 'string' ? payload.lastError : null,
     lastHttpStatus: typeof payload?.lastHttpStatus === 'number' ? payload.lastHttpStatus : null,
     source: typeof payload?.source === 'string' ? payload.source : 'HANDOVER',
+    displayPolicy: typeof payload?.displayPolicy === 'string' ? payload.displayPolicy : null,
+    staffIdentifiersRedacted:
+      typeof payload?.staffIdentifiersRedacted === 'boolean' ? payload.staffIdentifiersRedacted : true,
+    individualScoreVisible:
+      typeof payload?.individualScoreVisible === 'boolean' ? payload.individualScoreVisible : false,
+    causalSummaryVisible:
+      typeof payload?.causalSummaryVisible === 'boolean' ? payload.causalSummaryVisible : false,
     sentAt: typeof payload?.sentAt === 'string' ? payload.sentAt : null,
     receivedAt: typeof payload?.receivedAt === 'string' ? payload.receivedAt : null,
     createdAt: typeof payload?.createdAt === 'string' ? payload.createdAt : '',
@@ -82,8 +90,16 @@ function normalizeBridgeSummary(payload: Partial<IceaBridgeSummary> | null | und
     provisional: Boolean(payload?.provisional),
     insufficientEvidence: Boolean(payload?.insufficientEvidence),
     scoreSummary: payload?.scoreSummary && typeof payload.scoreSummary === 'object' ? payload.scoreSummary : null,
+    scoreSummaryRedacted: typeof payload?.scoreSummaryRedacted === 'boolean' ? payload.scoreSummaryRedacted : false,
     warnings: normalizeWarnings(payload?.warnings),
     formulaVersion: typeof payload?.formulaVersion === 'string' ? payload.formulaVersion : null,
+    displayPolicy: typeof payload?.displayPolicy === 'string' ? payload.displayPolicy : null,
+    staffIdentifiersRedacted:
+      typeof payload?.staffIdentifiersRedacted === 'boolean' ? payload.staffIdentifiersRedacted : true,
+    individualScoreVisible:
+      typeof payload?.individualScoreVisible === 'boolean' ? payload.individualScoreVisible : false,
+    causalSummaryVisible:
+      typeof payload?.causalSummaryVisible === 'boolean' ? payload.causalSummaryVisible : false,
     lastUpdated: typeof payload?.lastUpdated === 'string' ? payload.lastUpdated : '',
     source: typeof payload?.source === 'string' ? payload.source : 'HANDOVER',
   };
@@ -108,6 +124,11 @@ function normalizePatientRiskProvenance(value: unknown): IceaPatientRiskProvenan
     bridgeStatus: payload.bridgeStatus ?? null,
     localStatusIsAuthoritative:
       typeof payload.localStatusIsAuthoritative === 'boolean' ? payload.localStatusIsAuthoritative : true,
+    displayPolicy: typeof payload.displayPolicy === 'string' ? payload.displayPolicy : null,
+    individualScoreVisible:
+      typeof payload.individualScoreVisible === 'boolean' ? payload.individualScoreVisible : false,
+    causalSummaryVisible:
+      typeof payload.causalSummaryVisible === 'boolean' ? payload.causalSummaryVisible : false,
   };
 }
 

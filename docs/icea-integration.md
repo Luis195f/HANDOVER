@@ -16,7 +16,7 @@ Tras un `POST /api/fhir/transaction` exitoso, HANDOVER:
 2. persiste el Bundle local para ETL;
 3. crea/actualiza snapshot de pipeline;
 4. encola un webhook tecnico ICEA+;
-5. si el bridge esta habilitado, construye y envia el payload analitico.
+5. si el bridge esta habilitado, construye y envia el payload analitico versionado sin identificadores nominales de profesional.
 
 Si ICEA+ falla, el guardado clinico no se revierte.
 
@@ -114,6 +114,7 @@ Evidencia:
 - el score puede ser provisional;
 - el envelope contextual separa observado, derivado y pendiente de fuente hospitalaria futura;
 - la proyeccion contextual sirve para ajuste minimo por case-mix, vigilancia y continuidad, no para afirmar causalidad;
+- el contrato del bridge redacciona identificadores nominales de profesional y mantiene solo conteos/huellas tecnicas para shadow mode serio;
 - si no existe `ICEA_BRIDGE_STATUS_PATH`, el estado local visible pasa a ser la fuente autoritativa;
 - el bridge no bloquea el cierre clinico.
 
@@ -145,8 +146,9 @@ Lo que no debe afirmarse:
 
 - solo funciona con `ENABLE_ICEA_BRIDGE=true` y `ENABLE_ICEA_PATIENT_RISK=true`;
 - restringe enfermeria por `unitId`;
-- devuelve mensajes prudentes de "no sustituye juicio clinico";
-- puede exponer `provisional`, `complete`, `insufficient_evidence`, `failed`, `stale`.
+- devuelve solo estado prudente, warnings y trazabilidad tecnica; no expone score numerico individual ni resumen causal en la UI operativa;
+- el endpoint puede seguir existiendo como costura backend gobernada, pero en `shadow` prudente la app clinica no debe renderizar ninguna salida ICEA paciente-a-paciente;
+- puede exponer `provisional`, `complete`, `insufficient_evidence`, `failed`, `stale` solo para trazabilidad tecnica o superficies agregadas/admin autorizadas.
 
 Evidencia:
 
@@ -157,7 +159,7 @@ Evidencia:
 Limite clinico actual:
 
 - no existe writeback FHIR nuevo ni reconciliacion downstream cerrada del resultado ICEA;
-- el retorno bedside sigue siendo soporte operativo local de HANDOVER.
+- la UI clinica operativa mantiene ICEA fuera del recorrido paciente-a-paciente y deja la visibilidad humana en superficies agregadas/admin cuando aplique.
 
 ## 8) Criterios piloto Go/No-Go especificos de ICEA+
 
@@ -165,6 +167,7 @@ Limite clinico actual:
 
 - `ICEA_WEBHOOK_*` validado para el entorno;
 - `ICEA_API_*` y `ICEA_BRIDGE_MODEL_ID` validos si se habilita bridge;
+- `ENABLE_ICEA_IMMEDIATE_SCORING=false`, `ENABLE_ICEA_ENRICHED_SCORING=false`, `ENABLE_ICEA_PATIENT_RISK=false` y `ENABLE_ICEA_CAUSAL_SUMMARY=false` por defecto hasta aprobacion explicita de gobernanza;
 - `HANDOVER_PILOT_CONTROL_JSON` validado y con `explicitShadowModeForIcea=true` mientras el piloto siga en fase prudente;
 - roles/scopes verificados en `/api/icea/*` y ETL;
 - mensajes prudentes visibles en superficies clinicas activas;
@@ -176,6 +179,7 @@ Limite clinico actual:
 - bridge activado con `ICEA_BRIDGE_MODEL_ID` vacio o invalido;
 - `patient-risk` habilitado fuera del scope definido por el control plane o fuera de `shadow` sin umbral de dato aceptado;
 - `patient-risk` habilitado sin control de unidad;
+- cualquier salida ICEA paciente-a-paciente visible en Handover o PatientList durante shadow mode prudente;
 - documentacion que trate el score como diagnostico autonomo o resultado clinico definitivo.
 
 ## 9) Riesgos residuales aceptados
@@ -183,13 +187,22 @@ Limite clinico actual:
 | Riesgo | Delimitacion actual |
 |---|---|
 | Estado remoto no consultable para score | cuando no hay `ICEA_BRIDGE_STATUS_PATH`, el estado local es autoritativo |
-| Bridge provisional interpretado como definitivo | el soporte prudente depende tambien del entrenamiento operativo del piloto |
+| Bridge provisional interpretado como definitivo | el soporte prudente depende tambien del entrenamiento operativo del piloto y de mantener suprimido el score individual visible |
 | Envelope contextual interpretado como causalidad | el contrato explicita observado vs derivado y mantiene campos pendientes para fuentes hospitalarias futuras |
 | Anti-replay no forzado | queda a configuracion del entorno webhook |
 | Cambio de estado del piloto sin auditoria propia en repo | el control plane actual es read-only por config/env y debe apoyarse en procedimiento institucional externo |
 | Dependencia del upstream ICEA+ | disponibilidad, semantica final y deduplicacion remota no viven en este repo |
 
 Este documento refleja la integracion real y sus limites. No debe reescribirse como si ICEA+ estuviera clinicamente cerrado de punta a punta dentro de HANDOVER.
+
+## 11) Follow-up manual de gobernanza fuera del repo
+
+Antes de levantar cualquier excepcion a shadow mode operativo, la institucion debe dejar por escrito:
+
+- quien aprueba activar `ENABLE_ICEA_IMMEDIATE_SCORING`, `ENABLE_ICEA_PATIENT_RISK` o cualquier surface individual;
+- que comite valida el uso permitido y prohibido, incluyendo veto explicito a ranking individual, uso punitivo o causalidad cerrada;
+- que metrica/umbral justifica salir de score suprimido a cualquier lectura humana adicional;
+- como se audita el cambio de flags y el rollback operativo, dado que el control plane del repo sigue siendo read-only por config/env.
 
 ## 10) Observabilidad operativa real HANDOVER ↔ ICEA+
 

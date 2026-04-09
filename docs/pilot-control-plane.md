@@ -149,7 +149,7 @@ Las unidades elegibles dependen de `enabledUnits` global y/o de cada feature. Si
 Separacion aplicada en codigo:
 
 - `admin_analytics` y el endpoint de resumen del piloto solo se exponen a `supervisor` o `admin`;
-- `patient-risk` puede habilitarse para `nurse`, pero sigue filtrado por unidad;
+- el endpoint `patient-risk` puede seguir existiendo bajo gobernanza, pero shadow prudente no debe volverlo visible en la UI clinica de `nurse`;
 - acciones administrativas sensibles continúan restringidas a `admin` donde ya lo estaba el repo.
 
 ### Entornos

@@ -4,7 +4,6 @@ import { Button, Pressable, Text, View, type TextStyle, type ViewStyle } from 'r
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import type { HandoverProfileRuntime } from '@/src/lib/profile-runtime';
 import type { SyncSnapshot } from '@/src/lib/sync';
-import type { IceaPatientRiskSummary } from '@/src/types/icea';
 import { t } from '@/src/i18n';
 
 import { PatientBanner } from '../components/PatientBanner';
@@ -36,11 +35,6 @@ type Props = {
   bannerSummary: PatientSummary | null;
   bannerLoading: boolean;
   patientSummaryError?: string | null;
-  iceaPatientRisk?: IceaPatientRiskSummary | null;
-  loadingIceaPatientRisk?: boolean;
-  iceaPatientRiskError?: string | null;
-  showIceaPatientRisk: boolean;
-  showIceaCausalSummary: boolean;
 };
 
 const resolveSyncNoticeCopy = (
@@ -95,11 +89,6 @@ export function HandoverOverview({
   bannerSummary,
   bannerLoading,
   patientSummaryError,
-  iceaPatientRisk,
-  loadingIceaPatientRisk = false,
-  iceaPatientRiskError,
-  showIceaPatientRisk,
-  showIceaCausalSummary,
 }: Props) {
   const syncNoticeCopy = resolveSyncNoticeCopy(handoverSyncStatus, handoverSyncError);
   const syncNoticeColors = resolveSyncNoticeColors(handoverSyncStatus, colors);
@@ -110,11 +99,6 @@ export function HandoverOverview({
         summary={bannerSummary}
         loading={bannerLoading}
         error={patientSummaryError}
-        iceaRisk={iceaPatientRisk}
-        iceaRiskLoading={loadingIceaPatientRisk}
-        iceaRiskError={iceaPatientRiskError ?? null}
-        showIceaRisk={showIceaPatientRisk}
-        showIceaCausalSummary={showIceaCausalSummary}
       />
       {handoverSyncStatus !== 'idle' ? (
         <View
