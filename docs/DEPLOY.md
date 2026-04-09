@@ -63,8 +63,8 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 - `EXPO_PUBLIC_API_BASE_URL`
 - `EXPO_PUBLIC_FHIR_BASE_URL`
 - `EXPO_PUBLIC_ALLOWED_UNITS`
-- `EXPO_PUBLIC_ALLOW_ALL_UNITS`
-- `EXPO_PUBLIC_BYPASS_SCOPE`
+- `EXPO_PUBLIC_ALLOW_ALL_UNITS` (legacy no-op en el runtime actual)
+- `EXPO_PUBLIC_BYPASS_SCOPE` (legacy no-op; no habilita bypass RBAC)
 - `EXPO_PUBLIC_STORAGE_NAMESPACE`
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`
 - `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`

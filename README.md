@@ -66,8 +66,8 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
      - `EXPO_PUBLIC_OIDC_SCOPE` (por ejemplo `openid profile email offline_access` para refresh tokens).
      - El flujo se resuelve en `src/security/OAuthService.ts` y se integra en `src/security/auth.tsx`; las guardias RBAC viven en `src/security/acl.ts`.
     - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
-    - `EXPO_PUBLIC_ALLOWED_UNITS` y `EXPO_PUBLIC_ALLOW_ALL_UNITS` filtran el acceso a unidades clínicas específicas.
-    - `EXPO_PUBLIC_BYPASS_SCOPE` habilita cuentas de soporte que omiten filtros RBAC en situaciones operativas.
+    - `EXPO_PUBLIC_ALLOWED_UNITS` restringe el acceso del cliente a unidades clínicas explícitas.
+    - `EXPO_PUBLIC_ALLOW_ALL_UNITS` y `EXPO_PUBLIC_BYPASS_SCOPE` quedan como flags legacy de compatibilidad/configuración, pero no abren bypass RBAC ni acceso total en el runtime actual; `src/security/acl.ts` y sus tests fallan en cerrado.
     - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend Django/DRF.
       - `"off"` (por defecto): el backend reenviará los Bundles sin validarlos.
       - `"remote"`: se invocará `$validate` contra el servidor FHIR (`FHIR_BASE/Bundle/$validate`) antes de reenviar; si se detectan errores `error`/`fatal` se responderá `422` con detalles.
