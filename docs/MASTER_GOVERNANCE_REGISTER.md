@@ -103,7 +103,7 @@ Estados usados en este registro:
 | --- | --- | --- | --- |
 | Catálogos NNN completos | `provisional` | Licencia y datasets completos fuera del repo | `README.md`, `docs/fhir-and-interoperability.md`, `docs/qa-mdr-plan-nnn-icea.md` |
 | Bridge ICEA enriquecido y status remoto | `provisional` | `ICEA_BRIDGE_MODEL_ID`, `ICEA_BRIDGE_STATUS_PATH` y disponibilidad upstream | `docs/icea-integration.md`, `backend/api/icea_bridge_service.py` |
-| Bedside `patient-risk` | `pilot` | Flags de despliegue y gobierno clínico local | `docs/icea-integration.md`, `backend/api/views_icea_bridge.py`, `backend/api/icea_clinical_feedback.py` |
+| `patient-risk` backend gobernado sin UI bedside en shadow | `pilot` | Flags de despliegue y gobierno clínico local | `docs/icea-integration.md`, `backend/api/views_icea_bridge.py`, `backend/api/icea_clinical_feedback.py` |
 | Deploy backend full-stack automatizado | `pending` | El repo no trae `docker-compose` propio para Django | `docs/DEPLOY.md`, `Procfile` |
 | DR full-stack y rollback del backend fuera de staging web | `pending` | El repo solo cubre restore scratch-first y rollback documental de la web estática | `docs/backup-restore-drill.md`, `docs/release-rehearsal.md`, `Procfile` |
 | Cierre regulatorio MDR/QMS total | `pending` | Requiere evidencia externa, operación del piloto y revisión QMS formal | `docs/QMS_HANDOVER.md`, `docs/MDR_Anexo_II_HANDOVER.md`, `docs/qa-mdr-plan-nnn-icea.md` |

@@ -262,6 +262,11 @@ class IceaBridgeMapperTests(TestCase):
         self.assertEqual(payload['contextualSignal']['overlay_ids'], ['neuro'])
         self.assertEqual(payload['contextualSignal']['case_mix_envelope']['observed_fields']['pending_critical_task_count']['value'], 2.0)
         self.assertGreater(payload['contextualSignal']['case_mix_envelope']['baseline_complexity'], 0.0)
+        self.assertEqual(payload['governance']['displayPolicy'], 'shadow_aggregated_no_individual_score')
+        self.assertTrue(payload['governance']['staffIdentifiersRedacted'])
+        self.assertNotIn('nurseId', payload['context'])
+        self.assertNotIn('coSignerIds', payload['context'])
+        self.assertNotIn('primaryNurseId', payload['nursingExposure']['attribution'])
         self.assertIn(
             'nurse_to_patient_ratio',
             payload['contextualSignal']['case_mix_envelope']['pending_hospital_source_fields'],
@@ -337,6 +342,9 @@ class IceaBridgeMapperTests(TestCase):
         self.assertTrue(row['lineage']['contextual_signal_present'])
         self.assertEqual(row['lineage']['contextual_contract_version'], 'handover-icea-context-v1')
         self.assertEqual(row['lineage']['contextual_signal']['profile_id'], 'critical-care')
+        self.assertEqual(row['lineage']['display_policy'], 'shadow_aggregated_no_individual_score')
+        self.assertTrue(row['lineage']['staff_identifiers_redacted'])
+        self.assertNotIn('nurse_shares', row)
         self.assertEqual(row['lineage']['contextual_signal']['case_mix_envelope']['therapeutic_load'], payload['contextualSignal']['case_mix_envelope']['therapeutic_load'])
 
     def test_bridge_projection_remains_backward_compatible_without_contextual_signal(self):
@@ -425,7 +433,7 @@ class IceaBridgeServiceTests(TestCase):
     def test_bridge_settings_default_to_real_upstream_score_path_and_optional_status_refresh(self):
         settings = load_icea_bridge_settings()
 
-        self.assertTrue(settings.immediate_enabled)
+        self.assertFalse(settings.immediate_enabled)
         self.assertFalse(settings.enriched_enabled)
         self.assertEqual(settings.score_path, '/api/v1/icea-plus/score/')
         self.assertEqual(settings.status_path, '')
@@ -1300,8 +1308,17 @@ class IceaBridgeApiTests(TestCase):
             scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
             idempotency_key='req-bridge-001:immediate_provisional:abcd',
             payload_hash='abcd' * 16,
-            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            payload_json={
+                'contractVersion': 'handover-icea-bridge-v1',
+                'governance': {
+                    'displayPolicy': 'shadow_aggregated_no_individual_score',
+                    'staffIdentifiersRedacted': True,
+                    'individualScoreVisible': False,
+                    'causalSummaryVisible': False,
+                },
+            },
             status=IceaBridgeRequest.STATUS_PENDING,
+            score_summary_json={'score': 82.0},
             warnings_json=[{'code': 'insufficient_evidence', 'message': 'Not enough data'}],
             attempts=2,
             remote_refs_json={'jobId': 'job-bridge-001'},
@@ -1331,6 +1348,9 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.json()['bridgeRequest']['status'], 'pending')
         self.assertEqual(response.json()['bridgeRequest']['attempts'], 2)
         self.assertEqual(response.json()['bridgeRequest']['remoteRefs']['jobId'], 'job-bridge-001')
+        self.assertIsNone(response.json()['bridgeRequest']['scoreSummary'])
+        self.assertTrue(response.json()['bridgeRequest']['scoreSummaryRedacted'])
+        self.assertEqual(response.json()['bridgeRequest']['displayPolicy'], 'shadow_aggregated_no_individual_score')
         self.assertTrue(response.json()['summary']['provisional'])
 
     @patch('backend.api.views_icea_bridge.refresh_icea_bridge_request')
@@ -1362,6 +1382,8 @@ class IceaBridgeApiTests(TestCase):
         self.assertEqual(response.json()['results'][0]['handoverId'], 'bundle-bridge-001')
         self.assertEqual(response.json()['results'][0]['attempts'], 2)
         self.assertEqual(response.json()['results'][0]['remoteRefs']['jobId'], 'job-bridge-001')
+        self.assertIsNone(response.json()['results'][0]['scoreSummary'])
+        self.assertTrue(response.json()['results'][0]['scoreSummaryRedacted'])
 
     def test_query_view_accepts_handover_alias_filter(self):
         self._auth(roles=['supervisor'])
@@ -1685,6 +1707,7 @@ class IceaBridgeTransactionFlowTests(TestCase):
         self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_ACCEPTED)
         self.assertEqual(bridge_request.payload_json['contextualSignal']['contract_version'], 'handover-icea-context-v1')
         self.assertEqual(bridge_request.payload_json['contextualSignal']['profile_id'], 'critical-care')
+        self.assertEqual(bridge_request.payload_json['governance']['displayPolicy'], 'shadow_aggregated_no_individual_score')
 
     @patch.dict(
         os.environ,
@@ -1807,6 +1830,56 @@ class IceaBridgeTransactionFlowTests(TestCase):
         self.assertFalse(IceaBridgeRequest.objects.filter(request_id='req-bridge-no-go').exists())
         mock_bridge_request.assert_not_called()
 
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_API_BASE_URL': 'https://icea.example',
+            'ICEA_API_BEARER_TOKEN': 'svc-token',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+            'HANDOVER_PILOT_CONTROL_JSON': json.dumps(
+                {
+                    'explicitShadowModeForIcea': True,
+                    'features': {
+                        'icea_bridge': {'mode': 'shadow', 'enabledUnits': ['icu-a']},
+                        'icea_immediate_scoring': {'mode': 'shadow', 'enabledUnits': ['icu-a']},
+                    },
+                }
+            ),
+        },
+        clear=False,
+    )
+    @patch('backend.api.views._create_audit_event_for_transaction', autospec=True)
+    @patch('backend.api.icea_bridge_service.httpx.request')
+    @patch('backend.api.views._post_transaction_to_fhir')
+    def test_shadow_mode_keeps_transaction_200_and_bridge_non_blocking(
+        self,
+        mock_fhir_post,
+        mock_bridge_request,
+        _mock_audit,
+    ):
+        mock_fhir_post.return_value = build_fhir_response()
+        remote = Mock()
+        remote.status_code = 202
+        remote.text = '{"status":"accepted"}'
+        remote.headers = {'Content-Type': 'application/json'}
+        remote.json.return_value = {'status': 'accepted'}
+        mock_bridge_request.return_value = remote
+
+        response = self.client.post(
+            self.url,
+            data=build_bridge_bundle(),
+            format='json',
+            HTTP_IDEMPOTENCY_KEY='req-bridge-shadow',
+            HTTP_X_UNIT_ID='icu-a',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        bridge_request = IceaBridgeRequest.objects.get(request_id='req-bridge-shadow')
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_ACCEPTED)
+        self.assertEqual(bridge_request.payload_json['governance']['displayPolicy'], 'shadow_aggregated_no_individual_score')
+
 
 
 
@@ -1878,11 +1951,14 @@ class IceaPatientRiskApiTests(TestCase):
         self.assertEqual(response.json()['count'], 1)
         summary = response.json()['results'][0]
         self.assertEqual(summary['clinicalStatus'], 'provisional')
-        self.assertEqual(summary['score'], 82.0)
-        self.assertEqual(summary['confidence']['label'], 'high')
+        self.assertIsNone(summary['score'])
+        self.assertIsNone(summary['confidence'])
         self.assertEqual(summary['provenance']['formulaVersion'], 'icea_plus_v1')
-        self.assertEqual(summary['causalSummary']['summary'], 'Resumen causal prudente')
+        self.assertEqual(summary['provenance']['displayPolicy'], 'shadow_aggregated_no_individual_score')
+        self.assertFalse(summary['provenance']['individualScoreVisible'])
+        self.assertIsNone(summary['causalSummary'])
         self.assertIn('juicio clinico', summary['message'].lower())
+        self.assertIn('score individual', summary['message'].lower())
 
     @patch.dict(
         os.environ,

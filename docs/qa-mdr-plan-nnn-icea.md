@@ -16,7 +16,7 @@
   - webhook tecnico desacoplado con outbox local;
   - coordinacion de pipeline bajo `/api/icea/*`;
   - bridge analitico bajo `/api/icea/bridge/*`;
-  - resumen bedside prudente bajo `/api/icea/patient-risk` solo si las flags estan activas.
+  - costura backend gobernada bajo `/api/icea/patient-risk`, sin salida bedside visible en shadow prudente.
 
 No existe en el estado actual del repo una arquitectura paralela para NNN + ICEA+. Todo el soporte documental debe referenciar esta arquitectura Django-only.
 
@@ -41,7 +41,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 - ETL read con `client_credentials`, roles/scopes y `ETag`.
 - Pipeline status/dashboard via HANDOVER.
 - Bridge analitico ICEA+ con modos `immediate_provisional` y `enriched_followup`.
-- Resumen bedside prudente para `patient-risk`, con filtros por unidad y mensajes de "no sustituye juicio clinico".
+- `patient-risk` queda fuera de la UI clinica operativa en shadow prudente; cualquier uso humano debe ir a superficies agregadas/admin y no a soporte bedside paciente-a-paciente.
 - Metricas de timing por seccion (`sbar`, `vitals`, `diagnostics`, `treatments`) sin contenido clinico.
 
 ### Fuera de alcance o no cerrado en el repo
@@ -64,7 +64,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 | Webhook ICEA+ | `backend/api/icea.py`, `backend/api/icea_client.py` | `backend/api/tests/test_icea_webhook.py` | Soportado, anti-replay opcional |
 | Pipeline ICEA+ | `backend/api/icea_pipeline.py`, `backend/api/views_icea.py`, `backend/api/dashboard_summary.py` | `backend/api/tests/test_icea_pipeline_api.py`, `backend/api/tests/test_icea_dashboard_summary.py` | Soportado |
 | Bridge analitico | `backend/api/icea_payload_mapper.py`, `backend/api/icea_bridge_service.py`, `backend/api/views_icea_bridge.py` | `backend/api/tests/test_icea_bridge.py` | Soportado, con limites explicitos de configuracion/status |
-| Bedside patient risk | `backend/api/icea_clinical_feedback.py`, `backend/api/views_icea_bridge.py`, `src/lib/icea-bridge-api.ts` | `backend/api/tests/test_icea_bridge.py` | Soportado bajo flags |
+| Patient-risk backend gobernado (sin UI bedside en shadow) | `backend/api/icea_clinical_feedback.py`, `backend/api/views_icea_bridge.py`, `src/lib/icea-bridge-api.ts` | `backend/api/tests/test_icea_bridge.py` | Soportado bajo flags y oculto en UI clinica operativa |
 | Timing por seccion | `src/hooks/useHandoverTiming.ts`, `src/lib/handover-timing-submit.ts`, `backend/api/views.py::HandoverTimingMetricsView` | `backend/api/tests/test_handover_timing_metrics.py`, `backend/api/tests/test_icea_dashboard_summary.py` | Parcial: no calcula mediana/P90 ni time-to-complete total |
 
 ## 5) Criterios piloto Go/No-Go
@@ -79,7 +79,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
   - `ICEA_API_*` y `ICEA_BRIDGE_MODEL_ID` si se habilita bridge/patient-risk.
 - `GET /api/pilot-control/summary` coherente con el estado esperado de rollout y kill switches.
 - Capa `/api/icea/*` accesible solo via HANDOVER con roles/scopes esperados.
-- Resumen bedside, si se habilita, visible como soporte prudente y no como diagnostico autonomo.
+- Cualquier salida humana de ICEA en shadow prudente debe permanecer fuera de la UI clinica paciente-a-paciente y no actuar como diagnostico autonomo.
 - Checklist de ciberseguridad cerrado al menos sin hallazgos criticos abiertos.
 - Evidencia de que el cierre final devuelve `400` si falta firma clínica o si la firma criptográfica de transporte es inválida.
 
@@ -121,7 +121,7 @@ Cobertura real disponible:
 - fallo ICEA no revierte guardado clinico;
 - outbox con estados `queued/retry/delivered/failed`;
 - bridge con estados `queued/sent/accepted/pending/scored/failed/stale`;
-- resumen bedside prudente con filtros por rol/unidad.
+- costura backend gobernada sin resumen bedside visible en la UI clinica operativa.
 - control plane con modos `enabled/disabled/pilot/demo/shadow` y kill switches efectivos para analytics, insights y rollout por unidad.
 
 Limitacion:
@@ -162,7 +162,7 @@ Limitacion:
 | Riesgo residual | Delimitacion actual | Mitigacion disponible |
 |---|---|---|
 | Control plane sin write path auditable propio | El repo expone consulta efectiva del rollout, pero no registra desde UI cada cambio institucional de estado | usar `docs/pilot-control-plane.md`, `GET /api/pilot-control/summary` y acta operativa/QMS fuera del repo |
-| Interpretacion excesiva de ICEA+ | El bridge puede devolver resumen/provisional score, pero no existe writeback FHIR de un recurso clinico final ni una conciliacion downstream cerrada | copy prudente, flags, `patient-risk` con mensaje de "no sustituye juicio clinico", estado local autoritativo |
+| Interpretacion excesiva de ICEA+ | El bridge puede devolver resumen/provisional score, pero no existe writeback FHIR de un recurso clinico final ni una conciliacion downstream cerrada | copy prudente, flags, supresion de cualquier salida ICEA paciente-a-paciente en UI clinica y estado local autoritativo |
 | Uso de terminologia NNN sin licencia | El repo solo trae placeholders y no demuestra contrato de licencia | gate explicito, variables BYO-license, documentar licencia del operador |
 | Falta de log dedicado de decision clinica | No se persiste aun aceptacion/rechazo/modificacion de sugerencias | usar la plantilla `docs/clinical-decision-log-template-nnn-icea.md` como registro operativo separado |
 | Evidencia de rendimiento incompleta | Solo hay timing por seccion | completar baseline/post y percentiles fuera del repo antes del Go final |

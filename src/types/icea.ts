@@ -37,12 +37,17 @@ export interface IceaBridgeRequest {
   provisional: boolean;
   insufficientEvidence: boolean;
   scoreSummary?: Record<string, unknown> | null;
+  scoreSummaryRedacted?: boolean;
   warnings: IceaBridgeWarning[];
   attempts: number;
   remoteRefs: Record<string, unknown>;
   lastError?: string | null;
   lastHttpStatus?: number | null;
   source: string;
+  displayPolicy?: string | null;
+  staffIdentifiersRedacted?: boolean;
+  individualScoreVisible?: boolean;
+  causalSummaryVisible?: boolean;
   sentAt?: string | null;
   receivedAt?: string | null;
   createdAt: string;
@@ -56,8 +61,13 @@ export interface IceaBridgeSummary {
   provisional: boolean;
   insufficientEvidence: boolean;
   scoreSummary?: Record<string, unknown> | null;
+  scoreSummaryRedacted?: boolean;
   warnings: IceaBridgeWarning[];
   formulaVersion?: string | null;
+  displayPolicy?: string | null;
+  staffIdentifiersRedacted?: boolean;
+  individualScoreVisible?: boolean;
+  causalSummaryVisible?: boolean;
   lastUpdated: string;
   source: string;
 }
@@ -96,6 +106,9 @@ export interface IceaPatientRiskProvenance {
   formulaVersion?: string | null;
   bridgeStatus?: IceaBridgeStatus | null;
   localStatusIsAuthoritative: boolean;
+  displayPolicy?: string | null;
+  individualScoreVisible?: boolean;
+  causalSummaryVisible?: boolean;
 }
 
 export interface IceaPatientRiskCausalSummary {

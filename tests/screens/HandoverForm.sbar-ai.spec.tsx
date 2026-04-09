@@ -222,14 +222,6 @@ vi.mock('@/src/lib/ai-suggestions', () => ({ fetchInterventionsSuggestions: vi.f
 vi.mock('@/src/hooks/usePatientSummary', () => ({
   usePatientSummary: () => ({ loading: false, error: null, summary: { id: 'pat-1', name: 'Paciente' } }),
 }));
-vi.mock('@/src/hooks/useIceaPatientRisk', () => ({
-  useIceaPatientRisk: () => ({
-    data: null,
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
-}));
 vi.mock('@/src/lib/hooks/useVitalTrends', () => ({
   useVitalTrends: () => ({ loading: false, error: null, data: [] }),
 }));

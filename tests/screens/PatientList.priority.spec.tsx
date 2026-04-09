@@ -73,7 +73,7 @@ describe('PatientList deny-first authz seam', () => {
     });
   });
 
-  it('keeps patient-risk enabled for allowed all-units access only when the role is privileged', async () => {
+  it('keeps patient-risk disabled in operational patient lists even for privileged all-units access', async () => {
     const { ALL_UNITS_OPTION, getPatientListAccessState } = await import('@/src/screens/PatientList');
 
     const nurseState = getPatientListAccessState(
@@ -98,7 +98,7 @@ describe('PatientList deny-first authz seam', () => {
     expect(nurseState.canQueryPatients).toBe(true);
     expect(nurseState.canQueryIceaPatientRisk).toBe(false);
     expect(supervisorState.canQueryPatients).toBe(true);
-    expect(supervisorState.canQueryIceaPatientRisk).toBe(true);
+    expect(supervisorState.canQueryIceaPatientRisk).toBe(false);
   });
 
   it('derives queued patient sync status from the canonical offline queue', async () => {

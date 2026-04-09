@@ -7,7 +7,7 @@ HANDOVER construye y entrega un payload analitico trazable hacia ICEA+ **despues
 Principios aplicados:
 - clinica primero: un fallo de ICEA+ no revierte el guardado del handover;
 - backend unico: React Native solo consume el backend HANDOVER;
-- scoring honesto: `immediate_provisional` no implica conclusiones definitivas;
+- scoring honesto: `immediate_provisional` no implica conclusiones definitivas ni habilita score individual visible;
 - trazabilidad completa: request id, hash, contrato y estado quedan persistidos en HANDOVER.
 
 ## Flujo real
@@ -48,7 +48,10 @@ Contrato actual (`contractVersion=handover-icea-bridge-v1`):
     "windowEnd": "2026-03-08T15:00:00Z",
     "unitId": "icu-a",
     "teamId": null,
-    "nurseId": "nurse-1",
+    "primaryActorDocumented": true,
+    "documentedAuthorPresent": true,
+    "documentedCoSignerCount": 0,
+    "documentedActorCount": 1,
     "shift": "Manana"
   },
   "caseMix": {},
@@ -56,6 +59,12 @@ Contrato actual (`contractVersion=handover-icea-bridge-v1`):
   "qualitySignals": {},
   "uncertaintySignals": {},
   "provenance": {},
+  "governance": {
+    "displayPolicy": "shadow_aggregated_no_individual_score",
+    "staffIdentifiersRedacted": true,
+    "individualScoreVisible": false,
+    "causalSummaryVisible": false
+  },
   "contextualSignal": {
     "contract_version": "handover-icea-context-v1",
     "profile_id": "critical-care",
@@ -79,12 +88,13 @@ Contrato actual (`contractVersion=handover-icea-bridge-v1`):
 
 Familias de campos implementadas:
 - `identity`: bundle, request, paciente, episodio y composicion.
-- `context`: grano (`handover`, `episode`, `shift`), ventana temporal, unidad, actor principal y carga resumida del cambio de turno.
+- `context`: grano (`handover`, `episode`, `shift`), ventana temporal, unidad, presencia/conteo de actores documentados y carga resumida del cambio de turno, sin IDs nominales de profesional.
 - `caseMix`: edad, sexo, diagnosticos estructurados, risk flags y escalas basales si existen en el Bundle.
-- `nursingExposure`: conteos de medicacion/procedimientos/dispositivos/outcomes, checklist, cambios documentados, `severityWeight` heuristico y `exposureShare` cuando hay firmas/atribucion.
+- `nursingExposure`: conteos de medicacion/procedimientos/dispositivos/outcomes, checklist, cambios documentados, `severityWeight` heuristico y `exposureShare`, con atribucion resumida por conteos y sin IDs nominales.
 - `qualitySignals`: completitud estructurada, campos criticos presentes/faltantes, calidad del cierre y SBAR.
 - `uncertaintySignals`: `missingnessRate`, clase de completitud, `insufficientEvidence`, `staleData` y warnings trazables.
 - `provenance`: version de mapper, hash del Bundle y lineage minimo.
+- `governance`: politica de display (`shadow_aggregated_no_individual_score`), redaccion nominal y supresion explicita de score individual/resumen causal visible.
 - `identity.handoverId` y `identity.bundleId`: aliases estables del mismo identificador de handover para no romper consumidores clinicos u operativos.
 - `contextualSignal`: envelope contextual aditivo y versionado para ICEA+.
 
@@ -187,13 +197,14 @@ Politica operativa minima:
 - `GET /api/icea/bridge/status/<handoverId>`
   - roles: `nurse`, `supervisor`, `admin`
   - devuelve `bridgeRequest` + `summary` + metadata aditiva: `remoteStatusSupported`, `remoteRefreshAttempted`, `localStatusIsAuthoritative`
+  - el `scoreSummary` queda redactado en la respuesta publica; la salida visible conserva estado, warnings, request ids, modo y versionado
 - `GET /api/icea/bridge/status?bridgeRequestId=&requestId=&handoverId=&bundleId=&patientId=&unitId=&shift=&status=&scoringMode=`
   - roles: `supervisor`, `admin`
   - `handoverId` y `bundleId` filtran el mismo campo estable (`bundle_id`)
   - devuelve lista resumida para dashboards/operacion
 - `GET /api/icea/bridge/summary/<handoverId>`
   - roles: `nurse`, `supervisor`, `admin`
-  - devuelve resumen prudente para UI
+  - devuelve resumen prudente para trazabilidad, sin score individual visible y sin obligar a una surface clinica paciente-a-paciente
 - `POST /api/icea/bridge/retry/<bridgeId>`
   - rol: `admin`
   - reintenta el mismo payload o relanza `enriched_followup`
@@ -202,8 +213,10 @@ Politica operativa minima:
 
 Backend:
 - `ENABLE_ICEA_BRIDGE`
-- `ENABLE_ICEA_IMMEDIATE_SCORING`
+- `ENABLE_ICEA_IMMEDIATE_SCORING` (por defecto `false`; solo se activa explicitamente)
 - `ENABLE_ICEA_ENRICHED_SCORING` (por defecto `false`; solo se activa explicitamente)
+- `ENABLE_ICEA_PATIENT_RISK` (por defecto `false`)
+- `ENABLE_ICEA_CAUSAL_SUMMARY` (por defecto `false`)
 - `ICEA_BRIDGE_MODEL_ID` (UUID obligatorio para score real; si falta o es invalido HANDOVER deja error explicito y no intenta entrega ambigua)
 - `ICEA_BRIDGE_TIMEOUT_MS` (timeout explicito del submit y refresh del bridge; por defecto hereda `ICEA_API_TIMEOUT_MS`)
 - `ICEA_BRIDGE_RETRY_MAX`
@@ -216,8 +229,12 @@ Backend:
 
 Frontend:
 - `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE`
-- `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING`
+- `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING` (por defecto `false`)
 - `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING`
+- `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK` (por defecto `false`)
+- `EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY` (por defecto `false`)
+
+En shadow mode prudente, activar `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK` no debe volver visible ninguna salida ICEA paciente-a-paciente en la UI clinica operativa; la visibilidad humana queda reservada a superficies agregadas/admin cuando existan.
 
 ## Limites clinicos y analiticos
 
@@ -225,8 +242,9 @@ Frontend:
 - `severityWeight` y `exposureShare` son precursores transparentes construidos solo con datos realmente presentes.
 - Si faltan campos, HANDOVER degrada explicitamente via `missingnessRate`, `payloadCompletenessClass`, `insufficientEvidence` y warnings.
 - `contextualSignal` sirve para ajuste minimo por case-mix y continuidad; no valida comparaciones brutas entre unidades sin analitica posterior.
+- el contrato v1 ya no entrega IDs nominales de profesional al payload analitico del bridge;
 - Ningun campo del envelope contextual debe interpretarse como causalidad, benchmarking causal o explicabilidad clinica fuerte.
-- El dashboard debe tratar `provisional=true` y `insufficientEvidence=true` como resultados no concluyentes.
+- El dashboard debe tratar `provisional=true` y `insufficientEvidence=true` como resultados no concluyentes y no mostrar score individual visible.
 
 ## Riesgos residuales
 

@@ -133,7 +133,7 @@ def load_icea_bridge_settings() -> IceaBridgeSettings:
     retry_max_delay_seconds = max(_env_int('ICEA_BRIDGE_RETRY_MAX_DELAY_SECONDS', 300), retry_base_seconds)
     return IceaBridgeSettings(
         enabled=enabled,
-        immediate_enabled=_env_bool('ENABLE_ICEA_IMMEDIATE_SCORING', True),
+        immediate_enabled=_env_bool('ENABLE_ICEA_IMMEDIATE_SCORING', False),
         enriched_enabled=_env_bool('ENABLE_ICEA_ENRICHED_SCORING', False),
         model_id=(os.getenv('ICEA_BRIDGE_MODEL_ID') or '').strip(),
         timeout_ms=timeout_ms,
@@ -673,8 +673,10 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
     uncertainty = payload.get('uncertaintySignals') if isinstance(payload.get('uncertaintySignals'), dict) else {}
     provenance = payload.get('provenance') if isinstance(payload.get('provenance'), dict) else {}
     lineage = provenance.get('lineage') if isinstance(provenance.get('lineage'), dict) else {}
+    governance = payload.get('governance') if isinstance(payload.get('governance'), dict) else {}
     diagnoses = case_mix.get('diagnoses') if isinstance(case_mix.get('diagnoses'), list) else []
     risk_flags = case_mix.get('riskFlags') if isinstance(case_mix.get('riskFlags'), list) else []
+    attribution = exposure.get('attribution') if isinstance(exposure.get('attribution'), dict) else {}
 
     grain = 'window' if context.get('grain') == 'shift' else 'episode'
     row_key = (
@@ -725,7 +727,9 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
         'window_end': window_end,
         'end_dt': window_end,
         'shift': context.get('shift'),
-        'nurse_shares': _nurse_shares(context, exposure),
+        'documented_signature_count': _numeric_value(attribution.get('signatureCount')),
+        'documented_cosigner_count': _numeric_value(attribution.get('documentedCoSignerCount')),
+        'primary_actor_documented': 1.0 if attribution.get('primaryActorDocumented') else 0.0,
         'lineage': {
             'request_id': identity.get('requestId') or bridge_request.request_id,
             'bundle_id': identity.get('bundleId') or bridge_request.bundle_id,
@@ -738,6 +742,8 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
             'contextual_signal': contextual_signal or None,
             'request_hash': bridge_request.payload_hash,
             'bridge_request_id': bridge_request.bridge_request_id,
+            'display_policy': governance.get('displayPolicy'),
+            'staff_identifiers_redacted': bool(governance.get('staffIdentifiersRedacted', True)),
             'source': lineage,
         },
     }
@@ -758,19 +764,6 @@ def _avpu_score(value: Any) -> float:
         return mapping.get(value.strip().upper(), 0.0)
     return 0.0
 
-
-def _nurse_shares(context: dict[str, Any], exposure: dict[str, Any]) -> dict[str, float]:
-    attribution = exposure.get('attribution') if isinstance(exposure.get('attribution'), dict) else {}
-    shares: dict[str, float] = {}
-    primary_nurse_id = context.get('nurseId') or attribution.get('primaryNurseId')
-    exposure_share = exposure.get('exposureShare')
-    if isinstance(primary_nurse_id, str) and primary_nurse_id.strip() and isinstance(exposure_share, (int, float)):
-        shares[primary_nurse_id.strip()] = float(exposure_share)
-    for signer_id in attribution.get('coSignerIds') or []:
-        if not isinstance(signer_id, str) or not signer_id.strip() or signer_id.strip() in shares:
-            continue
-        shares[signer_id.strip()] = 0.0
-    return shares
 
 class IceaBridgeRemoteService:
     def __init__(self, settings_obj: IceaBridgeSettings | None = None, pipeline_service: IceaPipelineService | None = None):
@@ -1327,6 +1320,8 @@ def schedule_icea_bridge_resolution(
 def serialize_bridge_request(bridge_request: IceaBridgeRequest) -> dict[str, Any]:
     bridge_request = expire_icea_bridge_request_if_due(bridge_request)
     retry_scheduled = bridge_request.status == IceaBridgeRequest.STATUS_QUEUED and bridge_request.next_retry_at is not None
+    payload = bridge_request.payload_json if isinstance(bridge_request.payload_json, dict) else {}
+    governance = payload.get('governance') if isinstance(payload.get('governance'), dict) else {}
     return {
         'id': bridge_request.id,
         'bridgeRequestId': bridge_request.bridge_request_id,
@@ -1347,7 +1342,8 @@ def serialize_bridge_request(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'formulaVersion': bridge_request.formula_version or None,
         'provisional': bridge_request.provisional,
         'insufficientEvidence': bridge_request.insufficient_evidence,
-        'scoreSummary': bridge_request.score_summary_json,
+        'scoreSummary': None,
+        'scoreSummaryRedacted': bridge_request.score_summary_json is not None,
         'warnings': bridge_request.warnings_json or [],
         'attempts': bridge_request.attempts,
         'terminal': _is_terminal_status(bridge_request.status),
@@ -1360,6 +1356,10 @@ def serialize_bridge_request(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'nextRetryAt': bridge_request.next_retry_at.isoformat() if bridge_request.next_retry_at else None,
         'sentAt': bridge_request.sent_at.isoformat() if bridge_request.sent_at else None,
         'receivedAt': bridge_request.received_at.isoformat() if bridge_request.received_at else None,
+        'displayPolicy': str(governance.get('displayPolicy') or 'shadow_aggregated_no_individual_score'),
+        'staffIdentifiersRedacted': bool(governance.get('staffIdentifiersRedacted', True)),
+        'individualScoreVisible': False,
+        'causalSummaryVisible': False,
         'createdAt': bridge_request.created_at.isoformat(),
         'updatedAt': bridge_request.updated_at.isoformat(),
     }
@@ -1367,15 +1367,22 @@ def serialize_bridge_request(bridge_request: IceaBridgeRequest) -> dict[str, Any
 
 def serialize_bridge_summary(bridge_request: IceaBridgeRequest) -> dict[str, Any]:
     bridge_request = expire_icea_bridge_request_if_due(bridge_request)
+    payload = bridge_request.payload_json if isinstance(bridge_request.payload_json, dict) else {}
+    governance = payload.get('governance') if isinstance(payload.get('governance'), dict) else {}
     return {
         'handoverId': bridge_request.bundle_id,
         'status': bridge_request.status,
         'scoringMode': bridge_request.scoring_mode,
         'provisional': bridge_request.provisional,
         'insufficientEvidence': bridge_request.insufficient_evidence,
-        'scoreSummary': bridge_request.score_summary_json,
+        'scoreSummary': None,
+        'scoreSummaryRedacted': bridge_request.score_summary_json is not None,
         'warnings': bridge_request.warnings_json or [],
         'formulaVersion': bridge_request.formula_version or None,
+        'displayPolicy': str(governance.get('displayPolicy') or 'shadow_aggregated_no_individual_score'),
+        'staffIdentifiersRedacted': bool(governance.get('staffIdentifiersRedacted', True)),
+        'individualScoreVisible': False,
+        'causalSummaryVisible': False,
         'lastUpdated': bridge_request.updated_at.isoformat(),
         'source': SOURCE,
     }

@@ -153,6 +153,10 @@ def _extract_causal_summary(snapshot: IceaPipelineSnapshot | None) -> dict[str, 
     }
 
 
+def _suppressed_display_message() -> str:
+    return "La gobernanza del piloto mantiene el score individual y cualquier resumen causal fuera de la UI operativa."
+
+
 def _find_latest_snapshots(bridge_requests: list[IceaBridgeRequest]) -> dict[str, IceaPipelineSnapshot]:
     request_ids = [item.request_id for item in bridge_requests if item.request_id]
     bundle_ids = [item.bundle_id for item in bridge_requests if item.bundle_id]
@@ -183,8 +187,8 @@ def serialize_patient_risk_summary(
     bridge_request = expire_icea_bridge_request_if_due(bridge_request)
     clinical_status = _clinical_status(bridge_request)
     stale = _is_stale(bridge_request)
-    score_summary = _score_summary(bridge_request)
     warnings = _normalize_warnings(bridge_request.warnings_json)
+    message = _build_prudent_message(clinical_status=clinical_status, stale=stale)
     return {
         "patientId": bridge_request.patient_id,
         "unitId": bridge_request.unit_id,
@@ -192,11 +196,11 @@ def serialize_patient_risk_summary(
         "requestId": bridge_request.request_id,
         "clinicalStatus": clinical_status,
         "stale": stale,
-        "score": _extract_score_value(score_summary),
-        "scoreLabel": _extract_score_label(score_summary),
-        "confidence": _extract_confidence(score_summary),
+        "score": None,
+        "scoreLabel": None,
+        "confidence": None,
         "warnings": warnings,
-        "message": _build_prudent_message(clinical_status=clinical_status, stale=stale),
+        "message": f"{message} {_suppressed_display_message()}",
         "calculatedAt": bridge_request.received_at.isoformat() if bridge_request.received_at else None,
         "lastUpdatedAt": bridge_request.updated_at.isoformat(),
         "provenance": {
@@ -207,8 +211,11 @@ def serialize_patient_risk_summary(
             "formulaVersion": bridge_request.formula_version or None,
             "bridgeStatus": bridge_request.status,
             "localStatusIsAuthoritative": True,
+            "displayPolicy": "shadow_aggregated_no_individual_score",
+            "individualScoreVisible": False,
+            "causalSummaryVisible": False,
         },
-        "causalSummary": _extract_causal_summary(snapshot),
+        "causalSummary": None,
     }
 
 

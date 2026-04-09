@@ -13,6 +13,7 @@ CONTRACT_VERSION = 'handover-icea-bridge-v1'
 CONTEXTUAL_SIGNAL_CONTRACT_VERSION = 'handover-icea-context-v1'
 MAPPER_VERSION = '2026-03-08'
 SOURCE = 'HANDOVER'
+DISPLAY_POLICY = 'shadow_aggregated_no_individual_score'
 OBS_CODE_SYSTEM = 'urn:handover-pro:observation-codes'
 OBS_ADMIN = 'administrative'
 OBS_NOTES = 'handover-notes'
@@ -186,9 +187,10 @@ def build_icea_bridge_payload(
             'windowEnd': window_end,
             'unitId': effective_unit_id,
             'teamId': actors['teamId'],
-            'nurseId': actors['primaryNurseId'],
-            'coSignerIds': actors['coSignerIds'],
-            'documentedAuthorId': actors['authorId'],
+            'primaryActorDocumented': bool(actors['primaryNurseId']),
+            'documentedAuthorPresent': bool(actors['authorId']),
+            'documentedCoSignerCount': len(actors['coSignerIds']),
+            'documentedActorCount': signature_count,
             'shift': shift,
             'handoverLoad': {
                 'census': admin.get('census'),
@@ -225,9 +227,11 @@ def build_icea_bridge_payload(
             'severityWeight': _severity(vitals, scales, risk_flags),
             'exposureShare': exposure_share,
             'attribution': {
-                'primaryNurseId': actors['primaryNurseId'],
-                'coSignerIds': actors['coSignerIds'],
                 'signatureCount': actors['signatureCount'],
+                'documentedCoSignerCount': len(actors['coSignerIds']),
+                'primaryActorDocumented': bool(actors['primaryNurseId']),
+                'documentedAuthorPresent': bool(actors['authorId']),
+                'staffIdentifiersRedacted': True,
             },
         },
         'qualitySignals': {
@@ -258,13 +262,82 @@ def build_icea_bridge_payload(
                 'compositionId': composition_id,
             },
         },
+        'governance': {
+            'displayPolicy': DISPLAY_POLICY,
+            'staffIdentifiersRedacted': True,
+            'individualScoreVisible': False,
+            'causalSummaryVisible': False,
+        },
         'contextualSignal': contextual_signal,
     }
-    return payload
+    return _validate_icea_bridge_payload_contract(payload)
 
 
 def compute_payload_hash(payload: dict[str, Any]) -> str:
     return sha256(canonical_json(payload)).hexdigest()
+
+
+def _validate_icea_bridge_payload_contract(payload: dict[str, Any]) -> dict[str, Any]:
+    required_top_level = (
+        'contractVersion',
+        'source',
+        'scoringMode',
+        'identity',
+        'context',
+        'caseMix',
+        'nursingExposure',
+        'qualitySignals',
+        'uncertaintySignals',
+        'provenance',
+        'governance',
+        'contextualSignal',
+    )
+    missing_top_level = [key for key in required_top_level if key not in payload]
+    if missing_top_level:
+        raise ValueError(f'Invalid ICEA bridge payload: missing top-level fields {missing_top_level}')
+    if payload.get('contractVersion') != CONTRACT_VERSION:
+        raise ValueError('Invalid ICEA bridge payload: unexpected contractVersion')
+
+    identity = payload.get('identity')
+    context = payload.get('context')
+    provenance = payload.get('provenance')
+    governance = payload.get('governance')
+    contextual_signal = payload.get('contextualSignal')
+    uncertainty = payload.get('uncertaintySignals')
+    exposure = payload.get('nursingExposure')
+    attribution = exposure.get('attribution') if isinstance(exposure, dict) else None
+
+    if not isinstance(identity, dict) or not all(identity.get(key) for key in ('bundleId', 'requestId', 'patientId')):
+        raise ValueError('Invalid ICEA bridge payload: identity linkage is incomplete')
+    if not isinstance(context, dict) or not all(key in context for key in ('grain', 'timestamp', 'unitId', 'shift')):
+        raise ValueError('Invalid ICEA bridge payload: context block is incomplete')
+    if not isinstance(provenance, dict):
+        raise ValueError('Invalid ICEA bridge payload: provenance block is missing')
+    if not isinstance(provenance.get('lineage'), dict) or not provenance['lineage'].get('requestId'):
+        raise ValueError('Invalid ICEA bridge payload: provenance lineage is incomplete')
+    if not isinstance(governance, dict):
+        raise ValueError('Invalid ICEA bridge payload: governance block is missing')
+    if governance.get('displayPolicy') != DISPLAY_POLICY:
+        raise ValueError('Invalid ICEA bridge payload: unexpected governance displayPolicy')
+    if governance.get('staffIdentifiersRedacted') is not True:
+        raise ValueError('Invalid ICEA bridge payload: governance must redact staff identifiers')
+    if governance.get('individualScoreVisible') is not False or governance.get('causalSummaryVisible') is not False:
+        raise ValueError('Invalid ICEA bridge payload: governance must suppress individual analytics display')
+    if not isinstance(contextual_signal, dict) or contextual_signal.get('contract_version') != CONTEXTUAL_SIGNAL_CONTRACT_VERSION:
+        raise ValueError('Invalid ICEA bridge payload: contextual signal contract is missing')
+    warnings = uncertainty.get('warnings') if isinstance(uncertainty, dict) else None
+    if warnings is not None and not isinstance(warnings, list):
+        raise ValueError('Invalid ICEA bridge payload: uncertainty warnings must be a list')
+    if isinstance(attribution, dict):
+        if attribution.get('staffIdentifiersRedacted') is not True:
+            raise ValueError('Invalid ICEA bridge payload: attribution must stay redacted')
+        for forbidden_key in ('primaryNurseId', 'coSignerIds'):
+            if forbidden_key in attribution:
+                raise ValueError('Invalid ICEA bridge payload: nominal staff identifiers are not allowed in attribution')
+    for forbidden_key in ('nurseId', 'coSignerIds', 'documentedAuthorId'):
+        if isinstance(context, dict) and forbidden_key in context:
+            raise ValueError('Invalid ICEA bridge payload: nominal staff identifiers are not allowed in context')
+    return payload
 
 
 def _index(bundle: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
