@@ -136,3 +136,70 @@ describe('refineSBARWithAI', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('result helpers', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    envState.AI_BACKEND_BASE_URL = 'https://ai.example';
+    envState.AI_SBAR_ENABLED = true;
+    ensureFreshAccessToken.mockResolvedValue('tok-ai-123');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('clasifica 401 como no autorizado para degradacion honesta', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ detail: 'unauthorized' }) })) as unknown as typeof fetch,
+    );
+
+    const { generateSbarViaBackendResult } = await import('@/src/lib/ai-sbar');
+
+    const result = await generateSbarViaBackendResult('nota breve', { source: 'test' }, 'es');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('UNAUTHORIZED');
+      expect(result.error.status).toBe(401);
+    }
+  });
+
+  it('clasifica 5xx como backend no disponible', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 503, json: async () => ({ detail: 'unavailable' }) })) as unknown as typeof fetch,
+    );
+
+    const { generateSbarViaBackendResult } = await import('@/src/lib/ai-sbar');
+
+    const result = await generateSbarViaBackendResult('nota breve', { source: 'test' }, 'es');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('UNAVAILABLE');
+      expect(result.error.status).toBe(503);
+    }
+  });
+
+  it('expone exito estructurado para refine sin perder el wrapper legacy', async () => {
+    const refined: SBARSummary = {
+      situation: 'IA situation',
+      background: 'IA background',
+      assessment: 'IA assessment',
+      recommendation: 'IA recommendation',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ sbar: refined }) })) as unknown as typeof fetch,
+    );
+
+    const { refineSBARWithAIResult } = await import('@/src/lib/ai-sbar');
+
+    const result = await refineSBARWithAIResult(handover, draft);
+
+    expect(result).toEqual({ ok: true, summary: refined });
+  });
+});

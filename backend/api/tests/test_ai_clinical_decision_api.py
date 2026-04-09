@@ -136,3 +136,30 @@ def test_clinical_decision_endpoint_accepts_sbar_apply_and_derives_model_version
     assert event.suggestion_source == "ai_generate_sbar"
     assert event.suggestion_version
     assert event.metadata["replaceExisting"] is True
+
+
+@pytest.mark.django_db
+def test_clinical_decision_endpoint_accepts_shown_for_sbar_review():
+    client = _auth_client()
+
+    response = client.post(
+        "/api/ai/clinical-decision",
+        data=_payload(
+            suggestionSource="ai_refine_sbar",
+            decision="shown",
+            reasonCode="",
+            metadata={
+                "section": "sbar",
+                "suggestionCount": 1,
+                "suggestionHashes": [
+                    "82cab7df0abfb9d95a0d6f1ab1acb3f91887f3ed13a964828d6d728f9c2831a6",
+                ],
+            },
+        ),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    event = ClinicalDecisionEvent.objects.get()
+    assert event.decision == "shown"
+    assert event.suggestion_source == "ai_refine_sbar"

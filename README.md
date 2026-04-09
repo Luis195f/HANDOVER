@@ -9,7 +9,7 @@
 ![CI](./ci-badge.svg)
 ![Coverage](./coverage-badge.svg)
 
-Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend único en Django/DRF para FHIR, IA clínica y auditoría, además de una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
+Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend único en Django/DRF para FHIR, asistencia documental con IA y auditoría, además de una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
 
 ## Identificación comercial y posicionamiento regulatorio
 
@@ -119,7 +119,8 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
 - El frontend centraliza esta URL en `AI_TRANSCRIBE_ENDPOINT` (derivada de `resolveApiBaseUrl`) y normaliza errores HTTP (401/413/415/5xx) sin loguear PHI.
 - SBAR con IA:
   - Generación y refinado usan `AI_BACKEND_BASE_URL` (`/ai/summarize-sbar` y `/ai/refine-sbar`) y envían el bearer token real de sesión al backend Django/DRF.
-  - Si el backend no está configurado o no responde, los botones de IA se degradan con honestidad y se mantiene la generación local determinística.
+  - Si el backend no está configurado, devuelve `401/403`, o no responde, la UI muestra un borrador local por reglas de forma explícita para no bloquear el handover.
+  - La sugerencia SBAR asistida queda en revisión humana antes de aceptarse o descartarse; no se trata como paso clínico obligatorio ni como automatización decisoria.
 - TTS usa `expo-speech` y solo está disponible en iOS/Android; en web se muestra como no disponible.
 - Subida de audio a FHIR (opcional) requiere `API_BASE_URL` con el endpoint `/upload/audio-to-fhir`.
 

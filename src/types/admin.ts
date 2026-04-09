@@ -167,7 +167,7 @@ export interface IceaOpsDashboardData {
   events: IceaOpsEventSummary[];
 }
 
-export type ClinicalDecisionGovernanceValue = 'accepted' | 'applied' | 'rejected' | 'dismissed';
+export type ClinicalDecisionGovernanceValue = 'shown' | 'accepted' | 'applied' | 'rejected' | 'dismissed';
 export type ClinicalDecisionGovernanceSection = 'sbar' | 'treatments' | 'outcomes';
 export type ClinicalDecisionGovernanceSource =
   | 'ai_generate_sbar'
@@ -176,6 +176,7 @@ export type ClinicalDecisionGovernanceSource =
   | 'ai_noc_suggestions';
 
 export interface ClinicalDecisionGovernanceDecisionCounts {
+  shown: number;
   accepted: number;
   applied: number;
   rejected: number;

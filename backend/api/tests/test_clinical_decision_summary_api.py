@@ -62,6 +62,14 @@ def test_clinical_decision_summary_returns_aggregated_non_nominal_payload():
     now = timezone.now()
     _create_event(
         unit_id="icu-a",
+        suggestion_source="ai_refine_sbar",
+        decision="shown",
+        actor_id="auth0|nurse-0",
+        created_at=now - timedelta(days=1),
+        section="sbar",
+    )
+    _create_event(
+        unit_id="icu-a",
         suggestion_source="ai_nic_suggestions",
         decision="applied",
         actor_id="auth0|nurse-1",
@@ -90,13 +98,14 @@ def test_clinical_decision_summary_returns_aggregated_non_nominal_payload():
     assert response.status_code == 200
     body = response.json()
     assert body["available"] is True
-    assert body["totals"]["events"] == 3
+    assert body["totals"]["events"] == 4
     assert {item["decision"]: item["count"] for item in body["byDecision"]} == {
+        "shown": 1,
         "applied": 2,
         "dismissed": 1,
     }
     assert {item["unitId"]: item["count"] for item in body["byUnit"]} == {
-        "icu-a": 2,
+        "icu-a": 3,
         "ward-b": 1,
     }
     assert any(item["suggestionSource"] == "ai_nic_suggestions" and item["decisions"]["dismissed"] == 1 for item in body["bySuggestionSource"])

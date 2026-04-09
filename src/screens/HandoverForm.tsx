@@ -31,7 +31,12 @@ import { hashHex } from '@/src/lib/crypto';
 import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type HandoverValues as FhirHandoverValues } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
-import { generateSbarViaBackend, refineSBARWithAI } from '@/src/lib/ai-sbar';
+import {
+  generateSbarViaBackendResult,
+  refineSBARWithAIResult,
+  type AISbarErrorCode,
+} from '@/src/lib/ai-sbar';
+import { getBestAvailableSummary } from '@/src/lib/ai-degrade';
 import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsResult } from '@/src/lib/ai-suggestions';
 import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
@@ -302,6 +307,16 @@ export type DictationField =
 const ALL_SECTIONS_INFO = HANDOVER_SECTIONS_INFO;
 
 type SectionKey = (typeof HANDOVER_SECTIONS_INFO)[number]['key'];
+type PendingSbarSuggestion = {
+  patientId: string;
+  unitId: string;
+  source: 'ai_generate_sbar' | 'ai_refine_sbar';
+  mode: 'ai' | 'local_fallback';
+  summary: SBARSummary;
+  fullText: string;
+  hash: string;
+  replaceExisting: boolean;
+};
 
 const TIMED_SECTIONS_BY_KEY: Partial<Record<SectionKey, 'sbar' | 'vitals' | 'diagnostics' | 'treatments'>> = {
   sbar: 'sbar',
@@ -1045,6 +1060,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [isGeneratingSbarWithAI, setIsGeneratingSbarWithAI] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
+  const [pendingSbarSuggestion, setPendingSbarSuggestion] = useState<PendingSbarSuggestion | null>(null);
   const [audioUploadToFhir, setAudioUploadToFhir] = useState(false);
   const [audioUploadStatus, setAudioUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
@@ -1059,6 +1075,29 @@ export default function HandoverForm({ navigation, route }: Props) {
   } = useHandoverSyncStatus();
   const aiSbarAvailable = AI_SBAR_ENABLED;
   const aiSbarGenerationAvailable = AI_BACKEND_ENABLED;
+  const resolveTraceableSbarAiContext = (values?: Pick<HandoverFormValues, 'patientId'>) => {
+    const patientId =
+      typeof values?.patientId === 'string'
+        ? values.patientId.trim()
+        : typeof patientIdValue === 'string'
+          ? patientIdValue.trim()
+          : '';
+    const unitId = (effectivePilotUnitId ?? '').trim();
+    return {
+      patientId,
+      unitId,
+      ready: Boolean(patientId && unitId),
+    };
+  };
+  const canUseAiSbarAssist = resolveTraceableSbarAiContext().ready;
+
+  const requireTraceableSbarAiContext = (values?: Pick<HandoverFormValues, 'patientId'>) => {
+    const context = resolveTraceableSbarAiContext(values);
+    if (context.ready) return context;
+    setSbarAiError(null);
+    setSbarHelperMessage(t('handover.sbarAiTraceabilityRequired'));
+    return null;
+  };
 
   useEffect(() => {
     if (!audioUploadToFhir) {
@@ -1332,42 +1371,153 @@ export default function HandoverForm({ navigation, route }: Props) {
   const buildSbarDecisionHash = (summary: Pick<SBARSummary, 'situation' | 'background' | 'assessment' | 'recommendation'>) =>
     hashHex([summary.situation, summary.background, summary.assessment, summary.recommendation].join('\n'));
 
+  const clearPendingSbarSuggestion = (
+    decision?: 'accepted' | 'rejected',
+    reasonCode?: 'direct_apply' | 'replace_existing' | 'not_relevant',
+  ) => {
+    const pending = pendingSbarSuggestion;
+    if (!pending) return;
+
+    if (pending.mode === 'ai' && decision) {
+      void logClinicalDecision({
+        patientId: pending.patientId,
+        unitId: pending.unitId,
+        suggestionSource: pending.source,
+        decision,
+        ...(reasonCode ? { reasonCode } : {}),
+        metadata: {
+          section: 'sbar',
+          suggestionCount: 1,
+          suggestionHashes: [pending.hash],
+          replaceExisting: pending.replaceExisting,
+        },
+      });
+    }
+
+    setPendingSbarSuggestion(null);
+  };
+
+  const getSbarFallbackHelperMessage = (code: AISbarErrorCode) => {
+    switch (code) {
+      case 'UNAUTHORIZED':
+        return t('handover.sbarAiUnauthorizedFallbackHelper');
+      case 'UNCONFIGURED':
+        return t('handover.sbarAiDisabledFallbackHelper');
+      default:
+        return t('handover.sbarAiFallbackHelper');
+    }
+  };
+
+  const showPendingSbarSuggestion = (
+    values: HandoverFormValues,
+    input: {
+      source: PendingSbarSuggestion['source'];
+      mode: PendingSbarSuggestion['mode'];
+      summary: SBARSummary;
+      fullText?: string;
+      helperMessage: string;
+    },
+  ) => {
+    const traceableContext = resolveTraceableSbarAiContext(values);
+    if (input.mode === 'ai' && !traceableContext.ready) {
+      setSbarAiError(null);
+      setSbarHelperMessage(t('handover.sbarAiTraceabilityRequired'));
+      return;
+    }
+
+    clearPendingSbarSuggestion('rejected', 'replace_existing');
+
+    const summary = input.summary;
+    const fullText = input.fullText ?? buildSbarFullText(summary);
+    const nextPending: PendingSbarSuggestion = {
+      patientId: traceableContext.patientId,
+      unitId: traceableContext.unitId,
+      source: input.source,
+      mode: input.mode,
+      summary,
+      fullText,
+      hash: buildSbarDecisionHash(summary),
+      replaceExisting: Boolean((values.closingSummary ?? '').trim()),
+    };
+
+    setPendingSbarSuggestion(nextPending);
+    setSbarAiError(null);
+    setSbarHelperMessage(input.helperMessage);
+
+    if (input.mode === 'ai') {
+      void logClinicalDecision({
+        patientId: nextPending.patientId,
+        unitId: nextPending.unitId,
+        suggestionSource: nextPending.source,
+        decision: 'shown',
+        metadata: {
+          section: 'sbar',
+          suggestionCount: 1,
+          suggestionHashes: [nextPending.hash],
+          replaceExisting: nextPending.replaceExisting,
+        },
+      });
+    }
+  };
+
+  const applyPendingSbarSuggestion = () => {
+    if (!pendingSbarSuggestion) return;
+
+    const { summary, fullText, mode } = pendingSbarSuggestion;
+    form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
+    form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
+    form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
+    form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
+    form.setValue('closingSummary', fullText, { shouldDirty: true, shouldValidate: true });
+
+    clearPendingSbarSuggestion('accepted', 'direct_apply');
+    setSbarAiError(null);
+    setSbarHelperMessage(
+      mode === 'ai' ? t('handover.sbarSuggestionAcceptedHelper') : t('handover.sbarFallbackAcceptedHelper'),
+    );
+  };
+
+  const rejectPendingSbarSuggestion = () => {
+    if (!pendingSbarSuggestion) return;
+
+    const mode = pendingSbarSuggestion.mode;
+    clearPendingSbarSuggestion('rejected', 'not_relevant');
+    setSbarAiError(null);
+    setSbarHelperMessage(
+      mode === 'ai' ? t('handover.sbarSuggestionRejectedHelper') : t('handover.sbarFallbackRejectedHelper'),
+    );
+  };
+
   const handleRefineSbarWithAi = async () => {
     const values = form.getValues();
+    const draft = buildDraftSbar(values);
+    if (!requireTraceableSbarAiContext(values)) {
+      return;
+    }
 
     setIsRefiningSbarWithAI(true);
     setSbarAiError(null);
     setSbarHelperMessage(null);
 
     try {
-      const draft = buildDraftSbar(values);
-      const refined = await refineSBARWithAI(values, draft);
-
-      if (refined) {
-        form.setValue('sbarSituation', refined.situation, { shouldDirty: true, shouldValidate: true });
-        form.setValue('sbarBackground', refined.background, { shouldDirty: true, shouldValidate: true });
-        form.setValue('sbarAssessment', refined.assessment, { shouldDirty: true, shouldValidate: true });
-        form.setValue('sbarRecommendation', refined.recommendation, { shouldDirty: true, shouldValidate: true });
-        form.setValue('closingSummary', buildSbarFullText(refined), { shouldDirty: true, shouldValidate: true });
-        void logClinicalDecision({
-          patientId: values.patientId,
-          unitId: effectivePilotUnitId ?? '',
-          suggestionSource: 'ai_refine_sbar',
-          decision: 'applied',
-          reasonCode: 'direct_apply',
-          metadata: {
-            section: 'sbar',
-            suggestionCount: 1,
-            suggestionHashes: [buildSbarDecisionHash(refined)],
-            replaceExisting: Boolean((values.closingSummary ?? '').trim()),
-          },
+      const result = await refineSBARWithAIResult(values, draft);
+      if (result.ok) {
+        showPendingSbarSuggestion(values, {
+          source: 'ai_refine_sbar',
+          mode: 'ai',
+          summary: result.summary,
+          helperMessage: t('handover.sbarSuggestionReadyHelper'),
         });
-        setSbarHelperMessage(t('handover.sbarRefinedHelper'));
-      } else {
-        setSbarAiError(t('handover.sbarAiUnavailable'));
+        return;
       }
-    } catch {
-      setSbarAiError(t('handover.sbarAiUnavailable'));
+
+      const fallbackSummary = await getBestAvailableSummary(values, { useLocalRules: true });
+      showPendingSbarSuggestion(values, {
+        source: 'ai_refine_sbar',
+        mode: 'local_fallback',
+        summary: fallbackSummary,
+        helperMessage: getSbarFallbackHelperMessage(result.error.code),
+      });
     } finally {
       setIsRefiningSbarWithAI(false);
     }
@@ -1375,45 +1525,41 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleGenerateSbarWithAi = async () => {
     const values = form.getValues();
+    if (!requireTraceableSbarAiContext(values)) {
+      return;
+    }
+
     setIsGeneratingSbarWithAI(true);
     setSbarAiError(null);
     setSbarHelperMessage(null);
 
     try {
       const freeText = buildSbarFreeText(values);
-      const result = await generateSbarViaBackend(freeText, buildSbarContext(values), 'es');
-      form.setValue('sbarSituation', result.situation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarBackground', result.background, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarAssessment', result.assessment, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarRecommendation', result.recommendation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('closingSummary', result.fullText, { shouldDirty: true, shouldValidate: true });
-      void logClinicalDecision({
-        patientId: values.patientId,
-        unitId: effectivePilotUnitId ?? '',
-        suggestionSource: 'ai_generate_sbar',
-        decision: 'applied',
-        reasonCode: 'direct_apply',
-        metadata: {
-          section: 'sbar',
-          suggestionCount: 1,
-          suggestionHashes: [
-            buildSbarDecisionHash({
-              situation: result.situation,
-              background: result.background,
-              assessment: result.assessment,
-              recommendation: result.recommendation,
-            }),
-          ],
-          replaceExisting: Boolean((values.closingSummary ?? '').trim()),
-        },
+      const result = await generateSbarViaBackendResult(freeText, buildSbarContext(values), 'es');
+
+      if (result.ok) {
+        showPendingSbarSuggestion(values, {
+          source: 'ai_generate_sbar',
+          mode: 'ai',
+          summary: {
+            situation: result.result.situation,
+            background: result.result.background,
+            assessment: result.result.assessment,
+            recommendation: result.result.recommendation,
+          },
+          fullText: result.result.fullText,
+          helperMessage: t('handover.sbarSuggestionReadyHelper'),
+        });
+        return;
+      }
+
+      const fallbackSummary = await getBestAvailableSummary(values, { useLocalRules: true });
+      showPendingSbarSuggestion(values, {
+        source: 'ai_generate_sbar',
+        mode: 'local_fallback',
+        summary: fallbackSummary,
+        helperMessage: getSbarFallbackHelperMessage(result.error.code),
       });
-      setSbarHelperMessage(t('handover.sbarGeneratedAiHelper'));
-    } catch {
-      setSbarAiError(t('handover.sbarAiGenerateError'));
-      Alert.alert(
-        t('handover.sbarAiGenerateAlertTitle'),
-        t('handover.sbarAiGenerateAlertMessage'),
-      );
     } finally {
       setIsGeneratingSbarWithAI(false);
     }
@@ -1421,6 +1567,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleGenerateSbarSuggestion = () => {
     try {
+      clearPendingSbarSuggestion('rejected', 'replace_existing');
       const values = form.getValues();
       const summary = generateSBARSummary(values, { maxCharsPerSection: 320 });
       form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
@@ -2139,11 +2286,16 @@ export default function HandoverForm({ navigation, route }: Props) {
               isRefiningSbarWithAI={isRefiningSbarWithAI}
               aiSbarGenerationAvailable={aiSbarGenerationAvailable}
               isGeneratingSbarWithAI={isGeneratingSbarWithAI}
+              canUseAiSbarAssist={canUseAiSbarAssist}
               handleGenerateSbarWithAi={handleGenerateSbarWithAi}
               handleGenerateSbarSuggestion={handleGenerateSbarSuggestion}
               handleRefineSbarWithAi={handleRefineSbarWithAi}
+              pendingSbarSuggestionPreview={pendingSbarSuggestion ? formatSbar(pendingSbarSuggestion.summary, 'es') : null}
+              onAcceptPendingSbarSuggestion={applyPendingSbarSuggestion}
+              onRejectPendingSbarSuggestion={rejectPendingSbarSuggestion}
               sbarHelperMessage={sbarHelperMessage}
               sbarAiError={sbarAiError}
+              sbarAiTraceabilityMessage={canUseAiSbarAssist ? null : t('handover.sbarAiTraceabilityRequired')}
               sbarSituationError={sbarSituationError}
               sbarBackgroundError={sbarBackgroundError}
               sbarAssessmentError={sbarAssessmentError}

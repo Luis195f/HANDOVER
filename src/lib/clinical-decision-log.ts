@@ -6,7 +6,7 @@ export type ClinicalDecisionSource =
   | 'ai_nic_suggestions'
   | 'ai_noc_suggestions';
 
-export type ClinicalDecisionValue = 'accepted' | 'applied' | 'rejected' | 'dismissed';
+export type ClinicalDecisionValue = 'shown' | 'accepted' | 'applied' | 'rejected' | 'dismissed';
 
 export type ClinicalDecisionReasonCode =
   | 'direct_apply'

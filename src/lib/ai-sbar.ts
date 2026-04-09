@@ -23,6 +23,34 @@ interface RefineSbarResponse {
   sbar?: Partial<SBARSummary> | null;
 }
 
+export type AISbarErrorCode =
+  | 'UNCONFIGURED'
+  | 'UNAUTHORIZED'
+  | 'UNAVAILABLE'
+  | 'NETWORK'
+  | 'INVALID_RESPONSE'
+  | 'UNKNOWN';
+
+export class AISbarError extends Error {
+  code: AISbarErrorCode;
+  status?: number;
+
+  constructor(code: AISbarErrorCode, message: string, status?: number) {
+    super(message);
+    this.name = 'AISbarError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type GenerateSbarViaBackendResult =
+  | { ok: true; result: SbarResult }
+  | { ok: false; error: AISbarError };
+
+export type RefineSbarWithAiResult =
+  | { ok: true; summary: SBARSummary }
+  | { ok: false; error: AISbarError };
+
 const LEGAL_NOTICE_BY_LANG: Record<'es' | 'en', string> = {
   es: 'Aviso legal: Asistente de apoyo, no diagnóstico ni prescripción.',
   en: 'Legal notice: Support assistant, not a diagnosis or prescription.',
@@ -54,9 +82,6 @@ const appendLegalNotice = (text: string, language: 'es' | 'en') => {
 
 function getAiBackendBaseUrl(): string | null {
   const baseUrl = typeof AI_BACKEND_BASE_URL === 'string' && AI_BACKEND_BASE_URL.trim() ? AI_BACKEND_BASE_URL.trim() : null;
-  if (!baseUrl) {
-    console.info('[ai-sbar] AI backend is not configured');
-  }
   return baseUrl;
 }
 
@@ -97,10 +122,38 @@ const legacyDxNursingText = (value: unknown): string => {
   return '';
 };
 
-export async function refineSBARWithAI(handover: HandoverFormData, draft: SBARSummary): Promise<SBARSummary | null> {
+function toAISbarError(error: unknown): AISbarError {
+  if (error instanceof AISbarError) return error;
+  if (error instanceof TypeError || (error instanceof Error && /network|fetch/i.test(error.message))) {
+    return new AISbarError('NETWORK', 'No se pudo contactar con el backend de IA');
+  }
+  return new AISbarError('UNKNOWN', 'No se pudo completar la solicitud SBAR');
+}
+
+async function resolveBackendError(response: Response): Promise<AISbarError> {
+  const status = response.status;
+
+  if (status === 401 || status === 403) {
+    return new AISbarError('UNAUTHORIZED', 'La sesión no puede usar el backend de IA', status);
+  }
+
+  if (status >= 500) {
+    return new AISbarError('UNAVAILABLE', 'El backend de IA no está disponible', status);
+  }
+
+  return new AISbarError('INVALID_RESPONSE', 'El backend de IA devolvió una respuesta inválida', status);
+}
+
+export async function refineSBARWithAIResult(
+  handover: HandoverFormData,
+  draft: SBARSummary,
+): Promise<RefineSbarWithAiResult> {
   const baseUrl = getAiBackendBaseUrl();
   if (!baseUrl) {
-    return null;
+    return {
+      ok: false,
+      error: new AISbarError('UNCONFIGURED', 'El backend de IA no está configurado'),
+    };
   }
 
   const payload = {
@@ -129,14 +182,95 @@ export async function refineSBARWithAI(handover: HandoverFormData, draft: SBARSu
       signal: controller?.signal,
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return { ok: false, error: await resolveBackendError(response) };
+    }
 
     const data = (await response.json()) as RefineSbarResponse;
-    return buildRefinedSbar(data?.sbar, draft);
-  } catch {
-    return null;
+    return { ok: true, summary: buildRefinedSbar(data?.sbar, draft) };
+  } catch (error) {
+    return { ok: false, error: toAISbarError(error) };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+export async function refineSBARWithAI(handover: HandoverFormData, draft: SBARSummary): Promise<SBARSummary | null> {
+  const result = await refineSBARWithAIResult(handover, draft);
+  if (!result.ok) {
+    return null;
+  }
+  return result.summary;
+}
+
+export async function generateSbarViaBackendResult(
+  freeText: string,
+  context?: Record<string, unknown>,
+  language: 'es' | 'en' = 'es',
+): Promise<GenerateSbarViaBackendResult> {
+  const trimmed = freeText.trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: new AISbarError('INVALID_RESPONSE', 'No hay texto suficiente para generar un SBAR'),
+    };
+  }
+
+  const baseUrl = getAiBackendBaseUrl();
+  if (!baseUrl) {
+    return {
+      ok: false,
+      error: new AISbarError('UNCONFIGURED', 'El backend de IA no está configurado'),
+    };
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/ai/summarize-sbar`, {
+      method: 'POST',
+      headers: await buildJsonHeaders(),
+      body: JSON.stringify({ free_text: trimmed, context, language }),
+    });
+
+    if (!response.ok) {
+      return { ok: false, error: await resolveBackendError(response) };
+    }
+
+    const data = (await response.json()) as SbarBackendResponse;
+
+    if (
+      typeof data.situation !== 'string' ||
+      typeof data.background !== 'string' ||
+      typeof data.assessment !== 'string' ||
+      typeof data.recommendation !== 'string'
+    ) {
+      return {
+        ok: false,
+        error: new AISbarError('INVALID_RESPONSE', 'La respuesta del backend de IA no tiene el formato esperado'),
+      };
+    }
+
+    const rawText = typeof data.full_text === 'string' ? data.full_text : '';
+    const baseText = rawText.trim()
+      ? rawText
+      : formatSbarText(
+          { situation: data.situation, background: data.background, assessment: data.assessment, recommendation: data.recommendation },
+          language,
+        );
+
+    const fullText = appendLegalNotice(baseText, language);
+
+    return {
+      ok: true,
+      result: {
+        situation: data.situation,
+        background: data.background,
+        assessment: data.assessment,
+        recommendation: data.recommendation,
+        fullText,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: toAISbarError(error) };
   }
 }
 
@@ -145,46 +279,9 @@ export async function generateSbarViaBackend(
   context?: Record<string, unknown>,
   language: 'es' | 'en' = 'es',
 ): Promise<SbarResult> {
-  const trimmed = freeText.trim();
-  if (!trimmed) throw new Error('No se pudo generar el SBAR con IA');
-
-  const baseUrl = getAiBackendBaseUrl();
-  if (!baseUrl) throw new Error('Módulo de IA no configurado');
-
-  const response = await fetch(`${baseUrl}/ai/summarize-sbar`, {
-    method: 'POST',
-    headers: await buildJsonHeaders(),
-    body: JSON.stringify({ free_text: trimmed, context, language }),
-  });
-
-  if (!response.ok) throw new Error('No se pudo generar el SBAR con IA');
-
-  const data = (await response.json()) as SbarBackendResponse;
-
-  if (
-    typeof data.situation !== 'string' ||
-    typeof data.background !== 'string' ||
-    typeof data.assessment !== 'string' ||
-    typeof data.recommendation !== 'string'
-  ) {
-    throw new Error('No se pudo generar el SBAR con IA');
+  const result = await generateSbarViaBackendResult(freeText, context, language);
+  if (!result.ok) {
+    throw result.error;
   }
-
-  const rawText = typeof data.full_text === 'string' ? data.full_text : '';
-  const baseText = rawText.trim()
-    ? rawText
-    : formatSbarText(
-        { situation: data.situation, background: data.background, assessment: data.assessment, recommendation: data.recommendation },
-        language,
-      );
-
-  const fullText = appendLegalNotice(baseText, language);
-
-  return {
-    situation: data.situation,
-    background: data.background,
-    assessment: data.assessment,
-    recommendation: data.recommendation,
-    fullText,
-  };
+  return result.result;
 }

@@ -34,6 +34,7 @@ const GOVERNANCE_SOURCE_OPTIONS: Array<{ value: GovernanceFilterDraft['suggestio
 ];
 const GOVERNANCE_DECISION_OPTIONS: Array<{ value: GovernanceFilterDraft['decision']; label: string }> = [
   { value: 'all', label: 'Todas' },
+  { value: 'shown', label: 'Mostradas' },
   { value: 'applied', label: 'Aplicadas' },
   { value: 'dismissed', label: 'Descartadas' },
   { value: 'accepted', label: 'Aceptadas' },
@@ -345,7 +346,7 @@ function GovernanceBreakdownCard({
       <Text style={{ fontWeight: '700', color: '#0f172a' }}>{title}</Text>
       <Text style={{ marginTop: 4, color: '#334155' }}>Eventos: {count}</Text>
       <Text style={{ marginTop: 6, color: '#64748b' }}>
-        Aplicadas {decisions.applied} · Descartadas {decisions.dismissed} · Aceptadas {decisions.accepted} · Rechazadas {decisions.rejected}
+        Mostradas {decisions.shown} · Aplicadas {decisions.applied} · Descartadas {decisions.dismissed} · Aceptadas {decisions.accepted} · Rechazadas {decisions.rejected}
       </Text>
     </View>
   );
@@ -652,7 +653,7 @@ export function AdminDashboardScreen() {
                   <SummaryCard
                     label="Aplicadas"
                     value={decisionCount(clinicalDecisionSummary, 'applied')}
-                    detail={`Descartadas ${decisionCount(clinicalDecisionSummary, 'dismissed')}`}
+                    detail={`Mostradas ${decisionCount(clinicalDecisionSummary, 'shown')} · Descartadas ${decisionCount(clinicalDecisionSummary, 'dismissed')}`}
                   />
                   <SummaryCard
                     label="Fuentes IA"
@@ -731,7 +732,7 @@ export function AdminDashboardScreen() {
                     <Text style={{ fontWeight: '700', color: '#0f172a' }}>{formatDate(item.date)}</Text>
                     <Text style={{ marginTop: 4, color: '#334155' }}>Eventos: {item.count}</Text>
                     <Text style={{ marginTop: 6, color: '#64748b' }}>
-                      Aplicadas {item.decisions.applied} · Descartadas {item.decisions.dismissed} · Aceptadas {item.decisions.accepted} · Rechazadas {item.decisions.rejected}
+                      Mostradas {item.decisions.shown} · Aplicadas {item.decisions.applied} · Descartadas {item.decisions.dismissed} · Aceptadas {item.decisions.accepted} · Rechazadas {item.decisions.rejected}
                     </Text>
                   </View>
                 ))}

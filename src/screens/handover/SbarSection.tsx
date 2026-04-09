@@ -10,11 +10,16 @@ export type SbarSectionProps = {
   isRefiningSbarWithAI: boolean;
   aiSbarGenerationAvailable: boolean;
   isGeneratingSbarWithAI: boolean;
+  canUseAiSbarAssist: boolean;
   handleGenerateSbarWithAi: () => void;
   handleGenerateSbarSuggestion: () => void;
   handleRefineSbarWithAi: () => void;
+  pendingSbarSuggestionPreview: string | null;
+  onAcceptPendingSbarSuggestion: () => void;
+  onRejectPendingSbarSuggestion: () => void;
   sbarHelperMessage: string | null;
   sbarAiError: string | null;
+  sbarAiTraceabilityMessage: string | null;
   sbarSituationError?: string;
   sbarBackgroundError?: string;
   sbarAssessmentError?: string;
@@ -29,11 +34,16 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   isRefiningSbarWithAI,
   aiSbarGenerationAvailable,
   isGeneratingSbarWithAI,
+  canUseAiSbarAssist,
   handleGenerateSbarWithAi,
   handleGenerateSbarSuggestion,
   handleRefineSbarWithAi,
+  pendingSbarSuggestionPreview,
+  onAcceptPendingSbarSuggestion,
+  onRejectPendingSbarSuggestion,
   sbarHelperMessage,
   sbarAiError,
+  sbarAiTraceabilityMessage,
   sbarSituationError,
   sbarBackgroundError,
   sbarAssessmentError,
@@ -57,7 +67,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
               : t('handover.aiNotAvailable')
           }
           onPress={handleGenerateSbarWithAi}
-          disabled={!aiSbarGenerationAvailable || isGeneratingSbarWithAI}
+          disabled={!aiSbarGenerationAvailable || !canUseAiSbarAssist || isGeneratingSbarWithAI}
         />
         <View style={styles.secondaryButton}>
           <Button title={t('handover.sbarSuggested')} onPress={handleGenerateSbarSuggestion} />
@@ -72,7 +82,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
                 : t('handover.aiNotAvailable')
             }
             onPress={handleRefineSbarWithAi}
-            disabled={!aiSbarAvailable || isRefiningSbarWithAI}
+            disabled={!aiSbarAvailable || !canUseAiSbarAssist || isRefiningSbarWithAI}
           />
         </View>
         {isGeneratingSbarWithAI || isRefiningSbarWithAI ? (
@@ -80,8 +90,22 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         ) : null}
       </View>
       {aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
+      {sbarAiTraceabilityMessage ? <Text style={styles.helperText}>{sbarAiTraceabilityMessage}</Text> : null}
       {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
       {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
+      {pendingSbarSuggestionPreview ? (
+        <View style={styles.sbarPreview}>
+          <Text style={styles.sbarTitle}>{t('handover.sbarPendingReviewTitle')}</Text>
+          <Text style={styles.sbarText}>{pendingSbarSuggestionPreview}</Text>
+          <Text style={styles.helperText}>{t('handover.sbarPendingReviewHelper')}</Text>
+          <View style={styles.inlineActions}>
+            <Button title={t('handover.sbarAcceptSuggestion')} onPress={onAcceptPendingSbarSuggestion} />
+            <View style={styles.secondaryButton}>
+              <Button title={t('handover.sbarRejectSuggestion')} onPress={onRejectPendingSbarSuggestion} />
+            </View>
+          </View>
+        </View>
+      ) : null}
       <View style={styles.field}>
         <Text style={styles.label}>{t('handover.sbarSituationLabel')}</Text>
         <Controller
