@@ -1,10 +1,10 @@
 # Clinical Decision Log (IA asistida)
 
-Estado revisado contra el repo el 2026-03-28.
+Estado revisado contra el repo el 2026-04-08.
 
 ## Proposito
 
-Registrar de forma minima, trazable y no punitiva cuando un profesional humano aplica o descarta una sugerencia asistida por IA ya existente en HANDOVER.
+Registrar de forma minima, trazable y no punitiva cuando un profesional humano visualiza, acepta, aplica o descarta una sugerencia asistida por IA ya existente en HANDOVER.
 
 Este registro:
 - mejora trazabilidad operativa del piloto;
@@ -16,7 +16,7 @@ Este registro:
 - actor autenticado derivado del token (`actor_id`, `actor_role`);
 - paciente y unidad tecnica canonica (`patient_id`, `unit_id`);
 - origen de la sugerencia (`ai_generate_sbar`, `ai_refine_sbar`, `ai_nic_suggestions`, `ai_noc_suggestions`);
-- decision humana (`accepted`, `applied`, `rejected`, `dismissed`);
+- decision humana (`shown`, `accepted`, `applied`, `rejected`, `dismissed`);
 - `reason_code` breve cuando existe;
 - `created_at`;
 - metadatos minimos no-PHI:
@@ -55,13 +55,13 @@ Este registro:
 ## Cobertura actual
 
 Cubierto en esta iteracion:
-- aplicacion de SBAR generada o refinada con IA;
+- visualizacion previa y aceptacion/rechazo explicito de SBAR generada o refinada con IA;
 - aplicacion o descarte explicito de sugerencias NIC;
 - aplicacion o descarte explicito de sugerencias NOC pendientes de revision.
 - lectura agregada piloto-grade para comite/supervision sin ranking individual.
 
 Fuera de esta iteracion:
-- sugerencias solo visualizadas sin accion humana;
+- otras sugerencias visualizadas fuera de SBAR sin accion humana dedicada;
 - mezcla con ICEA scoring, submit FHIR, queue/sync u otras superficies no tocadas.
 - cualquier uso nominal, retributivo o punitivo.
 

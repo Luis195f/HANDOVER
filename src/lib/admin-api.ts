@@ -375,6 +375,8 @@ function demoDashboardData(): IceaOpsDashboardData {
 
 function normalizeDecisionCounts(payload: unknown): ClinicalDecisionGovernanceDecisionCounts {
   return {
+    shown:
+      typeof (payload as { shown?: unknown })?.shown === 'number' ? (payload as { shown: number }).shown : 0,
     accepted:
       typeof (payload as { accepted?: unknown })?.accepted === 'number' ? (payload as { accepted: number }).accepted : 0,
     applied:

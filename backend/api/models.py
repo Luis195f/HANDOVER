@@ -39,11 +39,13 @@ class ClientAuditEvent(models.Model):
 
 
 class ClinicalDecisionEvent(models.Model):
+    DECISION_SHOWN = "shown"
     DECISION_ACCEPTED = "accepted"
     DECISION_APPLIED = "applied"
     DECISION_REJECTED = "rejected"
     DECISION_DISMISSED = "dismissed"
     DECISION_CHOICES = [
+        (DECISION_SHOWN, "Shown"),
         (DECISION_ACCEPTED, "Accepted"),
         (DECISION_APPLIED, "Applied"),
         (DECISION_REJECTED, "Rejected"),
