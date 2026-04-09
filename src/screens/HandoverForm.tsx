@@ -1075,6 +1075,29 @@ export default function HandoverForm({ navigation, route }: Props) {
   } = useHandoverSyncStatus();
   const aiSbarAvailable = AI_SBAR_ENABLED;
   const aiSbarGenerationAvailable = AI_BACKEND_ENABLED;
+  const resolveTraceableSbarAiContext = (values?: Pick<HandoverFormValues, 'patientId'>) => {
+    const patientId =
+      typeof values?.patientId === 'string'
+        ? values.patientId.trim()
+        : typeof patientIdValue === 'string'
+          ? patientIdValue.trim()
+          : '';
+    const unitId = (effectivePilotUnitId ?? '').trim();
+    return {
+      patientId,
+      unitId,
+      ready: Boolean(patientId && unitId),
+    };
+  };
+  const canUseAiSbarAssist = resolveTraceableSbarAiContext().ready;
+
+  const requireTraceableSbarAiContext = (values?: Pick<HandoverFormValues, 'patientId'>) => {
+    const context = resolveTraceableSbarAiContext(values);
+    if (context.ready) return context;
+    setSbarAiError(null);
+    setSbarHelperMessage(t('handover.sbarAiTraceabilityRequired'));
+    return null;
+  };
 
   useEffect(() => {
     if (!audioUploadToFhir) {
@@ -1395,13 +1418,20 @@ export default function HandoverForm({ navigation, route }: Props) {
       helperMessage: string;
     },
   ) => {
+    const traceableContext = resolveTraceableSbarAiContext(values);
+    if (input.mode === 'ai' && !traceableContext.ready) {
+      setSbarAiError(null);
+      setSbarHelperMessage(t('handover.sbarAiTraceabilityRequired'));
+      return;
+    }
+
     clearPendingSbarSuggestion('rejected', 'replace_existing');
 
     const summary = input.summary;
     const fullText = input.fullText ?? buildSbarFullText(summary);
     const nextPending: PendingSbarSuggestion = {
-      patientId: values.patientId.trim(),
-      unitId: (effectivePilotUnitId ?? '').trim(),
+      patientId: traceableContext.patientId,
+      unitId: traceableContext.unitId,
       source: input.source,
       mode: input.mode,
       summary,
@@ -1461,6 +1491,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleRefineSbarWithAi = async () => {
     const values = form.getValues();
     const draft = buildDraftSbar(values);
+    if (!requireTraceableSbarAiContext(values)) {
+      return;
+    }
 
     setIsRefiningSbarWithAI(true);
     setSbarAiError(null);
@@ -1492,6 +1525,10 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleGenerateSbarWithAi = async () => {
     const values = form.getValues();
+    if (!requireTraceableSbarAiContext(values)) {
+      return;
+    }
+
     setIsGeneratingSbarWithAI(true);
     setSbarAiError(null);
     setSbarHelperMessage(null);
@@ -2249,6 +2286,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               isRefiningSbarWithAI={isRefiningSbarWithAI}
               aiSbarGenerationAvailable={aiSbarGenerationAvailable}
               isGeneratingSbarWithAI={isGeneratingSbarWithAI}
+              canUseAiSbarAssist={canUseAiSbarAssist}
               handleGenerateSbarWithAi={handleGenerateSbarWithAi}
               handleGenerateSbarSuggestion={handleGenerateSbarSuggestion}
               handleRefineSbarWithAi={handleRefineSbarWithAi}
@@ -2257,6 +2295,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               onRejectPendingSbarSuggestion={rejectPendingSbarSuggestion}
               sbarHelperMessage={sbarHelperMessage}
               sbarAiError={sbarAiError}
+              sbarAiTraceabilityMessage={canUseAiSbarAssist ? null : t('handover.sbarAiTraceabilityRequired')}
               sbarSituationError={sbarSituationError}
               sbarBackgroundError={sbarBackgroundError}
               sbarAssessmentError={sbarAssessmentError}

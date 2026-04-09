@@ -326,6 +326,7 @@
     "sbarAiFallbackHelper": "La IA no está disponible ahora. Se muestra un borrador local por reglas para que continúes sin bloquear el handover.",
     "sbarAiUnauthorizedFallbackHelper": "La sesión actual no pudo usar la IA. Se muestra un borrador local por reglas para que continúes sin bloquear el handover.",
     "sbarAiDisabledFallbackHelper": "La IA no está configurada en este entorno. Se muestra un borrador local por reglas para que continúes sin bloquear el handover.",
+    "sbarAiTraceabilityRequired": "Para usar SBAR asistida con IA primero vincula un paciente y una unidad técnica trazable.",
     "sbarFallbackAcceptedHelper": "Borrador local aplicado. Revísalo y ajusta si hace falta antes de finalizar el handover.",
     "sbarFallbackRejectedHelper": "Borrador local descartado. Puedes continuar completando el SBAR manualmente.",
     "sbarRefinedHelper": "SBAR refinada por IA. Revise y ajuste según criterio clínico.",

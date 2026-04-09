@@ -326,6 +326,7 @@
     "sbarAiFallbackHelper": "AI is unavailable right now. A local rules-based draft is shown so the handover can continue without blocking.",
     "sbarAiUnauthorizedFallbackHelper": "The current session could not use AI. A local rules-based draft is shown so the handover can continue without blocking.",
     "sbarAiDisabledFallbackHelper": "AI is not configured in this environment. A local rules-based draft is shown so the handover can continue without blocking.",
+    "sbarAiTraceabilityRequired": "To use AI-assisted SBAR, first link a patient and a traceable technical unit.",
     "sbarFallbackAcceptedHelper": "Local draft applied. Review and adjust it if needed before finalizing the handover.",
     "sbarFallbackRejectedHelper": "Local draft discarded. You can keep completing the SBAR manually.",
     "sbarRefinedHelper": "SBAR refined by AI. Review and adjust per clinical judgment.",
