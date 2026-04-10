@@ -2,15 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ensureFreshAccessTokenMock = vi.fn();
 const startSyncDaemonMock = vi.fn();
-const flushQueueMock = vi.fn();
+const flushSyncQueueMock = vi.fn();
 
 vi.mock('@/src/security/auth', () => ({
   ensureFreshAccessToken: (...args: unknown[]) => ensureFreshAccessTokenMock(...args),
 }));
 
-vi.mock('@/src/lib/sync/index', () => ({
+vi.mock('@/src/lib/sync', () => ({
   startSyncDaemon: (...args: unknown[]) => startSyncDaemonMock(...args),
-  flushQueue: (...args: unknown[]) => flushQueueMock(...args),
+  flushSyncQueue: (...args: unknown[]) => flushSyncQueueMock(...args),
 }));
 
 vi.mock('@/src/config/env', () => ({
@@ -48,13 +48,13 @@ describe('queueBootstrap auth seam', () => {
   it('flushNow ignores EXPO_PUBLIC_AUTH_TOKEN as an auth bypass', async () => {
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'public-token';
     ensureFreshAccessTokenMock.mockResolvedValue(null);
-    flushQueueMock.mockResolvedValue({ processed: 0, remaining: 1 });
+    flushSyncQueueMock.mockResolvedValue({ processed: 0, remaining: 1 });
 
     const { flushNow } = await loadQueueBootstrap();
     await flushNow();
 
-    expect(flushQueueMock).toHaveBeenCalledTimes(1);
-    const syncOpts = flushQueueMock.mock.calls[0]?.[0];
+    expect(flushSyncQueueMock).toHaveBeenCalledTimes(1);
+    const syncOpts = flushSyncQueueMock.mock.calls[0]?.[0];
     await expect(syncOpts.getToken()).resolves.toBeNull();
     expect(ensureFreshAccessTokenMock).toHaveBeenCalledWith('fhir');
   });

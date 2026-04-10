@@ -7,7 +7,7 @@ import { clearOfflineQueue, deleteOfflineQueueItem, enqueueBundle } from '@/src/
 import { useHandoverSyncStatus } from '@/src/screens/handover/useHandoverSyncStatus';
 
 const ensureFreshAccessTokenMock = vi.fn();
-const flushQueueMock = vi.fn();
+const flushSyncQueueMock = vi.fn();
 const recentlySyncedQueueIds = new Map<string, number>();
 const originalNodeEnv = process.env.NODE_ENV;
 const originalOfflineEncryptionDisabled = process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
@@ -29,8 +29,7 @@ vi.mock('@/src/security/auth', () => ({
   ensureFreshAccessToken: (...args: unknown[]) => ensureFreshAccessTokenMock(...args),
 }));
 
-vi.mock('@/src/lib/sync/index', () => ({
-  flushQueue: (...args: unknown[]) => flushQueueMock(...args),
+vi.mock('@/src/lib/sync', () => ({
   consumeRecentlySyncedQueueItem: (id: string, opts?: { minCompletedAt?: number }) => {
     const completedAt = recentlySyncedQueueIds.get(id);
     if (completedAt == null) {
@@ -42,9 +41,7 @@ vi.mock('@/src/lib/sync/index', () => ({
     }
     return true;
   },
-}));
-
-vi.mock('@/src/lib/sync', () => ({
+  flushSyncQueue: (...args: unknown[]) => flushSyncQueueMock(...args),
   getSyncSnapshot: () => ({
     status: 'idle',
     lastRunAt: null,
@@ -209,7 +206,7 @@ describe('useHandoverSyncStatus', () => {
     });
 
     ensureFreshAccessTokenMock.mockResolvedValueOnce('session-token');
-    flushQueueMock.mockResolvedValueOnce({ processed: 0, remaining: 0 });
+    flushSyncQueueMock.mockResolvedValueOnce({ processed: 0, remaining: 0 });
 
     await act(async () => {
       await view.getByTestId('retry').props.onPress();
@@ -230,7 +227,7 @@ describe('useHandoverSyncStatus', () => {
     const view = render(<HookHarness queueId={queued.id} initializeQueued={false} />);
 
     ensureFreshAccessTokenMock.mockResolvedValueOnce(null);
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+    flushSyncQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       const token = await opts.getToken();
       return { processed: 0, remaining: 0, outcome: token ? 'success' : 'auth-required' };
     });
@@ -241,13 +238,13 @@ describe('useHandoverSyncStatus', () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
 
-    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(flushSyncQueueMock).toHaveBeenCalledTimes(1);
     expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(1, 'fhir');
 
     ensureFreshAccessTokenMock
       .mockResolvedValueOnce('fresh-replay-token-1')
       .mockResolvedValueOnce('fresh-replay-token-2');
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+    flushSyncQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       await opts.getToken();
       await opts.getToken();
       recentlySyncedQueueIds.set(queued.id, Date.now());
@@ -261,7 +258,7 @@ describe('useHandoverSyncStatus', () => {
 
     expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(2, 'fhir');
     expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(3, 'fhir');
-    expect(flushQueueMock).toHaveBeenCalledTimes(2);
+    expect(flushSyncQueueMock).toHaveBeenCalledTimes(2);
     await waitFor(() => {
       expect(view.getByTestId('status').props.children).toBe('synced');
     });
@@ -276,7 +273,7 @@ describe('useHandoverSyncStatus', () => {
     const view = render(<HookHarness queueId={queued.id} initializeQueued={false} />);
 
     ensureFreshAccessTokenMock.mockRejectedValueOnce(new Error('refresh failed'));
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+    flushSyncQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       try {
         await opts.getToken();
         return { processed: 0, remaining: 0, outcome: 'success' };
@@ -292,7 +289,7 @@ describe('useHandoverSyncStatus', () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
 
-    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(flushSyncQueueMock).toHaveBeenCalledTimes(1);
     expect(ensureFreshAccessTokenMock).toHaveBeenCalledWith('fhir');
   });
 });

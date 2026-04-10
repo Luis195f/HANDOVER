@@ -89,7 +89,8 @@ describe('offline sync single source of truth', () => {
     expect(client.postBundle).toHaveBeenCalledWith(
       storedBundle,
       expect.objectContaining({
-        headers: { 'Idempotency-Key': queued.id },
+        idempotencyKey: queued.id,
+        headers: expect.objectContaining({ Prefer: 'return=representation' }),
       }),
     );
     expect(await queue.listOfflineQueue()).toHaveLength(0);
@@ -121,7 +122,7 @@ describe('offline sync single source of truth', () => {
     expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
   });
 
-  it('sync/index retries transport status 0 before leaving the canonical queue pending', async () => {
+  it('sync/index leaves transport status 0 pending in the canonical queue for the sync runtime backoff', async () => {
     const queue = await import('@/src/lib/queue');
     const sync = await import('@/src/lib/sync');
     const syncIndex = await import('@/src/lib/sync/index');
@@ -141,10 +142,12 @@ describe('offline sync single source of truth', () => {
       backoff: { retries: 1, minMs: 0, maxMs: 0 },
     });
 
-    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
-    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
-    expect(client.postBundle).toHaveBeenCalledTimes(2);
-    expect(await queue.listOfflineQueue()).toHaveLength(0);
+    expect(result).toEqual({ processed: 0, remaining: 1, outcome: 'network-error', status: 0 });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+    expect(client.postBundle).toHaveBeenCalledTimes(1);
+    const [pending] = await queue.listOfflineQueue();
+    expect(pending?.id).toBe(queued.id);
+    expect(pending?.syncStatus).toBe('pending');
   });
 });
 

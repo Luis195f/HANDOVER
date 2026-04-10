@@ -7,7 +7,7 @@ import SyncCenter from '@/src/screens/SyncCenter';
 import { t } from '@/src/i18n';
 
 const listOfflineQueue = vi.fn();
-const flushQueue = vi.fn();
+const flushSyncQueue = vi.fn();
 const getTokenMock = vi.fn(async () => 'token');
 
 const navigationMock = {
@@ -31,8 +31,8 @@ vi.mock('@/src/lib/queue', () => ({
   listOfflineQueue: (...args: unknown[]) => listOfflineQueue(...args),
 }));
 
-vi.mock('@/src/lib/sync/index', () => ({
-  flushQueue: (...args: unknown[]) => flushQueue(...args),
+vi.mock('@/src/lib/sync', () => ({
+  flushSyncQueue: (...args: unknown[]) => flushSyncQueue(...args),
 }));
 
 const authModuleMock = {
@@ -70,7 +70,7 @@ const queueItems = [
 describe('SyncCenter', () => {
   beforeEach(() => {
     listOfflineQueue.mockReset();
-    flushQueue.mockReset();
+    flushSyncQueue.mockReset();
     getTokenMock.mockReset();
     getTokenMock.mockResolvedValue('token');
 
@@ -78,7 +78,7 @@ describe('SyncCenter', () => {
     delete process.env.EXPO_PUBLIC_AUTH_TOKEN;
 
     listOfflineQueue.mockResolvedValue(queueItems);
-    flushQueue.mockResolvedValue({ processed: 2, remaining: 0 });
+    flushSyncQueue.mockResolvedValue({ processed: 2, remaining: 0 });
   });
 
   it('renders queue items with the expected statuses', async () => {
@@ -114,7 +114,7 @@ describe('SyncCenter', () => {
     });
 
     await waitFor(() => {
-      expect(flushQueue).toHaveBeenCalled();
+      expect(flushSyncQueue).toHaveBeenCalled();
     });
 
     expect(listOfflineQueue.mock.calls.length).toBeGreaterThan(initialCalls);
@@ -163,6 +163,10 @@ describe('SyncCenter', () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     process.env.EXPO_PUBLIC_AUTH_TOKEN = 'public-token';
     getTokenMock.mockResolvedValue(null);
+    flushSyncQueue.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+      const token = await opts.getToken();
+      return { processed: 0, remaining: 0, outcome: token ? 'success' : 'auth-required' };
+    });
 
     const view = render(<SyncCenter />);
     await waitFor(() => {
@@ -173,7 +177,7 @@ describe('SyncCenter', () => {
       fireEvent.press(view.getByTestId('sync-flush'));
     });
 
-    expect(flushQueue).not.toHaveBeenCalled();
+    expect(flushSyncQueue).toHaveBeenCalledTimes(1);
     expect(alertSpy).toHaveBeenCalledWith(t('sync.syncTitle'), t('sync.authRequiredMessage'));
     alertSpy.mockRestore();
   });

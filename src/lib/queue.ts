@@ -992,9 +992,9 @@ export async function enqueueBundle(bundle: unknown, meta: BundleMeta = {}) {
     enqueuedAt: new Date().toISOString(),
   };
 
-  // Canonical handover write path: UI, sync.ts and sync/index.ts must observe the
+  // Canonical handover write path: UI and the sync runtime persist into the
   // same secure offline queue instead of splitting across tx_queue and
-  // handover_offline_queue.
+  // handover_offline_queue. sync/index.ts is only a compatibility shim.
   return enqueueOfflineQueueItem({
     id: key,
     patientId,

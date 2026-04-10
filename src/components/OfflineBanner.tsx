@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, useColorScheme } from 'react-native';
 import { useNetInfo } from '@/src/lib/netinfo';
-import { getQueueSize } from '@/src/lib/sync/index';
+import { getCanonicalQueueSize } from '@/src/lib/sync';
 
 type Props = { onPress?: () => void };
 
@@ -20,7 +20,7 @@ export default function OfflineBanner({ onPress }: Props) {
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = React.useCallback(async () => {
-    const n = await getQueueSize();
+    const n = await getCanonicalQueueSize();
     setCount(n < 0 ? 0 : n);
   }, []);
 

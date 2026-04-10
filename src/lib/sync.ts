@@ -10,7 +10,7 @@ import {
   type HandoverValues,
 } from './fhir-map';
 import type { AdministrativeData } from '../types/administrative';
-import { postBundle, type ResponseLike } from './fhir-client';
+import { configureFHIRClient, postBundle, type ResponseLike } from './fhir-client';
 import { formatIssuesForUser, hasFatalOutcome, type OperationIssue } from './fhir-outcome';
 import { hashHex } from './crypto';
 import { z } from 'zod';
@@ -100,11 +100,32 @@ export type SyncSnapshot = {
 type SyncListener = (snapshot: SyncSnapshot) => void;
 
 type SyncEngineOptions = {
-  getToken: () => Promise<string>;
+  getToken: () => Promise<string | null>;
   validation?: ValidationOptions;
   onAuthError?: (error: Error) => void;
   isOnline?: () => Promise<boolean>;
   sender?: QueueSendHandler;
+};
+
+export type SyncOpts = {
+  fhirBaseUrl: string;
+  getToken: () => Promise<string | null>;
+  backoff?: { retries?: number; minMs?: number; maxMs?: number };
+};
+
+export type FlushOutcome =
+  | 'success'
+  | 'auth-required'
+  | 'auth-failed'
+  | 'network-error'
+  | 'server-error'
+  | 'client-error';
+
+export type FlushResult = {
+  processed: number;
+  remaining: number;
+  outcome: FlushOutcome;
+  status?: number;
 };
 
 // BEGIN HANDOVER_OFFLINE
@@ -130,6 +151,7 @@ type QueueSendFailure = {
   message?: string;
   recoverable?: boolean;
   errorIssuesJson?: string;
+  authOutcome?: Extract<FlushOutcome, 'auth-required' | 'auth-failed'>;
 };
 type QueueSendResult = QueueSendSuccess | QueueSendFailure;
 type QueueSendHandler = (item: OfflineQueueItem) => Promise<QueueSendResult>;
@@ -164,6 +186,8 @@ let syncSnapshot: SyncSnapshot = {
   nextRetryAt: null,
 };
 const syncListeners = new Set<SyncListener>();
+const RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS = 5 * 60_000;
+const recentlySyncedQueueItems = new Map<string, { completedAt: number }>();
 
 function notifySyncListeners() {
   for (const listener of syncListeners) {
@@ -190,6 +214,39 @@ export function subscribeSyncStatus(listener: SyncListener): () => void {
   return () => {
     syncListeners.delete(listener);
   };
+}
+
+function pruneRecentlySyncedQueueItems(now = Date.now()): void {
+  for (const [id, evidence] of recentlySyncedQueueItems.entries()) {
+    if (evidence.completedAt + RECENTLY_SYNCED_QUEUE_ITEM_TTL_MS <= now) {
+      recentlySyncedQueueItems.delete(id);
+    }
+  }
+}
+
+function rememberRecentlySyncedQueueItem(id: string): void {
+  const now = Date.now();
+  pruneRecentlySyncedQueueItems(now);
+  recentlySyncedQueueItems.set(id, { completedAt: now });
+}
+
+export function consumeRecentlySyncedQueueItem(
+  id: string,
+  opts?: { minCompletedAt?: number },
+): boolean {
+  const now = Date.now();
+  pruneRecentlySyncedQueueItems(now);
+  const evidence = recentlySyncedQueueItems.get(id);
+  if (!evidence) {
+    recentlySyncedQueueItems.delete(id);
+    return false;
+  }
+  if (typeof opts?.minCompletedAt === 'number' && evidence.completedAt < opts.minCompletedAt) {
+    recentlySyncedQueueItems.delete(id);
+    return false;
+  }
+  recentlySyncedQueueItems.delete(id);
+  return true;
 }
 
 function cancelSyncTimer() {
@@ -375,17 +432,30 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
       };
     }
 
-    let token: string;
+    let token: string | null;
     try {
       token = await options.getToken();
     } catch (error) {
-      return { ok: false, kind: 'auth', recoverable: true, message: (error as Error)?.message };
+      return {
+        ok: false,
+        kind: 'auth',
+        authOutcome: 'auth-failed',
+        recoverable: false,
+        message: (error as Error)?.message,
+      };
     }
 
     if (!token) {
       pauseSync('Autenticación requerida');
       options.onAuthError?.(new Error('unauthorized'));
-      return { ok: false, kind: 'auth', status: 401, recoverable: false, message: 'Token requerido' };
+      return {
+        ok: false,
+        kind: 'auth',
+        status: 401,
+        authOutcome: 'auth-required',
+        recoverable: false,
+        message: 'Token requerido',
+      };
     }
 
     try {
@@ -425,6 +495,7 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
           ok: false,
           kind: 'auth',
           status: response.status,
+          authOutcome: 'auth-required',
           recoverable: false,
           message: message ?? 'Unauthorized',
         };
@@ -467,7 +538,14 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
       if (error instanceof Error && error.message === 'unauthorized') {
         pauseSync('Autenticación requerida');
         options.onAuthError?.(error);
-        return { ok: false, kind: 'auth', status: 401, recoverable: false, message: error.message };
+        return {
+          ok: false,
+          kind: 'auth',
+          status: 401,
+          authOutcome: 'auth-required',
+          recoverable: false,
+          message: error.message,
+        };
       }
 
       // If the error comes from Zod/local validation, treat it as a non-recoverable 422.
@@ -594,6 +672,7 @@ export async function processQueueOnce(): Promise<void> {
 
     const duplicateDelivered = !result.ok && isDuplicateStatus(result.status);
     if (result.ok || duplicateDelivered) {
+      rememberRecentlySyncedQueueItem(item.id);
       await updateOfflineQueueStatus(item.id, 'synced', {
         attemptCount,
         lastAttemptAt: startedAt,
@@ -749,11 +828,8 @@ function ensureSyncConnectivityListener() {
 }
 
 export function configureSyncEngine(options: SyncEngineOptions): void {
-  syncOptions = options;
-  pausedForAuth = false;
-  cancelSyncTimer();
+  applySyncEngineOptions(options, { ensureConnectivity: true });
   setQueueSendHandler(options.sender ?? buildDefaultQueueSender(options));
-  ensureSyncConnectivityListener();
   void runSyncCycle();
 }
 
@@ -771,6 +847,111 @@ export function stopSyncEngine(): void {
     syncConnectivityUnsubscribe = null;
   }
   updateSyncSnapshot({ status: 'idle', nextRetryAt: null });
+}
+
+function configureCanonicalFhirClient(opts: SyncOpts): void {
+  configureFHIRClient({
+    getBaseUrl: () => opts.fhirBaseUrl,
+    ensureFreshToken: async () => (await opts.getToken()) ?? null,
+  });
+}
+
+function applySyncEngineOptions(
+  options: SyncEngineOptions,
+  opts: { ensureConnectivity?: boolean } = {},
+): void {
+  syncOptions = options;
+  pausedForAuth = false;
+  cancelSyncTimer();
+  if (opts.ensureConnectivity !== false) {
+    ensureSyncConnectivityListener();
+  }
+}
+
+function classifyFlushOutcome(
+  failure: { kind: QueueFailureKind; status?: number; authOutcome?: QueueSendFailure['authOutcome'] } | null,
+): FlushResult {
+  if (!failure) {
+    return { processed: 0, remaining: 0, outcome: 'success' };
+  }
+
+  if (failure.kind === 'auth') {
+    return {
+      processed: 0,
+      remaining: 0,
+      outcome: failure.authOutcome ?? 'auth-required',
+      status: failure.status ?? 401,
+    };
+  }
+
+  if (failure.kind === 'server') {
+    return { processed: 0, remaining: 0, outcome: 'server-error', status: failure.status };
+  }
+
+  if (failure.kind === 'client' || failure.kind === 'validation') {
+    return { processed: 0, remaining: 0, outcome: 'client-error', status: failure.status };
+  }
+
+  return { processed: 0, remaining: 0, outcome: 'network-error', status: failure.status };
+}
+
+export function startSyncDaemon(opts: SyncOpts): () => void {
+  configureCanonicalFhirClient(opts);
+  const sender = buildDefaultQueueSender({ getToken: opts.getToken });
+  applySyncEngineOptions({ getToken: opts.getToken, sender }, { ensureConnectivity: true });
+  setQueueSendHandler(sender);
+  void runSyncCycle();
+  return () => {
+    stopSyncEngine();
+  };
+}
+
+export async function flushSyncQueue(opts: SyncOpts): Promise<FlushResult> {
+  configureCanonicalFhirClient(opts);
+  const trackedFailure: {
+    current: {
+    kind: QueueFailureKind;
+    status?: number;
+    authOutcome?: QueueSendFailure['authOutcome'];
+    } | null;
+  } = { current: null };
+  const sender = buildDefaultQueueSender({ getToken: opts.getToken });
+
+  const trackedSender: QueueSendHandler = async (item) => {
+    const result = await sender(item);
+    if (!result.ok && trackedFailure.current == null) {
+      trackedFailure.current = {
+        kind: result.kind,
+        status: result.status,
+        authOutcome: result.authOutcome,
+      };
+    }
+    return result;
+  };
+
+  applySyncEngineOptions({
+    getToken: opts.getToken,
+    sender: trackedSender,
+  }, { ensureConnectivity: false });
+  setQueueSendHandler(trackedSender);
+
+  const before = await listOfflineQueue();
+  await runSyncCycle();
+  const after = await listOfflineQueue();
+  const afterIds = new Set(after.map((item) => item.id));
+  const processed = before.filter((item) => !afterIds.has(item.id)).length;
+  const base = classifyFlushOutcome(trackedFailure.current);
+
+  return {
+    processed,
+    remaining: after.length,
+    outcome: processed > 0 && trackedFailure.current == null ? 'success' : base.outcome,
+    status: processed > 0 && trackedFailure.current == null ? undefined : base.status,
+  };
+}
+
+export async function getCanonicalQueueSize(): Promise<number> {
+  return (await listOfflineQueue()).length;
 }
 // END HANDOVER_OFFLINE
 
