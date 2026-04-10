@@ -167,6 +167,35 @@ describe('postBundle', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it.each([401, 403])('calls logout only once when replay still fails with %s after refresh', async (finalStatus) => {
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call += 1;
+      return new Response(
+        JSON.stringify({ detail: finalStatus === 403 ? 'Forbidden' : 'Unauthorized' }),
+        {
+          status: call === 1 ? 401 : finalStatus,
+          headers: { 'Content-Type': 'application/fhir+json' },
+        },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { configureFHIRClient, postBundle } = await loadClient();
+    const logoutSpy = vi.fn();
+
+    configureFHIRClient({
+      ensureFreshToken: vi.fn(async () => 'fresh-token'),
+      logout: logoutSpy,
+    });
+
+    const result = await postBundle(bundle, { token: 'stale-token' });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(finalStatus);
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('returns json undefined when error body cannot be parsed', async () => {
     const fetchMock = vi
       .fn()

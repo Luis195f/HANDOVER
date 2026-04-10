@@ -510,7 +510,6 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
                   (isRetryHTTPError || isRetryHttpErrorLike) &&
                   (maybeRetryHttpError.status === 401 || maybeRetryHttpError.status === 403)
                 ) {
-                  if (runtimeConfig.logout) await runtimeConfig.logout();
                   throw createAuthStatusError(maybeRetryHttpError.status === 403 ? 403 : 401);
                 }
                 if (isRetryHTTPError || isRetryHttpErrorLike) {

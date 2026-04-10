@@ -925,52 +925,70 @@ export function startSyncDaemon(opts: SyncOpts): () => void {
   };
 }
 
+let currentFlushPromise: Promise<FlushResult> | null = null;
+
 export async function flushSyncQueue(opts: SyncOpts): Promise<FlushResult> {
-  configureCanonicalFhirClient(opts);
-  const trackedFailure: {
-    current: {
-    kind: QueueFailureKind;
-    status?: number;
-    authOutcome?: QueueSendFailure['authOutcome'];
-    } | null;
-  } = { current: null };
-  const sender = buildDefaultQueueSender({ getToken: opts.getToken });
+  if (currentFlushPromise) {
+    return currentFlushPromise;
+  }
 
-  const trackedSender: QueueSendHandler = async (item) => {
-    const result = await sender(item);
-    if (!result.ok && trackedFailure.current == null) {
-      trackedFailure.current = {
-        kind: result.kind,
-        status: result.status,
-        authOutcome: result.authOutcome,
-      };
-    }
-    return result;
-  };
+  currentFlushPromise = (async () => {
+    configureCanonicalFhirClient(opts);
+    const trackedFailure: {
+      current: {
+      kind: QueueFailureKind;
+      status?: number;
+      authOutcome?: QueueSendFailure['authOutcome'];
+      } | null;
+    } = { current: null };
+    const sender = buildDefaultQueueSender({ getToken: opts.getToken });
 
-  applySyncEngineOptions({
-    getToken: opts.getToken,
-    sender: trackedSender,
-  }, { ensureConnectivity: false });
-  setQueueSendHandler(trackedSender);
+    const trackedSender: QueueSendHandler = async (item) => {
+      const result = await sender(item);
+      if (!result.ok && trackedFailure.current == null) {
+        trackedFailure.current = {
+          kind: result.kind,
+          status: result.status,
+          authOutcome: result.authOutcome,
+        };
+      }
+      return result;
+    };
 
-  const before = await listOfflineQueue();
-  await runSyncCycle();
-  const after = await listOfflineQueue();
-  const afterIds = new Set(after.map((item) => item.id));
-  const processed = before.filter((item) => !afterIds.has(item.id)).length;
-  const base = classifyFlushOutcome(trackedFailure.current);
+    applySyncEngineOptions({
+      getToken: opts.getToken,
+      sender: trackedSender,
+    }, { ensureConnectivity: false });
+    setQueueSendHandler(trackedSender);
 
-  return {
-    processed,
-    remaining: after.length,
-    outcome: processed > 0 && trackedFailure.current == null ? 'success' : base.outcome,
-    status: processed > 0 && trackedFailure.current == null ? undefined : base.status,
-  };
+    const before = await listOfflineQueue();
+    await runSyncCycle();
+    const after = await listOfflineQueue();
+    const afterIds = new Set(after.map((item) => item.id));
+    const processed = before.filter((item) => !afterIds.has(item.id)).length;
+    const base = classifyFlushOutcome(trackedFailure.current);
+
+    return {
+      processed,
+      remaining: after.length,
+      outcome: processed > 0 && trackedFailure.current == null ? 'success' : base.outcome,
+      status: processed > 0 && trackedFailure.current == null ? undefined : base.status,
+    };
+  })();
+
+  try {
+    return await currentFlushPromise;
+  } finally {
+    currentFlushPromise = null;
+  }
 }
 
 export async function getCanonicalQueueSize(): Promise<number> {
-  return (await listOfflineQueue()).length;
+  try {
+    return (await listOfflineQueue()).length;
+  } catch {
+    return -1;
+  }
 }
 // END HANDOVER_OFFLINE
 
