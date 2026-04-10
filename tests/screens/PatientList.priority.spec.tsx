@@ -21,13 +21,13 @@ describe('PatientList deny-first authz seam', () => {
     mocked.hasUnitAccess.mockReset();
     vi.stubGlobal('__DEV__', true);
     process.env.NODE_ENV = 'test';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     await clearOfflineQueue();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
     delete process.env.NODE_ENV;
   });
 
@@ -121,3 +121,4 @@ describe('PatientList deny-first authz seam', () => {
     expect(statuses['pat-without-queue-entry']).toBeUndefined();
   });
 });
+

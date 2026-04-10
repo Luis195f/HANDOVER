@@ -10,7 +10,6 @@ const truthy = (v: FlagValue): boolean => {
 const extra = getAppConfigExtra();
 
 export const flags = {
-  ALLOW_ALL_UNITS: (extra as any)?.ALLOW_ALL_UNITS ?? process.env.EXPO_PUBLIC_ALLOW_ALL_UNITS,
   SHOW_SBAR: (extra as any)?.FEATURES?.handover?.showSBAR ?? process.env.EXPO_PUBLIC_SHOW_SBAR,
   SHOW_VITALS: (extra as any)?.FEATURES?.handover?.showVitals ?? process.env.EXPO_PUBLIC_SHOW_VITALS,
   SHOW_OXY: (extra as any)?.FEATURES?.handover?.showOxygen ?? process.env.EXPO_PUBLIC_SHOW_OXY,

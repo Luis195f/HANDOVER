@@ -27,7 +27,7 @@ describe('offline queue end-to-end', () => {
     secureStore.__reset?.();
     await queue.clearOfflineQueue();
     sync.setQueueSendHandler(async () => ({ ok: true }));
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
   });
 
   it('almacena el payload cifrado con sobre AES-GCM', async () => {
@@ -300,7 +300,7 @@ describe('offline queue end-to-end', () => {
     process.env.NODE_ENV = 'production';
     process.env.FHIR_BASE_URL = 'http://test.fhir';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'http://test.fhir';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     vi.stubGlobal('__DEV__', false);
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -327,7 +327,7 @@ describe('offline queue end-to-end', () => {
     secureStore.__reset?.();
     process.env.FHIR_BASE_URL = 'http://test.fhir';
     process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'http://test.fhir';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.doMock('@/src/lib/crypto', async () => {
@@ -381,3 +381,4 @@ describe('offline queue end-to-end', () => {
     expect(failed?.errorStatus).toBe(400);
   });
 });
+

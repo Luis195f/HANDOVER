@@ -49,7 +49,7 @@ const runtime = createGovernedCatalogRuntime<'NIC', NicCode>({
   licenseWarning: NIC_LICENSE_WARNING,
   placeholderCodes: NIC_PLACEHOLDER_CODES,
   placeholderVersion: 'placeholder-2026-03',
-  inlineEnvKeys: ['EXPO_PUBLIC_NIC_CATALOG_JSON', 'NIC_CATALOG_JSON'],
+  inlineEnvKeys: [],
   urlEnvKeys: ['EXPO_PUBLIC_NIC_CATALOG_URL', 'NIC_CATALOG_URL'],
 });
 

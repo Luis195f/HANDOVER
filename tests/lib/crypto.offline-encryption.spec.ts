@@ -8,21 +8,40 @@ import {
   encryptOfflinePayload,
   encryptPayload,
   isEncryptionDisabled,
+  TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV,
 } from '../../src/lib/crypto';
 
 function setEnv(disabled: string | undefined): void {
-  process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = disabled;
+  if (disabled === undefined) {
+    delete process.env[TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV];
+    return;
+  }
+
+  process.env[TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV] = disabled;
 }
 
 describe('offline encryption feature flag', () => {
-  const originalFlag = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  const originalFlag = process.env[TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV];
+  const originalPublicFlag = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
 
   afterEach(() => {
     setEnv(originalFlag);
+    if (originalPublicFlag === undefined) {
+      delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    } else {
+      process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = originalPublicFlag;
+    }
   });
 
   it('returns false by default', () => {
     setEnv(undefined);
+    expect(isEncryptionDisabled()).toBe(false);
+  });
+
+  it('ignores deprecated public bundle flags', () => {
+    setEnv(undefined);
+    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+
     expect(isEncryptionDisabled()).toBe(false);
   });
 
@@ -35,7 +54,7 @@ describe('offline encryption feature flag', () => {
 });
 
 describe('encryptOfflinePayload / decryptOfflinePayload', () => {
-  const originalFlag = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  const originalFlag = process.env[TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV];
 
   beforeEach(async () => {
     await clearOfflineEncryptionKeys();
@@ -96,3 +115,4 @@ describe('encryptOfflinePayload / decryptOfflinePayload', () => {
     expect(decoded).toBe(plaintext);
   });
 });
+

@@ -78,7 +78,7 @@ const asyncStorage = AsyncStorage as typeof AsyncStorage & { __reset?: () => voi
 
 const resetEnv = () => {
   process.env.NODE_ENV = 'test';
-  delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  delete process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
   delete process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS;
   delete process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED;
 };
@@ -111,7 +111,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('enqueues and returns items in FIFO order', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     const first = await queue.enqueueTx({ key: 'fifo-1', payload: { idx: 1 } });
@@ -123,7 +123,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('increments retryCount after a transient failure', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     const key = 'retry-once';
@@ -139,7 +139,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('mantiene el item en cola ante 502/503/504 y programa backoff', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     const key = 'gateway-error';
@@ -160,7 +160,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('elimina definitivamente tras errores 4xx', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     await queue.enqueueTx({ key: 'bad-request', payload: { foo: 'bar' } });
@@ -174,7 +174,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('respects max attempts configured via env by stopping after the configured retries', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     process.env.EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS = '1';
     const queueModule = await loadQueue();
 
@@ -191,7 +191,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('stores encrypted payloads when encryption flag is off and decrypts on read', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
     const queue = await loadQueue();
 
     const bundle = { resourceType: 'Bundle', id: 'test' };
@@ -211,7 +211,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('stores plaintext payloads when encryption is disabled and reads them back', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     const bundle = { resourceType: 'Bundle', id: 'plain' };
@@ -227,7 +227,7 @@ describe('tx queue (sqlite + fallback)', () => {
 
   it('includes signerId in bundle signature when signing is enabled', async () => {
     process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'true';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
 
     vi.stubGlobal('crypto', {
       subtle: {
@@ -255,7 +255,7 @@ describe('tx queue (sqlite + fallback)', () => {
 
   it('skips bundle signature when signing flag is disabled', async () => {
     process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'false';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
 
     const queue = await loadQueue();
     await queue.enqueueBundle({ resourceType: 'Bundle', type: 'transaction', entry: [] }, { patientId: 'pat-nosign' });
@@ -267,7 +267,7 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('stores handover bundles in the canonical offline queue instead of tx_queue', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
 
     const queue = await loadQueue();
     const item = await queue.enqueueBundle({ resourceType: 'Bundle', type: 'transaction', entry: [] }, { patientId: 'pat-canonical' });
@@ -283,20 +283,20 @@ describe('tx queue (sqlite + fallback)', () => {
   });
 
   it('reads legacy plaintext entries without errors even when encryption is enabled', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     const bundle = { resourceType: 'Bundle', id: 'legacy' };
     await queue.enqueueTx({ key: 'legacy-item', payload: bundle });
 
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
 
     const snapshot = await queue.getQueueSnapshot();
     expect(snapshot[0]?.payload).toEqual(bundle);
   });
 
   it('reads legacy encrypted payloads (v1:/enc:v1) and returns decrypted JSON', async () => {
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();
 
     const { LEGACY_ENCRYPTION_PREFIX } = await import('@/src/lib/crypto');
@@ -344,3 +344,4 @@ describe('tx queue (sqlite + fallback)', () => {
     expect(secureStoreMock.deleteItemAsync).not.toHaveBeenCalled();
   });
 });
+

@@ -49,7 +49,7 @@ const runtime = createGovernedCatalogRuntime<'NOC', NocCode>({
   licenseWarning: NOC_LICENSE_WARNING,
   placeholderCodes: NOC_PLACEHOLDER_CODES,
   placeholderVersion: 'placeholder-2026-03',
-  inlineEnvKeys: ['EXPO_PUBLIC_NOC_CATALOG_JSON', 'NOC_CATALOG_JSON'],
+  inlineEnvKeys: [],
   urlEnvKeys: ['EXPO_PUBLIC_NOC_CATALOG_URL', 'NOC_CATALOG_URL'],
 });
 

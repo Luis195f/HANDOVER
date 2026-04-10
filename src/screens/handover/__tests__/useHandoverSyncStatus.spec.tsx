@@ -10,7 +10,7 @@ const ensureFreshAccessTokenMock = vi.fn();
 const flushQueueMock = vi.fn();
 const recentlySyncedQueueIds = new Map<string, number>();
 const originalNodeEnv = process.env.NODE_ENV;
-const originalOfflineEncryptionDisabled = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+const originalOfflineEncryptionDisabled = process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
 
 vi.mock('expo-sqlite', () => ({
   openDatabaseSync: undefined,
@@ -105,7 +105,7 @@ describe('useHandoverSyncStatus', () => {
     recentlySyncedQueueIds.clear();
     vi.stubGlobal('__DEV__', true);
     process.env.NODE_ENV = 'test';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     await clearOfflineQueue();
   });
 
@@ -113,7 +113,7 @@ describe('useHandoverSyncStatus', () => {
     await clearOfflineQueue();
     vi.unstubAllGlobals();
     vi.useRealTimers();
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = originalOfflineEncryptionDisabled;
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = originalOfflineEncryptionDisabled;
     process.env.NODE_ENV = originalNodeEnv;
   });
 
@@ -296,3 +296,4 @@ describe('useHandoverSyncStatus', () => {
     expect(ensureFreshAccessTokenMock).toHaveBeenCalledWith('fhir');
   });
 });
+

@@ -36,8 +36,19 @@ export class OfflineDecryptionError extends Error {
   }
 }
 
+export const TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV = 'HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION';
+
+function readTestOnlyOfflineEncryptionDisableFlag(): string | undefined {
+  const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+  if (!isTestEnv) {
+    return undefined;
+  }
+
+  return process.env[TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV];
+}
+
 export function isEncryptionDisabled(): boolean {
-  const flag = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  const flag = readTestOnlyOfflineEncryptionDisableFlag();
   if (!flag) return false;
   return flag === '1' || flag.toLowerCase() === 'true';
 }
@@ -231,7 +242,7 @@ export function fhirId(prefix: string, input: string, maxLen = 64): string {
 const LEGACY_QUEUE_KEY = 'handover_offline_queue_key';
 export const ENCRYPTION_PREFIX = 'v1:';
 export const LEGACY_ENCRYPTION_PREFIX = 'enc:v1:';
-export const OFFLINE_ENCRYPTION_DISABLED = process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED === 'true';
+export const OFFLINE_ENCRYPTION_DISABLED = isEncryptionDisabled();
 
 let cachedLegacyKey: string | null = null;
 

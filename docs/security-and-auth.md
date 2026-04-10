@@ -9,6 +9,7 @@
 ## Modelo de autenticación/autorización
 - Autenticación JWT OIDC mediante `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE`.
 - Las variables `EXPO_PUBLIC_*` del cliente solo pueden contener metadata pública/flags. No deben transportar secretos, tokens privilegiados ni claves de proveedor.
+- La configuración operativa versionada del cliente tampoco debe reintroducir flags públicos para desactivar cifrado offline, abrir bypass de unidades/scopes o embutir datasets NNN inline en el bundle.
 - `DJANGO_DEBUG=true` solo es válido para desarrollo local explícito (`HANDOVER_DEPLOYMENT_MODE=development|demo`); no habilita bypass por sí mismo en `pilot`/`production` ni en despliegues sin modo local explícito.
 - Si faltan `AUTH0_ISSUER_BASE_URL` o `AUTH0_AUDIENCE` (o sus aliases `OIDC_ISSUER` / `OIDC_AUDIENCE`) fuera de tests reales o de desarrollo local explícito con `DEBUG=true`, el backend debe abortar startup; no existe fallback silencioso a `AllowAny` fuera de ese perímetro.
 - Todas las operaciones clínicas sensibles en DRF validan token Bearer.

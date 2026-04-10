@@ -18,7 +18,7 @@ describe('offline sync single source of truth', () => {
     vi.resetModules();
     vi.stubGlobal('__DEV__', true);
     process.env.NODE_ENV = 'test';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
 
     const queue = await import('@/src/lib/queue');
     await queue.clearOfflineQueue();
@@ -30,7 +30,7 @@ describe('offline sync single source of truth', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
     delete process.env.NODE_ENV;
   });
 
@@ -147,3 +147,4 @@ describe('offline sync single source of truth', () => {
     expect(await queue.listOfflineQueue()).toHaveLength(0);
   });
 });
+

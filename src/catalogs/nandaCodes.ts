@@ -50,7 +50,7 @@ const runtime = createGovernedCatalogRuntime<'NANDA', NandaDiagnosisCode>({
   licenseWarning: NANDA_LICENSE_WARNING,
   placeholderCodes: NANDA_PLACEHOLDER_CODES,
   placeholderVersion: 'placeholder-2026-03',
-  inlineEnvKeys: ['EXPO_PUBLIC_NANDA_CATALOG_JSON', 'NANDA_CATALOG_JSON'],
+  inlineEnvKeys: [],
   urlEnvKeys: ['EXPO_PUBLIC_NANDA_CATALOG_URL', 'NANDA_CATALOG_URL'],
 });
 
