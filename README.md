@@ -67,7 +67,6 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
      - El flujo se resuelve en `src/security/OAuthService.ts` y se integra en `src/security/auth.tsx`; las guardias RBAC viven en `src/security/acl.ts`.
     - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
     - `EXPO_PUBLIC_ALLOWED_UNITS` restringe el acceso del cliente a unidades clínicas explícitas.
-    - `EXPO_PUBLIC_ALLOW_ALL_UNITS` y `EXPO_PUBLIC_BYPASS_SCOPE` quedan como flags legacy de compatibilidad/configuración, pero no abren bypass RBAC ni acceso total en el runtime actual; `src/security/acl.ts` y sus tests fallan en cerrado.
     - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend Django/DRF.
       - `"off"` (por defecto): el backend reenviará los Bundles sin validarlos.
       - `"remote"`: se invocará `$validate` contra el servidor FHIR (`FHIR_BASE/Bundle/$validate`) antes de reenviar; si se detectan errores `error`/`fatal` se responderá `422` con detalles.
@@ -77,8 +76,6 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
    - `EXPO_PUBLIC_STORAGE_NAMESPACE` personaliza el espacio de almacenamiento seguro y el aislamiento de datos offline.
    - La clave de cifrado offline se genera en runtime y se persiste en almacenamiento seguro del dispositivo; no se acepta una semilla secreta desde el bundle cliente.
    - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS` y `EXPO_PUBLIC_QUEUE_BACKOFF_BASE` afinan la cola offline y el backoff exponencial.
-   - `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` desactiva temporalmente el cifrado AES de la cola offline (solo para debugging en desarrollo; `true/1/TRUE` lo deshabilitan, cualquier otro valor lo deja activo por defecto).
-   - `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED` habilita la firma ECDSA P-256 de los Bundles FHIR en el cliente antes de encolarlos (por defecto `false`; si no hay WebCrypto o clave, continúa enviando sin firma).
    - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` habilita una validación remota rápida (`Bundle/$validate`) antes de encolar si hay conectividad. Si el servidor devuelve un `OperationOutcome` con severidad `error`/`fatal`, se muestra un alert con los detalles y no se encola el bundle; en modo offline sigue encolando para respetar offline-first. Recomendado en entornos de staging/producción para detectar problemas de estructura antes de ocupar la cola.
    - Voz + IA:
      - `EXPO_PUBLIC_API_BASE_URL`/`API_BASE_URL`: base única del backend Django/DRF.
@@ -307,11 +304,8 @@ Los catálogos completos de `NANDA`, `NIC` y `NOC` se mantienen en modo **BYO-li
 Frontend/Expo:
 
 ```bash
-export EXPO_PUBLIC_NANDA_CATALOG_JSON='{"licensed":true,"version":"2026","codes":[{"system":"NANDA","code":"00001","display":"Oxigenación alterada"}]}'
 export EXPO_PUBLIC_NANDA_CATALOG_URL='https://terminology.example/nanda.json'
-export EXPO_PUBLIC_NIC_CATALOG_JSON='{"licensed":true,"version":"2026","codes":[{"system":"NIC","code":"2210","display":"Administración de analgésicos"}]}'
 export EXPO_PUBLIC_NIC_CATALOG_URL='https://terminology.example/nic.json'
-export EXPO_PUBLIC_NOC_CATALOG_JSON='{"licensed":true,"version":"2026","codes":[{"system":"NOC","code":"0402","display":"Estado respiratorio: permeabilidad de las vías aéreas"}]}'
 export EXPO_PUBLIC_NOC_CATALOG_URL='https://terminology.example/noc.json'
 ```
 

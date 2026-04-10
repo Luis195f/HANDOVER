@@ -19,7 +19,7 @@ describe('offline queue encryption', () => {
     await SecureStore.setItemAsync('handover_offline_queue_key', 'test-key-123');
     await clearOfflineQueue();
     setQueueSendHandler(async () => ({ ok: true }));
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
   });
 
   it('cifra el payload al encolar un bundle', async () => {
@@ -118,3 +118,4 @@ describe('offline queue encryption', () => {
     expect((sentPayload as { bundle?: unknown }).bundle).toEqual(bundle);
   });
 });
+

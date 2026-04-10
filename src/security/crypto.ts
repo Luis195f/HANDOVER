@@ -202,6 +202,16 @@ function hasWebCrypto(): boolean {
   return typeof globalThis !== 'undefined' && !!globalThis.crypto?.subtle;
 }
 
+function isLocalClientSigningRuntime(): boolean {
+  if (process.env.NODE_ENV === 'test') {
+    return true;
+  }
+
+  const deploymentMode = (process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE ?? '').trim().toLowerCase();
+  const isDevBuild = typeof __DEV__ !== 'undefined' && __DEV__;
+  return isDevBuild && (deploymentMode === '' || deploymentMode === 'development' || deploymentMode === 'demo');
+}
+
 // ✅ FIX: antes estaba vacía. Ahora emite OTEL warn + fallback a console.warn (para tests / visibilidad).
 function logSigningWarning(
   code: 'HNDR_SIGN_110' | 'HNDR_SIGN_120' | 'HNDR_SIGN_130',
@@ -226,7 +236,10 @@ export function isClientSigningEnabled(): boolean {
   if (!isTruthyFlag(process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED)) {
     return false;
   }
-  return process.env.NODE_ENV !== 'production';
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+  return isLocalClientSigningRuntime();
 }
 
 function parseStoredKeypair(raw: string | null): { privateJwk: JsonWebKey; publicJwk: JsonWebKey } | null {

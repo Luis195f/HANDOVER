@@ -8,7 +8,7 @@
 - `handover_offline_queue` is the canonical operational queue for clinical handover bundles. `tx_queue` remains only as a legacy compatibility path and must not be treated as the UI/sync source of truth for handover runtime state.
 - `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses and treats `409/412` as already-delivered duplicates.
 - Operational success evidence is strict: HANDOVER only transitions a bundle to `synced` after an explicit remote `2xx` response or an idempotent-accept contract already recognized by the repo (`409/412` in the current FHIR replay path). Local disappearance, cleanup, or malformed payloads without a clinical `bundle` are not success evidence and are retained as queue errors instead.
-- Storage can be encrypted; `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` can disable encryption in development, but the queue now emits an explicit warning when plaintext storage is enabled.
+- Storage is encrypted by default; versioned client configuration no longer admite un flag público para desactivar el cifrado offline.
   - Each item keeps `firstEnqueuedAt`, `lastAttemptAt`, and `attemptCount`/`attempts` to compute retry windows.
   - A maximum number of attempts is enforced (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Items that exceed the limit are marked with `syncStatus="error"`.
 
@@ -62,7 +62,7 @@
   - The offline AES-GCM key is generated at runtime and persisted in secure storage; the client no longer accepts an operational encryption secret via public env.
 ## WebCrypto and polyfills
 - The client uses `expo-crypto` for hashing and random bytes; no global `crypto` polyfill is added at runtime.
-- FHIR bundle ECDSA signing (`EXPO_PUBLIC_CLIENT_SIGNING_ENABLED=true`) is limited to development/demo/test and depends on `globalThis.crypto.subtle` when available.
+- FHIR bundle ECDSA signing in client remains acotado a runtime local de desarrollo/test y depende de `globalThis.crypto.subtle` cuando está disponible; no forma parte de la configuración versionada de staging/pilot.
 - If WebCrypto is missing, client transport signing is skipped and the queue continues unsigned; that fallback is not a valid pilot/production path, which must rely on backend signature enforcement.
 
 ## UI
@@ -71,7 +71,7 @@
 ## Related environment variables
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: maximum number of retries.
 - `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`: base value for exponential backoff.
-- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`: feature flag to disable offline encryption (local debugging only). Values `true/1/TRUE` disable it; any other value keeps encryption enabled.
+- Offline encryption disablement is reserved for isolated test runtime and is not configurable through `EXPO_PUBLIC_*`.
 
 ## Fast validation before enqueue
 - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE` (default `false`) enables a remote `Bundle/$validate` check when online. If the server returns an `OperationOutcome` with `error` or `fatal` severity, the app shows an alert via `formatIssuesForUser(...)` and does not enqueue the bundle. Offline mode still enqueues for offline-first behavior.

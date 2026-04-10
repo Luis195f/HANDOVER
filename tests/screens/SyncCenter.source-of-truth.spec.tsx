@@ -51,7 +51,7 @@ describe('SyncCenter canonical queue source', () => {
     queuedId = '';
     vi.stubGlobal('__DEV__', true);
     process.env.NODE_ENV = 'test';
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'true';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     mocked.listOfflineQueue.mockReset();
     const actualQueue = await vi.importActual<typeof import('@/src/lib/queue')>('@/src/lib/queue');
     await actualQueue.clearOfflineQueue();
@@ -68,7 +68,7 @@ describe('SyncCenter canonical queue source', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+    delete process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
     delete process.env.NODE_ENV;
   });
 
@@ -88,3 +88,4 @@ describe('SyncCenter canonical queue source', () => {
     expect(view.queryByText(t('sync.emptyQueue'))).toBeNull();
   });
 });
+

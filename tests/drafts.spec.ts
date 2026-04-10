@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 async function setup(encryptionDisabled = false) {
   vi.resetModules();
-  process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = encryptionDisabled ? "true" : "false";
+  process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = encryptionDisabled ? "true" : "false";
   vi.mock("expo-secure-store");
 
   const crypto = await import("@/src/lib/crypto");
@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  delete process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED;
+  delete process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION;
 });
 
 describe("drafts.ts (get/set/clear)", () => {
@@ -107,3 +107,4 @@ describe("drafts.ts (get/set/clear)", () => {
     expect(JSON.parse(decrypted)).toEqual(data);
   });
 });
+

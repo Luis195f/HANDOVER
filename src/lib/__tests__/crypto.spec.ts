@@ -11,7 +11,7 @@ describe('offline crypto helpers', () => {
   beforeEach(async () => {
     secureStore.__reset?.();
     await SecureStore.setItemAsync('handover_offline_queue_key', 'test-key-123');
-    process.env.EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
   });
 
   it('debería cifrar y descifrar simétricamente', async () => {
@@ -38,3 +38,4 @@ describe('offline crypto helpers', () => {
     expect(result).toBe(legacy);
   });
 });
+

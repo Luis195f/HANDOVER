@@ -7,8 +7,8 @@
 - `EXPO_PUBLIC_FHIR_BASE_URL`: URL pública del FHIR base consumido por el cliente.
 - `EXPO_PUBLIC_AUTH0_DOMAIN`, `EXPO_PUBLIC_AUTH0_CLIENT_ID`, `EXPO_PUBLIC_AUTH0_AUDIENCE`, `EXPO_PUBLIC_OIDC_ISSUER`, `EXPO_PUBLIC_OIDC_CLIENT_ID`, `EXPO_PUBLIC_OIDC_AUDIENCE`, `EXPO_PUBLIC_OIDC_SCOPE`: metadata de cliente OIDC/Auth0. Son identificadores/URLs públicas; no son secretos.
 - `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`, `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`, `EXPO_PUBLIC_HANDOVER_UNITS_JSON`, `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON`: controlan rollout/configuración pública del piloto.
-- `EXPO_PUBLIC_ENABLE_ICEA_*`, `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`, `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`, `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED`, `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`: flags públicos de comportamiento del cliente; no deben transportar credenciales, tokens privilegiados ni semillas criptográficas.
-- Regla dura: no introducir secretos en `EXPO_PUBLIC_*`. El cliente Expo no admite `OPENAI_API_KEY`, secretos ICEA, secretos Django, claves privadas ni bypass tokens.
+- `EXPO_PUBLIC_ENABLE_ICEA_*`, `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`, `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`, `EXPO_PUBLIC_NANDA_CATALOG_URL`, `EXPO_PUBLIC_NIC_CATALOG_URL`, `EXPO_PUBLIC_NOC_CATALOG_URL`: flags o endpoints públicos permitidos para comportamiento/lectura del cliente.
+- Regla dura: no introducir secretos en `EXPO_PUBLIC_*`. El cliente Expo no admite `OPENAI_API_KEY`, secretos ICEA, secretos Django, claves privadas, bypass tokens, flags para desactivar cifrado offline ni datasets NNN inline embebidos en el bundle.
 
 ## Backend core
 - `DJANGO_SETTINGS_MODULE`: módulo de settings (normalmente `backend.settings`).
@@ -85,6 +85,7 @@ AUTH0_AUDIENCE=
 ## Regla operativa de frontera
 - `.env.example` en raíz mezcla placeholders públicos del cliente y variables del backend para facilitar desarrollo local, pero la frontera sigue siendo estricta: `EXPO_PUBLIC_*` solo para configuración pública; secretos reales solo en backend/entorno seguro.
 - `config/staging.env` es configuración pública/versionable del export web; no debe reutilizarse como almacén de secretos ni como fuente de verdad del backend.
+- La postura endurecida actual elimina de la configuración versionada del cliente los knobs `EXPO_PUBLIC_ALLOW_ALL_UNITS`, `EXPO_PUBLIC_BYPASS_SCOPE`, `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED` y los `EXPO_PUBLIC_*_CATALOG_JSON`; si reaparecen, debe tratarse como regresión de frontera de confianza.
 
 ## Compatibilidad operativa de descifrado
 - La lectura de Bundles persistidos prioriza `encryption_metadata.key_source` cuando el registro lo incluye.

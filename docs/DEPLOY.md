@@ -63,13 +63,10 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 - `EXPO_PUBLIC_API_BASE_URL`
 - `EXPO_PUBLIC_FHIR_BASE_URL`
 - `EXPO_PUBLIC_ALLOWED_UNITS`
-- `EXPO_PUBLIC_ALLOW_ALL_UNITS` (legacy no-op en el runtime actual)
-- `EXPO_PUBLIC_BYPASS_SCOPE` (legacy no-op; no habilita bypass RBAC)
 - `EXPO_PUBLIC_STORAGE_NAMESPACE`
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`
 - `EXPO_PUBLIC_QUEUE_BACKOFF_BASE`
 - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`
-- `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED`
 - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`
 - `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`
 - `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`
@@ -85,7 +82,6 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 - `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK`
 - `EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY`
 - `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`
-- `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`
 - `EXPO_PUBLIC_ENABLE_DEMO`
 - `OIDC_ISSUER`
 - `OIDC_CLIENT_ID`
@@ -96,6 +92,7 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 Regla operativa:
 
 - `config/staging.env` no debe almacenar secretos backend, claves privadas ni tokens privilegiados.
+- `config/staging.env` tampoco debe reintroducir toggles públicos de bypass (`EXPO_PUBLIC_BYPASS_SCOPE`, `EXPO_PUBLIC_ALLOW_ALL_UNITS`), desactivación de cifrado offline o catálogos inline embebidos en bundle.
 - `OIDC_CLIENT_ID`, `OIDC_AUDIENCE` y el resto de flags públicos del export web son metadata/configuración de cliente; no sustituyen secretos backend ni autorizan bypass operativo.
 - Los secretos de Django, firma, retención, DB y webhooks deben vivir fuera del repo en el entorno real del backend.
 - `config/staging.env` debe declarar explícitamente el modo de despliegue y defaults prudentes del piloto para que la exportación web no caiga por omisión a valores distintos del backend.

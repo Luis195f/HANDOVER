@@ -16,9 +16,12 @@ describe('nocCodes', () => {
     vi.resetModules();
     delete process.env.EXPO_PUBLIC_NOC_CATALOG_JSON;
     delete process.env.NOC_CATALOG_JSON;
+    delete process.env.EXPO_PUBLIC_NOC_CATALOG_URL;
+    vi.stubGlobal('fetch', vi.fn());
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -31,27 +34,48 @@ describe('nocCodes', () => {
     expect(catalog.codes.length).toBeGreaterThan(0);
   });
 
-  it('carga catálogo inline licenciado por env', async () => {
+  it('ignora catálogo inline público y carga el dataset por URL', async () => {
     process.env.EXPO_PUBLIC_NOC_CATALOG_JSON = JSON.stringify({
       licensed: true,
-      version: 'noc-2026',
-      codes: [{ system: 'NOC', code: '9999', display: 'Resultado licenciado' }],
+      version: 'bundle-inline-should-be-ignored',
+      codes: [{ system: 'NOC', code: '0000', display: 'No debería entrar al bundle' }],
     });
+    process.env.EXPO_PUBLIC_NOC_CATALOG_URL = 'https://terminology.example.test/noc.json';
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        licensed: true,
+        version: 'noc-2026',
+        codes: [{ system: 'NOC', code: '9999', display: 'Resultado licenciado' }],
+      }),
+      headers: new Headers(),
+    } as Response);
 
     const module = await import('../nocCodes');
     const catalog = await module.loadNocCatalog();
 
+    expect(fetch).toHaveBeenCalledWith(
+      'https://terminology.example.test/noc.json',
+      expect.objectContaining({ method: 'GET' }),
+    );
     expect(catalog.licensed).toBe(true);
     expect(catalog.version).toBe('noc-2026');
     expect(catalog.codes[0]?.code).toBe('9999');
   });
 
   it('hace fallback al placeholder cuando no hay dataset utilizable', async () => {
-    process.env.EXPO_PUBLIC_NOC_CATALOG_JSON = JSON.stringify({
-      licensed: true,
-      version: 'empty',
-      entries: [],
-    });
+    process.env.EXPO_PUBLIC_NOC_CATALOG_URL = 'https://terminology.example.test/noc-empty.json';
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        licensed: true,
+        version: 'empty',
+        entries: [],
+      }),
+      headers: new Headers(),
+    } as Response);
 
     const module = await import('../nocCodes');
     const catalog = await module.loadNocCatalog();
