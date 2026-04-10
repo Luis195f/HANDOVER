@@ -16,4 +16,9 @@ describe('sync-errors', () => {
   it('usa el mensaje de validación remota para 422', () => {
     expect(resolveSyncErrorMessage(422)).toBe(t('sync.validationFailedMessage'));
   });
+
+  it('distingue 401 de 403 en el copy de replay', () => {
+    expect(resolveSyncErrorMessage(401)).toBe(t('sync.authRequiredMessage'));
+    expect(resolveSyncErrorMessage(403)).toBe(t('sync.authFailedMessage'));
+  });
 });

@@ -114,6 +114,59 @@ describe('postBundle', () => {
     expect(result.message).toContain('Bad data');
   });
 
+  it('preserves 403 responses instead of collapsing them into 401', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ detail: 'Forbidden' }), { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { postBundle } = await loadClient();
+
+    const result = await postBundle(bundle, { token: 'tk' });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(403);
+    expect(result.issue?.[0]?.code).toBe('forbidden');
+  });
+
+  it('forces a fresh token after a real 401 before replaying the bundle', async () => {
+    let call = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      call += 1;
+      const headers = new Headers(init?.headers);
+      if (call === 1) {
+        expect(headers.get('Authorization')).toBe('Bearer stale-token');
+        return new Response(JSON.stringify({ detail: 'Unauthorized' }), { status: 401 });
+      }
+      expect(headers.get('Authorization')).toBe('Bearer fresh-token');
+      return new Response(JSON.stringify({ resourceType: 'Bundle', id: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/fhir+json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { configureFHIRClient, postBundle } = await loadClient();
+    const refreshSpy = vi.fn(async (reason?: string) => {
+      expect(reason).toBe('401');
+      return 'fresh-token';
+    });
+
+    configureFHIRClient({
+      ensureFreshToken: refreshSpy,
+      logout: vi.fn(),
+    });
+
+    const result = await postBundle(bundle, { token: 'stale-token' });
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      json: { resourceType: 'Bundle', id: 'ok' },
+      location: undefined,
+    });
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('returns json undefined when error body cannot be parsed', async () => {
     const fetchMock = vi
       .fn()

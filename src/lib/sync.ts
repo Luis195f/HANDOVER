@@ -308,6 +308,10 @@ function isAuthStatus(status?: number): boolean {
   return status === 401 || status === 403;
 }
 
+function isTerminalAuthStatus(status?: number): status is 403 {
+  return status === 403;
+}
+
 function classifyQueueFailureKind(status?: number): QueueFailureKind {
   if (isDuplicateStatus(status)) return 'duplicate';
   if (isAuthStatus(status)) return 'auth';
@@ -489,15 +493,16 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         response.message;
 
       if (isAuthStatus(response.status)) {
-        pauseSync('Autenticación requerida');
+        const authMessage = resolveSyncErrorMessage(response.status, message);
+        pauseSync(authMessage);
         options.onAuthError?.(new Error('unauthorized'));
         return {
           ok: false,
           kind: 'auth',
           status: response.status,
-          authOutcome: 'auth-required',
+          authOutcome: response.status === 403 ? 'auth-failed' : 'auth-required',
           recoverable: false,
-          message: message ?? 'Unauthorized',
+          message: authMessage,
         };
       }
 
@@ -707,9 +712,24 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
+    if (isAuthError && isTerminalAuthStatus(status)) {
+      const errorMessage = resolveSyncErrorMessage(status, result.message);
+      pauseSync(errorMessage);
+      syncOptions?.onAuthError?.(new Error('forbidden'));
+      await updateOfflineQueueStatus(item.id, 'error', {
+        attemptCount,
+        lastAttemptAt: startedAt,
+        errorMessage,
+        errorStatus: status,
+        errorIssuesJson: cappedIssuesJson,
+      });
+      updateSyncSnapshot({ lastError: errorMessage });
+      continue;
+    }
+
     if (recoverable || isAuthError) {
       if (isAuthError) {
-        pauseSync('Autenticación requerida');
+        pauseSync(resolveSyncErrorMessage(status, result.message));
         syncOptions?.onAuthError?.(new Error('unauthorized'));
       }
       const nextAttempts = attemptCount;
@@ -852,7 +872,6 @@ export function stopSyncEngine(): void {
 function configureCanonicalFhirClient(opts: SyncOpts): void {
   configureFHIRClient({
     getBaseUrl: () => opts.fhirBaseUrl,
-    ensureFreshToken: async () => (await opts.getToken()) ?? null,
   });
 }
 

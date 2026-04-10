@@ -149,5 +149,31 @@ describe('offline sync single source of truth', () => {
     expect(pending?.id).toBe(queued.id);
     expect(pending?.syncStatus).toBe('pending');
   });
+
+  it('sync/index reports 403 replays as auth-failed and keeps the item terminal in the canonical queue', async () => {
+    const queue = await import('@/src/lib/queue');
+    const sync = await import('@/src/lib/sync');
+    const syncIndex = await import('@/src/lib/sync/index');
+    const client = await import('@/src/lib/fhir-client');
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-sync-index-403' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-sync-index-403' });
+    (client.postBundle as unknown as Mock).mockResolvedValue({ ok: false, status: 403, body: { error: 'forbidden' } });
+
+    const result = await syncIndex.flushQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'token',
+      backoff: { retries: 0, minMs: 0, maxMs: 0 },
+    });
+
+    const [failed] = await queue.listOfflineQueue();
+    expect(result).toEqual({ processed: 0, remaining: 1, outcome: 'auth-failed', status: 403 });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+    expect(failed?.id).toBe(queued.id);
+    expect(failed?.syncStatus).toBe('error');
+    expect(failed?.errorStatus).toBe(403);
+  });
 });
 

@@ -968,7 +968,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     configureFHIRClient({
       getToken: () => AuthService.getAccessToken(),
-      ensureFreshToken: () => ensureFreshToken("fhir"),
+      ensureFreshToken: (reason?: string) => ensureFreshToken(reason ?? "fhir"),
       getSession: () => getCurrentSession(),
       logout: async () =>
         logoutAndClear({
