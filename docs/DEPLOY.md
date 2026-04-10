@@ -96,8 +96,10 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 Regla operativa:
 
 - `config/staging.env` no debe almacenar secretos backend, claves privadas ni tokens privilegiados.
+- `OIDC_CLIENT_ID`, `OIDC_AUDIENCE` y el resto de flags públicos del export web son metadata/configuración de cliente; no sustituyen secretos backend ni autorizan bypass operativo.
 - Los secretos de Django, firma, retención, DB y webhooks deben vivir fuera del repo en el entorno real del backend.
-- `config/staging.env` debe declarar explícitamente el modo de despliegue y los defaults públicos críticos del piloto para que la exportación web no caiga por omisión a valores distintos del backend.
+- `config/staging.env` debe declarar explícitamente el modo de despliegue y defaults prudentes del piloto para que la exportación web no caiga por omisión a valores distintos del backend.
+- Para este árbol, la postura prudente documentada es: bridge ICEA visible apagado por defecto, scoring enriquecido apagado y shadow mode gobernado por `HANDOVER_PILOT_CONTROL_JSON`/backend, no por secretos o toggles ambiguos en cliente.
 
 Inferencia desde [`src/config/pilotControl.ts`](../src/config/pilotControl.ts): si `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE=pilot` y `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` falta, el frontend cae a `rolloutStatus=pause` y `explicitShadowModeForIcea=true`; la ausencia del JSON no debe interpretarse como `go`.
 
@@ -135,6 +137,7 @@ El repo soporta un control plane minimo gobernado por entorno, no un panel mutab
 Reglas de despliegue para piloto:
 
 - no actives ICEA nominal por defecto; usa `explicitShadowModeForIcea=true` mientras el piloto siga en fase prudente;
+- mantén la observabilidad ICEA en modo agregado/shadow para operación piloto; no reabras score paciente-a-paciente visible sin evidencia y decisión institucional fuera del repo;
 - si `HANDOVER_PILOT_CONTROL_JSON` restringe unidades o roles, valida el resultado con `GET /api/pilot-control/summary` antes del `go`;
 - si hay rollback, primero cambia el JSON de control y solo despues usa el kill switch duro (`ENABLE_ICEA_*`, `SHOW_*`, `AI_SUGGESTIONS_ENABLED`) si el corte debe ser inmediato;
 - el flujo clinico base debe poder seguir con analytics/admin/insights apagados.

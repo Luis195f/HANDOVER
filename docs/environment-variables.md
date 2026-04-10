@@ -1,6 +1,14 @@
-# Variables de entorno (Django-only)
+# Variables de entorno y frontera de secretos
 
-> Objetivo: centralizar configuración de backend Django/DRF, auth OIDC, IA y CI sin exponer secretos.
+> Objetivo: dejar una sola verdad para configuración pública del cliente Expo y secretos/backend Django/DRF sin mezclar fronteras.
+
+## Frontend Expo / variables públicas
+- `EXPO_PUBLIC_API_BASE_URL`: URL base pública del backend Django/DRF para la app/export web.
+- `EXPO_PUBLIC_FHIR_BASE_URL`: URL pública del FHIR base consumido por el cliente.
+- `EXPO_PUBLIC_AUTH0_DOMAIN`, `EXPO_PUBLIC_AUTH0_CLIENT_ID`, `EXPO_PUBLIC_AUTH0_AUDIENCE`, `EXPO_PUBLIC_OIDC_ISSUER`, `EXPO_PUBLIC_OIDC_CLIENT_ID`, `EXPO_PUBLIC_OIDC_AUDIENCE`, `EXPO_PUBLIC_OIDC_SCOPE`: metadata de cliente OIDC/Auth0. Son identificadores/URLs públicas; no son secretos.
+- `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`, `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`, `EXPO_PUBLIC_HANDOVER_UNITS_JSON`, `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON`: controlan rollout/configuración pública del piloto.
+- `EXPO_PUBLIC_ENABLE_ICEA_*`, `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`, `EXPO_PUBLIC_OFFLINE_ENCRYPTION_DISABLED`, `EXPO_PUBLIC_CLIENT_SIGNING_ENABLED`, `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`: flags públicos de comportamiento del cliente; no deben transportar credenciales, tokens privilegiados ni semillas criptográficas.
+- Regla dura: no introducir secretos en `EXPO_PUBLIC_*`. El cliente Expo no admite `OPENAI_API_KEY`, secretos ICEA, secretos Django, claves privadas ni bypass tokens.
 
 ## Backend core
 - `DJANGO_SETTINGS_MODULE`: módulo de settings (normalmente `backend.settings`).
@@ -19,6 +27,7 @@
 ## Auth / OIDC
 - `AUTH0_ISSUER_BASE_URL`: issuer base de Auth0/OIDC.
 - `AUTH0_AUDIENCE`: audiencia esperada en JWT access token.
+- `OIDC_ISSUER` y `OIDC_AUDIENCE`: aliases compatibles usados por parte del runtime/backend; fuera del perímetro local deben resolver al mismo valor canónico que `AUTH0_*`.
 
 ## IA
 - `HANDOVER_AI_ENABLED`: flag utilizado en CI para desactivar flujos AI externos.
@@ -72,6 +81,10 @@ HANDOVER_BUNDLE_ENCRYPTION_KEY=
 AUTH0_ISSUER_BASE_URL=
 AUTH0_AUDIENCE=
 ```
+
+## Regla operativa de frontera
+- `.env.example` en raíz mezcla placeholders públicos del cliente y variables del backend para facilitar desarrollo local, pero la frontera sigue siendo estricta: `EXPO_PUBLIC_*` solo para configuración pública; secretos reales solo en backend/entorno seguro.
+- `config/staging.env` es configuración pública/versionable del export web; no debe reutilizarse como almacén de secretos ni como fuente de verdad del backend.
 
 ## Compatibilidad operativa de descifrado
 - La lectura de Bundles persistidos prioriza `encryption_metadata.key_source` cuando el registro lo incluye.
