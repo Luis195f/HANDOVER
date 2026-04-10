@@ -36,6 +36,7 @@
 - Local persistence for handover bundles is `handover_offline_queue` in `src/lib/queue.ts`, with encrypted payload-at-rest and plaintext metadata limited to non-PHI control fields.
 - Queue status is explicit and finite: `pending`, `inFlight`, `error`, `synced`. The canonical runtime in `src/lib/sync.ts` is the only active writer of replay status transitions.
 - Replay is safe by construction: canonical sends reuse the persisted payload, keep idempotency headers stable (`txId` or queue item id), and treat `409/412` as delivered evidence instead of duplicate writes.
+- Auth replay is fail-closed: `401` pauses the engine and requires a fresh bearer before resuming, while `403` is preserved as a terminal auth failure on the queue item instead of degrading into generic network/server retry paths.
 - Deduplication is based on stable identity (`buildOfflineQueueId`) so the same handover bundle does not fork into multiple queue rows across retry/reopen flows.
 
 ## Other identifiers and hash usage
@@ -90,7 +91,7 @@
   - `idle`: no pending work or waiting for new work.
   - `running`: processing the queue.
   - `backoff`: waiting for the next retry (e.g., after 5xx or no network).
-  - `paused`: blocked by authentication (401/403) until re-login or `resumeSync()`.
+  - `paused`: blocked by authentication. `401` pauses replay awaiting re-login/refresh; `403` pauses the engine after marking the affected item as `error` so permissions failures do not loop indefinitely.
 
 ## Compatibility aliases and migration notes
 - `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of the canonical runtime entrypoints in `src/lib/sync.ts`.

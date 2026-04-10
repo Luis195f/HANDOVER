@@ -149,5 +149,79 @@ describe('offline sync single source of truth', () => {
     expect(pending?.id).toBe(queued.id);
     expect(pending?.syncStatus).toBe('pending');
   });
+
+  it('sync/index reports 403 replays as auth-failed and keeps the item terminal in the canonical queue', async () => {
+    const queue = await import('@/src/lib/queue');
+    const sync = await import('@/src/lib/sync');
+    const syncIndex = await import('@/src/lib/sync/index');
+    const client = await import('@/src/lib/fhir-client');
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-sync-index-403' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-sync-index-403' });
+    (client.postBundle as unknown as Mock).mockResolvedValue({ ok: false, status: 403, body: { error: 'forbidden' } });
+
+    const result = await syncIndex.flushQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'token',
+      backoff: { retries: 0, minMs: 0, maxMs: 0 },
+    });
+
+    const [failed] = await queue.listOfflineQueue();
+    expect(result).toEqual({ processed: 0, remaining: 1, outcome: 'auth-failed', status: 403 });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+    expect(failed?.id).toBe(queued.id);
+    expect(failed?.syncStatus).toBe('error');
+    expect(failed?.errorStatus).toBe(403);
+  });
+
+  it('canonical flush coalesces concurrent callers so a pending row is sent only once', async () => {
+    const queue = await import('@/src/lib/queue');
+    const sync = await import('@/src/lib/sync');
+    const client = await import('@/src/lib/fhir-client');
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-concurrent-flush' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-concurrent-flush' });
+    let release!: () => void;
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    (client.postBundle as unknown as Mock).mockImplementationOnce(async () => {
+      await inFlight;
+      return { ok: true, status: 200 };
+    });
+
+    const flushA = sync.flushSyncQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'token',
+    });
+    const flushB = sync.flushSyncQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'token',
+    });
+
+    release();
+    const [resultA, resultB] = await Promise.all([flushA, flushB]);
+
+    expect(resultA).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(resultB).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(client.postBundle).toHaveBeenCalledTimes(1);
+    expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
+    expect(await queue.listOfflineQueue()).toHaveLength(0);
+  });
+
+  it('getCanonicalQueueSize returns -1 when the canonical queue read fails', async () => {
+    const queue = await import('@/src/lib/queue');
+    const sync = await import('@/src/lib/sync');
+    const listSpy = vi.spyOn(queue, 'listOfflineQueue').mockRejectedValueOnce(new Error('read failed'));
+
+    await expect(sync.getCanonicalQueueSize()).resolves.toBe(-1);
+
+    listSpy.mockRestore();
+  });
 });
 

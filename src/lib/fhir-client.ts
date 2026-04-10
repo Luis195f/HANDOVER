@@ -217,7 +217,7 @@ const extractMrn = (patient: any): string | undefined => {
 // END HANDOVER D6 – fetchPatientSummary
 
 type AuthHooks = {
-  ensureFreshToken?: () => Promise<string | null>;
+  ensureFreshToken?: (reason?: string) => Promise<string | null>;
   logout?: () => Promise<void> | void;
   getBaseUrl?: () => string | undefined;
   getSession?: () => Promise<HandoverSession | null> | HandoverSession | null;
@@ -322,6 +322,15 @@ type NormalizedOutcome = {
   fatal: boolean;
   outcome: OperationOutcome;
 };
+
+type AuthStatusError = Error & { status: 401 | 403 };
+
+function createAuthStatusError(status: 401 | 403): AuthStatusError {
+  const error = new Error(status === 403 ? 'forbidden' : 'unauthorized') as AuthStatusError;
+  error.name = 'AuthStatusError';
+  error.status = status;
+  return error;
+}
 
 const normalizeOutcome = (maybeOutcome: unknown): NormalizedOutcome | null => {
   if (!maybeOutcome || typeof maybeOutcome !== 'object') return null;
@@ -486,7 +495,7 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
           !isHTTPError && typeof error === 'object' && error !== null && 'status' in error;
         if (isHTTPError || isHttpErrorLike) {
           if (maybeHttpError.status === 401 && !retried) {
-            const freshToken = hooks.ensureFreshToken ? await hooks.ensureFreshToken() : null;
+            const freshToken = hooks.ensureFreshToken ? await hooks.ensureFreshToken('401') : null;
             if (freshToken) {
               try {
                 return await attempt(freshToken, true);
@@ -497,9 +506,11 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
                   typeof retryHTTPErrorCtor === 'function' && retryError instanceof retryHTTPErrorCtor;
                 const isRetryHttpErrorLike =
                   !isRetryHTTPError && typeof retryError === 'object' && retryError !== null && 'status' in retryError;
-                if ((isRetryHTTPError || isRetryHttpErrorLike) && maybeRetryHttpError.status === 401) {
-                  if (runtimeConfig.logout) await runtimeConfig.logout();
-                  throw new Error('unauthorized');
+                if (
+                  (isRetryHTTPError || isRetryHttpErrorLike) &&
+                  (maybeRetryHttpError.status === 401 || maybeRetryHttpError.status === 403)
+                ) {
+                  throw createAuthStatusError(maybeRetryHttpError.status === 403 ? 403 : 401);
                 }
                 if (isRetryHTTPError || isRetryHttpErrorLike) {
                   return handleHttpError(maybeRetryHttpError);
@@ -508,12 +519,12 @@ const fetchFHIRWithConfig = (runtimeConfig: FhirClientRuntimeConfig) => {
               }
             }
             if (runtimeConfig.logout) await runtimeConfig.logout();
-            throw new Error('unauthorized');
+            throw createAuthStatusError(401);
           }
 
           if (maybeHttpError.status === 401 || maybeHttpError.status === 403) {
             if (runtimeConfig.logout) await runtimeConfig.logout();
-            throw new Error('unauthorized');
+            throw createAuthStatusError(maybeHttpError.status === 403 ? 403 : 401);
           }
 
           return handleHttpError(maybeHttpError);
@@ -692,13 +703,23 @@ const idempotencyKey =
       isAbortError ||
       /network request failed|failed to fetch|network error|timeout/i.test(errorMessage);
     const isUnauthorized = errorMessage.toLowerCase().includes('unauthorized');
+    const isForbidden = errorMessage.toLowerCase().includes('forbidden');
     const status =
       typeof error?.status === 'number'
         ? error.status
+        : isForbidden
+          ? 403
         : isUnauthorized
           ? 401
           : 0;
-    const code = isUnauthorized ? 'login' : status === 0 || isTransportFailure ? 'network' : 'invalid';
+    const code =
+      status === 401
+        ? 'login'
+        : status === 403
+          ? 'forbidden'
+          : status === 0 || isTransportFailure
+            ? 'network'
+            : 'invalid';
     return {
       ok: false,
       status,

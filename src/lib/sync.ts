@@ -308,6 +308,10 @@ function isAuthStatus(status?: number): boolean {
   return status === 401 || status === 403;
 }
 
+function isTerminalAuthStatus(status?: number): status is 403 {
+  return status === 403;
+}
+
 function classifyQueueFailureKind(status?: number): QueueFailureKind {
   if (isDuplicateStatus(status)) return 'duplicate';
   if (isAuthStatus(status)) return 'auth';
@@ -489,15 +493,16 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         response.message;
 
       if (isAuthStatus(response.status)) {
-        pauseSync('Autenticación requerida');
+        const authMessage = resolveSyncErrorMessage(response.status, message);
+        pauseSync(authMessage);
         options.onAuthError?.(new Error('unauthorized'));
         return {
           ok: false,
           kind: 'auth',
           status: response.status,
-          authOutcome: 'auth-required',
+          authOutcome: response.status === 403 ? 'auth-failed' : 'auth-required',
           recoverable: false,
-          message: message ?? 'Unauthorized',
+          message: authMessage,
         };
       }
 
@@ -707,9 +712,24 @@ export async function processQueueOnce(): Promise<void> {
       continue;
     }
 
+    if (isAuthError && isTerminalAuthStatus(status)) {
+      const errorMessage = resolveSyncErrorMessage(status, result.message);
+      pauseSync(errorMessage);
+      syncOptions?.onAuthError?.(new Error('forbidden'));
+      await updateOfflineQueueStatus(item.id, 'error', {
+        attemptCount,
+        lastAttemptAt: startedAt,
+        errorMessage,
+        errorStatus: status,
+        errorIssuesJson: cappedIssuesJson,
+      });
+      updateSyncSnapshot({ lastError: errorMessage });
+      continue;
+    }
+
     if (recoverable || isAuthError) {
       if (isAuthError) {
-        pauseSync('Autenticación requerida');
+        pauseSync(resolveSyncErrorMessage(status, result.message));
         syncOptions?.onAuthError?.(new Error('unauthorized'));
       }
       const nextAttempts = attemptCount;
@@ -852,7 +872,6 @@ export function stopSyncEngine(): void {
 function configureCanonicalFhirClient(opts: SyncOpts): void {
   configureFHIRClient({
     getBaseUrl: () => opts.fhirBaseUrl,
-    ensureFreshToken: async () => (await opts.getToken()) ?? null,
   });
 }
 
@@ -906,52 +925,70 @@ export function startSyncDaemon(opts: SyncOpts): () => void {
   };
 }
 
+let currentFlushPromise: Promise<FlushResult> | null = null;
+
 export async function flushSyncQueue(opts: SyncOpts): Promise<FlushResult> {
-  configureCanonicalFhirClient(opts);
-  const trackedFailure: {
-    current: {
-    kind: QueueFailureKind;
-    status?: number;
-    authOutcome?: QueueSendFailure['authOutcome'];
-    } | null;
-  } = { current: null };
-  const sender = buildDefaultQueueSender({ getToken: opts.getToken });
+  if (currentFlushPromise) {
+    return currentFlushPromise;
+  }
 
-  const trackedSender: QueueSendHandler = async (item) => {
-    const result = await sender(item);
-    if (!result.ok && trackedFailure.current == null) {
-      trackedFailure.current = {
-        kind: result.kind,
-        status: result.status,
-        authOutcome: result.authOutcome,
-      };
-    }
-    return result;
-  };
+  currentFlushPromise = (async () => {
+    configureCanonicalFhirClient(opts);
+    const trackedFailure: {
+      current: {
+      kind: QueueFailureKind;
+      status?: number;
+      authOutcome?: QueueSendFailure['authOutcome'];
+      } | null;
+    } = { current: null };
+    const sender = buildDefaultQueueSender({ getToken: opts.getToken });
 
-  applySyncEngineOptions({
-    getToken: opts.getToken,
-    sender: trackedSender,
-  }, { ensureConnectivity: false });
-  setQueueSendHandler(trackedSender);
+    const trackedSender: QueueSendHandler = async (item) => {
+      const result = await sender(item);
+      if (!result.ok && trackedFailure.current == null) {
+        trackedFailure.current = {
+          kind: result.kind,
+          status: result.status,
+          authOutcome: result.authOutcome,
+        };
+      }
+      return result;
+    };
 
-  const before = await listOfflineQueue();
-  await runSyncCycle();
-  const after = await listOfflineQueue();
-  const afterIds = new Set(after.map((item) => item.id));
-  const processed = before.filter((item) => !afterIds.has(item.id)).length;
-  const base = classifyFlushOutcome(trackedFailure.current);
+    applySyncEngineOptions({
+      getToken: opts.getToken,
+      sender: trackedSender,
+    }, { ensureConnectivity: false });
+    setQueueSendHandler(trackedSender);
 
-  return {
-    processed,
-    remaining: after.length,
-    outcome: processed > 0 && trackedFailure.current == null ? 'success' : base.outcome,
-    status: processed > 0 && trackedFailure.current == null ? undefined : base.status,
-  };
+    const before = await listOfflineQueue();
+    await runSyncCycle();
+    const after = await listOfflineQueue();
+    const afterIds = new Set(after.map((item) => item.id));
+    const processed = before.filter((item) => !afterIds.has(item.id)).length;
+    const base = classifyFlushOutcome(trackedFailure.current);
+
+    return {
+      processed,
+      remaining: after.length,
+      outcome: processed > 0 && trackedFailure.current == null ? 'success' : base.outcome,
+      status: processed > 0 && trackedFailure.current == null ? undefined : base.status,
+    };
+  })();
+
+  try {
+    return await currentFlushPromise;
+  } finally {
+    currentFlushPromise = null;
+  }
 }
 
 export async function getCanonicalQueueSize(): Promise<number> {
-  return (await listOfflineQueue()).length;
+  try {
+    return (await listOfflineQueue()).length;
+  } catch {
+    return -1;
+  }
 }
 // END HANDOVER_OFFLINE
 

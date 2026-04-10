@@ -380,5 +380,80 @@ describe('offline queue end-to-end', () => {
     expect(failed?.syncStatus).toBe('error');
     expect(failed?.errorStatus).toBe(400);
   });
+
+  it('fails closed on 403 by marking the replay as terminal instead of retrying forever', async () => {
+    await queue.createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } },
+      patientId: 'pat-403',
+    });
+
+    const sender = vi.fn(async () => ({ ok: false as const, status: 403, message: 'forbidden' }));
+    sync.setQueueSendHandler(sender);
+
+    await sync.processQueueOnce();
+    sender.mockClear();
+    await sync.processQueueOnce();
+
+    const [failed] = await queue.listOfflineQueue();
+    expect(sender).not.toHaveBeenCalled();
+    expect(failed?.syncStatus).toBe('error');
+    expect(failed?.errorStatus).toBe(403);
+    expect(failed?.errorMessage).toBe('Falló la actualización de autenticación. Inicia sesión de nuevo.');
+  });
+
+  it('canonical replay preserves auth hooks, refreshes after 401, and succeeds once without duplicating the transaction', async () => {
+    const client = await import('@/src/lib/fhir-client');
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-refresh-runtime' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-refresh-runtime' });
+
+    const refreshSpy = vi.fn(async (reason?: string) => {
+      expect(reason).toBe('401');
+      return 'fresh-bearer';
+    });
+    const logoutSpy = vi.fn();
+    client.configureFHIRClient({
+      ensureFreshToken: refreshSpy,
+      logout: logoutSpy,
+    });
+
+    const authHeaders: string[] = [];
+    const idempotencyKeys: string[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      authHeaders.push(headers.get('Authorization') ?? '');
+      idempotencyKeys.push(headers.get('Idempotency-Key') ?? '');
+
+      if (authHeaders.length === 1) {
+        return new Response(JSON.stringify({ detail: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/fhir+json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ resourceType: 'Bundle', id: 'replay-ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/fhir+json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const result = await sync.flushSyncQueue({
+      fhirBaseUrl: 'https://example.test',
+      getToken: async () => 'stale-bearer',
+      backoff: { retries: 1, minMs: 0, maxMs: 0 },
+    });
+
+    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    expect(logoutSpy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(authHeaders).toEqual(['Bearer stale-bearer', 'Bearer fresh-bearer']);
+    expect(idempotencyKeys).toEqual([queued.id, queued.id]);
+    expect(await queue.listOfflineQueue()).toHaveLength(0);
+    expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
+    expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+  });
 });
 

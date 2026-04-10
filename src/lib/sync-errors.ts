@@ -54,8 +54,11 @@ export function resolveSyncErrorMessage(status?: number | null, fallback?: strin
   if (status === 422) {
     return t('sync.validationFailedMessage');
   }
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return t('sync.authRequiredMessage');
+  }
+  if (status === 403) {
+    return t('sync.authFailedMessage');
   }
   if (typeof status === 'number') {
     return t('sync.syncErrorStatusMessage', { status });
