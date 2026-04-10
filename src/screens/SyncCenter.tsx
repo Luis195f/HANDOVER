@@ -13,7 +13,7 @@ import {
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { listOfflineQueue, type SyncStatus } from '@/src/lib/queue';
-import { flushQueue, type SyncOpts } from '@/src/lib/sync/index';
+import { flushSyncQueue, type SyncOpts } from '@/src/lib/sync';
 import { buildIssuesText, parseErrorIssuesJson, resolveErrorCopy } from './SyncCenter.helpers';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -136,7 +136,7 @@ export default function SyncCenter() {
     setAuthMessage(null);
     setBusy(true);
     try {
-      const res = await flushQueue(opts);
+      const res = await flushSyncQueue(opts);
       if (res.outcome === 'auth-required' || res.outcome === 'auth-failed') {
         const message = getAuthReplayMessage(res.outcome);
         setAuthMessage(message);
@@ -168,7 +168,7 @@ export default function SyncCenter() {
     }
 
     intervalRef.current = setInterval(() => {
-      // flush coalescente en sync/index.ts; es seguro llamarlo seguido
+      // flush coalescente en src/lib/sync.ts; es seguro llamarlo seguido
       void doFlush();
     }, Math.max(5, Math.min(60, intervalSec)) * 1000);
 

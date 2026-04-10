@@ -2,8 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { getSyncSnapshot, subscribeSyncStatus, type SyncSnapshot } from '@/src/lib/sync';
-import { getQueueSize } from '@/src/lib/sync/index';
+import { getCanonicalQueueSize, getSyncSnapshot, subscribeSyncStatus, type SyncSnapshot } from '@/src/lib/sync';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { useThemeTokens } from '@/src/theme';
 import { useTranslation } from '@/src/i18n';
@@ -70,7 +69,7 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
     let active = true;
 
     const refreshQueueCount = async () => {
-      const count = await getQueueSize().catch(() => -1);
+      const count = await getCanonicalQueueSize().catch(() => -1);
       if (!active) return;
       setCanonicalPendingCount(count < 0 ? 0 : count);
     };

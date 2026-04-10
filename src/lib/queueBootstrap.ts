@@ -1,10 +1,10 @@
 import { configureFHIRClient, postBundle } from './fhir-client';
 import { ENV, FHIR_BASE_URL } from '../config/env';
-import { startSyncDaemon, flushQueue, type SyncOpts } from './sync/index';
+import { startSyncDaemon, flushSyncQueue, type SyncOpts } from './sync';
 import { ensureFreshAccessToken } from '../security/auth';
 
-// Legacy bootstrap adapter kept only because the active App.tsx still wires the
-// older replay facade from src/lib/sync/index.ts during app startup.
+// App.tsx remains the active mobile bootstrap entrypoint; wire it directly to the
+// canonical sync runtime so replay does not fork through the legacy facade.
 async function getLegacyBootstrapSessionToken(): Promise<string | null> {
   try {
     return (await ensureFreshAccessToken('fhir')) ?? null;
@@ -52,5 +52,5 @@ export async function flushNow() {
     fhirBaseUrl: ENV.FHIR_BASE_URL ?? FHIR_BASE_URL,
     getToken: getLegacyBootstrapSessionToken,
   };
-  await flushQueue(opts);
+  await flushSyncQueue(opts);
 }

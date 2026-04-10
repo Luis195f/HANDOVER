@@ -16,8 +16,9 @@
 - `index.ts` is the only active Expo/mobile entrypoint in this repo cut. It registers the root component from `App.tsx`.
 - `App.tsx` is the active mobile bootstrap path. It mounts auth/navigation providers and installs queue replay through `src/lib/queueBootstrap.ts`.
 - `src/lib/sync.ts` is the canonical sync runtime for queue state, retry scheduling, and `SyncSnapshot`.
-- `src/lib/sync/index.ts` remains a legacy compatibility facade with residual runtime dependencies from `src/lib/queueBootstrap.ts`, `src/screens/SyncCenter.tsx`, `src/screens/handover/useHandoverSyncStatus.ts`, `src/components/SyncStatusBanner.tsx`, and `src/components/OfflineBanner.tsx`. It is not the source of truth for queue state.
-- `src/lib/offlineQueue.ts` is a residual compatibility adapter over the canonical queue storage in `src/lib/queue.ts`; keep it only while those `sync/index.ts` callers exist.
+- `src/lib/queueBootstrap.ts`, `src/screens/SyncCenter.tsx`, `src/screens/handover/useHandoverSyncStatus.ts`, `src/components/SyncStatusBanner.tsx`, and `src/components/OfflineBanner.tsx` now call `src/lib/sync.ts` directly for replay/runtime state.
+- `src/lib/sync/index.ts` remains only as a thin compatibility shim over `src/lib/sync.ts`; it no longer owns replay state or drains a separate queue path.
+- `src/lib/offlineQueue.ts` is a residual compatibility adapter over the canonical queue storage in `src/lib/queue.ts`. It is not part of the active HANDOVER replay/runtime path for handover bundles.
 - `main.py` is absent from the current repository state. The active Python/Django operational entrypoints are `manage.py`, `Procfile` (`gunicorn backend.wsgi ...`), `.github/workflows/django.yml` (`python manage.py migrate`, `pytest`), and `docker-compose.yml` (web export build only; Django is documented as a separate Procfile-compatible service).
 
 ## Transaction identifiers (txId)
@@ -26,9 +27,16 @@
 - The txId is also reflected in `Bundle.identifier` (`system=urn:handover-pro:tx`) for traceability.
 
 ## Queue item identifiers (offline queue)
-- `computeId(fullUrls: string[])` (`src/lib/sync.ts`) builds a deterministic ID for an offline queue item by sorting the entry `fullUrl` values, joining them, and hashing the result with `hashHex`.
+- `buildOfflineQueueId(...)` (`src/lib/queue.ts`) is the canonical identity builder for handover bundles. It hashes a stable serialization of `patientId`, `payloadType`, and the bundle payload so replay deduplicates on deterministic clinical identity instead of transient runtime state.
+- `computeId(fullUrls: string[])` (`src/lib/sync.ts`) remains scoped to the residual secure-store compatibility queue and is no longer the operational identity source for handover bundle replay.
 - `hashHex` (`src/lib/crypto.ts`) uses SHA-256 and returns a configurable hex prefix (default 64 chars). This makes it deterministic while keeping IDs compact.
-- The goal is to detect duplicates and avoid enqueueing the same resource set twice. Hash collisions are astronomically unlikely, but if they ever occur the safe mitigation is to compare the original `fullUrl` lists before skipping an enqueue.
+- The operational goal is to detect duplicates and avoid enqueueing the same clinical bundle identity twice. Hash collisions are astronomically unlikely; if they ever occur the safe mitigation is to compare the original payload identity inputs before skipping an enqueue.
+
+## Canonical queue invariants
+- Local persistence for handover bundles is `handover_offline_queue` in `src/lib/queue.ts`, with encrypted payload-at-rest and plaintext metadata limited to non-PHI control fields.
+- Queue status is explicit and finite: `pending`, `inFlight`, `error`, `synced`. The canonical runtime in `src/lib/sync.ts` is the only active writer of replay status transitions.
+- Replay is safe by construction: canonical sends reuse the persisted payload, keep idempotency headers stable (`txId` or queue item id), and treat `409/412` as delivered evidence instead of duplicate writes.
+- Deduplication is based on stable identity (`buildOfflineQueueId`) so the same handover bundle does not fork into multiple queue rows across retry/reopen flows.
 
 ## Other identifiers and hash usage
 - `hashHex` also backs other deterministic identifiers such as `fhirId` (`src/lib/crypto.ts`) and several resource ID helpers in `src/lib/fhir-map.ts`.
@@ -85,7 +93,7 @@
   - `paused`: blocked by authentication (401/403) until re-login or `resumeSync()`.
 
 ## Compatibility aliases and migration notes
-- `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of `flushQueue`.
+- `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of the canonical runtime entrypoints in `src/lib/sync.ts`.
 - `postBundleSmart` (alias of `postBundle` in `src/lib/fhir-client.ts`) is deprecated. Prefer `postBundle`.
 - These aliases remain for compatibility but will be removed in a future major release. Update imports to the canonical names when migrating.
 

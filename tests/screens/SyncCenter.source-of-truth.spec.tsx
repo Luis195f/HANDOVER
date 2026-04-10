@@ -32,9 +32,13 @@ vi.mock('@/src/lib/queue', () => ({
   listOfflineQueue: (...args: unknown[]) => mocked.listOfflineQueue(...args),
 }));
 
-vi.mock('@/src/lib/sync/index', () => ({
-  flushQueue: vi.fn(async () => ({ processed: 0, remaining: 1 })),
-}));
+vi.mock('@/src/lib/sync', async () => {
+  const actual = await vi.importActual<typeof import('@/src/lib/sync')>('@/src/lib/sync');
+  return {
+    ...actual,
+    flushSyncQueue: vi.fn(async () => ({ processed: 0, remaining: 1 })),
+  };
+});
 
 vi.mock('@/src/security/auth', () => ({
   ensureFreshAccessToken: vi.fn(async () => 'token'),

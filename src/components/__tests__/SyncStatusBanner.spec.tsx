@@ -33,6 +33,7 @@ vi.mock('@/src/i18n', () => ({
 }));
 
 vi.mock('@/src/lib/sync', () => ({
+  getCanonicalQueueSize: (...args: unknown[]) => queueSizeMock(...args),
   getSyncSnapshot: () => ({
     status: 'idle',
     lastRunAt: null,
@@ -58,10 +59,6 @@ vi.mock('@/src/lib/sync', () => ({
     });
     return () => {};
   },
-}));
-
-vi.mock('@/src/lib/sync/index', () => ({
-  getQueueSize: (...args: unknown[]) => queueSizeMock(...args),
 }));
 
 describe('SyncStatusBanner', () => {

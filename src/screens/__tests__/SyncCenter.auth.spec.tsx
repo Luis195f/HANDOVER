@@ -4,7 +4,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ensureFreshAccessTokenMock = vi.fn();
-const flushQueueMock = vi.fn();
+const flushSyncQueueMock = vi.fn();
 const listOfflineQueueMock = vi.fn(async () => []);
 
 vi.mock('@react-navigation/native', () => ({
@@ -47,8 +47,8 @@ vi.mock('@/src/lib/queue', () => ({
   listOfflineQueue: () => listOfflineQueueMock(),
 }));
 
-vi.mock('@/src/lib/sync/index', () => ({
-  flushQueue: (opts: unknown) => flushQueueMock(opts),
+vi.mock('@/src/lib/sync', () => ({
+  flushSyncQueue: (opts: unknown) => flushSyncQueueMock(opts),
 }));
 
 vi.mock('@/src/lib/net-errors', () => ({
@@ -76,7 +76,7 @@ describe('SyncCenter auth replay seam', () => {
     ensureFreshAccessTokenMock
       .mockResolvedValueOnce('fresh-replay-token-1')
       .mockResolvedValueOnce('fresh-replay-token-2');
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+    flushSyncQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       expect(await opts.getToken()).toBe('fresh-replay-token-1');
       expect(await opts.getToken()).toBe('fresh-replay-token-2');
       return { processed: 1, remaining: 0, outcome: 'success' };
@@ -90,7 +90,7 @@ describe('SyncCenter auth replay seam', () => {
     });
 
     await waitFor(() => {
-      expect(flushQueueMock).toHaveBeenCalledTimes(1);
+      expect(flushSyncQueueMock).toHaveBeenCalledTimes(1);
     });
     expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(1, 'fhir');
     expect(ensureFreshAccessTokenMock).toHaveBeenNthCalledWith(2, 'fhir');
@@ -102,7 +102,7 @@ describe('SyncCenter auth replay seam', () => {
   it('fails closed when the canonical refresher does not return a bearer', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => {});
     ensureFreshAccessTokenMock.mockResolvedValueOnce(null);
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+    flushSyncQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       const token = await opts.getToken();
       return { processed: 0, remaining: 0, outcome: token ? 'success' : 'auth-required' };
     });
@@ -114,7 +114,7 @@ describe('SyncCenter auth replay seam', () => {
       fireEvent.press(view.getByTestId('sync-flush'));
     });
 
-    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(flushSyncQueueMock).toHaveBeenCalledTimes(1);
     expect(ensureFreshAccessTokenMock).toHaveBeenCalledWith('fhir');
     expect(alertSpy).toHaveBeenCalledWith('sync.syncTitle', 'sync.authRequiredMessage');
     alertSpy.mockRestore();
@@ -123,7 +123,7 @@ describe('SyncCenter auth replay seam', () => {
   it('preserves auth-failed when the canonical refresher throws', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => {});
     ensureFreshAccessTokenMock.mockRejectedValueOnce(new Error('refresh failed'));
-    flushQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
+    flushSyncQueueMock.mockImplementationOnce(async (opts: { getToken: () => Promise<string | null> }) => {
       try {
         await opts.getToken();
         return { processed: 0, remaining: 0, outcome: 'success' };
@@ -139,7 +139,7 @@ describe('SyncCenter auth replay seam', () => {
       fireEvent.press(view.getByTestId('sync-flush'));
     });
 
-    expect(flushQueueMock).toHaveBeenCalledTimes(1);
+    expect(flushSyncQueueMock).toHaveBeenCalledTimes(1);
     expect(ensureFreshAccessTokenMock).toHaveBeenCalledWith('fhir');
     expect(alertSpy).toHaveBeenCalledWith('sync.syncTitle', 'sync.authFailedMessage');
     alertSpy.mockRestore();

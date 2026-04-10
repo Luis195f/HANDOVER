@@ -3,8 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FHIR_BASE_URL } from '@/src/config/env';
 import { t } from '@/src/i18n';
 import { getOfflineQueueItem } from '@/src/lib/queue';
-import { getSyncSnapshot, subscribeSyncStatus } from '@/src/lib/sync';
-import { consumeRecentlySyncedQueueItem, flushQueue } from '@/src/lib/sync/index';
+import { consumeRecentlySyncedQueueItem, flushSyncQueue, getSyncSnapshot, subscribeSyncStatus } from '@/src/lib/sync';
 import { ensureFreshAccessToken } from '@/src/security/auth';
 
 export type HandoverSyncStatus = 'idle' | 'queued' | 'syncing' | 'synced' | 'error';
@@ -107,7 +106,7 @@ export function useHandoverSyncStatus() {
 
     manualRetryInFlightRef.current = true;
     try {
-      const result = await flushQueue({
+      const result = await flushSyncQueue({
         fhirBaseUrl: FHIR_BASE_URL,
         getToken: () => ensureFreshAccessToken('fhir'),
         backoff: { retries: 5, minMs: 500, maxMs: 15_000 },
