@@ -4,10 +4,11 @@
 > - Estado: `implemented`.
 > - Última revisión: 2026-03-28.
 > - Fuente de verdad / evidencia base: `backend/security/*`, `backend/api/views.py`, `backend/api/urls.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
-> - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, attestation clínica, firma criptográfica de transporte y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend.
+> - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, attestation clínica, firma criptográfica de transporte y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend ni a una declaración de production-readiness.
 
 ## Modelo de autenticación/autorización
 - Autenticación JWT OIDC mediante `AUTH0_ISSUER_BASE_URL` y `AUTH0_AUDIENCE`.
+- Las variables `EXPO_PUBLIC_*` del cliente solo pueden contener metadata pública/flags. No deben transportar secretos, tokens privilegiados ni claves de proveedor.
 - `DJANGO_DEBUG=true` solo es válido para desarrollo local explícito (`HANDOVER_DEPLOYMENT_MODE=development|demo`); no habilita bypass por sí mismo en `pilot`/`production` ni en despliegues sin modo local explícito.
 - Si faltan `AUTH0_ISSUER_BASE_URL` o `AUTH0_AUDIENCE` (o sus aliases `OIDC_ISSUER` / `OIDC_AUDIENCE`) fuera de tests reales o de desarrollo local explícito con `DEBUG=true`, el backend debe abortar startup; no existe fallback silencioso a `AllowAny` fuera de ese perímetro.
 - Todas las operaciones clínicas sensibles en DRF validan token Bearer.
@@ -89,10 +90,10 @@
 - Evitar filtrar detalles internos de infraestructura en mensajes al cliente.
 - En uploads/AI no se debe reenviar texto crudo de errores upstream que pueda contener PHI; responder con detalle seguro y código de error estable.
 
-### Enfoque regulatorio (MDR/AEMPS-ready)
+### Orientación documental para piloto serio
 - Aplicar defense-in-depth (authn + authz + validación + auditoría + attestation clínica + firma criptográfica de transporte).
 - Mantener trazabilidad de cambios, evidencia de test y registro auditable de eventos críticos.
-- Diseñar documentación y controles para facilitar expediente técnico y actividades de vigilancia post-mercado.
+- Diseñar documentación y controles para facilitar una conversación seria de piloto, auditoría técnica y preparación regulatoria sin presentarlo como certificación o cierre regulatorio total.
 
 ## Backups y artefactos operativos
 - Los scripts [`scripts/backup-db.sh`](../scripts/backup-db.sh) y [`scripts/backup-media.sh`](../scripts/backup-media.sh) exigen cifrado por defecto; si falta `BACKUP_ENCRYPTION_PASSPHRASE`, fallan salvo override explícito `BACKUP_REQUIRE_ENCRYPTION=false`.

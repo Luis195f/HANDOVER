@@ -8,6 +8,7 @@ node_modules/
 
 # Expo caches
 .expo/
+**/.expo/
 .expo-shared/
 .expo/web-build/
 
@@ -61,8 +62,11 @@ __pycache__/
 *.pyd
 .venv/
 .venv*/
+venv/
+venv*/
 **/.venv/
 **/.venv*/
+.python-version
 .venv-stt/
 .pytest_cache/
 **/.pytest_cache/
@@ -91,11 +95,13 @@ Thumbs.db
 
 # Jest / Tests / Coverage
 coverage/
+**/coverage/
 # jest-tests mocks: keep tracked mocks, ignore everything else if needed
 !jest-tests/__mocks__/
 !jest-tests/__mocks__/*.js
 pytest-cache/
 .cache/
+**/test-results/
 
 # Project local tools
 scripts/

@@ -11,13 +11,13 @@
 
 Aplicación móvil para pases de turno clínico construida con React Native (Expo) y TypeScript. Incluye un backend único en Django/DRF para FHIR, asistencia documental con IA y auditoría, además de una cola offline que garantiza la entrega de bundles FHIR incluso con conectividad intermitente.
 
-## Identificación comercial y posicionamiento regulatorio
+## Identificación comercial y postura pública
 
 **Nombre comercial oficial:** HANDOVER – Relevo Seguro de Enfermería  
-**Subtítulo técnico (MDR / QMS):** Sistema Clínico Digital para la Entrega y Continuidad del Turno de Enfermería  
-**Referencia normativa (uso obligatorio):** HANDOVER – Relevo Seguro de Enfermería, Sistema Clínico Digital para la Entrega y Continuidad del Turno de Enfermería (hereinafter, HANDOVER).
+**Subtítulo documental de trabajo:** Sistema Clínico Digital para la Entrega y Continuidad del Turno de Enfermería  
+**Referencia documental base:** HANDOVER – Relevo Seguro de Enfermería, Sistema Clínico Digital para la Entrega y Continuidad del Turno de Enfermería.
 
-**Posicionamiento regulatorio:** Software as a Medical Device (SaMD) orientado a soporte clínico. La documentación MDR (Annex II) y QMS está disponible en [`/docs`](docs). Este software apoya la continuidad del turno de enfermería y no sustituye el juicio clínico.
+**Posicionamiento público de este repositorio:** HANDOVER es hoy un piloto operativo de software clínico orientado a soporte de continuidad del turno de enfermería. El repo incluye documentación MDR/QMS útil como baseline de trabajo y trazabilidad, pero no debe presentarse como expediente regulatorio cerrado, certificación, autorización comercial ni software production-ready. Este software apoya la continuidad del turno de enfermería y no sustituye el juicio clínico.
 
 **Seguridad y control de acceso (resumen):**
 - Autenticación JWT con Auth0 (OIDC) en el backend Django.
@@ -28,7 +28,7 @@ Aplicación móvil para pases de turno clínico construida con React Native (Exp
 - Eventos de auditoría estructurados sin PHI, con hash de payload y request IDs.
 - Retención configurable y comando de limpieza de eventos.
 
-**Documentación regulatoria adicional:**
+**Documentación de gobernanza y preparación regulatoria disponible en el repo:**
 - [Annex II (MDR)](docs/MDR_Anexo_II_HANDOVER.md)
 - [QMS](docs/QMS_HANDOVER.md)
 - [Matriz de trazabilidad MDR](docs/MDR_traceability_matrix.md)
@@ -65,7 +65,7 @@ Importante: este paquete queda ahora en estado piloto-grade trazable; no declara
      - `EXPO_PUBLIC_AUTH0_AUDIENCE` o `EXPO_PUBLIC_OIDC_AUDIENCE` para emitir access tokens con audiencia del API.
      - `EXPO_PUBLIC_OIDC_SCOPE` (por ejemplo `openid profile email offline_access` para refresh tokens).
      - El flujo se resuelve en `src/security/OAuthService.ts` y se integra en `src/security/auth.tsx`; las guardias RBAC viven en `src/security/acl.ts`.
-    - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
+    - `FHIR_BASE_URL` o `EXPO_PUBLIC_FHIR_BASE_URL` define la URL consumida por `src/lib/fhir-client.ts` para leer/escribir Bundles.
     - `EXPO_PUBLIC_ALLOWED_UNITS` restringe el acceso del cliente a unidades clínicas explícitas.
     - `EXPO_PUBLIC_ALLOW_ALL_UNITS` y `EXPO_PUBLIC_BYPASS_SCOPE` quedan como flags legacy de compatibilidad/configuración, pero no abren bypass RBAC ni acceso total en el runtime actual; `src/security/acl.ts` y sus tests fallan en cerrado.
     - `HANDOVER_FHIR_VALIDATION_MODE`: controla la validación de Bundles FHIR en el backend Django/DRF.
