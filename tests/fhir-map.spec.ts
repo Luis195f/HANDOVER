@@ -748,6 +748,13 @@ describe('buildFhirBundleFromFormData', () => {
           imageBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ',
           method: 'session',
         },
+        incoming: {
+          userId: 'nurse-2',
+          fullName: 'Nurse Incoming',
+          unitId: 'UCI-1',
+          signedAt: '2025-01-05T16:00:00Z',
+          method: 'session',
+        },
       },
       audioUri: 'https://example.org/audio/shift.m4a',
     });

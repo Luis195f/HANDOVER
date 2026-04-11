@@ -3,6 +3,23 @@
   "type": "transaction",
   "entry": [
     {
+      "fullUrl": "urn:uuid:patient-synthetic-1",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "synthetic-001",
+        "identifier": [
+          {
+            "system": "urn:handover-pro:patient-id",
+            "value": "synthetic-001"
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "Patient"
+      }
+    },
+    {
       "fullUrl": "urn:uuid:obs-synthetic-1",
       "resource": {
         "resourceType": "Observation",
@@ -18,7 +35,7 @@
           ]
         },
         "subject": {
-          "reference": "Patient/synthetic-001"
+          "reference": "urn:uuid:patient-synthetic-1"
         },
         "effectiveDateTime": "2026-01-01T08:00:00Z",
         "valueQuantity": {

@@ -9,6 +9,11 @@ type BundleEntry = {
   fullUrl?: string;
   resource?: {
     resourceType?: string;
+    subject?: { reference?: string };
+    encounter?: { reference?: string };
+    context?: { reference?: string };
+    author?: Array<{ reference?: string }>;
+    device?: { reference?: string };
     code?: { coding?: Array<{ code?: string }> };
     section?: Array<{ title?: string; entry?: Array<{ reference?: string }> }>;
   };
@@ -64,5 +69,51 @@ describe('Representative FHIR transaction bundle fixture', () => {
       .map((coding) => coding.code);
 
     expect(scaleCodes).toEqual(expect.arrayContaining(['38208-5', '38876-5', '9267-6']));
+  });
+
+  it('keeps patient, encounter, practitioner and section linkages internally coherent', () => {
+    const bundle = loadFixture();
+    const entries = bundle.entry ?? [];
+    const byFullUrl = new Map(entries.map((entry) => [entry.fullUrl, entry.resource] as const));
+
+    const patientEntry = entries.find((entry) => entry.resource?.resourceType === 'Patient');
+    const practitionerEntry = entries.find((entry) => entry.resource?.resourceType === 'Practitioner');
+    const encounterEntry = entries.find((entry) => entry.resource?.resourceType === 'Encounter');
+    const compositionEntry = entries.find((entry) => entry.resource?.resourceType === 'Composition');
+
+    expect(patientEntry?.fullUrl).toBeTruthy();
+    expect(practitionerEntry?.fullUrl).toBeTruthy();
+    expect(encounterEntry?.fullUrl).toBeTruthy();
+    expect(compositionEntry?.fullUrl).toBeTruthy();
+
+    const patientRef = patientEntry!.fullUrl!;
+    const encounterRef = encounterEntry!.fullUrl!;
+    const practitionerRef = practitionerEntry!.fullUrl!;
+    const composition = compositionEntry!.resource!;
+
+    expect(composition.subject?.reference).toBe(patientRef);
+    expect(composition.encounter?.reference).toBe(encounterRef);
+    expect(composition.author?.[0]?.reference).toBe(practitionerRef);
+
+    entries
+      .filter((entry) => !['Patient', 'Practitioner', 'Encounter', 'Composition', 'Device'].includes(entry.resource?.resourceType ?? ''))
+      .forEach((entry) => {
+        const resource = entry.resource!;
+        if (resource.subject?.reference) {
+          expect(resource.subject.reference).toBe(patientRef);
+        }
+
+        const encounterReference = resource.encounter?.reference ?? resource.context?.reference;
+        if (encounterReference) {
+          expect(encounterReference).toBe(encounterRef);
+        }
+      });
+
+    const deviceUse = entries.find((entry) => entry.resource?.resourceType === 'DeviceUseStatement')?.resource;
+    expect(deviceUse?.device?.reference).toBe('urn:uuid:88888888888888888888888888888888');
+    expect(byFullUrl.has(deviceUse?.device?.reference)).toBe(true);
+
+    const documentReference = entries.find((entry) => entry.resource?.resourceType === 'DocumentReference')?.resource;
+    expect(documentReference?.author?.[0]?.reference).toBe(practitionerRef);
   });
 });
