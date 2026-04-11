@@ -17,7 +17,7 @@ from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhi
 
 def test_transaction_resources_contract_and_audit():
     client = APIClient()
-    authenticate_api_client(client)
+    authenticate_api_client(client, unit_ids=["icu-a"])
     sample_bundle = {
         "resourceType": "Bundle",
         "type": "transaction",
@@ -53,7 +53,7 @@ def test_transaction_resources_contract_and_audit():
         patch("backend.api.views.httpx.post", autospec=True) as mock_audit_post,
         patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True),
     ):
-        response = client.post("/api/fhir/transaction", data=sample_bundle, format="json")
+        response = client.post("/api/fhir/transaction", data=sample_bundle, format="json", HTTP_X_UNIT_ID="icu-a")
 
     assert response.status_code == 200
     tx_bundle = mock_fhir_post.call_args.kwargs["json"]
