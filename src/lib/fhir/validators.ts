@@ -2,11 +2,15 @@ import { z } from 'zod';
 
 import type {
   Bundle,
+  Condition,
   Composition,
+  Device,
   DeviceUseStatement,
   DocumentReference,
+  MedicationAdministration,
   MedicationStatement,
   Observation,
+  Procedure,
 } from '../fhir-map';
 
 const isoDateTime = z
@@ -150,6 +154,7 @@ const medicationStatementSchema = z
     medicationCodeableConcept: codeableConceptSchema,
     subject: referenceSchema,
     encounter: referenceSchema.optional(),
+    context: referenceSchema.optional(),
     effectiveDateTime: isoDateTime.optional(),
     effectivePeriod: periodSchema.optional(),
     dateAsserted: isoDateTime.optional(),
@@ -170,6 +175,7 @@ const deviceUseStatementSchema = z
     status: z.enum(['active', 'completed', 'entered-in-error']).or(z.string().min(1)),
     subject: referenceSchema,
     encounter: referenceSchema.optional(),
+    context: referenceSchema.optional(),
     device: z
       .object({
         reference: z.string().min(1),
@@ -228,6 +234,125 @@ const compositionSchema = z
   })
   .catchall(z.unknown());
 
+const conditionSchema = z
+  .object({
+    resourceType: z.literal('Condition'),
+    clinicalStatus: codeableConceptSchema,
+    verificationStatus: codeableConceptSchema,
+    category: z.array(codeableConceptSchema).optional(),
+    code: codeableConceptSchema,
+    subject: referenceSchema,
+    encounter: referenceSchema.optional(),
+    onsetDateTime: isoDateTime.optional(),
+    recordedDate: isoDateTime.optional(),
+  })
+  .catchall(z.unknown());
+
+const procedureSchema = z
+  .object({
+    resourceType: z.literal('Procedure'),
+    status: z.string().min(1),
+    code: codeableConceptSchema,
+    subject: referenceSchema,
+    encounter: referenceSchema.optional(),
+    performedDateTime: isoDateTime.optional(),
+    performedPeriod: periodSchema.optional(),
+    reasonCode: z.array(codeableConceptSchema).optional(),
+    bodySite: z.array(codeableConceptSchema).optional(),
+  })
+  .catchall(z.unknown());
+
+const patientSchema = z
+  .object({
+    resourceType: z.literal('Patient'),
+    id: z.string().min(1).optional(),
+    identifier: z
+      .array(
+        z
+          .object({
+            system: z.string().min(1),
+            value: z.string().min(1),
+          })
+          .catchall(z.unknown()),
+      )
+      .optional(),
+  })
+  .catchall(z.unknown());
+
+const practitionerSchema = z
+  .object({
+    resourceType: z.literal('Practitioner'),
+    id: z.string().min(1).optional(),
+    identifier: z
+      .array(
+        z
+          .object({
+            system: z.string().min(1),
+            value: z.string().min(1),
+          })
+          .catchall(z.unknown()),
+      )
+      .optional(),
+    name: z
+      .array(
+        z
+          .object({
+            text: z.string().optional(),
+          })
+          .catchall(z.unknown()),
+      )
+      .optional(),
+  })
+  .catchall(z.unknown());
+
+const encounterSchema = z
+  .object({
+    resourceType: z.literal('Encounter'),
+    id: z.string().min(1).optional(),
+    status: z.string().min(1),
+    class: z
+      .object({
+        system: z.string().min(1),
+        code: z.string().min(1),
+        display: z.string().optional(),
+      })
+      .catchall(z.unknown()),
+    subject: referenceSchema.optional(),
+    period: periodSchema.optional(),
+  })
+  .catchall(z.unknown());
+
+const deviceSchema = z
+  .object({
+    resourceType: z.literal('Device'),
+    id: z.string().min(1).optional(),
+    status: z.string().optional(),
+    patient: referenceSchema.optional(),
+    deviceName: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            type: z.string().optional(),
+          })
+          .catchall(z.unknown()),
+      )
+      .optional(),
+  })
+  .catchall(z.unknown());
+
+const medicationAdministrationSchema = z
+  .object({
+    resourceType: z.literal('MedicationAdministration'),
+    status: z.string().min(1),
+    medicationCodeableConcept: codeableConceptSchema,
+    subject: referenceSchema,
+    encounter: referenceSchema.optional(),
+    effectiveDateTime: isoDateTime.optional(),
+    effectivePeriod: periodSchema.optional(),
+  })
+  .catchall(z.unknown());
+
 const bundleEntrySchema = z
   .object({
     fullUrl: z.string().min(1),
@@ -253,20 +378,34 @@ const bundleSchema = z
 type ValidatedBundle = {
   bundle: Bundle;
   observations: Observation[];
+  conditions: Condition[];
   medicationStatements: MedicationStatement[];
+  medicationAdministrations: MedicationAdministration[];
   deviceUseStatements: DeviceUseStatement[];
   documentReferences: DocumentReference[];
   compositions: Composition[];
+  procedures: Procedure[];
+  patients: z.infer<typeof patientSchema>[];
+  practitioners: z.infer<typeof practitionerSchema>[];
+  encounters: z.infer<typeof encounterSchema>[];
+  devices: Device[];
 };
 
 export function validateBundle(input: unknown): ValidatedBundle {
   const parsedBundle = bundleSchema.parse(input) as Bundle & { entry: Array<{ resource?: any }> };
 
   const observations: Observation[] = [];
+  const conditions: Condition[] = [];
   const medicationStatements: MedicationStatement[] = [];
+  const medicationAdministrations: MedicationAdministration[] = [];
   const deviceUseStatements: DeviceUseStatement[] = [];
   const documentReferences: DocumentReference[] = [];
   const compositions: Composition[] = [];
+  const procedures: Procedure[] = [];
+  const patients: z.infer<typeof patientSchema>[] = [];
+  const practitioners: z.infer<typeof practitionerSchema>[] = [];
+  const encounters: z.infer<typeof encounterSchema>[] = [];
+  const devices: Device[] = [];
 
   for (const entry of parsedBundle.entry ?? []) {
     const resource = entry.resource;
@@ -279,6 +418,9 @@ export function validateBundle(input: unknown): ValidatedBundle {
       case 'MedicationStatement':
         medicationStatements.push(medicationStatementSchema.parse(resource) as MedicationStatement);
         break;
+      case 'MedicationAdministration':
+        medicationAdministrations.push(medicationAdministrationSchema.parse(resource) as MedicationAdministration);
+        break;
       case 'DeviceUseStatement':
         deviceUseStatements.push(deviceUseStatementSchema.parse(resource) as DeviceUseStatement);
         break;
@@ -288,6 +430,24 @@ export function validateBundle(input: unknown): ValidatedBundle {
       case 'Composition':
         compositions.push(compositionSchema.parse(resource) as Composition);
         break;
+      case 'Condition':
+        conditions.push(conditionSchema.parse(resource) as Condition);
+        break;
+      case 'Procedure':
+        procedures.push(procedureSchema.parse(resource) as Procedure);
+        break;
+      case 'Patient':
+        patients.push(patientSchema.parse(resource));
+        break;
+      case 'Practitioner':
+        practitioners.push(practitionerSchema.parse(resource));
+        break;
+      case 'Encounter':
+        encounters.push(encounterSchema.parse(resource));
+        break;
+      case 'Device':
+        devices.push(deviceSchema.parse(resource) as Device);
+        break;
       default:
         break;
     }
@@ -296,10 +456,17 @@ export function validateBundle(input: unknown): ValidatedBundle {
   return {
     bundle: parsedBundle,
     observations,
+    conditions,
     medicationStatements,
+    medicationAdministrations,
     deviceUseStatements,
     documentReferences,
     compositions,
+    procedures,
+    patients,
+    practitioners,
+    encounters,
+    devices,
   };
 }
 
@@ -309,10 +476,17 @@ export const schemas = {
   codeableConcept: codeableConceptSchema,
   quantity: quantitySchema,
   observation: observationSchema,
+  condition: conditionSchema,
   medicationStatement: medicationStatementSchema,
+  medicationAdministration: medicationAdministrationSchema,
   deviceUseStatement: deviceUseStatementSchema,
   documentReference: documentReferenceSchema,
   composition: compositionSchema,
+  procedure: procedureSchema,
+  patient: patientSchema,
+  practitioner: practitionerSchema,
+  encounter: encounterSchema,
+  device: deviceSchema,
   bundle: bundleSchema,
 };
 

@@ -2,7 +2,7 @@
 
 > Estado del documento
 > - Estado: `pilot`.
-> - Última revisión: 2026-03-26.
+> - Última revisión: 2026-04-11.
 > - Fuente de verdad / evidencia base: `src/lib/fhir-map.ts`, `src/lib/fhir-map/nnn.ts`, `backend/api/views.py`, `tests/fhir-map.spec.ts`, `backend/api/tests/test_handover_etl_read.py`.
 > - Riesgos o lagunas abiertas: el repo soporta mapeo FHIR real para NNN y transacción clínica vía Django/DRF, pero no declara perfiles regulatorios externos cerrados ni licencia NNN embebida en el repositorio.
 
@@ -93,7 +93,7 @@ Desde el estado del repo revisado el 2026-03-19, HANDOVER exporta contexto Core/
 
 - El contrato es aditivo: no cambia recursos base ni secciones previas obligatorias.
 - El caller real del frontend ya estaba cableado: `src/screens/HandoverForm.tsx` construye `profileTraceInput` con `buildProfileTraceInput(profileRuntime)`, lo inyecta en `buildHandoverInputPayload(...)` y luego envia ese payload a `buildHandoverBundleAsync(...)` antes de encolar el Bundle.
-- `validate:fhir` no requirio cambios porque la validacion local ya acepta `Composition.extension` y secciones adicionales validas en R4.
+- `validate:fhir` cubre ahora coherencia transaccional adicional sobre los fixtures del piloto: unicidad de `fullUrl`, coherencia `request.url -> resourceType`, resolucion de referencias internas (`subject`, `encounter`/`context`, `author`, `device`, `Composition.section.entry`) y alineacion `Patient`/`Encounter`/`Composition` cuando el Bundle incluye esos recursos.
 - No se modifica `fhir-client`, cola offline, sync ni writeback backend para habilitar este transporte.
 ## 4) Evidencia concreta por tipo NNN
 
@@ -164,7 +164,8 @@ Lo que no hace el repo:
 Notas de alcance:
 
 - la validacion FHIR remota existe;
-- `pnpm -w validate:fhir` valida tambien el fixture `tests/fixtures/fhir/representative-transaction-bundle.json` para cubrir diagnostico, medicacion, tratamiento, dispositivo, adjunto y escalas en un mismo Bundle;
+- `pnpm -w validate:fhir` valida todos los fixtures `tests/fixtures/fhir/*.json`; la evidencia del contrato piloto se apoya en `representative-transaction-bundle.json` y en los bundles contextuales, mientras `minimal-transaction-bundle.json` queda como smoke fixture de transporte y no como evidencia clinica completa del piloto;
+- `tests/fhir-representative-bundle.spec.ts` endurece especificamente estas invariantes piloto: un `Patient`, un `Encounter`, un `Practitioner`, un `Composition`, enlace consistente `Patient/Encounter` para diagnostico, medicacion, tratamiento, dispositivo, adjunto y escalas, y resolucion de `Composition.section.entry`;
 - la validacion terminologica oficial para NNN no esta cerrada en este repo;
 - el ETL lee el Bundle persistido, no un recurso writeback nuevo de ICEA.
 

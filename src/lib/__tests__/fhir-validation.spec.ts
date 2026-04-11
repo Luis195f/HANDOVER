@@ -248,4 +248,240 @@ describe('validateBundle', () => {
       ])
     );
   });
+
+  it('rejects unresolved patient references in transaction bundles', () => {
+    const bundle = {
+      resourceType: 'Bundle' as const,
+      type: 'transaction' as const,
+      entry: [
+        {
+          fullUrl: 'urn:uuid:patient-1',
+          request: { method: 'POST', url: 'Patient' },
+          resource: {
+            resourceType: 'Patient' as const,
+            id: 'pat-1',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:obs-1',
+          request: { method: 'POST', url: 'Observation' },
+          resource: {
+            ...validObservation,
+            subject: { reference: 'urn:uuid:missing-patient' },
+          },
+        },
+      ],
+    };
+
+    const result = validateBundleWithZod(bundle);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'entry[1].resource.subject.reference',
+          message: expect.stringContaining('does not resolve'),
+        }),
+      ]),
+    );
+  });
+
+  it('rejects request urls that drift from resourceType', () => {
+    const bundle = {
+      resourceType: 'Bundle' as const,
+      type: 'transaction' as const,
+      entry: [
+        {
+          fullUrl: 'urn:uuid:1',
+          request: { method: 'POST', url: 'Patient' },
+          resource: validObservation,
+        },
+      ],
+    };
+
+    const result = validateBundleWithZod(bundle);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'entry[0].request.url',
+          message: 'request.url must match resourceType',
+        }),
+      ]),
+    );
+  });
+
+  it('accepts legacy medication context references when they resolve to the bundle encounter', () => {
+    const bundle = {
+      resourceType: 'Bundle' as const,
+      type: 'transaction' as const,
+      entry: [
+        {
+          fullUrl: 'urn:uuid:patient-1',
+          request: { method: 'POST', url: 'Patient' },
+          resource: {
+            resourceType: 'Patient' as const,
+            id: 'pat-1',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:encounter-1',
+          request: { method: 'POST', url: 'Encounter' },
+          resource: {
+            resourceType: 'Encounter' as const,
+            id: 'enc-1',
+            status: 'finished',
+            class: {
+              system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+              code: 'IMP',
+            },
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:med-1',
+          request: { method: 'POST', url: 'MedicationStatement' },
+          resource: {
+            resourceType: 'MedicationStatement' as const,
+            status: 'active',
+            medicationCodeableConcept: {
+              coding: [{ system: 'http://www.whocc.no/atc', code: 'N02BE01', display: 'Paracetamol' }],
+              text: 'Paracetamol',
+            },
+            subject: { reference: 'urn:uuid:patient-1' },
+            context: { reference: 'urn:uuid:encounter-1' },
+            dateAsserted: '2023-10-01T00:00:00Z',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:comp-1',
+          request: { method: 'POST', url: 'Composition' },
+          resource: {
+            ...validComposition,
+            subject: { reference: 'urn:uuid:patient-1' },
+            encounter: { reference: 'urn:uuid:encounter-1' },
+            author: [{ reference: 'Practitioner/789' }],
+          },
+        },
+      ],
+    };
+
+    const result = validateBundleWithZod(bundle);
+
+    expect(result).toEqual({ isValid: true, errors: [] });
+  });
+
+  it('accepts percent-encoded practitioner references when the bundle practitioner id is raw', () => {
+    const bundle = {
+      resourceType: 'Bundle' as const,
+      type: 'transaction' as const,
+      entry: [
+        {
+          fullUrl: 'urn:uuid:patient-1',
+          request: { method: 'POST', url: 'Patient' },
+          resource: {
+            resourceType: 'Patient' as const,
+            id: 'pat-1',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:encounter-1',
+          request: { method: 'POST', url: 'Encounter' },
+          resource: {
+            resourceType: 'Encounter' as const,
+            id: 'enc-1',
+            status: 'finished',
+            class: {
+              system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+              code: 'IMP',
+            },
+            subject: { reference: 'urn:uuid:patient-1' },
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:practitioner-1',
+          request: { method: 'POST', url: 'Practitioner' },
+          resource: {
+            resourceType: 'Practitioner' as const,
+            id: 'user@unit',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:comp-1',
+          request: { method: 'POST', url: 'Composition' },
+          resource: {
+            ...validComposition,
+            subject: { reference: 'urn:uuid:patient-1' },
+            encounter: { reference: 'urn:uuid:encounter-1' },
+            author: [{ reference: 'Practitioner/user%40unit' }],
+          },
+        },
+      ],
+    };
+
+    const result = validateBundleWithZod(bundle);
+
+    expect(result).toEqual({ isValid: true, errors: [] });
+  });
+
+  it('keeps rejecting percent-encoded practitioner references that still do not resolve', () => {
+    const bundle = {
+      resourceType: 'Bundle' as const,
+      type: 'transaction' as const,
+      entry: [
+        {
+          fullUrl: 'urn:uuid:patient-1',
+          request: { method: 'POST', url: 'Patient' },
+          resource: {
+            resourceType: 'Patient' as const,
+            id: 'pat-1',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:encounter-1',
+          request: { method: 'POST', url: 'Encounter' },
+          resource: {
+            resourceType: 'Encounter' as const,
+            id: 'enc-1',
+            status: 'finished',
+            class: {
+              system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+              code: 'IMP',
+            },
+            subject: { reference: 'urn:uuid:patient-1' },
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:practitioner-1',
+          request: { method: 'POST', url: 'Practitioner' },
+          resource: {
+            resourceType: 'Practitioner' as const,
+            id: 'user@unit',
+          },
+        },
+        {
+          fullUrl: 'urn:uuid:comp-1',
+          request: { method: 'POST', url: 'Composition' },
+          resource: {
+            ...validComposition,
+            subject: { reference: 'urn:uuid:patient-1' },
+            encounter: { reference: 'urn:uuid:encounter-1' },
+            author: [{ reference: 'Practitioner/missing%40unit' }],
+          },
+        },
+      ],
+    };
+
+    const result = validateBundleWithZod(bundle);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'entry[3].resource.author[0].reference',
+          message: expect.stringContaining('does not resolve'),
+        }),
+      ]),
+    );
+  });
 });
