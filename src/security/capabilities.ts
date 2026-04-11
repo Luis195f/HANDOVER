@@ -214,8 +214,8 @@ export function canAccess(route: RouteName, capabilities: Capabilities | null | 
     case 'AudioNote':
     case 'ShiftDetails':
     case 'QRScan':
-      return perms.canWriteHandover;
     case 'SyncCenter':
+      return perms.canWriteHandover;
     case 'PatientList':
     case 'PatientDashboard':
       return perms.canReadPatients;

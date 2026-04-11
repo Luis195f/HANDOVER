@@ -63,6 +63,29 @@ class IceaPipelineApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], "analytics_forbidden_unit")
 
+    def test_status_request_id_cannot_be_whitelisted_by_in_scope_query_unit(self):
+        self._create_snapshot(unit_id="ward-z")
+        self._auth(roles=["supervisor"], unit_ids=("icu-a",))
+
+        response = self.client.get(
+            self.status_url,
+            {"requestId": "req-icea-001", "unitId": "icu-a"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_status_rejects_selector_unit_id_when_it_contradicts_snapshot(self):
+        self._create_snapshot(unit_id="icu-a")
+        self._auth(roles=["supervisor"], unit_ids=("icu-a",))
+
+        response = self.client.get(
+            self.status_url,
+            {"requestId": "req-icea-001", "unitId": "ward-z"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_unit_mismatch")
+
     def test_status_without_selector_returns_400_and_does_not_touch_snapshots(self):
         snapshot = self._create_snapshot()
         original_updated_at = snapshot.updated_at
@@ -91,6 +114,36 @@ class IceaPipelineApiTests(TestCase):
         self.assertEqual(payload["snapshot"]["requestId"], "req-icea-001")
         self.assertEqual(payload["snapshot"]["visibleStatus"], "accepted")
         self.assertEqual(payload["remoteError"]["code"], "icea_pipeline_not_configured")
+
+    @patch.dict(
+        "os.environ",
+        {
+            "ICEA_API_BASE_URL": "https://icea.example",
+            "ICEA_API_BEARER_TOKEN": "svc-token",
+        },
+        clear=False,
+    )
+    @patch("backend.api.icea_pipeline.httpx.request")
+    def test_status_in_scope_snapshot_overrides_matching_selectors_for_refresh(self, mock_request):
+        self._create_snapshot(unit_id="icu-a")
+        self._auth(roles=["supervisor"], unit_ids=("icu-a",))
+        remote = Mock()
+        remote.status_code = 200
+        remote.text = '{"status":"running","stages":{"normalize":{"status":"running"}}}'
+        remote.headers = {"Content-Type": "application/json"}
+        remote.json.return_value = {
+            "status": "running",
+            "stages": {"normalize": {"status": "running"}},
+        }
+        mock_request.return_value = remote
+
+        response = self.client.get(
+            self.status_url,
+            {"requestId": "req-icea-001", "unitId": "icu-a"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["snapshot"]["unitId"], "icu-a")
 
     @patch.dict(
         "os.environ",
@@ -296,6 +349,64 @@ class IceaPipelineApiTests(TestCase):
         self.assertEqual(payload["snapshot"]["lastStage"], "normalize")
         self.assertEqual(payload["snapshot"]["visibleStatus"], "succeeded")
         self.assertTrue(IceaPipelineEvent.objects.filter(stage="normalize", status="succeeded").exists())
+
+    def test_normalize_action_request_id_cannot_be_whitelisted_by_query_unit(self):
+        self._create_snapshot(unit_id="ward-z")
+        self._auth(roles=["admin"])
+
+        response = self.client.post(
+            self.normalize_url,
+            data={"requestId": "req-icea-001", "unitId": "icu-a"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_unit_mismatch")
+
+    def test_normalize_action_rejects_selector_unit_id_when_it_contradicts_snapshot(self):
+        self._create_snapshot(unit_id="icu-a")
+        self._auth(roles=["admin"])
+
+        response = self.client.post(
+            self.normalize_url,
+            data={"requestId": "req-icea-001", "unitId": "ward-z"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_unit_mismatch")
+
+    @patch.dict(
+        "os.environ",
+        {
+            "ICEA_API_BASE_URL": "https://icea.example",
+            "ICEA_API_BEARER_TOKEN": "svc-token",
+        },
+        clear=False,
+    )
+    @patch("backend.api.icea_pipeline.httpx.request")
+    def test_normalize_action_in_scope_snapshot_overrides_matching_selector_unit(self, mock_request):
+        self._create_snapshot(unit_id="icu-a")
+        self._auth(roles=["admin"])
+        remote = Mock()
+        remote.status_code = 200
+        remote.text = '{"status":"completed","requestId":"req-icea-001","bundleId":"bundle-icea-001"}'
+        remote.headers = {"Content-Type": "application/json"}
+        remote.json.return_value = {
+            "status": "completed",
+            "requestId": "req-icea-001",
+            "bundleId": "bundle-icea-001",
+        }
+        mock_request.return_value = remote
+
+        response = self.client.post(
+            self.normalize_url,
+            data={"requestId": "req-icea-001", "unitId": "icu-a"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["snapshot"]["unitId"], "icu-a")
 
     @patch.dict(
         "os.environ",

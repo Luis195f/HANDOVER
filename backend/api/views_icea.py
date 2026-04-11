@@ -131,16 +131,31 @@ class IceaPipelineStatusView(AuthenticatedAPIView):
             return Response({"detail": "requestId, bundleId or patientId is required.", "code": "missing_selector"}, status=400)
 
         snapshot = resolve_pipeline_snapshot(**selectors)
-        requested_unit = selectors.get("unitId") or (snapshot.unit_id if snapshot is not None else None)
+        selector_unit = selectors.get("unitId")
+        snapshot_unit = None
+        if snapshot is not None:
+            snapshot_unit = str(snapshot.unit_id or "").strip() or None
+        if snapshot is not None:
+            if selector_unit and snapshot_unit and selector_unit != snapshot_unit:
+                return Response(
+                    {
+                        "detail": "Selector unitId does not match the resolved pipeline snapshot.",
+                        "code": "analytics_unit_mismatch",
+                    },
+                    status=403,
+                )
+            requested_unit = snapshot_unit
+        else:
+            requested_unit = selector_unit
         _, scope_error = _resolve_admin_analytics_unit_scope(
             request,
             requested_unit=requested_unit,
-            require_requested_unit=(snapshot is None),
+            require_requested_unit=True,
         )
         if scope_error is not None:
             return scope_error
-        if snapshot is not None and snapshot.unit_id:
-            selectors.setdefault("unitId", snapshot.unit_id)
+        if snapshot is not None and snapshot_unit:
+            selectors["unitId"] = snapshot_unit
 
         remote_error = None
         should_refresh = not request.query_params.get("refresh") or _truthy(request.query_params.get("refresh"))
@@ -266,7 +281,21 @@ class IceaPipelineActionView(AuthenticatedAPIView):
             return Response({"detail": "requestId, bundleId or patientId is required.", "code": "missing_selector"}, status=400)
         else:
             snapshot = resolve_pipeline_snapshot(**selectors)
-            requested_unit = selectors.get("unitId") or (snapshot.unit_id if snapshot is not None else None)
+            selector_unit = selectors.get("unitId")
+            snapshot_unit = None
+            if snapshot is not None:
+                snapshot_unit = str(snapshot.unit_id or "").strip() or None
+                if selector_unit and snapshot_unit and selector_unit != snapshot_unit:
+                    return Response(
+                        {
+                            "detail": "Selector unitId does not match the resolved pipeline snapshot.",
+                            "code": "analytics_unit_mismatch",
+                        },
+                        status=403,
+                    )
+                requested_unit = snapshot_unit
+            else:
+                requested_unit = selector_unit
 
         _, scope_error = _resolve_admin_analytics_unit_scope(
             request,
@@ -275,8 +304,8 @@ class IceaPipelineActionView(AuthenticatedAPIView):
         )
         if scope_error is not None:
             return scope_error
-        if snapshot is not None and snapshot.unit_id:
-            selectors.setdefault("unitId", snapshot.unit_id)
+        if snapshot is not None and requested_unit:
+            selectors["unitId"] = requested_unit
 
         actor_sub = _extract_actor_sub(request)
 

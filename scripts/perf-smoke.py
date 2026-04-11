@@ -197,7 +197,12 @@ def measure(iterations: int, fn) -> list[float]:
 
 def run_fhir_transaction(iterations: int) -> dict:
     client = APIClient()
-    authenticate_api_client(client, roles=["nurse"], scopes=["fhir:transaction", "handover:write"])
+    authenticate_api_client(
+        client,
+        roles=["nurse"],
+        scopes=["fhir:transaction", "handover:write"],
+        unit_ids=["icu-adulto"],
+    )
     counter = {"value": 0}
 
     def once() -> None:
@@ -232,7 +237,12 @@ def run_fhir_transaction(iterations: int) -> dict:
 
 def run_dashboard_summary(iterations: int) -> dict:
     client = APIClient()
-    authenticate_api_client(client, roles=["supervisor"], scopes=["handover:write"])
+    authenticate_api_client(
+        client,
+        roles=["supervisor"],
+        scopes=["handover:write"],
+        unit_ids=["icu-adulto"],
+    )
     seed_summary_data("icu-adulto")
 
     def once() -> None:
@@ -250,7 +260,12 @@ def run_dashboard_summary(iterations: int) -> dict:
 
 def run_ops_summary(iterations: int) -> dict:
     client = APIClient()
-    authenticate_api_client(client, roles=["supervisor"], scopes=["handover:write"])
+    authenticate_api_client(
+        client,
+        roles=["supervisor"],
+        scopes=["handover:write"],
+        unit_ids=["icu-adulto"],
+    )
     seed_summary_data("icu-adulto")
 
     def once() -> None:

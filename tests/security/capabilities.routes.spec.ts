@@ -23,6 +23,18 @@ describe('capabilities routes', () => {
     expect(canAccess('AdminDashboard', supervisorCapabilities)).toBe(true);
   });
 
+  it('permite SyncCenter con handover:write aunque falte patients:read', () => {
+    expect(
+      canAccess('SyncCenter', {
+        ...supervisorCapabilities,
+        permissions: {
+          ...supervisorCapabilities.permissions,
+          canReadPatients: false,
+        },
+      }),
+    ).toBe(true);
+  });
+
   it('falla cerrado para PatientList cuando falta patients:read', () => {
     expect(
       canAccess('PatientList', {
@@ -33,5 +45,9 @@ describe('capabilities routes', () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it('permite PatientList cuando patients:read está presente', () => {
+    expect(canAccess('PatientList', supervisorCapabilities)).toBe(true);
   });
 });
