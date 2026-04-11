@@ -43,11 +43,77 @@ export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/data/mockPatients";
 
 export const ALL_SPECIALTIES_OPTION = "all";
+function normalizeAuthorizedUnitIds(unitIds: readonly string[] | null | undefined): string[] {
+  return Array.from(
+    new Set(
+      (unitIds ?? [])
+        .map((unitId) => (typeof unitId === 'string' ? unitId.trim() : ''))
+        .filter((unitId) => unitId.length > 0),
+    ),
+  );
+}
+
+export function getAuthorizedPatientUnitIds(
+  session: ReturnType<typeof useAuth>['session'] | null | undefined,
+  capabilities?: ReturnType<typeof useAuth>['capabilities'] | null,
+): string[] {
+  if (capabilities?.permissions.isAdmin) {
+    return normalizeAuthorizedUnitIds(UNITS.map((unit) => unit.id));
+  }
+
+  if (capabilities) {
+    const capabilityUnits = normalizeAuthorizedUnitIds(capabilities.unitIds);
+    if (capabilityUnits.length > 0 || session?.mode !== 'demo') {
+      return capabilityUnits;
+    }
+  }
+
+  return normalizeAuthorizedUnitIds(session?.units);
+}
+
 export function canQuerySelectedUnit(
   session: ReturnType<typeof useAuth>['session'] | null | undefined,
   unitId: string,
+  capabilities?: ReturnType<typeof useAuth>['capabilities'] | null,
 ) {
-  return unitId === ALL_UNITS_OPTION || hasUnitAccess(session ?? null, unitId);
+  if (capabilities?.permissions.isAdmin) return true;
+
+  if (unitId === ALL_UNITS_OPTION) {
+    if (capabilities) {
+      return getAuthorizedPatientUnitIds(session, capabilities).length > 0;
+    }
+    return true;
+  }
+
+  if (capabilities) {
+    return getAuthorizedPatientUnitIds(session, capabilities).includes(unitId);
+  }
+
+  return hasUnitAccess(session ?? null, unitId);
+}
+
+export function getScopedAvailableUnits(
+  selectedSpecialtyId: string,
+  session: ReturnType<typeof useAuth>['session'] | null | undefined,
+  capabilities?: ReturnType<typeof useAuth>['capabilities'] | null,
+) {
+  const specialtyScopedUnits =
+    selectedSpecialtyId === ALL_SPECIALTIES_OPTION
+      ? UNITS
+      : UNITS.filter((unit) => unit.specialtyId === selectedSpecialtyId);
+
+  if (capabilities?.permissions.isAdmin) {
+    return specialtyScopedUnits;
+  }
+
+  const authorizedUnitIds = new Set(getAuthorizedPatientUnitIds(session, capabilities));
+  return specialtyScopedUnits.filter((unit) => authorizedUnitIds.has(unit.id));
+}
+
+export function canCreatePatientsInScope(
+  capabilities?: ReturnType<typeof useAuth>['capabilities'] | null,
+): boolean {
+  return Boolean(capabilities?.permissions.canCreatePatients);
 }
 
 export function getPatientListAccessState(
@@ -62,8 +128,9 @@ export function getPatientListAccessState(
     showIceaPatientRisk: boolean;
     isLoadingPatients: boolean;
   },
+  capabilities?: ReturnType<typeof useAuth>['capabilities'] | null,
 ) {
-  const canAccessSelectedUnit = canQuerySelectedUnit(session, selectedUnitId);
+  const canAccessSelectedUnit = canQuerySelectedUnit(session, selectedUnitId, capabilities);
   const canQueryPatients = Boolean(selectedUnitId) && canAccessSelectedUnit;
   // Shadow-mode governance: operational patient lists must not surface ICEA patient-by-patient output.
   const operationalIceaPatientRiskVisible = false;
@@ -232,7 +299,7 @@ function PickerSelect({ label, value, options, onValueChange, disabled }: Picker
 export default function PatientList({ navigation }: Props) {
   const { colors } = useThemeTokens();
   const { i18n } = useTranslation();
-  const { session } = useAuth();
+  const { session, capabilities } = useAuth();
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>(DEFAULT_SPECIALTY_ID);
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriorityOverride, setSortByPriorityOverride] = useState<boolean | null>(null);
@@ -258,7 +325,7 @@ export default function PatientList({ navigation }: Props) {
       return;
     }
 
-    if (!canQuerySelectedUnit(session, selectedUnitId)) {
+    if (!canQuerySelectedUnit(session, selectedUnitId, capabilities)) {
       const deniedState = getDeniedPatientLoadState(loadPatientsRequestRef.current);
       loadPatientsRequestRef.current = deniedState.nextRequestId;
       setIsLoadingPatients(deniedState.isLoadingPatients);
@@ -292,7 +359,7 @@ export default function PatientList({ navigation }: Props) {
         setIsLoadingPatients(false);
       }
     }
-  }, [selectedUnitId, session]);
+  }, [capabilities, selectedUnitId, session]);
 
   const resetNewPatientForm = useCallback(() => {
     setNewPatientForm({
@@ -300,6 +367,7 @@ export default function PatientList({ navigation }: Props) {
       unit: selectedUnitId !== ALL_UNITS_OPTION ? selectedUnitId : "",
     });
   }, [selectedUnitId]);
+  const canCreatePatients = canCreatePatientsInScope(capabilities);
 
   const openNewPatientForm = useCallback(() => {
     resetNewPatientForm();
@@ -327,6 +395,10 @@ export default function PatientList({ navigation }: Props) {
   }, []);
 
   const handleSubmitNewPatient = useCallback(async () => {
+    if (!canCreatePatients) {
+      return;
+    }
+
     const payload = {
       firstName: newPatientForm.firstName.trim(),
       lastName: newPatientForm.lastName.trim(),
@@ -355,7 +427,7 @@ export default function PatientList({ navigation }: Props) {
     } finally {
       setIsSubmittingNewPatient(false);
     }
-  }, [loadPatients, newPatientForm]);
+  }, [canCreatePatients, loadPatients, newPatientForm]);
 
   // BEGIN HANDOVER: ONBOARDING
   const handleShowOnboarding = useCallback(async () => {
@@ -409,12 +481,19 @@ export default function PatientList({ navigation }: Props) {
     return base;
   }, []);
 
-  const availableUnits = useMemo(() => {
-    if (selectedSpecialtyId === ALL_SPECIALTIES_OPTION) {
-      return UNITS;
+  const availableUnits = useMemo(
+    () => getScopedAvailableUnits(selectedSpecialtyId, session, capabilities),
+    [capabilities, selectedSpecialtyId, session],
+  );
+
+  useEffect(() => {
+    if (selectedUnitId === ALL_UNITS_OPTION) {
+      return;
     }
-    return UNITS.filter((unit) => unit.specialtyId === selectedSpecialtyId);
-  }, [selectedSpecialtyId]);
+    if (!availableUnits.some((unit) => unit.id === selectedUnitId)) {
+      setSelectedUnitId(ALL_UNITS_OPTION);
+    }
+  }, [availableUnits, selectedUnitId]);
 
   const unitOptions = useMemo<PickerOption[]>(() => {
     const options: PickerOption[] = [
@@ -508,11 +587,16 @@ export default function PatientList({ navigation }: Props) {
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
-  const accessState = getPatientListAccessState(session, selectedUnitId, {
-    canViewSupervisorDashboard,
-    showIceaPatientRisk: false,
-    isLoadingPatients,
-  });
+  const accessState = getPatientListAccessState(
+    session,
+    selectedUnitId,
+    {
+      canViewSupervisorDashboard,
+      showIceaPatientRisk: false,
+      isLoadingPatients,
+    },
+    capabilities,
+  );
   const canAccessSelectedUnit = accessState.canAccessSelectedUnit;
   const emptyStateMessage = t(accessState.emptyStateMessageKey);
   usePilotControlContext({
@@ -578,14 +662,16 @@ export default function PatientList({ navigation }: Props) {
   const listHeader = useMemo(
     () => (
       <View style={styles.filters}>
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.newPatientButton, { backgroundColor: colors.primary }]}
-          onPress={openNewPatientForm}
-          testID="new-patient-button"
-        >
-          <Text style={styles.newPatientButtonText}>+ Nuevo paciente</Text>
-        </Pressable>
+        {canCreatePatients ? (
+          <Pressable
+            accessibilityRole="button"
+            style={[styles.newPatientButton, { backgroundColor: colors.primary }]}
+            onPress={openNewPatientForm}
+            testID="new-patient-button"
+          >
+            <Text style={styles.newPatientButtonText}>+ Nuevo paciente</Text>
+          </Pressable>
+        ) : null}
         <PickerSelect
           label={t("patientList.specialtyLabel")}
           value={selectedSpecialtyId}
@@ -670,7 +756,7 @@ export default function PatientList({ navigation }: Props) {
       </View>
     ),
     [
-      availableUnits.length,
+      canCreatePatients,
       canViewSupervisorDashboard,
       colors.muted,
       colors.primary,

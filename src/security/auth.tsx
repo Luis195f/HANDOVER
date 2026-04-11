@@ -35,6 +35,8 @@ import type { OAuthConfig } from '@/src/security/OAuthService';
 
 type CapabilityPermissions = {
   canWriteHandover: boolean;
+  canReadPatients: boolean;
+  canCreatePatients: boolean;
   canSignHandover: boolean;
   canViewAudit: boolean;
   canSendAuditEvents: boolean;
@@ -57,12 +59,15 @@ type Capabilities = {
   userSub: string;
   roles: string[];
   scopes: string[];
+  unitIds: string[];
   permissions: CapabilityPermissions;
   fhir?: FhirCapabilities;
 };
 
 const EMPTY_CAPABILITY_PERMISSIONS: CapabilityPermissions = {
   canWriteHandover: false,
+  canReadPatients: false,
+  canCreatePatients: false,
   canSignHandover: false,
   canViewAudit: false,
   canSendAuditEvents: false,
@@ -74,6 +79,7 @@ function createDeniedCapabilities(userSub = ''): Capabilities {
     userSub,
     roles: [],
     scopes: [],
+    unitIds: [],
     permissions: EMPTY_CAPABILITY_PERMISSIONS,
   };
 }

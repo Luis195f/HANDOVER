@@ -58,7 +58,7 @@ class IceaTransactionFlowRegressionTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse('fhir-transaction')
-        authenticate_api_client(self.client, sub='auth0|nurse-order')
+        authenticate_api_client(self.client, sub='auth0|nurse-order', unit_ids=['icu-a'])
 
     @patch('backend.api.views._create_audit_event_for_transaction', autospec=True)
     @patch('backend.api.views._post_transaction_to_fhir')

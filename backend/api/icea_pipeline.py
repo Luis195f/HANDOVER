@@ -604,11 +604,17 @@ def resolve_pipeline_snapshot(
     return queryset.order_by("-updated_at").first()
 
 
-def build_dashboard_summary(*, unit_id: str | None = None, events_limit: int = 20) -> dict[str, Any]:
+def build_dashboard_summary(
+    *,
+    unit_id: str | None = None,
+    authorized_unit_ids: set[str] | None = None,
+    events_limit: int = 20,
+) -> dict[str, Any]:
     from backend.api.dashboard_summary import build_dashboard_summary_payload
 
     return build_dashboard_summary_payload(
         unit_id=unit_id,
+        authorized_unit_ids=authorized_unit_ids,
         events_limit=events_limit,
         serialize_pipeline_event=serialize_pipeline_event,
         load_pipeline_settings=load_icea_pipeline_settings,

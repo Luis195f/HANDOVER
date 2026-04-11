@@ -23,6 +23,7 @@ const normalizeAudioMime = (mime: string) => {
 export async function uploadAudioToFhir(params: {
   uri: string;
   patientId: string;
+  unitId: string;
   label?: string;
   encounterRef?: string;
 }): Promise<AudioToFhirResult> {
@@ -38,6 +39,7 @@ export async function uploadAudioToFhir(params: {
   const token = await ensureFreshAccessToken();
   const formData = new FormData();
   formData.append('patientId', params.patientId);
+  formData.append('unitId', params.unitId);
   if (params.label) {
     formData.append('label', params.label);
   }

@@ -237,7 +237,12 @@ def _aggregate_error_rows(*, queryset, source: str, timestamp_field: str, detail
     return rows
 
 
-def _collect_events(*, unit_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+def _collect_events(
+    *,
+    unit_id: str | None = None,
+    authorized_unit_ids: set[str] | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
     safe_events: list[tuple[Any, dict[str, Any]]] = []
 
     outbox = IceaOutboundEvent.objects.all()
@@ -247,6 +252,11 @@ def _collect_events(*, unit_id: str | None = None, limit: int = 20) -> list[dict
         outbox = outbox.filter(unit_id=unit_id)
         bridge = bridge.filter(unit_id=unit_id)
         pipeline = pipeline.filter(unit_id=unit_id)
+    elif authorized_unit_ids is not None:
+        allowed_units = sorted(authorized_unit_ids)
+        outbox = outbox.filter(unit_id__in=allowed_units)
+        bridge = bridge.filter(unit_id__in=allowed_units)
+        pipeline = pipeline.filter(unit_id__in=allowed_units)
 
     for event in outbox.order_by("-created_at", "-id")[: limit * 2]:
         safe_events.append((event.delivered_at or event.last_attempt_at or event.next_retry_at or event.created_at, safe_outbox_event_summary(event)))
@@ -265,10 +275,19 @@ def _collect_events(*, unit_id: str | None = None, limit: int = 20) -> list[dict
     return [payload for _ts, payload in safe_events[:limit]]
 
 
-def build_icea_ops_events_payload(*, unit_id: str | None = None, limit: int = 20) -> dict[str, Any]:
+def build_icea_ops_events_payload(
+    *,
+    unit_id: str | None = None,
+    authorized_unit_ids: set[str] | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
     if not ops_events_enabled():
         return _disabled_payload(scope="events", unit_id=unit_id)
-    safe_events = _collect_events(unit_id=unit_id, limit=max(1, min(limit, 100)))
+    safe_events = _collect_events(
+        unit_id=unit_id,
+        authorized_unit_ids=authorized_unit_ids,
+        limit=max(1, min(limit, 100)),
+    )
     return {
         "generatedAt": timezone.now().isoformat(),
         "available": True,
@@ -509,7 +528,7 @@ def build_icea_ops_unit_payload(*, unit_id: str) -> dict[str, Any]:
     return payload
 
 
-def build_icea_ops_summary_payload() -> dict[str, Any]:
+def build_icea_ops_summary_payload(*, authorized_unit_ids: set[str] | None = None) -> dict[str, Any]:
     if not ops_summary_enabled():
         return _disabled_payload(scope="summary")
 
@@ -517,6 +536,12 @@ def build_icea_ops_summary_payload() -> dict[str, Any]:
     bridge = IceaBridgeRequest.objects.all()
     snapshots = IceaPipelineSnapshot.objects.all()
     pipeline_events = IceaPipelineEvent.objects.all()
+    if authorized_unit_ids is not None:
+        allowed_units = sorted(authorized_unit_ids)
+        outbox = outbox.filter(unit_id__in=allowed_units)
+        bridge = bridge.filter(unit_id__in=allowed_units)
+        snapshots = snapshots.filter(unit_id__in=allowed_units)
+        pipeline_events = pipeline_events.filter(unit_id__in=allowed_units)
 
     unit_ids = sorted(
         {

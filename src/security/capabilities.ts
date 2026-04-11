@@ -4,6 +4,8 @@ import { secureDeleteItem, secureGetItem, secureSetItem } from '@/src/security/s
 
 export type CapabilityPermissions = {
   canWriteHandover: boolean;
+  canReadPatients: boolean;
+  canCreatePatients: boolean;
   canSignHandover: boolean;
   canViewAudit: boolean;
   canSendAuditEvents: boolean;
@@ -26,6 +28,7 @@ export type Capabilities = {
   userSub: string;
   roles: string[];
   scopes: string[];
+  unitIds: string[];
   permissions: CapabilityPermissions;
   fhir?: FhirCapabilities;
 };
@@ -104,8 +107,11 @@ export function getDemoCapabilities(userSub = 'demo-user'): Capabilities {
     userSub,
     roles: ['nurse'],
     scopes: ['handover:write', 'fhir:transaction'],
+    unitIds: [],
     permissions: {
       canWriteHandover: true,
+      canReadPatients: true,
+      canCreatePatients: true,
       // ✅ Nurse NO firma entregas (reservado a supervisor/admin)
       canSignHandover: false,
       // ✅ si quieres que demo vea auditoría, déjalo true; si no, pon false
@@ -208,10 +214,11 @@ export function canAccess(route: RouteName, capabilities: Capabilities | null | 
     case 'AudioNote':
     case 'ShiftDetails':
     case 'QRScan':
+      return perms.canWriteHandover;
     case 'SyncCenter':
     case 'PatientList':
     case 'PatientDashboard':
-      return perms.canWriteHandover;
+      return perms.canReadPatients;
     case 'AuditLog':
       return perms.canViewAudit;
     case 'SupervisorDashboard':

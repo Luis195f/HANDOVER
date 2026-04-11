@@ -101,6 +101,32 @@ describe('PatientList deny-first authz seam', () => {
     expect(supervisorState.canQueryIceaPatientRisk).toBe(false);
   });
 
+  it('filters available units to the authoritative capability scope', async () => {
+    const { getScopedAvailableUnits } = await import('@/src/screens/PatientList');
+
+    const units = getScopedAvailableUnits(
+      'all',
+      { roles: ['nurse'], units: ['icu-a', 'icu-b'] } as const,
+      {
+        userSub: 'auth0|nurse',
+        roles: ['nurse'],
+        scopes: ['patients:read'],
+        unitIds: ['icu-a'],
+        permissions: {
+          canWriteHandover: true,
+          canReadPatients: true,
+          canCreatePatients: false,
+          canSignHandover: false,
+          canViewAudit: false,
+          canSendAuditEvents: false,
+          isAdmin: false,
+        },
+      },
+    );
+
+    expect(units.map((unit) => unit.id)).toEqual(['icu-a']);
+  });
+
   it('derives queued patient sync status from the canonical offline queue', async () => {
     await clearOfflineQueue();
     await enqueueBundle(

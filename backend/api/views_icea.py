@@ -20,7 +20,7 @@ from backend.api.icea_pipeline import (
 )
 from backend.api.pilot_control import evaluate_pilot_feature, resolve_roles_from_request
 from backend.api.models import IceaPipelineEvent
-from backend.api.views import AuthenticatedAPIView
+from backend.api.views import AuthenticatedAPIView, _resolve_unit_scope
 from backend.security.permissions_roles import HasAnyRole
 
 
@@ -33,6 +33,19 @@ ALLOWED_ACTIONS = {
 }
 QUERY_ROLES = HasAnyRole.required("supervisor", "admin")
 ACTION_ROLES = HasAnyRole.required("admin")
+
+
+def _resolve_admin_analytics_unit_scope(request, *, requested_unit: str | None, require_requested_unit: bool = False):
+    return _resolve_unit_scope(
+        request,
+        requested_unit=requested_unit,
+        scope_unavailable_detail="Analytics unit scope could not be resolved for this token.",
+        scope_unavailable_code="analytics_unit_scope_unavailable",
+        forbidden_detail="Requested unit is outside your authorized scope.",
+        forbidden_code="analytics_forbidden_unit",
+        required_unit_detail="unitId is required for this token scope." if require_requested_unit else None,
+        required_unit_code="analytics_unit_filter_required" if require_requested_unit else None,
+    )
 
 
 def _analytics_gate_response(request, *, unit_id: str | None = None):
@@ -118,6 +131,17 @@ class IceaPipelineStatusView(AuthenticatedAPIView):
             return Response({"detail": "requestId, bundleId or patientId is required.", "code": "missing_selector"}, status=400)
 
         snapshot = resolve_pipeline_snapshot(**selectors)
+        requested_unit = selectors.get("unitId") or (snapshot.unit_id if snapshot is not None else None)
+        _, scope_error = _resolve_admin_analytics_unit_scope(
+            request,
+            requested_unit=requested_unit,
+            require_requested_unit=(snapshot is None),
+        )
+        if scope_error is not None:
+            return scope_error
+        if snapshot is not None and snapshot.unit_id:
+            selectors.setdefault("unitId", snapshot.unit_id)
+
         remote_error = None
         should_refresh = not request.query_params.get("refresh") or _truthy(request.query_params.get("refresh"))
         if should_refresh:
@@ -160,6 +184,12 @@ class IceaPipelineEventsView(AuthenticatedAPIView):
         gate = _analytics_gate_response(request, unit_id=unit_id or None)
         if gate is not None:
             return gate
+        authorized_unit_ids, scope_error = _resolve_admin_analytics_unit_scope(
+            request,
+            requested_unit=unit_id or None,
+        )
+        if scope_error is not None:
+            return scope_error
         stage = str(request.query_params.get("stage") or "").strip()
         try:
             limit = int(request.query_params.get("limit") or 20)
@@ -170,6 +200,8 @@ class IceaPipelineEventsView(AuthenticatedAPIView):
         queryset = IceaPipelineEvent.objects.all()
         if unit_id:
             queryset = queryset.filter(unit_id=unit_id)
+        elif authorized_unit_ids is not None:
+            queryset = queryset.filter(unit_id__in=sorted(authorized_unit_ids))
         if stage:
             queryset = queryset.filter(stage=stage)
         queryset = queryset.order_by("-created_at", "-id")
@@ -187,11 +219,24 @@ class IceaDashboardSummaryView(AuthenticatedAPIView):
         gate = _analytics_gate_response(request, unit_id=unit_id)
         if gate is not None:
             return gate
+        authorized_unit_ids, scope_error = _resolve_admin_analytics_unit_scope(
+            request,
+            requested_unit=unit_id,
+        )
+        if scope_error is not None:
+            return scope_error
         try:
             limit = int(request.query_params.get("eventsLimit") or 20)
         except (TypeError, ValueError):
             limit = 20
-        return Response(build_dashboard_summary(unit_id=unit_id, events_limit=limit), status=200)
+        return Response(
+            build_dashboard_summary(
+                unit_id=unit_id,
+                authorized_unit_ids=authorized_unit_ids,
+                events_limit=limit,
+            ),
+            status=200,
+        )
 
 
 class IceaPipelineActionView(AuthenticatedAPIView):
@@ -210,14 +255,30 @@ class IceaPipelineActionView(AuthenticatedAPIView):
         gate = _analytics_gate_response(request, unit_id=selectors.get("unitId"))
         if gate is not None:
             return gate
-        actor_sub = _extract_actor_sub(request)
+        snapshot = None
 
         if normalized_action == "refresh-dashboard-summary":
             unit_id = selectors.get("unitId")
             if not unit_id:
                 return Response({"detail": "unitId is required.", "code": "missing_unit_id"}, status=400)
+            requested_unit = unit_id
         elif not any(selectors.get(key) for key in ("requestId", "bundleId", "patientId")):
             return Response({"detail": "requestId, bundleId or patientId is required.", "code": "missing_selector"}, status=400)
+        else:
+            snapshot = resolve_pipeline_snapshot(**selectors)
+            requested_unit = selectors.get("unitId") or (snapshot.unit_id if snapshot is not None else None)
+
+        _, scope_error = _resolve_admin_analytics_unit_scope(
+            request,
+            requested_unit=requested_unit,
+            require_requested_unit=normalized_action != "refresh-dashboard-summary" and snapshot is None,
+        )
+        if scope_error is not None:
+            return scope_error
+        if snapshot is not None and snapshot.unit_id:
+            selectors.setdefault("unitId", snapshot.unit_id)
+
+        actor_sub = _extract_actor_sub(request)
 
         service = IceaPipelineService()
         try:
@@ -237,7 +298,6 @@ class IceaPipelineActionView(AuthenticatedAPIView):
             )
 
         body_json = remote_response.body_json
-        snapshot = None
         if normalized_action == "refresh-dashboard-summary":
             IceaPipelineEvent.objects.create(
                 request_id="",

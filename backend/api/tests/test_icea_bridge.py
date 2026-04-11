@@ -1673,7 +1673,7 @@ class IceaBridgeTransactionFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse('fhir-transaction')
-        authenticate_api_client(self.client, sub='auth0|nurse-1')
+        authenticate_api_client(self.client, sub='auth0|nurse-1', unit_ids=['icu-a'])
 
     @patch.dict(
         os.environ,

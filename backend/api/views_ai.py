@@ -5,6 +5,7 @@ import mimetypes
 import os
 import backend.ai_client as ai_client
 from typing import Any, Dict
+from urllib.parse import quote
 
 import httpx
 from asgiref.sync import async_to_sync
@@ -33,11 +34,12 @@ from .views import (
     AuthenticatedAPIView,
     FHIR_BASE,
     get_fhir_headers,
+    _extract_patient_resource_unit_ids,
     _get_authenticated_user_sub,
     _resolve_patient_unit_scope,
 )
 from backend.security.permissions_roles import HasAnyRole
-from backend.security.scope_permissions import HasAnyScope
+from backend.security.scope_permissions import HasAllScopes, HasAnyScope
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +334,41 @@ def _safe_upstream_upload_error(status_code: int) -> Response:
         },
         status=status_code,
     )
+
+
+def _fetch_patient_unit_ids_for_upload(request: HttpRequest, patient_id: str) -> tuple[set[str] | None, Response | None]:
+    patient_url = f"{FHIR_BASE.rstrip('/')}/Patient/{quote(patient_id, safe='')}"
+    try:
+        resp = httpx.get(
+            patient_url,
+            headers=get_fhir_headers(request),
+            timeout=30,
+        )
+    except httpx.HTTPError:
+        return None, Response(
+            {"detail": "No se pudo contactar el servidor FHIR", "code": "fhir_unavailable"},
+            status=503,
+        )
+
+    if resp.status_code >= 400:
+        return None, _safe_upstream_upload_error(resp.status_code)
+
+    try:
+        payload = resp.json()
+    except Exception:
+        return None, Response({"detail": "Respuesta del servidor FHIR no es JSON", "code": "fhir_invalid_response"}, status=502)
+
+    patient_unit_ids = _extract_patient_resource_unit_ids(payload)
+    if not patient_unit_ids:
+        return None, Response(
+            {
+                "detail": "Patient unit could not be resolved for audio upload.",
+                "code": "audio_upload_patient_unit_unresolved",
+            },
+            status=403,
+        )
+
+    return patient_unit_ids, None
 
 
 class ProtectedAIAPIView(AuthenticatedAPIView):
@@ -807,18 +844,26 @@ class AudioToFHIRView(ProtectedAIAPIView):
     permission_classes = [
         IsAuthenticated,
         HasAnyRole.required("nurse", "supervisor", "admin"),
-        HasAnyScope.required("handover:write"),
+        HasAllScopes.required("handover:write", "patients:read"),
     ]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request: HttpRequest) -> Response:
         upload = request.FILES.get("file")
         patient_id = request.data.get("patientId")
+        unit_id = str(request.data.get("unitId") or "").strip()
         label = request.data.get("label") or "Handover Audio"
         encounter_ref = request.data.get("encounterRef")
 
-        if not upload or not patient_id:
-            return Response({"detail": "patientId y file son obligatorios", "code": "missing_upload_fields"}, status=400)
+        if not upload or not patient_id or not unit_id:
+            return Response(
+                {"detail": "patientId, unitId y file son obligatorios", "code": "missing_upload_fields"},
+                status=400,
+            )
+
+        _, scope_error = _resolve_patient_unit_scope(request, requested_unit=unit_id)
+        if scope_error is not None:
+            return scope_error
 
         validation_error = _validate_audio_upload(upload)
         if validation_error:
@@ -827,6 +872,18 @@ class AudioToFHIRView(ProtectedAIAPIView):
         audio_content_type = _normalize_audio_content_type(upload)
         if not audio_content_type:
             return Response({"detail": "Audio inválido o formato no soportado"}, status=415)
+
+        patient_unit_ids, patient_unit_error = _fetch_patient_unit_ids_for_upload(request, str(patient_id))
+        if patient_unit_error is not None:
+            return patient_unit_error
+        if patient_unit_ids is not None and unit_id not in patient_unit_ids:
+            return Response(
+                {
+                    "detail": "Requested patient is outside the supplied unit scope.",
+                    "code": "audio_upload_patient_unit_mismatch",
+                },
+                status=403,
+            )
 
         b64 = base64.b64encode(upload.read()).decode("utf-8")
         now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")

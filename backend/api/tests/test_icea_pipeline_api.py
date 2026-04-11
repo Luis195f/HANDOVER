@@ -19,8 +19,8 @@ class IceaPipelineApiTests(TestCase):
         self.normalize_url = reverse("icea-pipeline-action", kwargs={"action": "normalize"})
         self.refresh_summary_url = reverse("icea-pipeline-action", kwargs={"action": "refresh-dashboard-summary"})
 
-    def _auth(self, *, roles, sub="auth0|admin-1"):
-        claims = {"sub": sub, "roles": roles, "permissions": ["handover:write"]}
+    def _auth(self, *, roles, sub="auth0|admin-1", unit_ids=("icu-a",)):
+        claims = {"sub": sub, "roles": roles, "permissions": ["handover:write"], "unitIds": list(unit_ids)}
         user = types.SimpleNamespace(is_authenticated=True, claims=claims, sub=sub, username=sub)
         self.client.force_authenticate(user=user, token=claims)
         self.client.credentials(HTTP_AUTHORIZATION="Bearer test-access-token")
@@ -51,8 +51,17 @@ class IceaPipelineApiTests(TestCase):
 
         response = self.client.get(self.status_url, {"requestId": "missing"})
 
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["code"], "icea_snapshot_not_found")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_unit_filter_required")
+
+    def test_status_forbids_snapshot_outside_supervisor_scope(self):
+        self._create_snapshot(unit_id="ward-z")
+        self._auth(roles=["supervisor"], unit_ids=("icu-a",))
+
+        response = self.client.get(self.status_url, {"requestId": "req-icea-001"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_forbidden_unit")
 
     def test_status_without_selector_returns_400_and_does_not_touch_snapshots(self):
         snapshot = self._create_snapshot()

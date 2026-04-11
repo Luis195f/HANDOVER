@@ -94,7 +94,12 @@ def _parse_timing_duration_ms(value: Any) -> float | None:
     return duration_ms
 
 
-def _build_dashboard_timing_summary(*, timing_events, unit_filter: str | None) -> dict[str, list[dict[str, Any]]]:
+def _build_dashboard_timing_summary(
+    *,
+    timing_events,
+    unit_filter: str | None,
+    authorized_unit_ids: set[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[tuple[str, str], dict[str, float | int]] = defaultdict(lambda: {"total": 0.0, "samples": 0})
     for meta in timing_events.values_list("meta", flat=True):
         timing = meta.get("timing") if isinstance(meta, dict) else None
@@ -102,6 +107,8 @@ def _build_dashboard_timing_summary(*, timing_events, unit_filter: str | None) -
             continue
         raw_unit = str(timing.get("unitId") or "").strip() or "unknown"
         if unit_filter and raw_unit != unit_filter:
+            continue
+        if authorized_unit_ids is not None and raw_unit not in authorized_unit_ids:
             continue
         section_id = _normalize_timing_section_id(timing.get("sectionId"))
         if section_id not in TIMING_ALLOWED_SECTIONS:
@@ -538,6 +545,7 @@ def _build_dashboard_clinical_patients(*, records) -> dict[str, list[dict[str, A
 def build_dashboard_summary_payload(
     *,
     unit_id: str | None,
+    authorized_unit_ids: set[str] | None = None,
     events_limit: int,
     serialize_pipeline_event: Callable[[IceaPipelineEvent], dict[str, Any]],
     load_pipeline_settings: Callable[[], Any],
@@ -558,6 +566,13 @@ def build_dashboard_summary_payload(
         events = events.filter(unit_id=unit_id)
         outbox = outbox.filter(unit_id=unit_id)
         bridge = bridge.filter(unit_id=unit_id)
+    elif authorized_unit_ids is not None:
+        allowed_units = sorted(authorized_unit_ids)
+        snapshots = snapshots.filter(unit_id__in=allowed_units)
+        records = records.filter(unit_id__in=allowed_units)
+        events = events.filter(unit_id__in=allowed_units)
+        outbox = outbox.filter(unit_id__in=allowed_units)
+        bridge = bridge.filter(unit_id__in=allowed_units)
 
     record_rows = list(
         records.values("unit_id")
@@ -628,7 +643,11 @@ def build_dashboard_summary_payload(
         if event.unit_id and event.unit_id not in latest_summaries:
             latest_summaries[event.unit_id] = event
 
-    timing_by_unit = _build_dashboard_timing_summary(timing_events=timing_events, unit_filter=unit_id)
+    timing_by_unit = _build_dashboard_timing_summary(
+        timing_events=timing_events,
+        unit_filter=unit_id,
+        authorized_unit_ids=authorized_unit_ids,
+    )
     clinical_patients_by_unit = _build_dashboard_clinical_patients(records=records)
     alerts = _build_dashboard_alerts(snapshots=snapshots, outbox=outbox, bridge=bridge)
     alert_counts_by_unit: dict[str, int] = defaultdict(int)

@@ -137,6 +137,17 @@ def test_bundle_view_emits_audit_success_and_fail():
         "resourceType": "Bundle",
         "type": "transaction",
         "identifier": {"value": "bundle-abc"},
+        "signature": [
+            {
+                "type": [{"code": "signature"}],
+                "when": "2026-03-10T11:00:00Z",
+                "onBehalfOf": {
+                    "reference": "Organization/icu-a",
+                    "identifier": {"system": "urn:handover:unit-id", "value": "icu-a"},
+                    "display": "icu-a",
+                },
+            }
+        ],
         "entry": [
             {
                 "request": {"method": "POST", "url": "Patient"},
@@ -160,6 +171,7 @@ def test_bundle_view_emits_audit_success_and_fail():
         "permissions": ["fhir:transaction", "handover:write"],
         "scope": "fhir:transaction handover:write",
         "roles": ["nurse"],
+        "unitIds": ["icu-a"],
     }
     user = types.SimpleNamespace(
         is_authenticated=True,

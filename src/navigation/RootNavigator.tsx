@@ -175,8 +175,8 @@ if (!allowedAppEntry) {
 
   // ✅ flags de features (sin romper tu lógica)
   // 🔧 Incluimos admin para que no quede bloqueado post-onboarding.
-  const canSubmitHandover = Boolean(capabilities?.permissions.canWriteHandover);
-  const postOnboardingRoute: keyof RootStackParamList = canSubmitHandover
+  const canEnterPatientList = canAccess('PatientList', capabilities);
+  const postOnboardingRoute: keyof RootStackParamList = canEnterPatientList
     ? 'PatientList'
     : (capabilities?.permissions.canViewAudit ? 'AuditLog' : 'Unauthorized');
 

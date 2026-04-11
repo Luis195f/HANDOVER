@@ -295,7 +295,7 @@ class IceaWebhookIntegrationTests(TestCase):
 
         User = get_user_model()
         self.user = User.objects.create_user(username="icea-user", password="testpass")
-        authenticate_api_client(self.client, sub="auth0|icea-user")
+        authenticate_api_client(self.client, sub="auth0|icea-user", unit_ids=["icu-a"])
 
         self.valid_bundle = build_icea_bundle()
 

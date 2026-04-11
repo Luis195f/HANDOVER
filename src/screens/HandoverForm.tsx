@@ -394,7 +394,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     audioNote: audioNoteParam,
   } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
-  const { session: authSession, logout } = useAuth();
+  const { session: authSession, capabilities, logout } = useAuth();
   const pilotRoles = authSession?.roles ?? session?.roles ?? [];
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
@@ -602,6 +602,28 @@ export default function HandoverForm({ navigation, route }: Props) {
   // BEGIN HANDOVER D4 – Get active unit
   // Pilot-control and runtime must use a stable route/store unit id, not the free-text administrative field.
   const effectivePilotUnitId = resolveCanonicalPilotContextUnitId(unitIdParam, selectedUnitId);
+  const authorizedUnitScope = useMemo(() => {
+    if (capabilities?.permissions.isAdmin) return null;
+    const capabilityUnitIds = Array.isArray(capabilities?.unitIds)
+      ? capabilities.unitIds.filter((unitId) => typeof unitId === 'string' && unitId.trim().length > 0)
+      : [];
+    if (capabilityUnitIds.length > 0) {
+      return new Set(capabilityUnitIds);
+    }
+    const sessionUnitIds = Array.isArray(authSession?.units)
+      ? authSession.units.filter((unitId) => typeof unitId === 'string' && unitId.trim().length > 0)
+      : [];
+    if (sessionUnitIds.length > 0) {
+      return new Set(sessionUnitIds);
+    }
+    return null;
+  }, [authSession?.units, capabilities]);
+  const unitAccessDeniedOnRender = Boolean(
+    authorizedUnitScope &&
+      effectivePilotUnitId &&
+      !authorizedUnitScope.has(effectivePilotUnitId),
+  );
+  const writeAccessDeniedOnRender = capabilities?.permissions.canWriteHandover === false;
   const pilotControlSnapshot = usePilotControlContext({
     unitId: effectivePilotUnitId,
     roles: pilotRoles,
@@ -1853,6 +1875,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         const uploadResult = await uploadAudioToFhir({
           uri: values.audioUri,
           patientId: values.patientId,
+          unitId: unitEffective ?? '',
           label: t('handover.audioUploadLabel'),
         });
         if (!uploadResult.ok) {
@@ -2178,6 +2201,16 @@ export default function HandoverForm({ navigation, route }: Props) {
     fontSize: fontSizes.sm,
     fontWeight: '600',
   };
+
+  if (writeAccessDeniedOnRender || unitAccessDeniedOnRender) {
+    return (
+      <View style={styles.screen}>
+        <View style={[styles.container, { padding: spacing.lg }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('handover.unitAccessDeniedTitle')}</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <FormProvider {...form}>

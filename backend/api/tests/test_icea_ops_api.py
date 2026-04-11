@@ -18,8 +18,8 @@ class IceaOpsApiTests(TestCase):
         self.events_url = reverse("icea-ops-events")
         self.unit_url = reverse("icea-ops-unit", kwargs={"unit_id": "icu-a"})
 
-    def _auth(self, *, roles):
-        claims = {"sub": "auth0|ops-user", "roles": roles, "permissions": ["handover:write"]}
+    def _auth(self, *, roles, unit_ids=("icu-a",)):
+        claims = {"sub": "auth0|ops-user", "roles": roles, "permissions": ["handover:write"], "unitIds": list(unit_ids)}
         user = types.SimpleNamespace(is_authenticated=True, claims=claims, sub="auth0|ops-user", username="ops-user")
         self.client.force_authenticate(user=user, token=claims)
         self.client.credentials(HTTP_AUTHORIZATION="Bearer ops-token")
@@ -159,6 +159,15 @@ class IceaOpsApiTests(TestCase):
         self.assertGreaterEqual(len(payload["recentEvents"]), 3)
         self.assertNotIn("patientId", str(payload))
 
+    def test_events_forbid_unit_outside_supervisor_scope(self):
+        self._seed_ops_data()
+        self._auth(roles=["supervisor"], unit_ids=("icu-a",))
+
+        response = self.client.get(self.events_url, {"unitId": "ward-z"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "icea_ops_forbidden_unit")
+
     @patch.dict(os.environ, {"ENABLE_ICEA_OPS_SUMMARY": "false"}, clear=False)
     def test_summary_flag_disabled_is_explicit(self):
         self._auth(roles=["admin"])
@@ -244,7 +253,7 @@ class IceaOpsApiTests(TestCase):
         self.assertEqual(payload["unavailableReason"], "icea_ops_unit_disabled")
 
     def test_unit_without_data_degrades_explicitly(self):
-        self._auth(roles=["supervisor"])
+        self._auth(roles=["supervisor"], unit_ids=("icu-a", "ward-z"))
 
         response = self.client.get(reverse("icea-ops-unit", kwargs={"unit_id": "ward-z"}))
 

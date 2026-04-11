@@ -27,7 +27,8 @@ class CapabilitiesViewTests(TestCase):
         claims = {
             "sub": "auth0|capabilities-user",
             "roles": ["supervisor"],
-            "permissions": ["handover:write", "audit:read"],
+            "permissions": ["handover:write", "audit:read", "patients:read"],
+            "unitIds": ["icu-a"],
         }
 
         with patch(
@@ -41,16 +42,19 @@ class CapabilitiesViewTests(TestCase):
 
         self.assertEqual(
             set(data.keys()),
-            {"userSub", "roles", "scopes", "permissions", "scopeCatalog", "fhir"},
+            {"userSub", "roles", "scopes", "unitIds", "permissions", "scopeCatalog", "fhir"},
         )
         self.assertEqual(data["userSub"], claims["sub"])
         self.assertEqual(data["roles"], ["supervisor"])
-        self.assertEqual(data["scopes"], ["audit:read", "handover:write"])
+        self.assertEqual(data["scopes"], ["audit:read", "handover:write", "patients:read"])
+        self.assertEqual(data["unitIds"], ["icu-a"])
         self.assertEqual(data["scopeCatalog"], CLINICAL_SCOPES)
         self.assertEqual(
             data["permissions"],
             {
                 "canWriteHandover": True,
+                "canReadPatients": True,
+                "canCreatePatients": False,
                 "canSignHandover": True,
                 "canViewAudit": True,
                 "canSendAuditEvents": True,

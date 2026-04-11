@@ -23,13 +23,24 @@ from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhi
 class SensitiveBundleStorageTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        authenticate_api_client(self.client, sub='auth0|storage-nurse')
+        authenticate_api_client(self.client, sub='auth0|storage-nurse', unit_ids=['icu-a'])
         self.tx_url = reverse('fhir-transaction')
         self.read_url = reverse('handover-etl-read', kwargs={'bundle_id': 'bundle-sensitive-001'})
         self.bundle = {
             'resourceType': 'Bundle',
             'id': 'bundle-sensitive-001',
             'type': 'transaction',
+            'signature': [
+                {
+                    'type': [{'code': 'signature'}],
+                    'when': '2026-03-10T11:00:00Z',
+                    'onBehalfOf': {
+                        'reference': 'Organization/icu-a',
+                        'identifier': {'system': 'urn:handover:unit-id', 'value': 'icu-a'},
+                        'display': 'icu-a',
+                    },
+                }
+            ],
             'entry': [
                 {
                     'request': {'method': 'POST', 'url': 'Patient'},

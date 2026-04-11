@@ -38,8 +38,11 @@ const baseCapabilities: Capabilities = {
   userSub: 'auth0|nurse',
   roles: ['nurse'],
   scopes: ['handover:write'],
+  unitIds: ['icu-a'],
   permissions: {
     canWriteHandover: true,
+    canReadPatients: true,
+    canCreatePatients: false,
     canSignHandover: false,
     canViewAudit: false,
     canSendAuditEvents: true,
@@ -51,8 +54,11 @@ const refreshedCapabilities: Capabilities = {
   userSub: 'auth0|nurse',
   roles: ['nurse'],
   scopes: ['handover:write', 'audit:read'],
+  unitIds: ['icu-a'],
   permissions: {
     canWriteHandover: true,
+    canReadPatients: true,
+    canCreatePatients: false,
     canSignHandover: false,
     canViewAudit: true,
     canSendAuditEvents: true,

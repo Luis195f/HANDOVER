@@ -129,8 +129,8 @@ class IceaDashboardSummaryContractTests(TestCase):
         self.client = APIClient()
         self.url = reverse("icea-dashboard-summary")
 
-    def _auth(self, roles):
-        claims = {"sub": "auth0|dashboard-user", "roles": roles, "permissions": ["handover:write"]}
+    def _auth(self, roles, unit_ids=("icu-a", "icu-b")):
+        claims = {"sub": "auth0|dashboard-user", "roles": roles, "permissions": ["handover:write"], "unitIds": list(unit_ids)}
         user = types.SimpleNamespace(is_authenticated=True, claims=claims, sub="auth0|dashboard-user", username="dashboard-user")
         self.client.force_authenticate(user=user, token=claims)
         self.client.credentials(HTTP_AUTHORIZATION="Bearer dashboard-token")
@@ -206,6 +206,14 @@ class IceaDashboardSummaryContractTests(TestCase):
         self.assertTrue(payload["units"][0]["clinicalPatients"][0]["recentIncidentFlag"])
         self.assertEqual(payload["units"][0]["handoverTiming"][0]["sectionId"], "sbar")
         self.assertGreaterEqual(len(payload["alerts"]), 2)
+
+    def test_summary_forbids_requested_unit_outside_supervisor_scope(self):
+        self._auth(["supervisor"], unit_ids=("icu-a",))
+
+        response = self.client.get(self.url, {"unitId": "ward-z"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_forbidden_unit")
 
     def test_summary_handles_partial_datetime_rows_without_crashing(self):
         self._auth(["supervisor"])

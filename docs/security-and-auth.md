@@ -2,7 +2,7 @@
 
 > Estado del documento
 > - Estado: `implemented`.
-> - Última revisión: 2026-03-28.
+> - Última revisión: 2026-04-11.
 > - Fuente de verdad / evidencia base: `backend/security/*`, `backend/api/views.py`, `backend/api/urls.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
 > - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, attestation clínica, firma criptográfica de transporte y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend ni a una declaración de production-readiness.
 
@@ -23,6 +23,10 @@
 - Requiere `Authorization: Bearer <access-token>` válido.
 - Requiere rol clínico `nurse`, `supervisor` o `admin`.
 - Requiere ambos scopes `fhir:transaction` y `handover:write`.
+- Antes de reenviar el write, el backend resuelve la unidad operativa de forma autoritativa usando este orden: selector explícito `X-Unit-Id` si viene, evidencia consistente del Bundle (`signature.onBehalfOf`, extensiones `unit-id`, referencias `PractitionerRole`/`Organization`/`Location` y evidencia equivalente del `Patient` si existe), y validación cruzada contra claims `unitIds`.
+- Si el selector del cliente contradice el Bundle, si el Bundle aporta unidades inconsistentes o si la unidad no puede resolverse con seguridad, responde deny-first con códigos estables (`fhir_transaction_unit_mismatch` o `fhir_transaction_unit_resolution_failed`) y no toca el FHIR server.
+- Para roles no admin, si la unidad resuelta cae fuera de `unitIds` o el token no trae scope de unidad utilizable, responde `403` con `fhir_transaction_forbidden_unit` o `fhir_transaction_unit_scope_unavailable`.
+- `admin` mantiene alcance global explícito, pero incluso `admin` no puede escribir si la unidad del Bundle no se resuelve de forma segura.
 - Responde `400` cuando un cierre final no trae la attestation clínica requerida o la firma criptográfica de transporte es inválida, `401` sin credenciales válidas, `403` con rol/scope insuficiente y `422` cuando el Bundle es inválido.
 - No existe bypass silencioso por `DEBUG` ni por ausencia de configuración Auth0 para este endpoint.
 
@@ -37,16 +41,22 @@
 - `GET /api/patients` requiere autenticación válida y scope `patients:read`.
 - `POST /api/patients` requiere autenticación válida y scope `patients:write`.
 - `GET /api/patients` además exige un rol permitido (`viewer`, `nurse`, `supervisor`, `admin`); `POST /api/patients` exige rol clínico operativo (`nurse`, `supervisor`, `admin`).
-- Para roles no privilegiados, las consultas y altas de pacientes quedan limitadas a las unidades declaradas en claims (`unitIds` / `units` y aliases soportados).
+- Para cualquier rol no admin, las consultas y altas de pacientes quedan limitadas a las unidades declaradas en claims (`unitIds` / `units` y aliases soportados).
 - Si una unidad pedida o enviada queda fuera de alcance, la API responde `403` con código estable; no debe degradar a éxito vacío ambiguo fuera del scope explícito.
 - Cuando `GET /api/patients` cae al FHIR remoto y el token no privilegiado cubre varias unidades, el backend hace fan-out por cada unidad autorizada y filtra la respuesta por unidad; no debe responder `200` vacío solo porque el upstream no soporte agregación multi-unit.
 - Si el FHIR remoto falla y se usa el bundle demo como fallback, ese fallback también queda filtrado por unidades autorizadas; no debe reabrir visibilidad lateral por demo data.
 - `GET /api/fhir/patient` mantiene el mismo perímetro deny-first: para roles no privilegiados exige unidad explícita en búsquedas multi-unit y valida que la respuesta quede dentro de las unidades autorizadas; una lectura cuyo `unit` no pueda resolverse responde `403` con código controlado en lugar de exponer datos ambiguos.
 
+## Capabilities y seams frontend/backend
+- `GET /api/me/capabilities` expone `unitIds` autoritativos más permisos efectivos explícitos para pacientes (`canReadPatients`, `canCreatePatients`) además de permisos de handover/auditoría.
+- El cliente usa ese contrato solo para ocultar o bloquear UI; la fuente de verdad de enforcement sigue siendo el backend.
+- `PatientList` y sus guards ya no dependen de `canWriteHandover` para leer pacientes; requieren capacidad efectiva de lectura de pacientes y filtran unidades visibles al scope devuelto por backend.
+
 ## Credencial requerida para AI/STT/uploads
 - Requieren `Authorization: Bearer <access-token>` válido.
 - Requieren rol clínico mínimo `nurse`, `supervisor` o `admin`.
-- Requieren scope `handover:write`.
+- `POST /api/upload/audio-to-fhir` requiere `handover:write`, `patients:read` y `unitId` explícito dentro del scope del token; además lee `Patient/{patientId}` en backend para comprobar que la unidad real del paciente es resoluble y compatible con el `unitId` enviado. Si falta evidencia de unidad o `patientId/unitId` se contradicen, responde `403` deny-first con código estable.
+- El resto de endpoints AI/STT requieren `handover:write`.
 - No existe fallback cliente mediante variables públicas de token ni secretos expuestos al bundle para estas rutas.
 - Si faltan credenciales, la API responde `401`.
 - Si el token no trae rol/scope suficiente, la API responde `403`.
@@ -63,6 +73,11 @@
 - `HANDOVER_FHIR_VALIDATION_MODE` define la estrategia (`off`, `remote`, `strict`).
 - Cuando procede, los errores de interoperabilidad se normalizan usando `OperationOutcome`.
 - `HANDOVER_REQUIRE_RBAC_ON_FHIR=true` obliga a reenviar solicitudes FHIR sólo con contexto de usuario autorizado.
+
+## Analítica operativa y métricas con unit scope
+- `GET/POST /api/metrics/handover-time` aplican authn/authz más unit scope; para tokens no admin, `unitId` fuera de claims responde `403` y los agregados sin `unitId` sólo devuelven unidades autorizadas.
+- `GET /api/icea/dashboard-summary`, `GET /api/icea/events`, `GET /api/icea/status`, `POST /api/icea/actions/*`, `GET /api/icea-ops/summary`, `GET /api/icea-ops/events` y `GET /api/icea-ops/unit/<unit_id>` aplican deny-first por unidad.
+- En vistas agregadas de analytics/ops, un supervisor sólo recibe unidades presentes en sus claims; `admin` mantiene acceso global explícito.
 
 ## Firma digital y trazabilidad
 - `HANDOVER_DEPLOYMENT_MODE` delimita el contrato operativo:

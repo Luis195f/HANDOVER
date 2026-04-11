@@ -30,13 +30,15 @@ class HandoverEtlReadTests(TestCase):
             ],
         }
 
-    def _auth(self, *, roles, scopes, sub="auth0|svc", gty="client-credentials", include_gty=True):
+    def _auth(self, *, roles, scopes, sub="auth0|svc", gty="client-credentials", include_gty=True, unit_ids=None):
         claims = {
             "sub": sub,
             "roles": roles,
             "permissions": scopes,
             "scope": " ".join(scopes),
         }
+        if unit_ids is not None:
+            claims["unitIds"] = list(unit_ids)
         if include_gty:
             claims["gty"] = gty
         user = types.SimpleNamespace(
@@ -50,7 +52,7 @@ class HandoverEtlReadTests(TestCase):
 
     @patch("backend.api.views._post_transaction_to_fhir")
     def test_post_transaction_persists_bundle_and_supports_idempotent_request_id(self, mock_post):
-        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="")
+        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="", unit_ids=["uci-1"])
         mock_response = Mock()
         mock_response.status_code = 201
         mock_response.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
@@ -87,7 +89,7 @@ class HandoverEtlReadTests(TestCase):
     @patch("backend.api.views.ensure_pipeline_snapshot_from_bundle", side_effect=RuntimeError("snapshot down"))
     @patch("backend.api.views._post_transaction_to_fhir")
     def test_post_transaction_keeps_clinical_success_when_snapshot_persistence_fails(self, mock_post, _mock_snapshot):
-        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="")
+        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="", unit_ids=["uci-1"])
         mock_response = Mock()
         mock_response.status_code = 201
         mock_response.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}
@@ -179,7 +181,7 @@ class HandoverEtlReadTests(TestCase):
 
     @patch("backend.api.views._post_transaction_to_fhir")
     def test_logs_do_not_expose_token_or_bundle_json(self, mock_post):
-        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="")
+        self._auth(roles=["nurse"], scopes=["fhir:transaction", "handover:write"], gty="", unit_ids=["uci-1"])
         mock_response = Mock()
         mock_response.status_code = 201
         mock_response.json.return_value = {"resourceType": "Bundle", "type": "transaction-response"}

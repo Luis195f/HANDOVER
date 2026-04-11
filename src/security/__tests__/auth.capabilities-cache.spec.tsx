@@ -63,8 +63,11 @@ const capabilityMocks = vi.hoisted(() => ({
     userSub: 'auth0|u1',
     roles: ['nurse'],
     scopes: ['handover:write'],
+    unitIds: ['icu-a'],
     permissions: {
       canWriteHandover: true,
+      canReadPatients: true,
+      canCreatePatients: false,
       canSignHandover: false,
       canViewAudit: false,
       canSendAuditEvents: true,
@@ -157,8 +160,11 @@ describe('AuthProvider capabilities cache invalidation', () => {
         userSub: 'auth0|u2',
         roles: ['nurse'],
         scopes: ['handover:write'],
+        unitIds: ['icu-a'],
         permissions: {
           canWriteHandover: true,
+          canReadPatients: true,
+          canCreatePatients: false,
           canSignHandover: false,
           canViewAudit: false,
           canSendAuditEvents: true,

@@ -1,6 +1,6 @@
+import types
 from unittest.mock import patch
 
-from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient, APIRequestFactory
@@ -16,8 +16,19 @@ class HandoverTimingMetricsViewTests(TestCase):
 
         self.client = APIClient()
         self.url = reverse('handover-time-metrics')
-        user = get_user_model().objects.create_user(username='metric-user', password='testpass')
-        self.client.force_authenticate(user=user)
+        self.claims = {
+            'sub': 'auth0|metrics',
+            'roles': ['supervisor'],
+            'permissions': ['handover:write', 'audit:write', 'audit:read'],
+            'unitIds': ['icu-a'],
+        }
+        user = types.SimpleNamespace(
+            is_authenticated=True,
+            claims=self.claims,
+            sub='auth0|metrics',
+            username='metric-user',
+        )
+        self.client.force_authenticate(user=user, token=self.claims)
 
         self._perm_patcher = patch.object(HandoverTimingMetricsView, 'get_permissions', return_value=[AllowAny()])
         self._auth_patcher = patch.object(HandoverTimingMetricsView, 'authentication_classes', [])
@@ -42,6 +53,20 @@ class HandoverTimingMetricsViewTests(TestCase):
         self.assertEqual(event.meta['timing']['sectionId'], 'sbar')
         self.assertEqual(event.meta['timing']['durationMs'], 1450)
         self.assertEqual(event.meta['timing']['unitId'], 'icu-a')
+
+    def test_post_forbids_unit_outside_scope(self):
+        payload = {
+            'sectionId': 'sbar',
+            'durationMs': 1450,
+            'unitId': 'icu-b',
+            'requestId': 'tx-001',
+        }
+
+        response = self.client.post(self.url, data=payload, format='json')
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'handover_timing_forbidden_unit')
+        self.assertEqual(AuditEvent.objects.filter(event_type='handover_timing').count(), 0)
 
     def test_post_rejects_forbidden_or_unknown_fields(self):
         payload = {
@@ -77,6 +102,12 @@ class HandoverTimingMetricsViewTests(TestCase):
         self.assertEqual(response.data['results'][0]['sectionId'], 'vitals')
         self.assertEqual(response.data['results'][0]['avgDurationMs'], 1500)
         self.assertEqual(response.data['results'][0]['samples'], 2)
+
+    def test_get_forbids_unit_outside_scope(self):
+        response = self.client.get(self.url, {'unitId': 'icu-b'})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'handover_timing_forbidden_unit')
 
     def test_get_ignores_invalid_duration_values(self):
         AuditEvent.objects.create(

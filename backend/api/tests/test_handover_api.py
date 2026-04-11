@@ -20,11 +20,22 @@ class HandoverApiTests(TestCase):
         self.url = reverse("fhir-transaction")
 
         if self.client:
-            authenticate_api_client(self.client, sub="auth0|base-test-user")
+            authenticate_api_client(self.client, sub="auth0|base-test-user", unit_ids=["icu-a"])
 
         self.valid_bundle = {
             "resourceType": "Bundle",
             "type": "transaction",
+            "signature": [
+                {
+                    "type": [{"code": "signature"}],
+                    "when": "2026-03-10T11:00:00Z",
+                    "onBehalfOf": {
+                        "reference": "Organization/icu-a",
+                        "identifier": {"system": "urn:handover:unit-id", "value": "icu-a"},
+                        "display": "icu-a",
+                    },
+                }
+            ],
             "entry": [
                 {
                     "request": {"method": "POST", "url": "Patient"},
@@ -89,6 +100,7 @@ class HandoverApiTests(TestCase):
             "permissions": ["fhir:transaction", "handover:write"],
             "scope": "fhir:transaction handover:write",
             "roles": ["nurse"],
+            "unitIds": ["icu-a"],
         }
         user_kwargs = {
             "is_authenticated": True,
