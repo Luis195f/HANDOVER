@@ -96,6 +96,23 @@ function collectReferenceNodes(
   return refs;
 }
 
+function normalizeResourceReference(reference: string): string | undefined {
+  const segments = reference.split('/');
+  if (segments.length !== 2) return undefined;
+
+  const [resourceType, resourceId] = segments;
+  if (!resourceType || !resourceId) return undefined;
+
+  try {
+    const decodedId = decodeURIComponent(resourceId);
+    if (decodedId === resourceId) return undefined;
+    if (encodeURIComponent(decodedId) !== resourceId) return undefined;
+    return `${resourceType}/${decodedId}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function validateBundleContract(entries: IndexedEntry[]): ValidationResult['errors'] {
   const errors: ValidationResult['errors'] = [];
   const entryTypes = new Set<string>();
@@ -163,6 +180,10 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
   const resolveReferenceIndex = (reference: string): number | undefined => {
     if (fullUrlToIndex.has(reference)) return fullUrlToIndex.get(reference);
     if (resourceRefToIndex.has(reference)) return resourceRefToIndex.get(reference);
+    const normalizedReference = normalizeResourceReference(reference);
+    if (normalizedReference && resourceRefToIndex.has(normalizedReference)) {
+      return resourceRefToIndex.get(normalizedReference);
+    }
     return undefined;
   };
 

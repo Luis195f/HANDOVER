@@ -54,7 +54,7 @@ describe('sync remote validation and 422 handling', () => {
             gender: 'female',
             name: [{ family: 'Doe', given: ['Jane'] }],
           },
-          request: { method: 'PUT', url: 'Patient/1' },
+          request: { method: 'POST', url: 'Patient' },
         },
       ],
     };

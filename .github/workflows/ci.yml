@@ -124,10 +124,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          pnpm -w validate:fhir | tee artifacts/fhir-validation.txt
+          status=0
+          pnpm -w validate:fhir 2>&1 | tee artifacts/fhir-validation.txt || status=${PIPESTATUS[0]}
+          exit "${status}"
 
       - name: Upload FHIR validation evidence
-        if: always()
+        if: always() && hashFiles('artifacts/fhir-validation.txt') != ''
         uses: actions/upload-artifact@v4
         with:
           name: fhir-validation
