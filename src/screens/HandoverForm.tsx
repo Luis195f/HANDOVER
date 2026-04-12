@@ -1000,7 +1000,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
+  const hasEffectivePilotUnitContext = Boolean((effectivePilotUnitId ?? '').trim());
   const aiSuggestionsEnabled =
+    hasEffectivePilotUnitContext &&
     isOn('AI_SUGGESTIONS_ENABLED') &&
     isPilotFeatureEnabled('ai_suggestions', {
       unitId: effectivePilotUnitId,
