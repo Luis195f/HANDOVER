@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from django.conf import settings
 from django.db.models import Count, Max, Q
 from django.utils import timezone
 
@@ -19,7 +18,7 @@ from backend.api.icea_observability import (
 )
 from backend.api.icea_pipeline import load_icea_pipeline_settings
 from backend.api.models import IceaBridgeRequest, IceaOutboundEvent, IceaPipelineEvent, IceaPipelineSnapshot
-from backend.api.pilot_control import evaluate_pilot_feature, load_pilot_control_config
+from backend.api.pilot_control import evaluate_pilot_feature_governance
 
 
 OPS_STALE_AFTER = timezone.timedelta(hours=6)
@@ -39,31 +38,9 @@ def _max_datetime(*values: Any):
 
 
 def _ops_admin_analytics_enabled(*, unit_id: str | None = None) -> bool:
-    feature = evaluate_pilot_feature("admin_analytics", unit_id=unit_id)
-    if feature["enabled"]:
-        return True
-    if feature["denialReason"] != "kill_switch_disabled":
-        return False
-
-    config = load_pilot_control_config()
-    feature_rule = config["features"]["admin_analytics"]
-    mode = feature_rule["mode"] or config["pilotMode"]
-    effective_environment = getattr(settings, "HANDOVER_DEPLOYMENT_MODE", "development").strip().lower()
-    environment_scope = feature_rule["environmentScope"] or config["environmentScope"]
-    enabled_units = feature_rule["enabledUnits"] or config["enabledUnits"]
-    normalized_unit_id = (unit_id or "").strip()
-
-    if bool(config.get("rolloutStatusExplicit")) and config["rolloutStatus"] == "no-go":
-        return False
-    if mode == "disabled":
-        return False
-    if mode == "demo" and effective_environment != "demo":
-        return False
-    if environment_scope and effective_environment not in environment_scope:
-        return False
-    if enabled_units and normalized_unit_id and normalized_unit_id not in enabled_units:
-        return False
-    return True
+    return bool(
+        evaluate_pilot_feature_governance("admin_analytics", unit_id=unit_id)["enabled"]
+    )
 
 
 def ops_summary_enabled(*, unit_id: str | None = None) -> bool:

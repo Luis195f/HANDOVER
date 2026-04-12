@@ -258,12 +258,20 @@ def load_pilot_control_config() -> dict[str, Any]:
     }
 
 
-def _feature_scope(config: dict[str, Any], feature_key: str) -> dict[str, Any]:
+def _feature_scope(
+    config: dict[str, Any],
+    feature_key: str,
+    *,
+    governance_only: bool = False,
+) -> dict[str, Any]:
     feature = config["features"][feature_key]
-    mode = feature["mode"] or _default_feature_mode(
-        feature_key,
-        explicit_shadow_mode_for_icea=config["explicitShadowModeForIcea"],
-    )
+    if governance_only:
+        mode = feature["mode"] or config["pilotMode"]
+    else:
+        mode = feature["mode"] or _default_feature_mode(
+            feature_key,
+            explicit_shadow_mode_for_icea=config["explicitShadowModeForIcea"],
+        )
     allowed_roles = (
         feature["allowedRoles"]
         or config["allowedRoles"]
@@ -295,12 +303,13 @@ def evaluate_pilot_feature(
     unit_id: str | None = None,
     roles: list[str] | tuple[str, ...] | set[str] | None = None,
     environment: str | None = None,
+    governance_only: bool = False,
 ) -> dict[str, Any]:
     if feature_key not in PILOT_FEATURE_SET:
         raise KeyError(f"Unsupported pilot feature: {feature_key}")
 
     config = load_pilot_control_config()
-    scope = _feature_scope(config, feature_key)
+    scope = _feature_scope(config, feature_key, governance_only=governance_only)
     effective_environment = (environment or getattr(settings, "HANDOVER_DEPLOYMENT_MODE", "development")).strip().lower()
     normalized_unit_id = (unit_id or "").strip()
     normalized_roles = _normalize_text_list(roles or [], lower=True)
@@ -317,7 +326,7 @@ def evaluate_pilot_feature(
     denial_reason = None
     enabled = True
 
-    if not base_switch_enabled:
+    if not base_switch_enabled and not governance_only:
         enabled = False
         denial_reason = "kill_switch_disabled"
     elif rollout_status_explicit and rollout_status == "no-go":
@@ -359,6 +368,22 @@ def evaluate_pilot_feature(
         "baseSwitches": _feature_base_switches(feature_key),
         "denialReason": denial_reason,
     }
+
+
+def evaluate_pilot_feature_governance(
+    feature_key: str,
+    *,
+    unit_id: str | None = None,
+    roles: list[str] | tuple[str, ...] | set[str] | None = None,
+    environment: str | None = None,
+) -> dict[str, Any]:
+    return evaluate_pilot_feature(
+        feature_key,
+        unit_id=unit_id,
+        roles=roles,
+        environment=environment,
+        governance_only=True,
+    )
 
 
 def is_pilot_feature_enabled(
