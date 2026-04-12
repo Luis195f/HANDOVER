@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -18,7 +19,12 @@ from backend.api.icea_pipeline import (
     serialize_pipeline_snapshot,
     _compact_payload_for_stage,
 )
-from backend.api.pilot_control import evaluate_pilot_feature, resolve_roles_from_request
+from backend.api.pilot_control import (
+    FEATURE_DEFAULT_ALLOWED_ROLES,
+    evaluate_pilot_feature,
+    load_pilot_control_config,
+    resolve_roles_from_request,
+)
 from backend.api.models import IceaPipelineEvent
 from backend.api.views import AuthenticatedAPIView, _resolve_unit_scope
 from backend.security.permissions_roles import HasAnyRole
@@ -54,6 +60,99 @@ def _analytics_gate_response(request, *, unit_id: str | None = None):
         unit_id=unit_id,
         roles=resolve_roles_from_request(request),
     )
+    if feature["enabled"]:
+        return None
+    status = 403 if feature["denialReason"] == "role_out_of_scope" else 503
+    return Response(
+        {
+            "detail": feature["fallback"],
+            "code": feature["denialReason"] or "admin_analytics_disabled",
+            "feature": feature,
+        },
+        status=status,
+    )
+
+
+def _normalize_roles(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        candidate = str(value).strip().lower()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return normalized
+
+
+def _dashboard_summary_feature_state(request, *, unit_id: str | None = None):
+    feature = evaluate_pilot_feature(
+        "admin_analytics",
+        unit_id=unit_id,
+        roles=resolve_roles_from_request(request),
+    )
+    if feature["denialReason"] != "kill_switch_disabled":
+        return feature
+
+    # Dashboard summary reuses admin rollout scope and roles, but it is not the
+    # fail-closed ICEA ops seam guarded by ENABLE_ICEA_OPS_*.
+    config = load_pilot_control_config()
+    feature_rule = config["features"]["admin_analytics"]
+    normalized_unit_id = (unit_id or "").strip()
+    normalized_roles = _normalize_roles(resolve_roles_from_request(request))
+    mode = feature_rule["mode"] or config["pilotMode"]
+    effective_environment = getattr(settings, "HANDOVER_DEPLOYMENT_MODE", "development").strip().lower()
+    environment_scope = feature_rule["environmentScope"] or config["environmentScope"]
+    enabled_units = feature_rule["enabledUnits"] or config["enabledUnits"]
+    allowed_roles = (
+        feature_rule["allowedRoles"]
+        or config["allowedRoles"]
+        or FEATURE_DEFAULT_ALLOWED_ROLES.get("admin_analytics", [])
+    )
+    rollout_status = config["rolloutStatus"]
+    rollout_status_explicit = bool(config.get("rolloutStatusExplicit"))
+    shadow_mode = bool(feature_rule["shadow"]) or mode == "shadow" or (
+        config["explicitShadowModeForIcea"] or (rollout_status_explicit and rollout_status == "pause")
+    )
+
+    denial_reason = None
+    enabled = True
+    if rollout_status_explicit and rollout_status == "no-go":
+        enabled = False
+        denial_reason = "rollout_no_go"
+    elif mode == "disabled":
+        enabled = False
+        denial_reason = "pilot_control_disabled"
+    elif mode == "demo" and effective_environment != "demo":
+        enabled = False
+        denial_reason = "demo_only"
+    elif environment_scope and effective_environment not in environment_scope:
+        enabled = False
+        denial_reason = "environment_out_of_scope"
+    elif enabled_units and normalized_unit_id and normalized_unit_id not in enabled_units:
+        enabled = False
+        denial_reason = "unit_out_of_scope"
+    elif allowed_roles and normalized_roles and not (set(normalized_roles) & set(allowed_roles)):
+        enabled = False
+        denial_reason = "role_out_of_scope"
+
+    return {
+        **feature,
+        "mode": mode,
+        "enabled": enabled,
+        "shadowMode": shadow_mode,
+        "pilotMode": config["pilotMode"],
+        "rolloutStatus": rollout_status,
+        "environment": effective_environment,
+        "environmentScope": environment_scope,
+        "enabledUnits": enabled_units,
+        "allowedRoles": allowed_roles,
+        "denialReason": denial_reason,
+    }
+
+
+def _dashboard_summary_gate_response(request, *, unit_id: str | None = None):
+    feature = _dashboard_summary_feature_state(request, unit_id=unit_id)
     if feature["enabled"]:
         return None
     status = 403 if feature["denialReason"] == "role_out_of_scope" else 503
@@ -231,15 +330,15 @@ class IceaDashboardSummaryView(AuthenticatedAPIView):
 
     def get(self, request):
         unit_id = str(request.query_params.get("unitId") or "").strip() or None
-        gate = _analytics_gate_response(request, unit_id=unit_id)
-        if gate is not None:
-            return gate
         authorized_unit_ids, scope_error = _resolve_admin_analytics_unit_scope(
             request,
             requested_unit=unit_id,
         )
         if scope_error is not None:
             return scope_error
+        gate = _dashboard_summary_gate_response(request, unit_id=unit_id)
+        if gate is not None:
+            return gate
         try:
             limit = int(request.query_params.get("eventsLimit") or 20)
         except (TypeError, ValueError):

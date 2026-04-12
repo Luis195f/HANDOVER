@@ -1,4 +1,5 @@
 import types
+import os
 
 from django.test import TestCase
 from django.urls import reverse
@@ -211,6 +212,28 @@ class IceaDashboardSummaryContractTests(TestCase):
         self._auth(["supervisor"], unit_ids=("icu-a",))
 
         response = self.client.get(self.url, {"unitId": "ward-z"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "analytics_forbidden_unit")
+
+    def test_summary_forbids_requested_unit_outside_supervisor_scope_before_ops_gate(self):
+        self._auth(["supervisor"], unit_ids=("icu-a",))
+
+        previous_summary = os.environ.get("ENABLE_ICEA_OPS_SUMMARY")
+        previous_events = os.environ.get("ENABLE_ICEA_OPS_EVENTS")
+        os.environ["ENABLE_ICEA_OPS_SUMMARY"] = "false"
+        os.environ["ENABLE_ICEA_OPS_EVENTS"] = "false"
+        try:
+            response = self.client.get(self.url, {"unitId": "ward-z"})
+        finally:
+            if previous_summary is None:
+                os.environ.pop("ENABLE_ICEA_OPS_SUMMARY", None)
+            else:
+                os.environ["ENABLE_ICEA_OPS_SUMMARY"] = previous_summary
+            if previous_events is None:
+                os.environ.pop("ENABLE_ICEA_OPS_EVENTS", None)
+            else:
+                os.environ["ENABLE_ICEA_OPS_EVENTS"] = previous_events
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], "analytics_forbidden_unit")
