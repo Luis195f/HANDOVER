@@ -28,6 +28,7 @@ from backend.ai_client import (
 )
 from backend.api.audit_pseudonymization import build_audit_patient_key
 from backend.api.models import ClinicalDecisionEvent
+from backend.api.pilot_control import evaluate_pilot_feature, resolve_roles_from_request
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
 from backend.security.roles import extract_roles
@@ -58,7 +59,6 @@ ALLOWED_AUDIO_MIME_TYPES = {
 DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
-AI_SUGGESTIONS_ENABLED = os.getenv("AI_SUGGESTIONS_ENABLED", "true").lower() in ["1", "true", "yes", "on"]
 
 CLINICAL_DECISION_ALLOWED_SOURCES = (
     "ai_generate_sbar",
@@ -789,11 +789,31 @@ class SuggestInterventionsView(ProtectedAIAPIView):
     parser_classes = [JSONParser]
 
     def post(self, request: HttpRequest) -> Response:
-        if not AI_SUGGESTIONS_ENABLED:
-            return Response({"detail": "Sugerencias de IA deshabilitadas"}, status=404)
+        feature = evaluate_pilot_feature(
+            "ai_suggestions",
+            unit_id=str(request.data.get("unitId") or "").strip() or None,
+            roles=resolve_roles_from_request(request),
+        )
+        if not feature["enabled"]:
+            status = 403 if feature["denialReason"] == "role_out_of_scope" else 404
+            return Response(
+                {
+                    "detail": feature["fallback"],
+                    "code": feature["denialReason"] or "ai_suggestions_disabled",
+                },
+                status=status,
+            )
 
         try:
             ctx = ClinicalContext.model_validate(request.data)
+            if not isinstance(ctx.unitId, str) or not ctx.unitId.strip():
+                return Response(
+                    {
+                        "detail": "unitId is required for governed AI suggestions.",
+                        "code": "ai_suggestions_unit_required",
+                    },
+                    status=400,
+                )
             payload = async_to_sync(generate_intervention_suggestions)(ctx)
         except ValueError:
             return Response({"detail": "Formato de respuesta de IA inesperado"}, status=502)

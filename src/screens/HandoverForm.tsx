@@ -1794,6 +1794,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     return {
       language: 'es',
       section,
+      unitId: effectivePilotUnitId ?? undefined,
       vitalSigns: Object.keys(vitalSigns).length ? vitalSigns : undefined,
       scores: Object.keys(scores).length ? (scores as ClinicalContext['scores']) : undefined,
       diagnoses: diagnoses.length ? diagnoses : undefined,

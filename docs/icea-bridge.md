@@ -232,7 +232,7 @@ Frontend:
 - `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING` (por defecto `false`)
 - `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING`
 - `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK` (por defecto `false`)
-- `EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY` (por defecto `false`)
+- `ENABLE_ICEA_CAUSAL_SUMMARY` permanece backend-only, por defecto `false` y fuera del control plane operativo de piloto; la UI operativa no expone un toggle cliente equivalente
 
 En shadow mode prudente, activar `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK` no debe volver visible ninguna salida ICEA paciente-a-paciente en la UI clinica operativa; la visibilidad humana queda reservada a superficies agregadas/admin cuando existan.
 

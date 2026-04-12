@@ -72,7 +72,7 @@ El objetivo del paquete NNN + ICEA+ es demostrar, con evidencia trazable del rep
 ### Go tecnico minimo
 
 - Suites criticas de NNN + ICEA+ en verde para el corte del piloto.
-- `HANDOVER_PILOT_CONTROL_JSON` y `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` revisados contra el scope real por unidad/rol/entorno.
+- `HANDOVER_PILOT_CONTROL_JSON` revisado contra el scope real por unidad/rol/entorno y contrastado con `GET /api/pilot-control/summary`.
 - Variables de entorno del entorno piloto validadas:
   - catalogos NNN licenciados si se pretende usar catalogo completo;
   - `ICEA_WEBHOOK_*` para outbox tecnico;

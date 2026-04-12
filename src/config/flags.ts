@@ -36,12 +36,8 @@ export const flags = {
   ENABLE_ICEA_PATIENT_RISK:
     (extra as any)?.FEATURES?.handover?.enableIceaPatientRisk ??
     process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK ?? false,
-  ENABLE_ICEA_CAUSAL_SUMMARY:
-    (extra as any)?.FEATURES?.handover?.enableIceaCausalSummary ??
-    process.env.EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY ?? false,
   HIDE_LEGACY_FIELDS:
     (extra as any)?.FEATURES?.handover?.hideLegacyFields ?? process.env.EXPO_PUBLIC_HIDE_LEGACY_FIELDS ?? false,
-  REMOTE_CONFIG_DISABLED_FOR_NOW: (extra as any)?.FEATURES?.handover?.remoteConfigDisabled,
 } satisfies Record<string, FlagValue>;
 
 export const isOn = (k: keyof typeof flags) => truthy(flags[k]);

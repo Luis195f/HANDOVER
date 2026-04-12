@@ -11,13 +11,11 @@ export type HandoverFeatureFlags = {
     showAttachments?: Boolish;
     enableAlerts?: Boolish;
     aiSuggestions?: Boolish;
-    remoteConfigDisabled?: Boolish;
   };
 };
 
 export type AppConfigExtra = {
   HANDOVER_DEPLOYMENT_MODE?: string;
-  HANDOVER_PILOT_CONTROL_JSON?: string;
   FEATURES?: HandoverFeatureFlags;
 } & Record<string, unknown>;
 
