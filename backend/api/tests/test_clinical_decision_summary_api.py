@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from backend.api.models import ClinicalDecisionEvent
+from backend.audit.models import AuditEvent
 from backend.security.auth import Auth0User
 
 
@@ -118,6 +119,13 @@ def test_clinical_decision_summary_returns_aggregated_non_nominal_payload():
     assert "auth0|nurse-1" not in serialized
     assert "note" not in serialized
 
+    audit_event = AuditEvent.objects.get(event_type="clinical_decision_summary_access")
+    assert audit_event.action == "read"
+    assert audit_event.status == "success"
+    assert audit_event.user_sub == "auth0|leader-1"
+    assert audit_event.meta["summaryResult"]["totalEvents"] == 4
+    assert audit_event.meta["summaryQuery"] == {}
+
 
 @pytest.mark.django_db
 def test_clinical_decision_summary_supervisor_without_unit_id_only_sees_authorized_units():
@@ -157,6 +165,12 @@ def test_clinical_decision_summary_supervisor_cannot_query_unit_outside_scope():
 
     assert response.status_code == 403
     assert response.json()["code"] == "patients_forbidden_unit"
+    audit_event = AuditEvent.objects.get(event_type="clinical_decision_summary_access")
+    assert audit_event.status == "fail"
+    assert audit_event.http_status == 403
+    assert audit_event.resource_id == "ward-b"
+    assert audit_event.meta["errorCode"] == "patients_forbidden_unit"
+    assert audit_event.meta["summaryQuery"]["unitId"] == "ward-b"
 
 
 @pytest.mark.django_db
@@ -227,6 +241,11 @@ def test_clinical_decision_summary_rejects_invalid_date_query():
 
     assert response.status_code == 400
     assert response.json()["code"] == "invalid_clinical_decision_summary_query"
+    audit_event = AuditEvent.objects.get(event_type="clinical_decision_summary_access")
+    assert audit_event.status == "fail"
+    assert audit_event.http_status == 400
+    assert audit_event.meta["errorCode"] == "invalid_clinical_decision_summary_query"
+    assert audit_event.meta["summaryQuery"]["dateFrom"] == "not-a-date"
 
 
 @pytest.mark.django_db

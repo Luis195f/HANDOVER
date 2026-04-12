@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
@@ -18,6 +20,7 @@ from backend.api.views import (
     _get_claims_from_request,
     _unit_scope_error_response,
 )
+from backend.audit.service import emit_audit_event
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
 
@@ -68,6 +71,44 @@ class ClinicalDecisionSummaryView(AuthenticatedAPIView):
         return [permission() for permission in self.permission_classes]
 
     @staticmethod
+    def _emit_summary_audit(
+        request,
+        *,
+        status: str,
+        http_status: int,
+        params: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        raw_params = params or {}
+        safe_query = {
+            key: value
+            for key in ("unitId", "suggestionSource", "decision", "section", "dateFrom", "dateTo")
+            if (value := str(raw_params.get(key) or "").strip())
+        }
+        meta: dict[str, Any] = {"summaryQuery": safe_query}
+        if error_code:
+            meta["errorCode"] = error_code
+        if isinstance(payload, dict):
+            totals = payload.get("totals") if isinstance(payload.get("totals"), dict) else {}
+            meta["summaryResult"] = {
+                "available": bool(payload.get("available")),
+                "enabled": bool(payload.get("enabled", payload.get("available"))),
+                "totalEvents": totals.get("events"),
+            }
+
+        emit_audit_event(
+            event_type="clinical_decision_summary_access",
+            action="read",
+            status=status,
+            http_status=http_status,
+            request=request,
+            resource_type="ClinicalDecisionEvent",
+            resource_id=safe_query.get("unitId", ""),
+            meta=meta,
+        )
+
+    @staticmethod
     def _resolve_summary_unit_scope(request, *, requested_unit: str | None):
         claims = _get_claims_from_request(request) or {}
         if not isinstance(claims, dict):
@@ -98,6 +139,13 @@ class ClinicalDecisionSummaryView(AuthenticatedAPIView):
     def get(self, request):
         serializer = ClinicalDecisionSummaryQuerySerializer(data=request.query_params)
         if not serializer.is_valid():
+            self._emit_summary_audit(
+                request,
+                status="fail",
+                http_status=400,
+                params=request.query_params,
+                error_code="invalid_clinical_decision_summary_query",
+            )
             return Response(
                 {
                     "detail": "Invalid clinical decision summary query.",
@@ -113,6 +161,16 @@ class ClinicalDecisionSummaryView(AuthenticatedAPIView):
             requested_unit=params.get("unitId"),
         )
         if scope_error is not None:
+            error_code = ""
+            if isinstance(getattr(scope_error, "data", None), dict):
+                error_code = str(scope_error.data.get("code") or "").strip()
+            self._emit_summary_audit(
+                request,
+                status="fail",
+                http_status=scope_error.status_code,
+                params=params,
+                error_code=error_code or "clinical_decision_summary_scope_error",
+            )
             return scope_error
 
         payload = build_clinical_decision_summary_payload(
@@ -124,5 +182,12 @@ class ClinicalDecisionSummaryView(AuthenticatedAPIView):
             date_from=params.get("dateFrom"),
             date_to=params.get("dateTo"),
             roles=resolve_roles_from_request(request),
+        )
+        self._emit_summary_audit(
+            request,
+            status="success",
+            http_status=200,
+            params=params,
+            payload=payload,
         )
         return Response(payload, status=200)
