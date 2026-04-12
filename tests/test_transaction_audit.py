@@ -17,7 +17,7 @@ from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhi
 
 def test_proxy_and_auditevent_include_authenticated_actor_and_entities():
     client = APIClient()
-    authenticate_api_client(client, sub="auth0|audit-user")
+    authenticate_api_client(client, sub="auth0|audit-user", unit_ids=["ward-a"])
     bundle = {
         "resourceType": "Bundle",
         "type": "transaction",
