@@ -48,8 +48,11 @@ vi.mock('@/src/security/capabilities', () => ({
     userSub: 'demo',
     roles: [],
     scopes: [],
+    unitIds: [],
     permissions: {
       canWriteHandover: false,
+      canReadPatients: false,
+      canCreatePatients: false,
       canSignHandover: false,
       canViewAudit: false,
       canSendAuditEvents: false,

@@ -131,6 +131,11 @@ class BackupAndPerfSmokeScriptTests(SimpleTestCase):
         self.assertNotEqual(database["name"], "live-preprod-db")
         self.assertIn("handover-perf-smoke-", database["name"])
         self.assertIn("ignored unless the dangerous override is enabled", database["note"])
+        measured = {item["scenario"] for item in payload["measured"]}
+        self.assertEqual(
+            measured,
+            {"fhir_transaction_synthetic", "icea_dashboard_summary", "icea_ops_summary"},
+        )
 
     def test_backup_db_fails_closed_without_plaintext_artifacts_when_encryption_required(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -44,6 +44,35 @@ def _patient_resource(patient_id: str, unit_id: str) -> dict:
     }
 
 
+def _transaction_bundle(unit_id: str) -> dict:
+    return {
+        "resourceType": "Bundle",
+        "type": "transaction",
+        "signature": [
+            {
+                "type": [{"code": "signature"}],
+                "when": "2026-03-10T11:00:00Z",
+                "onBehalfOf": {
+                    "reference": f"Organization/{unit_id}",
+                    "identifier": {"system": "urn:handover:unit-id", "value": unit_id},
+                    "display": unit_id,
+                },
+            }
+        ],
+        "entry": [
+            {
+                "request": {"method": "POST", "url": "Patient"},
+                "resource": {
+                    "resourceType": "Patient",
+                    "id": "pat-test-001",
+                    "name": [{"use": "official", "family": "Test", "given": ["Paciente"]}],
+                    "gender": "unknown",
+                },
+            }
+        ],
+    }
+
+
 class RoleAclTests(TestCase):
     """
     Django TestCase (unittest runner compatible) to validate:
@@ -57,24 +86,11 @@ class RoleAclTests(TestCase):
                 "sub": "auth0|nurse-1",
                 "roles": ["nurse"],
                 "permissions": ["fhir:transaction", "handover:write"],
+                "unitIds": ["icu-a"],
             }
         )
         url = reverse("fhir-transaction")
-        payload = {
-            "resourceType": "Bundle",
-            "type": "transaction",
-            "entry": [
-                {
-                    "request": {"method": "POST", "url": "Patient"},
-                    "resource": {
-                        "resourceType": "Patient",
-                        "id": "pat-test-001",
-                        "name": [{"use": "official", "family": "Test", "given": ["Paciente"]}],
-                        "gender": "unknown",
-                    },
-                }
-            ],
-        }
+        payload = _transaction_bundle("icu-a")
 
         with patch("backend.api.views.httpx.post", autospec=True) as mock_post:
             mock_resp = Mock()
@@ -86,6 +102,24 @@ class RoleAclTests(TestCase):
             response = client.post(url, data=payload, format="json")
 
         self.assertIn(response.status_code, (200, 201))
+
+    def test_fhir_transaction_rejects_unit_outside_scope(self):
+        client = _auth_client(
+            {
+                "sub": "auth0|nurse-foreign-unit",
+                "roles": ["nurse"],
+                "permissions": ["fhir:transaction", "handover:write"],
+                "unitIds": ["icu-a"],
+            }
+        )
+        url = reverse("fhir-transaction")
+
+        with patch("backend.api.views.httpx.post", autospec=True) as mock_post:
+            response = client.post(url, data=_transaction_bundle("ward-z"), format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("code"), "fhir_transaction_forbidden_unit")
+        mock_post.assert_not_called()
 
     def test_fhir_transaction_invalid_role_forbidden(self):
         client = _auth_client(
@@ -180,7 +214,10 @@ class RoleAclTests(TestCase):
 
         self.assertEqual(data.get("userSub"), "auth0|sup-1")
         perms = data.get("permissions", {})
+        self.assertEqual(data.get("unitIds"), [])
         self.assertIs(perms.get("canSignHandover"), True)
+        self.assertIs(perms.get("canReadPatients"), False)
+        self.assertIs(perms.get("canCreatePatients"), False)
         self.assertIs(perms.get("canViewAudit"), True)
         self.assertEqual(data.get("fhir", {}).get("version"), "R4")
 
@@ -199,7 +236,10 @@ class RoleAclTests(TestCase):
         data = response.json()
 
         perms = data.get("permissions", {})
+        self.assertEqual(data.get("unitIds"), [])
         self.assertIs(perms.get("canSignHandover"), False)
+        self.assertIs(perms.get("canReadPatients"), False)
+        self.assertIs(perms.get("canCreatePatients"), False)
         self.assertIs(perms.get("canViewAudit"), False)
 
     def test_dashboard_supervisor_allowed(self):

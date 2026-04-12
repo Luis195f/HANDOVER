@@ -137,8 +137,11 @@ describe('RootNavigator ACL (role enforcement)', () => {
         userSub: 'auth0|admin',
         roles: ['admin'],
         scopes: ['handover:write', 'handover:audit'],
+        unitIds: [],
         permissions: {
           canWriteHandover: true,
+          canReadPatients: true,
+          canCreatePatients: true,
           canSignHandover: true,
           canViewAudit: true,
           canSendAuditEvents: true,
@@ -169,9 +172,12 @@ describe('RootNavigator ACL (role enforcement)', () => {
       capabilities: {
         userSub: 'auth0|nurse',
         roles: ['nurse'],
-        scopes: ['handover:write'],
+        scopes: ['handover:write', 'patients:read'],
+        unitIds: ['icu-a'],
         permissions: {
           canWriteHandover: true,
+          canReadPatients: true,
+          canCreatePatients: true,
           canSignHandover: false,
           canViewAudit: false,
           canSendAuditEvents: true,
@@ -200,8 +206,11 @@ describe('RootNavigator ACL (role enforcement)', () => {
         userSub: 'auth0|none',
         roles: [],
         scopes: [],
+        unitIds: [],
         permissions: {
           canWriteHandover: false,
+          canReadPatients: false,
+          canCreatePatients: false,
           canSignHandover: false,
           canViewAudit: false,
           canSendAuditEvents: false,

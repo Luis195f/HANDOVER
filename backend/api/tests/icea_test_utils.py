@@ -47,13 +47,15 @@ def build_icea_bundle(*, bundle_id: str = "bundle-tx-001", patient_id: str = "pa
     }
 
 
-def build_authenticated_api_user(*, sub: str, roles: list[str], scopes: list[str]):
+def build_authenticated_api_user(*, sub: str, roles: list[str], scopes: list[str], unit_ids: list[str] | None = None):
     claims = {
         "sub": sub,
         "permissions": scopes,
         "scope": " ".join(scopes),
         "roles": roles,
     }
+    if unit_ids is not None:
+        claims["unitIds"] = unit_ids
     return types.SimpleNamespace(
         is_authenticated=True,
         claims=claims,
@@ -68,12 +70,14 @@ def authenticate_api_client(
     sub: str = "auth0|test-user",
     roles: list[str] | None = None,
     scopes: list[str] | None = None,
+    unit_ids: list[str] | None = None,
     token: str = "test-access-token",
 ):
     user, claims = build_authenticated_api_user(
         sub=sub,
         roles=roles or ["nurse"],
         scopes=scopes or ["fhir:transaction", "handover:write"],
+        unit_ids=unit_ids,
     )
     client.force_authenticate(user=user, token=claims)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")

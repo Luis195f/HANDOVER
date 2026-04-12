@@ -9,7 +9,7 @@
 ## 1) Arquitectura real
 
 - La app envia bundles a `POST /api/fhir/transaction`.
-- Django/DRF concentra validación, enforcement de firma criptográfica de transporte según entorno, auditoría y side effects ICEA.
+- Django/DRF concentra validación, enforcement de firma criptográfica de transporte según entorno, resolución autoritativa de unidad para el write clínico, auditoría y side effects ICEA.
 - La lectura ETL del Bundle clinico persistido ocurre via `GET /api/handover/{bundle_id}`.
 - La app no necesita hablar directo con ICEA+ para interoperabilidad operativa.
 
@@ -158,6 +158,7 @@ Lo que no hace el repo:
   - `HANDOVER_FHIR_VALIDATION_MODE = off | remote`
   - cierres finales requieren attestation saliente, attestation autenticada entrante y actores distintos en el relevo
   - `pilot/production` requieren firma criptográfica fuerte backend-managed (`HANDOVER_PRIVATE_KEY_PATH` + `HANDOVER_PUBLIC_KEY_PATH`) y no aceptan `HANDOVER_SIGNATURE_DISABLED=true`
+  - `POST /api/fhir/transaction` falla cerrado si la unidad operativa no puede resolverse de forma segura desde `X-Unit-Id` coherente y/o evidencia suficiente del Bundle (`signature.onBehalfOf`, extensiones `unit-id`, referencias organizativas); para tokens no admin, la unidad resuelta debe pertenecer a `unitIds`
   - `BundleView` preserva `OperationOutcome.issue[]` del FHIR server cuando la transaccion es rechazada, para que frontend/sync muestren errores estructurados y no solo strings genéricos
 - reenvio a FHIR con `Prefer: return=representation`
 

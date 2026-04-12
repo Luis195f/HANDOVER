@@ -15,6 +15,33 @@ const flagState = vi.hoisted(() => ({
   values: {} as Record<string, boolean>,
 }));
 const mockUseZodForm = vi.fn();
+const authState = vi.hoisted(() => ({
+  session: {
+    userId: 'nurse-1',
+    displayName: 'Nurse One',
+    roles: ['nurse'],
+    units: ['unit-1'],
+    user: { id: 'nurse-1', name: 'Nurse One', unitId: 'unit-1' },
+    accessToken: 'token',
+  },
+  capabilities: {
+    userSub: 'auth0|nurse-1',
+    roles: ['nurse'],
+    scopes: ['handover:write'],
+    unitIds: ['unit-1'],
+    permissions: {
+      canWriteHandover: true,
+      canReadPatients: false,
+      canCreatePatients: false,
+      canSignHandover: false,
+      canViewAudit: false,
+      canSendAuditEvents: true,
+      isAdmin: false,
+    },
+    scopeCatalog: [],
+    fhir: { version: 'R4', transaction: true, profiles: [] },
+  },
+}));
 const pilotRuntimeState = vi.hoisted(() => ({
   pilotControlVersion: 0,
   pilotContextCalls: [] as Array<{ unitId?: string; roles?: string[] }>,
@@ -185,20 +212,18 @@ vi.mock('@/src/lib/profile-runtime', () => {
 
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({
-    session: {
-      userId: 'nurse-1',
-      displayName: 'Nurse One',
-      roles: ['nurse'],
-      units: ['unit-1'],
-      user: { id: 'nurse-1', name: 'Nurse One', unitId: 'unit-1' },
-      accessToken: 'token',
-    },
+    session: authState.session,
+    capabilities: authState.capabilities,
     loading: false,
     loginWithOAuth: vi.fn(),
     loginWithCredentials: vi.fn(),
     logout: vi.fn(async () => undefined),
   }),
-  getSession: vi.fn(async () => ({ userId: 'nurse-1', accessToken: 'token', units: ['unit-1'] })),
+  getSession: vi.fn(async () => ({
+    userId: authState.session.userId,
+    accessToken: authState.session.accessToken,
+    units: authState.session.units,
+  })),
 }));
 
 vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) => ensureUnitAccess(...args) }));
@@ -373,6 +398,31 @@ describe('HandoverForm drafts', () => {
     pilotRuntimeState.runtimeCalls.length = 0;
     pilotRuntimeState.runtimeOverride = null;
     flagState.values = {};
+    authState.session = {
+      userId: 'nurse-1',
+      displayName: 'Nurse One',
+      roles: ['nurse'],
+      units: ['unit-1'],
+      user: { id: 'nurse-1', name: 'Nurse One', unitId: 'unit-1' },
+      accessToken: 'token',
+    };
+    authState.capabilities = {
+      userSub: 'auth0|nurse-1',
+      roles: ['nurse'],
+      scopes: ['handover:write'],
+      unitIds: ['unit-1'],
+      permissions: {
+        canWriteHandover: true,
+        canReadPatients: false,
+        canCreatePatients: false,
+        canSignHandover: false,
+        canViewAudit: false,
+        canSendAuditEvents: true,
+        isAdmin: false,
+      },
+      scopeCatalog: [],
+      fhir: { version: 'R4', transaction: true, profiles: [] },
+    };
     mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
   });
 
@@ -616,6 +666,19 @@ describe('HandoverForm drafts', () => {
 
   it('en fallback Core muestra los dominios recuperados para piloto sin duplicar contingencias en el cierre', async () => {
     const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+    authState.session = {
+      ...authState.session,
+      units: ['unknown-unit'],
+      user: { id: 'nurse-1', name: 'Nurse One', unitId: 'unknown-unit' },
+    };
+    authState.capabilities = {
+      ...authState.capabilities,
+      unitIds: ['unknown-unit'],
+      permissions: {
+        ...authState.capabilities.permissions,
+        canWriteHandover: true,
+      },
+    };
 
     flagState.values = {
       SHOW_OXY: true,

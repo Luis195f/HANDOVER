@@ -16,7 +16,7 @@ from backend.api.tests.icea_test_utils import authenticate_api_client
 
 def test_remote_validation_blocks_on_error():
     client = APIClient()
-    authenticate_api_client(client)
+    authenticate_api_client(client, unit_ids=["icu-a"])
 
     validation_response = Mock()
     validation_response.status_code = 200
@@ -34,6 +34,7 @@ def test_remote_validation_blocks_on_error():
             "/api/fhir/transaction",
             data={"resourceType": "Bundle", "type": "transaction", "entry": []},
             format="json",
+            HTTP_X_UNIT_ID="icu-a",
         )
 
     assert response.status_code == 422
@@ -43,7 +44,7 @@ def test_remote_validation_blocks_on_error():
 
 def test_transaction_passthrough_preserves_operation_outcome():
     client = APIClient()
-    authenticate_api_client(client)
+    authenticate_api_client(client, unit_ids=["icu-a"])
 
     tx_response = Mock()
     tx_response.status_code = 422
@@ -74,6 +75,7 @@ def test_transaction_passthrough_preserves_operation_outcome():
                 "entry": [{"resource": {"resourceType": "Patient", "id": "pat-1"}}],
             },
             format="json",
+            HTTP_X_UNIT_ID="icu-a",
         )
 
     assert response.status_code == 422

@@ -6,11 +6,18 @@ from rest_framework.test import APIClient
 from backend.security.auth import Auth0User
 
 
-def _auth_client(*, roles=("nurse",), permissions=("handover:write",), sub="auth0|test-user"):
+def _auth_client(
+    *,
+    roles=("nurse",),
+    permissions=("handover:write", "patients:read"),
+    unit_ids=("icu-a",),
+    sub="auth0|test-user",
+):
     claims = {
         "sub": sub,
         "roles": list(roles),
         "permissions": list(permissions),
+        "unitIds": list(unit_ids),
     }
     client = APIClient()
     client.force_authenticate(user=Auth0User(sub=sub, claims=claims), token=claims)
@@ -60,10 +67,25 @@ def _post(case: str, client: APIClient):
         upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
         return client.post(
             "/api/upload/audio-to-fhir",
-            data={"file": upload, "patientId": "p-123"},
+            data={"file": upload, "patientId": "p-123", "unitId": "icu-a"},
             format="multipart",
         )
     raise AssertionError(f"Unknown case {case}")
+
+
+def _patient_payload(unit_id: str | None) -> dict:
+    patient = {
+        "resourceType": "Patient",
+        "id": "p-123",
+    }
+    if unit_id:
+        patient["extension"] = [
+            {
+                "url": "https://handover.dev/fhir/StructureDefinition/unit-id",
+                "valueString": unit_id,
+            }
+        ]
+    return patient
 
 
 @override_settings(DEBUG=True)
@@ -117,7 +139,7 @@ def test_audio_to_fhir_rejects_invalid_mime():
     upload = SimpleUploadedFile("audio.bin", b"valid-bytes", content_type="application/octet-stream")
     response = client.post(
         "/api/upload/audio-to-fhir",
-        data={"file": upload, "patientId": "p-123"},
+        data={"file": upload, "patientId": "p-123", "unitId": "icu-a"},
         format="multipart",
     )
 
@@ -164,16 +186,23 @@ def test_audio_to_fhir_accepts_safe_inference_and_keeps_existing_flow(monkeypatc
         def json(self):
             return {"resourceType": "DocumentReference", "id": "doc-1"}
 
+    class _MockGetResp:
+        status_code = 200
+
+        def json(self):
+            return _patient_payload("icu-a")
+
     def _mock_post(*args, **kwargs):
         assert kwargs["json"]["content"][0]["attachment"]["contentType"] == "audio/mpeg"
         return _MockResp()
 
+    monkeypatch.setattr(views_ai.httpx, "get", lambda *args, **kwargs: _MockGetResp(), raising=True)
     monkeypatch.setattr(views_ai.httpx, "post", _mock_post, raising=True)
 
     upload = SimpleUploadedFile("audio.mp3", b"small", content_type="")
     response = client.post(
         "/api/upload/audio-to-fhir",
-        data={"file": upload, "patientId": "p-123"},
+        data={"file": upload, "patientId": "p-123", "unitId": "icu-a"},
         format="multipart",
     )
 
@@ -186,16 +215,23 @@ def test_audio_to_fhir_redacts_upstream_error_body(monkeypatch):
 
     client = _auth_client()
 
+    class _MockGetResp:
+        status_code = 200
+
+        def json(self):
+            return _patient_payload("icu-a")
+
     class _MockResp:
         status_code = 422
         text = '{"detail":"Patient/p-123 inválido"}'
 
+    monkeypatch.setattr(views_ai.httpx, "get", lambda *args, **kwargs: _MockGetResp(), raising=True)
     monkeypatch.setattr(views_ai.httpx, "post", lambda *args, **kwargs: _MockResp(), raising=True)
 
     upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
     response = client.post(
         "/api/upload/audio-to-fhir",
-        data={"file": upload, "patientId": "p-123"},
+        data={"file": upload, "patientId": "p-123", "unitId": "icu-a"},
         format="multipart",
     )
 
@@ -203,6 +239,73 @@ def test_audio_to_fhir_redacts_upstream_error_body(monkeypatch):
     payload = response.json()
     assert payload["code"] == "fhir_upload_rejected"
     assert "Patient/p-123" not in payload["detail"]
+
+
+def test_audio_to_fhir_forbids_unit_outside_scope():
+    client = _auth_client(unit_ids=("icu-a",))
+
+    upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
+    response = client.post(
+        "/api/upload/audio-to-fhir",
+        data={"file": upload, "patientId": "p-123", "unitId": "icu-b"},
+        format="multipart",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "patients_forbidden_unit"
+
+
+def test_audio_to_fhir_rejects_patient_unit_mismatch(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client(unit_ids=("icu-a",))
+
+    class _MockGetResp:
+        status_code = 200
+
+        def json(self):
+            return _patient_payload("ward-z")
+
+    monkeypatch.setattr(views_ai.httpx, "get", lambda *args, **kwargs: _MockGetResp(), raising=True)
+
+    def _unexpected_post(*args, **kwargs):
+        raise AssertionError("upload post should not be attempted when patient/unit mismatch is detected")
+
+    monkeypatch.setattr(views_ai.httpx, "post", _unexpected_post, raising=True)
+
+    upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
+    response = client.post(
+        "/api/upload/audio-to-fhir",
+        data={"file": upload, "patientId": "p-123", "unitId": "icu-a"},
+        format="multipart",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "audio_upload_patient_unit_mismatch"
+
+
+def test_audio_to_fhir_rejects_patient_without_resolvable_unit(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client(unit_ids=("icu-a",))
+
+    class _MockGetResp:
+        status_code = 200
+
+        def json(self):
+            return _patient_payload(None)
+
+    monkeypatch.setattr(views_ai.httpx, "get", lambda *args, **kwargs: _MockGetResp(), raising=True)
+
+    upload = SimpleUploadedFile("audio.mp3", b"small", content_type="audio/mpeg")
+    response = client.post(
+        "/api/upload/audio-to-fhir",
+        data={"file": upload, "patientId": "p-123", "unitId": "icu-a"},
+        format="multipart",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "audio_upload_patient_unit_unresolved"
 
 
 def test_transcribe_returns_503_when_openai_disabled(monkeypatch):

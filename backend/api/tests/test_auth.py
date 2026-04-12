@@ -183,8 +183,11 @@ class AuthEndpointTests(TestCase):
                 "userSub": "auth0|cap-user",
                 "roles": ["supervisor"],
                 "scopes": ["audit:read", "handover:write"],
+                "unitIds": [],
                 "permissions": {
                     "canWriteHandover": True,
+                    "canReadPatients": False,
+                    "canCreatePatients": False,
                     "canSignHandover": True,
                     "canViewAudit": True,
                     "canSendAuditEvents": True,

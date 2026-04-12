@@ -46,7 +46,13 @@ from backend.security.auth import Auth0JWTAuthentication
 from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
 from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
-from backend.api.icea import enqueue_icea_outbound_event_for_transaction
+from backend.api.icea import (
+    _extract_unit_from_extensions,
+    _extract_unit_from_roles,
+    _extract_unit_from_signatures,
+    _resource_index,
+    enqueue_icea_outbound_event_for_transaction,
+)
 from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.api.icea_transaction import persist_handover_bundle_record, persist_successful_transaction_icea_side_effects
@@ -246,6 +252,131 @@ def _unit_scope_error_response(*, detail: str, code: str, status: int = 403) -> 
     return Response({"detail": detail, "code": code}, status=status)
 
 
+def _resolve_unit_scope(
+    request: HttpRequest,
+    *,
+    requested_unit: str | None,
+    scope_unavailable_detail: str,
+    scope_unavailable_code: str,
+    forbidden_detail: str,
+    forbidden_code: str,
+    required_unit_detail: str | None = None,
+    required_unit_code: str | None = None,
+) -> tuple[set[str] | None, Response | None]:
+    claims = _get_claims_from_request(request) or {}
+    if not isinstance(claims, dict):
+        return None, _unit_scope_error_response(
+            detail=scope_unavailable_detail,
+            code=scope_unavailable_code,
+        )
+
+    roles = extract_roles(claims)
+    if "admin" in roles:
+        return None, None
+
+    authorized_unit_ids = _extract_authorized_unit_ids(claims)
+    if not authorized_unit_ids:
+        return None, _unit_scope_error_response(
+            detail=scope_unavailable_detail,
+            code=scope_unavailable_code,
+        )
+
+    normalized_requested_unit = str(requested_unit or "").strip()
+    if required_unit_code and required_unit_detail and not normalized_requested_unit:
+        return None, _unit_scope_error_response(
+            detail=required_unit_detail,
+            code=required_unit_code,
+        )
+
+    if normalized_requested_unit and normalized_requested_unit not in authorized_unit_ids:
+        return None, _unit_scope_error_response(
+            detail=forbidden_detail,
+            code=forbidden_code,
+        )
+
+    return authorized_unit_ids, None
+
+
+def _normalize_optional_unit_id(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _collect_bundle_patient_unit_ids(resources: list[dict[str, Any]]) -> set[str]:
+    unit_ids: set[str] = set()
+    for resource in resources:
+        if resource.get("resourceType") != "Patient":
+            continue
+        unit_ids.update(_extract_patient_resource_unit_ids(resource))
+    return unit_ids
+
+
+def _resolve_fhir_transaction_unit_scope(
+    request: HttpRequest,
+    *,
+    bundle: dict[str, Any],
+) -> tuple[str | None, Response | None]:
+    requested_unit = _normalize_optional_unit_id(request.headers.get("X-Unit-Id"))
+    resources, full_url_map = _resource_index(bundle)
+
+    bundle_unit_evidence: list[tuple[str, str]] = []
+    for source, candidate in (
+        ("signature", _extract_unit_from_signatures(bundle, full_url_map)),
+        ("extension", _extract_unit_from_extensions(resources)),
+        ("role", _extract_unit_from_roles(resources, full_url_map)),
+    ):
+        normalized_candidate = _normalize_optional_unit_id(candidate)
+        if normalized_candidate:
+            bundle_unit_evidence.append((source, normalized_candidate))
+
+    patient_unit_ids = _collect_bundle_patient_unit_ids(resources)
+    if len(patient_unit_ids) > 1:
+        return None, _unit_scope_error_response(
+            detail="FHIR transaction unit evidence is inconsistent.",
+            code="fhir_transaction_unit_mismatch",
+            status=400,
+        )
+    if len(patient_unit_ids) == 1:
+        bundle_unit_evidence.append(("patient", next(iter(patient_unit_ids))))
+
+    bundle_units = {unit_id for _source, unit_id in bundle_unit_evidence}
+    if len(bundle_units) > 1:
+        return None, _unit_scope_error_response(
+            detail="FHIR transaction unit evidence is inconsistent.",
+            code="fhir_transaction_unit_mismatch",
+            status=400,
+        )
+
+    bundle_unit = next(iter(bundle_units), None)
+    if requested_unit and bundle_unit and requested_unit != bundle_unit:
+        return None, _unit_scope_error_response(
+            detail="FHIR transaction unit selector does not match Bundle evidence.",
+            code="fhir_transaction_unit_mismatch",
+            status=400,
+        )
+
+    resolved_unit = requested_unit or bundle_unit
+    if not resolved_unit:
+        return None, _unit_scope_error_response(
+            detail="FHIR transaction unit could not be resolved authoritatively.",
+            code="fhir_transaction_unit_resolution_failed",
+            status=400,
+        )
+
+    _, scope_error = _resolve_unit_scope(
+        request,
+        requested_unit=resolved_unit,
+        scope_unavailable_detail="Authorized unit scope is required for clinical FHIR writes.",
+        scope_unavailable_code="fhir_transaction_unit_scope_unavailable",
+        forbidden_detail="Requested clinical write is outside your authorized unit scope.",
+        forbidden_code="fhir_transaction_forbidden_unit",
+    )
+    if scope_error is not None:
+        return None, scope_error
+
+    return resolved_unit, None
+
+
 def _build_empty_searchset_bundle() -> dict[str, Any]:
     return {
         "resourceType": "Bundle",
@@ -363,31 +494,14 @@ def _resolve_patient_unit_scope(
     *,
     requested_unit: str | None,
 ) -> tuple[set[str] | None, Response | None]:
-    claims = _get_claims_from_request(request) or {}
-    if not isinstance(claims, dict):
-        return None, _unit_scope_error_response(
-            detail="Patient scope could not be resolved for this token.",
-            code="patients_unit_scope_unavailable",
-        )
-
-    roles = extract_roles(claims)
-    if roles & {"supervisor", "admin"}:
-        return None, None
-
-    authorized_unit_ids = _extract_authorized_unit_ids(claims)
-    if not authorized_unit_ids:
-        return None, _unit_scope_error_response(
-            detail="Patient scope could not be resolved for this token.",
-            code="patients_unit_scope_unavailable",
-        )
-
-    if requested_unit and requested_unit not in authorized_unit_ids:
-        return None, _unit_scope_error_response(
-            detail="Requested unit is outside your authorized scope.",
-            code="patients_forbidden_unit",
-        )
-
-    return authorized_unit_ids, None
+    return _resolve_unit_scope(
+        request,
+        requested_unit=requested_unit,
+        scope_unavailable_detail="Patient scope could not be resolved for this token.",
+        scope_unavailable_code="patients_unit_scope_unavailable",
+        forbidden_detail="Requested unit is outside your authorized scope.",
+        forbidden_code="patients_forbidden_unit",
+    )
 
 
 def _post_transaction_to_fhir(*args, **kwargs):
@@ -1237,6 +1351,7 @@ class CapabilitiesView(APIView):
         claims = _get_claims_from_request(request) or {}
         roles = sorted(extract_roles(claims))
         scopes = sorted(_extract_permissions_from_request(request))
+        unit_ids = sorted(_extract_authorized_unit_ids(claims)) if isinstance(claims, dict) else []
 
         user_sub = ""
         if isinstance(claims, dict):
@@ -1247,6 +1362,8 @@ class CapabilitiesView(APIView):
 
         permissions = {
             "canWriteHandover": "handover:write" in scopes,
+            "canReadPatients": "patients:read" in scopes,
+            "canCreatePatients": "patients:write" in scopes,
             "canSignHandover": any(r in {"supervisor", "admin"} for r in roles),
             "canViewAudit": ("audit:read" in scopes) or ("handover:audit" in scopes),
             "canSendAuditEvents": ("audit:write" in scopes) or ("handover:write" in scopes),
@@ -1257,6 +1374,7 @@ class CapabilitiesView(APIView):
             "userSub": user_sub,
             "roles": roles,
             "scopes": scopes,
+            "unitIds": unit_ids,
             "permissions": permissions,
             "scopeCatalog": CLINICAL_SCOPES,
             "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
@@ -1407,6 +1525,19 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
         unit_id = str(validated.get("unitId") or "")
         request_id = str(validated.get("requestId") or "")
 
+        _authorized_unit_ids, scope_error = _resolve_unit_scope(
+            request,
+            requested_unit=unit_id or None,
+            scope_unavailable_detail="Timing metrics scope could not be resolved for this token.",
+            scope_unavailable_code="handover_timing_unit_scope_unavailable",
+            forbidden_detail="Requested unit is outside your authorized scope.",
+            forbidden_code="handover_timing_forbidden_unit",
+            required_unit_detail="unitId is required for this token scope.",
+            required_unit_code="handover_timing_unit_filter_required",
+        )
+        if scope_error is not None:
+            return scope_error
+
         emit_audit_event(
             event_type="handover_timing",
             action="create",
@@ -1453,6 +1584,17 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
 
     def get(self, request: HttpRequest) -> Response:
         unit_filter = str(request.query_params.get("unitId") or "").strip()
+        authorized_unit_ids, scope_error = _resolve_unit_scope(
+            request,
+            requested_unit=unit_filter or None,
+            scope_unavailable_detail="Timing metrics scope could not be resolved for this token.",
+            scope_unavailable_code="handover_timing_unit_scope_unavailable",
+            forbidden_detail="Requested unit is outside your authorized scope.",
+            forbidden_code="handover_timing_forbidden_unit",
+        )
+        if scope_error is not None:
+            return scope_error
+
         rows = []
         queryset = AuditEvent.objects.filter(event_type="handover_timing")
 
@@ -1466,6 +1608,8 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
 
             if unit_filter:
                 queryset = queryset.filter(timing_unit_id_raw=unit_filter)
+            elif authorized_unit_ids is not None:
+                queryset = queryset.filter(timing_unit_id_raw__in=sorted(authorized_unit_ids))
 
             aggregates = (
                 queryset.filter(timing_duration_ms_raw__regex=r"^\s*\d+(?:\.\d+)?\s*$")
@@ -1524,6 +1668,8 @@ class HandoverTimingMetricsView(AuthenticatedAPIView):
                 timing_duration_ms_raw = timing.get("durationMs")
 
                 if unit_filter and str(timing_unit_id_raw or "").strip() != unit_filter:
+                    continue
+                if authorized_unit_ids is not None and str(timing_unit_id_raw or "").strip() not in authorized_unit_ids:
                     continue
 
                 section_id = self._normalize_section_id(timing_section_id_raw)
@@ -2070,7 +2216,6 @@ class BundleView(AuthenticatedAPIView):
             )
 
         user_id = _get_authenticated_user_sub(request)
-        unit_id = request.headers.get("X-Unit-Id")
 
         if user_id is None:
             return Response({"detail": "Invalid token: missing subject"}, status=401)
@@ -2134,6 +2279,29 @@ class BundleView(AuthenticatedAPIView):
                 meta={"errorCode": "SIGNATURE_ERROR"},
             )
             return signature_error
+
+        resolved_unit_id, unit_scope_error = _resolve_fhir_transaction_unit_scope(
+            request,
+            bundle=bundle,
+        )
+        if unit_scope_error is not None:
+            unit_scope_code = ""
+            if isinstance(getattr(unit_scope_error, "data", None), dict):
+                unit_scope_code = str(unit_scope_error.data.get("code") or "").strip()
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=bundle,
+                status="fail",
+                http_status=unit_scope_error.status_code,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
+                meta={
+                    "errorCode": "UNIT_SCOPE_ERROR",
+                    "unitScopeCode": unit_scope_code or None,
+                },
+            )
+            return unit_scope_error
+
+        request.META["HTTP_X_UNIT_ID"] = resolved_unit_id
 
         # Tag de tracking
         bundle_meta = bundle.get("meta") or {}
@@ -2212,13 +2380,13 @@ class BundleView(AuthenticatedAPIView):
             request,
             bundle=bundle,
             user_id=user_id,
-            unit_id=unit_id,
+            unit_id=resolved_unit_id,
         )
         _emit_handover_closure_attestation_event(
             request,
             bundle=bundle,
             user_id=user_id,
-            unit_id=unit_id,
+            unit_id=resolved_unit_id,
         )
         persist_successful_transaction_icea_side_effects(
             bundle=bundle,
