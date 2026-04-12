@@ -1,6 +1,6 @@
 # Clinical Decision Log (IA asistida)
 
-Estado revisado contra el repo el 2026-04-08.
+Estado revisado contra el repo el 2026-04-12.
 
 ## Proposito
 
@@ -51,6 +51,7 @@ Este registro:
 - `filters.dateTo` refleja el valor solicitado por la UI; el bound exclusivo interno se expone aparte en `queryBounds.createdAtLt`;
 - devuelve solo contadores agregados por decision, unidad, fuente, seccion y serie diaria;
 - no devuelve `actor_id`, notas, texto clinico libre ni metadata cruda.
+- el acceso agregado deja traza backend en `AuditEvent` (`event_type=clinical_decision_summary_access`) con actor autenticado, `request_id`, resultado, filtros seguros y conteo total; no registra notas ni identificadores nominales del paciente.
 
 ## Cobertura actual
 
@@ -59,10 +60,12 @@ Cubierto en esta iteracion:
 - aplicacion o descarte explicito de sugerencias NIC;
 - aplicacion o descarte explicito de sugerencias NOC pendientes de revision.
 - lectura agregada piloto-grade para comite/supervision sin ranking individual.
+- acceso a la lectura agregada con traza auditable no nominal en backend.
 
 Fuera de esta iteracion:
 - otras sugerencias visualizadas fuera de SBAR sin accion humana dedicada;
 - mezcla con ICEA scoring, submit FHIR, queue/sync u otras superficies no tocadas.
+- lectura nominal de eventos individuales de decision clinica para vigilancia operacional fina.
 - cualquier uso nominal, retributivo o punitivo.
 
 ## Comportamiento ante fallo

@@ -26,6 +26,7 @@ from backend.ai_client import (
     transcribe_audio,
     is_openai_enabled,
 )
+from backend.api.audit_pseudonymization import build_audit_patient_key
 from backend.api.models import ClinicalDecisionEvent
 from backend.audit.service import emit_audit_event
 from backend.audit.utils import canonical_json, hash_payload
@@ -369,6 +370,55 @@ def _fetch_patient_unit_ids_for_upload(request: HttpRequest, patient_id: str) ->
         )
 
     return patient_unit_ids, None
+
+
+def _emit_audio_upload_audit(
+    *,
+    request: HttpRequest,
+    patient_id: str,
+    unit_id: str,
+    status: str,
+    http_status: int,
+    audio_content_type: str | None,
+    encounter_ref: str | None,
+    error_code: str | None = None,
+    payload_obj: Any = None,
+    resource_id: str = "",
+) -> None:
+    audio_meta: dict[str, Any] = {
+        "patientKey": build_audit_patient_key(patient_id),
+        "unitId": unit_id,
+        "contentType": audio_content_type or "",
+        "hasEncounterRef": bool(str(encounter_ref or "").strip()),
+    }
+    if error_code:
+        audio_meta["errorCode"] = error_code
+
+    emit_audit_event(
+        event_type="audio_document_upload",
+        action="create",
+        status=status,
+        http_status=http_status,
+        request=request,
+        resource_type="DocumentReference",
+        resource_id=resource_id or getattr(request, "audit_request_id", ""),
+        payload_obj=payload_obj,
+        meta={"audioUpload": audio_meta},
+    )
+
+
+def _extract_response_error_code(response: Response, fallback: str) -> str:
+    if isinstance(getattr(response, "data", None), dict):
+        code = str(response.data.get("code") or "").strip()
+        if code:
+            return code
+    return fallback
+
+
+def _extract_document_reference_id(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("id") or "").strip()
 
 
 class ProtectedAIAPIView(AuthenticatedAPIView):
@@ -856,6 +906,16 @@ class AudioToFHIRView(ProtectedAIAPIView):
         encounter_ref = request.data.get("encounterRef")
 
         if not upload or not patient_id or not unit_id:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id or ""),
+                unit_id=unit_id,
+                status="fail",
+                http_status=400,
+                audio_content_type=None,
+                encounter_ref=str(encounter_ref or ""),
+                error_code="missing_upload_fields",
+            )
             return Response(
                 {"detail": "patientId, unitId y file son obligatorios", "code": "missing_upload_fields"},
                 status=400,
@@ -863,20 +923,70 @@ class AudioToFHIRView(ProtectedAIAPIView):
 
         _, scope_error = _resolve_patient_unit_scope(request, requested_unit=unit_id)
         if scope_error is not None:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=scope_error.status_code,
+                audio_content_type=None,
+                encounter_ref=str(encounter_ref or ""),
+                error_code=_extract_response_error_code(scope_error, "audio_upload_scope_error"),
+            )
             return scope_error
 
         validation_error = _validate_audio_upload(upload)
         if validation_error:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=validation_error.status_code,
+                audio_content_type=_normalize_audio_content_type(upload),
+                encounter_ref=str(encounter_ref or ""),
+                error_code=_extract_response_error_code(validation_error, "audio_upload_invalid"),
+            )
             return validation_error
 
         audio_content_type = _normalize_audio_content_type(upload)
         if not audio_content_type:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=415,
+                audio_content_type=None,
+                encounter_ref=str(encounter_ref or ""),
+                error_code="unsupported_audio_type",
+            )
             return Response({"detail": "Audio inválido o formato no soportado"}, status=415)
 
         patient_unit_ids, patient_unit_error = _fetch_patient_unit_ids_for_upload(request, str(patient_id))
         if patient_unit_error is not None:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=patient_unit_error.status_code,
+                audio_content_type=audio_content_type,
+                encounter_ref=str(encounter_ref or ""),
+                error_code=_extract_response_error_code(patient_unit_error, "audio_upload_patient_lookup_failed"),
+            )
             return patient_unit_error
         if patient_unit_ids is not None and unit_id not in patient_unit_ids:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=403,
+                audio_content_type=audio_content_type,
+                encounter_ref=str(encounter_ref or ""),
+                error_code="audio_upload_patient_unit_mismatch",
+            )
             return Response(
                 {
                     "detail": "Requested patient is outside the supplied unit scope.",
@@ -905,14 +1015,60 @@ class AudioToFHIRView(ProtectedAIAPIView):
                 timeout=60,
             )
         except httpx.HTTPError:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=503,
+                audio_content_type=audio_content_type,
+                encounter_ref=str(encounter_ref or ""),
+                error_code="fhir_unavailable",
+                payload_obj=doc,
+            )
             return Response({"detail": "No se pudo contactar el servidor FHIR", "code": "fhir_unavailable"}, status=503)
 
         if resp.status_code >= 400:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=resp.status_code,
+                audio_content_type=audio_content_type,
+                encounter_ref=str(encounter_ref or ""),
+                error_code="fhir_upload_rejected",
+                payload_obj=doc,
+            )
             return _safe_upstream_upload_error(resp.status_code)
 
         try:
-            return Response(resp.json(), status=resp.status_code)
+            response_payload = resp.json()
         except Exception:
+            _emit_audio_upload_audit(
+                request=request,
+                patient_id=str(patient_id),
+                unit_id=unit_id,
+                status="fail",
+                http_status=502,
+                audio_content_type=audio_content_type,
+                encounter_ref=str(encounter_ref or ""),
+                error_code="fhir_invalid_response",
+                payload_obj=doc,
+            )
             return Response({"detail": "Respuesta del servidor FHIR no es JSON", "code": "fhir_invalid_response"}, status=502)
+
+        _emit_audio_upload_audit(
+            request=request,
+            patient_id=str(patient_id),
+            unit_id=unit_id,
+            status="success",
+            http_status=resp.status_code,
+            audio_content_type=audio_content_type,
+            encounter_ref=str(encounter_ref or ""),
+            payload_obj=doc,
+            resource_id=_extract_document_reference_id(response_payload),
+        )
+        return Response(response_payload, status=resp.status_code)
 
 
