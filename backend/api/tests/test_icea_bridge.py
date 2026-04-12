@@ -1397,6 +1397,23 @@ class IceaBridgeApiTests(TestCase):
     @patch.dict(
         os.environ,
         {
+            'ENABLE_ICEA_OPS_SUMMARY': 'false',
+            'ENABLE_ICEA_OPS_EVENTS': 'false',
+        },
+        clear=False,
+    )
+    def test_query_view_remains_available_when_admin_ops_kill_switches_are_off(self):
+        self._auth(roles=['supervisor'])
+
+        response = self.client.get(self.status_query_url, {'handoverId': 'bundle-bridge-001'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+        self.assertEqual(response.json()['results'][0]['handoverId'], 'bundle-bridge-001')
+
+    @patch.dict(
+        os.environ,
+        {
             'ENABLE_ICEA_BRIDGE': 'true',
             'ICEA_BRIDGE_STALE_AFTER_SECONDS': '60',
         },
