@@ -2,25 +2,27 @@
 
 ## Objetivo
 
-HANDOVER construye y entrega un payload analitico trazable hacia ICEA+ **despues** de persistir con exito la transaccion clinica. El calculo analitico sigue viviendo en ICEA+; HANDOVER no duplica el motor matematico.
+HANDOVER construye y entrega un payload analitico trazable hacia ICEA+ **solo despues** de confirmar con exito la transaccion clinica FHIR. El calculo analitico sigue viviendo en ICEA+; HANDOVER no duplica el motor matematico.
 
 Principios aplicados:
 - clinica primero: un fallo de ICEA+ no revierte el guardado del handover;
+- shadow mode estricto: outbox, snapshots, bridge y cualquier persistencia tecnica post-FHIR degradan de forma best-effort y no contaminan el exito clinico ya confirmado;
 - backend unico: React Native solo consume el backend HANDOVER;
 - scoring honesto: `immediate_provisional` no implica conclusiones definitivas ni habilita score individual visible;
 - trazabilidad completa: request id, hash, contrato y estado quedan persistidos en HANDOVER.
 
 ## Flujo real
 
-1. `POST /api/fhir/transaction` persiste el Bundle FHIR y el `HandoverBundleRecord`.
-2. HANDOVER actualiza el snapshot tecnico del pipeline ICEA ya existente.
-3. Si `ENABLE_ICEA_BRIDGE=true`, HANDOVER crea o actualiza un `IceaBridgeRequest`.
-4. Se construye el payload analitico v1 en `backend/api/icea_payload_mapper.py`.
-5. La entrega a ICEA+ se intenta de forma desacoplada y best-effort desde `backend/api/icea_bridge_service.py`.
-6. El scheduler del bridge tiene una sola fuente de verdad: el service programa entregas nuevas al crear el request y evita reprogramar una request ya `queued`; los retries admin reutilizan el mismo helper con `force=true`.
-7. HANDOVER persiste el ultimo estado visible (`queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`) y un resumen minimo del score si ICEA+ lo devuelve.
-8. Los fallos retryables del submit del bridge se reintentan de forma acotada y con backoff; si se agotan, la request termina en `failed` con el ultimo error persistido.
-9. Cualquier `accepted` o `pending` que no alcance resolucion dentro de la ventana configurada expira a `stale`, de modo que no queda un pending indefinido.
+1. `POST /api/fhir/transaction` confirma primero la transaccion clinica contra FHIR.
+2. Solo despues de ese exito, HANDOVER dispara side effects tecnicos best-effort: outbox ICEA+, persistencia local `HandoverBundleRecord`, snapshot tecnico y bridge.
+3. Si falla cualquiera de esas costuras tecnicas post-FHIR, HANDOVER conserva el exito clinico y degrada de forma honesta la trazabilidad/analitica derivada.
+4. Si `ENABLE_ICEA_BRIDGE=true`, HANDOVER crea o actualiza un `IceaBridgeRequest`.
+5. Se construye el payload analitico v1 en `backend/api/icea_payload_mapper.py`.
+6. La entrega a ICEA+ se intenta de forma desacoplada y best-effort desde `backend/api/icea_bridge_service.py`.
+7. El scheduler del bridge tiene una sola fuente de verdad: el service programa entregas nuevas al crear el request y evita reprogramar una request ya `queued`; los retries admin reutilizan el mismo helper con `force=true`.
+8. HANDOVER persiste el ultimo estado visible (`queued`, `sent`, `accepted`, `pending`, `scored`, `failed`, `stale`) y un resumen minimo del score si ICEA+ lo devuelve.
+9. Los fallos retryables del submit del bridge se reintentan de forma acotada y con backoff; si se agotan, la request termina en `failed` con el ultimo error persistido.
+10. Cualquier `accepted` o `pending` que no alcance resolucion dentro de la ventana configurada expira a `stale`, de modo que no queda un pending indefinido.
 
 ## Payload analitico v1
 
@@ -245,6 +247,19 @@ En shadow mode prudente, activar `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK` no debe 
 - el contrato v1 ya no entrega IDs nominales de profesional al payload analitico del bridge;
 - Ningun campo del envelope contextual debe interpretarse como causalidad, benchmarking causal o explicabilidad clinica fuerte.
 - El dashboard debe tratar `provisional=true` y `insufficientEvidence=true` como resultados no concluyentes y no mostrar score individual visible.
+
+## Shadow mode vinculante
+
+Permanece en shadow mode:
+- outbox tecnico ICEA+, snapshots de pipeline, `IceaBridgeRequest`, `/api/icea/bridge/*` y superficies agregadas/admin derivadas;
+- cualquier payload, warning o estado del bridge existe para trazabilidad tecnica y lectura agregada autorizada, no para decidir exito clinico del handover;
+- la costura backend `patient-risk` solo puede entenderse como seam gobernado y suprimido en la UI clinica operativa mientras siga el shadow mode prudente.
+
+No debe usarse jamas como evaluacion individual:
+- score numerico individual visible;
+- ranking, benchmarking nominal o uso punitivo sobre profesionales;
+- resumen causal cerrado o atribucion causal del resultado enfermero;
+- sustitucion del juicio clinico, del cierre operativo del handover o del criterio asistencial habitual.
 
 ## Riesgos residuales
 

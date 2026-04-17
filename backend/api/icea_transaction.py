@@ -101,7 +101,10 @@ def persist_successful_transaction_icea_side_effects(
         logger.exception("ICEA outbox enqueue failed after successful clinical transaction")
 
     if persist_bundle_record is not None:
-        persist_bundle_record(bundle=bundle, request=request)
+        try:
+            persist_bundle_record(bundle=bundle, request=request)
+        except Exception:
+            logger.exception("ICEA bundle persistence failed after successful clinical transaction")
 
     try:
         snapshot_callback(bundle=bundle, request=request)

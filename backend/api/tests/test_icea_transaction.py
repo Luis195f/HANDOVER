@@ -95,3 +95,50 @@ class IceaTransactionFlowRegressionTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(order, ['outbox', 'persist', 'snapshot', 'bridge'])
+
+    @patch('backend.api.icea_transaction.logger')
+    @patch('backend.api.views._create_audit_event_for_transaction', autospec=True)
+    @patch('backend.api.views._post_transaction_to_fhir')
+    def test_successful_transaction_keeps_clinical_201_when_bundle_record_persistence_fails(
+        self,
+        mock_fhir_post,
+        _mock_audit,
+        mock_logger,
+    ):
+        order: list[str] = []
+        mock_fhir_post.return_value = build_fhir_response()
+
+        def record(name: str, *, error: Exception | None = None):
+            def _inner(*args, **kwargs):
+                order.append(name)
+                if error is not None:
+                    raise error
+                return None
+
+            return _inner
+
+        with patch(
+            'backend.api.views.enqueue_icea_outbound_event_for_transaction',
+            side_effect=record('outbox'),
+        ), patch(
+            'backend.api.views._persist_handover_bundle_record',
+            side_effect=record('persist', error=RuntimeError('bundle store unavailable')),
+        ), patch(
+            'backend.api.views.ensure_pipeline_snapshot_from_bundle',
+            side_effect=record('snapshot'),
+        ), patch(
+            'backend.api.views.enqueue_icea_bridge_request_for_transaction',
+            side_effect=record('bridge'),
+        ):
+            response = self.client.post(
+                self.url,
+                data=build_icea_bundle(bundle_id='bundle-persist-fail-001', patient_id='pat-persist-fail-001', unit_id='icu-a'),
+                format='json',
+                HTTP_IDEMPOTENCY_KEY='req-persist-fail-001',
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(order, ['outbox', 'persist', 'snapshot', 'bridge'])
+        mock_logger.exception.assert_called_once_with(
+            'ICEA bundle persistence failed after successful clinical transaction',
+        )

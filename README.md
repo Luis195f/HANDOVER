@@ -367,12 +367,14 @@ HANDOVER incluye ahora un puente analitico dedicado hacia ICEA+ que se activa **
 Que hace HANDOVER:
 - estructura y mapea el Bundle FHIR a un payload analitico v1;
 - envia la solicitud de scoring de forma desacoplada y no bloqueante;
+- degrada de forma honesta si fallan outbox, persistencia tecnica, snapshot o bridge, sin cambiar el exito clinico ya confirmado;
 - persiste estado visible, hash, warnings, modo de scoring y resumen minimo del resultado;
-- expone endpoints `/api/icea/bridge/*` para UI y dashboards.
+- expone endpoints `/api/icea/bridge/*` solo para trazabilidad tecnica y superficies agregadas/admin autorizadas.
 
 Que no hace HANDOVER:
 - no ejecuta el motor matematico de ICEA+;
 - no afirma conclusiones clinicas definitivas en `immediate_provisional`;
+- no habilita dashboards nominales, scoring individual, resumen causal visible ni evaluacion profesional individual;
 - no permite llamadas directas desde la app movil a ICEA+.
 
 Flags principales:
@@ -381,7 +383,7 @@ Flags principales:
 
 Mientras el upstream ICEA+ no publique un endpoint real de status para score, HANDOVER no inventa polling: el estado local visible pasa a ser la fuente operativa y solo se intenta refresh remoto cuando el cliente pide `refresh=true` y existe `ICEA_BRIDGE_STATUS_PATH` configurado.
 
-En postura de piloto prudente, HANDOVER conserva la trazabilidad tecnica del bridge pero suprime cualquier salida ICEA paciente-a-paciente en la UI operativa, incluido score individual, resumen causal y soporte bedside visible.
+En postura de piloto prudente, HANDOVER conserva la trazabilidad tecnica del bridge pero suprime cualquier salida ICEA paciente-a-paciente en la UI operativa, incluido score individual, resumen causal, soporte bedside visible y cualquier uso nominal o punitivo.
 
 Documentacion relacionada:
 - [Bridge analitico ICEA+](docs/icea-bridge.md)
