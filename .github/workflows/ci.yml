@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [main]
@@ -11,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v2
         with:
@@ -27,6 +32,16 @@ jobs:
 
       - name: Install dependencies (frozen lockfile)
         run: pnpm install --frozen-lockfile
+
+      - name: Record gate toolchain
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          {
+            echo "node=$(node --version)"
+            echo "pnpm=$(pnpm --version)"
+            echo "python=$(python --version 2>&1)"
+          } > artifacts/pilot-gate-toolchain.txt
 
       - name: Type check
         run: pnpm -w typecheck
@@ -83,16 +98,6 @@ jobs:
           path: coverage-badge.svg
           retention-days: 7
 
-      - name: Publish pilot coverage summary
-        shell: bash
-        run: |
-          {
-            echo "## Pilot-grade JS coverage"
-            echo
-            python -c 'import xml.etree.ElementTree as ET; rate=float(ET.parse("coverage/cobertura-coverage.xml").getroot().get("line-rate", "0"))*100; print(f"- Line coverage: {rate:.2f}%")'
-            echo "- Evidence: coverage/lcov.info, coverage/cobertura-coverage.xml, coverage HTML report"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload pilot coverage evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -137,15 +142,51 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish pilot gate summary
+      - name: Write pilot gate evidence summary
         if: always()
         shell: bash
         run: |
           {
-            echo "## Pilot gate evidence"
+            echo "# CI pilot gate evidence"
             echo
-            echo "- JS gate commands: pnpm -w typecheck, pnpm -w lint:ci, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
-            echo "- Uploaded artifacts: coverage-badge, coverage-pilot, playwright-evidence, fhir-validation"
-            echo "- Backend pytest and backend coverage remain in the separate Django CI workflow by design."
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "## Gate"
+            echo
+            echo "- Commands: pnpm -w typecheck, pnpm -w lint:ci, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
+            echo "- Scope: strict TypeScript gate, ESLint with zero warnings, explicit sensitive-any guard, pilot-grade frontend suites with coverage, browser E2E and representative FHIR fixture validation."
+            echo
+            echo "## Reproducibility"
+            echo
+            echo "- Toolchain manifest: artifacts/pilot-gate-toolchain.txt"
+            echo "- Frozen install: pnpm install --frozen-lockfile"
+            echo "- Node source of truth: .nvmrc"
+            echo "- pnpm source of truth: packageManager=pnpm@10.17.1"
+            echo
+            echo "## Human-readable evidence"
+            echo
+            if [ -f coverage/cobertura-coverage.xml ]; then
+              python -c 'import xml.etree.ElementTree as ET; rate=float(ET.parse("coverage/cobertura-coverage.xml").getroot().get("line-rate", "0"))*100; print(f"- coverage-pilot: HTML + lcov + Cobertura ({rate:.2f}% line coverage).")'
+            else
+              echo "- coverage-pilot: missing cobertura evidence."
+            fi
+            echo "- coverage-badge: one-file SVG snapshot of frontend pilot coverage."
+            echo "- playwright-evidence: HTML report plus raw Playwright test-results when generated."
+            if [ -f artifacts/fhir-validation.txt ]; then
+              echo "- fhir-validation: plain-text transcript of validate:fhir over representative bundles."
+            else
+              echo "- fhir-validation: missing validation transcript."
+            fi
+            echo "- Backend pytest and backend coverage stay in the separate Django CI workflow by design."
+          } > artifacts/pilot-gate-summary.md
+          cat artifacts/pilot-gate-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload pilot gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-gate-summary
+          path: |
+            artifacts/pilot-gate-summary.md
+            artifacts/pilot-gate-toolchain.txt
+          if-no-files-found: error
+          retention-days: 7
 
