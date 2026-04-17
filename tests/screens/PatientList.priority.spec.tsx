@@ -146,5 +146,23 @@ describe('PatientList deny-first authz seam', () => {
 
     expect(statuses['pat-without-queue-entry']).toBeUndefined();
   });
+
+  it('builds an offline patient-list notice without pretending the list is empty', async () => {
+    const { buildPatientListLoadNotice } = await import('@/src/screens/PatientList');
+
+    expect(buildPatientListLoadNotice(new Error('Network request failed'))).toEqual({
+      title: 'No se pudo actualizar la lista',
+      message: 'Sin conexión. La lista de pacientes no se pudo actualizar ahora mismo.',
+      action: 'retry',
+    });
+  });
+
+  it('keeps stale list data only when the failed request matches the last successful scope', async () => {
+    const { shouldKeepPatientListOnLoadFailure } = await import('@/src/screens/PatientList');
+
+    expect(shouldKeepPatientListOnLoadFailure('icu-a', 'icu-a', 3)).toBe(true);
+    expect(shouldKeepPatientListOnLoadFailure('icu-b', 'icu-a', 3)).toBe(false);
+    expect(shouldKeepPatientListOnLoadFailure('icu-a', 'icu-a', 0)).toBe(false);
+  });
 });
 

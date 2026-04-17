@@ -128,10 +128,10 @@ export function HandoverOverview({
       ) : null}
       {isE2E ? (
         <View style={styles.e2eControls} testID="e2e-controls">
-          <Text style={styles.e2eTitle}>E2E controles</Text>
+          <Text style={styles.e2eTitle}>Controles E2E</Text>
           <View style={styles.e2eActions}>
-            <Button title="Forzar estado final" onPress={onSetFinalStatus} testID="e2e-set-final" />
-            <Button title="Añadir firma mock" onPress={onAddSignature} testID="e2e-add-signature" />
+            <Button title="Marcar final" onPress={onSetFinalStatus} testID="e2e-set-final" />
+            <Button title="Registrar firma" onPress={onAddSignature} testID="e2e-add-signature" />
             <Button title="Completar checklist" onPress={onCompleteChecklist} testID="e2e-complete-checklist" />
           </View>
         </View>

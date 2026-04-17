@@ -11,6 +11,7 @@ const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const validateBundle = vi.fn(() => ({ isValid: true, errors: [] }));
 const ensureUnitAccess = vi.fn();
 const confirmHighRiskSubmission = vi.fn(async () => true);
+const netInfoFetchMock = vi.fn(async () => ({ isConnected: true, isInternetReachable: true }));
 const flagState = vi.hoisted(() => ({
   values: {} as Record<string, boolean>,
 }));
@@ -257,6 +258,11 @@ vi.mock('@/src/lib/stt', () => ({
     getLastError: () => null,
   }),
 }));
+vi.mock('@/src/lib/netinfo', () => ({
+  default: {
+    fetch: (...args: unknown[]) => netInfoFetchMock(...args),
+  },
+}));
 
 vi.mock('@/src/lib/ai-suggestions', () => ({ fetchInterventionsSuggestions: vi.fn() }));
 
@@ -398,6 +404,8 @@ describe('HandoverForm drafts', () => {
     pilotRuntimeState.runtimeCalls.length = 0;
     pilotRuntimeState.runtimeOverride = null;
     flagState.values = {};
+    netInfoFetchMock.mockReset();
+    netInfoFetchMock.mockResolvedValue({ isConnected: true, isInternetReachable: true });
     authState.session = {
       userId: 'nurse-1',
       displayName: 'Nurse One',
@@ -488,8 +496,42 @@ describe('HandoverForm drafts', () => {
     const [handoverInput] = buildHandoverBundleAsync.mock.calls[0];
     expect(handoverInput.status).toBe('draft');
 
-    // ✅ Ahora vuelve a ser el OK (ya no cae en el catch por el audit)
-    expect(alertSpy).toHaveBeenCalledWith('OK', expect.stringContaining('Entrega encolada'));
+    const [title, message, buttons] = alertSpy.mock.calls[0];
+    expect(title).toBe('OK');
+    expect(message).toContain('Entrega encolada');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    const queueButton = (buttons as any[]).find((btn) => btn.text === 'Ver cola');
+    expect(queueButton).toBeTruthy();
+  });
+
+  it('expone feedback offline honesto al encolar un borrador sin red', async () => {
+    const navigation = { navigate: vi.fn(), goBack: vi.fn() } as any;
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    netInfoFetchMock.mockResolvedValueOnce({ isConnected: false, isInternetReachable: false });
+
+    const view = render(
+      <HandoverForm
+        navigation={navigation}
+        route={{ key: 'offline-draft', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    fireEvent.press(view.getByText('Guardar borrador'));
+
+    await waitFor(() => {
+      expect(enqueueBundle).toHaveBeenCalledTimes(1);
+    });
+
+    const [title, message, buttons] = alertSpy.mock.calls[0];
+    expect(title).toBe('OK');
+    expect(message).toContain('Sin conexión');
+    expect(message).toContain('cola');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+
+    const queueButton = (buttons as any[]).find((btn) => btn.text === 'Ver cola');
+    expect(queueButton).toBeTruthy();
+    await queueButton.onPress?.();
+    expect(navigation.navigate).toHaveBeenCalledWith('SyncCenter');
   });
 
   it('muestra error y permite reintentar al fallar el encolado', async () => {

@@ -1,22 +1,6 @@
-import type {
-  DeviceSummary,
-  PendingTaskSummary,
-  RiskFlags,
-  VitalsSnapshot,
-} from '@/src/types/handover';
+import type { PatientListItem } from '@/src/types/patientList';
 
-export type PatientListItem = {
-  id: string;
-  name: string;
-  unitId: string;
-  bedLabel?: string;
-  vitals?: VitalsSnapshot;
-  devices?: DeviceSummary[];
-  risks?: RiskFlags;
-  pendingTasks?: PendingTaskSummary[];
-  lastIncidentAt?: string | null;
-  recentIncidentFlag?: boolean;
-};
+export type { PatientListItem } from '@/src/types/patientList';
 
 export const PATIENTS_MOCK: PatientListItem[] = [
   {
