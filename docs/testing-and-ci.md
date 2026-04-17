@@ -2,8 +2,8 @@
 
 > Estado del documento
 > - Estado: `implemented`.
-> - Última revisión: 2026-03-26.
-> - Fuente de verdad / evidencia base: `package.json`, `.github/workflows/ci.yml`, `.github/workflows/django.yml`, `backend/api/tests/test_icea_ops_api.py`, `tests/admin-api.spec.ts`.
+> - Última revisión: 2026-04-17.
+> - Fuente de verdad / evidencia base: `package.json`, `eslint.config.js`, `.github/workflows/ci.yml`, `.github/workflows/django.yml`, `backend/api/tests/test_icea_ops_api.py`, `tests/admin-api.spec.ts`.
 > - Riesgos o lagunas abiertas: este documento refleja los runners y gates actuales del repo; no implica que todas las suites se hayan ejecutado en cada corte documental.
 
 ## Runner principal
@@ -12,15 +12,20 @@
 - Ese comando ejecuta `vitest.pilot.config.ts`, la bateria pilot-grade que ya respalda el gate sensible de CI.
 - Para el backend Django/DRF, el runner vigente sigue siendo `pytest`; no se introduce un cuarto sistema.
 - La reproducibilidad del toolchain queda anclada en el repo con `.nvmrc` (`20.17.0`), `packageManager=pnpm@10.17.1` y `vitest` / `@vitest/coverage-v8` fijados en la misma version exacta.
+- El comando release-grade local mas cercano al gate real queda en `pnpm -w quality:release`; encadena higiene de árbol (`git diff --check`), gate JS sensible con evidencia y `pytest` backend con cobertura XML.
 
 ## Cuándo usar runners secundarios
 
 - `pnpm -w test:pilot:coverage:ci`: misma bateria pilot-grade, pero con reportes `lcov` + `cobertura` para CI.
 - `pnpm -w quality:pilot:ci`: espejo local del gate JS principal de CI (`typecheck` + `lint:ci` + `gate:any-sensitive` + cobertura pilot-grade + `test:e2e` + `validate:fhir`).
+- `pnpm -w quality:backend`: runner backend reproducible alineado con GitHub Actions, sin cobertura.
+- `pnpm -w quality:backend:coverage`: mismo runner backend con `coverage.xml` para rehearsal local o evidencia previa a RC.
+- `pnpm -w quality:release`: one-shot conservador para release/piloto serio: higiene de árbol + gate JS sensible + `pytest` backend con cobertura.
 - `pnpm -w test:unit`: Vitest general para explorar regresiones fuera del gate pilot-grade o ampliar cobertura durante desarrollo.
 - `pnpm -w test:smoke:forms`: smoke rápido del flujo crítico de `HandoverForm`.
 - `pnpm -w test:legacy`: Jest legacy solo para `jest-tests/**` o cuando se toca compatibilidad histórica que todavía no migró a Vitest.
 - `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`: runner backend más cercano a GitHub Actions.
+- `pnpm -w lint:ci` sigue siendo estricto (`--max-warnings=0`), pero ahora ignora caches y artefactos generados (`.pytest_cache`, `artifacts`, `playwright-report`, `test-results`, `htmlcov`) para no convertir residuos locales en ruido del gate.
 
 ## Pipeline local pilot-grade
 
@@ -30,6 +35,11 @@ Usa este pipeline cuando toques auth, sync/queue, FHIR mapping, validación clí
   ```bash
   pnpm -w quality:pilot
   ```
+- Validación release-grade reproducible:
+  ```bash
+  pnpm -w quality:release
+  ```
+  Produce `coverage/` para frontend y `coverage.xml` para backend, ademas de fallar si hay whitespace/conflict hygiene pendiente detectable por `git diff --check`.
 - Espejo local del gate JS de CI con artefactos de cobertura:
   ```bash
   pnpm -w quality:pilot:ci
@@ -134,6 +144,53 @@ Comandos locales recomendados:
   pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
   ```
 
+## Evidencia exacta por workflow
+
+### Workflow `CI`
+
+Gate ejecutado:
+
+- `pnpm install --frozen-lockfile`
+- `pnpm -w typecheck`
+- `pnpm -w lint:ci`
+- `pnpm -w gate:any-sensitive`
+- `pnpm -w test:pilot:coverage:ci`
+- `pnpm -w test:e2e`
+- `pnpm -w validate:fhir`
+
+Evidencia publicada:
+
+- `pilot-gate-summary`: resumen humano del gate, alcance, toolchain (`node`, `pnpm`, `python`) y significado de cada artefacto.
+- `coverage-badge`: snapshot SVG rápido del resultado de cobertura pilot-grade frontend.
+- `coverage-pilot`: directorio `coverage/` completo con HTML, `lcov.info` y `cobertura-coverage.xml`.
+- `playwright-evidence`: `playwright-report/` y `test-results/playwright` cuando existen.
+- `fhir-validation`: transcripción de texto plano de `validate:fhir` sobre bundles representativos.
+
+Interpretación:
+
+- Este workflow da evidencia del seam JS/Expo clínico y del trust boundary FHIR del frontend.
+- No sustituye la evidencia backend; esa vive en `Django CI`.
+
+### Workflow `Django CI`
+
+Gate ejecutado:
+
+- matrix `pytest` en Python `3.10`, `3.11` y `3.12` tras `python manage.py migrate --noinput`
+- job de cobertura backend en Python `3.12` con:
+  ```bash
+  pytest --ds=backend.settings --maxfail=1 --disable-warnings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --junitxml=backend-pytest-junit.xml backend tests
+  ```
+
+Evidencia publicada:
+
+- `backend-coverage-xml`: `coverage.xml` de `coverage.py` para el backend Django/DRF.
+- `backend-gate-evidence`: resumen humano del gate, manifest de toolchain Python, transcripción completa de `pytest` y `backend-pytest-junit.xml`.
+
+Interpretación:
+
+- Este workflow da evidencia de regresión backend, reproducibilidad Python y bloqueo de llamadas externas con `--disable-socket`.
+- La cobertura backend sigue siendo evidencia auxiliar; no sustituye el juicio sobre seams clínicos o de seguridad.
+
 ## Variables dummy usadas en GitHub Actions
 
 Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
@@ -161,10 +218,11 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 
 - El workflow `CI` instala dependencias con `pnpm install --frozen-lockfile` tanto en `pull_request` como en `push`.
 - `CI` usa `pnpm/action-setup` fijado en `10.17.1` y `actions/setup-node` leyendo `.nvmrc`, para que el runner comparta la misma base documentada del repo.
+- `CI` y `Django CI` fuerzan permisos mínimos de GitHub (`contents: read`) y hacen checkout con `persist-credentials: false`, para no ampliar superficie de credenciales en jobs que solo leen y validan.
 - El paso JS principal de CI usa `pnpm -w test:pilot:coverage:ci`, que es la misma batería que `pnpm test` con reportes extra para artefactos.
 - `lint:ci` es el comando de referencia para lint estricto en CI.
-- `CI` publica evidencia reutilizable de RC: `coverage-badge`, `coverage-pilot` (lcov + Cobertura + HTML), `playwright-evidence` (HTML + JUnit cuando existe) y `fhir-validation`.
-- La evidencia backend sigue viviendo en el workflow separado `Django CI`, que publica `backend-coverage-xml`.
+- `CI` publica evidencia reutilizable de RC: `pilot-gate-summary`, `coverage-badge`, `coverage-pilot` (lcov + Cobertura + HTML), `playwright-evidence` (HTML + JUnit cuando existe) y `fhir-validation`.
+- La evidencia backend sigue viviendo en el workflow separado `Django CI`, que publica `backend-coverage-xml` y `backend-gate-evidence`.
 
 ## Topología de runners vigente
 

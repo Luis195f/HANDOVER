@@ -1,5 +1,8 @@
 name: Django CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -29,6 +32,8 @@ jobs:
       HANDOVER_REQUIRE_RBAC_ON_FHIR: "true"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -79,6 +84,8 @@ jobs:
       HANDOVER_REQUIRE_RBAC_ON_FHIR: "true"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -96,11 +103,22 @@ jobs:
           pip install -r backend/requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Record backend toolchain
+        run: |
+          mkdir -p artifacts
+          {
+            echo "python=$(python --version 2>&1)"
+            echo "pip=$(pip --version)"
+          } > artifacts/backend-gate-toolchain.txt
+
       - name: Run database migrations
         run: python manage.py migrate --noinput
 
       - name: Run pytest with coverage (backend only)
+        shell: bash
         run: |
+          set -euo pipefail
+          status=0
           pytest \
             --ds=backend.settings \
             --maxfail=1 \
@@ -111,8 +129,10 @@ jobs:
             --cov-branch \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            backend tests
-          test -f coverage.xml
+            --junitxml=backend-pytest-junit.xml \
+            backend tests 2>&1 | tee artifacts/backend-pytest.txt || status=${PIPESTATUS[0]}
+          test -f coverage.xml || status=1
+          exit "${status}"
 
       - name: Publish coverage summary
         run: |
@@ -120,6 +140,7 @@ jobs:
             echo "## Backend coverage (pytest + coverage.py)"
             echo
             python -c 'import xml.etree.ElementTree as ET; rate=float(ET.parse("coverage.xml").getroot().get("line-rate", "0"))*100; print(f"- Line coverage: {rate:.2f}%")'
+            echo "- Evidence: backend-coverage-xml + backend-gate-evidence"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage artifact
@@ -127,4 +148,55 @@ jobs:
         with:
           name: backend-coverage-xml
           path: coverage.xml
+          retention-days: 7
+
+      - name: Write backend gate evidence summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Django CI backend evidence"
+            echo
+            echo "## Gate"
+            echo
+            echo "- Matrix smoke: pytest on Python 3.10, 3.11 and 3.12 after migrations."
+            echo "- Coverage gate: pytest --ds=backend.settings --maxfail=1 --disable-warnings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --junitxml=backend-pytest-junit.xml backend tests"
+            echo
+            echo "## Reproducibility"
+            echo
+            echo "- Toolchain manifest: artifacts/backend-gate-toolchain.txt"
+            echo "- Dependency sources: requirements.txt, backend/requirements.txt, requirements-dev.txt"
+            echo "- Network guard: pytest socket blocking with localhost-only allowlist"
+            echo
+            echo "## Human-readable evidence"
+            echo
+            if [ -f coverage.xml ]; then
+              python -c 'import xml.etree.ElementTree as ET; rate=float(ET.parse("coverage.xml").getroot().get("line-rate", "0"))*100; print(f"- backend-coverage-xml: coverage.py XML snapshot ({rate:.2f}% line coverage).")'
+            else
+              echo "- backend-coverage-xml: missing coverage.xml."
+            fi
+            if [ -f artifacts/backend-pytest.txt ]; then
+              echo "- backend-gate-evidence/backend-pytest.txt: full pytest transcript for human review."
+            else
+              echo "- backend-gate-evidence/backend-pytest.txt: missing pytest transcript."
+            fi
+            if [ -f backend-pytest-junit.xml ]; then
+              echo "- backend-gate-evidence/backend-pytest-junit.xml: machine-readable test result index."
+            else
+              echo "- backend-gate-evidence/backend-pytest-junit.xml: missing JUnit report."
+            fi
+          } > artifacts/backend-gate-summary.md
+          cat artifacts/backend-gate-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload backend gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-gate-evidence
+          path: |
+            artifacts/backend-gate-summary.md
+            artifacts/backend-gate-toolchain.txt
+            artifacts/backend-pytest.txt
+            backend-pytest-junit.xml
+          if-no-files-found: error
           retention-days: 7
