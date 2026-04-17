@@ -26,6 +26,7 @@ from backend.api.icea_pipeline import (
 )
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
 from backend.api.pilot_control import (
+    evaluate_pilot_feature,
     evaluate_pilot_feature_governance,
     resolve_roles_from_request,
 )
@@ -338,6 +339,7 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if bridge_request is None:
             return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
         bridge_request = expire_icea_bridge_request_if_due(bridge_request)
+        request_roles = resolve_roles_from_request(request)
 
         payload = request.data if isinstance(request.data, dict) else {}
         requested_mode = str(payload.get('scoringMode') or '').strip() or bridge_request.scoring_mode
@@ -352,8 +354,16 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if (
             not settings.enabled
             or not settings.allows_mode(requested_mode)
-            or not evaluate_pilot_feature('icea_bridge', unit_id=bridge_request.unit_id)['enabled']
-            or not evaluate_pilot_feature(scoring_feature, unit_id=bridge_request.unit_id)['enabled']
+            or not evaluate_pilot_feature(
+                'icea_bridge',
+                unit_id=bridge_request.unit_id,
+                roles=request_roles,
+            )['enabled']
+            or not evaluate_pilot_feature(
+                scoring_feature,
+                unit_id=bridge_request.unit_id,
+                roles=request_roles,
+            )['enabled']
         ):
             return _error_response(
                 detail='ICEA bridge is disabled for this scoring mode.',
