@@ -1,7 +1,7 @@
 import datetime
 import pytest
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
 from backend.api.audit_pseudonymization import build_audit_patient_key
@@ -574,6 +574,85 @@ def test_transcribe_returns_503_when_openai_disabled(monkeypatch):
     assert response.status_code == 503
     assert "deshabilitado" in response.json()["detail"]
     assert response.json()["code"] == "ai_disabled"
+
+
+@override_settings(HANDOVER_DEPLOYMENT_MODE="test")
+def test_suggest_interventions_is_fail_closed_by_default():
+    client = _auth_client()
+
+    response = client.post(
+        "/api/ai/suggest-interventions",
+        data={"language": "es", "section": "other", "notes": "Paciente estable", "unitId": "icu-a"},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "kill_switch_disabled"
+    assert "feature" not in response.json()
+
+
+@override_settings(HANDOVER_DEPLOYMENT_MODE="test")
+def test_suggest_interventions_requires_unit_id(monkeypatch):
+    client = _auth_client()
+    monkeypatch.setenv("AI_SUGGESTIONS_ENABLED", "true")
+
+    response = client.post(
+        "/api/ai/suggest-interventions",
+        data={"language": "es", "section": "other", "notes": "Paciente estable"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "ai_suggestions_unit_required"
+
+
+@override_settings(HANDOVER_DEPLOYMENT_MODE="test")
+def test_suggest_interventions_respects_pilot_control_rollout_no_go(monkeypatch):
+    client = _auth_client()
+    monkeypatch.setenv("AI_SUGGESTIONS_ENABLED", "true")
+    monkeypatch.setenv(
+        "HANDOVER_PILOT_CONTROL_JSON",
+        '{"rolloutStatus":"no-go","features":{"ai_suggestions":{"mode":"enabled"}}}',
+    )
+
+    response = client.post(
+        "/api/ai/suggest-interventions",
+        data={"language": "es", "section": "other", "notes": "Paciente estable", "unitId": "icu-a"},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "rollout_no_go"
+    assert "feature" not in response.json()
+
+
+@override_settings(HANDOVER_DEPLOYMENT_MODE="test")
+def test_suggest_interventions_returns_payload_when_backend_gate_allows(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    client = _auth_client()
+    monkeypatch.setenv("AI_SUGGESTIONS_ENABLED", "true")
+
+    class _FakeSuggestions:
+        def model_dump(self):
+            return {
+                "section": "other",
+                "interventions": ["Reevaluar signos vitales"],
+            }
+
+    async def _fake_generate(_ctx):
+        return _FakeSuggestions()
+
+    monkeypatch.setattr(views_ai, "generate_intervention_suggestions", _fake_generate, raising=True)
+
+    response = client.post(
+        "/api/ai/suggest-interventions",
+        data={"language": "es", "section": "other", "notes": "Paciente estable", "unitId": "icu-a"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["interventions"] == ["Reevaluar signos vitales"]
 
 def test_refine_rejects_integer_draft_fields(monkeypatch):
     import backend.api.views_ai as views_ai

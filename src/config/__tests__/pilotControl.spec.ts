@@ -22,7 +22,6 @@ describe('pilotControl', () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv };
     delete process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE;
-    delete process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON;
     delete process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE;
     delete process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK;
     delete process.env.EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING;
@@ -36,17 +35,6 @@ describe('pilotControl', () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE = 'true';
     process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK = 'true';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      explicitShadowModeForIcea: true,
-      features: {
-        icea_patient_risk: {
-          mode: 'pilot',
-          enabledUnits: ['icu-a'],
-          allowedRoles: ['nurse', 'supervisor', 'admin'],
-          environmentScope: ['pilot', 'test'],
-        },
-      },
-    });
 
     const { resolvePilotFeatureState } = await import('../pilotControl');
     const state = resolvePilotFeatureState('icea_patient_risk', {
@@ -64,36 +52,18 @@ describe('pilotControl', () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      features: {
-        governed_nnn: {
-          mode: 'pilot',
-          enabledUnits: ['ward-a'],
-          environmentScope: ['pilot'],
-        },
-      },
-    });
 
     const { resolvePilotFeatureState } = await import('../pilotControl');
 
     expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-a' }).enabled).toBe(false);
     expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-a' }).denialReason).toBe('backend_unavailable');
     expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-b' }).enabled).toBe(false);
-    expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-b' }).denialReason).toBe('unit_out_of_scope');
+    expect(resolvePilotFeatureState('governed_nnn', { unitId: 'ward-b' }).denialReason).toBe('backend_unavailable');
   });
 
   it('uses the backend feature endpoint as the primary source of truth', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK = 'true';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      features: {
-        icea_patient_risk: {
-          mode: 'pilot',
-          enabledUnits: ['icu-a'],
-          allowedRoles: ['nurse'],
-        },
-      },
-    });
     mockState.apiGet.mockResolvedValue({
       generatedAt: '2026-03-27T10:00:00Z',
       requestedContext: {
@@ -283,13 +253,6 @@ describe('pilotControl', () => {
 
   it('keeps the conservative fallback intact when the endpoint request fails', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'production';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      features: {
-        admin_analytics: {
-          mode: 'enabled',
-        },
-      },
-    });
     mockState.apiGet.mockRejectedValue(new Error('pilot-control unavailable'));
 
     const { refreshPilotControlContext, resolvePilotFeatureState } = await import('../pilotControl');

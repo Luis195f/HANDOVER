@@ -11,7 +11,9 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
 from backend.api.models import ClinicalDecisionEvent
-from backend.api.pilot_control import evaluate_pilot_feature
+from backend.api.pilot_control import (
+    evaluate_pilot_feature_governance,
+)
 
 
 CLINICAL_DECISION_ALLOWED_SOURCES = frozenset(
@@ -108,7 +110,6 @@ def _disabled_payload(*, unit_id: str | None, filters: dict[str, Any], feature: 
         **({"unitId": unit_id} if unit_id else {}),
     }
 
-
 def _decision_count_map(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts = {decision: 0 for decision in CLINICAL_DECISION_ALLOWED_DECISIONS}
     for row in rows:
@@ -203,7 +204,7 @@ def build_clinical_decision_summary_payload(
         "dateTo": date_to.strip() if isinstance(date_to, str) and date_to.strip() else None,
     }
 
-    feature = evaluate_pilot_feature("admin_analytics", unit_id=normalized_unit_id, roles=roles)
+    feature = evaluate_pilot_feature_governance("admin_analytics", unit_id=normalized_unit_id, roles=roles)
     if not feature["enabled"]:
         return _disabled_payload(unit_id=normalized_unit_id, filters=filters, feature=feature)
 

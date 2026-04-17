@@ -1,5 +1,3 @@
-import { isOn } from './flags';
-
 import type { RiskConfig } from '@/src/types/risk';
 
 const DEFAULT_RISK_CONFIG: RiskConfig = {
@@ -36,12 +34,6 @@ export function getRiskConfigOverrideFromEnv(): Partial<RiskConfig> {
 
 export function getEffectiveRiskConfig(): RiskConfig {
   const overrides = getRiskConfigOverrideFromEnv();
-
-  // Futuro: permitir cargar configuración remota si existe un feature flag
-  if (isOn('REMOTE_CONFIG_DISABLED_FOR_NOW')) {
-    // Placeholder para backend remoto
-  }
-
   return { ...DEFAULT_RISK_CONFIG, ...overrides };
 }
 

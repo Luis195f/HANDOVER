@@ -36,49 +36,65 @@ FEATURE_DEFAULT_ALLOWED_ROLES = {
 FEATURE_METADATA = {
     "icea_bridge": {
         "label": "ICEA bridge",
-        "env_var": "ENABLE_ICEA_BRIDGE",
+        "base_switches": (
+            {"name": "ENABLE_ICEA_BRIDGE", "default": False},
+        ),
         "shadow_accessible": True,
         "icea_related": True,
         "fallback": "HANDOVER mantiene FHIR, ETL y el flujo clínico base sin bridge ICEA.",
     },
     "icea_immediate_scoring": {
         "label": "Immediate scoring",
-        "env_var": "ENABLE_ICEA_IMMEDIATE_SCORING",
+        "base_switches": (
+            {"name": "ENABLE_ICEA_IMMEDIATE_SCORING", "default": False},
+        ),
         "shadow_accessible": True,
         "icea_related": True,
         "fallback": "El bundle clínico sigue persistiendo; no se solicita score inmediato.",
     },
     "icea_enriched_scoring": {
         "label": "Enriched scoring",
-        "env_var": "ENABLE_ICEA_ENRICHED_SCORING",
+        "base_switches": (
+            {"name": "ENABLE_ICEA_ENRICHED_SCORING", "default": False},
+        ),
         "shadow_accessible": True,
         "icea_related": True,
         "fallback": "El piloto continúa sin seguimiento enriquecido; permanece el score provisional o sin score.",
     },
     "icea_patient_risk": {
         "label": "Patient risk insights",
-        "env_var": "ENABLE_ICEA_PATIENT_RISK",
+        "base_switches": (
+            {"name": "ENABLE_ICEA_PATIENT_RISK", "default": False},
+        ),
         "shadow_accessible": False,
         "icea_related": True,
         "fallback": "No se muestra apoyo individual ICEA; la valoración enfermera y el flujo clínico siguen intactos.",
     },
     "governed_nnn": {
         "label": "NNN governed features",
-        "env_var": "ENABLE_GOVERNED_NNN",
+        "base_switches": (
+            {"name": "SHOW_NIC_CODING", "default": False},
+            {"name": "SHOW_NOC_OUTCOMES", "default": False},
+        ),
         "shadow_accessible": False,
         "icea_related": False,
         "fallback": "Se conserva el registro clínico base y el texto libre; NIC/NOC/NANDA gobernado queda oculto.",
     },
     "admin_analytics": {
         "label": "Admin analytics blocks",
-        "env_var": "ENABLE_ADMIN_ANALYTICS",
+        "base_switches": (
+            {"name": "ENABLE_ICEA_OPS_SUMMARY", "default": False},
+            {"name": "ENABLE_ICEA_OPS_EVENTS", "default": False},
+        ),
         "shadow_accessible": True,
         "icea_related": True,
         "fallback": "Las vistas analíticas/admin quedan fuera de servicio sin romper la operación asistencial.",
     },
     "ai_suggestions": {
         "label": "AI support suggestions",
-        "env_var": "ENABLE_AI_SUGGESTIONS",
+        "base_switches": (
+            {"name": "AI_SUGGESTIONS_ENABLED", "default": False},
+        ),
         "shadow_accessible": False,
         "icea_related": False,
         "fallback": "Se mantiene el handover manual sin sugerencias IA.",
@@ -136,15 +152,18 @@ def _normalize_environment_scope(value: Any) -> list[str]:
     return [item for item in _normalize_text_list(value, lower=True) if item in SUPPORTED_ENVIRONMENTS]
 
 
-def _base_switch_enabled(feature_key: str) -> bool:
-    if feature_key == "governed_nnn":
-        return _env_bool("SHOW_NIC_CODING", False) or _env_bool("SHOW_NOC_OUTCOMES", False)
-    if feature_key == "admin_analytics":
-        return _env_bool("ENABLE_ICEA_OPS_SUMMARY", True) or _env_bool("ENABLE_ICEA_OPS_EVENTS", True)
-    if feature_key == "ai_suggestions":
-        return _env_bool("AI_SUGGESTIONS_ENABLED", False)
+def _feature_base_switches(feature_key: str) -> list[str]:
     metadata = FEATURE_METADATA[feature_key]
-    return _env_bool(metadata["env_var"], False)
+    return [str(item["name"]).strip() for item in metadata["base_switches"] if str(item.get("name") or "").strip()]
+
+
+def _base_switch_enabled(feature_key: str) -> bool:
+    metadata = FEATURE_METADATA[feature_key]
+    return any(
+        _env_bool(str(item["name"]), bool(item.get("default", False)))
+        for item in metadata["base_switches"]
+        if str(item.get("name") or "").strip()
+    )
 
 
 def _default_pilot_mode() -> str:
@@ -239,12 +258,20 @@ def load_pilot_control_config() -> dict[str, Any]:
     }
 
 
-def _feature_scope(config: dict[str, Any], feature_key: str) -> dict[str, Any]:
+def _feature_scope(
+    config: dict[str, Any],
+    feature_key: str,
+    *,
+    governance_only: bool = False,
+) -> dict[str, Any]:
     feature = config["features"][feature_key]
-    mode = feature["mode"] or _default_feature_mode(
-        feature_key,
-        explicit_shadow_mode_for_icea=config["explicitShadowModeForIcea"],
-    )
+    if governance_only:
+        mode = feature["mode"] or config["pilotMode"]
+    else:
+        mode = feature["mode"] or _default_feature_mode(
+            feature_key,
+            explicit_shadow_mode_for_icea=config["explicitShadowModeForIcea"],
+        )
     allowed_roles = (
         feature["allowedRoles"]
         or config["allowedRoles"]
@@ -276,12 +303,13 @@ def evaluate_pilot_feature(
     unit_id: str | None = None,
     roles: list[str] | tuple[str, ...] | set[str] | None = None,
     environment: str | None = None,
+    governance_only: bool = False,
 ) -> dict[str, Any]:
     if feature_key not in PILOT_FEATURE_SET:
         raise KeyError(f"Unsupported pilot feature: {feature_key}")
 
     config = load_pilot_control_config()
-    scope = _feature_scope(config, feature_key)
+    scope = _feature_scope(config, feature_key, governance_only=governance_only)
     effective_environment = (environment or getattr(settings, "HANDOVER_DEPLOYMENT_MODE", "development")).strip().lower()
     normalized_unit_id = (unit_id or "").strip()
     normalized_roles = _normalize_text_list(roles or [], lower=True)
@@ -298,7 +326,7 @@ def evaluate_pilot_feature(
     denial_reason = None
     enabled = True
 
-    if not base_switch_enabled:
+    if not base_switch_enabled and not governance_only:
         enabled = False
         denial_reason = "kill_switch_disabled"
     elif rollout_status_explicit and rollout_status == "no-go":
@@ -337,8 +365,25 @@ def evaluate_pilot_feature(
         "enabledUnits": enabled_units,
         "allowedRoles": allowed_roles,
         "fallback": metadata["fallback"],
+        "baseSwitches": _feature_base_switches(feature_key),
         "denialReason": denial_reason,
     }
+
+
+def evaluate_pilot_feature_governance(
+    feature_key: str,
+    *,
+    unit_id: str | None = None,
+    roles: list[str] | tuple[str, ...] | set[str] | None = None,
+    environment: str | None = None,
+) -> dict[str, Any]:
+    return evaluate_pilot_feature(
+        feature_key,
+        unit_id=unit_id,
+        roles=roles,
+        environment=environment,
+        governance_only=True,
+    )
 
 
 def is_pilot_feature_enabled(
@@ -383,6 +428,7 @@ def serialize_pilot_control_summary(
             "effective": not features[feature_key]["enabled"],
             "mode": features[feature_key]["mode"],
             "shadowMode": features[feature_key]["shadowMode"],
+            "baseSwitches": features[feature_key]["baseSwitches"],
             "fallback": features[feature_key]["fallback"],
             "reason": features[feature_key]["denialReason"],
         }

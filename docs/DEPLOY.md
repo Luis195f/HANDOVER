@@ -69,7 +69,6 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 - `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`
 - `EXPO_PUBLIC_HANDOVER_FHIR_VALIDATION_MODE`
 - `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`
-- `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`
 - `EXPO_PUBLIC_HANDOVER_UNITS_JSON`
 - `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON`
 - `EXPO_PUBLIC_SHOW_NIC_CODING`
@@ -80,7 +79,6 @@ Ese wrapper ahora replica el gate JS sensible real del repo (`typecheck`, `lint:
 - `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING`
 - `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING`
 - `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK`
-- `EXPO_PUBLIC_ENABLE_ICEA_CAUSAL_SUMMARY`
 - `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`
 - `EXPO_PUBLIC_ENABLE_DEMO`
 - `OIDC_ISSUER`
@@ -96,9 +94,9 @@ Regla operativa:
 - `OIDC_CLIENT_ID`, `OIDC_AUDIENCE` y el resto de flags públicos del export web son metadata/configuración de cliente; no sustituyen secretos backend ni autorizan bypass operativo.
 - Los secretos de Django, firma, retención, DB y webhooks deben vivir fuera del repo en el entorno real del backend.
 - `config/staging.env` debe declarar explícitamente el modo de despliegue y defaults prudentes del piloto para que la exportación web no caiga por omisión a valores distintos del backend.
-- Para este árbol, la postura prudente documentada es: bridge ICEA visible apagado por defecto, scoring enriquecido apagado y shadow mode gobernado por `HANDOVER_PILOT_CONTROL_JSON`/backend, no por secretos o toggles ambiguos en cliente.
+- Para este árbol, la postura prudente documentada es: bridge ICEA visible apagado por defecto, scoring enriquecido apagado y rollout sensible gobernado por `HANDOVER_PILOT_CONTROL_JSON`/backend, no por secretos o toggles ambiguos en cliente.
 
-Inferencia desde [`src/config/pilotControl.ts`](../src/config/pilotControl.ts): si `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE=pilot` y `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` falta, el frontend cae a `rolloutStatus=pause` y `explicitShadowModeForIcea=true`; la ausencia del JSON no debe interpretarse como `go`.
+Inferencia desde [`src/config/pilotControl.ts`](../src/config/pilotControl.ts): si `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE=pilot`, el cliente degrada en `pause`/`shadow` y nunca habilita una surface sensible por sí solo; la ausencia de respuesta backend no debe interpretarse como `go`.
 
 ### Backend Django
 
@@ -128,8 +126,7 @@ El repo soporta un control plane minimo gobernado por entorno, no un panel mutab
 
 - `HANDOVER_DEPLOYMENT_MODE` en backend;
 - `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE` en frontend web/app;
-- `HANDOVER_PILOT_CONTROL_JSON` en backend;
-- `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON` en frontend.
+- `HANDOVER_PILOT_CONTROL_JSON` en backend.
 
 Reglas de despliegue para piloto:
 

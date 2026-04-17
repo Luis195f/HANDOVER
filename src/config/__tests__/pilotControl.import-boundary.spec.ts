@@ -21,7 +21,6 @@ describe('pilotControl import-time boundaries', () => {
     delete process.env.EXPO_PUBLIC_API_BASE;
     delete process.env.API_BASE;
     delete process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE;
-    delete process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON;
     delete process.env.EXPO_PUBLIC_SHOW_NIC_CODING;
     delete process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES;
     delete process.env.EXPO_PUBLIC_ENABLE_ICEA_BRIDGE;
@@ -70,15 +69,6 @@ describe('pilotControl import-time boundaries', () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      features: {
-        governed_nnn: {
-          mode: 'pilot',
-          enabledUnits: ['ward-a'],
-          environmentScope: ['pilot'],
-        },
-      },
-    });
 
     const { resolvePilotFeatureState } = await import('../pilotControl');
     const state = resolvePilotFeatureState('governed_nnn', { unitId: 'ward-a', roles: ['nurse'] });

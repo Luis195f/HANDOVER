@@ -18,7 +18,7 @@ from backend.api.icea_observability import (
 )
 from backend.api.icea_pipeline import load_icea_pipeline_settings
 from backend.api.models import IceaBridgeRequest, IceaOutboundEvent, IceaPipelineEvent, IceaPipelineSnapshot
-from backend.api.pilot_control import is_pilot_feature_enabled
+from backend.api.pilot_control import evaluate_pilot_feature_governance
 
 
 OPS_STALE_AFTER = timezone.timedelta(hours=6)
@@ -37,12 +37,18 @@ def _max_datetime(*values: Any):
     return max(candidates)
 
 
-def ops_summary_enabled() -> bool:
-    return _env_bool(SUMMARY_FLAG, True) and is_pilot_feature_enabled("admin_analytics")
+def _ops_admin_analytics_enabled(*, unit_id: str | None = None) -> bool:
+    return bool(
+        evaluate_pilot_feature_governance("admin_analytics", unit_id=unit_id)["enabled"]
+    )
 
 
-def ops_events_enabled() -> bool:
-    return _env_bool(EVENTS_FLAG, True) and is_pilot_feature_enabled("admin_analytics")
+def ops_summary_enabled(*, unit_id: str | None = None) -> bool:
+    return _env_bool(SUMMARY_FLAG, True) and _ops_admin_analytics_enabled(unit_id=unit_id)
+
+
+def ops_events_enabled(*, unit_id: str | None = None) -> bool:
+    return _env_bool(EVENTS_FLAG, True) and _ops_admin_analytics_enabled(unit_id=unit_id)
 
 
 def _ops_flags() -> dict[str, bool]:
@@ -281,7 +287,7 @@ def build_icea_ops_events_payload(
     authorized_unit_ids: set[str] | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    if not ops_events_enabled():
+    if not ops_events_enabled(unit_id=unit_id):
         return _disabled_payload(scope="events", unit_id=unit_id)
     safe_events = _collect_events(
         unit_id=unit_id,
@@ -515,7 +521,7 @@ def _unit_payload(*, unit_id: str, include_recent_events: bool) -> dict[str, Any
 
 
 def build_icea_ops_unit_payload(*, unit_id: str) -> dict[str, Any]:
-    if not ops_summary_enabled():
+    if not ops_summary_enabled(unit_id=unit_id):
         return _disabled_payload(scope="unit", unit_id=unit_id)
     payload = _unit_payload(unit_id=unit_id, include_recent_events=True)
     payload.update(

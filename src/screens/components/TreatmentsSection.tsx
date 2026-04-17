@@ -233,6 +233,8 @@ export function TreatmentsSection({
 
   const errorBag = formState.errors[name] as FieldErrors<TreatmentItem>[] | undefined;
   const nicCodingEnabled = enableNicCoding ?? isOn('SHOW_NIC_CODING');
+  const hasTraceableSuggestionUnit = Boolean(clinicalDecisionContext?.unitId?.trim());
+  const nicSuggestionsEnabled = nicCodingEnabled && hasTraceableSuggestionUnit;
 
   const canAddSelectedSuggestions = selectedInterventions.length > 0;
   const selectedInterventionSet = useMemo(() => new Set(selectedInterventions), [selectedInterventions]);
@@ -355,7 +357,7 @@ export function TreatmentsSection({
   };
 
   const handleSuggestNic = async () => {
-    if (!nicCodingEnabled || suggestionsLoading) return;
+    if (!nicSuggestionsEnabled || suggestionsLoading) return;
 
     setSuggestionsError(null);
     setSuggestionsLoading(true);
@@ -717,14 +719,16 @@ export function TreatmentsSection({
             <Text style={styles.helperText}>No se encontraron intervenciones NIC en el catálogo activo.</Text>
           ) : null}
 
-          <Pressable
-            style={styles.button}
-            onPress={() => void handleSuggestNic()}
-            accessibilityRole="button"
-            testID="nic-suggest-button"
-          >
-            <Text style={styles.buttonText}>{suggestionsLoading ? 'Generando sugerencias...' : 'Sugerir NIC'}</Text>
-          </Pressable>
+          {nicSuggestionsEnabled ? (
+            <Pressable
+              style={styles.button}
+              onPress={() => void handleSuggestNic()}
+              accessibilityRole="button"
+              testID="nic-suggest-button"
+            >
+              <Text style={styles.buttonText}>{suggestionsLoading ? 'Generando sugerencias...' : 'Sugerir NIC'}</Text>
+            </Pressable>
+          ) : null}
 
           {suggestionsError ? <Text style={[styles.helperText, styles.errorText]}>{suggestionsError}</Text> : null}
 

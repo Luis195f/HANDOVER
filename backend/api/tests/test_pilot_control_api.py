@@ -115,6 +115,40 @@ class PilotControlApiTests(TestCase):
         self.assertFalse(payload["features"]["admin_analytics"]["enabled"])
         self.assertEqual(payload["features"]["admin_analytics"]["denialReason"], "role_out_of_scope")
 
+    def test_admin_analytics_is_fail_closed_by_default_until_ops_flags_are_explicitly_enabled(self):
+        self._auth(roles=["admin"])
+        config = {
+            "pilotMode": "enabled",
+            "features": {
+                "admin_analytics": {
+                    "mode": "enabled",
+                    "allowedRoles": ["admin"],
+                },
+            },
+        }
+
+        with self.settings(HANDOVER_DEPLOYMENT_MODE="test"), patch.dict(
+            "os.environ",
+            {
+                "HANDOVER_PILOT_CONTROL_JSON": json.dumps(config),
+            },
+            clear=False,
+        ):
+            response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["features"]["admin_analytics"]["enabled"])
+        self.assertEqual(payload["features"]["admin_analytics"]["denialReason"], "kill_switch_disabled")
+        self.assertTrue(
+            any(
+                item["key"] == "admin_analytics"
+                and item["effective"]
+                and item["reason"] == "kill_switch_disabled"
+                for item in payload["killSwitches"]
+            )
+        )
+
     def test_summary_returns_effective_flags_and_kill_switches(self):
         self._auth(roles=["admin"])
         config = {
@@ -167,6 +201,11 @@ class PilotControlApiTests(TestCase):
         self.assertEqual(payload["features"]["icea_bridge"]["mode"], "shadow")
         self.assertTrue(payload["features"]["icea_bridge"]["enabled"])
         self.assertTrue(payload["features"]["icea_bridge"]["shadowMode"])
+        self.assertEqual(payload["features"]["icea_bridge"]["baseSwitches"], ["ENABLE_ICEA_BRIDGE"])
+        self.assertEqual(
+            payload["features"]["governed_nnn"]["baseSwitches"],
+            ["SHOW_NIC_CODING", "SHOW_NOC_OUTCOMES"],
+        )
         self.assertEqual(payload["features"]["icea_patient_risk"]["denialReason"], "rollout_paused")
         self.assertFalse(payload["features"]["icea_patient_risk"]["enabled"])
         self.assertEqual(payload["features"]["governed_nnn"]["mode"], "disabled")

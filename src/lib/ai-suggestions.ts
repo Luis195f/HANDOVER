@@ -12,6 +12,7 @@ export interface NocOutcomeSuggestion {
 export interface ClinicalContext {
   language: 'es' | 'en';
   section: 'vitals' | 'diagnosis' | 'risk' | 'other' | 'outcomes';
+  unitId?: string;
   patientAge?: number;
   vitalSigns?: {
     respiratoryRate?: number;

@@ -64,6 +64,7 @@ def get_client() -> OpenAI:
 class ClinicalContext(BaseModel):
     language: str = "es"
     section: str
+    unitId: str | None = None
     patient_age: int | None = None
     vital_signs: dict | None = None
     scores: dict | None = None

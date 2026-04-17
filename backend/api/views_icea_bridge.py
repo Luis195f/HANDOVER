@@ -25,7 +25,11 @@ from backend.api.icea_pipeline import (
     IceaPipelineTransportError,
 )
 from backend.api.models import HandoverBundleRecord, IceaBridgeRequest
-from backend.api.pilot_control import evaluate_pilot_feature, resolve_roles_from_request
+from backend.api.pilot_control import (
+    evaluate_pilot_feature,
+    evaluate_pilot_feature_governance,
+    resolve_roles_from_request,
+)
 from backend.api.views import AuthenticatedAPIView
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
@@ -39,9 +43,8 @@ REFRESHABLE_STATUSES = {
     IceaBridgeRequest.STATUS_STALE,
 }
 
-
-def _admin_analytics_gate_response(request, *, unit_id: str | None = None):
-    feature = evaluate_pilot_feature(
+def _bridge_status_query_gate_response(request, *, unit_id: str | None = None):
+    feature = evaluate_pilot_feature_governance(
         'admin_analytics',
         unit_id=unit_id,
         roles=resolve_roles_from_request(request),
@@ -257,7 +260,7 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
         except (TypeError, ValueError):
             limit = 20
         limit = max(1, min(limit, 100))
-        gate = _admin_analytics_gate_response(
+        gate = _bridge_status_query_gate_response(
             request,
             unit_id=str(request.query_params.get('unitId') or '').strip() or None,
         )
@@ -336,6 +339,7 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if bridge_request is None:
             return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
         bridge_request = expire_icea_bridge_request_if_due(bridge_request)
+        request_roles = resolve_roles_from_request(request)
 
         payload = request.data if isinstance(request.data, dict) else {}
         requested_mode = str(payload.get('scoringMode') or '').strip() or bridge_request.scoring_mode
@@ -350,8 +354,16 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
         if (
             not settings.enabled
             or not settings.allows_mode(requested_mode)
-            or not evaluate_pilot_feature('icea_bridge', unit_id=bridge_request.unit_id)['enabled']
-            or not evaluate_pilot_feature(scoring_feature, unit_id=bridge_request.unit_id)['enabled']
+            or not evaluate_pilot_feature(
+                'icea_bridge',
+                unit_id=bridge_request.unit_id,
+                roles=request_roles,
+            )['enabled']
+            or not evaluate_pilot_feature(
+                scoring_feature,
+                unit_id=bridge_request.unit_id,
+                roles=request_roles,
+            )['enabled']
         ):
             return _error_response(
                 detail='ICEA bridge is disabled for this scoring mode.',

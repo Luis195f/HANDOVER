@@ -1000,7 +1000,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
+  const hasEffectivePilotUnitContext = Boolean((effectivePilotUnitId ?? '').trim());
   const aiSuggestionsEnabled =
+    hasEffectivePilotUnitContext &&
     isOn('AI_SUGGESTIONS_ENABLED') &&
     isPilotFeatureEnabled('ai_suggestions', {
       unitId: effectivePilotUnitId,
@@ -1794,6 +1796,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     return {
       language: 'es',
       section,
+      unitId: effectivePilotUnitId ?? undefined,
       vitalSigns: Object.keys(vitalSigns).length ? vitalSigns : undefined,
       scores: Object.keys(scores).length ? (scores as ClinicalContext['scores']) : undefined,
       diagnoses: diagnoses.length ? diagnoses : undefined,

@@ -60,7 +60,6 @@ interface PilotControlFeatureRule {
 }
 
 interface PilotControlConfig {
-  legacyPayloadPresent: boolean;
   pilotMode: PilotMode;
   rolloutStatus: 'go' | 'pause' | 'no-go';
   rolloutStatusExplicit: boolean;
@@ -214,12 +213,6 @@ function normalizeTextList(value: unknown, lower = false): string[] {
   return normalized;
 }
 
-function normalizeEnvironmentScope(value: unknown): PilotEnvironment[] {
-  return normalizeTextList(value, true).filter((item): item is PilotEnvironment =>
-    ['development', 'demo', 'test', 'pilot', 'production'].includes(item),
-  );
-}
-
 function normalizePilotContext(context: PilotFeatureContext = {}): NormalizedPilotContext {
   const unitId = typeof context.unitId === 'string' ? context.unitId.trim() : '';
   return {
@@ -367,59 +360,28 @@ function defaultFeatureMode(
 }
 
 function loadPilotControlConfig(): PilotControlConfig {
-  const raw =
-    (typeof extra.HANDOVER_PILOT_CONTROL_JSON === 'string' ? extra.HANDOVER_PILOT_CONTROL_JSON : undefined) ??
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON ??
-    '';
-  let parsed: unknown = {};
-  try {
-    parsed = raw.trim() ? JSON.parse(raw) : {};
-  } catch {
-    parsed = {};
-  }
-  const payload = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   const environment = resolveEnvironment();
-  const pilotMode = (normalizeMode(payload.pilotMode) as PilotMode | null) ?? defaultPilotMode(environment);
-  const explicitShadowModeForIcea =
-    typeof payload.explicitShadowModeForIcea === 'boolean'
-      ? payload.explicitShadowModeForIcea
-      : environment === 'pilot';
+  const pilotMode = defaultPilotMode(environment);
+  const explicitShadowModeForIcea = environment === 'pilot';
   const rolloutStatus =
-    typeof payload.rolloutStatus === 'string' &&
-    ['go', 'pause', 'no-go'].includes(payload.rolloutStatus.trim().toLowerCase())
-      ? (payload.rolloutStatus.trim().toLowerCase() as PilotControlConfig['rolloutStatus'])
-      : pilotMode === 'disabled'
-        ? 'no-go'
-        : pilotMode === 'demo' || pilotMode === 'pilot' || explicitShadowModeForIcea
-          ? 'pause'
-          : 'go';
-  const featuresPayload = payload.features && typeof payload.features === 'object' ? (payload.features as Record<string, unknown>) : {};
+    pilotMode === 'disabled'
+      ? 'no-go'
+      : pilotMode === 'demo' || pilotMode === 'pilot' || explicitShadowModeForIcea
+        ? 'pause'
+        : 'go';
   return {
-    legacyPayloadPresent: raw.trim().length > 0,
     pilotMode,
     rolloutStatus,
-    rolloutStatusExplicit: Object.prototype.hasOwnProperty.call(payload, 'rolloutStatus'),
-    enabledUnits: normalizeTextList(payload.enabledUnits),
-    allowedRoles: normalizeTextList(payload.allowedRoles, true),
-    environmentScope: normalizeEnvironmentScope(payload.environmentScope),
+    rolloutStatusExplicit: false,
+    enabledUnits: [],
+    allowedRoles: [],
+    environmentScope: [],
     explicitShadowModeForIcea,
     features: FEATURE_KEYS.reduce(
       (acc, key) => {
-        const featurePayload =
-          featuresPayload[key] && typeof featuresPayload[key] === 'object'
-            ? (featuresPayload[key] as Record<string, unknown>)
-            : null;
         return {
           ...acc,
-          [key]: featurePayload
-            ? {
-                mode: normalizeMode(featurePayload.mode) ?? undefined,
-                enabledUnits: normalizeTextList(featurePayload.enabledUnits),
-                allowedRoles: normalizeTextList(featurePayload.allowedRoles, true),
-                environmentScope: normalizeEnvironmentScope(featurePayload.environmentScope),
-                shadow: Boolean(featurePayload.shadow ?? featurePayload.shadowMode),
-              }
-            : {},
+          [key]: {},
         };
       },
       {} as Record<PilotFeatureKey, PilotControlFeatureRule>,
@@ -486,10 +448,7 @@ function resolveConservativeFallbackState(
     denialReason = rolloutForcesShadow ? 'rollout_paused' : 'shadow_mode';
   }
 
-  if (
-    enabled &&
-    (config.legacyPayloadPresent || environment === 'pilot' || environment === 'production' || environment === 'demo')
-  ) {
+  if (enabled && (environment === 'pilot' || environment === 'production' || environment === 'demo')) {
     enabled = false;
     denialReason = 'backend_unavailable';
   }

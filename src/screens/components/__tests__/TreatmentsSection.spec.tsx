@@ -90,6 +90,15 @@ describe('TreatmentsSection NIC suggestions', () => {
     expect(queryByTestId('nic-suggest-button')).toBeNull();
   });
 
+  it('oculta el boton "Sugerir NIC" cuando no hay unitId trazable para el backend', () => {
+    const { queryByTestId } = renderWithForm({
+      enableNicCoding: true,
+      clinicalDecisionContext: { patientId: 'pat-001' },
+    });
+
+    expect(queryByTestId('nic-suggest-button')).toBeNull();
+  });
+
   it('muestra el gate de licencia NIC y permite añadir desde el catálogo placeholder', async () => {
     const { getByTestId, getByText, methods } = renderWithForm({
       enableNicCoding: true,

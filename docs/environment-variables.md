@@ -6,8 +6,8 @@
 - `EXPO_PUBLIC_API_BASE_URL`: URL base pública del backend Django/DRF para la app/export web.
 - `EXPO_PUBLIC_FHIR_BASE_URL`: URL pública del FHIR base consumido por el cliente.
 - `EXPO_PUBLIC_AUTH0_DOMAIN`, `EXPO_PUBLIC_AUTH0_CLIENT_ID`, `EXPO_PUBLIC_AUTH0_AUDIENCE`, `EXPO_PUBLIC_OIDC_ISSUER`, `EXPO_PUBLIC_OIDC_CLIENT_ID`, `EXPO_PUBLIC_OIDC_AUDIENCE`, `EXPO_PUBLIC_OIDC_SCOPE`: metadata de cliente OIDC/Auth0. Son identificadores/URLs públicas; no son secretos.
-- `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`, `EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON`, `EXPO_PUBLIC_HANDOVER_UNITS_JSON`, `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON`: controlan rollout/configuración pública del piloto.
-- `EXPO_PUBLIC_ENABLE_ICEA_*`, `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`, `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`, `EXPO_PUBLIC_NANDA_CATALOG_URL`, `EXPO_PUBLIC_NIC_CATALOG_URL`, `EXPO_PUBLIC_NOC_CATALOG_URL`: flags o endpoints públicos permitidos para comportamiento/lectura del cliente.
+- `EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE`, `EXPO_PUBLIC_HANDOVER_UNITS_JSON`, `EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON`: controlan contexto/configuración pública del cliente. El rollout sensible se resuelve en backend vía `HANDOVER_PILOT_CONTROL_JSON`.
+- `EXPO_PUBLIC_ENABLE_ICEA_BRIDGE`, `EXPO_PUBLIC_ENABLE_ICEA_IMMEDIATE_SCORING`, `EXPO_PUBLIC_ENABLE_ICEA_ENRICHED_SCORING`, `EXPO_PUBLIC_ENABLE_ICEA_PATIENT_RISK`, `EXPO_PUBLIC_AI_SUGGESTIONS_ENABLED`, `EXPO_PUBLIC_FAST_VALIDATE_BEFORE_QUEUE`, `EXPO_PUBLIC_NANDA_CATALOG_URL`, `EXPO_PUBLIC_NIC_CATALOG_URL`, `EXPO_PUBLIC_NOC_CATALOG_URL`: flags o endpoints públicos permitidos para comportamiento/lectura del cliente. En features sensibles funcionan solo como hard kills locales; no habilitan rollout por sí solos.
 - Regla dura: no introducir secretos en `EXPO_PUBLIC_*`. El cliente Expo no admite `OPENAI_API_KEY`, secretos ICEA, secretos Django, claves privadas, bypass tokens, flags para desactivar cifrado offline ni datasets NNN inline embebidos en el bundle.
 
 ## Backend core

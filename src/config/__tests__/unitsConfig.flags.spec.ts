@@ -275,15 +275,6 @@ describe('unitsConfig advanced flags by unit', () => {
     process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE = 'pilot';
     process.env.EXPO_PUBLIC_SHOW_NIC_CODING = 'true';
     process.env.EXPO_PUBLIC_SHOW_NOC_OUTCOMES = 'true';
-    process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON = JSON.stringify({
-      features: {
-        governed_nnn: {
-          mode: 'pilot',
-          enabledUnits: ['nnn-unit'],
-          environmentScope: ['pilot'],
-        },
-      },
-    });
     process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
       {
         id: 'nnn-unit',

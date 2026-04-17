@@ -171,7 +171,6 @@ module.exports = ({ config }) => ({
     FHIR_BASE_URL: process.env.EXPO_PUBLIC_FHIR_BASE_URL ?? 'https://fhir.example.com',
     ENCRYPTION_NAMESPACE: process.env.EXPO_PUBLIC_STORAGE_NAMESPACE ?? 'handover-pro',
     HANDOVER_DEPLOYMENT_MODE: process.env.EXPO_PUBLIC_HANDOVER_DEPLOYMENT_MODE ?? process.env.HANDOVER_DEPLOYMENT_MODE,
-    HANDOVER_PILOT_CONTROL_JSON: process.env.EXPO_PUBLIC_HANDOVER_PILOT_CONTROL_JSON,
 
     FEATURES: {
       handover: {
