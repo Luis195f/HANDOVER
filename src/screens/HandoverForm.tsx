@@ -1937,9 +1937,16 @@ export default function HandoverForm({ navigation, route }: Props) {
         return;
       }
 
+      let netState: Awaited<ReturnType<typeof NetInfo.fetch>> | null = null;
+      try {
+        netState = await NetInfo.fetch();
+      } catch {
+        netState = null;
+      }
+      const hasNetworkAtSubmit = netState ? hasNetwork(netState) : null;
+
       if (isFastValidateEnabled()) {
-        const netState = await NetInfo.fetch();
-        if (hasNetwork(netState)) {
+        if (hasNetworkAtSubmit) {
           const freshToken = await ensureFreshAccessToken();
           const validation = await fastValidateBundleRemotely(bundle, {
             token: freshToken ?? activeSession?.accessToken ?? null,
@@ -2007,7 +2014,10 @@ export default function HandoverForm({ navigation, route }: Props) {
         await queueAndFlushAuditEvent(auditStorageRef.current, auditEvent);
       }
 
-      let successMessage = t('handover.submitQueuedMessage');
+      let successMessage =
+        hasNetworkAtSubmit === false
+          ? t('handover.submitQueuedOfflineMessage')
+          : t('handover.submitQueuedMessage');
       if (isOn('ENABLE_ALERTS')) {
         const alerts: string[] = [];
         const vitals = values.vitals ?? {};
@@ -2032,8 +2042,13 @@ export default function HandoverForm({ navigation, route }: Props) {
         }
       }
 
-      Alert.alert(t('common.ok'), successMessage);
-      navigation.goBack();
+      Alert.alert(t('common.ok'), successMessage, [
+        { text: t('common.close'), style: 'cancel' },
+        {
+          text: t('common.viewQueue'),
+          onPress: () => navigation.navigate('SyncCenter'),
+        },
+      ]);
     } catch (error: unknown) {
       const netError = normalizeNetError(error);
       const ui = getUserFacingNetworkMessage(netError, { screen: 'HandoverForm', op: 'submit' });

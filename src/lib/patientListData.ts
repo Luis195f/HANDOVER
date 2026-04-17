@@ -1,4 +1,4 @@
-import type { PatientListItem } from '@/src/data/mockPatients';
+import type { PatientListItem } from '@/src/types/patientList';
 import type { DeviceSummary, PendingTaskSummary, RiskFlags, VitalsSnapshot } from '@/src/types/handover';
 
 import type { PriorityInput } from './priority';

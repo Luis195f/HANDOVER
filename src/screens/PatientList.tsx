@@ -11,13 +11,13 @@ import {
   View,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
 
 import Chip from "@/src/components/Chip";
 import PriorityBadge from "@/src/components/priority/PriorityBadge";
 import { DEFAULT_SPECIALTY_ID, SPECIALTIES, type Specialty } from "@/src/config/specialties";
 import { usePilotControlContext } from '@/src/config/pilotControl';
 import { UNITS, UNITS_BY_ID, type Unit } from "@/src/config/units";
-import { type PatientListItem } from "@/src/data/mockPatients";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { ensureUnitAccess, hasRole, hasUnitAccess } from "@/src/security/acl";
 import { useAuth } from "@/src/security/auth";
@@ -26,6 +26,7 @@ import { listOfflineQueue, summarizePatientQueueState, type QueueItem, type Sync
 import { computePriority, computePriorityList, type PrioritizedPatient } from "@/src/lib/priority";
 import { buildPriorityUiModel, getPriorityToneStyles, hasActionablePrioritySignal, type PriorityUiTone } from "@/src/lib/priority-ui";
 import { buildPriorityInputs, normalizePatientListResponse } from "@/src/lib/patientListData";
+import { normalizeNetError } from "@/src/lib/net-errors";
 import {
   ALL_UNITS_OPTION,
   setSelectedUnitId,
@@ -38,9 +39,10 @@ import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
 import { apiGet } from "@/src/lib/api";
 import { createPatient } from "@/src/lib/patients";
+import type { PatientListItem } from "@/src/types/patientList";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
-export type { PatientListItem } from "@/src/data/mockPatients";
+export type { PatientListItem } from "@/src/types/patientList";
 
 export const ALL_SPECIALTIES_OPTION = "all";
 function normalizeAuthorizedUnitIds(unitIds: readonly string[] | null | undefined): string[] {
@@ -158,6 +160,61 @@ export function getDeniedPatientLoadState(currentRequestId: number) {
     patients: [] as PatientListItem[],
     isLoadingPatients: false,
   };
+}
+
+export type PatientListLoadNoticeAction = 'retry' | 'login' | 'dismiss';
+
+export type PatientListLoadNotice = {
+  title: string;
+  message: string;
+  action: PatientListLoadNoticeAction;
+};
+
+function appendStalePatientListNotice(message: string, hasStaleData?: boolean) {
+  if (!hasStaleData) return message;
+  return `${message} ${t('patientList.staleDataMessage')}`;
+}
+
+export function buildPatientListLoadNotice(
+  error: unknown,
+  options: { hasStaleData?: boolean } = {},
+): PatientListLoadNotice {
+  const netError = normalizeNetError(error);
+
+  if (netError.status === 401) {
+    return {
+      title: t('net.sessionExpiredTitle'),
+      message: appendStalePatientListNotice(t('net.sessionExpiredMessage'), options.hasStaleData),
+      action: 'login',
+    };
+  }
+
+  if (netError.status === 403) {
+    return {
+      title: t('patientList.loadErrorTitle'),
+      message: appendStalePatientListNotice(t('patientList.noAccessMessage'), options.hasStaleData),
+      action: 'dismiss',
+    };
+  }
+
+  const message =
+    netError.kind === 'OFFLINE'
+      ? t('patientList.loadOfflineMessage')
+      : t('patientList.loadRetryMessage');
+
+  return {
+    title: t('patientList.loadErrorTitle'),
+    message: appendStalePatientListNotice(message, options.hasStaleData),
+    action: 'retry',
+  };
+}
+
+export function shouldKeepPatientListOnLoadFailure(
+  currentScopeKey: string,
+  lastSuccessfulScopeKey: string | null,
+  currentPatientCount: number,
+) {
+  return currentPatientCount > 0 && currentScopeKey === lastSuccessfulScopeKey;
 }
 
 export function filterPatients(
@@ -306,10 +363,15 @@ export default function PatientList({ navigation }: Props) {
   const [patientSyncStatuses, setPatientSyncStatuses] = useState<Record<string, SyncStatus>>({});
   const [patients, setPatients] = useState<PatientListItem[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+  const [patientLoadNotice, setPatientLoadNotice] = useState<PatientListLoadNotice | null>(null);
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [isSubmittingNewPatient, setIsSubmittingNewPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState<NewPatientFormState>(NEW_PATIENT_INITIAL_STATE);
   const loadPatientsRequestRef = useRef(0);
+  const currentPatientsRef = useRef<PatientListItem[]>([]);
+  const lastSuccessfulScopeRef = useRef<string | null>(null);
+
+  currentPatientsRef.current = patients;
 
   const refreshSyncStatuses = useCallback(async () => {
     const queue = await listOfflineQueue();
@@ -322,6 +384,7 @@ export default function PatientList({ navigation }: Props) {
       loadPatientsRequestRef.current = deniedState.nextRequestId;
       setIsLoadingPatients(deniedState.isLoadingPatients);
       setPatients(deniedState.patients);
+      setPatientLoadNotice(null);
       return;
     }
 
@@ -330,11 +393,14 @@ export default function PatientList({ navigation }: Props) {
       loadPatientsRequestRef.current = deniedState.nextRequestId;
       setIsLoadingPatients(deniedState.isLoadingPatients);
       setPatients(deniedState.patients);
+      setPatientLoadNotice(null);
       return;
     }
 
     const requestId = ++loadPatientsRequestRef.current;
+    const scopeKey = String(selectedUnitId);
     setIsLoadingPatients(true);
+    setPatientLoadNotice(null);
     try {
       const path = selectedUnitId === ALL_UNITS_OPTION
         ? '/api/patients'
@@ -349,11 +415,20 @@ export default function PatientList({ navigation }: Props) {
           selectedUnitId !== ALL_UNITS_OPTION ? String(selectedUnitId) : undefined,
         ),
       );
-    } catch {
+      lastSuccessfulScopeRef.current = scopeKey;
+    } catch (error) {
       if (requestId !== loadPatientsRequestRef.current) {
         return;
       }
-      setPatients([]);
+      const keepVisiblePatients = shouldKeepPatientListOnLoadFailure(
+        scopeKey,
+        lastSuccessfulScopeRef.current,
+        currentPatientsRef.current.length,
+      );
+      if (!keepVisiblePatients) {
+        setPatients([]);
+      }
+      setPatientLoadNotice(buildPatientListLoadNotice(error, { hasStaleData: keepVisiblePatients }));
     } finally {
       if (requestId === loadPatientsRequestRef.current) {
         setIsLoadingPatients(false);
@@ -462,6 +537,12 @@ export default function PatientList({ navigation }: Props) {
     const interval = setInterval(refreshSyncStatuses, 15_000);
     return () => clearInterval(interval);
   }, [refreshSyncStatuses]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSyncStatuses();
+    }, [refreshSyncStatuses]),
+  );
 
   useEffect(() => {
     void loadPatients();
@@ -672,6 +753,45 @@ export default function PatientList({ navigation }: Props) {
             <Text style={styles.newPatientButtonText}>+ Nuevo paciente</Text>
           </Pressable>
         ) : null}
+        {patientLoadNotice ? (
+          <View
+            testID="patient-list-load-notice"
+            style={[
+              styles.loadNotice,
+              { backgroundColor: `${colors.danger}12`, borderColor: colors.danger },
+            ]}
+          >
+            <Text style={[styles.loadNoticeTitle, { color: colors.danger }]}>{patientLoadNotice.title}</Text>
+            <Text style={[styles.loadNoticeMessage, { color: colors.text }]}>{patientLoadNotice.message}</Text>
+            {patientLoadNotice.action === 'retry' ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  void loadPatients();
+                }}
+                style={styles.loadNoticeAction}
+                disabled={isLoadingPatients}
+                testID="patient-list-load-retry"
+              >
+                <Text style={[styles.loadNoticeActionText, { color: colors.primary }]}>
+                  {t("common.retry")}
+                </Text>
+              </Pressable>
+            ) : null}
+            {patientLoadNotice.action === 'login' ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => navigation.navigate("Login")}
+                style={styles.loadNoticeAction}
+                testID="patient-list-load-login"
+              >
+                <Text style={[styles.loadNoticeActionText, { color: colors.primary }]}>
+                  {t("net.loginCta")}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         <PickerSelect
           label={t("patientList.specialtyLabel")}
           value={selectedSpecialtyId}
@@ -758,13 +878,17 @@ export default function PatientList({ navigation }: Props) {
     [
       canCreatePatients,
       canViewSupervisorDashboard,
+      colors.danger,
       colors.muted,
       colors.primary,
       colors.text,
+      isLoadingPatients,
+      loadPatients,
       navigation,
       onSpecialtyChange,
       onUnitChange,
       openNewPatientForm,
+      patientLoadNotice,
       selectedSpecialtyId,
       selectedUnitId,
       actionablePriorityCount,
@@ -790,7 +914,9 @@ export default function PatientList({ navigation }: Props) {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {isLoadingPatients ? "Cargando pacientes…" : emptyStateMessage}
+              {isLoadingPatients
+                ? "Cargando pacientes…"
+                : patientLoadNotice?.message ?? emptyStateMessage}
             </Text>
           </View>
         }
@@ -1038,6 +1164,27 @@ const styles = StyleSheet.create({
     borderColor: "#E2E8F0",
     padding: 12,
     gap: 8,
+  },
+  loadNotice: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+  },
+  loadNoticeTitle: {
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  loadNoticeMessage: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  loadNoticeAction: {
+    alignSelf: "flex-start",
+    paddingVertical: 4,
+  },
+  loadNoticeActionText: {
+    fontWeight: "700",
   },
   priorityToggle: {
     flexDirection: "row",
