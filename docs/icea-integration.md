@@ -13,12 +13,10 @@
 Tras un `POST /api/fhir/transaction` exitoso, HANDOVER:
 
 1. confirma primero la transaccion clinica contra FHIR;
-2. persiste el Bundle local para ETL;
-3. crea/actualiza snapshot de pipeline;
-4. encola un webhook tecnico ICEA+;
-5. si el bridge esta habilitado, construye y envia el payload analitico versionado sin identificadores nominales de profesional.
+2. dispara solo despues side effects tecnicos best-effort: outbox ICEA+, persistencia local para ETL/readback, snapshot y bridge;
+3. si el bridge esta habilitado, construye y envia el payload analitico versionado sin identificadores nominales de profesional.
 
-Si ICEA+ falla, el guardado clinico no se revierte.
+Si ICEA+, el outbox, la persistencia tecnica local o el bridge fallan, el guardado clinico no se revierte y la degradacion debe quedar en el plano tecnico/analitico.
 
 Evidencia:
 
@@ -148,7 +146,17 @@ Lo que no debe afirmarse:
 - restringe enfermeria por `unitId`;
 - devuelve solo estado prudente, warnings y trazabilidad tecnica; no expone score numerico individual ni resumen causal en la UI operativa;
 - el endpoint puede seguir existiendo como costura backend gobernada, pero en `shadow` prudente la app clinica no debe renderizar ninguna salida ICEA paciente-a-paciente;
+- no debe reinterpretarse como scoring bedside, evaluacion individual, ranking profesional ni causalidad cerrada;
 - puede exponer `provisional`, `complete`, `insufficient_evidence`, `failed`, `stale` solo para trazabilidad tecnica o superficies agregadas/admin autorizadas.
+
+## 7.1) Shadow mode vinculante
+
+Mientras ICEA/ICEA+ siga en shadow mode dentro de HANDOVER:
+
+- el flujo clinico operativo se mide por el exito del submit FHIR y no por el estado del outbox, snapshot, bridge o cualquier scoring derivado;
+- dashboards, resumenes y observabilidad ICEA deben permanecer agregados y no nominales;
+- cualquier error ICEA debe degradar con honestidad y no romper el handover;
+- ningun artefacto ICEA debe usarse para evaluacion individual, accion punitiva o atribucion causal cerrada.
 
 Evidencia:
 
