@@ -157,12 +157,64 @@ describe('PatientList deny-first authz seam', () => {
     });
   });
 
-  it('keeps stale list data only when the failed request matches the last successful scope', async () => {
+  it('keeps stale list data for an offline failure in the same scope', async () => {
     const { shouldKeepPatientListOnLoadFailure } = await import('@/src/screens/PatientList');
 
-    expect(shouldKeepPatientListOnLoadFailure('icu-a', 'icu-a', 3)).toBe(true);
-    expect(shouldKeepPatientListOnLoadFailure('icu-b', 'icu-a', 3)).toBe(false);
-    expect(shouldKeepPatientListOnLoadFailure('icu-a', 'icu-a', 0)).toBe(false);
+    expect(
+      shouldKeepPatientListOnLoadFailure(
+        'icu-a',
+        'icu-a',
+        3,
+        new Error('Network request failed'),
+      ),
+    ).toBe(true);
+  });
+
+  it('clears stale list data on a 401 even when the failed request matches the last successful scope', async () => {
+    const { shouldKeepPatientListOnLoadFailure } = await import('@/src/screens/PatientList');
+
+    expect(
+      shouldKeepPatientListOnLoadFailure(
+        'icu-a',
+        'icu-a',
+        3,
+        { name: 'HTTPError', status: 401, message: 'Unauthorized' },
+      ),
+    ).toBe(false);
+  });
+
+  it('clears stale list data on a 403 even when the failed request matches the last successful scope', async () => {
+    const { shouldKeepPatientListOnLoadFailure } = await import('@/src/screens/PatientList');
+
+    expect(
+      shouldKeepPatientListOnLoadFailure(
+        'icu-a',
+        'icu-a',
+        3,
+        { name: 'HTTPError', status: 403, message: 'Forbidden' },
+      ),
+    ).toBe(false);
+  });
+
+  it('does not keep stale list data for a different scope or without visible patients', async () => {
+    const { shouldKeepPatientListOnLoadFailure } = await import('@/src/screens/PatientList');
+
+    expect(
+      shouldKeepPatientListOnLoadFailure(
+        'icu-b',
+        'icu-a',
+        3,
+        new Error('Network request failed'),
+      ),
+    ).toBe(false);
+    expect(
+      shouldKeepPatientListOnLoadFailure(
+        'icu-a',
+        'icu-a',
+        0,
+        new Error('Network request failed'),
+      ),
+    ).toBe(false);
   });
 });
 

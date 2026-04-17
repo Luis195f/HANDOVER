@@ -213,8 +213,23 @@ export function shouldKeepPatientListOnLoadFailure(
   currentScopeKey: string,
   lastSuccessfulScopeKey: string | null,
   currentPatientCount: number,
+  error: unknown,
 ) {
-  return currentPatientCount > 0 && currentScopeKey === lastSuccessfulScopeKey;
+  if (!(currentPatientCount > 0 && currentScopeKey === lastSuccessfulScopeKey)) {
+    return false;
+  }
+
+  const netError = normalizeNetError(error);
+
+  if (netError.status === 401 || netError.status === 403) {
+    return false;
+  }
+
+  if (netError.kind === 'OFFLINE' || netError.kind === 'TIMEOUT' || netError.kind === 'ABORT') {
+    return true;
+  }
+
+  return Boolean(netError.status && netError.status >= 500 && netError.status <= 599);
 }
 
 export function filterPatients(
@@ -424,6 +439,7 @@ export default function PatientList({ navigation }: Props) {
         scopeKey,
         lastSuccessfulScopeRef.current,
         currentPatientsRef.current.length,
+        error,
       );
       if (!keepVisiblePatients) {
         setPatients([]);
