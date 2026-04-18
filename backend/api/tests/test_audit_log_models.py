@@ -53,7 +53,7 @@ class AuditLogViewTests(TestCase):
         )
         self.client.force_authenticate(user=user, token=user.claims)
 
-        self._perm_patcher = patch.object(AuditLogView, "permission_classes", [AllowAny])
+        self._perm_patcher = patch.object(AuditLogView, "get_permissions", return_value=[AllowAny()])
         self._auth_patcher = patch.object(AuditLogView, "authentication_classes", [])
         self._perm_patcher.start()
         self._auth_patcher.start()
@@ -209,3 +209,40 @@ class AuditLogViewTests(TestCase):
 class AuditMetaSanitizationTests(TestCase):
     def test_sanitize_client_audit_meta_returns_none_for_invalid_root(self):
         self.assertIsNone(sanitize_client_audit_meta("not-a-dict"))
+
+
+class AuditLogViewPermissionTests(TestCase):
+    def test_post_accepts_handover_write_without_audit_read_but_get_remains_forbidden(self):
+        from rest_framework.test import APIClient
+
+        from backend.api.views import AuditLogView
+
+        client = APIClient()
+        url = reverse("audit-log")
+        claims = {
+            "sub": "nurse-audit",
+            "permissions": ["handover:write"],
+            "scope": "handover:write",
+            "roles": ["nurse"],
+        }
+        user = types.SimpleNamespace(
+            is_authenticated=True,
+            sub="nurse-audit",
+            username="nurse-audit",
+            claims=claims,
+        )
+        client.force_authenticate(user=user, token=claims)
+
+        payload = {
+            "type": "patient_edit",
+            "userId": "nurse-audit",
+            "patientKey": build_audit_patient_key("pat-91"),
+            "at": "2026-01-01T10:00:00Z",
+        }
+
+        with patch.object(AuditLogView, "_running_tests", return_value=False):
+            post_response = client.post(url, data=payload, format="json")
+            get_response = client.get(url)
+
+        self.assertEqual(post_response.status_code, 201)
+        self.assertEqual(get_response.status_code, 403)
