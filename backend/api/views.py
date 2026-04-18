@@ -2470,11 +2470,18 @@ class HandoverEtlReadView(AuthenticatedAPIView):
 
 
 class AuditLogView(AuthenticatedAPIView):
-    permission_classes = [
-        IsAuthenticated,
-        ClinicianAuditPermission,
-        HasAnyScope.required("audit:read", "handover:audit"),
-    ]
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [
+                IsAuthenticated(),
+                ClinicianAuditPermission(),
+                HasAnyScope.required("audit:read", "handover:audit")(),
+            ]
+        return [
+            IsAuthenticated(),
+            HasAnyRole.required("nurse", "supervisor", "admin")(),
+            HasAnyScope.required("handover:write", "audit:write")(),
+        ]
 
     def get(self, request: HttpRequest) -> Response:
         try:
