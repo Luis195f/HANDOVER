@@ -57,6 +57,8 @@ from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_tran
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.api.icea_transaction import persist_handover_bundle_record, persist_successful_transaction_icea_side_effects
 from backend.audit.models import AuditEvent
+from backend.api.etl_access import get_claims_from_request as _get_claims_from_request
+from backend.api.etl_permissions import ClientCredentialsEtlPermission
 from backend.security.permissions import ClinicianAuditPermission, IsAdminOrSupervisor
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.roles import extract_roles
@@ -122,8 +124,6 @@ AuthenticatedApiView = AuthenticatedAPIView
 
 logger = logging.getLogger(__name__)
 
-ETL_ALLOWED_ROLES = {"service_etl", "admin"}
-ETL_REQUIRED_SCOPES = {"icea:etl:read", "handover:etl:read"}
 FHIR_TRANSACTION_ALLOWED_ROLES = ("nurse", "supervisor", "admin")
 FHIR_TRANSACTION_REQUIRED_SCOPES = ("fhir:transaction", "handover:write")
 
@@ -220,16 +220,6 @@ def _resolve_persisted_handover_bundle(record: HandoverBundleRecord) -> dict[str
             extra={"bundle_id": record.bundle_id, "request_id": record.request_id},
         )
         raise
-
-
-def _has_valid_etl_access(request: HttpRequest) -> bool:
-    claims = _get_claims_from_request(request) or {}
-    roles = extract_roles(claims) if isinstance(claims, dict) else set()
-    if not (roles & ETL_ALLOWED_ROLES):
-        return False
-
-    scopes = set(_extract_permissions_from_request(request) or [])
-    return bool(scopes & ETL_REQUIRED_SCOPES)
 
 
 def _claims_text_list(value: Any) -> list[str]:
@@ -538,23 +528,6 @@ def _build_demo_patient_bundle(*, patient_id: str | None = None) -> dict:
         "total": len(entries),
         "entry": entries,
     }
-
-
-def _get_claims_from_request(request: HttpRequest) -> dict | None:
-    """Extrae claims ya validados del request sin depender de helpers externos."""
-    auth_claims = getattr(request, "auth", None)
-    if isinstance(auth_claims, dict):
-        return auth_claims
-
-    user = getattr(request, "user", None)
-    user_claims = getattr(user, "claims", None)
-    if isinstance(user_claims, dict):
-        return user_claims
-
-    if hasattr(user, "claims") and isinstance(user.claims, dict):
-        return user.claims
-
-    return None
 
 
 def _get_authenticated_subject_from_context(request: HttpRequest) -> str | None:
@@ -2401,36 +2374,16 @@ class BundleView(AuthenticatedAPIView):
 
 class HandoverEtlReadView(AuthenticatedAPIView):
     authentication_classes = [Auth0JWTAuthentication]
-    permission_classes = [AllowAny]
+    permission_classes = [ClientCredentialsEtlPermission]
 
     def get_permissions(self):
         return [permission() for permission in self.permission_classes]
 
     def get_authenticators(self):
-        auth_header = (self.request.META.get("HTTP_AUTHORIZATION") or "").strip().lower()
-        if not auth_header.startswith("bearer "):
-            return []
-        return [authenticator() for authenticator in self.authentication_classes]
+        classes = [authenticator for authenticator in self.authentication_classes if authenticator is not None]
+        return [authenticator() for authenticator in classes]
 
     def get(self, request: HttpRequest, bundle_id: str) -> HttpResponse:
-        auth_header = (request.META.get("HTTP_AUTHORIZATION") or "").strip().lower()
-        if not auth_header.startswith("bearer "):
-            return Response(
-                {"detail": "Authentication credentials were not provided.", "code": "auth-required"},
-                status=401,
-            )
-
-        if not getattr(request.user, "is_authenticated", False):
-            return Response({"detail": "Invalid or expired token", "code": "auth-failed"}, status=401)
-
-        claims = _get_claims_from_request(request) or {}
-        grant_type = str((claims.get("gty") if isinstance(claims, dict) else "") or "").strip().lower()
-        if grant_type != "client-credentials":
-            return Response({"detail": "Forbidden", "code": "forbidden-grant-type"}, status=403)
-
-        if not _has_valid_etl_access(request):
-            return Response({"detail": "Forbidden", "code": "forbidden-scope"}, status=403)
-
         record = (
             HandoverBundleRecord.objects.filter(bundle_id=bundle_id)
             .only("id", "bundle_id", "request_id", "bundle_json", "encryption_metadata", "expires_at", "created_at")
