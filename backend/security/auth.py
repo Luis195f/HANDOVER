@@ -211,13 +211,3 @@ class Auth0JWTAuthentication(BaseAuthentication):
     def authenticate_header(self, request) -> str:
         return "Bearer"
 
-
-def verify_jwt(token: str):
-    """
-    Backwards-compatible alias for tests.
-    Tests monkeypatch this symbol; keep it stable.
-    """
-    if "verify_token" in globals():
-        return verify_token(token)  # type: ignore[name-defined]
-    raise NotImplementedError("verify_jwt is not wired to a real implementation")
-
