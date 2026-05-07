@@ -74,8 +74,8 @@ function getAllowedUnits(): string[] {
   if (!raw) return [];
   return raw
     .split(',')
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+    .map((value: string) => value.trim())
+    .filter((value: string) => value.length > 0);
 }
 
 function normalizeUnits(units: string[] | undefined): string[] {
