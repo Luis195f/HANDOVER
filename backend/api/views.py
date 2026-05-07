@@ -676,7 +676,8 @@ class FHIRJSONRenderer(JSONRenderer):
 # =========================
 
 FHIR_BASE = os.environ.get("FHIR_BASE") or os.environ.get("FHIR_BASE_URL") or "http://localhost:8080/fhir"
-HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "off").lower().strip()
+# Default to local minimal validation; strict environments must still declare the mode explicitly at startup.
+HANDOVER_FHIR_VALIDATION_MODE = os.getenv("HANDOVER_FHIR_VALIDATION_MODE", "local").lower().strip()
 HANDOVER_VALIDATE_STRICT = os.getenv("HANDOVER_VALIDATE_STRICT", "false").lower().strip()
 HANDOVER_REQUIRE_RBAC_ON_FHIR = os.getenv("HANDOVER_REQUIRE_RBAC_ON_FHIR", "true").lower().strip()
 OIDC_TOKEN_URL = os.getenv("OIDC_TOKEN_URL", "")

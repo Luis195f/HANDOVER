@@ -19,6 +19,7 @@ class SecurityHardeningSettingsTests(TestCase):
         env["SECRET_KEY"] = "test-secret"
         env["DJANGO_DEBUG"] = "false"
         env["HANDOVER_SIGNATURE_DISABLED"] = "false"
+        env["HANDOVER_FHIR_VALIDATION_MODE"] = "local"
         env["HANDOVER_PRIVATE_KEY_PATH"] = "C:/keys/private.pem"
         env["HANDOVER_PUBLIC_KEY_PATH"] = "C:/keys/public.pem"
         env.pop("PYTEST_CURRENT_TEST", None)
@@ -128,6 +129,18 @@ class SecurityHardeningSettingsTests(TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("HANDOVER_SIGNATURE_DISABLED cannot be enabled in pilot/production", result.stderr)
+
+    def test_pilot_requires_explicit_fhir_validation_mode(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_FHIR_VALIDATION_MODE": "",
+            "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+            "AUTH0_AUDIENCE": "handover-api",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HANDOVER_FHIR_VALIDATION_MODE must be set explicitly in pilot/production", result.stderr)
 
     def test_pilot_requires_signature_key_paths(self):
         result = self._run_settings_import({
