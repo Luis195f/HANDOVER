@@ -23,5 +23,13 @@ class AuditEvent(models.Model):
     class Meta:
         ordering = ["-timestamp"]
 
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError("AuditEvent is append-only and cannot be updated once persisted.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("AuditEvent is append-only and cannot be deleted from the model layer.")
+
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"AuditEvent(event_type={self.event_type}, status={self.status})"
