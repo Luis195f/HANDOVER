@@ -20,6 +20,31 @@ const QR_DISABLED_UNIT_IDS = new Set([
   'udcc-psychogeriatrics',
 ]);
 
+function isBehavioralHealthQrDisabledContext(
+  context: PatientIdentificationContext,
+  profileContext: ReturnType<typeof resolveProfileContext>,
+): boolean {
+  const normalizedUnitId = normalizeContextId(context.unitId);
+  if (normalizedUnitId && QR_DISABLED_UNIT_IDS.has(normalizedUnitId)) {
+    return true;
+  }
+
+  const normalizedSpecialtyId = normalizeContextId(context.specialtyId);
+  if (normalizedSpecialtyId && QR_DISABLED_SPECIALTY_IDS.has(normalizedSpecialtyId)) {
+    return true;
+  }
+
+  const normalizedResolvedSpecialtyId = normalizeContextId(profileContext.specialtyId);
+  if (normalizedResolvedSpecialtyId && QR_DISABLED_SPECIALTY_IDS.has(normalizedResolvedSpecialtyId)) {
+    return true;
+  }
+
+  return (
+    normalizeContextId(profileContext.unitProfileId) === 'behavioral-health' ||
+    normalizeContextId(profileContext.catalogUnitProfileId) === 'behavioral-health'
+  );
+}
+
 function normalizeContextId(value?: string | null): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim().toLowerCase();
@@ -52,22 +77,12 @@ export function isQrPatientScanEnabled(context: PatientIdentificationContext = {
     return truthy(explicitFlag);
   }
 
-  const normalizedUnitId = normalizeContextId(context.unitId);
-  if (normalizedUnitId && QR_DISABLED_UNIT_IDS.has(normalizedUnitId)) {
-    return false;
-  }
-
-  const normalizedSpecialtyId = normalizeContextId(context.specialtyId);
-  if (normalizedSpecialtyId && QR_DISABLED_SPECIALTY_IDS.has(normalizedSpecialtyId)) {
-    return false;
-  }
-
   const profileContext = resolveProfileContext({
     unitId: context.unitId,
     specialtyId: context.specialtyId,
   });
 
-  return normalizeContextId(profileContext.unitProfileId) !== 'behavioral-health';
+  return !isBehavioralHealthQrDisabledContext(context, profileContext);
 }
 
 export function getPatientIdentificationHint(context: PatientIdentificationContext = {}): string {
