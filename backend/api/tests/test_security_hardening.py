@@ -142,6 +142,44 @@ class SecurityHardeningSettingsTests(TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("HANDOVER_FHIR_VALIDATION_MODE must be set explicitly in pilot/production", result.stderr)
 
+    def test_pilot_rejects_fhir_validation_mode_off(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_FHIR_VALIDATION_MODE": "off",
+            "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+            "AUTH0_AUDIENCE": "handover-api",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid HANDOVER_FHIR_VALIDATION_MODE for pilot/production: 'off'", result.stderr)
+        self.assertIn("Allowed values: local, remote, strict", result.stderr)
+        self.assertIn("'off' and any other invalid value are not allowed in strict environments", result.stderr)
+
+    def test_pilot_rejects_invalid_fhir_validation_mode_value(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_FHIR_VALIDATION_MODE": "remtoe",
+            "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+            "AUTH0_AUDIENCE": "handover-api",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid HANDOVER_FHIR_VALIDATION_MODE for pilot/production: 'remtoe'", result.stderr)
+        self.assertIn("Allowed values: local, remote, strict", result.stderr)
+
+    def test_pilot_accepts_valid_fhir_validation_mode(self):
+        result = self._run_settings_import({
+            "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+            "HANDOVER_DEPLOYMENT_MODE": "pilot",
+            "HANDOVER_FHIR_VALIDATION_MODE": "remote",
+            "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+            "AUTH0_AUDIENCE": "handover-api",
+        })
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     def test_pilot_requires_signature_key_paths(self):
         result = self._run_settings_import({
             "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",

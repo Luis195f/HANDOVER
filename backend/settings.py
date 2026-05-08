@@ -88,6 +88,7 @@ HANDOVER_PRIVATE_KEY_PATH = os.getenv("HANDOVER_PRIVATE_KEY_PATH")
 HANDOVER_PUBLIC_KEY_PATH = os.getenv("HANDOVER_PUBLIC_KEY_PATH")
 HANDOVER_SIGNATURE_DISABLED = os.getenv("HANDOVER_SIGNATURE_DISABLED", "false").lower() == "true"
 RAW_HANDOVER_FHIR_VALIDATION_MODE = (os.getenv("HANDOVER_FHIR_VALIDATION_MODE") or "").strip().lower()
+STRICT_HANDOVER_FHIR_VALIDATION_MODES = {"local", "remote", "strict"}
 
 if HANDOVER_STRICT_SECURITY_MODE and HANDOVER_SIGNATURE_DISABLED:
     _record_startup_validation_error(
@@ -99,6 +100,15 @@ if HANDOVER_STRICT_SECURITY_MODE and not RAW_HANDOVER_FHIR_VALIDATION_MODE:
     _record_startup_validation_error(
         "HANDOVER_FHIR_VALIDATION_MODE must be set explicitly in pilot/production. "
         "Use local, remote or strict; do not rely on an implicit fallback."
+    )
+elif (
+    HANDOVER_STRICT_SECURITY_MODE
+    and RAW_HANDOVER_FHIR_VALIDATION_MODE not in STRICT_HANDOVER_FHIR_VALIDATION_MODES
+):
+    _record_startup_validation_error(
+        "Invalid HANDOVER_FHIR_VALIDATION_MODE for pilot/production: "
+        f"{RAW_HANDOVER_FHIR_VALIDATION_MODE!r}. Allowed values: local, remote, strict. "
+        "'off' and any other invalid value are not allowed in strict environments."
     )
 
 if HANDOVER_STRICT_SECURITY_MODE and (
