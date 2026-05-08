@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.test import APIClient, APIRequestFactory
 
 from backend.api.views import AuthenticatedAPIView
+from backend.security import auth as auth_module
 from backend.security.auth import Auth0JWTAuthentication, Auth0User, AuthFailed, AuthRequired
 from backend.security.scopes import CLINICAL_SCOPES, FHIR_PROFILES
 
@@ -146,6 +147,15 @@ class AuthEndpointTests(TestCase):
         request = self.factory.get("/api/protected", HTTP_AUTHORIZATION="Bearer local-token")
 
         self.assertIsNone(Auth0JWTAuthentication().authenticate(request))
+
+    def test_verify_jwt_compatibility_alias_fails_closed_by_default(self):
+        with self.assertRaises(NotImplementedError) as exc:
+            auth_module.verify_jwt("compat-token")
+
+        self.assertEqual(
+            str(exc.exception),
+            "backend.security.auth.verify_jwt is a compatibility alias for tests only; real authentication lives in Auth0JWTAuthentication.authenticate().",
+        )
 
     @override_settings(DEBUG=False)
     @patch(
