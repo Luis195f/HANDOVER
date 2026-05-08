@@ -64,6 +64,19 @@ def _get_bearer_token(request) -> str:
     return parts[1]
 
 
+def verify_jwt(token: str) -> Dict[str, Any]:
+    """
+    Alias de compatibilidad para tests/consumidores que monkeypatchan
+    ``backend.security.auth.verify_jwt``.
+
+    No forma parte del flujo real de autenticación. La validación JWT activa
+    sigue en ``Auth0JWTAuthentication.authenticate()``.
+    """
+    raise NotImplementedError(
+        "backend.security.auth.verify_jwt is a compatibility alias for tests only; real authentication lives in Auth0JWTAuthentication.authenticate()."
+    )
+
+
 def _get_jwks() -> Dict[str, Any]:
     global _JWKS_CACHE, _JWKS_CACHE_TS
 
