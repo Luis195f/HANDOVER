@@ -6,9 +6,16 @@ import { type HandoverValues as HandoverFormValues } from '@/src/validation/sche
 export type PatientSectionProps = {
   styles: Record<string, TextStyle | ViewStyle>;
   onScanPress: () => void;
+  qrPatientScanEnabled: boolean;
+  patientIdentificationHint: string;
 };
 
-export const PatientSection: React.FC<PatientSectionProps> = ({ styles, onScanPress }) => {
+export const PatientSection: React.FC<PatientSectionProps> = ({
+  styles,
+  onScanPress,
+  qrPatientScanEnabled,
+  patientIdentificationHint,
+}) => {
   const {
     control,
     formState: { errors },
@@ -27,7 +34,7 @@ export const PatientSection: React.FC<PatientSectionProps> = ({ styles, onScanPr
               <TextInput
                 style={styles.input}
                 testID="handover-patient-id"
-                placeholder="Paciente"
+                placeholder="Paciente o identificador institucional"
                 onBlur={onBlur}
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -35,9 +42,14 @@ export const PatientSection: React.FC<PatientSectionProps> = ({ styles, onScanPr
             )}
           />
         </View>
-        <View style={styles.spacer} />
-        <Button title="Escanear" onPress={onScanPress} testID="handover-scan-qr" />
+        {qrPatientScanEnabled ? (
+          <>
+            <View style={styles.spacer} />
+            <Button title="Escanear QR" onPress={onScanPress} testID="handover-scan-qr" />
+          </>
+        ) : null}
       </View>
+      <Text style={styles.helperText}>{patientIdentificationHint}</Text>
       {patientError ? <Text style={styles.error}>{patientError}</Text> : null}
     </View>
   );

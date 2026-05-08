@@ -22,6 +22,7 @@ import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
+import { getPatientIdentificationHint, isQrPatientScanEnabled } from '@/src/config/patientIdentification';
 import { isPilotFeatureEnabled, usePilotControlContext } from '@/src/config/pilotControl';
 import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
 import { HANDOVER_SECTIONS_INFO, resolveHandoverProfileRuntime } from '@/src/lib/profile-runtime';
@@ -660,6 +661,22 @@ export default function HandoverForm({ navigation, route }: Props) {
   const showLegacyNursingDiagnosisText = profileRuntime.fieldVisibility['legacy-nursing-diagnosis-text'];
   const showNicCodingHint = profileRuntime.fieldVisibility['nic-coding-hint'];
   const showHandoverTimingHint = profileRuntime.fieldVisibility['handover-timing-hint'];
+  const qrPatientScanEnabled = useMemo(
+    () =>
+      isQrPatientScanEnabled({
+        unitId: effectivePilotUnitId,
+        specialtyId,
+      }),
+    [effectivePilotUnitId, specialtyId],
+  );
+  const patientIdentificationHint = useMemo(
+    () =>
+      getPatientIdentificationHint({
+        unitId: effectivePilotUnitId,
+        specialtyId,
+      }),
+    [effectivePilotUnitId, specialtyId],
+  );
 
   useEffect(() => {
     if (!features.showHandoverTimingMetrics || timingInitializedRef.current) return;
@@ -1695,6 +1712,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [form, patientIdValue, session]);
 
   const onScanPress = () => {
+    if (!qrPatientScanEnabled) {
+      Alert.alert(t('handover.scannerUnavailableTitle'), patientIdentificationHint);
+      return;
+    }
+
     const routeNames = navigation.getState?.().routeNames ?? [];
     if (routeNames.includes('QRScan')) {
       const trimmedPatientId =
@@ -1704,6 +1726,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       navigation.navigate('QRScan', {
         returnTo: 'HandoverForm',
         patientIdParam: trimmedPatientId,
+        unitIdParam: effectivePilotUnitId ?? undefined,
+        specialtyId,
       });
     } else {
       Alert.alert(t('handover.scannerUnavailableTitle'), t('handover.scannerUnavailableMessage'));
@@ -2288,6 +2312,8 @@ export default function HandoverForm({ navigation, route }: Props) {
             onLayout={handleSectionLayout}
             onToggle={toggleSection}
             onScanPress={onScanPress}
+            qrPatientScanEnabled={qrPatientScanEnabled}
+            patientIdentificationHint={patientIdentificationHint}
             parseNumericInput={parseNumericInput}
             dictationState={{
               activeDictationField,

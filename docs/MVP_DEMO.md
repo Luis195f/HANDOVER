@@ -1,5 +1,7 @@
 # MVP Demo / Piloto (5–7 min)
 
+> Para el trabajo específico del demo psiquiátrico del Hospital Psiquiátrico San Juan de Dios, usa además [`docs/sjd-psychiatry-demo-scope.md`](./sjd-psychiatry-demo-scope.md). Ese documento fija alcance, límites y guardrails del seam SJD; este archivo sigue describiendo el walkthrough genérico hoy soportado por el repo.
+
 > **Objetivo**: demostrar flujo clínico SBAR, offline queue, auditoría y FHIR con datos sintéticos.
 
 ## Requisitos

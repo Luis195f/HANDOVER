@@ -17,6 +17,8 @@ type Props = {
   onLayout: (key: ContextSectionKey) => (event: LayoutChangeEvent) => void;
   onToggle: (key: ContextSectionKey) => void;
   onScanPress: () => void;
+  qrPatientScanEnabled: boolean;
+  patientIdentificationHint: string;
   parseNumericInput: AdministrativeSectionProps['parseNumericInput'];
   dictationState: AdministrativeSectionProps['dictationState'];
   DictationMicButton: AdministrativeSectionProps['DictationMicButton'];
@@ -29,6 +31,8 @@ export function HandoverContextSections({
   onLayout,
   onToggle,
   onScanPress,
+  qrPatientScanEnabled,
+  patientIdentificationHint,
   parseNumericInput,
   dictationState,
   DictationMicButton,
@@ -59,7 +63,12 @@ export function HandoverContextSections({
           isCollapsed={collapsedSections.paciente}
           onToggle={() => onToggle('paciente')}
         >
-          <PatientSection styles={styles} onScanPress={onScanPress} />
+          <PatientSection
+            styles={styles}
+            onScanPress={onScanPress}
+            qrPatientScanEnabled={qrPatientScanEnabled}
+            patientIdentificationHint={patientIdentificationHint}
+          />
         </CollapsibleSection>
       </View>
     </>

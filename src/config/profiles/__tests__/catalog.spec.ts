@@ -205,7 +205,7 @@ describe('profile master catalog', () => {
   });
 
   it('keeps operational specialties limited to the visible subset while pilot-ready and registry-only stages stay explicit', () => {
-    expect(SPECIALTIES.map((specialty) => specialty.id)).toEqual(['icu', 'ed', 'onc', 'neph', 'ped', 'ob', 'neuroicu', 'cvicu']);
+    expect(SPECIALTIES.map((specialty) => specialty.id)).toEqual(['icu', 'ed', 'onc', 'neph', 'ped', 'ob', 'neuroicu', 'cvicu', 'psych']);
     expect(WAVE_1_UNIT_PROFILE_IDS).toEqual([
       'emergency',
       'general-inpatient',
@@ -261,5 +261,7 @@ describe('profile master catalog', () => {
     expect(matchLocationToUnit('Paciente trasladado a UCI Adulto Ala A')).toBe('icu-a');
     expect(matchLocationToUnit('Pendiente en resucitacion de urgencias')).toBe('ed-obs');
     expect(matchLocationToUnit('Control post hemodialisis')).toBe('neph-hd');
+    expect(matchLocationToUnit('Observacion especial en Psiquiatria adulto SJD A')).toBe('sjd-a');
+    expect(matchLocationToUnit('Revisar continuidad en UDCC')).toBe('udcc-psychogeriatrics');
   });
 });

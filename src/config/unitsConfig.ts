@@ -100,6 +100,34 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     specialtyOverlayIds: ['pedsSubspecialties'],
     features: { ...BASE_FEATURES, enablePediatricScales: true },
   },
+  {
+    id: 'sjd-a',
+    name: 'Psiquiatria adulto · SJD A',
+    specialty: 'psych',
+    profileId: 'behavioral-health',
+    features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
+  },
+  {
+    id: 'sjd-b',
+    name: 'Psiquiatria adulto · SJD B',
+    specialty: 'psych',
+    profileId: 'behavioral-health',
+    features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
+  },
+  {
+    id: 'sjd-infanto',
+    name: 'Psiquiatria infanto-adolescente',
+    specialty: 'psych',
+    profileId: 'behavioral-health',
+    features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
+  },
+  {
+    id: 'udcc-psychogeriatrics',
+    name: 'Psicogeriatria / UDCC',
+    specialty: 'psych',
+    profileId: 'behavioral-health',
+    features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
+  },
 ] as const;
 
 const STATIC_UNITS_CONFIG_BY_ID = STATIC_UNITS_CONFIG.reduce(
