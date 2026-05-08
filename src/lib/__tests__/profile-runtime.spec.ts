@@ -259,6 +259,39 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(emergency.checklistItems.at(-1)?.label).toBe('Preguntas del equipo entrante resueltas');
   });
 
+  it('resolves SJD psychiatry units onto the shared behavioral-health runtime without opening a parallel form', async () => {
+    process.env.UNITS_CONFIG = JSON.stringify({
+      units: [
+        {
+          id: 'sjd-a',
+          name: 'Psiquiatria adulto · SJD A',
+          specialty: 'psych',
+          profileId: 'behavioral-health',
+          features: { enablePsychosocialExtra: true },
+        },
+      ],
+    });
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['behavioral-health'],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
+
+    expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
+    expect(runtime.context.unitProfileId).toBe('behavioral-health');
+    expect(runtime.context.specialtyId).toBe('psych');
+    expect(runtime.pack.id).toBe('behavioral-health');
+    expect(runtime.basePack.id).toBe('behavioral-health');
+    expect(runtime.sectionVisibility.psychosocial).toBe(true);
+    expect(runtime.requiredExtraFields).toEqual(
+      expect.arrayContaining(['Riesgo conductual', 'Plan de observacion', 'Cambio respecto al basal']),
+    );
+    expect(runtime.visibleOutputs).toContain('Plan de observacion y seguridad');
+    expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
+  });
+
   it('keeps hidden sections monotonic across compatible overlay merges while preserving trace order', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
       unitProfiles: ['emergency'],

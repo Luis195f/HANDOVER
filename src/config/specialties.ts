@@ -74,6 +74,13 @@ export const SPECIALTIES: Specialty[] = [
     defaultUnitProfileId: 'specialized-critical-care',
     overlayId: 'cardio',
   },
+  {
+    id: 'psych',
+    name: 'Psiquiatria y salud mental',
+    aliases: ['salud-mental', 'psiquiatria', 'psiquiatria-adulto', 'psiquiatria-infanto-adolescente', 'udcc'],
+    readiness: 'scaffold',
+    defaultUnitProfileId: 'behavioral-health',
+  },
 ];
 
 export const SPECIALTIES_BY_ID: Record<string, Specialty> = SPECIALTIES.reduce(

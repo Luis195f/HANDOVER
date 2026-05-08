@@ -111,6 +111,38 @@ export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
       helper: 'Aclara dudas del relevo sobre microvigilancia, avisos y la siguiente reevaluación no delegable.',
     },
   ],
+  'behavioral-health': [
+    {
+      key: 'patientIdentityConfirmed',
+      label: 'Paciente, ubicacion funcional y referente del turno confirmados',
+      helper: 'Prioriza censo, cama/planta o identificador institucional sin depender del QR.',
+    },
+    {
+      key: 'allergiesReviewed',
+      label: 'Alertas conductuales, observacion especial y riesgos inmediatos revisados',
+      helper: 'Aclara si hubo cambio respecto al basal, pendiente critico o necesidad de acompanamiento intensivo.',
+    },
+    {
+      key: 'linesAndDevicesChecked',
+      label: 'Pertenencias, entorno seguro y restricciones activas verificadas',
+      helper: 'Solo registra estado y trazabilidad; no sustituye protocolos locales de seguridad.',
+    },
+    {
+      key: 'medicationPlanReviewed',
+      label: 'Adherencia, medicacion pendiente y tratamientos no omitibles revisados',
+      helper: 'Haz visible rechazo terapeutico, ventanas horarias y necesidad de seguimiento del siguiente turno.',
+    },
+    {
+      key: 'safetyMeasuresApplied',
+      label: 'Plan de observacion, continuidad y coordinacion interna aplicado',
+      helper: 'Expresa prioridades de cuidado y continuidad, no etiquetas punitivas ni rankings de peligrosidad.',
+    },
+    {
+      key: 'questionsAnswered',
+      label: 'Preguntas del equipo entrante resueltas',
+      helper: 'Aclara gatillos de reevaluacion, avisos al equipo y coordinaciones pendientes del turno siguiente.',
+    },
+  ],
 };
 
 export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProfileRuntimePack & { id: UnitProfileId }>> = {
@@ -281,11 +313,20 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     id: 'behavioral-health',
     label: 'Salud mental',
     enabledSections: ['psychosocial'],
-    requiredExtraFields: ['Riesgo conductual', 'Plan de observacion'],
-    optionalExtraFields: ['Alianza terapeutica', 'Factores desencadenantes'],
-    scales: ['EVA'],
-    sentinelEvents: ['Riesgo auto o heteroagresivo', 'Descompensacion conductual'],
-    visibleOutputs: ['Plan de observacion y seguridad'],
+    requiredExtraFields: ['Riesgo conductual', 'Plan de observacion', 'Cambio respecto al basal'],
+    optionalExtraFields: ['Alianza terapeutica', 'Factores desencadenantes', 'Coordinacion interna o familiar relevante'],
+    focusAreas: ['Observacion especial, continuidad y seguridad relacional', 'Adherencia, sueno, ingesta y cambio conductual respecto al basal'],
+    explanations: ['Hace visible observacion, continuidad y riesgo de omision en salud mental sin abrir un formulario paralelo ni convertir QR en flujo principal.'],
+    scales: ['EVA', 'Escala conductual local', 'Riesgo suicida institucional'],
+    sentinelEvents: ['Riesgo auto o heteroagresivo', 'Descompensacion conductual', 'Fuga o no retorno', 'Rechazo terapeutico'],
+    quickPicks: {
+      treatments: [
+        { id: 'psych-observation', type: 'other', description: 'Actualizar observacion especial, gatillos y siguiente reevaluacion del turno' },
+        { id: 'psych-adherence', type: 'education', description: 'Cerrar adherencia, rechazo terapeutico y pendientes de medicacion o acompanamiento' },
+        { id: 'psych-continuity', type: 'other', description: 'Resumir continuidad, coordinaciones internas y cambios respecto al basal' },
+      ],
+    },
+    visibleOutputs: ['Plan de observacion y seguridad', 'Continuidad de turno sin etiquetas estigmatizantes'],
   }),
   'home-care': createPack({
     id: 'home-care',
