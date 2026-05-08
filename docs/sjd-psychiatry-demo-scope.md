@@ -33,8 +33,8 @@ Seams SJD psiquiatría implementados en este PR:
 - configuración estática de esas unidades en `src/config/unitsConfig.ts`;
 - mapeo de esas unidades al perfil común `behavioral-health`;
 - checklist y runtime mínimo reforzado para salud mental;
-- identificación por QR desactivada por defecto para `behavioral-health`, `psych` y las unidades SJD/UDCC;
-- QR reactivable únicamente mediante flag explícito;
+- identificación por QR desactivada por defecto para contextos resueltos como `behavioral-health` / `psych`, incluyendo unidades SJD/UDCC y unidades custom que lleguen por `UNITS_CONFIG`;
+- QR reactivable únicamente mediante `EXPO_PUBLIC_ENABLE_QR_PATIENT_SCAN=true`;
 - documentación demo enlazada desde `docs/MVP_DEMO.md`.
 
 Límites observados tras este PR:
@@ -57,30 +57,19 @@ Límites observados tras este PR:
 
 ## Guardrails psiquiátricos específicos para este demo
 
-- QR queda como capacidad opcional o futura, detrás de flag, desactivada por defecto en el recorrido psiquiátrico.
-- La identificación principal del demo debe apoyarse en censo/listado de unidad, búsqueda manual, ubicación funcional, cama/planta o identificador institucional.
+- QR no es flujo principal en psiquiatría/salud mental; queda como capacidad opcional o futura, detrás de flag, desactivada por defecto en el recorrido psiquiátrico.
+- La identificación principal del demo debe apoyarse en censo/listado de unidad, búsqueda manual, ubicación funcional, cama/planta o identificador institucional, no en QR.
 - La app no debe exponer información a familiares; solo registrar coordinación interna cuando proceda.
 - La contención mecánica no debe describirse con instrucciones operativas detalladas; el demo solo puede mostrar estado, autorización, revisiones, trazabilidad y referencia a protocolo local.
 - No deben mostrarse rankings de “peligrosidad”.
 - Las prioridades visibles deben expresarse como continuidad, observación, riesgo de omisión, cambio respecto a basal o necesidad de coordinación.
 - No deben generarse recomendaciones clínicas autónomas; solo checklist, recordatorios, síntesis SBAR y continuidad de turno.
 
-## Fuentes clínicas externas esperadas para el demo
+## Insumos institucionales y confidencialidad
 
-Este repo no contiene con nombres verificables los documentos locales SJD listados en el encargo. Por tanto, deben tratarse como insumos externos de validación clínica/operativa y no como archivos ya incorporados al workspace.
+Este repositorio no incorpora, enumera ni reproduce documentación interna de instituciones sanitarias. Cualquier documento local, protocolo, cronograma, pauta operativa o material institucional que pudiera orientar una demo debe tratarse como insumo confidencial externo, sujeto a autorización formal, anonimización/saneamiento y revisión institucional antes de cualquier uso.
 
-Fuentes a mapear fuera del repo o a incorporar después de saneamiento institucional:
-
-- Actividades mañana SJD A y SJD B.
-- Actividades tarde SJD A y SJD B.
-- Actividades turno noche.
-- CRONO DUE A 2025.
-- Procedimiento/protocolo de contención mecánica.
-- Protocolo de prevención de caídas.
-- Protocolo de fugas.
-- UDCC cronograma mañana y tarde.
-- Valoración funcional.
-- Protocolo de fallecimiento solo como referencia futura, fuera del objetivo inicial de demo.
+Para efectos del demo, solo se permite usar datos sintéticos y descripciones funcionales genéricas. No deben incluirse nombres de documentos internos, extractos, capturas, adjuntos ni contenido operativo local en el repositorio, PRs, issues, documentación pública o materiales de presentación.
 
 ## Lectura clínica objetivo del demo
 
@@ -121,8 +110,8 @@ Este PR implementa el seam inicial SJD psiquiatría de forma acotada:
 - añade unidades SJD/UDCC al catálogo operativo;
 - mapea esas unidades al perfil común `behavioral-health`;
 - refuerza el runtime mínimo de salud mental;
-- desactiva QR por defecto en contexto psiquiátrico/salud mental;
-- mantiene QR como capacidad futura reactivable por flag explícito;
+- desactiva QR por defecto en contexto psiquiátrico/salud mental, incluso cuando ese contexto se resuelve por `UNITS_CONFIG` y no solo por IDs SJD hardcodeados;
+- mantiene QR como capacidad futura reactivable solo mediante `EXPO_PUBLIC_ENABLE_QR_PATIENT_SCAN=true`;
 - añade pruebas mínimas del seam.
 
 Este PR no cambia:
