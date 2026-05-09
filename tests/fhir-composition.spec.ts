@@ -264,6 +264,121 @@ describe('FHIR Composition', () => {
     expect(contextObservation?.note?.[0]?.text).toContain('Reevaluar pupilas y Glasgow');
   });
 
+  it('projects behavioral-health through the existing contextual export seam without creating a psychiatric FHIR contract', async () => {
+    process.env.UNITS_CONFIG = JSON.stringify({
+      units: [
+        {
+          id: 'sjd-a',
+          name: 'Psiquiatria adulto demo',
+          specialty: 'psych',
+          profileId: 'behavioral-health',
+        },
+      ],
+    });
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['behavioral-health'],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('@/src/lib/profile-runtime');
+    const { buildHandoverInputPayload, buildProfileTraceInput } = await import('@/src/screens/handover/submission');
+    const { buildHandoverBundle: buildBehavioralHealthBundle } = await import('@/src/lib/fhir-map');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
+    const payload = buildHandoverInputPayload(
+      {
+        patientId: 'pat-psych-1',
+        encounterId: 'enc-psych-1',
+        author: { id: 'nurse-psych-1', display: 'Nurse Psych One' },
+        bedsideChecklist: {
+          patientIdentityConfirmed: true,
+          allergiesReviewed: true,
+          linesAndDevicesChecked: true,
+          medicationPlanReviewed: true,
+          safetyMeasuresApplied: true,
+          questionsAnswered: true,
+        },
+        administrativeData: {
+          unit: 'Psiquiatria adulto',
+          census: 14,
+          staffIn: ['Nurse In'],
+          staffOut: ['Nurse Out'],
+          shiftStart: '2025-10-20T08:00:00Z',
+          shiftEnd: '2025-10-20T16:00:00Z',
+          shiftType: 'Mañana',
+        },
+        psychosocial: {
+          emotionalStatus: 'Ansiedad contenida y colaboracion parcial',
+          familyVisits: true,
+          familyNotes: 'Acompanamiento sintetico coordinado para continuidad del relevo.',
+        },
+        pendingTasks: [
+          {
+            id: 'task-psych-1',
+            category: 'critical-task',
+            title: 'Reevaluar observacion especial y continuidad terapeutica',
+            status: 'pending',
+            priority: 'critical',
+            dueBy: '2025-10-20T16:15:00Z',
+          },
+        ],
+      } as any,
+      {},
+      buildProfileTraceInput(runtime),
+    );
+    const bundle = buildBehavioralHealthBundle(payload, { now: () => '2025-10-20T16:05:00Z' });
+
+    expect(runtime.context.unitProfileId).toBe('behavioral-health');
+    expect(runtime.context.specialtyOverlayIds).toEqual([]);
+
+    const composition = bundle.entry.find((entry) => entry.resource.resourceType === 'Composition')?.resource as any;
+    const activeProfiles = (composition.extension ?? [])
+      .filter((extension: any) => extension.url === ACTIVE_PROFILE_EXTENSION_URL)
+      .map(readNestedExtension);
+
+    expect(activeProfiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ profileId: 'handover-core', profileKind: 'core' }),
+        expect.objectContaining({ profileId: 'behavioral-health', profileKind: 'unit-profile' }),
+      ]),
+    );
+    expect(activeProfiles.some((profile) => profile.profileKind === 'specialty-overlay')).toBe(false);
+
+    const contextSection = (composition.section ?? []).find((section: any) => section.title === 'Clinical context');
+    expect(contextSection?.entry).toHaveLength(1);
+
+    const contextObservation = bundle.entry
+      .map((entry) => entry.resource as any)
+      .find(
+        (resource) =>
+          resource.resourceType === 'Observation' &&
+          resource.code?.coding?.some((coding: any) => coding.code === FHIR_CODES.CONTEXT.CLINICAL_CONTEXT.code),
+      );
+
+    expect(contextObservation?.valueString).toContain('Salud mental');
+    expect(contextObservation?.component).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Unit profile' }),
+          valueString: expect.stringContaining('behavioral-health'),
+        }),
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Contextual priority signal' }),
+          valueString: expect.stringContaining('Necesidad de observacion conductual intensiva'),
+        }),
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Contextual priority signal' }),
+          valueString: expect.stringContaining('Riesgo de ruptura terapeutica u omision relacional'),
+        }),
+        expect.objectContaining({
+          code: expect.objectContaining({ text: 'Pending critical task count' }),
+          valueInteger: 1,
+        }),
+      ]),
+    );
+    expect(contextObservation?.component?.some((component: any) => component.code?.text === 'Specialty overlay')).toBe(false);
+    expect(contextObservation?.note?.[0]?.text).toContain('Reevaluar observacion especial y continuidad terapeutica');
+  });
+
   it.each([
     ['uci-adulto-contextual-bundle.json', 'critical-care', []],
     ['hospitalizacion-general-medicina-interna-contextual-bundle.json', 'general-inpatient', []],

@@ -50,6 +50,13 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 - sin cambios en backend, FHIR, ICEA, auth, auditoria u offline queue;
 - sin instrucciones operativas para contencion.
 
+## Compatibilidad FHIR e ICEA shadow
+
+- el seam psiquiatrico no crea un mapper FHIR psiquiatrico ni recursos FHIR especificos nuevos;
+- cuando el runtime resuelve `behavioral-health`, la exportacion usa solo costuras ya existentes: `Composition.extension`, `Composition.section[Clinical context]`, la `Observation` contextual y los recursos Core ya presentes segun el dato realmente documentado;
+- el copy editorial del runtime, el checklist contextual, `mergeTrace` e `iceaContext` no abren un contrato clinico nuevo ni cambian la gobernanza del payload;
+- si el bridge ICEA consume ese Bundle, la proyeccion sigue entrando por el `contextualSignal` versionado ya existente y mantiene `shadow_aggregated_no_individual_score`, sin score individual visible ni lectura nominal bedside.
+
 ## Lectura funcional esperada
 
 El demo debe permitir que el equipo:
