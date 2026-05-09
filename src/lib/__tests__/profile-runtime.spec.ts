@@ -282,6 +282,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
     expect(runtime.context.specialtyId).toBe('psych');
+    expect(runtime.context.specialtyOverlayIds).toEqual([]);
     expect(runtime.pack.id).toBe('behavioral-health');
     expect(runtime.basePack.id).toBe('behavioral-health');
     expect(runtime.sectionVisibility.psychosocial).toBe(true);
@@ -291,11 +292,21 @@ describe('resolveHandoverProfileRuntime', () => {
       expect.arrayContaining([
         'Estado basal y cambio observado',
         'Observacion especial o acompanamiento',
+        'Riesgo de caidas y necesidad de deambulacion supervisada cuando aplique',
         'Riesgo de fuga o no retorno',
+        'Entorno seguro y elementos que deban resguardarse',
+        'Coordinacion interna pendiente y reevaluacion del siguiente turno',
       ]),
     );
-    expect(runtime.visibleOutputs).toContain('Plan de observacion y continuidad');
+    expect(runtime.optionalExtraFields).toContain(
+      'Evento de contencion trazable: autorizacion, revision, vigencia y reevaluacion',
+    );
+    expect(runtime.visibleOutputs).toContain('Plan de observacion, entorno seguro y continuidad');
+    expect(runtime.visibleOutputs).toContain('Evento de contencion trazable sin instrucciones operativas');
     expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
+    expect(runtime.checklistItems[1]?.label).toContain('caidas');
+    expect(runtime.checklistItems[2]?.label).toContain('elementos retirables');
+    expect(runtime.checklistItems[4]?.label).toContain('contencion');
   });
 
   it('keeps child-adolescent psychiatry on the shared behavioral-health core while projecting a unit-specific checklist', async () => {
@@ -309,16 +320,19 @@ describe('resolveHandoverProfileRuntime', () => {
 
     expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
+    expect(runtime.context.specialtyOverlayIds).toEqual([]);
     expect(runtime.pack.id).toBe('behavioral-health');
     expect(runtime.basePack.id).toBe('behavioral-health');
     expect(runtime.activeOverlays).toEqual([]);
     expect(runtime.optionalExtraFields).toEqual(
       expect.arrayContaining([
+        'Evento de contencion trazable: autorizacion, revision, vigencia y reevaluacion',
         'Responsable o referente de comunicacion interna',
         'Coordinacion con familia, tutor o cuidadores cuando aplique',
       ]),
     );
     expect(runtime.checklistItems[0]?.label).toBe('Paciente, ubicacion funcional y referente interno confirmados');
+    expect(runtime.checklistItems[2]?.label).toContain('fuga/no retorno');
     expect(runtime.checklistItems[4]?.label).toContain('familia o tutor');
   });
 
@@ -333,9 +347,15 @@ describe('resolveHandoverProfileRuntime', () => {
 
     expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
+    expect(runtime.context.specialtyOverlayIds).toEqual([]);
     expect(runtime.pack.id).toBe('behavioral-health');
     expect(runtime.basePack.id).toBe('behavioral-health');
     expect(runtime.activeOverlays).toEqual([]);
+    expect(runtime.requiredExtraFields).toEqual(
+      expect.arrayContaining([
+        'Riesgo de caidas y necesidad de deambulacion supervisada cuando aplique',
+      ]),
+    );
     expect(runtime.optionalExtraFields).toEqual(
       expect.arrayContaining([
         'Deterioro funcional o cognitivo-conductual cuando aplique',
@@ -345,6 +365,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.checklistItems[0]?.label).toBe(
       'Paciente, ubicacion funcional y basal cognitivo-funcional confirmados',
     );
+    expect(runtime.checklistItems[1]?.label).toContain('riesgo de caidas');
     expect(runtime.checklistItems[2]?.label).toContain('deambulacion supervisada');
   });
 

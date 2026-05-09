@@ -115,17 +115,17 @@ export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
     {
       key: 'patientIdentityConfirmed',
       label: 'Paciente, ubicacion funcional y referente del turno confirmados',
-      helper: 'Prioriza censo, cama/planta o identificador institucional sin depender del QR.',
+      helper: 'Prioriza censo, cama/planta o identificador del centro sin depender del QR.',
     },
     {
       key: 'allergiesReviewed',
-      label: 'Alertas conductuales, observacion especial y riesgos inmediatos revisados',
-      helper: 'Aclara si hubo cambio respecto al basal, pendiente critico o necesidad de acompanamiento intensivo.',
+      label: 'Observacion especial, riesgo de caidas y fuga/no retorno revisados',
+      helper: 'Aclara cambio respecto al basal, necesidad de acompanamiento y siguiente reevaluacion prioritaria.',
     },
     {
       key: 'linesAndDevicesChecked',
-      label: 'Pertenencias, entorno seguro y restricciones activas verificadas',
-      helper: 'Solo registra estado y trazabilidad; no sustituye protocolos locales de seguridad.',
+      label: 'Entorno seguro, elementos retirables y tratamientos o dispositivos verificados',
+      helper: 'Deja visible lo que requiere resguardo o puede retirarse, con estado y trazabilidad para el relevo.',
     },
     {
       key: 'medicationPlanReviewed',
@@ -134,8 +134,9 @@ export const UNIT_PROFILE_CHECKLIST_ITEMS: Partial<
     },
     {
       key: 'safetyMeasuresApplied',
-      label: 'Plan de observacion, continuidad y coordinacion interna aplicado',
-      helper: 'Expresa prioridades de cuidado y continuidad, no etiquetas punitivas ni rankings de peligrosidad.',
+      label: 'Continuidad, reevaluacion y evento de contencion trazables',
+      helper:
+        'Si existe una medida excepcional, registra solo autorizacion, revision, vigencia y proxima reevaluacion dentro del marco asistencial vigente.',
     },
     {
       key: 'questionsAnswered',
@@ -316,10 +317,11 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     requiredExtraFields: [
       'Estado basal y cambio observado',
       'Observacion especial o acompanamiento',
+      'Riesgo de caidas y necesidad de deambulacion supervisada cuando aplique',
       'Riesgo de fuga o no retorno',
-      'Riesgo conductual expresado de forma no estigmatizante',
+      'Entorno seguro y elementos que deban resguardarse',
       'Adherencia o rechazo terapeutico',
-      'Coordinacion interna pendiente',
+      'Coordinacion interna pendiente y reevaluacion del siguiente turno',
     ],
     optionalExtraFields: [
       'Sueno e ingesta/hidratacion',
@@ -327,19 +329,24 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
       'Coordinacion con familia, tutor o cuidadores cuando aplique',
       'Deterioro funcional o cognitivo-conductual cuando aplique',
       'Dispositivos o tratamientos que el paciente pueda retirarse',
+      'Evento de contencion trazable: autorizacion, revision, vigencia y reevaluacion',
     ],
     focusAreas: [
-      'Observacion especial, continuidad y seguridad relacional',
+      'Observacion especial, entorno seguro y seguridad relacional',
+      'Caidas, fuga/no retorno y elementos retirables que requieren continuidad',
       'Cambio respecto al basal, adherencia terapeutica y riesgo de omision del turno siguiente',
       'Ingesta, hidratacion, sueno y coordinacion interna pendiente',
     ],
     explanations: [
       'Refuerza salud mental con secciones y copy del runtime ya existentes, sin abrir un formulario paralelo ni convertir QR en flujo principal.',
+      'Mantiene un unico nucleo behavioral-health y deja las variaciones por subunidad limitadas a checklist contextual y copy prudente.',
     ],
     scales: ['EVA', 'Observacion conductual estructurada cuando aplique'],
     sentinelEvents: [
+      'Caida',
       'Descompensacion conductual',
       'Fuga o no retorno',
+      'Retiro no planificado de dispositivo o tratamiento',
       'Rechazo terapeutico con riesgo de omision',
       'Cambio relevante respecto al basal',
     ],
@@ -348,7 +355,7 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
         {
           id: 'psych-observation',
           type: 'other',
-          description: 'Actualizar observacion especial, acompanamiento, gatillos y siguiente reevaluacion del turno',
+          description: 'Actualizar observacion especial, acompanamiento, riesgo de caidas y siguiente reevaluacion del turno',
         },
         {
           id: 'psych-adherence',
@@ -356,9 +363,19 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
           description: 'Cerrar adherencia o rechazo terapeutico y pendientes de medicacion o tratamiento no omitibles',
         },
         {
+          id: 'psych-safe-environment',
+          type: 'other',
+          description: 'Verificar entorno seguro, riesgo de fuga/no retorno y elementos, dispositivos o tratamientos retirables',
+        },
+        {
           id: 'psych-intake-sleep',
           type: 'other',
           description: 'Registrar sueno, ingesta, hidratacion y cambios respecto al basal relevantes para continuidad',
+        },
+        {
+          id: 'psych-restraint-trace',
+          type: 'other',
+          description: 'Registrar evento de contencion solo con autorizacion, vigencia, revision y siguiente reevaluacion',
         },
         {
           id: 'psych-continuity',
@@ -368,8 +385,9 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
       ],
     },
     visibleOutputs: [
-      'Plan de observacion y continuidad',
+      'Plan de observacion, entorno seguro y continuidad',
       'Pendientes de medicacion, tratamiento y coordinacion visibles para el siguiente turno',
+      'Evento de contencion trazable sin instrucciones operativas',
       'Continuidad de turno sin etiquetas estigmatizantes',
     ],
   }),
