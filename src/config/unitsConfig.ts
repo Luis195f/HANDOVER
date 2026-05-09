@@ -82,13 +82,13 @@ const BEHAVIORAL_HEALTH_CHILD_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] =
   },
   {
     key: 'allergiesReviewed',
-    label: 'Observacion especial, entorno seguro y acompanamiento revisados',
-    helper: 'Asegura continuidad del acompanamiento y cambios respecto al basal sin exponer informacion externa.',
+    label: 'Observacion especial, acompanamiento y entorno seguro revisados',
+    helper: 'Asegura continuidad del acompanamiento, cambios respecto al basal y avisos internos del turno.',
   },
   {
     key: 'linesAndDevicesChecked',
-    label: 'Pertenencias, dispositivos retirables y entorno revisados',
-    helper: 'Deja visible solo lo necesario para continuidad y seguridad del relevo.',
+    label: 'Pertenencias, dispositivos retirables y riesgo de fuga/no retorno revisados',
+    helper: 'Deja visible solo lo necesario para continuidad, retorno seguro y coordinacion del relevo.',
   },
   {
     key: 'medicationPlanReviewed',
@@ -97,8 +97,8 @@ const BEHAVIORAL_HEALTH_CHILD_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] =
   },
   {
     key: 'safetyMeasuresApplied',
-    label: 'Coordinacion con familia o tutor y avisos internos revisados',
-    helper: 'Registra continuidad de comunicacion solo como dato interno del relevo.',
+    label: 'Coordinacion interna y con familia o tutor cuando aplique revisadas',
+    helper: 'Registra continuidad de comunicacion solo como coordinacion del relevo y siguiente reevaluacion.',
   },
   {
     key: 'questionsAnswered',
@@ -130,8 +130,8 @@ const BEHAVIORAL_HEALTH_UDCC_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] = 
   },
   {
     key: 'safetyMeasuresApplied',
-    label: 'Continuidad con cuidadores, supervision y entorno seguro aplicada',
-    helper: 'Aclara acompanamiento, movilidad y medidas de seguridad no farmacologicas del turno.',
+    label: 'Continuidad con cuidadores, supervision, entorno seguro y reevaluacion aplicada',
+    helper: 'Aclara acompanamiento, movilidad y continuidad del siguiente turno sin abrir un overlay paralelo.',
   },
   {
     key: 'questionsAnswered',
