@@ -75,6 +75,8 @@ The contextual priority output is surfaced in the existing React Native experien
 - PatientList can auto-sort only when there is actionable contextual signal and otherwise falls back to the received order.
 - Each patient card shows a compact, non-alarmist explanation covering why the patient is elevated, what cannot be omitted, and the active time window when available.
 - SupervisorDashboard reuses the same patient census and MPAC facade to expose a unit-level priority snapshot for supervision.
+- Behavioral-health demos can project explainable continuity priorities through the existing profile runtime copy (`focusAreas`, `explanations`, `visibleOutputs`, checklist labels) without adding a psychiatric scorer, autonomous recommendation engine, or new persisted schema.
+- That projection is editorial and prudential: it must not be presented as clinically validated psychiatric scoring, ranking, or replacement for nurse judgment.
 
 ## Validation
 

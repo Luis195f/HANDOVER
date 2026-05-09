@@ -92,6 +92,8 @@ export function HandoverOverview({
 }: Props) {
   const syncNoticeCopy = resolveSyncNoticeCopy(handoverSyncStatus, handoverSyncError);
   const syncNoticeColors = resolveSyncNoticeColors(handoverSyncStatus, colors);
+  const usesBehavioralHealthRuntime =
+    profileRuntime.basePack.id === 'behavioral-health' || profileRuntime.pack.id === 'behavioral-health';
 
   return (
     <>
@@ -181,9 +183,18 @@ export function HandoverOverview({
           {`Merge aplicado: ${profileRuntime.mergeTrace.map((entry) => entry.label).join(' -> ')}`}
         </Text>
         {profileRuntime.visibleOutputs.length > 0 ? (
-          <Text style={styles.profileCardMeta}>
-            {`Salidas visibles: ${profileRuntime.visibleOutputs.join(' · ')}`}
-          </Text>
+          <View testID="handover-profile-visible-outputs">
+            <Text style={styles.profileCardMeta}>
+              {usesBehavioralHealthRuntime
+                ? 'Prioridades explicables de continuidad (MPAC prudente):'
+                : 'Salidas visibles:'}
+            </Text>
+            {profileRuntime.visibleOutputs.map((output) => (
+              <Text key={output} style={styles.profileCardMeta}>
+                {`- ${output}`}
+              </Text>
+            ))}
+          </View>
         ) : null}
       </View>
     </>
