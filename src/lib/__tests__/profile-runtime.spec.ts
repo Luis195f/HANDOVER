@@ -301,8 +301,23 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.optionalExtraFields).toContain(
       'Evento de contencion trazable: autorizacion, revision, vigencia y reevaluacion',
     );
-    expect(runtime.visibleOutputs).toContain('Plan de observacion, entorno seguro y continuidad');
-    expect(runtime.visibleOutputs).toContain('Basal funcional y supervision requerida explicitados para el siguiente turno');
+    expect(runtime.explanations).toContain(
+      'MPAC para salud mental se proyecta aqui como prioridades explicables de continuidad y seguridad; no sustituye juicio clinico ni activa scoring autonomo.',
+    );
+    expect(runtime.explanations).toContain(
+      'No presenta ranking individual ni validacion clinica; ordena de forma prudente lo que el relevo no debe omitir.',
+    );
+    expect(runtime.visibleOutputs).toContain('Continuidad del relevo explicitada para el siguiente turno');
+    expect(runtime.visibleOutputs).toContain('Riesgo de omision en medicacion, tratamiento, vigilancia o coordinacion visible');
+    expect(runtime.visibleOutputs).toContain('Cambio respecto al basal resumido sin etiquetas estigmatizantes');
+    expect(runtime.visibleOutputs).toContain('Necesidad de reevaluacion y siguiente ventana del turno visibles');
+    expect(runtime.visibleOutputs).toContain('Coordinacion interna pendiente y referente del relevo explicitados');
+    expect(runtime.visibleOutputs).toContain('Seguridad del entorno y resguardo de elementos retirables visibles');
+    expect(runtime.visibleOutputs).toContain('Adherencia o rechazo terapeutico con continuidad del plan');
+    expect(runtime.visibleOutputs).toContain('Fuga o no retorno y supervision requerida visibles');
+    expect(runtime.visibleOutputs).toContain('Caidas o movilidad supervisada explicitadas cuando apliquen');
+    expect(runtime.visibleOutputs).toContain('Dispositivos o tratamientos retirables con trazabilidad para el relevo');
+    expect(runtime.visibleOutputs).toContain('Observacion especial o acompanamiento explicitados');
     expect(runtime.visibleOutputs).toContain('Evento de contencion trazable sin instrucciones operativas');
     expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
     expect(runtime.checklistItems[1]?.label).toContain('caidas');
@@ -375,7 +390,8 @@ describe('resolveHandoverProfileRuntime', () => {
         'Ingesta, hidratacion, sueno, supervision funcional y coordinacion interna pendiente',
       ]),
     );
-    expect(runtime.visibleOutputs).toContain('Basal funcional y supervision requerida explicitados para el siguiente turno');
+    expect(runtime.visibleOutputs).toContain('Coordinacion interna pendiente y referente del relevo explicitados');
+    expect(runtime.visibleOutputs).toContain('Caidas o movilidad supervisada explicitadas cuando apliquen');
     expect(runtime.checklistItems[0]?.label).toBe(
       'Paciente, ubicacion funcional, basal cognitivo-funcional y supervision requerida confirmados',
     );

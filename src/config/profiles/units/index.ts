@@ -341,6 +341,8 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     explanations: [
       'Refuerza salud mental con secciones y copy del runtime ya existentes, sin abrir un formulario paralelo ni convertir QR en flujo principal.',
       'Mantiene un unico nucleo behavioral-health y deja las variaciones por subunidad limitadas a checklist contextual y copy prudente.',
+      'MPAC para salud mental se proyecta aqui como prioridades explicables de continuidad y seguridad; no sustituye juicio clinico ni activa scoring autonomo.',
+      'No presenta ranking individual ni validacion clinica; ordena de forma prudente lo que el relevo no debe omitir.',
     ],
     scales: ['EVA', 'Observacion conductual estructurada cuando aplique'],
     sentinelEvents: [
@@ -386,11 +388,18 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
       ],
     },
     visibleOutputs: [
-      'Plan de observacion, entorno seguro y continuidad',
-      'Basal funcional y supervision requerida explicitados para el siguiente turno',
-      'Pendientes de medicacion, tratamiento y coordinacion visibles para el siguiente turno',
+      'Continuidad del relevo explicitada para el siguiente turno',
+      'Riesgo de omision en medicacion, tratamiento, vigilancia o coordinacion visible',
+      'Cambio respecto al basal resumido sin etiquetas estigmatizantes',
+      'Necesidad de reevaluacion y siguiente ventana del turno visibles',
+      'Coordinacion interna pendiente y referente del relevo explicitados',
+      'Seguridad del entorno y resguardo de elementos retirables visibles',
+      'Adherencia o rechazo terapeutico con continuidad del plan',
+      'Fuga o no retorno y supervision requerida visibles',
+      'Caidas o movilidad supervisada explicitadas cuando apliquen',
+      'Dispositivos o tratamientos retirables con trazabilidad para el relevo',
+      'Observacion especial o acompanamiento explicitados',
       'Evento de contencion trazable sin instrucciones operativas',
-      'Continuidad de turno sin etiquetas estigmatizantes',
     ],
   }),
   'home-care': createPack({
