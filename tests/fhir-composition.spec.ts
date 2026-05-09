@@ -6,6 +6,8 @@ import { buildHandoverBundle } from '@/src/lib/fhir-map';
 import { FHIR_CODES, FHIR_EXTENSION_URLS } from '@/src/lib/codes';
 import { PROFILE_REGRESSION_SCENARIOS } from './fixtures/fhir/profileRegressionScenarios';
 
+type SubmissionInput = Parameters<typeof import('@/src/screens/handover/submission').buildHandoverInputPayload>[0];
+
 const originalEnv = { ...process.env };
 
 vi.mock('expo-constants', () => ({
@@ -26,6 +28,172 @@ const readNestedExtension = (extension: { extension?: Array<{ url: string; value
 
 const readFixtureBundle = (fixtureFile: string) =>
   JSON.parse(readFileSync(new URL(`./fixtures/fhir/${fixtureFile}`, import.meta.url), 'utf8'));
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const expectRecord = (value: unknown, label: string): Record<string, unknown> => {
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value;
+};
+
+const expectString = (value: unknown, label: string): string => {
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be a string`);
+  }
+  return value;
+};
+
+const expectBoolean = (value: unknown, label: string): boolean => {
+  if (typeof value !== 'boolean') {
+    throw new Error(`${label} must be a boolean`);
+  }
+  return value;
+};
+
+const expectNumber = (value: unknown, label: string): number => {
+  if (typeof value !== 'number') {
+    throw new Error(`${label} must be a number`);
+  }
+  return value;
+};
+
+const readOptionalString = (record: Record<string, unknown>, key: string): string | undefined => {
+  const value = record[key];
+  return typeof value === 'string' ? value : undefined;
+};
+
+const readOptionalNumber = (record: Record<string, unknown>, key: string): number | undefined => {
+  const value = record[key];
+  return typeof value === 'number' ? value : undefined;
+};
+
+const readOptionalBoolean = (record: Record<string, unknown>, key: string): boolean | undefined => {
+  const value = record[key];
+  return typeof value === 'boolean' ? value : undefined;
+};
+
+const readStringArray = (value: unknown, label: string): string[] => {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error(`${label} must be a string array`);
+  }
+  return value;
+};
+
+const readScenarioValues = (values: Record<string, unknown>) => {
+  const administrativeData = expectRecord(values.administrativeData, 'administrativeData');
+  const bedsideChecklist = expectRecord(values.bedsideChecklist, 'bedsideChecklist');
+  const author = isRecord(values.author) ? values.author : undefined;
+  const vitals = isRecord(values.vitals) ? values.vitals : undefined;
+  const psychosocial = isRecord(values.psychosocial) ? values.psychosocial : undefined;
+  const treatments = Array.isArray(values.treatments) ? values.treatments : undefined;
+  const outcomes = Array.isArray(values.outcomes) ? values.outcomes : undefined;
+  const pendingTasks = Array.isArray(values.pendingTasks) ? values.pendingTasks : undefined;
+
+  return {
+    patientId: expectString(values.patientId, 'patientId'),
+    encounterId: readOptionalString(values, 'encounterId'),
+    author: author
+      ? {
+          id: expectString(author.id, 'author.id'),
+          display: expectString(author.display, 'author.display'),
+        }
+      : undefined,
+    bedsideChecklist: {
+      patientIdentityConfirmed: expectBoolean(
+        bedsideChecklist.patientIdentityConfirmed,
+        'bedsideChecklist.patientIdentityConfirmed',
+      ),
+      allergiesReviewed: expectBoolean(bedsideChecklist.allergiesReviewed, 'bedsideChecklist.allergiesReviewed'),
+      linesAndDevicesChecked: expectBoolean(
+        bedsideChecklist.linesAndDevicesChecked,
+        'bedsideChecklist.linesAndDevicesChecked',
+      ),
+      medicationPlanReviewed: expectBoolean(
+        bedsideChecklist.medicationPlanReviewed,
+        'bedsideChecklist.medicationPlanReviewed',
+      ),
+      safetyMeasuresApplied: expectBoolean(
+        bedsideChecklist.safetyMeasuresApplied,
+        'bedsideChecklist.safetyMeasuresApplied',
+      ),
+      questionsAnswered: expectBoolean(bedsideChecklist.questionsAnswered, 'bedsideChecklist.questionsAnswered'),
+      bedsideNotes: readOptionalString(bedsideChecklist, 'bedsideNotes'),
+    },
+    administrativeData: {
+      unit: expectString(administrativeData.unit, 'administrativeData.unit'),
+      census: expectNumber(administrativeData.census, 'administrativeData.census'),
+      staffIn: readStringArray(administrativeData.staffIn, 'administrativeData.staffIn'),
+      staffOut: readStringArray(administrativeData.staffOut, 'administrativeData.staffOut'),
+      shiftStart: expectString(administrativeData.shiftStart, 'administrativeData.shiftStart'),
+      shiftEnd: expectString(administrativeData.shiftEnd, 'administrativeData.shiftEnd'),
+      shiftType: expectString(administrativeData.shiftType, 'administrativeData.shiftType'),
+      generalNotes: readOptionalString(administrativeData, 'generalNotes'),
+      incidents: Array.isArray(administrativeData.incidents)
+        ? readStringArray(administrativeData.incidents, 'administrativeData.incidents')
+        : undefined,
+    },
+    vitals: vitals
+      ? {
+          hr: readOptionalNumber(vitals, 'hr'),
+          rr: readOptionalNumber(vitals, 'rr'),
+          tempC: readOptionalNumber(vitals, 'tempC'),
+          spo2: readOptionalNumber(vitals, 'spo2'),
+          sbp: readOptionalNumber(vitals, 'sbp'),
+          dbp: readOptionalNumber(vitals, 'dbp'),
+          glucoseMgDl: readOptionalNumber(vitals, 'glucoseMgDl'),
+          glucoseMmolL: readOptionalNumber(vitals, 'glucoseMmolL'),
+          avpu:
+            vitals.avpu === 'A' || vitals.avpu === 'C' || vitals.avpu === 'V' || vitals.avpu === 'P' || vitals.avpu === 'U'
+              ? vitals.avpu
+              : undefined,
+          recordedAt: readOptionalString(vitals, 'recordedAt'),
+          issuedAt: readOptionalString(vitals, 'issuedAt'),
+        }
+      : undefined,
+    psychosocial: psychosocial
+      ? {
+          emotionalStatus: readOptionalString(psychosocial, 'emotionalStatus'),
+          familyVisits: readOptionalBoolean(psychosocial, 'familyVisits'),
+          familyNotes: readOptionalString(psychosocial, 'familyNotes'),
+        }
+      : undefined,
+    treatments: treatments?.map((item, index) => {
+      const treatment = expectRecord(item, `treatments[${index}]`);
+      return {
+        id: expectString(treatment.id, `treatments[${index}].id`),
+        type: expectString(treatment.type, `treatments[${index}].type`),
+        description: expectString(treatment.description, `treatments[${index}].description`),
+        scheduledAt: readOptionalString(treatment, 'scheduledAt'),
+        done: readOptionalBoolean(treatment, 'done'),
+      };
+    }),
+    outcomes: outcomes?.map((item, index) => {
+      const outcome = expectRecord(item, `outcomes[${index}]`);
+      return {
+        nocCode: expectString(outcome.nocCode, `outcomes[${index}].nocCode`),
+        nocDisplay: expectString(outcome.nocDisplay, `outcomes[${index}].nocDisplay`),
+        baseline: expectNumber(outcome.baseline, `outcomes[${index}].baseline`),
+        target: expectNumber(outcome.target, `outcomes[${index}].target`),
+        current: readOptionalNumber(outcome, 'current'),
+      };
+    }),
+    pendingTasks: pendingTasks?.map((item, index) => {
+      const task = expectRecord(item, `pendingTasks[${index}]`);
+      return {
+        id: expectString(task.id, `pendingTasks[${index}].id`),
+        category: expectString(task.category, `pendingTasks[${index}].category`),
+        title: expectString(task.title, `pendingTasks[${index}].title`),
+        status: expectString(task.status, `pendingTasks[${index}].status`),
+        priority: expectString(task.priority, `pendingTasks[${index}].priority`),
+        dueBy: readOptionalString(task, 'dueBy'),
+      };
+    }),
+    closingSummary: readOptionalString(values, 'closingSummary'),
+  } satisfies SubmissionInput;
+};
 
 async function buildScenarioBundle(
   fixtureFile: string,
@@ -65,11 +233,7 @@ async function buildScenarioBundle(
     specialtyId: scenario.specialtyId,
   });
 
-  const payload = buildHandoverInputPayload(
-    scenario.values as any,
-    {},
-    buildProfileTraceInput(runtime),
-  );
+  const payload = buildHandoverInputPayload(readScenarioValues(scenario.values), {}, buildProfileTraceInput(runtime));
 
   return {
     bundle: buildScenarioHandoverBundle(payload, { now: () => scenario.now }),
@@ -284,47 +448,44 @@ describe('FHIR Composition', () => {
     const { buildHandoverBundle: buildBehavioralHealthBundle } = await import('@/src/lib/fhir-map');
 
     const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
-    const payload = buildHandoverInputPayload(
-      {
-        patientId: 'pat-psych-1',
-        encounterId: 'enc-psych-1',
-        author: { id: 'nurse-psych-1', display: 'Nurse Psych One' },
-        bedsideChecklist: {
-          patientIdentityConfirmed: true,
-          allergiesReviewed: true,
-          linesAndDevicesChecked: true,
-          medicationPlanReviewed: true,
-          safetyMeasuresApplied: true,
-          questionsAnswered: true,
+    const behavioralHealthValues = {
+      patientId: 'pat-psych-1',
+      encounterId: 'enc-psych-1',
+      author: { id: 'nurse-psych-1', display: 'Nurse Psych One' },
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      administrativeData: {
+        unit: 'Psiquiatria adulto',
+        census: 14,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-10-20T08:00:00Z',
+        shiftEnd: '2025-10-20T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      psychosocial: {
+        emotionalStatus: 'Ansiedad contenida y colaboracion parcial',
+        familyVisits: true,
+        familyNotes: 'Acompanamiento sintetico coordinado para continuidad del relevo.',
+      },
+      pendingTasks: [
+        {
+          id: 'task-psych-1',
+          category: 'critical-task',
+          title: 'Reevaluar observacion especial y continuidad terapeutica',
+          status: 'pending',
+          priority: 'critical',
+          dueBy: '2025-10-20T16:15:00Z',
         },
-        administrativeData: {
-          unit: 'Psiquiatria adulto',
-          census: 14,
-          staffIn: ['Nurse In'],
-          staffOut: ['Nurse Out'],
-          shiftStart: '2025-10-20T08:00:00Z',
-          shiftEnd: '2025-10-20T16:00:00Z',
-          shiftType: 'Mañana',
-        },
-        psychosocial: {
-          emotionalStatus: 'Ansiedad contenida y colaboracion parcial',
-          familyVisits: true,
-          familyNotes: 'Acompanamiento sintetico coordinado para continuidad del relevo.',
-        },
-        pendingTasks: [
-          {
-            id: 'task-psych-1',
-            category: 'critical-task',
-            title: 'Reevaluar observacion especial y continuidad terapeutica',
-            status: 'pending',
-            priority: 'critical',
-            dueBy: '2025-10-20T16:15:00Z',
-          },
-        ],
-      } as any,
-      {},
-      buildProfileTraceInput(runtime),
-    );
+      ],
+    } satisfies SubmissionInput;
+    const payload = buildHandoverInputPayload(behavioralHealthValues, {}, buildProfileTraceInput(runtime));
     const bundle = buildBehavioralHealthBundle(payload, { now: () => '2025-10-20T16:05:00Z' });
 
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
@@ -396,4 +557,3 @@ describe('FHIR Composition', () => {
     },
   );
 });
-

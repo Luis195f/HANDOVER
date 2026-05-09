@@ -15,6 +15,33 @@ vi.mock('@/src/config/flags', () => ({
   isOn: (name: string) => isOn(name),
 }));
 
+const readBehavioralHealthPackSurfaces = (
+  runtime: Pick<
+    Awaited<ReturnType<(typeof import('../profile-runtime'))['resolveHandoverProfileRuntime']>>,
+    'requiredExtraFields' | 'optionalExtraFields' | 'focusAreas' | 'visibleOutputs' | 'treatmentQuickPicks'
+  >,
+) => [
+  ...runtime.requiredExtraFields,
+  ...runtime.optionalExtraFields,
+  ...runtime.focusAreas,
+  ...runtime.visibleOutputs,
+  ...runtime.treatmentQuickPicks.map((quickPick) => quickPick.description),
+].join(' | ');
+
+const expectNoUdccSpecificPackCopy = (
+  runtime: Pick<
+    Awaited<ReturnType<(typeof import('../profile-runtime'))['resolveHandoverProfileRuntime']>>,
+    'requiredExtraFields' | 'optionalExtraFields' | 'focusAreas' | 'visibleOutputs' | 'treatmentQuickPicks'
+  >,
+) => {
+  const surfaces = readBehavioralHealthPackSurfaces(runtime);
+
+  expect(surfaces).not.toContain('basal cognitivo-funcional');
+  expect(surfaces).not.toContain('deambulacion supervisada');
+  expect(surfaces).not.toContain('continencia');
+  expect(surfaces).not.toContain('piel');
+};
+
 describe('resolveHandoverProfileRuntime', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -292,7 +319,7 @@ describe('resolveHandoverProfileRuntime', () => {
       expect.arrayContaining([
         'Estado basal y cambio observado',
         'Observacion especial, acompanamiento o nivel de supervision requerido',
-        'Riesgo de caidas, movilidad segura y necesidad de deambulacion supervisada cuando aplique',
+        'Riesgo de seguridad fisica y apoyo para movilidad o traslados cuando aplique',
         'Riesgo de fuga o no retorno',
         'Entorno seguro y elementos que deban resguardarse',
         'Coordinacion interna pendiente y reevaluacion del siguiente turno',
@@ -315,10 +342,11 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.visibleOutputs).toContain('Seguridad del entorno y resguardo de elementos retirables visibles');
     expect(runtime.visibleOutputs).toContain('Adherencia o rechazo terapeutico con continuidad del plan');
     expect(runtime.visibleOutputs).toContain('Fuga o no retorno y supervision requerida visibles');
-    expect(runtime.visibleOutputs).toContain('Caidas o movilidad supervisada explicitadas cuando apliquen');
+    expect(runtime.visibleOutputs).toContain('Seguridad fisica y apoyo para movilidad explicitados cuando apliquen');
     expect(runtime.visibleOutputs).toContain('Dispositivos o tratamientos retirables con trazabilidad para el relevo');
     expect(runtime.visibleOutputs).toContain('Observacion especial o acompanamiento explicitados');
     expect(runtime.visibleOutputs).toContain('Evento de contencion trazable sin instrucciones operativas');
+    expectNoUdccSpecificPackCopy(runtime);
     expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
     expect(runtime.checklistItems[1]?.label).toContain('caidas');
     expect(runtime.checklistItems[2]?.label).toContain('elementos retirables');
@@ -349,6 +377,7 @@ describe('resolveHandoverProfileRuntime', () => {
         'Coordinacion con familia, tutor o cuidadores cuando aplique',
       ]),
     );
+    expectNoUdccSpecificPackCopy(runtime);
     expect(runtime.checklistItems[0]?.label).toBe('Paciente, ubicacion funcional y referente interno confirmados');
     expect(runtime.checklistItems[2]?.label).toContain('fuga/no retorno');
     expect(runtime.checklistItems[4]?.label).toContain('familia o tutor');
@@ -374,24 +403,25 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.requiredExtraFields).toEqual(
       expect.arrayContaining([
         'Observacion especial, acompanamiento o nivel de supervision requerido',
-        'Riesgo de caidas, movilidad segura y necesidad de deambulacion supervisada cuando aplique',
+        'Riesgo de seguridad fisica y apoyo para movilidad o traslados cuando aplique',
       ]),
     );
     expect(runtime.optionalExtraFields).toEqual(
       expect.arrayContaining([
-        'Continencia, piel o ayudas funcionales cuando condicionen la continuidad del turno',
-        'Deterioro funcional o cognitivo-conductual cuando aplique',
+        'Necesidades fisicas o de autocuidado que condicionen la continuidad del turno',
+        'Cambios cognitivo-conductuales o funcionales que condicionen la continuidad del turno',
         'Dispositivos o tratamientos que el paciente pueda retirarse',
       ]),
     );
     expect(runtime.focusAreas).toEqual(
       expect.arrayContaining([
-        'Caidas, fuga/no retorno, movilidad segura y elementos retirables que requieren continuidad',
-        'Ingesta, hidratacion, sueno, supervision funcional y coordinacion interna pendiente',
+        'Seguridad fisica, fuga/no retorno y elementos retirables que requieren continuidad',
+        'Ingesta, hidratacion, sueno, acompanamiento requerido y coordinacion interna pendiente',
       ]),
     );
     expect(runtime.visibleOutputs).toContain('Coordinacion interna pendiente y referente del relevo explicitados');
-    expect(runtime.visibleOutputs).toContain('Caidas o movilidad supervisada explicitadas cuando apliquen');
+    expect(runtime.visibleOutputs).toContain('Seguridad fisica y apoyo para movilidad explicitados cuando apliquen');
+    expectNoUdccSpecificPackCopy(runtime);
     expect(runtime.checklistItems[0]?.label).toBe(
       'Paciente, ubicacion funcional, basal cognitivo-funcional y supervision requerida confirmados',
     );
