@@ -291,8 +291,8 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.requiredExtraFields).toEqual(
       expect.arrayContaining([
         'Estado basal y cambio observado',
-        'Observacion especial o acompanamiento',
-        'Riesgo de caidas y necesidad de deambulacion supervisada cuando aplique',
+        'Observacion especial, acompanamiento o nivel de supervision requerido',
+        'Riesgo de caidas, movilidad segura y necesidad de deambulacion supervisada cuando aplique',
         'Riesgo de fuga o no retorno',
         'Entorno seguro y elementos que deban resguardarse',
         'Coordinacion interna pendiente y reevaluacion del siguiente turno',
@@ -302,11 +302,14 @@ describe('resolveHandoverProfileRuntime', () => {
       'Evento de contencion trazable: autorizacion, revision, vigencia y reevaluacion',
     );
     expect(runtime.visibleOutputs).toContain('Plan de observacion, entorno seguro y continuidad');
+    expect(runtime.visibleOutputs).toContain('Basal funcional y supervision requerida explicitados para el siguiente turno');
     expect(runtime.visibleOutputs).toContain('Evento de contencion trazable sin instrucciones operativas');
     expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
     expect(runtime.checklistItems[1]?.label).toContain('caidas');
     expect(runtime.checklistItems[2]?.label).toContain('elementos retirables');
     expect(runtime.checklistItems[4]?.label).toContain('contencion');
+    expect(runtime.checklistItems.some((item) => item.label.includes('basal cognitivo-funcional'))).toBe(false);
+    expect(runtime.checklistItems.some((item) => item.label.includes('deambulacion supervisada'))).toBe(false);
   });
 
   it('keeps child-adolescent psychiatry on the shared behavioral-health core while projecting a unit-specific checklist', async () => {
@@ -327,13 +330,15 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.optionalExtraFields).toEqual(
       expect.arrayContaining([
         'Evento de contencion trazable: autorizacion, revision, vigencia y reevaluacion',
-        'Responsable o referente de comunicacion interna',
+        'Responsable o referente de comunicacion interna y relacion terapeutica relevante',
         'Coordinacion con familia, tutor o cuidadores cuando aplique',
       ]),
     );
     expect(runtime.checklistItems[0]?.label).toBe('Paciente, ubicacion funcional y referente interno confirmados');
     expect(runtime.checklistItems[2]?.label).toContain('fuga/no retorno');
     expect(runtime.checklistItems[4]?.label).toContain('familia o tutor');
+    expect(runtime.checklistItems.some((item) => item.label.includes('basal cognitivo-funcional'))).toBe(false);
+    expect(runtime.checklistItems.some((item) => item.label.includes('deambulacion supervisada'))).toBe(false);
   });
 
   it('keeps psychogeriatrics on the shared behavioral-health core while projecting a unit-specific checklist', async () => {
@@ -353,20 +358,35 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.activeOverlays).toEqual([]);
     expect(runtime.requiredExtraFields).toEqual(
       expect.arrayContaining([
-        'Riesgo de caidas y necesidad de deambulacion supervisada cuando aplique',
+        'Observacion especial, acompanamiento o nivel de supervision requerido',
+        'Riesgo de caidas, movilidad segura y necesidad de deambulacion supervisada cuando aplique',
       ]),
     );
     expect(runtime.optionalExtraFields).toEqual(
       expect.arrayContaining([
+        'Continencia, piel o ayudas funcionales cuando condicionen la continuidad del turno',
         'Deterioro funcional o cognitivo-conductual cuando aplique',
         'Dispositivos o tratamientos que el paciente pueda retirarse',
       ]),
     );
-    expect(runtime.checklistItems[0]?.label).toBe(
-      'Paciente, ubicacion funcional y basal cognitivo-funcional confirmados',
+    expect(runtime.focusAreas).toEqual(
+      expect.arrayContaining([
+        'Caidas, fuga/no retorno, movilidad segura y elementos retirables que requieren continuidad',
+        'Ingesta, hidratacion, sueno, supervision funcional y coordinacion interna pendiente',
+      ]),
     );
-    expect(runtime.checklistItems[1]?.label).toContain('riesgo de caidas');
-    expect(runtime.checklistItems[2]?.label).toContain('deambulacion supervisada');
+    expect(runtime.visibleOutputs).toContain('Basal funcional y supervision requerida explicitados para el siguiente turno');
+    expect(runtime.checklistItems[0]?.label).toBe(
+      'Paciente, ubicacion funcional, basal cognitivo-funcional y supervision requerida confirmados',
+    );
+    expect(runtime.checklistItems[1]?.label).toContain('deambulacion supervisada');
+    expect(runtime.checklistItems[2]?.label).toContain('continencia');
+    expect(runtime.checklistItems[3]?.label).toContain('adherencia terapeutica');
+    expect(runtime.checklistItems[4]?.label).toContain('reevaluacion');
+    expect(runtime.treatmentQuickPicks.map((quickPick) => quickPick.id)).toEqual(
+      expect.arrayContaining(['psych-intake-sleep', 'psych-continuity']),
+    );
+    expect(runtime.checklistItems.some((item) => item.label.includes('familia o tutor'))).toBe(false);
   });
 
   it('keeps hidden sections monotonic across compatible overlay merges while preserving trace order', async () => {
