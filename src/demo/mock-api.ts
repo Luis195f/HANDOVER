@@ -1,4 +1,10 @@
-import { DEMO_ADMIN_DASHBOARD, DEMO_FHIR_ALLERGY_BUNDLE, DEMO_FHIR_ENCOUNTER_BUNDLE, DEMO_FHIR_PATIENT, DEMO_PATIENTS } from './fixtures';
+import {
+  DEMO_ADMIN_DASHBOARD,
+  DEMO_PATIENTS,
+  getDemoAllergyBundle,
+  getDemoEncounterBundle,
+  getDemoFhirPatient,
+} from './fixtures';
 
 // BEGIN HANDOVER: DEMO_MODE
 function normalizeUrl(input: RequestInfo | URL): string | null {
@@ -15,9 +21,30 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
+function parseUrl(url: string): URL {
+  return new URL(url, 'https://demo.local');
+}
+
+function readDemoPatientId(parsed: URL): string | null {
+  const patientPathMatch = parsed.pathname.match(/\/Patient\/([^/?#]+)/i);
+  if (patientPathMatch?.[1]) {
+    return decodeURIComponent(patientPathMatch[1]);
+  }
+
+  const subject = parsed.searchParams.get('subject') ?? parsed.searchParams.get('patient');
+  if (!subject) return null;
+  const subjectMatch = subject.match(/Patient\/(.+)$/i);
+  if (subjectMatch?.[1]) {
+    return decodeURIComponent(subjectMatch[1]);
+  }
+  return decodeURIComponent(subject);
+}
+
 export async function buildDemoResponse(input: RequestInfo | URL, _init?: RequestInit): Promise<Response | null> {
   const url = normalizeUrl(input);
   if (!url) return null;
+  const parsed = parseUrl(url);
+  const patientId = readDemoPatientId(parsed);
 
   if (url.includes('/api/ping')) {
     return jsonResponse({ ok: true, mode: 'demo' });
@@ -58,18 +85,20 @@ export async function buildDemoResponse(input: RequestInfo | URL, _init?: Reques
     });
   }
 
-  if (/\/Patient\//i.test(url)) {
-    return jsonResponse(DEMO_FHIR_PATIENT);
+  if (/\/Patient\//i.test(parsed.pathname)) {
+    return jsonResponse(getDemoFhirPatient(patientId));
   }
-  if (url.includes('Encounter?')) {
-    return jsonResponse(DEMO_FHIR_ENCOUNTER_BUNDLE);
+  if (parsed.pathname.includes('Encounter')) {
+    return jsonResponse(getDemoEncounterBundle(patientId));
   }
-  if (url.includes('AllergyIntolerance?')) {
-    return jsonResponse(DEMO_FHIR_ALLERGY_BUNDLE);
+  if (parsed.pathname.includes('AllergyIntolerance')) {
+    return jsonResponse(getDemoAllergyBundle(patientId));
   }
 
-  if (url.includes('/patients') || url.includes('/Patient')) {
-    return jsonResponse(DEMO_PATIENTS);
+  if (parsed.pathname.includes('/patients')) {
+    const requestedUnit = parsed.searchParams.get('unit');
+    const patients = requestedUnit ? DEMO_PATIENTS.filter((patient) => patient.unitId === requestedUnit) : DEMO_PATIENTS;
+    return jsonResponse(patients);
   }
 
   return null;
