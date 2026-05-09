@@ -316,8 +316,8 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     enabledSections: ['psychosocial', 'nutrition', 'examenes'],
     requiredExtraFields: [
       'Estado basal y cambio observado',
-      'Observacion especial o acompanamiento',
-      'Riesgo de caidas y necesidad de deambulacion supervisada cuando aplique',
+      'Observacion especial, acompanamiento o nivel de supervision requerido',
+      'Riesgo de caidas, movilidad segura y necesidad de deambulacion supervisada cuando aplique',
       'Riesgo de fuga o no retorno',
       'Entorno seguro y elementos que deban resguardarse',
       'Adherencia o rechazo terapeutico',
@@ -325,7 +325,8 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     ],
     optionalExtraFields: [
       'Sueno e ingesta/hidratacion',
-      'Responsable o referente de comunicacion interna',
+      'Continencia, piel o ayudas funcionales cuando condicionen la continuidad del turno',
+      'Responsable o referente de comunicacion interna y relacion terapeutica relevante',
       'Coordinacion con familia, tutor o cuidadores cuando aplique',
       'Deterioro funcional o cognitivo-conductual cuando aplique',
       'Dispositivos o tratamientos que el paciente pueda retirarse',
@@ -333,9 +334,9 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
     ],
     focusAreas: [
       'Observacion especial, entorno seguro y seguridad relacional',
-      'Caidas, fuga/no retorno y elementos retirables que requieren continuidad',
+      'Caidas, fuga/no retorno, movilidad segura y elementos retirables que requieren continuidad',
       'Cambio respecto al basal, adherencia terapeutica y riesgo de omision del turno siguiente',
-      'Ingesta, hidratacion, sueno y coordinacion interna pendiente',
+      'Ingesta, hidratacion, sueno, supervision funcional y coordinacion interna pendiente',
     ],
     explanations: [
       'Refuerza salud mental con secciones y copy del runtime ya existentes, sin abrir un formulario paralelo ni convertir QR en flujo principal.',
@@ -370,7 +371,7 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
         {
           id: 'psych-intake-sleep',
           type: 'other',
-          description: 'Registrar sueno, ingesta, hidratacion y cambios respecto al basal relevantes para continuidad',
+          description: 'Registrar sueno, ingesta, hidratacion y continencia o piel cuando condicionen la continuidad',
         },
         {
           id: 'psych-restraint-trace',
@@ -380,12 +381,13 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
         {
           id: 'psych-continuity',
           type: 'other',
-          description: 'Resumir coordinacion interna, continuidad del turno y avisos para el siguiente relevo',
+          description: 'Resumir basal funcional, supervision requerida, coordinacion interna y avisos para el siguiente relevo',
         },
       ],
     },
     visibleOutputs: [
       'Plan de observacion, entorno seguro y continuidad',
+      'Basal funcional y supervision requerida explicitados para el siguiente turno',
       'Pendientes de medicacion, tratamiento y coordinacion visibles para el siguiente turno',
       'Evento de contencion trazable sin instrucciones operativas',
       'Continuidad de turno sin etiquetas estigmatizantes',

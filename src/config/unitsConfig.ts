@@ -110,28 +110,28 @@ const BEHAVIORAL_HEALTH_CHILD_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] =
 const BEHAVIORAL_HEALTH_UDCC_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] = [
   {
     key: 'patientIdentityConfirmed',
-    label: 'Paciente, ubicacion funcional y basal cognitivo-funcional confirmados',
-    helper: 'Prioriza censo/listado, ubicacion y referencia breve del estado habitual.',
+    label: 'Paciente, ubicacion funcional, basal cognitivo-funcional y supervision requerida confirmados',
+    helper: 'Prioriza censo/listado, ubicacion y referencia breve del estado habitual y del apoyo necesario.',
   },
   {
     key: 'allergiesReviewed',
-    label: 'Cambio respecto al basal, observacion y riesgo de caidas revisados',
-    helper: 'Haz visible deterioro funcional o cognitivo-conductual y necesidad de supervision.',
+    label: 'Cambio respecto al basal, deambulacion supervisada y riesgo de caidas revisados',
+    helper: 'Haz visible deterioro cognitivo-funcional, movilidad y ayudas necesarias del turno.',
   },
   {
     key: 'linesAndDevicesChecked',
-    label: 'Dispositivos, tratamientos retirables y deambulacion supervisada verificados',
-    helper: 'Confirma lo que puede retirarse el paciente y las medidas de acompanamiento activas.',
+    label: 'Entorno seguro, continencia, piel y elementos retirables verificados',
+    helper: 'Confirma dispositivos o tratamientos que pueda retirarse y cualquier continuidad de continencia o integridad cutanea.',
   },
   {
     key: 'medicationPlanReviewed',
-    label: 'Ingesta, hidratacion, sueno y medicacion pendiente revisados',
-    helper: 'Expresa lo no omitible para el siguiente turno con continuidad longitudinal.',
+    label: 'Ingesta, hidratacion, sueno y adherencia terapeutica revisados',
+    helper: 'Incluye medicacion pendiente, rechazos o dificultad para sostener el plan del siguiente turno.',
   },
   {
     key: 'safetyMeasuresApplied',
-    label: 'Continuidad con cuidadores, supervision, entorno seguro y reevaluacion aplicada',
-    helper: 'Aclara acompanamiento, movilidad y continuidad del siguiente turno sin abrir un overlay paralelo.',
+    label: 'Supervision, coordinacion interna y con cuidadores, y reevaluacion revisadas',
+    helper: 'Aclara acompanamiento, comunicacion o relacion relevante, actividad estructurada cuando aplique y continuidad del relevo siguiente.',
   },
   {
     key: 'questionsAnswered',

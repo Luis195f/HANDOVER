@@ -33,11 +33,14 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 
 ### Psicogeriatria / UDCC
 
+- basal cognitivo-funcional y cambio respecto al basal;
+- supervision requerida y deambulacion supervisada;
 - riesgo de caidas;
-- deambulacion supervisada;
 - deterioro cognitivo-funcional;
+- continencia o piel cuando condicionen la continuidad;
 - dispositivos o tratamientos retirables;
-- ingesta, hidratacion y sueno.
+- ingesta, hidratacion y sueno;
+- adherencia terapeutica y reevaluacion del siguiente turno.
 
 ## Limites del demo
 
