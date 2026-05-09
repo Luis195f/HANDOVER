@@ -74,6 +74,72 @@ const BASE_FEATURES: UnitFeatureFlags = {
   hideLegacyFields: isOn('HIDE_LEGACY_FIELDS'),
 };
 
+const BEHAVIORAL_HEALTH_CHILD_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] = [
+  {
+    key: 'patientIdentityConfirmed',
+    label: 'Paciente, ubicacion funcional y referente interno confirmados',
+    helper: 'Prioriza censo/listado, ubicacion y quien centraliza la comunicacion del turno.',
+  },
+  {
+    key: 'allergiesReviewed',
+    label: 'Observacion especial, entorno seguro y acompanamiento revisados',
+    helper: 'Asegura continuidad del acompanamiento y cambios respecto al basal sin exponer informacion externa.',
+  },
+  {
+    key: 'linesAndDevicesChecked',
+    label: 'Pertenencias, dispositivos retirables y entorno revisados',
+    helper: 'Deja visible solo lo necesario para continuidad y seguridad del relevo.',
+  },
+  {
+    key: 'medicationPlanReviewed',
+    label: 'Adherencia, medicacion pendiente y actividad terapeutica revisadas',
+    helper: 'Incluye rechazos, acompanamiento y continuidad generica del plan del turno.',
+  },
+  {
+    key: 'safetyMeasuresApplied',
+    label: 'Coordinacion con familia o tutor y avisos internos revisados',
+    helper: 'Registra continuidad de comunicacion solo como dato interno del relevo.',
+  },
+  {
+    key: 'questionsAnswered',
+    label: 'Preguntas del equipo entrante resueltas',
+    helper: 'Aclara acompanamiento, continuidad y coordinaciones del siguiente turno.',
+  },
+];
+
+const BEHAVIORAL_HEALTH_UDCC_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] = [
+  {
+    key: 'patientIdentityConfirmed',
+    label: 'Paciente, ubicacion funcional y basal cognitivo-funcional confirmados',
+    helper: 'Prioriza censo/listado, ubicacion y referencia breve del estado habitual.',
+  },
+  {
+    key: 'allergiesReviewed',
+    label: 'Cambio respecto al basal, observacion y riesgo de caidas revisados',
+    helper: 'Haz visible deterioro funcional o cognitivo-conductual y necesidad de supervision.',
+  },
+  {
+    key: 'linesAndDevicesChecked',
+    label: 'Dispositivos, tratamientos retirables y deambulacion supervisada verificados',
+    helper: 'Confirma lo que puede retirarse el paciente y las medidas de acompanamiento activas.',
+  },
+  {
+    key: 'medicationPlanReviewed',
+    label: 'Ingesta, hidratacion, sueno y medicacion pendiente revisados',
+    helper: 'Expresa lo no omitible para el siguiente turno con continuidad longitudinal.',
+  },
+  {
+    key: 'safetyMeasuresApplied',
+    label: 'Continuidad con cuidadores, supervision y entorno seguro aplicada',
+    helper: 'Aclara acompanamiento, movilidad y medidas de seguridad no farmacologicas del turno.',
+  },
+  {
+    key: 'questionsAnswered',
+    label: 'Preguntas del equipo entrante resueltas',
+    helper: 'Resume continuidad funcional, cognitiva y pendientes del relevo siguiente.',
+  },
+];
+
 /** Configuración estática por defecto. */
 const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
   {
@@ -119,14 +185,22 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     name: 'Psiquiatria infanto-adolescente',
     specialty: 'psych',
     profileId: 'behavioral-health',
-    features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
+    features: {
+      ...BASE_FEATURES,
+      enablePsychosocialExtra: true,
+      checklistItems: [...BEHAVIORAL_HEALTH_CHILD_CHECKLIST_ITEMS],
+    },
   },
   {
     id: 'udcc-psychogeriatrics',
     name: 'Psicogeriatria / UDCC',
     specialty: 'psych',
     profileId: 'behavioral-health',
-    features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
+    features: {
+      ...BASE_FEATURES,
+      enablePsychosocialExtra: true,
+      checklistItems: [...BEHAVIORAL_HEALTH_UDCC_CHECKLIST_ITEMS],
+    },
   },
 ] as const;
 
@@ -312,4 +386,3 @@ export function getDefaultUnitConfig(units?: readonly HandoverUnitConfig[]): Han
 }
 
 // END HANDOVER D4 – MultiUnitConfig
-

@@ -32,7 +32,8 @@ Seams SJD psiquiatría implementados en este PR:
 - unidades `sjd-a`, `sjd-b`, `sjd-infanto` y `udcc-psychogeriatrics` en `src/config/units.ts`;
 - configuración estática de esas unidades en `src/config/unitsConfig.ts`;
 - mapeo de esas unidades al perfil común `behavioral-health`;
-- checklist y runtime mínimo reforzado para salud mental;
+- runtime común de salud mental reforzado con `psychosocial`, `nutrition` y `examenes`;
+- variaciones ligeras por subunidad resueltas solo con checklist contextual, sin formulario paralelo;
 - identificación por QR desactivada por defecto para contextos resueltos como `behavioral-health` / `psych`, incluyendo unidades SJD/UDCC y unidades custom que lleguen por `UNITS_CONFIG`;
 - QR reactivable únicamente mediante `EXPO_PUBLIC_ENABLE_QR_PATIENT_SCAN=true`;
 - documentación demo enlazada desde `docs/MVP_DEMO.md`.
@@ -41,7 +42,7 @@ Límites observados tras este PR:
 
 - no existe todavía un overlay psiquiátrico SJD específico;
 - el runtime `behavioral-health` sigue siendo común y prudente, no una modelización clínica completa por subunidad;
-- adulto, infanto-adolescente y psicogeriatría/UDCC todavía no tienen campos diferenciales completos;
+- las diferencias adulto, infanto-adolescente y psicogeriatría/UDCC siguen limitadas a copy runtime y checklist contextual, sin campos persistidos propios;
 - la evidencia demo actual aún no incluye fixtures sintéticos SJD trazados de punta a punta;
 - no se ha modificado backend, FHIR, ICEA, auth/RBAC ni sync/offline queue;
 - los documentos clínicos locales SJD siguen siendo insumos externos de validación, no evidencia incorporada al repo.
@@ -110,6 +111,8 @@ Este PR implementa el seam inicial SJD psiquiatría de forma acotada:
 - añade unidades SJD/UDCC al catálogo operativo;
 - mapea esas unidades al perfil común `behavioral-health`;
 - refuerza el runtime mínimo de salud mental;
+- hace visibles secciones ya existentes para continuidad, ingesta/hidratacion y pendientes del turno;
+- diferencia de forma ligera infanto-adolescente y psicogeriatría/UDCC mediante checklist contextual ya soportado por el repo;
 - desactiva QR por defecto en contexto psiquiátrico/salud mental, incluso cuando ese contexto se resuelve por `UNITS_CONFIG` y no solo por IDs SJD hardcodeados;
 - mantiene QR como capacidad futura reactivable solo mediante `EXPO_PUBLIC_ENABLE_QR_PATIENT_SCAN=true`;
 - añade pruebas mínimas del seam.
@@ -128,7 +131,7 @@ Este PR no cambia:
 ## Riesgos residuales abiertos tras este PR
 
 - sin unidades y especialidades SJD visibles en runtime, el demo sigue apoyado en costuras genéricas;
-- sin campos psiquiátricos mínimos adicionales, el runtime `behavioral-health` actual es insuficiente para adulto, infanto-adolescente y psicogeriatría;
+- sin una costura adicional de schema/UI persistida, el runtime psiquiátrico sigue dependiendo de copy contextual y checklist para parte de la variación ligera por subunidad;
 - sin fixtures y demo mode SJD, la narrativa clínica todavía no queda trazada de punta a punta;
 - los documentos clínicos SJD siguen siendo una dependencia externa hasta que exista una vía institucional de incorporación o validación fuera de PHI.
 

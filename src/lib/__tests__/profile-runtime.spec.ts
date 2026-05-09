@@ -285,11 +285,67 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.pack.id).toBe('behavioral-health');
     expect(runtime.basePack.id).toBe('behavioral-health');
     expect(runtime.sectionVisibility.psychosocial).toBe(true);
+    expect(runtime.sectionVisibility.nutrition).toBe(true);
+    expect(runtime.sectionVisibility.examenes).toBe(true);
     expect(runtime.requiredExtraFields).toEqual(
-      expect.arrayContaining(['Riesgo conductual', 'Plan de observacion', 'Cambio respecto al basal']),
+      expect.arrayContaining([
+        'Estado basal y cambio observado',
+        'Observacion especial o acompanamiento',
+        'Riesgo de fuga o no retorno',
+      ]),
     );
-    expect(runtime.visibleOutputs).toContain('Plan de observacion y seguridad');
+    expect(runtime.visibleOutputs).toContain('Plan de observacion y continuidad');
     expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
+  });
+
+  it('keeps child-adolescent psychiatry on the shared behavioral-health core while projecting a unit-specific checklist', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['behavioral-health'],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-infanto', specialtyId: 'psych' });
+
+    expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
+    expect(runtime.context.unitProfileId).toBe('behavioral-health');
+    expect(runtime.pack.id).toBe('behavioral-health');
+    expect(runtime.basePack.id).toBe('behavioral-health');
+    expect(runtime.activeOverlays).toEqual([]);
+    expect(runtime.optionalExtraFields).toEqual(
+      expect.arrayContaining([
+        'Responsable o referente de comunicacion interna',
+        'Coordinacion con familia, tutor o cuidadores cuando aplique',
+      ]),
+    );
+    expect(runtime.checklistItems[0]?.label).toBe('Paciente, ubicacion funcional y referente interno confirmados');
+    expect(runtime.checklistItems[4]?.label).toContain('familia o tutor');
+  });
+
+  it('keeps psychogeriatrics on the shared behavioral-health core while projecting a unit-specific checklist', async () => {
+    process.env.EXPO_PUBLIC_HANDOVER_PROFILE_ACTIVATION_JSON = JSON.stringify({
+      unitProfiles: ['behavioral-health'],
+    });
+
+    const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
+
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'udcc-psychogeriatrics', specialtyId: 'psych' });
+
+    expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
+    expect(runtime.context.unitProfileId).toBe('behavioral-health');
+    expect(runtime.pack.id).toBe('behavioral-health');
+    expect(runtime.basePack.id).toBe('behavioral-health');
+    expect(runtime.activeOverlays).toEqual([]);
+    expect(runtime.optionalExtraFields).toEqual(
+      expect.arrayContaining([
+        'Deterioro funcional o cognitivo-conductual cuando aplique',
+        'Dispositivos o tratamientos que el paciente pueda retirarse',
+      ]),
+    );
+    expect(runtime.checklistItems[0]?.label).toBe(
+      'Paciente, ubicacion funcional y basal cognitivo-funcional confirmados',
+    );
+    expect(runtime.checklistItems[2]?.label).toContain('deambulacion supervisada');
   });
 
   it('keeps hidden sections monotonic across compatible overlay merges while preserving trace order', async () => {
