@@ -312,21 +312,66 @@ export const UNIT_PROFILE_RUNTIME_PACKS: Readonly<Record<UnitProfileId, UnitProf
   'behavioral-health': createPack({
     id: 'behavioral-health',
     label: 'Salud mental',
-    enabledSections: ['psychosocial'],
-    requiredExtraFields: ['Riesgo conductual', 'Plan de observacion', 'Cambio respecto al basal'],
-    optionalExtraFields: ['Alianza terapeutica', 'Factores desencadenantes', 'Coordinacion interna o familiar relevante'],
-    focusAreas: ['Observacion especial, continuidad y seguridad relacional', 'Adherencia, sueno, ingesta y cambio conductual respecto al basal'],
-    explanations: ['Hace visible observacion, continuidad y riesgo de omision en salud mental sin abrir un formulario paralelo ni convertir QR en flujo principal.'],
-    scales: ['EVA', 'Escala conductual local', 'Riesgo suicida institucional'],
-    sentinelEvents: ['Riesgo auto o heteroagresivo', 'Descompensacion conductual', 'Fuga o no retorno', 'Rechazo terapeutico'],
+    enabledSections: ['psychosocial', 'nutrition', 'examenes'],
+    requiredExtraFields: [
+      'Estado basal y cambio observado',
+      'Observacion especial o acompanamiento',
+      'Riesgo de fuga o no retorno',
+      'Riesgo conductual expresado de forma no estigmatizante',
+      'Adherencia o rechazo terapeutico',
+      'Coordinacion interna pendiente',
+    ],
+    optionalExtraFields: [
+      'Sueno e ingesta/hidratacion',
+      'Responsable o referente de comunicacion interna',
+      'Coordinacion con familia, tutor o cuidadores cuando aplique',
+      'Deterioro funcional o cognitivo-conductual cuando aplique',
+      'Dispositivos o tratamientos que el paciente pueda retirarse',
+    ],
+    focusAreas: [
+      'Observacion especial, continuidad y seguridad relacional',
+      'Cambio respecto al basal, adherencia terapeutica y riesgo de omision del turno siguiente',
+      'Ingesta, hidratacion, sueno y coordinacion interna pendiente',
+    ],
+    explanations: [
+      'Refuerza salud mental con secciones y copy del runtime ya existentes, sin abrir un formulario paralelo ni convertir QR en flujo principal.',
+    ],
+    scales: ['EVA', 'Observacion conductual estructurada cuando aplique'],
+    sentinelEvents: [
+      'Descompensacion conductual',
+      'Fuga o no retorno',
+      'Rechazo terapeutico con riesgo de omision',
+      'Cambio relevante respecto al basal',
+    ],
     quickPicks: {
       treatments: [
-        { id: 'psych-observation', type: 'other', description: 'Actualizar observacion especial, gatillos y siguiente reevaluacion del turno' },
-        { id: 'psych-adherence', type: 'education', description: 'Cerrar adherencia, rechazo terapeutico y pendientes de medicacion o acompanamiento' },
-        { id: 'psych-continuity', type: 'other', description: 'Resumir continuidad, coordinaciones internas y cambios respecto al basal' },
+        {
+          id: 'psych-observation',
+          type: 'other',
+          description: 'Actualizar observacion especial, acompanamiento, gatillos y siguiente reevaluacion del turno',
+        },
+        {
+          id: 'psych-adherence',
+          type: 'education',
+          description: 'Cerrar adherencia o rechazo terapeutico y pendientes de medicacion o tratamiento no omitibles',
+        },
+        {
+          id: 'psych-intake-sleep',
+          type: 'other',
+          description: 'Registrar sueno, ingesta, hidratacion y cambios respecto al basal relevantes para continuidad',
+        },
+        {
+          id: 'psych-continuity',
+          type: 'other',
+          description: 'Resumir coordinacion interna, continuidad del turno y avisos para el siguiente relevo',
+        },
       ],
     },
-    visibleOutputs: ['Plan de observacion y seguridad', 'Continuidad de turno sin etiquetas estigmatizantes'],
+    visibleOutputs: [
+      'Plan de observacion y continuidad',
+      'Pendientes de medicacion, tratamiento y coordinacion visibles para el siguiente turno',
+      'Continuidad de turno sin etiquetas estigmatizantes',
+    ],
   }),
   'home-care': createPack({
     id: 'home-care',
