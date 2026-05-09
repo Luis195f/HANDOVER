@@ -14,6 +14,13 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 - adulto, infanto-adolescente y psicogeriatria/UDCC mantienen un unico core y solo cambian mediante checklist contextual y copy prudente;
 - QR sigue desactivado por defecto en contextos `behavioral-health` / `psych`.
 
+## Infraestructura de demo reutilizada
+
+- `src/demo/fixtures.ts` concentra el dataset sintetico del modo demo;
+- `src/demo/mock-api.ts` responde a `/api/patients`, `Patient/{id}`, `Encounter?...` y `AllergyIntolerance?...` sin tocar backend real;
+- `docs/MVP_DEMO.md` sigue siendo el walkthrough generico; este documento fija el seam psiquiatrico SJD hoy soportado;
+- no se conectan materiales locales ni artefactos operativos del centro.
+
 ## Variaciones ligeras permitidas
 
 ### Adulto
@@ -41,6 +48,38 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 - dispositivos o tratamientos retirables;
 - ingesta, hidratacion y sueno;
 - adherencia terapeutica y reevaluacion del siguiente turno.
+
+## Recorridos sinteticos soportados hoy
+
+### 1) Adulto salud mental
+
+- fixture demo: `demo-psych-adult-001` en `sjd-a`;
+- presentacion: continuidad del relevo, observacion especial, riesgo de caidas y fuga/no retorno, entorno seguro y elementos retirables resguardados;
+- no omitir: adherencia o rechazo terapeutico, medicacion del siguiente turno y reevaluacion prioritaria;
+- cierre esperado: pendientes claros para el siguiente relevo sin lenguaje punitivo ni ranking de peligrosidad.
+
+### 2) Infanto-adolescente
+
+- fixture demo: `demo-psych-child-001` en `sjd-infanto`;
+- presentacion: acompanamiento, entorno seguro, elementos retirables antes de cambio de actividad, retorno seguro y coordinacion con tutor cuando aplique;
+- no omitir: rechazo terapeutico parcial, continuidad del acompanamiento y cierre del siguiente turno;
+- cierre esperado: continuidad relacional y de supervision sin crear formulario paralelo ni instruccion operativa de contencion.
+
+### 3) Psicogeriatria / UDCC
+
+- fixture demo: `demo-psych-udcc-001` en `udcc-psychogeriatrics`;
+- presentacion: basal cognitivo-funcional, deambulacion supervisada, riesgo de caidas, hidratacion/sueno, adherencia terapeutica y audifono removible resguardado;
+- no omitir: supervision requerida, cambio respecto al basal y pendientes del turno siguiente;
+- cierre esperado: continuidad funcional y seguridad del entorno sin score psiquiatrico ni IA clinica cerrada.
+
+## Walkthrough recomendado
+
+1. Abrir `demo mode` y filtrar, si hace falta, por `sjd-a`, `sjd-infanto` o `udcc-psychogeriatrics`.
+2. Mostrar que el listado y el detalle siguen viniendo del seam demo aislado, con datos sinteticos y sin backend operativo.
+3. En cada recorrido, enfatizar continuidad del relevo, observacion especial o supervision, adherencia/rechazo, entorno seguro, elementos retirables y reevaluacion del siguiente turno.
+4. Si se menciona contencion, dejarla solo como evento trazable con autorizacion, revision, vigencia y reevaluacion, sin describir pasos operativos.
+5. Presentar MPAC solo como prioridades explicables de continuidad subordinadas al juicio enfermero.
+6. Cerrar recordando que HANDOVER se muestra aqui como piloto/demo profesional, no como producto production-ready ni clinicamente validado.
 
 ## Limites del demo
 
