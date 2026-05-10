@@ -78,6 +78,16 @@ def build_icea_bridge_payload(
     admin = _admin(observations)
     effective_unit_id = (unit_id or '').strip() or admin.get('unitId') or _unit_from_bundle(bundle, resources, full_urls) or 'unknown'
     window_start, window_end, invalid_shift_window = _shift_window(composition, encounter, admin)
+    age_years = _age(
+        patient.get('birthDate') if isinstance(patient, dict) else None,
+        reference=_clinical_reference_datetime(
+            bundle=bundle,
+            composition=composition,
+            encounter=encounter,
+            window_start=window_start,
+            window_end=window_end,
+        ),
+    )
     has_shift_window = bool(window_start and window_end)
     shift = admin.get('shiftType') or _infer_shift(window_start)
     diagnoses = _diagnoses(conditions)
@@ -114,7 +124,7 @@ def build_icea_bridge_payload(
     completeness_rate = round(len(present) / len(completeness_checks), 4)
 
     missingness_inputs = {
-        'ageYears': _age(patient.get('birthDate') if isinstance(patient, dict) else None) is not None,
+        'ageYears': age_years is not None,
         'diagnoses': len(diagnoses) > 0,
         'vitals': completeness_checks['vitals'],
         'clinicalSummary': bool(closing_summary),
@@ -141,7 +151,7 @@ def build_icea_bridge_payload(
     exposure_share = round(1.0 / signature_count, 4) if signature_count > 0 else None
     observed_contextual_fields = _build_observed_contextual_fields(
         clinical_context=clinical_context,
-        case_mix={'ageYears': _age(patient.get('birthDate') if isinstance(patient, dict) else None), 'diagnoses': diagnoses, 'riskFlags': risk_flags},
+        case_mix={'ageYears': age_years, 'diagnoses': diagnoses, 'riskFlags': risk_flags},
         exposure={
             'documentedMedicationCount': sum(1 for resource in resources if resource.get('resourceType') == 'MedicationStatement'),
             'documentedProcedureCount': sum(1 for resource in resources if resource.get('resourceType') == 'Procedure'),
@@ -200,7 +210,7 @@ def build_icea_bridge_payload(
             },
         },
         'caseMix': {
-            'ageYears': _age(patient.get('birthDate') if isinstance(patient, dict) else None),
+            'ageYears': age_years,
             'sex': _safe(patient.get('gender') if isinstance(patient, dict) else None),
             'diagnoses': diagnoses,
             'riskFlags': risk_flags,
@@ -1088,15 +1098,38 @@ def _dt(value: str | None) -> datetime.datetime | None:
     return parsed.astimezone(datetime.timezone.utc)
 
 
-def _age(birth_date: str | None) -> int | None:
+def _clinical_reference_datetime(
+    *,
+    bundle: dict[str, Any],
+    composition: dict[str, Any] | None,
+    encounter: dict[str, Any] | None,
+    window_start: str | None,
+    window_end: str | None,
+) -> datetime.datetime | None:
+    for candidate in (
+        window_end,
+        window_start,
+        _safe((composition or {}).get('date')),
+        _safe(((encounter or {}).get('period') or {}).get('end')),
+        _safe(((encounter or {}).get('period') or {}).get('start')),
+        _safe((bundle.get('signature') or [{}])[0].get('when')) if isinstance(bundle.get('signature'), list) else None,
+        _safe(bundle.get('timestamp')),
+    ):
+        parsed = _dt(candidate)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _age(birth_date: str | None, *, reference: datetime.datetime | None) -> int | None:
     if not birth_date:
         return None
     parsed = _dt(f'{birth_date}T00:00:00Z')
-    if parsed is None:
+    if parsed is None or reference is None:
         return None
-    today = timezone.now().date()
-    years = today.year - parsed.date().year
-    if (today.month, today.day) < (parsed.date().month, parsed.date().day):
+    reference_date = reference.date()
+    years = reference_date.year - parsed.date().year
+    if (reference_date.month, reference_date.day) < (parsed.date().month, parsed.date().day):
         years -= 1
     return years if years >= 0 else None
 
