@@ -1,6 +1,6 @@
 # Demo SJD Psiquiatria: alcance prudente
 
-Estado revisado el 2026-05-09.
+Estado revisado el 2026-05-10.
 
 ## Objetivo
 
@@ -9,7 +9,7 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 ## Seam implementado
 
 - las unidades `sjd-a`, `sjd-b`, `sjd-infanto` y `udcc-psychogeriatrics` siguen mapeadas al perfil comun `behavioral-health`;
-- el runtime comun de salud mental hace visibles observacion especial, riesgo de caidas, fuga/no retorno, entorno seguro, elementos retirables y continuidad del relevo;
+- el runtime comun de salud mental hace visibles observacion especial, seguridad fisica y apoyo para movilidad o traslados cuando aplique, fuga/no retorno, entorno seguro, elementos retirables y continuidad del relevo;
 - la contencion aparece solo como evento trazable con autorizacion, revision, vigencia y reevaluacion;
 - adulto, infanto-adolescente y psicogeriatria/UDCC mantienen un unico core y solo cambian mediante checklist contextual y copy prudente;
 - QR sigue desactivado por defecto en contextos `behavioral-health` / `psych`.
@@ -26,9 +26,10 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 ### Adulto
 
 - observacion especial y acompanamiento;
+- seguridad fisica y apoyo para movilidad o traslados cuando aplique;
 - adherencia o rechazo terapeutico;
 - fuga/no retorno;
-- entorno seguro;
+- entorno seguro y elementos retirables;
 - reevaluacion del siguiente turno.
 
 ### Infanto-adolescente
@@ -54,7 +55,7 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 ### 1) Adulto salud mental
 
 - fixture demo: `demo-psych-adult-001` en `sjd-a`;
-- presentacion: continuidad del relevo, observacion especial, riesgo de caidas y fuga/no retorno, entorno seguro y elementos retirables resguardados;
+- presentacion: continuidad del relevo, observacion especial, seguridad fisica y apoyo para movilidad o traslados cuando aplique, fuga/no retorno, entorno seguro y elementos retirables resguardados;
 - no omitir: adherencia o rechazo terapeutico, medicacion del siguiente turno y reevaluacion prioritaria;
 - cierre esperado: pendientes claros para el siguiente relevo sin lenguaje punitivo ni ranking de peligrosidad.
 
@@ -76,7 +77,7 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 
 1. Abrir `demo mode` y filtrar, si hace falta, por `sjd-a`, `sjd-infanto` o `udcc-psychogeriatrics`.
 2. Mostrar que el listado y el detalle siguen viniendo del seam demo aislado, con datos sinteticos y sin backend operativo.
-3. En cada recorrido, enfatizar continuidad del relevo, observacion especial o supervision, adherencia/rechazo, entorno seguro, elementos retirables y reevaluacion del siguiente turno.
+3. En cada recorrido, enfatizar continuidad del relevo, observacion especial o supervision, seguridad fisica y apoyo para movilidad o traslados cuando aplique, adherencia/rechazo, entorno seguro, elementos retirables y reevaluacion del siguiente turno.
 4. Si se menciona contencion, dejarla solo como evento trazable con autorizacion, revision, vigencia y reevaluacion, sin describir pasos operativos.
 5. Presentar MPAC solo como prioridades explicables de continuidad subordinadas al juicio enfermero.
 6. Cerrar recordando que HANDOVER se muestra aqui como piloto/demo profesional, no como producto production-ready ni clinicamente validado.
@@ -102,7 +103,7 @@ El demo debe permitir que el equipo:
 
 - revise parte diario y continuidad del relevo;
 - haga visible observacion especial y entorno seguro;
-- registre caidas, fuga/no retorno y elementos retirables como riesgos de seguridad;
+- registre seguridad fisica, apoyo para movilidad o traslados cuando aplique, fuga/no retorno y elementos retirables como riesgos de seguridad;
 - deje trazable una medida excepcional sin describir pasos tecnicos;
 - cierre pendientes no omitibles para el siguiente turno.
 
