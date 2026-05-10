@@ -272,6 +272,52 @@ class IceaBridgeMapperTests(TestCase):
             payload['contextualSignal']['case_mix_envelope']['pending_hospital_source_fields'],
         )
 
+    def test_mapper_calculates_age_from_clinical_shift_window_not_runner_clock(self):
+        with patch(
+            'backend.api.icea_payload_mapper.timezone.now',
+            return_value=datetime.datetime(2026, 5, 10, 12, 0, tzinfo=datetime.timezone.utc),
+        ):
+            payload = build_icea_bridge_payload(
+                build_bridge_bundle(),
+                request_id='req-bridge-age-window',
+                scoring_mode='immediate_provisional',
+                unit_id='icu-a',
+            )
+
+        self.assertEqual(payload['caseMix']['ageYears'], 37)
+
+    def test_mapper_calculates_age_from_encounter_period_when_shift_window_missing(self):
+        bundle = build_bridge_bundle()
+        bundle['entry'][1]['resource']['period'] = {
+            'start': '2026-03-08T06:00:00Z',
+            'end': '2026-03-08T18:00:00Z',
+        }
+        bundle['entry'][2]['resource'].pop('date', None)
+        bundle['entry'] = [
+            entry
+            for entry in bundle['entry']
+            if not (
+                entry.get('resource', {}).get('resourceType') == 'Observation'
+                and entry['resource'].get('code', {}).get('coding', [{}])[0].get('code') == 'administrative'
+            )
+        ]
+
+        with patch(
+            'backend.api.icea_payload_mapper.timezone.now',
+            return_value=datetime.datetime(2026, 5, 10, 12, 0, tzinfo=datetime.timezone.utc),
+        ):
+            payload = build_icea_bridge_payload(
+                bundle,
+                request_id='req-bridge-age-encounter',
+                scoring_mode='immediate_provisional',
+                unit_id='icu-a',
+            )
+
+        self.assertEqual(payload['context']['grain'], 'shift')
+        self.assertEqual(payload['context']['windowStart'], '2026-03-08T06:00:00Z')
+        self.assertEqual(payload['context']['windowEnd'], '2026-03-08T18:00:00Z')
+        self.assertEqual(payload['caseMix']['ageYears'], 37)
+
     def test_mapper_degrades_without_inventing_missing_fields(self):
         payload = build_icea_bridge_payload(
             build_bridge_bundle(complete=False),
