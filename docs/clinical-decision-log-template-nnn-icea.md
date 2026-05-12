@@ -18,7 +18,7 @@
 
 - No existe todavia una entidad dedicada de feedback clinico persistente para salidas ICEA+.
 - La cobertura automatizada del decision log sigue limitada a superficies IA ya cableadas (SBAR/NIC/NOC), no a cualquier sugerencia futura o flujo operativo externo.
-- Esta plantilla sigue siendo necesaria cuando el piloto requiera conciliacion manual fuera de esas superficies o correlacion transversal con procesos institucionales.
+- Esta plantilla sigue siendo necesaria cuando el piloto requiera conciliacion manual fuera de esas superficies o correlacion transversal con el contexto clinico operativo.
 
 Por tanto, para un piloto:
 
@@ -37,12 +37,12 @@ Por tanto, para un piloto:
 | `bridge_request_id` | No | Solo para eventos ICEA+ |
 | `patient_id` | Si | ID pseudonimizado o ID interno permitido |
 | `unit_id` | Si | Unidad del turno |
-| `role` | Si | `nurse`, `supervisor`, `admin` o equivalente local |
+| `role` | Si | `nurse`, `supervisor`, `admin` o equivalente operativo |
 | `suggestion_source` | Si | `nanda`, `nic`, `noc`, `icea_patient_risk`, `icea_bridge_summary` |
 | `suggestion_reference` | Si | Codigo mostrado, texto resumido o `bridge_request_id` |
 | `decision` | Si | `accepted`, `rejected`, `modified`, `viewed_only` |
 | `minimal_context` | Si | Contexto breve sin PHI directa |
-| `reason_code` | No | Motivo estructurado local |
+| `reason_code` | No | Motivo estructurado documentado |
 | `notes` | No | Solo si no contiene PHI |
 
 ## 4) Catalogos recomendados
@@ -57,7 +57,7 @@ Por tanto, para un piloto:
 ### `reason_code`
 
 - `CLINICAL_FIT`
-- `LOCAL_PROTOCOL`
+- `DOCUMENTED_CLINICAL_JUDGMENT`
 - `INSUFFICIENT_EVIDENCE`
 - `LICENSING_LIMIT`
 - `UI_FALLBACK`
@@ -67,7 +67,7 @@ Por tanto, para un piloto:
 
 ```json
 {"event_id":"8b6a7f5d-92c3-4f3f-a8b0-1d95c6a8a101","timestamp_utc":"2026-03-09T08:31:22Z","handover_id":"bundle-bridge-001","request_id":"req-bridge-001","bridge_request_id":"req-bridge-001:immediate_provisional","patient_id":"pat-risk-001","unit_id":"icu-a","role":"nurse","suggestion_source":"icea_patient_risk","suggestion_reference":"req-bridge-001:immediate_provisional","decision":"viewed_only","minimal_context":"cierre de turno UCI","reason_code":"INSUFFICIENT_EVIDENCE","notes":""}
-{"event_id":"c2e6e87a-fb6a-4c3c-8df4-9db6de315d30","timestamp_utc":"2026-03-09T08:33:05Z","handover_id":"bundle-bridge-001","request_id":"req-bridge-001","patient_id":"pat-risk-001","unit_id":"icu-a","role":"nurse","suggestion_source":"nic","suggestion_reference":"NIC 2210","decision":"modified","minimal_context":"ajuste segun protocolo local","reason_code":"LOCAL_PROTOCOL","notes":"frecuencia adaptada sin cambiar el objetivo clinico"}
+{"event_id":"c2e6e87a-fb6a-4c3c-8df4-9db6de315d30","timestamp_utc":"2026-03-09T08:33:05Z","handover_id":"bundle-bridge-001","request_id":"req-bridge-001","patient_id":"pat-risk-001","unit_id":"icu-a","role":"nurse","suggestion_source":"nic","suggestion_reference":"NIC 2210","decision":"modified","minimal_context":"ajuste segun criterio clinico documentado","reason_code":"DOCUMENTED_CLINICAL_JUDGMENT","notes":"frecuencia adaptada sin cambiar el objetivo clinico"}
 ```
 
 ## 6) Controles de calidad
@@ -81,7 +81,7 @@ Por tanto, para un piloto:
 
 ## 7) Evidencia minima a archivar junto al log
 
-- export o captura del `handover_id`/`request_id` correspondiente;
+- export controlado o registro trazable del `handover_id`/`request_id` correspondiente;
 - si aplica, respuesta de `/api/icea/bridge/status/<handoverId>` o `/api/icea/patient-risk`;
 - version del catalogo NNN activo (`licensed`, `version`, `source`);
 - referencia a release/commit del piloto.
