@@ -16,6 +16,7 @@ from backend.api.icea_bridge_service import (
     REMOTE_STATUS_TIMEOUT_ERROR,
     STORED_BUNDLE_UNAVAILABLE_ERROR,
     _apply_remote_payload,
+    _build_icea_plus_score_request,
     _build_icea_plus_score_row,
     _mark_failed,
     _normalize_remote_payload,
@@ -43,10 +44,16 @@ HANDOVER_CONTEXT_SYSTEM = 'urn:handover-pro:context'
 HANDOVER_CONTEXT_COMPONENT_SYSTEM = 'urn:handover-pro:component'
 MODEL_ID = '11111111-1111-4111-8111-111111111111'
 FHIR_FIXTURE_DIR = Path(__file__).resolve().parents[3] / 'tests' / 'fixtures' / 'fhir'
+ICEA_CONTRACT_FIXTURE = Path(__file__).resolve().parents[3] / 'tests' / 'fixtures' / 'icea' / 'handover_icea_feature_contract_v1.json'
 
 
 def load_fhir_fixture(name: str) -> dict:
     with (FHIR_FIXTURE_DIR / name).open('r', encoding='utf-8') as handle:
+        return json.load(handle)
+
+
+def load_icea_contract_fixture() -> dict:
+    with ICEA_CONTRACT_FIXTURE.open('r', encoding='utf-8') as handle:
         return json.load(handle)
 
 
@@ -385,6 +392,26 @@ class IceaBridgeMapperTests(TestCase):
 
         row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
 
+        self.assertEqual(row['contract_version'], 'handover-icea-feature-v1')
+        self.assertEqual(row['source_repo'], 'Luis195f/HANDOVER')
+        self.assertEqual(row['source_grain'], 'window')
+        self.assertEqual(row['row_id'], 'window:enc-bridge-001')
+        self.assertEqual(row['episode_id'], 'enc-bridge-001')
+        self.assertEqual(row['unit_id'], 'icu-a')
+        self.assertEqual(row['clinical_timestamp'], '2026-03-08T15:00:00Z')
+        self.assertIn('recorded_timestamp', row)
+        self.assertEqual(row['features']['age_years'], 37.0)
+        self.assertEqual(row['features']['documented_medication_count'], 1.0)
+        self.assertFalse(row['missingness_flags']['age_years'])
+        self.assertTrue(row['missingness_flags']['glasgow'])
+        self.assertTrue(row['shadow_mode'])
+        self.assertTrue(row['non_individual_use'])
+        fixture = load_icea_contract_fixture()
+        self.assertEqual(row['contract_version'], fixture['contract_version'])
+        self.assertEqual(row['source_repo'], fixture['source_repo'])
+        self.assertEqual(row['source_grain'], fixture['source_grain'])
+        self.assertEqual(row['shadow_mode'], fixture['shadow_mode'])
+        self.assertEqual(row['non_individual_use'], fixture['non_individual_use'])
         self.assertTrue(row['lineage']['contextual_signal_present'])
         self.assertEqual(row['lineage']['contextual_contract_version'], 'handover-icea-context-v1')
         self.assertEqual(row['lineage']['contextual_signal']['profile_id'], 'critical-care')
@@ -392,6 +419,46 @@ class IceaBridgeMapperTests(TestCase):
         self.assertTrue(row['lineage']['staff_identifiers_redacted'])
         self.assertNotIn('nurse_shares', row)
         self.assertEqual(row['lineage']['contextual_signal']['case_mix_envelope']['therapeutic_load'], payload['contextualSignal']['case_mix_envelope']['therapeutic_load'])
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_IMMEDIATE_SCORING': 'true',
+            'ICEA_BRIDGE_MODEL_ID': MODEL_ID,
+        },
+        clear=False,
+    )
+    def test_bridge_score_request_wraps_valid_feature_contract(self):
+        payload = build_icea_bridge_payload(
+            build_bridge_bundle(),
+            request_id='req-bridge-contract-001',
+            scoring_mode='immediate_provisional',
+            unit_id='icu-a',
+        )
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-contract-001:immediate_provisional',
+            request_id='req-bridge-contract-001',
+            bundle_id='bundle-bridge-001',
+            patient_id='pat-bridge-001',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-contract-001:immediate_provisional:ctx',
+            payload_hash='contract' * 8,
+            payload_json=payload,
+            status=IceaBridgeRequest.STATUS_QUEUED,
+        )
+
+        request_payload = _build_icea_plus_score_request(bridge_request, load_icea_bridge_settings())
+
+        self.assertEqual(request_payload['contract_version'], 'handover-icea-feature-v1')
+        self.assertEqual(request_payload['source_repo'], 'Luis195f/HANDOVER')
+        self.assertEqual(request_payload['grain'], 'window')
+        self.assertFalse(request_payload['from_db'])
+        self.assertTrue(request_payload['shadow_mode'])
+        self.assertTrue(request_payload['non_individual_use'])
+        self.assertEqual(request_payload['rows'][0]['contract_version'], 'handover-icea-feature-v1')
+        self.assertIsInstance(request_payload['rows'][0]['features'], dict)
 
     def test_bridge_projection_remains_backward_compatible_without_contextual_signal(self):
         payload = {
@@ -1334,6 +1401,43 @@ class IceaBridgeServiceTests(TestCase):
         )
 
         self.assertEqual(normalized['status'], IceaBridgeRequest.STATUS_STALE)
+
+    def test_normalize_remote_payload_suppresses_score_for_contract_mismatch(self):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-mismatch:immediate_provisional',
+            request_id='req-bridge-mismatch',
+            bundle_id='bundle-bridge-mismatch',
+            patient_id='pat-bridge-mismatch',
+            unit_id='icu-a',
+            episode_id='enc-bridge-mismatch',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-mismatch:immediate_provisional:mismatch',
+            payload_hash='mismatch' * 8,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_SENT,
+        )
+
+        normalized = _normalize_remote_payload(
+            {
+                'summary': {'rows_requested': 1, 'rows_scored': 0},
+                'results': [
+                    {
+                        'row_id': 'window:bundle-bridge-mismatch',
+                        'status': 'contract_mismatch',
+                        'score': 99.0,
+                        'flags': {'contract_mismatch': True},
+                    }
+                ],
+            },
+            bridge_request=bridge_request,
+            http_status=200,
+            stale_after_seconds=60,
+        )
+
+        self.assertEqual(normalized['status'], IceaBridgeRequest.STATUS_FAILED)
+        self.assertTrue(normalized['insufficientEvidence'])
+        self.assertIsNone(normalized['scoreSummary'])
+        self.assertIn('contract_mismatch', {warning['code'] for warning in normalized['warnings']})
 
 
 class IceaBridgeApiTests(TestCase):
@@ -2313,4 +2417,3 @@ class IceaPatientRiskApiTests(TestCase):
         response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
 
         self.assertEqual(response.status_code, 403)
-
