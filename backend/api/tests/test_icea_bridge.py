@@ -483,12 +483,21 @@ class IceaBridgeMapperTests(TestCase):
             payload_json=payload,
             status=IceaBridgeRequest.STATUS_QUEUED,
         )
+        fallback_timestamp = datetime.datetime(2026, 3, 9, 10, 11, 12, tzinfo=datetime.timezone.utc)
+        IceaBridgeRequest.objects.filter(id=bridge_request.id).update(
+            created_at=fallback_timestamp,
+            updated_at=fallback_timestamp,
+        )
+        bridge_request.refresh_from_db()
 
         row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
 
         self.assertFalse(row['lineage']['contextual_signal_present'])
         self.assertIsNone(row['lineage']['contextual_contract_version'])
         self.assertIsNone(row['lineage']['contextual_signal'])
+        self.assertEqual(row['clinical_timestamp'], fallback_timestamp.isoformat())
+        self.assertEqual(row['recorded_timestamp'], fallback_timestamp.isoformat())
+        self.assertIn('legacy_timestamp_fallback', {warning['code'] for warning in row['warnings']})
 
     def test_contextual_contract_regression_fixtures_cover_uci_ward_ed_and_oncology(self):
         scenarios = [
@@ -1511,6 +1520,45 @@ class IceaBridgeServiceTests(TestCase):
         self.assertFalse(normalized['insufficientEvidence'])
         self.assertIsNone(normalized['scoreSummary'])
         self.assertIn('low_feature_coverage', {warning['code'] for warning in normalized['warnings']})
+
+    def test_normalize_remote_payload_completed_status_does_not_override_contract_failures(self):
+        for remote_status in ('contract_mismatch', 'low_feature_coverage'):
+            with self.subTest(remote_status=remote_status):
+                bridge_request = IceaBridgeRequest.objects.create(
+                    bridge_request_id=f'req-bridge-completed-{remote_status}:immediate_provisional',
+                    request_id=f'req-bridge-completed-{remote_status}',
+                    bundle_id=f'bundle-bridge-completed-{remote_status}',
+                    patient_id=f'pat-bridge-completed-{remote_status}',
+                    unit_id='icu-a',
+                    episode_id=f'enc-bridge-completed-{remote_status}',
+                    scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+                    idempotency_key=f'req-bridge-completed-{remote_status}:immediate_provisional:contract',
+                    payload_hash=(remote_status.replace('_', '') * 4)[:32],
+                    payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+                    status=IceaBridgeRequest.STATUS_SENT,
+                )
+
+                normalized = _normalize_remote_payload(
+                    {
+                        'status': 'completed',
+                        'summary': {'rows_requested': 1, 'rows_scored': 0},
+                        'results': [
+                            {
+                                'row_id': f'window:bundle-bridge-completed-{remote_status}',
+                                'status': remote_status,
+                                'score': 99.0,
+                            }
+                        ],
+                    },
+                    bridge_request=bridge_request,
+                    http_status=200,
+                    stale_after_seconds=60,
+                )
+
+                self.assertEqual(normalized['status'], IceaBridgeRequest.STATUS_FAILED)
+                self.assertFalse(normalized['insufficientEvidence'])
+                self.assertIsNone(normalized['scoreSummary'])
+                self.assertIn(remote_status, {warning['code'] for warning in normalized['warnings']})
 
 
 class IceaBridgeApiTests(TestCase):

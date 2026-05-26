@@ -670,6 +670,33 @@ def _build_icea_plus_score_request(bridge_request: IceaBridgeRequest, settings: 
     return _validate_icea_plus_score_request_contract(request_payload)
 
 
+def _timestamp_value(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    return ''
+
+
+def _bridge_request_timestamp(bridge_request: IceaBridgeRequest) -> str:
+    return _timestamp_value(bridge_request.created_at) or _timestamp_value(bridge_request.updated_at) or timezone.now().isoformat()
+
+
+def _row_warnings_with_legacy_timestamp_fallback(warnings: list[Any], *, used_fallback: bool) -> list[Any]:
+    if not used_fallback:
+        return warnings
+    for item in warnings:
+        if isinstance(item, dict) and str(item.get('code') or '').strip() == 'legacy_timestamp_fallback':
+            return warnings
+    return [
+        *warnings,
+        {
+            'code': 'legacy_timestamp_fallback',
+            'message': 'Legacy bridge payload lacked required ICEA timestamps; HANDOVER used the bridge request persistence timestamp.',
+        },
+    ]
+
+
 def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaBridgeRequest) -> dict[str, Any]:
     identity = payload.get('identity') if isinstance(payload.get('identity'), dict) else {}
     context = payload.get('context') if isinstance(payload.get('context'), dict) else {}
@@ -701,8 +728,27 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
     if isinstance(patient_key, str) and patient_key.strip().lower() == 'unknown':
         patient_key = None
 
-    clinical_timestamp = window_end or window_start or context.get('timestamp')
-    recorded_timestamp = (provenance.get('generatedAt') if isinstance(provenance, dict) else None) or context.get('timestamp')
+    bridge_persistence_timestamp = _bridge_request_timestamp(bridge_request)
+    clinical_timestamp = (
+        _timestamp_value(window_end)
+        or _timestamp_value(window_start)
+        or _timestamp_value(context.get('timestamp'))
+        or _timestamp_value(payload.get('clinicalTimestamp'))
+        or _timestamp_value(payload.get('clinical_timestamp'))
+        or _timestamp_value(payload.get('timestamp'))
+        or bridge_persistence_timestamp
+    )
+    recorded_timestamp = (
+        _timestamp_value(context.get('recordedTimestamp'))
+        or _timestamp_value(context.get('timestamp'))
+        or _timestamp_value(provenance.get('generatedAt'))
+        or bridge_persistence_timestamp
+    )
+    used_timestamp_fallback = clinical_timestamp == bridge_persistence_timestamp or recorded_timestamp == bridge_persistence_timestamp
+    row_warnings = _row_warnings_with_legacy_timestamp_fallback(
+        uncertainty.get('warnings') if isinstance(uncertainty.get('warnings'), list) else [],
+        used_fallback=used_timestamp_fallback,
+    )
     feature_values = {
         'age_years': _optional_numeric_value(case_mix.get('ageYears')),
         'diagnosis_count': float(len(diagnoses)),
@@ -745,7 +791,7 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
         'recorded_timestamp': recorded_timestamp,
         'features': features,
         'missingness_flags': missingness_flags,
-        'warnings': uncertainty.get('warnings') if isinstance(uncertainty.get('warnings'), list) else [],
+        'warnings': row_warnings,
         'shadow_mode': True,
         'non_individual_use': True,
         'patient_key': patient_key,
@@ -1200,11 +1246,16 @@ def _normalize_remote_payload(
     first_result = next((item for item in results if isinstance(item, dict)), {})
     raw_status = str(payload.get('status') or payload.get('state') or payload.get('result') or '').strip().lower()
     result_status = str(first_result.get('status') or '').strip().lower()
-    non_scoring_status = raw_status in NON_SCORING_REMOTE_STATUSES or result_status in NON_SCORING_REMOTE_STATUSES
-    insufficient_evidence_status = raw_status == 'insufficient_evidence' or result_status == 'insufficient_evidence'
+    result_statuses = {
+        str(item.get('status') or '').strip().lower()
+        for item in results
+        if isinstance(item, dict) and str(item.get('status') or '').strip()
+    }
+    non_scoring_status = raw_status in NON_SCORING_REMOTE_STATUSES or bool(result_statuses & NON_SCORING_REMOTE_STATUSES)
+    insufficient_evidence_status = raw_status == 'insufficient_evidence' or 'insufficient_evidence' in result_statuses
     contract_failure_status = (
         raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
-        or result_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
+        or bool(result_statuses & NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES)
     )
 
     score_summary = None
@@ -1230,7 +1281,9 @@ def _normalize_remote_payload(
         }
 
     status = IceaBridgeRequest.STATUS_SENT
-    if raw_status in {'accepted', 'queued'}:
+    if contract_failure_status:
+        status = IceaBridgeRequest.STATUS_FAILED
+    elif raw_status in {'accepted', 'queued'}:
         status = IceaBridgeRequest.STATUS_ACCEPTED
     elif raw_status in {'pending', 'running', 'processing'}:
         status = IceaBridgeRequest.STATUS_PENDING
@@ -1238,8 +1291,6 @@ def _normalize_remote_payload(
         status = IceaBridgeRequest.STATUS_SCORED
     elif raw_status == 'stale':
         status = IceaBridgeRequest.STATUS_STALE
-    elif contract_failure_status:
-        status = IceaBridgeRequest.STATUS_FAILED
     elif result_status in {'complete', 'completed', 'provisional'} or insufficient_evidence_status:
         status = IceaBridgeRequest.STATUS_SCORED
     elif score_summary is not None:
@@ -1264,7 +1315,7 @@ def _normalize_remote_payload(
     if flags.get('high_uncertainty'):
         warnings.append({'code': 'high_uncertainty', 'message': 'ICEA+ reported high uncertainty for this score.'})
     if non_scoring_status:
-        warning_code = result_status if result_status in NON_SCORING_REMOTE_STATUSES else raw_status
+        warning_code = next((item for item in result_statuses if item in NON_SCORING_REMOTE_STATUSES), raw_status)
         if not any(item.get('code') == warning_code for item in warnings if isinstance(item, dict)):
             warnings.append({'code': warning_code, 'message': f'ICEA+ did not produce an individual score: {warning_code}.'})
 
