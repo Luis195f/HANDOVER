@@ -32,6 +32,7 @@ REMOTE_STATUS_TIMEOUT_ERROR = 'remote_status_timeout'
 FEATURE_CONTRACT_VERSION = 'handover-icea-feature-v1'
 FEATURE_SOURCE_REPO = 'Luis195f/HANDOVER'
 NON_SCORING_REMOTE_STATUSES = frozenset({'contract_mismatch', 'insufficient_evidence', 'low_feature_coverage'})
+NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES = frozenset({'contract_mismatch', 'low_feature_coverage'})
 
 
 @dataclass(frozen=True)
@@ -1200,6 +1201,11 @@ def _normalize_remote_payload(
     raw_status = str(payload.get('status') or payload.get('state') or payload.get('result') or '').strip().lower()
     result_status = str(first_result.get('status') or '').strip().lower()
     non_scoring_status = raw_status in NON_SCORING_REMOTE_STATUSES or result_status in NON_SCORING_REMOTE_STATUSES
+    insufficient_evidence_status = raw_status == 'insufficient_evidence' or result_status == 'insufficient_evidence'
+    contract_failure_status = (
+        raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
+        or result_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
+    )
 
     score_summary = None
     if non_scoring_status:
@@ -1232,9 +1238,9 @@ def _normalize_remote_payload(
         status = IceaBridgeRequest.STATUS_SCORED
     elif raw_status == 'stale':
         status = IceaBridgeRequest.STATUS_STALE
-    elif non_scoring_status:
+    elif contract_failure_status:
         status = IceaBridgeRequest.STATUS_FAILED
-    elif result_status in {'complete', 'completed', 'provisional', 'insufficient_evidence'}:
+    elif result_status in {'complete', 'completed', 'provisional'} or insufficient_evidence_status:
         status = IceaBridgeRequest.STATUS_SCORED
     elif score_summary is not None:
         status = IceaBridgeRequest.STATUS_SCORED
@@ -1265,8 +1271,7 @@ def _normalize_remote_payload(
     insufficient_evidence = (
         bool(payload.get('insufficientEvidence'))
         or bool(flags.get('insufficient_evidence'))
-        or result_status == 'insufficient_evidence'
-        or non_scoring_status
+        or insufficient_evidence_status
         or any(
             str(item.get('code') or '').strip().lower() == 'insufficient_evidence'
             for item in warnings

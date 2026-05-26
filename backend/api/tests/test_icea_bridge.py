@@ -1435,9 +1435,82 @@ class IceaBridgeServiceTests(TestCase):
         )
 
         self.assertEqual(normalized['status'], IceaBridgeRequest.STATUS_FAILED)
-        self.assertTrue(normalized['insufficientEvidence'])
+        self.assertFalse(normalized['insufficientEvidence'])
         self.assertIsNone(normalized['scoreSummary'])
         self.assertIn('contract_mismatch', {warning['code'] for warning in normalized['warnings']})
+
+    def test_apply_remote_payload_keeps_insufficient_evidence_out_of_failed_status(self):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-insufficient:immediate_provisional',
+            request_id='req-bridge-insufficient',
+            bundle_id='bundle-bridge-insufficient',
+            patient_id='pat-bridge-insufficient',
+            unit_id='icu-a',
+            episode_id='enc-bridge-insufficient',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-insufficient:immediate_provisional:insufficient',
+            payload_hash='insufficient' * 5 + 'abcd',
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_SENT,
+        )
+
+        result = _apply_remote_payload(
+            bridge_request,
+            {
+                'summary': {'rows_requested': 1, 'rows_scored': 0},
+                'results': [
+                    {
+                        'row_id': 'window:bundle-bridge-insufficient',
+                        'status': 'insufficient_evidence',
+                        'score': 52.0,
+                    }
+                ],
+            },
+            200,
+        )
+        bridge_request.refresh_from_db()
+
+        self.assertEqual(result.status, IceaBridgeRequest.STATUS_SCORED)
+        self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_SCORED)
+        self.assertTrue(bridge_request.insufficient_evidence)
+        self.assertIsNone(bridge_request.score_summary_json)
+        self.assertIn('insufficient_evidence', {warning['code'] for warning in bridge_request.warnings_json})
+
+    def test_normalize_remote_payload_does_not_mark_insufficient_evidence_for_low_feature_coverage(self):
+        bridge_request = IceaBridgeRequest.objects.create(
+            bridge_request_id='req-bridge-coverage:immediate_provisional',
+            request_id='req-bridge-coverage',
+            bundle_id='bundle-bridge-coverage',
+            patient_id='pat-bridge-coverage',
+            unit_id='icu-a',
+            episode_id='enc-bridge-coverage',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-bridge-coverage:immediate_provisional:coverage',
+            payload_hash='coverage' * 8,
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_SENT,
+        )
+
+        normalized = _normalize_remote_payload(
+            {
+                'summary': {'rows_requested': 1, 'rows_scored': 0},
+                'results': [
+                    {
+                        'row_id': 'window:bundle-bridge-coverage',
+                        'status': 'low_feature_coverage',
+                        'score': 41.0,
+                    }
+                ],
+            },
+            bridge_request=bridge_request,
+            http_status=200,
+            stale_after_seconds=60,
+        )
+
+        self.assertEqual(normalized['status'], IceaBridgeRequest.STATUS_FAILED)
+        self.assertFalse(normalized['insufficientEvidence'])
+        self.assertIsNone(normalized['scoreSummary'])
+        self.assertIn('low_feature_coverage', {warning['code'] for warning in normalized['warnings']})
 
 
 class IceaBridgeApiTests(TestCase):
@@ -2149,6 +2222,31 @@ class IceaPatientRiskApiTests(TestCase):
         summary = response.json()['results'][0]
         self.assertTrue(summary['stale'])
         self.assertIn('desactualizado', summary['message'].lower())
+
+    @patch.dict(
+        os.environ,
+        {
+            'ENABLE_ICEA_BRIDGE': 'true',
+            'ENABLE_ICEA_PATIENT_RISK': 'true',
+        },
+        clear=False,
+    )
+    def test_patient_risk_surfaces_insufficient_evidence_without_failed_status(self):
+        self._auth(roles=['nurse'], unit_ids=['icu-a'])
+        IceaBridgeRequest.objects.filter(id=self.bridge_request.id).update(
+            status=IceaBridgeRequest.STATUS_SCORED,
+            provisional=False,
+            insufficient_evidence=True,
+            score_summary_json=None,
+            warnings_json=[{'code': 'insufficient_evidence', 'message': 'Not enough data'}],
+        )
+
+        response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()['results'][0]
+        self.assertEqual(summary['clinicalStatus'], 'insufficient_evidence')
+        self.assertIn('evidencia insuficiente', summary['message'].lower())
 
     @patch.dict(
         os.environ,
