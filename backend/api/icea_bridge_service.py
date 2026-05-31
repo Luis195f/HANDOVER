@@ -29,6 +29,12 @@ from backend.api.pilot_control import is_pilot_feature_enabled
 DEFAULT_RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 STORED_BUNDLE_UNAVAILABLE_ERROR = 'stored_bundle_unavailable'
 REMOTE_STATUS_TIMEOUT_ERROR = 'remote_status_timeout'
+FEATURE_CONTRACT_VERSION = 'handover-icea-feature-v1'
+FEATURE_SOURCE_REPO = 'Luis195f/HANDOVER'
+NON_SCORING_REMOTE_STATUSES = frozenset({'contract_mismatch', 'insufficient_evidence', 'low_feature_coverage'})
+NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES = frozenset({'contract_mismatch', 'low_feature_coverage'})
+SCORE_SUMMARY_REDACTED_WARNING = 'score_summary_redacted_due_to_non_scoring_status'
+SCORE_SUMMARY_REDACTED_MARKER = {'redacted': True, 'reason': SCORE_SUMMARY_REDACTED_WARNING}
 
 
 @dataclass(frozen=True)
@@ -652,13 +658,45 @@ def _build_icea_plus_score_request(bridge_request: IceaBridgeRequest, settings: 
 
     model_id = settings.model_id.strip()
     payload = bridge_request.payload_json if isinstance(bridge_request.payload_json, dict) else {}
-    context = payload.get('context') if isinstance(payload.get('context'), dict) else {}
-    return {
+    row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
+    request_payload = {
+        'contract_version': FEATURE_CONTRACT_VERSION,
+        'source_repo': FEATURE_SOURCE_REPO,
         'model_id': model_id,
-        'grain': 'window' if context.get('grain') == 'shift' else 'episode',
+        'grain': row['source_grain'],
         'from_db': False,
-        'rows': [_build_icea_plus_score_row(payload, bridge_request=bridge_request)],
+        'rows': [row],
+        'shadow_mode': True,
+        'non_individual_use': True,
     }
+    return _validate_icea_plus_score_request_contract(request_payload)
+
+
+def _timestamp_value(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    return ''
+
+
+def _bridge_request_timestamp(bridge_request: IceaBridgeRequest) -> str:
+    return _timestamp_value(bridge_request.created_at) or _timestamp_value(bridge_request.updated_at) or timezone.now().isoformat()
+
+
+def _row_warnings_with_legacy_timestamp_fallback(warnings: list[Any], *, used_fallback: bool) -> list[Any]:
+    if not used_fallback:
+        return warnings
+    for item in warnings:
+        if isinstance(item, dict) and str(item.get('code') or '').strip() == 'legacy_timestamp_fallback':
+            return warnings
+    return [
+        *warnings,
+        {
+            'code': 'legacy_timestamp_fallback',
+            'message': 'Legacy bridge payload lacked required ICEA timestamps; HANDOVER used the bridge request persistence timestamp.',
+        },
+    ]
 
 
 def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaBridgeRequest) -> dict[str, Any]:
@@ -692,44 +730,80 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
     if isinstance(patient_key, str) and patient_key.strip().lower() == 'unknown':
         patient_key = None
 
-    row = {
-        'row_id': f'{grain}:{row_key}',
-        'episode_id': identity.get('episodeId') or identity.get('encounterId') or identity.get('bundleId'),
-        'patient_key': patient_key,
-        'unit_code': unit_id,
-        'unit_id': unit_id,
-        'age_years': _numeric_value(case_mix.get('ageYears')),
+    bridge_persistence_timestamp = _bridge_request_timestamp(bridge_request)
+    clinical_timestamp = (
+        _timestamp_value(window_end)
+        or _timestamp_value(window_start)
+        or _timestamp_value(context.get('timestamp'))
+        or _timestamp_value(payload.get('clinicalTimestamp'))
+        or _timestamp_value(payload.get('clinical_timestamp'))
+        or _timestamp_value(payload.get('timestamp'))
+        or bridge_persistence_timestamp
+    )
+    recorded_timestamp = (
+        _timestamp_value(context.get('recordedTimestamp'))
+        or _timestamp_value(context.get('timestamp'))
+        or _timestamp_value(provenance.get('generatedAt'))
+        or bridge_persistence_timestamp
+    )
+    used_timestamp_fallback = clinical_timestamp == bridge_persistence_timestamp or recorded_timestamp == bridge_persistence_timestamp
+    row_warnings = _row_warnings_with_legacy_timestamp_fallback(
+        uncertainty.get('warnings') if isinstance(uncertainty.get('warnings'), list) else [],
+        used_fallback=used_timestamp_fallback,
+    )
+    feature_values = {
+        'age_years': _optional_numeric_value(case_mix.get('ageYears')),
         'diagnosis_count': float(len(diagnoses)),
         'risk_flag_count': float(len(risk_flags)),
-        'braden': _numeric_value(baseline_scores.get('braden')),
-        'glasgow': _numeric_value(baseline_scores.get('glasgow')),
-        'pain_eva': _numeric_value(baseline_scores.get('painEva')),
-        'avpu_score': _avpu_score(baseline_scores.get('avpu')),
-        'documented_medication_count': _numeric_value(exposure.get('documentedMedicationCount')),
-        'documented_procedure_count': _numeric_value(exposure.get('documentedProcedureCount')),
-        'documented_device_use_count': _numeric_value(exposure.get('documentedDeviceUseCount')),
-        'documented_outcome_count': _numeric_value(exposure.get('documentedOutcomeCount')),
-        'documented_exam_count': _numeric_value(exposure.get('documentedExamCount')),
-        'abnormal_vital_count': _numeric_value(change_signals.get('abnormalVitalCount')),
-        'severity_weight': _numeric_value(exposure.get('severityWeight')),
-        'exposure_share': _numeric_value(exposure.get('exposureShare')),
-        'structured_completeness_rate': _numeric_value(quality.get('structuredCompletenessRate')),
-        'bedside_checklist_completion_rate': _numeric_value(quality.get('bedsideChecklistCompletionRate')),
-        'missingness_rate': _numeric_value(uncertainty.get('missingnessRate')),
-        'support_level': _numeric_value(uncertainty.get('supportLevel')),
+        'braden': _optional_numeric_value(baseline_scores.get('braden')),
+        'glasgow': _optional_numeric_value(baseline_scores.get('glasgow')),
+        'pain_eva': _optional_numeric_value(baseline_scores.get('painEva')),
+        'avpu_score': _optional_avpu_score(baseline_scores.get('avpu')),
+        'documented_medication_count': _optional_numeric_value(exposure.get('documentedMedicationCount')),
+        'documented_procedure_count': _optional_numeric_value(exposure.get('documentedProcedureCount')),
+        'documented_device_use_count': _optional_numeric_value(exposure.get('documentedDeviceUseCount')),
+        'documented_outcome_count': _optional_numeric_value(exposure.get('documentedOutcomeCount')),
+        'documented_exam_count': _optional_numeric_value(exposure.get('documentedExamCount')),
+        'abnormal_vital_count': _optional_numeric_value(change_signals.get('abnormalVitalCount')),
+        'severity_weight': _optional_numeric_value(exposure.get('severityWeight')),
+        'exposure_share': _optional_numeric_value(exposure.get('exposureShare')),
+        'structured_completeness_rate': _optional_numeric_value(quality.get('structuredCompletenessRate')),
+        'bedside_checklist_completion_rate': _optional_numeric_value(quality.get('bedsideChecklistCompletionRate')),
+        'missingness_rate': _optional_numeric_value(uncertainty.get('missingnessRate')),
+        'support_level': _optional_numeric_value(uncertainty.get('supportLevel')),
         'stale_data': 1.0 if uncertainty.get('staleData') else 0.0,
         'insufficient_evidence': 1.0 if uncertainty.get('insufficientEvidence') else 0.0,
         'closing_summary_present': 1.0 if change_signals.get('closingSummaryPresent') else 0.0,
         'sbar_present': 1.0 if change_signals.get('sbarPresent') else 0.0,
         'shift_closure_documented': 1.0 if quality.get('shiftClosureDocumented') else 0.0,
+        'documented_signature_count': _optional_numeric_value(attribution.get('signatureCount')),
+        'documented_cosigner_count': _optional_numeric_value(attribution.get('documentedCoSignerCount')),
+        'primary_actor_documented': 1.0 if attribution.get('primaryActorDocumented') else 0.0,
+    }
+    features = {key: value for key, value in feature_values.items() if value is not None}
+    missingness_flags = {key: value is None for key, value in feature_values.items()}
+    row = {
+        'contract_version': FEATURE_CONTRACT_VERSION,
+        'source_repo': FEATURE_SOURCE_REPO,
+        'source_grain': grain,
+        'row_id': f'{grain}:{row_key}',
+        'episode_id': identity.get('episodeId') or identity.get('encounterId') or identity.get('bundleId'),
+        'unit_id': unit_id,
+        'clinical_timestamp': clinical_timestamp,
+        'recorded_timestamp': recorded_timestamp,
+        'features': features,
+        'missingness_flags': missingness_flags,
+        'warnings': row_warnings,
+        'shadow_mode': True,
+        'non_individual_use': True,
+        'patient_key': patient_key,
+        'unit_code': unit_id,
+        **features,
         'window_start': window_start,
         'start_dt': window_start,
         'window_end': window_end,
         'end_dt': window_end,
         'shift': context.get('shift'),
-        'documented_signature_count': _numeric_value(attribution.get('signatureCount')),
-        'documented_cosigner_count': _numeric_value(attribution.get('documentedCoSignerCount')),
-        'primary_actor_documented': 1.0 if attribution.get('primaryActorDocumented') else 0.0,
         'lineage': {
             'request_id': identity.get('requestId') or bridge_request.request_id,
             'bundle_id': identity.get('bundleId') or bridge_request.bundle_id,
@@ -750,12 +824,59 @@ def _build_icea_plus_score_row(payload: dict[str, Any], *, bridge_request: IceaB
     return {key: value for key, value in row.items() if value not in (None, '', {})}
 
 
-def _numeric_value(value: Any) -> float:
+def _validate_icea_plus_score_request_contract(payload: dict[str, Any]) -> dict[str, Any]:
+    rows = payload.get('rows')
+    if payload.get('contract_version') != FEATURE_CONTRACT_VERSION:
+        raise IceaPipelineConfigurationError('invalid_feature_contract')
+    if payload.get('source_repo') != FEATURE_SOURCE_REPO:
+        raise IceaPipelineConfigurationError('invalid_feature_source_repo')
+    if payload.get('shadow_mode') is not True or payload.get('non_individual_use') is not True:
+        raise IceaPipelineConfigurationError('invalid_feature_governance')
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise IceaPipelineConfigurationError('invalid_feature_rows')
+    row = rows[0]
+    if not isinstance(row, dict):
+        raise IceaPipelineConfigurationError('invalid_feature_row')
+    for key in (
+        'contract_version',
+        'source_repo',
+        'source_grain',
+        'row_id',
+        'episode_id',
+        'unit_id',
+        'clinical_timestamp',
+        'recorded_timestamp',
+        'features',
+        'missingness_flags',
+        'warnings',
+        'shadow_mode',
+        'non_individual_use',
+    ):
+        if key not in row:
+            raise IceaPipelineConfigurationError(f'missing_feature_contract_field:{key}')
+    if row.get('contract_version') != FEATURE_CONTRACT_VERSION or row.get('source_repo') != FEATURE_SOURCE_REPO:
+        raise IceaPipelineConfigurationError('invalid_feature_row_contract')
+    if row.get('source_grain') != payload.get('grain'):
+        raise IceaPipelineConfigurationError('feature_grain_mismatch')
+    if not isinstance(row.get('features'), dict) or not isinstance(row.get('missingness_flags'), dict):
+        raise IceaPipelineConfigurationError('invalid_feature_payload')
+    if row.get('shadow_mode') is not True or row.get('non_individual_use') is not True:
+        raise IceaPipelineConfigurationError('invalid_feature_row_governance')
+    return payload
+
+
+def _optional_numeric_value(value: Any) -> float | None:
     if isinstance(value, bool):
         return 1.0 if value else 0.0
     if isinstance(value, (int, float)):
         return float(value)
-    return 0.0
+    return None
+
+
+def _optional_avpu_score(value: Any) -> float | None:
+    if not isinstance(value, str):
+        return None
+    return _avpu_score(value)
 
 
 def _avpu_score(value: Any) -> float:
@@ -1052,10 +1173,10 @@ def _apply_remote_payload(
             'insufficient_evidence': normalized['insufficientEvidence'],
             'formula_version': normalized['formulaVersion'],
             'contract_version': normalized['contractVersion'],
-            'score_summary_json': normalized['scoreSummary'],
+            'score_summary_json': normalized['scoreSummaryStorage'],
             'warnings_json': normalized['warnings'],
             'remote_refs_json': normalized['remoteRefs'],
-            'last_error': '',
+            'last_error': normalized['lastError'],
             'last_http_status': http_status,
             'next_retry_at': None,
             'received_at': received_at,
@@ -1070,7 +1191,7 @@ def _apply_remote_payload(
         delivered=bridge_request.status == IceaBridgeRequest.STATUS_SCORED,
         status=bridge_request.status,
         http_status=http_status,
-        detail='ok',
+        detail=normalized['detail'] or 'ok',
     )
 
 
@@ -1114,6 +1235,29 @@ def _mark_failed(
     return IceaBridgeDeliveryResult(delivered=False, status=bridge_request.status, http_status=http_status, detail=bridge_request.last_error)
 
 
+def _numeric_score_value(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _contains_numeric_score_material(value: Any) -> bool:
+    if _numeric_score_value(value):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_numeric_score_material(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_numeric_score_material(item) for item in value)
+    return False
+
+
+def _remote_payload_has_redactable_score_material(payload: dict[str, Any], first_result: dict[str, Any]) -> bool:
+    if _contains_numeric_score_material(payload.get('scoreSummary')):
+        return True
+    for key in ('score', 'raw_score', 'rawScore', 'riskScore', 'value'):
+        if _numeric_score_value(payload.get(key)) or _numeric_score_value(first_result.get(key)):
+            return True
+    return False
+
+
 def _normalize_remote_payload(
     body_json: dict[str, Any] | list[Any] | None,
     *,
@@ -1127,9 +1271,39 @@ def _normalize_remote_payload(
     first_result = next((item for item in results if isinstance(item, dict)), {})
     raw_status = str(payload.get('status') or payload.get('state') or payload.get('result') or '').strip().lower()
     result_status = str(first_result.get('status') or '').strip().lower()
+    result_statuses = {
+        str(item.get('status') or '').strip().lower()
+        for item in results
+        if isinstance(item, dict) and str(item.get('status') or '').strip()
+    }
+    ordered_result_statuses = [
+        str(item.get('status') or '').strip().lower()
+        for item in results
+        if isinstance(item, dict) and str(item.get('status') or '').strip()
+    ]
+    non_scoring_status = raw_status in NON_SCORING_REMOTE_STATUSES or bool(result_statuses & NON_SCORING_REMOTE_STATUSES)
+    insufficient_evidence_status = raw_status == 'insufficient_evidence' or 'insufficient_evidence' in result_statuses
+    contract_failure_status = (
+        raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
+        or bool(result_statuses & NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES)
+    )
+    contract_failure_code = ''
+    if contract_failure_status:
+        contract_failure_code = next(
+            (item for item in ordered_result_statuses if item in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES),
+            raw_status if raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES else '',
+        )
+    contract_failure_detail = (
+        f'ICEA+ returned non-scoring contract failure: {contract_failure_code}'
+        if contract_failure_code
+        else ''
+    )
+    redacted_score_material = non_scoring_status and _remote_payload_has_redactable_score_material(payload, first_result)
 
     score_summary = None
-    if isinstance(payload.get('scoreSummary'), dict):
+    if non_scoring_status:
+        score_summary = None
+    elif isinstance(payload.get('scoreSummary'), dict):
         score_summary = payload.get('scoreSummary')
     elif isinstance(payload.get('summary'), dict) and not results:
         score_summary = payload.get('summary')
@@ -1149,7 +1323,9 @@ def _normalize_remote_payload(
         }
 
     status = IceaBridgeRequest.STATUS_SENT
-    if raw_status in {'accepted', 'queued'}:
+    if contract_failure_status:
+        status = IceaBridgeRequest.STATUS_FAILED
+    elif raw_status in {'accepted', 'queued'}:
         status = IceaBridgeRequest.STATUS_ACCEPTED
     elif raw_status in {'pending', 'running', 'processing'}:
         status = IceaBridgeRequest.STATUS_PENDING
@@ -1157,7 +1333,7 @@ def _normalize_remote_payload(
         status = IceaBridgeRequest.STATUS_SCORED
     elif raw_status == 'stale':
         status = IceaBridgeRequest.STATUS_STALE
-    elif result_status in {'complete', 'completed', 'provisional', 'insufficient_evidence'}:
+    elif result_status in {'complete', 'completed', 'provisional'} or insufficient_evidence_status:
         status = IceaBridgeRequest.STATUS_SCORED
     elif score_summary is not None:
         status = IceaBridgeRequest.STATUS_SCORED
@@ -1180,11 +1356,20 @@ def _normalize_remote_payload(
         warnings.append({'code': 'missing_key_inputs', 'message': 'ICEA+ reported missing key inputs for scoring.'})
     if flags.get('high_uncertainty'):
         warnings.append({'code': 'high_uncertainty', 'message': 'ICEA+ reported high uncertainty for this score.'})
+    if non_scoring_status:
+        warning_code = next((item for item in result_statuses if item in NON_SCORING_REMOTE_STATUSES), raw_status)
+        if not any(item.get('code') == warning_code for item in warnings if isinstance(item, dict)):
+            warnings.append({'code': warning_code, 'message': f'ICEA+ did not produce an individual score: {warning_code}.'})
+    if redacted_score_material and not any(item.get('code') == SCORE_SUMMARY_REDACTED_WARNING for item in warnings if isinstance(item, dict)):
+        warnings.append({
+            'code': SCORE_SUMMARY_REDACTED_WARNING,
+            'message': 'HANDOVER suppressed numeric score material returned with a non-scoring ICEA+ status.',
+        })
 
     insufficient_evidence = (
         bool(payload.get('insufficientEvidence'))
         or bool(flags.get('insufficient_evidence'))
-        or result_status == 'insufficient_evidence'
+        or insufficient_evidence_status
         or any(
             str(item.get('code') or '').strip().lower() == 'insufficient_evidence'
             for item in warnings
@@ -1221,8 +1406,11 @@ def _normalize_remote_payload(
         'formulaVersion': formula_version,
         'contractVersion': str(payload.get('contractVersion') or payload.get('contract_version') or bridge_request.contract_version or CONTRACT_VERSION)[:64],
         'scoreSummary': score_summary,
+        'scoreSummaryStorage': dict(SCORE_SUMMARY_REDACTED_MARKER) if redacted_score_material else score_summary,
         'warnings': warnings,
         'remoteRefs': remote_refs,
+        'lastError': contract_failure_code if status == IceaBridgeRequest.STATUS_FAILED and contract_failure_code else '',
+        'detail': contract_failure_detail if status == IceaBridgeRequest.STATUS_FAILED else '',
     }
 
 
@@ -1386,4 +1574,3 @@ def serialize_bridge_summary(bridge_request: IceaBridgeRequest) -> dict[str, Any
         'lastUpdated': bridge_request.updated_at.isoformat(),
         'source': SOURCE,
     }
-
