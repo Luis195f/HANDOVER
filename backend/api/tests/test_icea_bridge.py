@@ -621,6 +621,21 @@ class IceaBridgeServiceTests(TestCase):
             expires_at=HandoverBundleRecord.default_expiry(),
         )
 
+    def _create_bridge_request_for_remote_payload(self, suffix: str) -> IceaBridgeRequest:
+        return IceaBridgeRequest.objects.create(
+            bridge_request_id=f'req-bridge-{suffix}:immediate_provisional',
+            request_id=f'req-bridge-{suffix}',
+            bundle_id=f'bundle-bridge-{suffix}',
+            patient_id=f'pat-bridge-{suffix}',
+            unit_id='icu-a',
+            episode_id=f'enc-bridge-{suffix}',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key=f'req-bridge-{suffix}:immediate_provisional:remote',
+            payload_hash=(suffix.replace('_', '') * 8)[:64],
+            payload_json={'contractVersion': 'handover-icea-bridge-v1'},
+            status=IceaBridgeRequest.STATUS_SENT,
+        )
+
     @patch.dict(
         os.environ,
         {
@@ -1559,8 +1574,18 @@ class IceaBridgeServiceTests(TestCase):
         self.assertEqual(result.status, IceaBridgeRequest.STATUS_SCORED)
         self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_SCORED)
         self.assertTrue(bridge_request.insufficient_evidence)
-        self.assertIsNone(bridge_request.score_summary_json)
+        self.assertEqual(
+            bridge_request.score_summary_json,
+            {'redacted': True, 'reason': 'score_summary_redacted_due_to_non_scoring_status'},
+        )
+        serialized = serialize_bridge_request(bridge_request)
+        self.assertIsNone(serialized['scoreSummary'])
+        self.assertTrue(serialized['scoreSummaryRedacted'])
         self.assertIn('insufficient_evidence', {warning['code'] for warning in bridge_request.warnings_json})
+        self.assertIn(
+            'score_summary_redacted_due_to_non_scoring_status',
+            {warning['code'] for warning in bridge_request.warnings_json},
+        )
 
     def test_normalize_remote_payload_does_not_mark_insufficient_evidence_for_low_feature_coverage(self):
         bridge_request = IceaBridgeRequest.objects.create(
@@ -1636,6 +1661,94 @@ class IceaBridgeServiceTests(TestCase):
                 self.assertFalse(normalized['insufficientEvidence'])
                 self.assertIsNone(normalized['scoreSummary'])
                 self.assertIn(remote_status, {warning['code'] for warning in normalized['warnings']})
+
+    def test_apply_remote_payload_redacts_numeric_score_material_for_non_scoring_statuses(self):
+        scenarios = [
+            (
+                'contract_mismatch',
+                {'status': 'contract_mismatch'},
+                {'scoreSummary': {'score': 99.0}},
+                IceaBridgeRequest.STATUS_FAILED,
+            ),
+            (
+                'low_feature_coverage',
+                {'status': 'low_feature_coverage', 'score': 41.0},
+                {},
+                IceaBridgeRequest.STATUS_FAILED,
+            ),
+            (
+                'insufficient_evidence',
+                {'status': 'insufficient_evidence', 'raw_score': 0.52},
+                {},
+                IceaBridgeRequest.STATUS_SCORED,
+            ),
+        ]
+
+        for remote_status, result_payload, root_payload, expected_status in scenarios:
+            with self.subTest(remote_status=remote_status):
+                bridge_request = self._create_bridge_request_for_remote_payload(f'redacted-{remote_status}')
+
+                result = _apply_remote_payload(
+                    bridge_request,
+                    {
+                        **root_payload,
+                        'summary': {'rows_requested': 1, 'rows_scored': 0},
+                        'results': [
+                            {
+                                'row_id': f'window:bundle-bridge-redacted-{remote_status}',
+                                **result_payload,
+                            }
+                        ],
+                    },
+                    200,
+                )
+                bridge_request.refresh_from_db()
+                serialized = serialize_bridge_request(bridge_request)
+
+                self.assertEqual(result.status, expected_status)
+                self.assertEqual(bridge_request.status, expected_status)
+                self.assertEqual(
+                    bridge_request.score_summary_json,
+                    {'redacted': True, 'reason': 'score_summary_redacted_due_to_non_scoring_status'},
+                )
+                self.assertIsNone(serialized['scoreSummary'])
+                self.assertTrue(serialized['scoreSummaryRedacted'])
+                self.assertNotIn('score', json.dumps(serialized['scoreSummary']))
+                self.assertNotIn('99.0', json.dumps(serialized))
+                self.assertNotIn('41.0', json.dumps(serialized))
+                self.assertNotIn('0.52', json.dumps(serialized))
+                self.assertIn(
+                    'score_summary_redacted_due_to_non_scoring_status',
+                    {warning['code'] for warning in bridge_request.warnings_json},
+                )
+
+    def test_apply_remote_payload_keeps_redacted_false_for_non_scoring_without_numeric_score_material(self):
+        bridge_request = self._create_bridge_request_for_remote_payload('non-scoring-no-score')
+
+        _apply_remote_payload(
+            bridge_request,
+            {
+                'status': 'completed',
+                'summary': {'rows_requested': 1, 'rows_scored': 0},
+                'results': [
+                    {
+                        'row_id': 'window:bundle-bridge-non-scoring-no-score',
+                        'status': 'contract_mismatch',
+                    }
+                ],
+            },
+            200,
+        )
+        bridge_request.refresh_from_db()
+        serialized = serialize_bridge_request(bridge_request)
+
+        self.assertIsNone(bridge_request.score_summary_json)
+        self.assertIsNone(serialized['scoreSummary'])
+        self.assertFalse(serialized['scoreSummaryRedacted'])
+        self.assertNotIn(
+            'score_summary_redacted_due_to_non_scoring_status',
+            {warning['code'] for warning in bridge_request.warnings_json},
+        )
 
 
 class IceaBridgeApiTests(TestCase):

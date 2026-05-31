@@ -33,6 +33,8 @@ FEATURE_CONTRACT_VERSION = 'handover-icea-feature-v1'
 FEATURE_SOURCE_REPO = 'Luis195f/HANDOVER'
 NON_SCORING_REMOTE_STATUSES = frozenset({'contract_mismatch', 'insufficient_evidence', 'low_feature_coverage'})
 NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES = frozenset({'contract_mismatch', 'low_feature_coverage'})
+SCORE_SUMMARY_REDACTED_WARNING = 'score_summary_redacted_due_to_non_scoring_status'
+SCORE_SUMMARY_REDACTED_MARKER = {'redacted': True, 'reason': SCORE_SUMMARY_REDACTED_WARNING}
 
 
 @dataclass(frozen=True)
@@ -1171,7 +1173,7 @@ def _apply_remote_payload(
             'insufficient_evidence': normalized['insufficientEvidence'],
             'formula_version': normalized['formulaVersion'],
             'contract_version': normalized['contractVersion'],
-            'score_summary_json': normalized['scoreSummary'],
+            'score_summary_json': normalized['scoreSummaryStorage'],
             'warnings_json': normalized['warnings'],
             'remote_refs_json': normalized['remoteRefs'],
             'last_error': '',
@@ -1233,6 +1235,29 @@ def _mark_failed(
     return IceaBridgeDeliveryResult(delivered=False, status=bridge_request.status, http_status=http_status, detail=bridge_request.last_error)
 
 
+def _numeric_score_value(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _contains_numeric_score_material(value: Any) -> bool:
+    if _numeric_score_value(value):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_numeric_score_material(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_numeric_score_material(item) for item in value)
+    return False
+
+
+def _remote_payload_has_redactable_score_material(payload: dict[str, Any], first_result: dict[str, Any]) -> bool:
+    if _contains_numeric_score_material(payload.get('scoreSummary')):
+        return True
+    for key in ('score', 'raw_score', 'rawScore', 'riskScore', 'value'):
+        if _numeric_score_value(payload.get(key)) or _numeric_score_value(first_result.get(key)):
+            return True
+    return False
+
+
 def _normalize_remote_payload(
     body_json: dict[str, Any] | list[Any] | None,
     *,
@@ -1257,6 +1282,7 @@ def _normalize_remote_payload(
         raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
         or bool(result_statuses & NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES)
     )
+    redacted_score_material = non_scoring_status and _remote_payload_has_redactable_score_material(payload, first_result)
 
     score_summary = None
     if non_scoring_status:
@@ -1318,6 +1344,11 @@ def _normalize_remote_payload(
         warning_code = next((item for item in result_statuses if item in NON_SCORING_REMOTE_STATUSES), raw_status)
         if not any(item.get('code') == warning_code for item in warnings if isinstance(item, dict)):
             warnings.append({'code': warning_code, 'message': f'ICEA+ did not produce an individual score: {warning_code}.'})
+    if redacted_score_material and not any(item.get('code') == SCORE_SUMMARY_REDACTED_WARNING for item in warnings if isinstance(item, dict)):
+        warnings.append({
+            'code': SCORE_SUMMARY_REDACTED_WARNING,
+            'message': 'HANDOVER suppressed numeric score material returned with a non-scoring ICEA+ status.',
+        })
 
     insufficient_evidence = (
         bool(payload.get('insufficientEvidence'))
@@ -1359,6 +1390,7 @@ def _normalize_remote_payload(
         'formulaVersion': formula_version,
         'contractVersion': str(payload.get('contractVersion') or payload.get('contract_version') or bridge_request.contract_version or CONTRACT_VERSION)[:64],
         'scoreSummary': score_summary,
+        'scoreSummaryStorage': dict(SCORE_SUMMARY_REDACTED_MARKER) if redacted_score_material else score_summary,
         'warnings': warnings,
         'remoteRefs': remote_refs,
     }
