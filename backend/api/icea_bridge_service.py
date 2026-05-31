@@ -1176,7 +1176,7 @@ def _apply_remote_payload(
             'score_summary_json': normalized['scoreSummaryStorage'],
             'warnings_json': normalized['warnings'],
             'remote_refs_json': normalized['remoteRefs'],
-            'last_error': '',
+            'last_error': normalized['lastError'],
             'last_http_status': http_status,
             'next_retry_at': None,
             'received_at': received_at,
@@ -1191,7 +1191,7 @@ def _apply_remote_payload(
         delivered=bridge_request.status == IceaBridgeRequest.STATUS_SCORED,
         status=bridge_request.status,
         http_status=http_status,
-        detail='ok',
+        detail=normalized['detail'] or 'ok',
     )
 
 
@@ -1276,11 +1276,27 @@ def _normalize_remote_payload(
         for item in results
         if isinstance(item, dict) and str(item.get('status') or '').strip()
     }
+    ordered_result_statuses = [
+        str(item.get('status') or '').strip().lower()
+        for item in results
+        if isinstance(item, dict) and str(item.get('status') or '').strip()
+    ]
     non_scoring_status = raw_status in NON_SCORING_REMOTE_STATUSES or bool(result_statuses & NON_SCORING_REMOTE_STATUSES)
     insufficient_evidence_status = raw_status == 'insufficient_evidence' or 'insufficient_evidence' in result_statuses
     contract_failure_status = (
         raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES
         or bool(result_statuses & NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES)
+    )
+    contract_failure_code = ''
+    if contract_failure_status:
+        contract_failure_code = next(
+            (item for item in ordered_result_statuses if item in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES),
+            raw_status if raw_status in NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES else '',
+        )
+    contract_failure_detail = (
+        f'ICEA+ returned non-scoring contract failure: {contract_failure_code}'
+        if contract_failure_code
+        else ''
     )
     redacted_score_material = non_scoring_status and _remote_payload_has_redactable_score_material(payload, first_result)
 
@@ -1393,6 +1409,8 @@ def _normalize_remote_payload(
         'scoreSummaryStorage': dict(SCORE_SUMMARY_REDACTED_MARKER) if redacted_score_material else score_summary,
         'warnings': warnings,
         'remoteRefs': remote_refs,
+        'lastError': contract_failure_code if status == IceaBridgeRequest.STATUS_FAILED and contract_failure_code else '',
+        'detail': contract_failure_detail if status == IceaBridgeRequest.STATUS_FAILED else '',
     }
 
 

@@ -1573,6 +1573,8 @@ class IceaBridgeServiceTests(TestCase):
 
         self.assertEqual(result.status, IceaBridgeRequest.STATUS_SCORED)
         self.assertEqual(bridge_request.status, IceaBridgeRequest.STATUS_SCORED)
+        self.assertEqual(result.detail, 'ok')
+        self.assertEqual(bridge_request.last_error, '')
         self.assertTrue(bridge_request.insufficient_evidence)
         self.assertEqual(
             bridge_request.score_summary_json,
@@ -1707,6 +1709,13 @@ class IceaBridgeServiceTests(TestCase):
 
                 self.assertEqual(result.status, expected_status)
                 self.assertEqual(bridge_request.status, expected_status)
+                if expected_status == IceaBridgeRequest.STATUS_FAILED:
+                    self.assertEqual(bridge_request.last_error, remote_status)
+                    self.assertIn(f'non-scoring contract failure: {remote_status}', result.detail)
+                    self.assertNotEqual(result.detail, 'ok')
+                else:
+                    self.assertEqual(bridge_request.last_error, '')
+                    self.assertEqual(result.detail, 'ok')
                 self.assertEqual(
                     bridge_request.score_summary_json,
                     {'redacted': True, 'reason': 'score_summary_redacted_due_to_non_scoring_status'},
@@ -1725,7 +1734,7 @@ class IceaBridgeServiceTests(TestCase):
     def test_apply_remote_payload_keeps_redacted_false_for_non_scoring_without_numeric_score_material(self):
         bridge_request = self._create_bridge_request_for_remote_payload('non-scoring-no-score')
 
-        _apply_remote_payload(
+        result = _apply_remote_payload(
             bridge_request,
             {
                 'status': 'completed',
@@ -1742,6 +1751,9 @@ class IceaBridgeServiceTests(TestCase):
         bridge_request.refresh_from_db()
         serialized = serialize_bridge_request(bridge_request)
 
+        self.assertEqual(result.status, IceaBridgeRequest.STATUS_FAILED)
+        self.assertEqual(result.detail, 'ICEA+ returned non-scoring contract failure: contract_mismatch')
+        self.assertEqual(bridge_request.last_error, 'contract_mismatch')
         self.assertIsNone(bridge_request.score_summary_json)
         self.assertIsNone(serialized['scoreSummary'])
         self.assertFalse(serialized['scoreSummaryRedacted'])
