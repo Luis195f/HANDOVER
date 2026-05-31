@@ -483,10 +483,11 @@ class IceaBridgeMapperTests(TestCase):
             payload_json=payload,
             status=IceaBridgeRequest.STATUS_QUEUED,
         )
-        fallback_timestamp = datetime.datetime(2026, 3, 9, 10, 11, 12, tzinfo=datetime.timezone.utc)
+        created_timestamp = datetime.datetime(2026, 3, 9, 10, 11, 12, tzinfo=datetime.timezone.utc)
+        updated_timestamp = datetime.datetime(2026, 3, 9, 11, 12, 13, tzinfo=datetime.timezone.utc)
         IceaBridgeRequest.objects.filter(id=bridge_request.id).update(
-            created_at=fallback_timestamp,
-            updated_at=fallback_timestamp,
+            created_at=created_timestamp,
+            updated_at=updated_timestamp,
         )
         bridge_request.refresh_from_db()
 
@@ -495,8 +496,41 @@ class IceaBridgeMapperTests(TestCase):
         self.assertFalse(row['lineage']['contextual_signal_present'])
         self.assertIsNone(row['lineage']['contextual_contract_version'])
         self.assertIsNone(row['lineage']['contextual_signal'])
-        self.assertEqual(row['clinical_timestamp'], fallback_timestamp.isoformat())
-        self.assertEqual(row['recorded_timestamp'], fallback_timestamp.isoformat())
+        self.assertEqual(row['clinical_timestamp'], updated_timestamp.isoformat())
+        self.assertEqual(row['recorded_timestamp'], updated_timestamp.isoformat())
+        self.assertIn('legacy_timestamp_fallback', {warning['code'] for warning in row['warnings']})
+
+    def test_bridge_projection_legacy_timestamp_fallback_uses_created_at_without_updated_at(self):
+        payload = {
+            'contractVersion': 'handover-icea-bridge-v1',
+            'identity': {'bundleId': 'bundle-legacy-created', 'requestId': 'req-legacy-created', 'patientId': 'pat-legacy'},
+            'context': {'grain': 'episode', 'unitId': 'icu-a'},
+            'caseMix': {},
+            'nursingExposure': {},
+            'qualitySignals': {},
+            'uncertaintySignals': {},
+            'provenance': {'lineage': {'requestId': 'req-legacy-created'}},
+        }
+        created_timestamp = datetime.datetime(2026, 3, 9, 10, 11, 12, tzinfo=datetime.timezone.utc)
+        bridge_request = IceaBridgeRequest(
+            bridge_request_id='req-legacy-created:immediate_provisional',
+            request_id='req-legacy-created',
+            bundle_id='bundle-legacy-created',
+            patient_id='pat-legacy',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-legacy-created:immediate_provisional:legacy',
+            payload_hash='legacycreated' * 4,
+            payload_json=payload,
+            status=IceaBridgeRequest.STATUS_QUEUED,
+        )
+        bridge_request.created_at = created_timestamp
+        bridge_request.updated_at = None
+
+        row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
+
+        self.assertEqual(row['clinical_timestamp'], created_timestamp.isoformat())
+        self.assertEqual(row['recorded_timestamp'], created_timestamp.isoformat())
         self.assertIn('legacy_timestamp_fallback', {warning['code'] for warning in row['warnings']})
 
     def test_contextual_contract_regression_fixtures_cover_uci_ward_ed_and_oncology(self):
