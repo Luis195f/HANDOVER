@@ -26,69 +26,51 @@ Principios aplicados:
 
 ## Payload analitico v1
 
-Contrato actual (`contractVersion=handover-icea-bridge-v1`):
+HANDOVER mantiene internamente el payload puente `contractVersion=handover-icea-bridge-v1`, construido desde el Bundle FHIR y persistido en `IceaBridgeRequest.payload_json`. Al enviar a ICEA+, el runtime no publica ese payload crudo: proyecta una solicitud de feature contract versionada `handover-icea-feature-v1`.
+
+Sobre POST real a ICEA+:
 
 ```json
 {
-  "contractVersion": "handover-icea-bridge-v1",
-  "source": "HANDOVER",
-  "scoringMode": "immediate_provisional",
-  "provisional": true,
-  "identity": {
-    "handoverId": "bundle-bridge-001",
-    "bundleId": "bundle-bridge-001",
-    "requestId": "req-bridge-001",
-    "patientId": "pat-bridge-001",
-    "episodeId": "enc-bridge-001",
-    "encounterId": "enc-bridge-001",
-    "compositionId": "comp-bridge-001"
-  },
-  "context": {
-    "grain": "shift",
-    "timestamp": "2026-03-08T07:10:00Z",
-    "windowStart": "2026-03-08T07:00:00Z",
-    "windowEnd": "2026-03-08T15:00:00Z",
-    "unitId": "icu-a",
-    "teamId": null,
-    "primaryActorDocumented": true,
-    "documentedAuthorPresent": true,
-    "documentedCoSignerCount": 0,
-    "documentedActorCount": 1,
-    "shift": "Manana"
-  },
-  "caseMix": {},
-  "nursingExposure": {},
-  "qualitySignals": {},
-  "uncertaintySignals": {},
-  "provenance": {},
-  "governance": {
-    "displayPolicy": "shadow_aggregated_no_individual_score",
-    "staffIdentifiersRedacted": true,
-    "individualScoreVisible": false,
-    "causalSummaryVisible": false
-  },
-  "contextualSignal": {
-    "contract_version": "handover-icea-context-v1",
-    "profile_id": "critical-care",
-    "overlay_ids": ["neuro"],
-    "case_mix_envelope": {
-      "baseline_complexity": 0.58,
-      "surveillance_intensity": 0.47,
-      "therapeutic_load": 0.31,
-      "temporal_criticality": 0.44,
-      "continuity_risk": 0.29,
-      "dependency_load": 0.34,
-      "coordination_complexity": 0.39,
-      "explainability_summary": "Deterministic stratification only; not causal attribution.",
-      "observed_fields": {},
-      "derived_fields": {},
-      "pending_hospital_source_fields": []
-    }
-  }
+  "contract_version": "handover-icea-feature-v1",
+  "source_repo": "Luis195f/HANDOVER",
+  "model_id": "11111111-1111-4111-8111-111111111111",
+  "grain": "window",
+  "from_db": false,
+  "rows": [],
+  "shadow_mode": true,
+  "non_individual_use": true
 }
 ```
 
-Familias de campos implementadas:
+Campos obligatorios del sobre:
+- `contract_version`: version del contrato de features enviado a ICEA+; actualmente `handover-icea-feature-v1`.
+- `source_repo`: repo emisor del contrato; actualmente `Luis195f/HANDOVER`.
+- `model_id`: UUID configurado en `ICEA_BRIDGE_MODEL_ID`.
+- `grain`: debe coincidir con `rows[0].source_grain`.
+- `from_db`: siempre `false` en este bridge; HANDOVER envia una proyeccion desde el handover persistido, no una consulta directa a una base ICEA.
+- `rows`: lista de una fila proyectada desde el payload HANDOVER.
+- `shadow_mode`: obligatorio `true`.
+- `non_individual_use`: obligatorio `true`.
+
+Estructura obligatoria de cada `row`:
+- `contract_version`: debe coincidir con el feature contract del sobre.
+- `source_repo`: debe coincidir con el repo emisor del sobre.
+- `source_grain`: `window` para handovers con ventana de turno, `episode` cuando no hay ventana de turno usable.
+- `row_id`: identificador tecnico estable de la fila, formado como `<source_grain>:<episode|encounter|bundle|bridge_request>`.
+- `episode_id`: episodio, encounter o bundle usado como ancla clinica de la fila.
+- `unit_id`: unidad de cuidado resuelta por HANDOVER.
+- `clinical_timestamp`: timestamp clinico de referencia para la fila.
+- `recorded_timestamp`: timestamp de registro/proyeccion de la fila.
+- `features`: diccionario numerico con las features disponibles.
+- `missingness_flags`: diccionario paralelo que marca features ausentes.
+- `warnings`: advertencias trazables, sin PHI libre.
+- `shadow_mode`: obligatorio `true`.
+- `non_individual_use`: obligatorio `true`.
+
+La fila puede incluir campos aditivos compatibles, como `patient_key`, `unit_code`, `window_start`, `window_end`, `start_dt`, `end_dt`, `shift`, features numericas aplanadas y `lineage`. El envelope contextual `handover-icea-context-v1` viaja dentro de `row.lineage.contextual_signal`; no sustituye el contrato de features ni habilita uso individual.
+
+Familias de datos de origen usadas para construir `features` y `lineage`:
 - `identity`: bundle, request, paciente, episodio y composicion.
 - `context`: grano (`handover`, `episode`, `shift`), ventana temporal, unidad, presencia/conteo de actores documentados y carga resumida del cambio de turno, sin IDs nominales de profesional.
 - `caseMix`: edad, sexo, diagnosticos estructurados, risk flags y escalas basales si existen en el Bundle.
@@ -130,8 +112,22 @@ La entrega analitica actual del bridge se alinea con el repo ICEA+ verificado en
 - no se ha encontrado un endpoint real de status de score en ese upstream, por lo que HANDOVER no inventa polling remoto;
 - si ICEA+ responde con aliases de contrato (`status`/`state`/`result`, `formulaVersion`/`formula_version`, `warnings`/`issues`), HANDOVER los normaliza sin renombrar el contrato publico del bridge;
 - la fila enviada a ICEA+ mantiene las features numericas actuales y agrega el envelope contextual dentro de `rows[].lineage.contextual_signal` para trazabilidad y capas analiticas posteriores;
+- `clinical_timestamp` prefiere `context.windowEnd`, `context.windowStart`, `context.timestamp` y timestamps clinicos del payload si existen; `recorded_timestamp` prefiere `context.recordedTimestamp` y `context.timestamp`;
+- payloads legacy que no traen timestamps requeridos se proyectan con un fallback conservador y estable desde `IceaBridgeRequest.created_at`, luego `updated_at` solo si falta `created_at`, para preservar idempotencia entre reintentos con el mismo payload hash e Idempotency-Key;
+- cuando HANDOVER usa ese fallback de timestamp, agrega warning `legacy_timestamp_fallback`;
 - GET /api/icea/bridge/status/<handoverId>?refresh=true solo intenta refresco remoto si ICEA_BRIDGE_STATUS_PATH esta configurado explicitamente;
 - cuando no existe ese path, HANDOVER responde `remoteStatusSupported=false`, `remoteRefreshAttempted=false` y `localStatusIsAuthoritative=true` con estado local visible.
+
+## Respuestas no-scoring
+
+HANDOVER trata estos estados remotos como resultados sin score individual procesable:
+- `contract_mismatch`: ICEA+ no pudo procesar la fila porque el contrato o la configuracion esperada no coinciden. HANDOVER lo persiste como fallo del bridge/contrato y conserva warnings trazables.
+- `low_feature_coverage`: ICEA+ rechazo o no puntuo por cobertura insuficiente del contrato de features. HANDOVER lo persiste como fallo del bridge/cobertura y conserva warnings trazables.
+- `insufficient_evidence`: ICEA+ produjo un resultado analitico valido sin score concluyente por evidencia insuficiente. HANDOVER no lo clasifica como fallo tecnico; lo marca como `insufficientEvidence=true`.
+
+Para los tres estados, HANDOVER suprime `scoreSummary` aunque la respuesta remota incluya campos numericos. En respuestas publicas del bridge y resumenes derivados, `scoreSummary` permanece `null`; `scoreSummaryRedacted=true` solo indica que existio material interno suprimido, no visibilidad clinica de un score individual.
+
+`contract_mismatch` y `low_feature_coverage` no se convierten en `insufficientEvidence` salvo que ICEA+ lo indique de forma explicita mediante `insufficientEvidence`, flags o warnings de `insufficient_evidence`.
 
 ## Scoring inmediato vs enriquecido
 
@@ -267,4 +263,3 @@ No debe usarse jamas como evaluacion individual:
 - El modo `enriched_followup` requiere disponibilidad de datos posteriores; HANDOVER no los inventa.
 - La vista admin actual expone resumen del bridge, no un dashboard analitico completo.
 - Sigue existiendo una advertencia heredada no relacionada en `backend/api/views.py` por `datetime.utcnow()` usada en auditoria existente.
-
