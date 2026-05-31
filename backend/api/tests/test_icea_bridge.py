@@ -496,6 +496,49 @@ class IceaBridgeMapperTests(TestCase):
         self.assertFalse(row['lineage']['contextual_signal_present'])
         self.assertIsNone(row['lineage']['contextual_contract_version'])
         self.assertIsNone(row['lineage']['contextual_signal'])
+        self.assertEqual(row['clinical_timestamp'], created_timestamp.isoformat())
+        self.assertEqual(row['recorded_timestamp'], created_timestamp.isoformat())
+        self.assertIn('legacy_timestamp_fallback', {warning['code'] for warning in row['warnings']})
+
+        IceaBridgeRequest.objects.filter(id=bridge_request.id).update(
+            updated_at=datetime.datetime(2026, 3, 9, 12, 13, 14, tzinfo=datetime.timezone.utc),
+        )
+        bridge_request.refresh_from_db()
+        retry_row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
+
+        self.assertEqual(retry_row['clinical_timestamp'], row['clinical_timestamp'])
+        self.assertEqual(retry_row['recorded_timestamp'], row['recorded_timestamp'])
+        self.assertIn('legacy_timestamp_fallback', {warning['code'] for warning in retry_row['warnings']})
+
+    def test_bridge_projection_legacy_timestamp_fallback_uses_updated_at_without_created_at(self):
+        payload = {
+            'contractVersion': 'handover-icea-bridge-v1',
+            'identity': {'bundleId': 'bundle-legacy-updated', 'requestId': 'req-legacy-updated', 'patientId': 'pat-legacy'},
+            'context': {'grain': 'episode', 'unitId': 'icu-a'},
+            'caseMix': {},
+            'nursingExposure': {},
+            'qualitySignals': {},
+            'uncertaintySignals': {},
+            'provenance': {'lineage': {'requestId': 'req-legacy-updated'}},
+        }
+        updated_timestamp = datetime.datetime(2026, 3, 9, 11, 12, 13, tzinfo=datetime.timezone.utc)
+        bridge_request = IceaBridgeRequest(
+            bridge_request_id='req-legacy-updated:immediate_provisional',
+            request_id='req-legacy-updated',
+            bundle_id='bundle-legacy-updated',
+            patient_id='pat-legacy',
+            unit_id='icu-a',
+            scoring_mode=IceaBridgeRequest.SCORING_MODE_IMMEDIATE,
+            idempotency_key='req-legacy-updated:immediate_provisional:legacy',
+            payload_hash='legacyupdated' * 4,
+            payload_json=payload,
+            status=IceaBridgeRequest.STATUS_QUEUED,
+        )
+        bridge_request.created_at = None
+        bridge_request.updated_at = updated_timestamp
+
+        row = _build_icea_plus_score_row(payload, bridge_request=bridge_request)
+
         self.assertEqual(row['clinical_timestamp'], updated_timestamp.isoformat())
         self.assertEqual(row['recorded_timestamp'], updated_timestamp.isoformat())
         self.assertIn('legacy_timestamp_fallback', {warning['code'] for warning in row['warnings']})

@@ -679,7 +679,7 @@ def _timestamp_value(value: Any) -> str:
 
 
 def _bridge_request_timestamp(bridge_request: IceaBridgeRequest) -> str:
-    return _timestamp_value(bridge_request.updated_at) or _timestamp_value(bridge_request.created_at) or timezone.now().isoformat()
+    return _timestamp_value(bridge_request.created_at) or _timestamp_value(bridge_request.updated_at) or timezone.now().isoformat()
 
 
 def _row_warnings_with_legacy_timestamp_fallback(warnings: list[Any], *, used_fallback: bool) -> list[Any]:
