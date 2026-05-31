@@ -37,7 +37,38 @@ Sobre POST real a ICEA+:
   "model_id": "11111111-1111-4111-8111-111111111111",
   "grain": "window",
   "from_db": false,
-  "rows": [],
+  "rows": [
+    {
+      "contract_version": "handover-icea-feature-v1",
+      "source_repo": "Luis195f/HANDOVER",
+      "source_grain": "window",
+      "row_id": "window:enc-bridge-001",
+      "episode_id": "enc-bridge-001",
+      "unit_id": "icu-a",
+      "clinical_timestamp": "2026-03-08T15:00:00Z",
+      "recorded_timestamp": "2026-03-08T15:03:00Z",
+      "features": {
+        "age_years": 37.0,
+        "documented_medication_count": 1.0,
+        "documented_procedure_count": 1.0,
+        "structured_completeness_rate": 0.82,
+        "missingness_rate": 0.18,
+        "shift_closure_documented": 1.0
+      },
+      "missingness_flags": {
+        "age_years": false,
+        "documented_medication_count": false,
+        "documented_procedure_count": false,
+        "structured_completeness_rate": false,
+        "missingness_rate": false,
+        "shift_closure_documented": false,
+        "glasgow": true
+      },
+      "warnings": [],
+      "shadow_mode": true,
+      "non_individual_use": true
+    }
+  ],
   "shadow_mode": true,
   "non_individual_use": true
 }
@@ -49,7 +80,7 @@ Campos obligatorios del sobre:
 - `model_id`: UUID configurado en `ICEA_BRIDGE_MODEL_ID`.
 - `grain`: debe coincidir con `rows[0].source_grain`.
 - `from_db`: siempre `false` en este bridge; HANDOVER envia una proyeccion desde el handover persistido, no una consulta directa a una base ICEA.
-- `rows`: lista de una fila proyectada desde el payload HANDOVER.
+- `rows`: lista con exactamente una fila proyectada desde el payload HANDOVER; `rows: []` es invalido para este bridge.
 - `shadow_mode`: obligatorio `true`.
 - `non_individual_use`: obligatorio `true`.
 
