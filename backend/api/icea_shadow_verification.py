@@ -16,6 +16,7 @@ from backend.api.icea_bridge_service import (
     build_icea_bridge_idempotency_key,
     build_icea_plus_score_request,
     load_icea_bridge_settings,
+    remote_payload_has_individual_score_material,
     score_configuration_error_code,
 )
 from backend.api.icea_payload_mapper import build_icea_bridge_payload, compute_payload_hash
@@ -293,8 +294,13 @@ def _validate_remote_response(body: Any) -> tuple[list[dict[str, str]], dict[str
             )
         )
 
+    individual_score_material = any(
+        remote_payload_has_individual_score_material(body, row)
+        for row in rows
+    )
     individual_result_redacted = (
-        body.get("score_summary") is None
+        not individual_score_material
+        and body.get("score_summary") is None
         and body.get("score_summary_redacted") is True
         and body.get("summary_redacted") is True
         and all(

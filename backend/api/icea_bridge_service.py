@@ -35,6 +35,8 @@ NON_SCORING_REMOTE_STATUSES = frozenset({'contract_mismatch', 'insufficient_evid
 NON_SCORING_CONTRACT_FAILURE_REMOTE_STATUSES = frozenset({'contract_mismatch', 'low_feature_coverage'})
 SCORE_SUMMARY_REDACTED_WARNING = 'score_summary_redacted_due_to_non_scoring_status'
 SCORE_SUMMARY_REDACTED_MARKER = {'redacted': True, 'reason': SCORE_SUMMARY_REDACTED_WARNING}
+REMOTE_SCORE_SUMMARY_KEYS = ('scoreSummary', 'score_summary')
+REMOTE_SCORE_VALUE_KEYS = ('score', 'raw_score', 'rawScore', 'riskScore', 'value')
 
 
 @dataclass(frozen=True)
@@ -1260,11 +1262,15 @@ def _contains_numeric_score_material(value: Any) -> bool:
     return False
 
 
-def _remote_payload_has_redactable_score_material(payload: dict[str, Any], first_result: dict[str, Any]) -> bool:
-    if _contains_numeric_score_material(payload.get('scoreSummary')):
-        return True
-    for key in ('score', 'raw_score', 'rawScore', 'riskScore', 'value'):
-        if _numeric_score_value(payload.get(key)) or _numeric_score_value(first_result.get(key)):
+def remote_payload_has_individual_score_material(
+    payload: dict[str, Any],
+    result: dict[str, Any],
+) -> bool:
+    for key in REMOTE_SCORE_SUMMARY_KEYS:
+        if _contains_numeric_score_material(payload.get(key)) or _contains_numeric_score_material(result.get(key)):
+            return True
+    for key in REMOTE_SCORE_VALUE_KEYS:
+        if _numeric_score_value(payload.get(key)) or _numeric_score_value(result.get(key)):
             return True
     return False
 
@@ -1309,7 +1315,7 @@ def _normalize_remote_payload(
         if contract_failure_code
         else ''
     )
-    redacted_score_material = non_scoring_status and _remote_payload_has_redactable_score_material(payload, first_result)
+    redacted_score_material = non_scoring_status and remote_payload_has_individual_score_material(payload, first_result)
 
     score_summary = None
     if non_scoring_status:
