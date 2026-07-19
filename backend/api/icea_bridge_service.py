@@ -211,6 +211,10 @@ def _idempotency_key(request_id: str, scoring_mode: str, payload_hash: str) -> s
     return f'{request_id}:{scoring_mode}:{payload_hash[:16]}'
 
 
+def build_icea_bridge_idempotency_key(request_id: str, scoring_mode: str, payload_hash: str) -> str:
+    return _idempotency_key(request_id, scoring_mode, payload_hash)
+
+
 def _is_terminal_status(status: str) -> bool:
     return status in {
         IceaBridgeRequest.STATUS_SCORED,
@@ -672,6 +676,13 @@ def _build_icea_plus_score_request(bridge_request: IceaBridgeRequest, settings: 
     return _validate_icea_plus_score_request_contract(request_payload)
 
 
+def build_icea_plus_score_request(
+    bridge_request: IceaBridgeRequest,
+    settings: IceaBridgeSettings,
+) -> dict[str, Any]:
+    return _build_icea_plus_score_request(bridge_request, settings)
+
+
 def _timestamp_value(value: Any) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
@@ -895,7 +906,7 @@ class IceaBridgeRemoteService:
         return self._request(
             'POST',
             self.settings.score_path,
-            json_body=_build_icea_plus_score_request(bridge_request, self.settings),
+            json_body=build_icea_plus_score_request(bridge_request, self.settings),
             idempotency_key=bridge_request.idempotency_key,
         )
 
