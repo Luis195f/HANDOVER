@@ -388,3 +388,26 @@ En postura de piloto prudente, HANDOVER conserva la trazabilidad tecnica del bri
 Documentacion relacionada:
 - [Bridge analitico ICEA+](docs/icea-bridge.md)
 - [Integracion ICEA+](docs/icea-integration.md)
+
+## OpenAI Build Week 2026
+
+### PRE-EXISTING
+
+HANDOVER Core, offline-first, FHIR, MPAC, outbox ICEA, bridge y el contrato
+`handover-icea-feature-v1` ya existian antes de Build Week.
+
+### BUILT DURING BUILD WEEK
+
+El commit funcional `ba4b652` incorpora **HANDOVER → ICEA Integration Readiness & Shadow Bridge
+Verification**, desarrollada con Codex + GPT-5.6 Sol. La feature verifica readiness, contrato y
+governance de forma fail-closed; no garantiza compatibilidad entre feature-spaces previamente
+incompatibles.
+
+Session ID del hilo principal de desarrollo:
+`019f797f-63a3-70e1-b717-d51a11a8a2a4`.
+
+En una prueba cross-repository real, HANDOVER alcanzo una instancia ICEA local con JWT y RBAC de rol
+`service` funcionales. El transporte obtuvo HTTP `200` y `reached_icea=true`, pero el verificador
+detecto `contract_mismatch` porque el modelo demo disponible no era compatible con el feature-space
+producido por HANDOVER. Esto demuestra la deteccion fail-closed, no compatibilidad end-to-end del
+scoring. La deduplicacion del receptor permanece `NOT_VERIFIED`.

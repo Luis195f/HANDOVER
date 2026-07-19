@@ -326,7 +326,7 @@ de forma segura. No garantiza que dos sistemas previamente incompatibles sean co
 
 Codex con GPT-5.6 ayudo a inspeccionar los contratos existentes, contrastar el productor HANDOVER con el receptor ICEA, elegir el cambio minimo, implementar el command/verificador, crear tests focalizados y revisar seguridad, redaccion e idempotencia. No se integro GPT-5.6 en runtime, no se envio informacion clinica a un LLM y no se creo una nueva frontera de confianza.
 
-`CODEX_FEEDBACK_SESSION_ID=PENDING`
+`CODEX_FEEDBACK_SESSION_ID=019f797f-63a3-70e1-b717-d51a11a8a2a4`
 
 ### Ejecucion reproducible para jueces
 
