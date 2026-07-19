@@ -139,20 +139,45 @@ class IceaShadowVerificationTests(SimpleTestCase):
         self.assertFalse(any(check["status"] == FAIL for check in result["checks"]))
 
     @patch("backend.api.icea_bridge_service.httpx.request")
-    def test_individual_score_material_is_fail(self, mock_request):
-        unsafe_body = shadow_response()
-        unsafe_body["results"][0]["score"] = 72.4
-        mock_request.return_value = httpx.Response(200, json=unsafe_body)
+    def test_recognized_individual_score_aliases_are_fail(self, mock_request):
+        cases = (
+            ("score_summary", "root", {"score": 72.4}),
+            ("scoreSummary", "root", {"score": 72.4}),
+            ("score", "result", 72.4),
+            ("raw_score", "result", 0.724),
+            ("rawScore", "result", 0.724),
+            ("riskScore", "result", 72.4),
+            ("value", "result", 72.4),
+        )
+
+        for score_key, location, numeric_value in cases:
+            with self.subTest(score_key=score_key, location=location):
+                unsafe_body = shadow_response()
+                target = unsafe_body if location == "root" else unsafe_body["results"][0]
+                target[score_key] = numeric_value
+                mock_request.return_value = httpx.Response(200, json=unsafe_body)
+
+                with patch.dict(os.environ, BRIDGE_ENV, clear=False):
+                    result = verify_synthetic_icea_shadow_bridge()
+
+                self.assertEqual(result["status"], FAIL)
+                self.assertFalse(result["governance"]["no_individual_result"])
+                self.assertIn(
+                    "no_individual_result",
+                    {check["name"] for check in result["checks"] if check["status"] == FAIL},
+                )
+
+    @patch("backend.api.icea_bridge_service.httpx.request")
+    def test_numeric_value_outside_score_context_is_not_rejected(self, mock_request):
+        safe_body = shadow_response()
+        safe_body["metadata"] = {"value": 1}
+        mock_request.return_value = httpx.Response(200, json=safe_body)
 
         with patch.dict(os.environ, BRIDGE_ENV, clear=False):
             result = verify_synthetic_icea_shadow_bridge()
 
-        self.assertEqual(result["status"], FAIL)
-        self.assertFalse(result["governance"]["no_individual_result"])
-        self.assertIn(
-            "no_individual_result",
-            {check["name"] for check in result["checks"] if check["status"] == FAIL},
-        )
+        self.assertEqual(result["status"], PASS)
+        self.assertTrue(result["governance"]["no_individual_result"])
 
     @patch("backend.api.icea_bridge_service.httpx.request")
     def test_forbidden_non_individual_response_fields_are_fail(self, mock_request):
