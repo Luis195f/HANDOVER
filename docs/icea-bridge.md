@@ -294,3 +294,88 @@ No debe usarse jamas como evaluacion individual:
 - El modo `enriched_followup` requiere disponibilidad de datos posteriores; HANDOVER no los inventa.
 - La vista admin actual expone resumen del bridge, no un dashboard analitico completo.
 - Sigue existiendo una advertencia heredada no relacionada en `backend/api/views.py` por `datetime.utcnow()` usada en auditoria existente.
+
+## Built during OpenAI Build Week 2026
+
+### PRE-EXISTING
+
+Antes de esta rama ya existian y no se presentan como trabajo Build Week:
+
+- HANDOVER Core y el runtime clinico Core + UPP + SOP + MPAC + ICEA+;
+- operacion offline-first, cola y sincronizacion;
+- construccion, validacion y envio FHIR transaction;
+- MPAC;
+- outbox ICEA con HMAC, anti-replay opcional, idempotencia y retries;
+- bridge ICEA con autenticacion de servicio, timeout, retries y trazabilidad;
+- productor y validador `handover-icea-feature-v1`.
+
+### BUILT DURING BUILD WEEK
+
+Esta rama añade exclusivamente **HANDOVER → ICEA Integration Readiness & Shadow Bridge Verification**,
+una capacidad reproducible para verificar readiness, contrato y governance y detectar incompatibilidades
+de forma segura. No garantiza que dos sistemas previamente incompatibles sean compatibles.
+
+- carga el fixture FHIR fijo `tests/fixtures/fhir/uci-adulto-contextual-bundle.json`;
+- falla cerrado si el fixture deja de usar identidades explicitamente sinteticas;
+- construye el payload real mediante el mapper HANDOVER y la proyeccion existente del bridge;
+- envia una request real mediante `IceaBridgeRemoteService`, reutilizando el auth service, TLS, timeout e `Idempotency-Key` existentes;
+- valida la aceptacion del contrato y la respuesta shadow del receptor;
+- emite un resultado JSON `PASS`, `FAIL` o `NOT_VERIFIED` con razones y checks;
+- confirma que la respuesta no publica score individual numerico, ranking, score laboral, writeback clinico ni accion clinica automatica;
+- no persiste el Bundle sintetico ni crea un segundo outbox, scheduler o servicio.
+
+Codex con GPT-5.6 ayudo a inspeccionar los contratos existentes, contrastar el productor HANDOVER con el receptor ICEA, elegir el cambio minimo, implementar el command/verificador, crear tests focalizados y revisar seguridad, redaccion e idempotencia. No se integro GPT-5.6 en runtime, no se envio informacion clinica a un LLM y no se creo una nueva frontera de confianza.
+
+`CODEX_FEEDBACK_SESSION_ID=019f797f-63a3-70e1-b717-d51a11a8a2a4`
+
+### Ejecucion reproducible para jueces
+
+Prerequisitos:
+
+1. Arrancar una instancia ICEA local o de prueba que exponga `/api/v1/icea-plus/score/`.
+2. Usar un `ICEA_BRIDGE_MODEL_ID` de esa instancia cuyo feature contract esperado sea `handover-icea-feature-v1` y `source_repo=Luis195f/HANDOVER`.
+3. Reutilizar credenciales de servicio locales/de prueba ya provisionadas. El verificador no crea, imprime ni almacena secretos.
+
+Ejemplo PowerShell para una instancia local:
+
+```powershell
+$env:HANDOVER_DEPLOYMENT_MODE = "development"
+$env:ENABLE_ICEA_BRIDGE = "true"
+$env:ENABLE_ICEA_IMMEDIATE_SCORING = "true"
+$env:ICEA_API_BASE_URL = "http://127.0.0.1:8001"
+$env:ICEA_API_BEARER_TOKEN = "<existing-test-token>"
+$env:ICEA_BRIDGE_MODEL_ID = "<existing-icea-model-uuid>"
+$env:ICEA_BRIDGE_SCORE_PATH = "/api/v1/icea-plus/score/"
+python manage.py verify_icea_shadow_bridge
+```
+
+Tambien se puede usar el flujo `client_credentials` existente mediante `ICEA_API_TOKEN_URL`, `ICEA_API_CLIENT_ID` e `ICEA_API_CLIENT_SECRET` en lugar de `ICEA_API_BEARER_TOKEN`.
+
+Para un endpoint HTTPS de prueba no local se exige confirmacion explicita:
+
+```powershell
+python manage.py verify_icea_shadow_bridge --allow-remote-test-endpoint
+```
+
+Interpretacion:
+
+- `PASS`: hubo respuesta real de ICEA y pasaron contrato, governance shadow y redaccion individual.
+- `FAIL`: HANDOVER o ICEA devolvieron un mismatch contractual o material individual/prohibido.
+- `NOT_VERIFIED`: configuracion incompleta, endpoint no confirmado, error de red, auth, timeout o un resultado
+  analitico valido `insufficient_evidence` sin scoring concluyente; nunca se infiere `PASS`.
+
+### Verified local cross-repository run
+
+Se ejecuto una prueba real HANDOVER → ICEA contra una instancia ICEA local:
+
+- readiness y smoke de ICEA finalizaron en `PASS`;
+- HANDOVER alcanzo realmente ICEA con autenticacion JWT y RBAC de rol `service` funcionales;
+- el transporte obtuvo HTTP `200`, con `reached_icea=true` y `auth_mode=bearer`;
+- ICEA devolvio `contract_mismatch` porque el modelo demo disponible tiene un feature-space distinto del
+  payload `handover-icea-feature-v1` producido por HANDOVER y no existe actualmente un modelo seeded compatible;
+- el resultado demuestra que el verificador detecta la incompatibilidad y falla cerrado;
+- no demuestra compatibilidad end-to-end del scoring;
+- no se modifico ICEA, su contrato ni su kernel para fabricar un `PASS`;
+- la deduplicacion del receptor permanece `NOT_VERIFIED`.
+
+La idempotencia de retry dentro de HANDOVER se verifica reconstruyendo el mismo body desde el mismo request transitorio y reutilizando la misma `Idempotency-Key`. El endpoint de score ICEA actual no expone receipt ni garantia de deduplicacion por esa cabecera; por ello `receiver_replay` se declara honestamente `NOT_VERIFIED` y el command no duplica el POST para aparentar una garantia inexistente.
