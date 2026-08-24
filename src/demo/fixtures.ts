@@ -6,17 +6,67 @@ import type { PatientListItem } from '@/src/types/patientList';
 
 // BEGIN HANDOVER: DEMO_MODE
 export const DEMO_USER_ID = 'demo@nurseos.app';
+export const DEMO_RECEIVER_USER_ID = 'demo.receiver@nurseos.app';
 
-export const DEMO_SESSION_TEMPLATE: HandoverSession = {
-  userId: DEMO_USER_ID,
-  displayName: 'Enfermera Demo',
-  roles: ['nurse'],
-  units: UNITS.map((unit) => unit.id),
-  accessToken: 'demo-token',
-  refreshToken: undefined,
-  expiresAt: undefined,
-  mode: 'demo',
+export const DEMO_ACTOR_IDS = [DEMO_USER_ID, DEMO_RECEIVER_USER_ID] as const;
+export type DemoActorId = (typeof DEMO_ACTOR_IDS)[number];
+
+export type DemoActorIdentity = {
+  userId: DemoActorId;
+  displayName: string;
+  email: string;
+  kind: 'outgoing' | 'incoming';
+  synthetic: true;
+  roles: string[];
+  units: string[];
 };
+
+const DEMO_UNIT_IDS = UNITS.map((unit) => unit.id);
+
+export const DEMO_ACTORS: readonly DemoActorIdentity[] = [
+  {
+    userId: DEMO_USER_ID,
+    displayName: 'Profesional saliente demo (sintetica)',
+    email: 'outgoing-demo@example.invalid',
+    kind: 'outgoing',
+    synthetic: true,
+    roles: ['nurse'],
+    units: [...DEMO_UNIT_IDS],
+  },
+  {
+    userId: DEMO_RECEIVER_USER_ID,
+    displayName: 'Profesional receptora demo (sintetica)',
+    email: 'incoming-demo@example.invalid',
+    kind: 'incoming',
+    synthetic: true,
+    roles: ['nurse'],
+    units: [...DEMO_UNIT_IDS],
+  },
+];
+
+export function isDemoActorId(userId: string): userId is DemoActorId {
+  return DEMO_ACTOR_IDS.some((candidate) => candidate === userId);
+}
+
+export function getDemoActorIdentity(userId: string): DemoActorIdentity | null {
+  return DEMO_ACTORS.find((actor) => actor.userId === userId) ?? null;
+}
+
+function buildDemoSession(actor: DemoActorIdentity, expiresAt?: string): HandoverSession {
+  return {
+    userId: actor.userId,
+    displayName: actor.displayName,
+    email: actor.email,
+    roles: [...actor.roles],
+    units: [...actor.units],
+    accessToken: 'demo-token',
+    refreshToken: undefined,
+    expiresAt,
+    mode: 'demo',
+  };
+}
+
+export const DEMO_SESSION_TEMPLATE: HandoverSession = buildDemoSession(DEMO_ACTORS[0]);
 
 type DemoPatientFixture = {
   patient: PatientListItem;
@@ -246,10 +296,8 @@ export const DEMO_FHIR_ALLERGY_BUNDLE = getDemoAllergyBundle();
 
 export const DEMO_ADMIN_DASHBOARD = buildDemoAdminDashboardSummary();
 
-export function ensureDemoSessionTemplate(): HandoverSession {
-  return {
-    ...DEMO_SESSION_TEMPLATE,
-    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(),
-  };
+export function ensureDemoSessionTemplate(userId: DemoActorId = DEMO_USER_ID): HandoverSession {
+  const actor = getDemoActorIdentity(userId) ?? DEMO_ACTORS[0];
+  return buildDemoSession(actor, new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString());
 }
 // END HANDOVER: DEMO_MODE

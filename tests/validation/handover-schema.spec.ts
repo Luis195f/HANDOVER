@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
+import { DEMO_RECEIVER_USER_ID, DEMO_USER_ID } from '@/src/demo/fixtures';
 import { zHandover, type HandoverFormData } from "@/src/validation/schemas";
 
 const baseValidData: HandoverFormData = {
@@ -243,6 +244,33 @@ describe("zHandover", () => {
     expect(result.success).toBe(false);
     const messages = result.success ? [] : result.error.issues.map((i) => i.message);
     expect(messages).toContain("La doble attestation del relevo requiere actores distintos.");
+  });
+
+  it('acepta el cierre demo saliente A hacia receptora B', () => {
+    const valid: HandoverFormData = {
+      ...baseValidData,
+      signatures: {
+        outgoing: { ...baseValidData.signatures!.outgoing!, userId: DEMO_USER_ID },
+        incoming: { ...baseValidData.signatures!.incoming!, userId: DEMO_RECEIVER_USER_ID },
+      },
+    };
+
+    expect(zHandover.safeParse(valid).success).toBe(true);
+  });
+
+  it('continua rechazando el cierre demo A hacia A', () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      signatures: {
+        outgoing: { ...baseValidData.signatures!.outgoing!, userId: DEMO_USER_ID },
+        incoming: { ...baseValidData.signatures!.incoming!, userId: DEMO_USER_ID },
+      },
+    };
+
+    const result = zHandover.safeParse(invalid);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+    expect(messages).toContain('La doble attestation del relevo requiere actores distintos.');
   });
 
   it("acepta diagnósticos SNOMED válidos", () => {
