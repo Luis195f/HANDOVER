@@ -2,7 +2,7 @@
 
 > Estado del documento
 > - Estado: `implemented`.
-> - Última revisión: 2026-04-11.
+> - Última revisión: 2026-08-24.
 > - Fuente de verdad / evidencia base: `backend/security/*`, `backend/api/views.py`, `backend/api/urls.py`, `docs/MASTER_GOVERNANCE_REGISTER.md`.
 > - Riesgos o lagunas abiertas: la evidencia fuerte cubre authn/authz, attestation clínica, firma criptográfica de transporte y superficies sensibles principales; no equivale a una auditoría exhaustiva de todo el backend ni a una declaración de production-readiness.
 
@@ -44,7 +44,8 @@
 - Para cualquier rol no admin, las consultas y altas de pacientes quedan limitadas a las unidades declaradas en claims (`unitIds` / `units` y aliases soportados).
 - Si una unidad pedida o enviada queda fuera de alcance, la API responde `403` con código estable; no debe degradar a éxito vacío ambiguo fuera del scope explícito.
 - Cuando `GET /api/patients` cae al FHIR remoto y el token no privilegiado cubre varias unidades, el backend hace fan-out por cada unidad autorizada y filtra la respuesta por unidad; no debe responder `200` vacío solo porque el upstream no soporte agregación multi-unit.
-- Si el FHIR remoto falla y se usa el bundle demo como fallback, ese fallback también queda filtrado por unidades autorizadas; no debe reabrir visibilidad lateral por demo data.
+- Si el FHIR remoto no está disponible, `GET /api/patients` y `GET /api/fhir/patient` responden `503` con `code=fhir_unavailable`; nunca sustituyen la fuente clínica por `DemoPatient`, un Bundle sintético ni un `200` vacío ambiguo.
+- El modo demo permanece aislado en el frontend y solo se intercepta cuando la sesión es explícitamente `mode=demo`; un fallo operacional no activa ese modo. El serializador legado `DemoPatient.to_fhir()` usa `Patient.meta.tag` con `system=https://handover.dev/fhir/CodeSystem/data-origin` y `code=synthetic-demo` como defensa en profundidad.
 - `GET /api/fhir/patient` mantiene el mismo perímetro deny-first: para roles no privilegiados exige unidad explícita en búsquedas multi-unit y valida que la respuesta quede dentro de las unidades autorizadas; una lectura cuyo `unit` no pueda resolverse responde `403` con código controlado en lugar de exponer datos ambiguos.
 
 ## Capabilities y seams frontend/backend

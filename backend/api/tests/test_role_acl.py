@@ -284,7 +284,7 @@ class RoleAclTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json().get("code"), "forbidden-role")
 
-    def test_patients_endpoint_returns_demo_data_for_nurse_when_fhir_unavailable(self):
+    def test_patients_endpoint_fails_closed_for_nurse_when_fhir_unavailable(self):
         DemoPatient.objects.create(
             external_id="demo-pat-999",
             given_name="Elena",
@@ -302,15 +302,21 @@ class RoleAclTests(TestCase):
         )
         url = reverse("patients")
 
-        with patch("backend.api.views.httpx.get", autospec=True, side_effect=httpx.HTTPError("fhir-down")):
+        with patch(
+            "backend.api.views.httpx.get",
+            autospec=True,
+            side_effect=httpx.HTTPError("fhir-down"),
+        ) as mock_get:
             response = client.get(url)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 503)
         payload = response.json()
-        self.assertEqual(payload.get("resourceType"), "Bundle")
-        self.assertGreaterEqual(payload.get("total", 0), 1)
+        self.assertEqual(payload.get("code"), "fhir_unavailable")
+        self.assertNotIn("DemoPatient", str(payload))
+        self.assertNotIn("demo-pat-999", str(payload))
         resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
-        self.assertIn("demo-pat-999", [resource.get("id") for resource in resources])
+        self.assertFalse(any(resource.get("resourceType") == "Patient" for resource in resources))
+        self.assertEqual(mock_get.call_args.kwargs["params"].get("unit"), "icu-a")
 
     def test_patients_endpoint_returns_local_db_patients_first(self):
         Patient.objects.create(

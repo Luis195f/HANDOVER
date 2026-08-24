@@ -101,6 +101,15 @@ class DemoPatient(models.Model):
         payload = {
             "resourceType": "Patient",
             "id": self.external_id,
+            "meta": {
+                "tag": [
+                    {
+                        "system": "https://handover.dev/fhir/CodeSystem/data-origin",
+                        "code": "synthetic-demo",
+                        "display": "Synthetic demo data",
+                    }
+                ]
+            },
             "name": [{"use": "official", "family": self.family_name, "given": [self.given_name]}],
             "gender": (self.gender or "unknown").lower(),
         }
