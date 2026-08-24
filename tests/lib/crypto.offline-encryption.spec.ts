@@ -8,6 +8,7 @@ import {
   encryptOfflinePayload,
   encryptPayload,
   isEncryptionDisabled,
+  OfflineDecryptionError,
   TEST_ONLY_OFFLINE_ENCRYPTION_DISABLE_ENV,
 } from '../../src/lib/crypto';
 
@@ -82,6 +83,14 @@ describe('encryptOfflinePayload / decryptOfflinePayload', () => {
 
     const decrypted = await decryptOfflinePayload(encrypted);
     expect(decrypted).toBe(plaintext);
+  });
+
+  it('rejects a tampered AES-GCM envelope', async () => {
+    const encrypted = await encryptOfflinePayload(JSON.stringify({ marker: 'authenticated' }));
+    const envelope = JSON.parse(encrypted) as { tag: string };
+    envelope.tag = `${envelope.tag.startsWith('A') ? 'B' : 'A'}${envelope.tag.slice(1)}`;
+
+    await expect(decryptOfflinePayload(JSON.stringify(envelope))).rejects.toBeInstanceOf(OfflineDecryptionError);
   });
 
   it('returns plaintext unchanged when encryption is disabled', async () => {

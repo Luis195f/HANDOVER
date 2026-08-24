@@ -16,7 +16,6 @@ import * as SQLite from "expo-sqlite";
 import {
   decryptOfflinePayload,
   decryptPayload as decryptQueueEncryptedPayload,
-  encryptPayload,
   encryptOfflinePayload,
   hashHex,
   isEncryptionDisabled,
@@ -180,10 +179,6 @@ async function encryptQueuePayload(payload: unknown, patientId?: string): Promis
   }
   try {
     return await encryptOfflinePayload(serialized);
-  } catch {
-  }
-  try {
-    return await encryptPayload(serialized);
   } catch {
   }
   const payloadHash = hashHex(serialized);
