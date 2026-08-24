@@ -69,7 +69,7 @@ describe('Demo mode network interception', () => {
         expect.objectContaining({
           resource: expect.objectContaining({
             resourceType: 'Location',
-            identifier: [expect.objectContaining({ value: 'UDCC-03' })],
+            identifier: [expect.objectContaining({ value: 'PG-03' })],
           }),
         }),
       ],

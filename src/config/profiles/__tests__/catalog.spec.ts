@@ -261,7 +261,7 @@ describe('profile master catalog', () => {
     expect(matchLocationToUnit('Paciente trasladado a UCI Adulto Ala A')).toBe('icu-a');
     expect(matchLocationToUnit('Pendiente en resucitacion de urgencias')).toBe('ed-obs');
     expect(matchLocationToUnit('Control post hemodialisis')).toBe('neph-hd');
-    expect(matchLocationToUnit('Observacion especial en Psiquiatria adulto SJD A')).toBe('sjd-a');
-    expect(matchLocationToUnit('Revisar continuidad en UDCC')).toBe('udcc-psychogeriatrics');
+    expect(matchLocationToUnit('Observacion especial en Unidad de Salud Mental Adultos A')).toBe('sjd-a');
+    expect(matchLocationToUnit('Revisar continuidad en Psicogeriatria UDCC')).toBe('udcc-psychogeriatrics');
   });
 });

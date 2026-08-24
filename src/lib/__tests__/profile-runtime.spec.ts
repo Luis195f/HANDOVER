@@ -291,7 +291,7 @@ describe('resolveHandoverProfileRuntime', () => {
       units: [
         {
           id: 'sjd-a',
-          name: 'Psiquiatria adulto · SJD A',
+          name: 'Unidad de Salud Mental Adultos A',
           specialty: 'psych',
           profileId: 'behavioral-health',
           features: { enablePsychosocialExtra: true },
