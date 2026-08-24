@@ -6,9 +6,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as nandaCatalogModule from '@/src/catalogs/nandaCodes';
 import DiagnosisAutocomplete from '../DiagnosisAutocomplete';
+import { SNOMED_SYSTEM, type SnomedCoding } from '@/src/data/snomed-dict';
 import type { HandoverStructuredDiagnosis } from '@/src/types/handover';
 
 type FormValues = {
+  dxMedical: SnomedCoding | null;
   dxMedicalStructured: HandoverStructuredDiagnosis[];
   dxNursingStructured: HandoverStructuredDiagnosis[];
   dxNursing?: string;
@@ -16,11 +18,18 @@ type FormValues = {
 
 function renderWithForm(
   props: Partial<React.ComponentProps<typeof DiagnosisAutocomplete>> = {},
+  initialValues: Partial<FormValues> = {},
 ) {
   let methods: UseFormReturn<FormValues> | undefined;
   const Wrapper = () => {
     const form = useForm<FormValues>({
-      defaultValues: { dxMedicalStructured: [], dxNursingStructured: [], dxNursing: '' },
+      defaultValues: {
+        dxMedical: null,
+        dxMedicalStructured: [],
+        dxNursingStructured: [],
+        dxNursing: '',
+        ...initialValues,
+      },
     });
     methods = form;
     return (
@@ -54,10 +63,12 @@ afterEach(() => {
 
 describe('DiagnosisAutocomplete', () => {
   it('renderiza label e input', () => {
-    const { getByText, getByPlaceholderText } = renderWithForm();
+    const { getByText, getByPlaceholderText, methods } = renderWithForm();
 
     expect(getByText('Diagnósticos médicos (estructurados)')).toBeTruthy();
     expect(getByPlaceholderText('Buscar diagnóstico...')).toBeTruthy();
+    expect(methods.getValues('dxMedical')).toBeNull();
+    expect(methods.getValues('dxMedicalStructured')).toEqual([]);
   });
 
   it('muestra la advertencia de licencia antes de habilitar el catálogo NANDA completo', () => {
@@ -88,7 +99,7 @@ describe('DiagnosisAutocomplete', () => {
     expect(getByText('Oxigenación alterada (00001) · NANDA')).toBeTruthy();
   });
 
-  it('muestra sugerencias según la búsqueda y añade diagnósticos', async () => {
+  it('selecciona un SNOMED en el contrato canónico conservando system, code y display', async () => {
     vi.useFakeTimers();
     const { getByPlaceholderText, getByTestId, methods } = renderWithForm();
 
@@ -96,28 +107,73 @@ describe('DiagnosisAutocomplete', () => {
     await flushSearchDebounce();
 
     await act(async () => {
-      fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-195967001'));
+      fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-61277005'));
     });
 
-    expect(methods.getValues('dxMedicalStructured')).toHaveLength(1);
+    expect(methods.getValues('dxMedical')).toEqual({
+      system: SNOMED_SYSTEM,
+      code: '61277005',
+      display: 'Asma',
+    });
+    expect(methods.getValues('dxMedicalStructured')).toEqual([]);
   });
 
-  it('permite eliminar diagnósticos añadidos', async () => {
+  it('borra coherentemente el diagnóstico médico canónico', async () => {
     vi.useFakeTimers();
-    const { getByPlaceholderText, getByTestId, getByText, methods } = renderWithForm();
+    const { getByPlaceholderText, getByTestId, methods } = renderWithForm();
 
     fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'asma');
     await flushSearchDebounce();
 
     await act(async () => {
+      fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-61277005'));
+    });
+
+    expect(methods.getValues('dxMedical')?.code).toBe('61277005');
+
+    await act(async () => {
+      fireEvent.press(getByTestId('diagnosis-primary-snomed-remove'));
+    });
+
+    expect(methods.getValues('dxMedical')).toBeNull();
+    expect(methods.getValues('dxMedicalStructured')).toEqual([]);
+  });
+
+  it('reemplaza el diagnóstico canónico sin conservar valores obsoletos', async () => {
+    vi.useFakeTimers();
+    const { getByPlaceholderText, getByTestId, methods } = renderWithForm();
+
+    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'asma');
+    await flushSearchDebounce();
+    await act(async () => {
+      fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-61277005'));
+    });
+
+    fireEvent.changeText(getByPlaceholderText('Buscar diagnóstico...'), 'neumonia');
+    await flushSearchDebounce();
+    await act(async () => {
       fireEvent.press(getByTestId('diagnosis-suggestion-SNOMED-195967001'));
     });
 
-    expect(methods.getValues('dxMedicalStructured')).toHaveLength(1);
+    expect(methods.getValues('dxMedical')).toEqual({
+      system: SNOMED_SYSTEM,
+      code: '195967001',
+      display: 'Neumonía',
+    });
+    expect(methods.getValues('dxMedicalStructured')).toEqual([]);
+  });
 
-    fireEvent.press(getByText('Eliminar'));
+  it('muestra un diagnóstico canónico precargado sin duplicarlo', () => {
+    const { getByTestId, getByText, methods } = renderWithForm(
+      {},
+      {
+        dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+      },
+    );
 
-    expect(methods.getValues('dxMedicalStructured')).toHaveLength(0);
+    expect(getByTestId('diagnosis-primary-snomed')).toBeTruthy();
+    expect(getByText('Neumonía')).toBeTruthy();
+    expect(methods.getValues('dxMedicalStructured')).toEqual([]);
   });
 
   it('autocompleta dxNursing legado al seleccionar el primer NANDA', async () => {

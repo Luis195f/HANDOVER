@@ -683,6 +683,50 @@ describe('buildFhirBundleFromFormData', () => {
     expect(categoryCodings.some((coding: any) => coding.code === '129839007')).toBe(false);
   });
 
+  it('preserves one canonical SNOMED Condition from the selected diagnosis', () => {
+    const handover: HandoverData = zHandover.parse({
+      administrativeData: {
+        unit: 'UCI',
+        census: 8,
+        staffIn: ['Nurse In'],
+        staffOut: ['Nurse Out'],
+        shiftStart: '2025-01-05T08:00:00Z',
+        shiftEnd: '2025-01-05T16:00:00Z',
+        shiftType: 'Mañana',
+      },
+      patientId: 'patient-selected-dx-1',
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: makeCoding('61277005', 'Asma'),
+      dxMedicalStructured: [],
+      dxNursing: '',
+      dxNursingStructured: [],
+    });
+
+    const bundle = buildFhirBundleFromFormData(handover, { now: () => '2025-01-05T16:00:00Z' });
+    const matchingConditions = bundle.entry
+      .map((entry) => entry.resource)
+      .filter(
+        (resource) =>
+          resource.resourceType === 'Condition' &&
+          resource.code?.coding?.[0]?.system === SNOMED_SYSTEM &&
+          resource.code?.coding?.[0]?.code === '61277005',
+      );
+
+    expect(matchingConditions).toHaveLength(1);
+    expect(matchingConditions[0]?.code?.coding?.[0]).toEqual({
+      system: SNOMED_SYSTEM,
+      code: '61277005',
+      display: 'Asma',
+    });
+  });
+
   it('creates a transaction bundle valid for handover data', () => {
     const handover: HandoverData = zHandover.parse({
       administrativeData: {

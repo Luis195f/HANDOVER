@@ -283,6 +283,36 @@ describe("zHandover", () => {
     expect(result.success).toBe(true);
   });
 
+  it("acepta el contrato producido por la selección SNOMED canónica", () => {
+    const selectedFromAutocomplete: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: { system: SNOMED_SYSTEM, code: "61277005", display: "Asma" },
+      dxMedicalStructured: [],
+    };
+
+    const result = zHandover.safeParse(selectedFromAutocomplete);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dxMedical).toEqual(selectedFromAutocomplete.dxMedical);
+      expect(result.data.dxMedicalStructured).toEqual([]);
+    }
+  });
+
+  it("no sustituye el diagnóstico principal requerido con un estructurado auxiliar", () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: null,
+      dxMedicalStructured: [{ system: "SNOMED", code: "61277005", display: "Asma" }],
+    };
+
+    const result = zHandover.safeParse(invalid);
+
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+    expect(messages).toContain("Diagnóstico SNOMED requerido");
+  });
+
   it("rechaza términos SNOMED no reconocidos", () => {
     const invalid: HandoverFormData = {
       ...baseValidData,

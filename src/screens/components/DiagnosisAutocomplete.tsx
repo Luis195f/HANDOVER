@@ -15,6 +15,7 @@ import {
   searchDiagnosisIndex,
   type NandaCatalogPayload,
 } from '../../catalogs/nandaCodes';
+import { normalizeTerm, SNOMED_SYSTEM, snomedTerms } from '../../data/snomed-dict';
 import type { HandoverStructuredDiagnosis } from '../../types/handover';
 import type { HandoverValues } from '../../validation/schemas';
 import { validateSnomed } from '../../lib/terminology-validation';
@@ -150,10 +151,18 @@ function buildSuggestions(
   }
 
   const baseSystemsAllowed = systemsAllowed?.length
-    ? systemsAllowed.filter((system) => system !== 'NANDA')
-    : NON_NANDA_SYSTEMS;
+    ? systemsAllowed.filter((system) => system !== 'NANDA' && system !== 'SNOMED')
+    : NON_NANDA_SYSTEMS.filter((system) => system !== 'SNOMED');
   const baseSuggestions = baseSystemsAllowed.length
     ? filterDiagnosisCodes(trimmedQuery, baseSystemsAllowed)
+    : [];
+
+  const shouldSearchSnomed = !systemsAllowed || systemsAllowed.includes('SNOMED');
+  const normalizedQuery = normalizeTerm(trimmedQuery);
+  const snomedSuggestions: DiagnosisCode[] = shouldSearchSnomed
+    ? snomedTerms
+        .filter((term) => normalizeTerm(term.display).includes(normalizedQuery))
+        .map((term) => ({ ...term, system: 'SNOMED' as const }))
     : [];
 
   const shouldSearchNanda = !systemsAllowed || systemsAllowed.includes('NANDA');
@@ -161,7 +170,10 @@ function buildSuggestions(
     ? searchDiagnosisIndex(nandaCatalog.index, trimmedQuery, MAX_SUGGESTIONS)
     : [];
 
-  return dedupeDiagnosisCodes([...nandaSuggestions, ...baseSuggestions]).slice(0, MAX_SUGGESTIONS);
+  return dedupeDiagnosisCodes([...nandaSuggestions, ...snomedSuggestions, ...baseSuggestions]).slice(
+    0,
+    MAX_SUGGESTIONS,
+  );
 }
 
 export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
@@ -177,6 +189,7 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     clearErrors,
     getValues,
     setValue,
+    watch,
     formState: { errors },
   } = useFormContext<HandoverValues>();
 
@@ -204,6 +217,7 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
   const [nandaCatalogError, setNandaCatalogError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<DiagnosisCode[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const canonicalMedicalDiagnosis = name === 'dxMedicalStructured' ? watch('dxMedical') : null;
 
   const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
   const deferredQuery = useDeferredValue(debouncedQuery);
@@ -261,9 +275,10 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
   };
 
   const handleSelect = async (code: DiagnosisCode) => {
-    const alreadySelected = fields.some(
-      (field) => field.code === code.code && field.system === code.system,
-    );
+    const alreadySelected =
+      name === 'dxMedicalStructured' && code.system === 'SNOMED'
+        ? canonicalMedicalDiagnosis?.code === code.code
+        : fields.some((field) => field.code === code.code && field.system === code.system);
     if (alreadySelected) {
       setQuery('');
       setSuggestions([]);
@@ -281,6 +296,25 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
     }
 
     clearErrors(name);
+    if (name === 'dxMedicalStructured' && code.system === 'SNOMED') {
+      setValue(
+        'dxMedical',
+        {
+          system: SNOMED_SYSTEM,
+          code: code.code,
+          display: code.display,
+        },
+        {
+          shouldDirty: true,
+          shouldTouch: true,
+          shouldValidate: true,
+        },
+      );
+      setQuery('');
+      setSuggestions([]);
+      return;
+    }
+
     const nextItem: HandoverStructuredDiagnosis = {
       system: code.system,
       code: code.code,
@@ -416,6 +450,30 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
       ) : null}
 
       <View style={styles.selectedList}>
+        {name === 'dxMedicalStructured' && canonicalMedicalDiagnosis?.code ? (
+          <View style={styles.selectedItem} testID="diagnosis-primary-snomed">
+            <View style={styles.selectedHeader}>
+              <Text style={styles.selectedTitle}>{canonicalMedicalDiagnosis.display}</Text>
+              <Text style={styles.pill}>SNOMED · {canonicalMedicalDiagnosis.code}</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Pressable
+                accessibilityRole="button"
+                testID="diagnosis-primary-snomed-remove"
+                onPress={() =>
+                  setValue('dxMedical', null, {
+                    shouldDirty: true,
+                    shouldTouch: true,
+                    shouldValidate: true,
+                  })
+                }
+                style={({ pressed }) => [styles.removeButton, pressed ? { opacity: 0.85 } : null]}
+              >
+                <Text style={styles.removeButtonText}>Eliminar</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         {fields.map((field, index) => {
           const noteName = `${name}.${index}.freeTextNote` as const;
 
