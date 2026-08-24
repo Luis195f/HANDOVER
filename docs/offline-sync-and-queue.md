@@ -46,6 +46,7 @@
 
 ## Offline queue encryption
 - FHIR bundles stored in the SQLite queue are encrypted by default using symmetric AEAD (AES-256-GCM via `@noble/ciphers` + `expo-crypto`).
+- New clinical queue writes are AEAD-only: an AES-GCM failure goes directly to the observable hash-only sentinel path and never falls back to CBC.
 - Only the clinical payload (FHIR bundle) is encrypted; queue metadata (status, timestamps, response code) stays in plaintext for debugging and control flow.
 - Storage format for new envelopes (`EncryptedEnvelopeV1`, handled in `src/lib/crypto.ts`):
 
@@ -61,7 +62,7 @@
 
 - Backward compatibility:
   - Legacy plain JSON queues are still readable.
-  - Legacy `enc:v1` envelopes are decrypted via `security/crypto`.
+  - Legacy `v1:` and `enc:v1:` CBC payloads remain readable, but these formats are not authorized for new clinical queue writes.
   - New AES-GCM envelopes (`EncryptedEnvelopeV1`) are handled in `src/lib/crypto.ts`.
   - In all cases, `queue.ts` and `sync.ts` operate on plaintext JSON after loading.
 - Security notes:

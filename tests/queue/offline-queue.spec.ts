@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import * as Notifications from 'expo-notifications';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
 
 vi.mock('expo-sqlite', () => ({
@@ -30,6 +30,10 @@ describe('offline queue end-to-end', () => {
     process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
   });
 
+  afterEach(() => {
+    vi.doUnmock('@/src/lib/crypto');
+  });
+
   it('almacena el payload cifrado con sobre AES-GCM', async () => {
     await queue.createOfflineQueueItem({ payload: { foo: 'secret' }, patientId: 'pat-1' });
 
@@ -38,6 +42,31 @@ describe('offline queue end-to-end', () => {
     expect(payload).not.toContain('secret');
     const parsed = payload ? JSON.parse(payload) : null;
     expect(parsed?.algo).toBe('AES-256-GCM');
+  });
+
+  it('uses AES-GCM exclusively for successful new clinical queue writes', async () => {
+    vi.resetModules();
+    secureStore.__reset?.();
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
+
+    const cbcEncryptSpy = vi.fn(async () => 'v1:cbc-must-not-run');
+    vi.doMock('@/src/lib/crypto', async () => {
+      const actual = await vi.importActual<typeof import('@/src/lib/crypto')>('@/src/lib/crypto');
+      return { ...actual, encryptPayload: cbcEncryptSpy };
+    });
+
+    const isolatedQueue = await import('@/src/lib/queue');
+    await isolatedQueue.clearOfflineQueue();
+    await isolatedQueue.createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', marker: 'GCM-ONLY-PHI' } },
+      patientId: 'pat-gcm-only',
+    });
+
+    const [stored] = await isolatedQueue.listOfflineQueue({ decrypt: false });
+    const rawPayload = String(stored?.payload ?? '');
+    expect(JSON.parse(rawPayload)).toMatchObject({ v: 1, algo: 'AES-256-GCM' });
+    expect(rawPayload).not.toContain('GCM-ONLY-PHI');
+    expect(cbcEncryptSpy).not.toHaveBeenCalled();
   });
 
   it('descifra al procesar la cola y elimina tras éxito', async () => {
@@ -322,7 +351,7 @@ describe('offline queue end-to-end', () => {
     expect(warnSpy.mock.calls.some(([message]) => typeof message === 'string' && message.includes('HNDR_QUEUE_003'))).toBe(true);
   });
 
-  it('does not include patientId in offline protection warnings', async () => {
+  it('fails closed with one hash-only warning and never invokes CBC when GCM fails', async () => {
     vi.resetModules();
     secureStore.__reset?.();
     process.env.FHIR_BASE_URL = 'http://test.fhir';
@@ -330,6 +359,7 @@ describe('offline queue end-to-end', () => {
     process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cbcEncryptSpy = vi.fn(async () => 'v1:cbc-must-not-run');
     vi.doMock('@/src/lib/crypto', async () => {
       const actual = await vi.importActual<typeof import('@/src/lib/crypto')>('@/src/lib/crypto');
       return {
@@ -338,28 +368,40 @@ describe('offline queue end-to-end', () => {
         encryptOfflinePayload: vi.fn(async () => {
           throw new Error('offline encryption failed');
         }),
-        encryptPayload: vi.fn(async () => {
-          throw new Error('queue encryption failed');
-        }),
+        encryptPayload: cbcEncryptSpy,
       };
     });
 
     const isolatedQueue = await import('@/src/lib/queue');
     await isolatedQueue.clearOfflineQueue();
-    await isolatedQueue.createOfflineQueueItem({
-      payload: { bundle: { resourceType: 'Bundle', id: 'sensitive-bundle' } },
-      patientId: 'pat-sensitive',
+    const first = await isolatedQueue.createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', marker: 'PHI-FIRST' } },
+      patientId: 'pat-sensitive-first',
+    });
+    const second = await isolatedQueue.createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', marker: 'PHI-SECOND' } },
+      patientId: 'pat-sensitive-second',
     });
 
-    const protectionWarning = warnSpy.mock.calls.find(([message]) =>
+    const protectionWarnings = warnSpy.mock.calls.filter(([message]) =>
       typeof message === 'string' && message.includes('HNDR_QUEUE_002')
     );
+    const stored = await isolatedQueue.listOfflineQueue({ decrypt: false });
+    const persisted = stored.map((item) => String(item.payload ?? '')).join('\n');
+    const sentinels = stored.map((item) => JSON.parse(String(item.payload ?? '')) as Record<string, unknown>);
 
-    expect(protectionWarning).toBeDefined();
-    expect(JSON.stringify(protectionWarning)).not.toContain('pat-sensitive');
-    expect(JSON.stringify(protectionWarning)).not.toContain('patientId');
-
-    vi.doUnmock('@/src/lib/crypto');
+    expect(cbcEncryptSpy).not.toHaveBeenCalled();
+    expect(first.syncStatus).toBe('error');
+    expect(second.syncStatus).toBe('error');
+    expect(sentinels).toHaveLength(2);
+    expect(sentinels.every((sentinel) => sentinel.__encryptionFailed === true && sentinel.v === 1)).toBe(true);
+    expect(sentinels.every((sentinel) => typeof sentinel.payloadHash === 'string' && /^[a-f0-9]{64}$/.test(sentinel.payloadHash))).toBe(true);
+    expect(persisted).not.toContain('PHI-FIRST');
+    expect(persisted).not.toContain('PHI-SECOND');
+    expect(persisted).not.toContain('pat-sensitive');
+    expect(protectionWarnings).toHaveLength(1);
+    expect(JSON.stringify(protectionWarnings)).not.toContain('pat-sensitive');
+    expect(JSON.stringify(protectionWarnings)).not.toContain('patientId');
   });
 
   it('marks 400 responses as final errors without retrying again', async () => {
