@@ -432,7 +432,7 @@ def test_get_patients_without_unit_filter_aggregates_remote_units_for_multi_unit
 
 
 @pytest.mark.django_db
-def test_get_patients_demo_fallback_is_filtered_to_authorized_units(monkeypatch):
+def test_get_patients_multi_unit_fhir_failure_fails_closed_without_demo(monkeypatch):
     DemoPatient.objects.create(
         external_id="demo-icu-a",
         given_name="Ana",
@@ -452,21 +452,105 @@ def test_get_patients_demo_fallback_is_filtered_to_authorized_units(monkeypatch)
     claims = _auth_claims(
         roles=["nurse"],
         permissions=["patients:read"],
-        unit_ids=["icu-a"],
+        unit_ids=["icu-a", "icu-b"],
     )
     client.force_authenticate(
         user=DummyUser(claims=claims),
         token=claims,
     )
 
-    def raise_http_error(*args, **kwargs):
+    requested_units: list[str] = []
+
+    def raise_http_error(url, *, params, headers, timeout):
+        requested_units.append(str(params["unit"]))
         raise api_views.httpx.HTTPError("fhir-down")
 
     monkeypatch.setattr(api_views.httpx, "get", raise_http_error)
 
     response = client.get("/api/patients/")
 
-    assert response.status_code == 200
-    bundle = response.json()
-    resources = [entry["resource"] for entry in bundle.get("entry", [])]
-    assert [resource["id"] for resource in resources] == ["demo-icu-a"]
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["code"] == "fhir_unavailable"
+    assert "DemoPatient" not in str(payload)
+    assert "demo-icu-a" not in str(payload)
+    assert "demo-icu-b" not in str(payload)
+    resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
+    assert not any(resource.get("resourceType") == "Patient" for resource in resources)
+    assert requested_units == ["icu-a"]
+
+
+@pytest.mark.django_db
+def test_get_fhir_patient_failure_fails_closed_without_demo(monkeypatch):
+    DemoPatient.objects.create(
+        external_id="demo-detail",
+        given_name="Detalle",
+        family_name="Sintetico",
+        gender="unknown",
+        unit_id="icu-a",
+    )
+    client = APIClient()
+    claims = _auth_claims(
+        roles=["nurse"],
+        permissions=["patients:read"],
+        unit_ids=["icu-a"],
+    )
+    client.force_authenticate(user=DummyUser(claims=claims), token=claims)
+
+    def raise_http_error(*args, **kwargs):
+        raise api_views.httpx.HTTPError("fhir-down")
+
+    monkeypatch.setattr(api_views.httpx, "get", raise_http_error)
+
+    response = client.get("/api/fhir/patient?id=demo-detail&unit=icu-a")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["code"] == "fhir_unavailable"
+    assert "DemoPatient" not in str(payload)
+    assert "demo-detail" not in str(payload)
+    resources = [entry.get("resource", {}) for entry in payload.get("entry", [])]
+    assert not any(resource.get("resourceType") == "Patient" for resource in resources)
+
+
+@pytest.mark.django_db
+def test_get_fhir_patient_preserves_upstream_not_found(monkeypatch):
+    client = APIClient()
+    claims = _auth_claims(
+        roles=["nurse"],
+        permissions=["patients:read"],
+        unit_ids=["icu-a"],
+    )
+    client.force_authenticate(user=DummyUser(claims=claims), token=claims)
+    monkeypatch.setattr(
+        api_views.httpx,
+        "get",
+        lambda *args, **kwargs: DummyHttpResponse(
+            404,
+            {"resourceType": "OperationOutcome"},
+        ),
+    )
+
+    response = client.get("/api/fhir/patient?id=missing-patient&unit=icu-a")
+
+    assert response.status_code == 404
+    assert response.json()["errors"] == ["FHIR server rejected the request."]
+
+
+def test_demo_patient_to_fhir_is_explicitly_tagged_as_synthetic_demo():
+    patient = DemoPatient(
+        external_id="demo-tagged",
+        given_name="Caso",
+        family_name="Sintetico",
+        gender="unknown",
+    )
+
+    payload = patient.to_fhir()
+
+    assert payload["meta"]["tag"] == [
+        {
+            "system": "https://handover.dev/fhir/CodeSystem/data-origin",
+            "code": "synthetic-demo",
+            "display": "Synthetic demo data",
+        }
+    ]

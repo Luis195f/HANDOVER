@@ -44,7 +44,7 @@ from backend.api.audit_pseudonymization import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
-from backend.api.models import ClientAuditEvent, DemoPatient, HandoverBundleRecord, Patient as LocalPatient
+from backend.api.models import ClientAuditEvent, HandoverBundleRecord, Patient as LocalPatient
 from backend.api.views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
 from backend.api.icea import (
     _extract_unit_from_extensions,
@@ -507,27 +507,18 @@ def _local_registry_not_ready_response() -> Response:
     )
 
 
+def _fhir_unavailable_response() -> Response:
+    return Response(
+        {
+            "detail": "No se pudo contactar el servidor FHIR",
+            "code": "fhir_unavailable",
+        },
+        status=503,
+    )
+
+
 def _is_missing_local_registry_table(error: OperationalError) -> bool:
     return "no such table" in str(error).lower()
-
-
-def _build_demo_patient_bundle(*, patient_id: str | None = None) -> dict:
-    queryset = DemoPatient.objects.all()
-    if patient_id:
-        queryset = queryset.filter(external_id=patient_id)
-
-    entries = [
-        {
-            "resource": patient.to_fhir(),
-        }
-        for patient in queryset
-    ]
-    return {
-        "resourceType": "Bundle",
-        "type": "searchset",
-        "total": len(entries),
-        "entry": entries,
-    }
 
 
 def _get_authenticated_subject_from_context(request: HttpRequest) -> str | None:
@@ -1789,16 +1780,9 @@ class PatientView(AuthenticatedAPIView):
 
         try:
             resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
-        except httpx.HTTPError as exc:
-            logger.error("Error al leer Patient desde FHIR (%s): %s", url, exc)
-            demo_bundle = _build_demo_patient_bundle(patient_id=patient_id)
-            demo_bundle = _filter_patient_bundle_to_authorized_units(
-                demo_bundle,
-                authorized_unit_ids=authorized_unit_ids,
-            )
-            if demo_bundle.get("total", 0) > 0:
-                return Response(demo_bundle, status=200)
-            return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
+        except httpx.HTTPError:
+            logger.warning("FHIR Patient read unavailable")
+            return _fhir_unavailable_response()
 
         if resp.status_code >= 400:
             return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
@@ -2023,13 +2007,8 @@ class PatientsView(AuthenticatedAPIView):
                             timeout=30,
                         )
                     except httpx.HTTPError:
-                        return Response(
-                            _filter_patient_bundle_to_authorized_units(
-                                _build_demo_patient_bundle(patient_id=None),
-                                authorized_unit_ids=authorized_unit_ids,
-                            ),
-                            status=200,
-                        )
+                        logger.warning("FHIR Patient search unavailable during multi-unit lookup")
+                        return _fhir_unavailable_response()
 
                     if resp.status_code >= 400:
                         return Response(
@@ -2052,14 +2031,8 @@ class PatientsView(AuthenticatedAPIView):
         try:
             resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
         except httpx.HTTPError:
-            # 3) If FHIR is down, fallback to demo bundle (RoleAclTests expects Bundle)
-            return Response(
-                _filter_patient_bundle_to_authorized_units(
-                    _build_demo_patient_bundle(patient_id=None),
-                    authorized_unit_ids=authorized_unit_ids,
-                ),
-                status=200,
-            )
+            logger.warning("FHIR Patient search unavailable")
+            return _fhir_unavailable_response()
 
         if resp.status_code >= 400:
             return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
