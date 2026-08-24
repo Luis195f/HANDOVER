@@ -58,4 +58,36 @@ describe('SignaturesSection demo actors', () => {
       method: 'session',
     });
   });
+
+  it('uses the same incoming attestation mutation from the demo E2E confirmation', () => {
+    const onChange = vi.fn();
+    const [outgoingActor, incomingActor] = DEMO_ACTORS;
+    const outgoing = {
+      userId: outgoingActor.userId,
+      fullName: outgoingActor.displayName,
+      role: 'nurse' as const,
+      unitId: outgoingActor.units[0],
+      signedAt: '2026-08-24T10:00:00.000Z',
+      method: 'session' as const,
+    };
+    const ui = render(
+      <SignaturesSection
+        value={{ outgoing }}
+        currentUser={incomingActor}
+        administrativeUnitId={incomingActor.units[0]}
+        onChange={onChange}
+        allowE2EIncomingConfirmation
+      />,
+    );
+
+    fireEvent.press(ui.getByTestId('e2e-confirm-incoming-attestation'));
+
+    const completedValue = onChange.mock.calls[0]?.[0] as HandoverValues['signatures'];
+    expect(completedValue?.outgoing?.userId).toBe(outgoingActor.userId);
+    expect(completedValue?.incoming).toMatchObject({
+      userId: incomingActor.userId,
+      role: 'nurse',
+      method: 'session',
+    });
+  });
 });

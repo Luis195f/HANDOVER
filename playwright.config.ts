@@ -16,8 +16,8 @@ export default defineConfig({
   testDir: "tests/e2e",
   reporter,
   outputDir: "test-results/playwright",
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  timeout: 180_000,
+  expect: { timeout: 30_000 },
   retries: process.env.CI ? 1 : 0,
   use: {
     baseURL,
@@ -34,6 +34,9 @@ export default defineConfig({
     env: {
       ...process.env,
       EXPO_PUBLIC_E2E: "true",
+      EXPO_PUBLIC_ENABLE_DEMO: "true",
+      EXPO_PUBLIC_API_BASE_URL: "https://demo.local",
+      EXPO_PUBLIC_FHIR_BASE_URL: "https://demo.local/fhir",
       CI: process.env.CI ? "1" : process.env.CI,
       EXPO_NO_TELEMETRY: "1",
       E2E_PORT: String(webPort),

@@ -237,6 +237,29 @@ describe('RootNavigator ACL (role enforcement)', () => {
     expect(ui.getByText('Acceso restringido')).toBeTruthy();
   });
 
+  test('demo entra a PatientList mientras se hidratan sus capacidades', async () => {
+    (useAuth as any).mockReturnValue({
+      loading: false,
+      logout: vi.fn(),
+      switchDemoActor: vi.fn(),
+      session: {
+        mode: 'demo',
+        userId: 'demo@nurseos.app',
+        roles: ['nurse'],
+        units: ['sjd-a'],
+        accessToken: 'demo-token',
+      },
+      capabilities: null,
+    });
+
+    const RootNavigator = await loadRootNavigator();
+    const ui = render(<RootNavigator />);
+
+    await act(async () => {});
+
+    expect(ui.getByTestId('PATIENT_LIST')).toBeTruthy();
+  });
+
   test('demo actor switch preserves the mounted HandoverForm state', async () => {
     (globalThis as { __TEST_ROUTE?: string }).__TEST_ROUTE = 'HandoverForm';
     const capabilities: NonNullable<ReturnType<typeof useAuth>['capabilities']> = {

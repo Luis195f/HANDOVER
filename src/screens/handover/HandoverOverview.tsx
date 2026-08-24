@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Pressable, Text, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Pressable, Text, View, type TextStyle, type ViewStyle } from 'react-native';
 
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import type { HandoverProfileRuntime } from '@/src/lib/profile-runtime';
@@ -27,10 +27,6 @@ type Props = {
   onRetrySync: () => void;
   onOpenLogin: () => void;
   onOpenSyncCenter: () => void;
-  isE2E: boolean;
-  onSetFinalStatus: () => void;
-  onAddSignature: () => void;
-  onCompleteChecklist: () => void;
   profileRuntime: HandoverProfileRuntime;
   bannerSummary: PatientSummary | null;
   bannerLoading: boolean;
@@ -81,10 +77,6 @@ export function HandoverOverview({
   onRetrySync,
   onOpenLogin,
   onOpenSyncCenter,
-  isE2E,
-  onSetFinalStatus,
-  onAddSignature,
-  onCompleteChecklist,
   profileRuntime,
   bannerSummary,
   bannerLoading,
@@ -104,6 +96,8 @@ export function HandoverOverview({
       />
       {handoverSyncStatus !== 'idle' ? (
         <View
+          testID="handover-sync-status"
+          accessibilityLabel={syncNoticeCopy}
           style={[
             styles.syncNotice,
             { backgroundColor: syncNoticeColors.backgroundColor, borderColor: syncNoticeColors.borderColor },
@@ -122,19 +116,13 @@ export function HandoverOverview({
                 <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.loginCta')}</Text>
               </Pressable>
             ) : null}
-            <Pressable accessibilityRole="button" onPress={onOpenSyncCenter}>
+            <Pressable
+              accessibilityRole="button"
+              testID="handover-open-sync-center"
+              onPress={onOpenSyncCenter}
+            >
               <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.openSyncCenter')}</Text>
             </Pressable>
-          </View>
-        </View>
-      ) : null}
-      {isE2E ? (
-        <View style={styles.e2eControls} testID="e2e-controls">
-          <Text style={styles.e2eTitle}>Controles E2E</Text>
-          <View style={styles.e2eActions}>
-            <Button title="Marcar final" onPress={onSetFinalStatus} testID="e2e-set-final" />
-            <Button title="Registrar firma" onPress={onAddSignature} testID="e2e-add-signature" />
-            <Button title="Completar checklist" onPress={onCompleteChecklist} testID="e2e-complete-checklist" />
           </View>
         </View>
       ) : null}

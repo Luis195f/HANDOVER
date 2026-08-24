@@ -51,6 +51,7 @@ const StaffListInput = ({
         name={`administrativeData.${fieldKey}` as const}
         render={({ field: { onChange, value } }) => (
           <TextInput
+            testID={`handover-${fieldKey}`}
             style={[styles.input, styles.textArea]}
             multiline
             placeholder={placeholder}
@@ -102,6 +103,8 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           name="administrativeData.unit"
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
+              testID="handover-administrative-unit"
+              accessibilityLabel="Unidad"
               style={styles.input}
               placeholder="UCI Adulto"
               onBlur={onBlur}
