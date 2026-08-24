@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const secureStoreState: Record<string, string | null> = {};
 
@@ -172,5 +172,73 @@ describe('user switch', () => {
 
     const users = await listRecentUsers(storage);
     expect(users).toEqual([]);
+  });
+});
+
+describe('demo actor session switch', () => {
+  const originalDev = (globalThis as { __DEV__?: boolean }).__DEV__;
+  const originalDemoFlag = process.env.EXPO_PUBLIC_ENABLE_DEMO;
+
+  beforeEach(() => {
+    resetSecureStore();
+    vi.resetModules();
+    (globalThis as { __DEV__?: boolean }).__DEV__ = false;
+  });
+
+  afterEach(() => {
+    (globalThis as { __DEV__?: boolean }).__DEV__ = originalDev;
+    process.env.EXPO_PUBLIC_ENABLE_DEMO = originalDemoFlag;
+  });
+
+  it('switches between distinct demo sessions without widening role or unit scope', async () => {
+    process.env.EXPO_PUBLIC_ENABLE_DEMO = 'true';
+    const { DEMO_RECEIVER_USER_ID, DEMO_USER_ID } = await import('@/src/demo/fixtures');
+    const { getCurrentSession, loginDemo, switchDemoActor } = await import('@/src/security/auth');
+
+    const outgoing = await loginDemo();
+    const incoming = await switchDemoActor(DEMO_RECEIVER_USER_ID);
+
+    expect(outgoing.userId).toBe(DEMO_USER_ID);
+    expect(incoming.userId).toBe(DEMO_RECEIVER_USER_ID);
+    expect(incoming.userId).not.toBe(outgoing.userId);
+    expect(incoming.roles).toEqual(outgoing.roles);
+    expect(incoming.units).toEqual(outgoing.units);
+    await expect(getCurrentSession()).resolves.toMatchObject({
+      userId: DEMO_RECEIVER_USER_ID,
+      mode: 'demo',
+    });
+  });
+
+  it('rejects switching from an operational session even when the public flag is enabled', async () => {
+    process.env.EXPO_PUBLIC_ENABLE_DEMO = 'true';
+    const { DEMO_RECEIVER_USER_ID } = await import('@/src/demo/fixtures');
+    const { getCurrentSession, setCurrentSession, switchDemoActor } = await import('@/src/security/auth');
+
+    await setCurrentSession({
+      userId: 'operational-user',
+      displayName: 'Operational User',
+      roles: ['nurse'],
+      units: ['unit-1'],
+      accessToken: 'operational-token',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      mode: 'normal',
+    });
+
+    await expect(switchDemoActor(DEMO_RECEIVER_USER_ID)).rejects.toThrowError(
+      'DEMO_ACTOR_SWITCH_FORBIDDEN',
+    );
+    await expect(getCurrentSession()).resolves.toMatchObject({ userId: 'operational-user' });
+  });
+
+  it('rejects switching a demo session when the explicit public flag is absent', async () => {
+    delete process.env.EXPO_PUBLIC_ENABLE_DEMO;
+    const { DEMO_RECEIVER_USER_ID, ensureDemoSessionTemplate } = await import('@/src/demo/fixtures');
+    const { setCurrentSession, switchDemoActor } = await import('@/src/security/auth');
+
+    await setCurrentSession(ensureDemoSessionTemplate());
+
+    await expect(switchDemoActor(DEMO_RECEIVER_USER_ID)).rejects.toThrowError(
+      'DEMO_ACTOR_SWITCH_FORBIDDEN',
+    );
   });
 });

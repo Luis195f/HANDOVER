@@ -1,6 +1,6 @@
 import React from 'react';
-import { Text, View } from 'react-native';
-import { render, act } from '@testing-library/react-native';
+import { Button, Text, View } from 'react-native';
+import { render, act, fireEvent } from '@testing-library/react-native';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // =====================================================
@@ -70,7 +70,17 @@ vi.mock('@/src/screens/SupervisorDashboard', () => ({
 
 // Mock del resto para evitar imports laterales
 vi.mock('@/src/screens/AudioNote', () => ({ default: () => <View /> }));
-vi.mock('@/src/screens/HandoverForm', () => ({ default: () => <View /> }));
+vi.mock('@/src/screens/HandoverForm', () => ({
+  default: function HandoverFormMock() {
+    const [value, setValue] = React.useState('initial-form-state');
+    return (
+      <View>
+        <Text testID="HANDOVER_FORM_STATE">{value}</Text>
+        <Button title="Edit form" onPress={() => setValue('retained-form-state')} />
+      </View>
+    );
+  },
+}));
 vi.mock('@/src/screens/PatientDashboard', () => ({ default: () => <View /> }));
 vi.mock('@/src/screens/OnboardingScreen', () => ({ default: () => <View /> }));
 vi.mock('@/src/screens/PrivacyPolicy', () => ({ default: () => <View /> }));
@@ -225,5 +235,73 @@ describe('RootNavigator ACL (role enforcement)', () => {
     await act(async () => {});
 
     expect(ui.getByText('Acceso restringido')).toBeTruthy();
+  });
+
+  test('demo actor switch preserves the mounted HandoverForm state', async () => {
+    (globalThis as { __TEST_ROUTE?: string }).__TEST_ROUTE = 'HandoverForm';
+    const capabilities: NonNullable<ReturnType<typeof useAuth>['capabilities']> = {
+      userSub: 'demo@nurseos.app',
+      roles: ['nurse'],
+      scopes: ['handover:write', 'fhir:transaction'],
+      unitIds: [],
+      permissions: {
+        canWriteHandover: true,
+        canReadPatients: true,
+        canCreatePatients: true,
+        canSignHandover: false,
+        canViewAudit: false,
+        canSendAuditEvents: false,
+        isAdmin: false,
+      },
+    };
+    let authState: ReturnType<typeof useAuth> = {
+      loading: false,
+      logout: vi.fn(async () => undefined),
+      switchDemoActor: async (userId) => ({
+        mode: 'demo',
+        userId,
+        roles: ['nurse'],
+        units: [],
+        accessToken: 'demo-token',
+      }),
+      loginWithOAuth: vi.fn(),
+      loginWithCredentials: vi.fn(),
+      loginDemo: vi.fn(),
+      refreshCapabilities: vi.fn(),
+      session: {
+        mode: 'demo',
+        userId: 'demo@nurseos.app',
+        roles: ['nurse'],
+        units: [],
+        accessToken: 'demo-token',
+      },
+      capabilities,
+    };
+    vi.mocked(useAuth).mockImplementation(() => authState);
+
+    const RootNavigator = await loadRootNavigator();
+    const ui = render(<RootNavigator />);
+    await act(async () => {});
+    fireEvent.press(ui.getByText('Edit form'));
+    expect(ui.getByTestId('HANDOVER_FORM_STATE').props.children).toBe('retained-form-state');
+
+    authState = {
+      ...authState,
+      session: {
+        mode: 'demo',
+        userId: 'demo.receiver@nurseos.app',
+        roles: ['nurse'],
+        units: [],
+        accessToken: 'demo-token',
+      },
+      capabilities: { ...capabilities, userSub: 'demo.receiver@nurseos.app' },
+    };
+    await act(async () => {
+      ui.update(<RootNavigator />);
+    });
+
+    expect(ui.getByTestId('HANDOVER_FORM_STATE').props.children).toBe('retained-form-state');
+    expect(getOnboardingCompleted).toHaveBeenCalledTimes(1);
+    expect(hasPrivacyConsent).toHaveBeenCalledTimes(1);
   });
 });

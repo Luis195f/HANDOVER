@@ -46,6 +46,7 @@
 - Cuando `GET /api/patients` cae al FHIR remoto y el token no privilegiado cubre varias unidades, el backend hace fan-out por cada unidad autorizada y filtra la respuesta por unidad; no debe responder `200` vacío solo porque el upstream no soporte agregación multi-unit.
 - Si el FHIR remoto no está disponible, `GET /api/patients` y `GET /api/fhir/patient` responden `503` con `code=fhir_unavailable`; nunca sustituyen la fuente clínica por `DemoPatient`, un Bundle sintético ni un `200` vacío ambiguo.
 - El modo demo permanece aislado en el frontend y solo se intercepta cuando la sesión es explícitamente `mode=demo`; un fallo operacional no activa ese modo. El serializador legado `DemoPatient.to_fhir()` usa `Patient.meta.tag` con `system=https://handover.dev/fhir/CodeSystem/data-origin` y `code=synthetic-demo` como defensa en profundidad.
+- El cambio deliberado entre profesional saliente y receptora sintéticas exige además `EXPO_PUBLIC_ENABLE_DEMO=true`; conserva rol, alcance de unidades y capacidades demo, y no se expone en sesiones operacionales.
 - `GET /api/fhir/patient` mantiene el mismo perímetro deny-first: para roles no privilegiados exige unidad explícita en búsquedas multi-unit y valida que la respuesta quede dentro de las unidades autorizadas; una lectura cuyo `unit` no pueda resolverse responde `403` con código controlado en lugar de exponer datos ambiguos.
 
 ## Capabilities y seams frontend/backend

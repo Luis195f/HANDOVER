@@ -66,10 +66,10 @@ function CapabilityGuard(props: {
 function withCapabilityGuard<P extends object>(
   Screen: React.ComponentType<P>,
   routeName: RouteName,
-  getGuard: () => { capabilities: Capabilities | null; isDemo: boolean }
 ) {
   return function GuardedScreen(props: P) {
-    const { capabilities, isDemo } = getGuard();
+    const { capabilities, session } = useAuth();
+    const isDemo = session?.mode === 'demo';
     return (
       <CapabilityGuard capabilities={capabilities} isDemo={isDemo} routeName={routeName}>
         <Screen {...props} />
@@ -78,18 +78,31 @@ function withCapabilityGuard<P extends object>(
   };
 }
 
+const GuardedPatientList = withCapabilityGuard(PatientList, 'PatientList');
+const GuardedAudioNote = withCapabilityGuard(AudioNote, 'AudioNote');
+const GuardedHandoverMain = withCapabilityGuard(HandoverForm, 'HandoverMain');
+const GuardedHandoverForm = withCapabilityGuard(HandoverForm, 'HandoverForm');
+const GuardedShiftDetails = withCapabilityGuard(ShiftDetailsScreen, 'ShiftDetails');
+const GuardedQRScan = withCapabilityGuard(QRScan, 'QRScan');
+const GuardedSyncCenter = withCapabilityGuard(SyncCenter, 'SyncCenter');
+const GuardedPatientDashboard = withCapabilityGuard(PatientDashboard, 'PatientDashboard');
+const GuardedAuditLog = withCapabilityGuard(AuditLogScreen, 'AuditLog');
+const GuardedSupervisorDashboard = withCapabilityGuard(SupervisorDashboardScreen, 'SupervisorDashboard');
+const GuardedAdminDashboard = withCapabilityGuard(AdminDashboardScreen, 'AdminDashboard');
+
 function AuthGate() {
-  const { session, capabilities, loading, logout } = useAuth();
+  const { session, capabilities, loading, logout, switchDemoActor } = useAuth();
 
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
   const [privacyConsent, setPrivacyConsentState] = React.useState<boolean | null>(null);
   const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
+  const hasSession = Boolean(session);
 
   React.useEffect(() => {
     let alive = true;
 
     async function loadOnboarding() {
-      if (!session) {
+      if (!hasSession) {
         setOnboardingCompletedState(null);
         return;
       }
@@ -107,13 +120,13 @@ function AuthGate() {
     return () => {
       alive = false;
     };
-  }, [session]);
+  }, [hasSession]);
 
   React.useEffect(() => {
     let alive = true;
 
     async function loadConsent() {
-      if (!session) {
+      if (!hasSession) {
         setPrivacyConsentState(null);
         return;
       }
@@ -131,7 +144,7 @@ function AuthGate() {
     return () => {
       alive = false;
     };
-  }, [session]);
+  }, [hasSession]);
 
   // Splash mientras hidrata auth + flags (si hay sesión)
   const onboardingReady = isE2E ? true : onboardingCompleted;
@@ -183,61 +196,9 @@ if (!allowedAppEntry) {
   const initialRouteName: keyof RootStackParamList =
     onboardingReady ? (consentReady ? postOnboardingRoute : 'PrivacyConsent') : 'Onboarding';
 
-  // ✅ Guard factory (cerramos sobre session/isDemo una sola vez)
-  const guardBase = () => ({ capabilities, isDemo });
-
-  // ✅ Screens protegidas (wrappers tipados)
-  const GuardedPatientList = withCapabilityGuard(PatientList as any, 'PatientList', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedAudioNote = withCapabilityGuard(AudioNote as any, 'AudioNote', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedHandoverMain = withCapabilityGuard(HandoverForm as any, 'HandoverMain', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedHandoverForm = withCapabilityGuard(HandoverForm as any, 'HandoverForm', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedShiftDetails = withCapabilityGuard(ShiftDetailsScreen as any, 'ShiftDetails', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedQRScan = withCapabilityGuard(QRScan as any, 'QRScan', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedSyncCenter = withCapabilityGuard(SyncCenter as any, 'SyncCenter', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedPatientDashboard = withCapabilityGuard(PatientDashboard as any, 'PatientDashboard', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedAuditLog = withCapabilityGuard(AuditLogScreen as any, 'AuditLog', () => ({
-    ...guardBase(),
-  }));
-
-  const GuardedSupervisorDashboard = withCapabilityGuard(
-    SupervisorDashboardScreen as any,
-    'SupervisorDashboard',
-    () => ({
-      ...guardBase(),
-    }),
-  );
-
-  const GuardedAdminDashboard = withCapabilityGuard(AdminDashboardScreen as any, 'AdminDashboard', () => ({
-    ...guardBase(),
-  }));
-
   return (
     <View style={{ flex: 1 }}>
-      <DemoModeBanner visible={!!isDemo} onExit={logout} />
+      <DemoModeBanner session={session} onExit={logout} onSwitchActor={switchDemoActor} />
 
       <Stack.Navigator key={initialRouteName} initialRouteName={initialRouteName}>
         <Stack.Screen name="Onboarding" options={{ headerShown: false }}>
