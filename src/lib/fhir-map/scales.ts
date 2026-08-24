@@ -28,6 +28,17 @@ export function mapEvaObservationImpl(
 ): Observation | null {
   if (!pain) return null;
 
+  const evaScore = pain.evaScore;
+  if (
+    typeof evaScore !== 'number' ||
+    !Number.isFinite(evaScore) ||
+    !Number.isInteger(evaScore) ||
+    evaScore < 0 ||
+    evaScore > 10
+  ) {
+    return null;
+  }
+
   const components: ObservationComponent[] = [];
   const note: NonNullable<Observation['note']> = [{ text: `Dolor reportado: ${pain.hasPain ? 'Sí' : 'No'}` }];
 
@@ -63,7 +74,7 @@ export function mapEvaObservationImpl(
     subject: context.subject,
     encounter: context.encounter,
     effectiveDateTime: context.effectiveDateTime,
-    valueInteger: pain.evaScore ?? undefined,
+    valueInteger: evaScore,
     component: components.length > 0 ? components : undefined,
     note,
   };
