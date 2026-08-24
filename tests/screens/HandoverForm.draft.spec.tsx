@@ -460,6 +460,14 @@ describe('HandoverForm drafts', () => {
       );
     });
 
+    const [, initialDefaultValues] = mockUseZodForm.mock.calls[0];
+    expect(initialDefaultValues.dxMedical).toEqual({
+      system: SNOMED_SYSTEM,
+      code: '',
+      display: '',
+    });
+    expect(initialDefaultValues.dxMedicalStructured).toEqual([]);
+
     const formInstance = mockUseZodForm.mock.results[0]?.value;
     await waitFor(() => {
       expect(formInstance.setValue).toHaveBeenCalledWith(
@@ -578,7 +586,10 @@ describe('HandoverForm drafts', () => {
           route={{
             key: '1',
             name: 'HandoverForm',
-            params: { patientId: 'pat-1', prefilledValues: { location: 'unit-prefill' } },
+            params: {
+              patientId: 'pat-1',
+              prefilledValues: { location: 'unit-prefill', dxText: 'Asma' },
+            },
           } as any}
         />,
       );
@@ -590,6 +601,12 @@ describe('HandoverForm drafts', () => {
 
     const [, defaultValues] = mockUseZodForm.mock.calls[0];
     expect(defaultValues.administrativeData.unit).toBe('unit-prefill');
+    expect(defaultValues.dxMedical).toEqual({
+      system: SNOMED_SYSTEM,
+      code: '61277005',
+      display: 'Asma',
+    });
+    expect(defaultValues.dxMedicalStructured).toEqual([]);
   });
 
   it('alinea la unidad técnica canónica entre pilot-control y profile runtime aunque el texto administrativo difiera', async () => {

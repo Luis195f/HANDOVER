@@ -188,6 +188,13 @@ El Core es universal. No debe fragmentarse por servicio.
 
 Toda unidad debe poder operar con este minimo comun incluso antes de activar su perfil especifico.
 
+## 6.3. Contrato del diagnostico medico principal
+
+- `dxMedical` es el diagnostico medico principal canonico y conserva `system`, `code` y `display` SNOMED CT.
+- `dxMedicalStructured` contiene diagnosticos adicionales y no debe duplicar el SNOMED principal.
+- La seleccion, sustitucion o eliminacion del SNOMED principal en la UI debe actualizar `dxMedical` de forma atomica.
+- El prefill, la validacion, el submit, la persistencia y el mapping FHIR consumen el mismo valor canonico.
+
 ---
 
 # 7. Unit Profile Packs (UPP)
