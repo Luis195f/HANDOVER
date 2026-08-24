@@ -81,31 +81,31 @@ export const UNITS: Unit[] = [
   },
   {
     id: 'sjd-a',
-    name: 'Psiquiatria adulto · SJD A',
+    name: 'Unidad de Salud Mental Adultos A',
     specialtyId: 'psych',
     profileId: 'behavioral-health',
-    aliases: ['san-juan-de-dios-a', 'psiquiatria-adulto-a', 'sjd-adulto-a'],
+    aliases: ['san-juan-de-dios-a', 'psiquiatria-adulto-a', 'sjd-adulto-a', 'psiquiatria-adulto-sjd-a'],
   },
   {
     id: 'sjd-b',
-    name: 'Psiquiatria adulto · SJD B',
+    name: 'Unidad de Salud Mental Adultos B',
     specialtyId: 'psych',
     profileId: 'behavioral-health',
-    aliases: ['san-juan-de-dios-b', 'psiquiatria-adulto-b', 'sjd-adulto-b'],
+    aliases: ['san-juan-de-dios-b', 'psiquiatria-adulto-b', 'sjd-adulto-b', 'psiquiatria-adulto-sjd-b'],
   },
   {
     id: 'sjd-infanto',
-    name: 'Psiquiatria infanto-adolescente',
+    name: 'Unidad de Salud Mental Infanto-Adolescente',
     specialtyId: 'psych',
     profileId: 'behavioral-health',
     aliases: ['infanto-adolescente', 'psiquiatria-infanto', 'salud-mental-infanto'],
   },
   {
     id: 'udcc-psychogeriatrics',
-    name: 'Psicogeriatria / UDCC',
+    name: 'Unidad de Psicogeriatria',
     specialtyId: 'psych',
     profileId: 'behavioral-health',
-    aliases: ['udcc', 'psicogeriatria', 'deterioro-cognitivo-conductual'],
+    aliases: ['udcc', 'psicogeriatria', 'deterioro-cognitivo-conductual', 'psicogeriatria-udcc'],
   },
 ];
 
