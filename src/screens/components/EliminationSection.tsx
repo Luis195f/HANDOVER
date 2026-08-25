@@ -26,6 +26,7 @@ export function EliminationSection({ parseNumber }: EliminationSectionProps) {
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Diuresis (mL)</Text>
             <TextInput
+              testID="elimination.urineMl"
               style={nursingStyles.input}
               keyboardType="numeric"
               placeholder="800"

@@ -26,6 +26,7 @@ export type SbarSectionProps = {
   sbarRecommendationError?: string;
   sbarFullTextError?: string;
   hideLegacyFields?: boolean;
+  isDemo?: boolean;
 };
 
 export const SbarSection: React.FC<SbarSectionProps> = ({
@@ -50,6 +51,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   sbarRecommendationError,
   sbarFullTextError,
   hideLegacyFields,
+  isDemo = false,
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
   const aiUnavailableMessage =
@@ -57,7 +59,13 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
 
   return (
     <>
+      <Text style={styles.helperText}>
+        {isDemo ? t('handover.sbarSyntheticProvenance') : t('handover.sbarLocalProvenance')}
+      </Text>
       <View style={styles.inlineActions}>
+        <Button title={t('handover.sbarRegenerate')} onPress={handleGenerateSbarSuggestion} />
+      </View>
+      {!isDemo ? <View style={styles.inlineActions}>
         <Button
           title={
             aiSbarGenerationAvailable
@@ -69,9 +77,6 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
           onPress={handleGenerateSbarWithAi}
           disabled={!aiSbarGenerationAvailable || !canUseAiSbarAssist || isGeneratingSbarWithAI}
         />
-        <View style={styles.secondaryButton}>
-          <Button title={t('handover.sbarSuggested')} onPress={handleGenerateSbarSuggestion} />
-        </View>
         <View style={styles.secondaryButton}>
           <Button
             title={
@@ -88,11 +93,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         {isGeneratingSbarWithAI || isRefiningSbarWithAI ? (
           <ActivityIndicator style={{ marginLeft: 12 }} />
         ) : null}
-      </View>
-      {aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
-      {sbarAiTraceabilityMessage ? <Text style={styles.helperText}>{sbarAiTraceabilityMessage}</Text> : null}
+      </View> : null}
+      {!isDemo && aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
+      {!isDemo && sbarAiTraceabilityMessage ? <Text style={styles.helperText}>{sbarAiTraceabilityMessage}</Text> : null}
       {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
-      {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
+      {!isDemo && sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
       {pendingSbarSuggestionPreview ? (
         <View style={styles.sbarPreview}>
           <Text style={styles.sbarTitle}>{t('handover.sbarPendingReviewTitle')}</Text>
@@ -115,6 +120,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-situation"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -132,6 +138,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-background"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -149,6 +156,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-assessment"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -166,6 +174,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-recommendation"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}

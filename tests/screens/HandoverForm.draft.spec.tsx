@@ -622,6 +622,7 @@ describe('HandoverForm drafts', () => {
             params: {
               patientId: 'pat-1',
               unitId: 'route-unit',
+              unitIdParam: 'canonical-route-unit',
               administrativeData: { ...baseValues.administrativeData, unit: 'admin-unit' },
             },
           } as any}
@@ -629,9 +630,9 @@ describe('HandoverForm drafts', () => {
       );
     });
 
-    expect(pilotRuntimeState.pilotContextCalls.slice(-1)[0]?.unitId).toBe('route-unit');
+    expect(pilotRuntimeState.pilotContextCalls.slice(-1)[0]?.unitId).toBe('canonical-route-unit');
     expect(pilotRuntimeState.runtimeCalls.length).toBeGreaterThan(0);
-    expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'route-unit')).toBe(true);
+    expect(pilotRuntimeState.runtimeCalls.every((call) => call.unitId === 'canonical-route-unit')).toBe(true);
   });
 
   it('no genera churn de contexto backend cuando cambia el texto libre de la unidad', async () => {

@@ -35,6 +35,7 @@ type Props = {
   currentUser?: SignatureUser | null;
   administrativeUnitId?: string;
   canSignOutgoing: boolean;
+  allowedSignatureKind?: 'outgoing' | 'incoming';
   buildOutgoingSignature: (payload: SignaturePadValue) => HandoverSignature | null;
   onAttestationCaptured: (kind: 'outgoing' | 'incoming', signature: HandoverSignature) => void;
   outgoingSignatureError?: string;
@@ -61,6 +62,7 @@ export function HandoverClosureSections({
   currentUser,
   administrativeUnitId,
   canSignOutgoing,
+  allowedSignatureKind,
   buildOutgoingSignature,
   onAttestationCaptured,
   outgoingSignatureError,
@@ -178,6 +180,7 @@ export function HandoverClosureSections({
             administrativeUnitId={administrativeUnitId}
             getSignaturePayload={() => form.getValues()}
             disableOutgoingAction
+            allowedSignatureKind={allowedSignatureKind}
           />
 
           {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}

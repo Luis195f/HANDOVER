@@ -29,6 +29,7 @@ describe('SignaturesSection demo actors', () => {
         currentUser={outgoingActor}
         administrativeUnitId={outgoingActor.units[0]}
         onChange={onChange}
+        allowedSignatureKind="outgoing"
       />,
     );
 
@@ -48,6 +49,7 @@ describe('SignaturesSection demo actors', () => {
           currentUser={incomingActor}
           administrativeUnitId={incomingActor.units[0]}
           onChange={onChange}
+          allowedSignatureKind="incoming"
         />,
       );
     });
@@ -81,6 +83,7 @@ describe('SignaturesSection demo actors', () => {
         currentUser={incomingActor}
         administrativeUnitId={incomingActor.units[0]}
         onChange={onChange}
+        allowedSignatureKind="incoming"
       />,
     );
 
@@ -89,5 +92,20 @@ describe('SignaturesSection demo actors', () => {
 
     expect(confirmAction).toHaveBeenCalledOnce();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('does not let the outgoing actor attest as incoming', () => {
+    const onChange = vi.fn();
+    const [outgoingActor] = DEMO_ACTORS;
+    const ui = render(
+      <SignaturesSection
+        currentUser={outgoingActor}
+        administrativeUnitId={outgoingActor.units[0]}
+        onChange={onChange}
+        allowedSignatureKind="outgoing"
+      />,
+    );
+
+    expect(ui.queryByText('signatures.signIncoming')).toBeNull();
   });
 });

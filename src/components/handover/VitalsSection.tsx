@@ -15,6 +15,7 @@ export type VitalsSectionProps = {
   styles: Record<string, TextStyle | ViewStyle>;
   parseNumericInput: (value: string) => number | undefined;
   riskEvaluation: ReturnType<typeof deriveRiskEvaluationFromValues>;
+  isDemo?: boolean;
   loadingVitalTrends: boolean;
   vitalTrendsError: string | null;
   vitalTrends: VitalTrendsData | null;
@@ -151,7 +152,7 @@ const VitalsGroup = ({
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="2024-01-01T08:00:00Z"
+              placeholder="2026-08-27T07:30:00Z"
               autoCapitalize="none"
               onBlur={onBlur}
               value={value ?? ''}
@@ -174,7 +175,7 @@ const VitalsGroup = ({
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="2024-01-01T08:05:00Z"
+              placeholder="2026-08-27T07:35:00Z"
               autoCapitalize="none"
               onBlur={onBlur}
               value={value ?? ''}
@@ -197,6 +198,7 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
   styles,
   parseNumericInput,
   riskEvaluation,
+  isDemo = false,
   loadingVitalTrends,
   vitalTrendsError,
   vitalTrends,
@@ -208,6 +210,24 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
   const watchedVitals = useWatch({ control, name: 'vitals' });
+  const watchedBraden = useWatch({ control, name: 'braden' });
+  const hasCompleteNews2Input = [
+    watchedVitals?.rr,
+    watchedVitals?.spo2,
+    watchedVitals?.sbp,
+    watchedVitals?.hr,
+    watchedVitals?.tempC,
+    watchedVitals?.avpu,
+  ].every((value) => value !== undefined && value !== null);
+  const hasCompleteBradenInput = [
+    watchedBraden?.sensoryPerception,
+    watchedBraden?.moisture,
+    watchedBraden?.activity,
+    watchedBraden?.mobility,
+    watchedBraden?.nutrition,
+    watchedBraden?.frictionShear,
+  ].every((value) => value !== undefined && value !== null);
+  const showDemoUncalculatedRisk = isDemo && !hasCompleteNews2Input && !hasCompleteBradenInput;
 
   return (
     <>
@@ -225,7 +245,9 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
       <View
         style={[
           styles.riskBanner,
-          riskEvaluation.level === 'high'
+          showDemoUncalculatedRisk
+            ? styles.riskModerate
+            : riskEvaluation.level === 'high'
             ? styles.riskHigh
             : riskEvaluation.level === 'moderate'
               ? styles.riskModerate
@@ -233,13 +255,17 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
         ]}
       >
         <Text style={styles.riskTitle}>
-          {riskEvaluation.level === 'high'
+          {showDemoUncalculatedRisk
+            ? 'No calculado'
+            : riskEvaluation.level === 'high'
             ? 'Riesgo alto detectado'
             : riskEvaluation.level === 'moderate'
               ? 'Riesgo moderado'
               : 'Riesgo bajo'}
         </Text>
-        {riskEvaluation.reasons.length > 0 ? (
+        {showDemoUncalculatedRisk ? (
+          <Text style={styles.riskReason}>Sin datos suficientes para calcular NEWS2 o Braden.</Text>
+        ) : riskEvaluation.reasons.length > 0 ? (
           riskEvaluation.reasons.map((reason) => (
             <Text key={reason} style={styles.riskReason}>
               • {reason}

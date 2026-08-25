@@ -1,12 +1,20 @@
 import { UNITS } from '@/src/config/units';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { buildDemoAdminDashboardSummary } from '@/src/mock/admin/dashboard-fixture';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import type { HandoverSession } from '@/src/security/auth-types';
 import type { PatientListItem } from '@/src/types/patientList';
+import type { HandoverValues } from '@/src/validation/schemas';
 
 // BEGIN HANDOVER: DEMO_MODE
 export const DEMO_USER_ID = 'demo@nurseos.app';
 export const DEMO_RECEIVER_USER_ID = 'demo.receiver@nurseos.app';
+export const DEMO_NOW = '2026-08-27T07:30:00.000Z';
+
+const demoTime = (offsetMinutes: number) =>
+  new Date(new Date(DEMO_NOW).getTime() + offsetMinutes * 60_000).toISOString();
+const DEMO_SHIFT_START = demoTime(-90);
+const DEMO_SHIFT_END = demoTime(390);
 
 export const DEMO_ACTOR_IDS = [DEMO_USER_ID, DEMO_RECEIVER_USER_ID] as const;
 export type DemoActorId = (typeof DEMO_ACTOR_IDS)[number];
@@ -75,6 +83,10 @@ type DemoPatientFixture = {
   gender: 'female' | 'male';
   encounterId: string;
   locationId: string;
+  clinical: {
+    diagnosis: NonNullable<HandoverValues['dxMedical']>;
+    medications: HandoverValues['medications'];
+  };
 };
 
 const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
@@ -93,6 +105,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
           critical: true,
           priority: 'critical',
           category: 'reevaluation',
+          dueBy: demoTime(90),
         },
         {
           id: 'task-demo-psych-adult-med',
@@ -100,6 +113,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
           urgent: true,
           priority: 'urgent',
           category: 'critical-task',
+          dueBy: demoTime(150),
         },
       ],
     },
@@ -116,6 +130,26 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
     gender: 'female',
     encounterId: 'enc-demo-psych-adult-001',
     locationId: 'loc-demo-psych-adult-001',
+    clinical: {
+      diagnosis: { system: SNOMED_SYSTEM, code: '31535000', display: 'Crisis de ansiedad' },
+      medications: [
+        {
+          id: 'med-demo-psych-adult-001-sertralina',
+          name: 'Sertralina',
+          code: {
+            system: 'http://www.nlm.nih.gov/research/umls/rxnorm',
+            code: '36437',
+            display: 'Sertralina',
+          },
+          dose: '50 mg',
+          route: 'oral',
+          frequency: '08:00',
+          isContinuous: false,
+          isContinuousInfusion: false,
+          isHighAlert: false,
+        },
+      ],
+    },
   },
   {
     patient: {
@@ -131,6 +165,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
           urgent: true,
           priority: 'urgent',
           category: 'reevaluation',
+          dueBy: demoTime(120),
         },
         {
           id: 'task-demo-psych-child-followup',
@@ -138,6 +173,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
           critical: true,
           priority: 'critical',
           category: 'critical-task',
+          dueBy: demoTime(180),
         },
       ],
     },
@@ -154,6 +190,10 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
     gender: 'male',
     encounterId: 'enc-demo-psych-child-001',
     locationId: 'loc-demo-psych-child-001',
+    clinical: {
+      diagnosis: { system: SNOMED_SYSTEM, code: '57177007', display: 'Agitación psicomotriz' },
+      medications: [],
+    },
   },
   {
     patient: {
@@ -162,7 +202,10 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
       unitId: 'udcc-psychogeriatrics',
       bedLabel: 'PG-03',
       vitals: { rr: 17, spo2: 96, tempC: 36.5, sbp: 124, hr: 79, o2: false, avpu: 'A' },
-      devices: [{ id: 'dev-demo-udcc-walker', label: 'Andador supervisado', category: 'support' }],
+      devices: [
+        { id: 'dev-demo-udcc-walker', label: 'Andador supervisado', category: 'support' },
+        { id: 'dev-demo-udcc-urinary', label: 'Sonda vesical sintetica', category: 'invasive' },
+      ],
       risks: { fall: true },
       pendingTasks: [
         {
@@ -171,13 +214,15 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
           critical: true,
           priority: 'critical',
           category: 'reevaluation',
+          dueBy: demoTime(105),
         },
         {
           id: 'task-demo-psych-udcc-hydration',
-          title: 'Cerrar hidratacion, adherencia terapeutica y resguardo de audifono removible',
+          title: 'Vigilar diuresis por sonda y estreñimiento; ultima deposicion sintetica hace 2 dias',
           urgent: true,
           priority: 'urgent',
           category: 'critical-task',
+          dueBy: demoTime(165),
         },
       ],
     },
@@ -194,6 +239,45 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
     gender: 'female',
     encounterId: 'enc-demo-psych-udcc-001',
     locationId: 'loc-demo-psych-udcc-001',
+    clinical: {
+      diagnosis: { system: SNOMED_SYSTEM, code: '90128006', display: 'Delirium' },
+      medications: [],
+    },
+  },
+  {
+    patient: {
+      id: 'demo-psych-adult-002',
+      name: 'Caso sintetico adulto seguimiento',
+      unitId: 'sjd-a',
+      bedLabel: 'SMA-A-02',
+      vitals: { rr: 16, spo2: 98, tempC: 36.7, sbp: 116, hr: 76, o2: false, avpu: 'A' },
+      pendingTasks: [
+        {
+          id: 'task-demo-psych-adult-002-sleep',
+          title: 'Revisar descanso nocturno y respuesta a medidas no farmacológicas.',
+          priority: 'routine',
+          category: 'reevaluation',
+          dueBy: demoTime(210),
+        },
+      ],
+    },
+    summary: {
+      id: 'demo-psych-adult-002',
+      name: 'Caso sintetico adulto seguimiento',
+      gender: 'female',
+      age: 35,
+      bed: 'SMA-A-02',
+      mrn: 'MRN-DEMO-PSY-004',
+      allergies: ['Sin alergias sinteticas activas'],
+    },
+    birthDate: '1991-04-22',
+    gender: 'female',
+    encounterId: 'enc-demo-psych-adult-002',
+    locationId: 'loc-demo-psych-adult-002',
+    clinical: {
+      diagnosis: { system: SNOMED_SYSTEM, code: '20617004', display: 'Insomnio' },
+      medications: [],
+    },
   },
 ] as const;
 
@@ -206,6 +290,100 @@ const getDefaultDemoPatientFixture = (): DemoPatientFixture => DEMO_PATIENT_FIXT
 export const DEMO_PATIENT_SUMMARY: PatientSummary = getDefaultDemoPatientFixture().summary;
 
 export const DEMO_PATIENTS: PatientListItem[] = DEMO_PATIENT_FIXTURES.map((fixture) => fixture.patient);
+
+export type DemoHandoverPrefill = Pick<
+  HandoverValues,
+  | 'dxMedical'
+  | 'vitals'
+  | 'medications'
+  | 'devices'
+  | 'nutrition'
+  | 'elimination'
+  | 'exams'
+  | 'evolution'
+  | 'pendingTasks'
+  | 'contingencyPlan'
+> & {
+  administrativeData: HandoverValues['administrativeData'];
+  risks: NonNullable<HandoverValues['risks']>;
+  risksStructured: NonNullable<HandoverValues['risksStructured']>;
+} & Partial<
+  Pick<
+    HandoverValues,
+    'sbarSituation' | 'sbarBackground' | 'sbarAssessment' | 'sbarRecommendation'
+  >
+>;
+
+/** Synthetic read/confirm data for the controlled demo only. */
+export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverPrefill {
+  const fixture = getDemoPatientFixture(patientId);
+  const activeFallRisk = fixture.patient.risks?.fall === true;
+  const census = DEMO_PATIENT_FIXTURES.filter((candidate) => candidate.patient.unitId === fixture.patient.unitId).length;
+
+  return {
+    administrativeData: {
+      unit: fixture.patient.unitId,
+      census,
+      staffOut: [DEMO_ACTORS[0].displayName],
+      staffIn: [DEMO_ACTORS[1].displayName],
+      shiftStart: DEMO_SHIFT_START,
+      shiftEnd: DEMO_SHIFT_END,
+      shiftType: 'Mañana',
+      incidents: [],
+    },
+    dxMedical: fixture.clinical.diagnosis,
+    vitals: {
+      rr: fixture.patient.vitals?.rr,
+      spo2: fixture.patient.vitals?.spo2,
+      tempC: fixture.patient.vitals?.tempC,
+      sbp: fixture.patient.vitals?.sbp,
+      hr: fixture.patient.vitals?.hr,
+      avpu: fixture.patient.vitals?.avpu,
+      recordedAt: DEMO_NOW,
+      issuedAt: demoTime(5),
+    },
+    medications: fixture.clinical.medications,
+    devices: (fixture.patient.devices ?? []).map((device) => ({ name: device.label, active: true })),
+    nutrition: {
+      dietType: 'oral',
+      tolerance: 'Sin incidencias sintéticas registradas en el turno previo.',
+    },
+    elimination:
+      fixture.patient.id === 'demo-psych-udcc-001'
+        ? { urineMl: 450, stoolPattern: 'constipation', hasRectalTube: false }
+        : undefined,
+    exams: [
+      {
+        type: 'other',
+        state: 'pending',
+        description: 'Revisión interdisciplinar sintética programada para el turno.',
+        priority: 'routine',
+        dueBy: demoTime(150),
+      },
+    ],
+    evolution: 'Sin cambios clínicos sintéticos relevantes desde la última revisión. Confirmar novedades con el equipo entrante.',
+    pendingTasks: (fixture.patient.pendingTasks ?? []).map((task) => ({
+      id: task.id,
+      category: task.category ?? 'other',
+      title: task.title,
+      status: task.status ?? 'pending',
+      priority: task.priority ?? (task.critical ? 'critical' : task.urgent ? 'urgent' : 'routine'),
+      dueBy: task.dueBy,
+      escalationCriteria: task.escalationCriteria,
+    })),
+    contingencyPlan: {
+      watchItems: ['Cambio en la observación, seguridad del entorno o adherencia terapéutica.'],
+      immediateActions: ['Confirmar el pendiente crítico y el plan de medicación del turno.'],
+      escalationCriteria: ['Avisar al referente clínico ante cambio conductual agudo o riesgo de seguridad.'],
+      escalationContact: 'Referente clínico de guardia',
+      fallbackPlan: 'Mantener observación y aplicar el protocolo local de seguridad.',
+    },
+    risks: activeFallRisk ? { fall: true } : {},
+    risksStructured: activeFallRisk
+      ? [{ type: 'fall', present: true, actions: ['Mantener entorno seguro y supervisión indicada.'] }]
+      : [],
+  };
+}
 
 export function getDemoPatientFixture(patientId?: string | null): DemoPatientFixture {
   if (patientId && DEMO_PATIENT_FIXTURES_BY_ID[patientId]) {

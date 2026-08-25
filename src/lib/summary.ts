@@ -156,6 +156,33 @@ function describeFluidBalance(balance?: FluidBalanceInfo): string | undefined {
   return parts.filter(Boolean).length ? `Balance hídrico: ${parts.filter(Boolean).join('. ')}` : undefined;
 }
 
+function describeElimination(data: HandoverFormData): string | undefined {
+  const elimination = data.elimination;
+  const parts: string[] = [];
+  const stoolLabels = {
+    constipation: 'estreñimiento',
+    diarrhea: 'diarrea',
+    no_stool: 'sin deposición registrada',
+  } as const;
+
+  if (elimination?.stoolPattern && elimination.stoolPattern !== 'normal') {
+    parts.push(stoolLabels[elimination.stoolPattern]);
+  }
+  if (elimination?.hasRectalTube) {
+    parts.push('sonda rectal presente');
+  }
+
+  const urinaryDevices = (data.devices ?? [])
+    .filter((device) => device.active !== false && /urin|vesical|urostom|nefrostom/i.test(device.name))
+    .map((device) => device.name.trim())
+    .filter(isNonEmptyString);
+  if (urinaryDevices.length > 0) {
+    parts.push(`dispositivo urinario: ${urinaryDevices.join(', ')}`);
+  }
+
+  return parts.length > 0 ? `Eliminación: ${parts.join(', ')}` : undefined;
+}
+
 function describeMobility(mobilityLevel?: string, repositioningPlan?: string): string | undefined {
   if (!mobilityLevel && !repositioningPlan) return undefined;
   const details: string[] = [];
@@ -301,14 +328,17 @@ function buildAssessment(data: HandoverFormData): string {
   const risks = describeRisks((data as any).risks, (data as any).risksStructured);
   if (risks) parts.push(risks);
 
-  const pendingTasks = describePendingTasks(data.pendingTasks);
-  if (pendingTasks) parts.push(pendingTasks);
-
   const pain = describePain((data as any).painAssessment);
   if (pain) parts.push(pain);
 
   const balance = describeFluidBalance((data as any).fluidBalance);
   if (balance) parts.push(balance);
+
+  const elimination = describeElimination(data);
+  if (elimination) parts.push(elimination);
+
+  const pendingTasks = describePendingTasks(data.pendingTasks);
+  if (pendingTasks) parts.push(pendingTasks);
 
   const braden = data.braden
     ? `Braden ${data.braden.totalScore} (${BRADEN_LABELS[data.braden.riskLevel]} riesgo)`

@@ -21,6 +21,7 @@ export interface UnitFeatureFlags {
   showNocOutcomes?: boolean;
   showHandoverTimingMetrics?: boolean;
   hideLegacyFields?: boolean;
+  enableElimination?: boolean;
   // Puedes añadir más banderas en el futuro
 }
 
@@ -199,6 +200,7 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     features: {
       ...BASE_FEATURES,
       enablePsychosocialExtra: true,
+      enableElimination: true,
       checklistItems: [...BEHAVIORAL_HEALTH_PSYCHOGERIATRICS_CHECKLIST_ITEMS],
     },
   },
@@ -281,6 +283,9 @@ function normalizeUnitConfig(unit: LegacyHandoverUnitConfig, defaultUnitId?: str
         parseBooleanLike(unitFeatures.hideLegacyFields) ??
         fallbackFeatures.hideLegacyFields ??
         BASE_FEATURES.hideLegacyFields,
+      enableElimination:
+        parseBooleanLike(unitFeatures.enableElimination) ??
+        fallbackFeatures.enableElimination,
     },
   };
 }
