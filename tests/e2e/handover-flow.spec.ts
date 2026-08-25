@@ -16,43 +16,53 @@ const CHECKLIST_LABELS = [
 test('Expo Web real completes a dual-actor handover through offline queue replay', async ({
   context,
   page,
-}) => {
+}, testInfo) => {
+  const allowedNetworkOrigins = new Set([
+    'http://127.0.0.1:19006',
+    'https://demo.local',
+    'https://oidc.e2e.invalid',
+  ]);
+  const observedNetworkOrigins = new Set<string>();
+  const unexpectedNetworkUrls: string[] = [];
   const fhirBundles: string[] = [];
   let loadedExpoJavaScriptBytes = 0;
 
-  page.on('response', async (response) => {
-    const contentType = response.headers()['content-type'] ?? '';
-    if (
-      response.url().startsWith('http://127.0.0.1:19006/') &&
-      contentType.includes('javascript')
-    ) {
-      try {
-        const body = await response.body();
-        loadedExpoJavaScriptBytes = Math.max(loadedExpoJavaScriptBytes, body.byteLength);
-      } catch {
-        // A later bundle response can still provide the real-app evidence.
-      }
-    }
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    observedNetworkOrigins.add(url.origin);
   });
 
-  await page.route('https://oidc.e2e.invalid/**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        issuer: 'https://oidc.e2e.invalid',
-        authorization_endpoint: 'https://oidc.e2e.invalid/authorize',
-        token_endpoint: 'https://oidc.e2e.invalid/token',
-        revocation_endpoint: 'https://oidc.e2e.invalid/revoke',
-        userinfo_endpoint: 'https://oidc.e2e.invalid/userinfo',
-        end_session_endpoint: 'https://oidc.e2e.invalid/logout',
-      }),
-    });
-  });
-
-  await page.route('https://demo.local/**', async (route) => {
+  await page.route('**/*', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+
+    if (!allowedNetworkOrigins.has(url.origin)) {
+      unexpectedNetworkUrls.push(request.url());
+      await route.abort('blockedbyclient');
+      return;
+    }
+
+    if (url.origin === 'http://127.0.0.1:19006') {
+      await route.continue();
+      return;
+    }
+
+    if (url.origin === 'https://oidc.e2e.invalid') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          issuer: 'https://oidc.e2e.invalid',
+          authorization_endpoint: 'https://oidc.e2e.invalid/authorize',
+          token_endpoint: 'https://oidc.e2e.invalid/token',
+          revocation_endpoint: 'https://oidc.e2e.invalid/revoke',
+          userinfo_endpoint: 'https://oidc.e2e.invalid/userinfo',
+          end_session_endpoint: 'https://oidc.e2e.invalid/logout',
+        }),
+      });
+      return;
+    }
+
     const headers = {
       'access-control-allow-headers': '*',
       'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -81,6 +91,21 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
     });
   });
 
+  page.on('response', async (response) => {
+    const contentType = response.headers()['content-type'] ?? '';
+    if (
+      response.url().startsWith('http://127.0.0.1:19006/') &&
+      contentType.includes('javascript')
+    ) {
+      try {
+        const body = await response.body();
+        loadedExpoJavaScriptBytes = Math.max(loadedExpoJavaScriptBytes, body.byteLength);
+      } catch {
+        // A later bundle response can still provide the real-app evidence.
+      }
+    }
+  });
+
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect.poll(() => loadedExpoJavaScriptBytes).toBeGreaterThan(800);
 
@@ -93,6 +118,7 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect(patientCard).toBeVisible();
   await patientCard.click();
   await expect(page.getByTestId('handover-profile-runtime')).toBeVisible();
+  await expect(page.getByTestId('handover-scan-qr')).toHaveCount(0);
 
   const evolution = page.getByTestId('handover-evolution');
   await evolution.fill('Evolución sintética E2E sin datos clínicos reales.');
@@ -168,4 +194,14 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   expect(transmittedBundle).toContain(SNOMED_SEPSIS_CODE);
   expect(transmittedBundle).toContain(OUTGOING_ACTOR_ID);
   expect(transmittedBundle).toContain(INCOMING_ACTOR_ID);
+
+  const observedOrigins = [...observedNetworkOrigins].sort();
+  await testInfo.attach('observed-network-origins.json', {
+    body: Buffer.from(JSON.stringify(observedOrigins, null, 2)),
+    contentType: 'application/json',
+  });
+  console.info(`[e2e] observed network origins: ${observedOrigins.join(', ')}`);
+
+  expect(unexpectedNetworkUrls, `Unexpected network requests: ${unexpectedNetworkUrls.join(', ')}`).toEqual([]);
+  expect(observedOrigins).not.toContain('https://cdn.jsdelivr.net');
 });
