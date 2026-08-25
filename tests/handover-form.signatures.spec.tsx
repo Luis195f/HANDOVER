@@ -278,41 +278,20 @@ describe('HandoverForm signatures', () => {
     }
   });
 
-  it('ejecuta los controles E2E de firma y checklist sin abrir seams clínicos', async () => {
+  it('no expone controles E2E que escriban directamente firma, estado o checklist', () => {
     const originalE2E = process.env.EXPO_PUBLIC_E2E;
     process.env.EXPO_PUBLIC_E2E = 'true';
 
-    formValues.bedsideChecklist = {
-      patientIdentityConfirmed: false,
-      allergiesReviewed: false,
-      linesAndDevicesChecked: false,
-      medicationPlanReviewed: false,
-      safetyMeasuresApplied: false,
-      questionsAnswered: false,
-    };
-
-    const { getByTestId } = render(
+    const { queryByTestId } = render(
       <HandoverForm
         navigation={{ navigate: vi.fn() } as any}
         route={{ key: '5', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
       />,
     );
 
-    fireEvent.press(getByTestId('e2e-add-signature'));
-    fireEvent.press(getByTestId('e2e-complete-checklist'));
-
-    await waitFor(() => {
-      expect(formValues.signatures?.outgoing?.imageBase64).toContain('data:image/png;base64,');
-      expect(formValues.signatures?.outgoing?.unitId).toBe('unit-1');
-      expect(formValues.bedsideChecklist).toMatchObject({
-        patientIdentityConfirmed: true,
-        allergiesReviewed: true,
-        linesAndDevicesChecked: true,
-        medicationPlanReviewed: true,
-        safetyMeasuresApplied: true,
-        questionsAnswered: true,
-      });
-    });
+    expect(queryByTestId('e2e-set-final')).toBeNull();
+    expect(queryByTestId('e2e-add-signature')).toBeNull();
+    expect(queryByTestId('e2e-complete-checklist')).toBeNull();
 
     if (originalE2E === undefined) {
       delete process.env.EXPO_PUBLIC_E2E;

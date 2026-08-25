@@ -395,6 +395,8 @@ export const DiagnosisAutocomplete: React.FC<DiagnosisAutocompleteProps> = ({
 
       {enabled ? (
         <TextInput
+          accessibilityLabel={`Buscar ${label}`}
+          testID={`diagnosis-search-${name}`}
           placeholder="Buscar diagnóstico..."
           value={query}
           onChangeText={(text) => {

@@ -272,7 +272,7 @@ export default function SyncCenter() {
         }
         renderItem={({ item }) => <ItemRow item={item} C={palette} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
+          <View style={styles.empty} testID="sync-empty-queue">
             <Text allowFontScaling style={{ color: palette.textSecondary }}>{t('sync.emptyQueue')}</Text>
           </View>
         }

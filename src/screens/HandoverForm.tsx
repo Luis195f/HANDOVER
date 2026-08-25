@@ -126,7 +126,6 @@ import { HandoverContextSections } from './handover/HandoverContextSections';
 import {
   baseChecklistDefaults,
   buildChecklistDefaults,
-  buildCompletedChecklist,
   compactNumberMap,
   compactObject,
   deriveInitialRisksStructured,
@@ -423,6 +422,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [activeSection, setActiveSection] = useState<SectionKey | null>(ALL_SECTIONS_INFO[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
   const [bedsideChecklistHighlightMissing, setBedsideChecklistHighlightMissing] = useState(false);
+  const [e2eClosureConfirmationPending, setE2EClosureConfirmationPending] = useState(false);
   const timingInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -697,6 +697,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     'oxygenTherapy',
   ]);
   const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
+  const isE2EDemo = isE2E && (authSession?.mode === 'demo' || session?.mode === 'demo');
   const watchedValues = form.watch();
 
   useEffect(() => {
@@ -784,42 +785,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     },
     [form],
   );
-
-  const handleE2ESignature = () => {
-    const payload: SignaturePadValue = {
-      imageBase64:
-        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA' +
-        'AAC0lEQVR42mP8/5+hHgAFgwJ/lKX0LgAAAABJRU5ErkJggg==',
-      signedAt: new Date().toISOString(),
-    };
-    const built = buildOutgoingSignature(payload);
-    if (!built) return;
-
-    type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
-    const nextSignature: OutgoingSig = {
-      ...built,
-      method: (built.method ?? 'session') as OutgoingSig['method'],
-    };
-    const currentSignatures = form.getValues('signatures');
-
-    form.setValue(
-      'signatures',
-      {
-        ...(currentSignatures ?? {}),
-        outgoing: nextSignature,
-      },
-      { shouldDirty: true, shouldValidate: true },
-    );
-    void recordClosureAttestation('outgoing', nextSignature);
-  };
-
-  const handleE2EChecklistComplete = () => {
-    const currentChecklist = form.getValues('bedsideChecklist');
-    const runtimeChecklistItems = normalizeChecklistItems(profileRuntime.checklistItems);
-    const completed = buildCompletedChecklist(currentChecklist, runtimeChecklistItems);
-
-    form.setValue('bedsideChecklist', completed, { shouldDirty: true, shouldValidate: true });
-  };
 
   const dxText = (value: unknown): string => {
     if (typeof value === 'string') return value.trim();
@@ -2150,13 +2115,17 @@ export default function HandoverForm({ navigation, route }: Props) {
     return isValid;
   };
 
-  const confirmClosureAttestation = () =>
-    new Promise<boolean>((resolve) => {
-      Alert.alert(t('handover.legalConfirmTitle'), t('handover.legalConfirmMessage'), [
-        { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
-        { text: t('handover.legalConfirmAction'), style: 'default', onPress: () => resolve(true) },
-      ]);
-    });
+  const handleConfirmedClosure = () => {
+    setE2EClosureConfirmationPending(false);
+    onSubmit();
+  };
+
+  const confirmClosureAttestation = () => {
+    Alert.alert(t('handover.legalConfirmTitle'), t('handover.legalConfirmMessage'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('handover.legalConfirmAction'), style: 'default', onPress: handleConfirmedClosure },
+    ]);
+  };
 
   const finalizeSubmission = async () => {
     form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
@@ -2165,9 +2134,11 @@ export default function HandoverForm({ navigation, route }: Props) {
       Alert.alert(attestationAlert.title, attestationAlert.message);
       return;
     }
-    const confirmed = await confirmClosureAttestation();
-    if (!confirmed) return;
-    onSubmit();
+    if (isE2EDemo) {
+      setE2EClosureConfirmationPending(true);
+      return;
+    }
+    confirmClosureAttestation();
   };
 
   const handleSaveDraft = () => {
@@ -2289,10 +2260,6 @@ export default function HandoverForm({ navigation, route }: Props) {
             }}
             onOpenLogin={() => navigation.navigate('Login')}
             onOpenSyncCenter={() => navigation.navigate('SyncCenter')}
-            isE2E={isE2E}
-            onSetFinalStatus={() => form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true })}
-            onAddSignature={handleE2ESignature}
-            onCompleteChecklist={handleE2EChecklistComplete}
             profileRuntime={profileRuntime}
             bannerSummary={bannerSummary}
             bannerLoading={bannerLoading}
@@ -2896,6 +2863,8 @@ export default function HandoverForm({ navigation, route }: Props) {
                   name="evolution"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
+                      accessibilityLabel="Notas de evolución"
+                      testID="handover-evolution"
                       style={[styles.input, styles.textArea, tokenInputStyle]}
                       multiline
                       placeholder="Notas de evolución"
@@ -2968,6 +2937,9 @@ export default function HandoverForm({ navigation, route }: Props) {
         onFinalize={handleFinalize}
         finalizeDisabled={formState.isSubmitting || hasValidationErrors}
         onBeforeExport={handleValidateForExport}
+        allowE2EConfirmation={isE2EDemo}
+        showE2EClosureConfirmation={isE2EDemo && e2eClosureConfirmationPending}
+        onConfirmClosure={handleConfirmedClosure}
       />
       </ScrollView>
       </View>

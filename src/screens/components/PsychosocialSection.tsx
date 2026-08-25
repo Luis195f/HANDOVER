@@ -18,6 +18,8 @@ export function PsychosocialSection() {
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Estado emocional</Text>
             <TextInput
+              testID="psychosocial-emotional-status"
+              accessibilityLabel="Estado emocional"
               style={nursingStyles.input}
               placeholder="Ej: tranquilo, ansioso"
               onBlur={onBlur}
@@ -35,6 +37,8 @@ export function PsychosocialSection() {
           <View style={nursingStyles.field}>
             <Text style={nursingStyles.label}>Notas familiares</Text>
             <TextInput
+              testID="psychosocial-family-notes"
+              accessibilityLabel="Notas familiares"
               style={[nursingStyles.input, nursingStyles.textArea]}
               multiline
               placeholder="Ej: Familia presente en turno de tarde"

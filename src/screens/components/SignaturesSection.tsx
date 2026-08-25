@@ -27,6 +27,7 @@ type Props = {
   administrativeUnitId?: string;
   getSignaturePayload?: () => unknown;
   disableOutgoingAction?: boolean;
+  allowE2EIncomingConfirmation?: boolean;
 };
 
 type SignatureKind = 'outgoing' | 'incoming';
@@ -90,6 +91,7 @@ export function SignaturesSection({
   administrativeUnitId,
   getSignaturePayload,
   disableOutgoingAction,
+  allowE2EIncomingConfirmation,
 }: Props) {
   const outgoing = value?.outgoing;
   const incoming = value?.incoming;
@@ -103,8 +105,24 @@ export function SignaturesSection({
     [currentUser],
   );
 
-  const confirmSignature = (kind: SignatureKind) => {
+  const applySignature = (kind: SignatureKind) => {
     if (!currentUser || !activeUnitId) return;
+    const timestamp = new Date().toISOString();
+    const contentToSign = JSON.stringify(getSignaturePayload?.() ?? {});
+    const signatureHash = hashHex(`${contentToSign}${timestamp}`);
+    const nextSignature = buildSignatureFromUser(
+      currentUser,
+      activeUnitId,
+      signatureHash,
+      timestamp,
+    );
+    onChange({
+      ...value,
+      [kind]: nextSignature,
+    });
+  };
+
+  const confirmSignature = (kind: SignatureKind) => {
     const message =
       kind === 'outgoing'
         ? t('signatures.confirmOutgoingMessage')
@@ -114,21 +132,7 @@ export function SignaturesSection({
       {
         text: t('signatures.confirm'),
         style: 'default',
-        onPress: () => {
-          const timestamp = new Date().toISOString();
-          const contentToSign = JSON.stringify(getSignaturePayload?.() ?? {});
-          const signatureHash = hashHex(`${contentToSign}${timestamp}`);
-          const nextSignature = buildSignatureFromUser(
-            currentUser,
-            activeUnitId,
-            signatureHash,
-            timestamp,
-          );
-          onChange({
-            ...value,
-            [kind]: nextSignature,
-          });
-        },
+        onPress: () => applySignature(kind),
       },
     ]);
   };
@@ -136,13 +140,13 @@ export function SignaturesSection({
   const renderBlock = (kind: SignatureKind, signature?: HandoverSignature | null) => {
     const isOutgoing = kind === 'outgoing';
     return (
-      <View style={styles.block}>
+      <View style={styles.block} testID={`signature-${kind}`}>
         <Text style={styles.label}>
           {isOutgoing ? t('signatures.outgoingLabel') : t('signatures.incomingLabel')}
         </Text>
         {signature ? (
           <View>
-            <Text style={styles.valueText}>
+            <Text style={styles.valueText} testID={`signature-${kind}-user`}>
               {t('signatures.nameLabel')}: {signature.fullName}
             </Text>
             <Text style={styles.valueText}>
@@ -163,6 +167,15 @@ export function SignaturesSection({
                 <Button
                   title={isOutgoing ? t('signatures.signOutgoing') : t('signatures.signIncoming')}
                   onPress={() => confirmSignature(kind)}
+                />
+              </View>
+            ) : null}
+            {!isOutgoing && canSignWithUnit && allowE2EIncomingConfirmation ? (
+              <View style={styles.action}>
+                <Button
+                  title="Confirmar atestación entrante"
+                  onPress={() => applySignature('incoming')}
+                  testID="e2e-confirm-incoming-attestation"
                 />
               </View>
             ) : null}
