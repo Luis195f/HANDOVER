@@ -26,6 +26,7 @@ export type SbarSectionProps = {
   sbarRecommendationError?: string;
   sbarFullTextError?: string;
   hideLegacyFields?: boolean;
+  isDemo?: boolean;
 };
 
 export const SbarSection: React.FC<SbarSectionProps> = ({
@@ -50,6 +51,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   sbarRecommendationError,
   sbarFullTextError,
   hideLegacyFields,
+  isDemo = false,
 }) => {
   const { control } = useFormContext<HandoverFormValues>();
   const aiUnavailableMessage =
@@ -57,7 +59,8 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
 
   return (
     <>
-      <View style={styles.inlineActions}>
+      {isDemo ? <Text style={styles.helperText}>Contenido sintético de ejemplo precargado</Text> : null}
+      {!isDemo ? <View style={styles.inlineActions}>
         <Button
           title={
             aiSbarGenerationAvailable
@@ -88,11 +91,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
         {isGeneratingSbarWithAI || isRefiningSbarWithAI ? (
           <ActivityIndicator style={{ marginLeft: 12 }} />
         ) : null}
-      </View>
-      {aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
-      {sbarAiTraceabilityMessage ? <Text style={styles.helperText}>{sbarAiTraceabilityMessage}</Text> : null}
-      {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
-      {sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
+      </View> : null}
+      {!isDemo && aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
+      {!isDemo && sbarAiTraceabilityMessage ? <Text style={styles.helperText}>{sbarAiTraceabilityMessage}</Text> : null}
+      {!isDemo && sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
+      {!isDemo && sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
       {pendingSbarSuggestionPreview ? (
         <View style={styles.sbarPreview}>
           <Text style={styles.sbarTitle}>{t('handover.sbarPendingReviewTitle')}</Text>

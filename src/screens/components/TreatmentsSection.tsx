@@ -584,7 +584,7 @@ export function TreatmentsSection({
                   <Text style={styles.label}>Programado para</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="2024-05-01T10:00"
+                    placeholder="2026-08-27T10:00"
                     onBlur={onBlur}
                     onChangeText={onChange}
                     value={value ?? ''}

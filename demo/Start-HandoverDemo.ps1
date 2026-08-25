@@ -16,7 +16,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:ExpectedBranch = 'fix/p0-web-demo-interactions'
+$script:AllowedBranches = @(
+    'main',
+    'fix/p0-web-demo-interactions',
+    'fix/p0-demo-clinical-surface'
+)
 $script:WebPort = 19006
 $script:LoopbackPort = 19007
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -38,9 +42,10 @@ function Assert-Repository {
 
     $branch = (& git branch --show-current 2>$null | Select-Object -First 1)
     $branchSucceeded = $?
-    if (-not $branchSucceeded -or $branch -ne $script:ExpectedBranch) {
-        throw "Wrong branch. Expected '$script:ExpectedBranch'; found '$branch'."
+    if (-not $branchSucceeded -or $branch -notin $script:AllowedBranches) {
+        throw "Wrong branch. Allowed: '$($script:AllowedBranches -join "', '")'; found '$branch'."
     }
+    $script:ActiveBranch = $branch
 }
 
 function Get-NodePath {
@@ -115,7 +120,7 @@ function Save-State {
     New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
     $state = [ordered]@{
         repoRoot = $script:RepoRoot
-        branch = $script:ExpectedBranch
+        branch = $script:ActiveBranch
         createdAt = [DateTime]::UtcNow.ToString('o')
         processes = @($script:StartedProcesses | ForEach-Object {
             [ordered]@{

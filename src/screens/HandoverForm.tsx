@@ -22,6 +22,7 @@ import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
+import { UNITS_BY_ID } from '@/src/config/units';
 import { getPatientIdentificationHint, isQrPatientScanEnabled } from '@/src/config/patientIdentification';
 import { isPilotFeatureEnabled, usePilotControlContext } from '@/src/config/pilotControl';
 import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
@@ -142,7 +143,7 @@ import {
   safeJsonParse,
   truncateNote,
 } from './handover/formUtils';
-import { HandoverOverview } from './handover/HandoverOverview';
+import { HandoverOverview, type DemoClinicalSummary } from './handover/HandoverOverview';
 import {
   buildHandoverInputPayload,
   buildProfileTraceInput,
@@ -152,6 +153,7 @@ import {
   normalizeUnitSelection,
 } from './handover/submission';
 import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
+import { getDemoActorIdentity, getDemoHandoverPrefill, type DemoHandoverPrefill } from '@/src/demo/fixtures';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
@@ -307,6 +309,7 @@ export type DictationField =
 const ALL_SECTIONS_INFO = HANDOVER_SECTIONS_INFO;
 
 type SectionKey = (typeof HANDOVER_SECTIONS_INFO)[number]['key'];
+const DEMO_OPEN_SECTION_KEYS = new Set<SectionKey>(['sbar', 'examenes', 'evolucion', 'resumen', 'bedsideChecklist', 'firmas']);
 type PendingSbarSuggestion = {
   patientId: string;
   unitId: string;
@@ -392,10 +395,16 @@ export default function HandoverForm({ navigation, route }: Props) {
     prefilledValues: prefilledValuesParam,
     patientSummary: patientSummaryParam,
     prefillMeta,
+    demoPrefill: demoPrefillParam,
     audioNote: audioNoteParam,
   } = route.params ?? {};
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession, capabilities, logout } = useAuth();
+  const isDemoSession = authSession?.mode === 'demo' || session?.mode === 'demo';
+  const demoPrefill = useMemo<DemoHandoverPrefill | undefined>(
+    () => (isDemoSession ? demoPrefillParam ?? getDemoHandoverPrefill(patientIdParam ?? patientSummaryParam?.id) : undefined),
+    [demoPrefillParam, isDemoSession, patientIdParam, patientSummaryParam?.id],
+  );
   const pilotRoles = authSession?.roles ?? session?.roles ?? [];
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
@@ -418,7 +427,10 @@ export default function HandoverForm({ navigation, route }: Props) {
 );
   const [sectionPositions, setSectionPositions] = useState<Partial<Record<SectionKey, number>>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<SectionKey, boolean>>(() =>
-    ALL_SECTIONS_INFO.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
+    ALL_SECTIONS_INFO.reduce(
+      (acc, { key }) => ({ ...acc, [key]: isDemoSession ? !DEMO_OPEN_SECTION_KEYS.has(key) : false }),
+      {} as Record<SectionKey, boolean>,
+    ),
   );
   const [activeSection, setActiveSection] = useState<SectionKey | null>(ALL_SECTIONS_INFO[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
@@ -464,6 +476,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const defaultValues = useMemo<HandoverFormValues>(() => {
     const initialAdministrativeUnitId = resolveEffectiveHandoverUnitId(
+      demoPrefill?.administrativeData.unit,
       administrativeDataParam?.unit,
       unitIdParam,
       selectedUnitId,
@@ -481,28 +494,28 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults)
 
-  const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
+  const shiftStartDefault = demoPrefill?.administrativeData.shiftStart ?? administrativeDataParam?.shiftStart ?? new Date().toISOString();
   const shiftEndDefault =
-    administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+    demoPrefill?.administrativeData.shiftEnd ?? administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
 
     const administrativeDefaults: AdministrativeData = {
       unit:
         initialAdministrativeUnitId ?? '',
-      census: administrativeDataParam?.census ?? 0,
-      staffIn: administrativeDataParam?.staffIn ?? [],
-      staffOut: administrativeDataParam?.staffOut ?? [],
+      census: demoPrefill?.administrativeData.census ?? administrativeDataParam?.census ?? 0,
+      staffIn: demoPrefill?.administrativeData.staffIn ?? administrativeDataParam?.staffIn ?? [],
+      staffOut: demoPrefill?.administrativeData.staffOut ?? administrativeDataParam?.staffOut ?? [],
       shiftStart: shiftStartDefault,
       shiftEnd: shiftEndDefault,
       shiftType:
-        administrativeDataParam?.shiftType ??
+        demoPrefill?.administrativeData.shiftType ?? administrativeDataParam?.shiftType ??
         deriveShiftType(shiftStartDefault),
-      generalNotes: administrativeDataParam?.generalNotes ?? undefined,
-      incidents: administrativeDataParam?.incidents ?? [],
+      generalNotes: demoPrefill?.administrativeData.generalNotes ?? administrativeDataParam?.generalNotes ?? undefined,
+      incidents: demoPrefill?.administrativeData.incidents ?? administrativeDataParam?.incidents ?? [],
     };
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
     const dxMedicalValue: SnomedCoding =
-      normalizeLegacySnomedCoding(dxMedicalPrefill) ?? { ...emptySnomedCoding };
+      demoPrefill?.dxMedical ?? normalizeLegacySnomedCoding(dxMedicalPrefill) ?? { ...emptySnomedCoding };
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
@@ -511,10 +524,10 @@ export default function HandoverForm({ navigation, route }: Props) {
       dxNursing: '',
       dxMedicalStructured: [],
       dxNursingStructured: [],
-      evolution: '',
+      evolution: demoPrefill?.evolution ?? '',
       closingSummary: '',
       meds: '',
-      medications: [],
+      medications: demoPrefill?.medications ?? [],
       treatments: [],
       outcomes: [],
       turnContext: {
@@ -523,24 +536,25 @@ export default function HandoverForm({ navigation, route }: Props) {
         operationalSummary: '',
         serviceIncidents: [],
       },
-      pendingTasks: [],
-      exams: [],
+      pendingTasks: demoPrefill?.pendingTasks ?? [],
+      exams: demoPrefill?.exams ?? [],
       procedures: [],
-      contingencyPlan: {
+      contingencyPlan: demoPrefill?.contingencyPlan ?? {
         watchItems: [],
         immediateActions: [],
         escalationCriteria: [],
         escalationContact: '',
         fallbackPlan: '',
       },
-      sbarSituation: '',
-      sbarBackground: '',
-      sbarAssessment: '',
-      sbarRecommendation: '',
+      sbarSituation: demoPrefill?.sbarSituation ?? '',
+      sbarBackground: demoPrefill?.sbarBackground ?? '',
+      sbarAssessment: demoPrefill?.sbarAssessment ?? '',
+      sbarRecommendation: demoPrefill?.sbarRecommendation ?? '',
       sbarFullText: '',
-      vitals: prefilledVitals ?? {},
+      vitals: demoPrefill?.vitals ?? prefilledVitals ?? {},
       oxygenTherapy: {},
-      devices: [],
+      devices: demoPrefill?.devices ?? [],
+      nutrition: demoPrefill?.nutrition,
       fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
@@ -551,8 +565,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       // BEGIN HANDOVER D1 – BedsideChecklist
       bedsideChecklist: bedsideChecklistDefaults,
       // END HANDOVER D1 – BedsideChecklist
-      risks: {},
-      risksStructured: [],
+      risks: demoPrefill?.risks ?? {},
+      risksStructured: demoPrefill?.risksStructured ?? [],
       signatures: {
         outgoing: undefined,
         incoming: undefined,
@@ -571,6 +585,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   prefilledValuesParam,
   prefilledVitals,
   prefillMeta,
+  demoPrefill,
   pilotRoles,
 ]);
 
@@ -594,10 +609,12 @@ export default function HandoverForm({ navigation, route }: Props) {
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const activeUnitId = administrativeUnitValue || signatureUser?.activeUnitId || signatureUser?.units?.[0];
+  const demoActorKind = isDemoSession ? getDemoActorIdentity(signatureUser?.userId ?? '')?.kind : undefined;
   const canSignOutgoing = Boolean(
     signatureUser &&
       (signatureUser.roles ?? (signatureUser.role ? [signatureUser.role] : [])).includes('nurse') &&
-      activeUnitId,
+      activeUnitId &&
+      demoActorKind !== 'incoming',
   );
   
   // BEGIN HANDOVER D4 – Get active unit
@@ -1635,6 +1652,35 @@ export default function HandoverForm({ navigation, route }: Props) {
     [patientSummary, patientSummaryParam],
   );
   const bannerLoading = loadingPatient && !patientSummaryParam;
+  const demoClinicalSummary = useMemo<DemoClinicalSummary | null>(() => {
+    if (!isDemoSession || !demoPrefill) return null;
+    const unitId = watchedValues.administrativeData?.unit;
+    const vitals = watchedValues.vitals ?? {};
+    const vitalParts = [
+      typeof vitals.hr === 'number' ? `FC ${vitals.hr}` : null,
+      typeof vitals.rr === 'number' ? `FR ${vitals.rr}` : null,
+      typeof vitals.spo2 === 'number' ? `SpO₂ ${vitals.spo2}%` : null,
+      typeof vitals.sbp === 'number' ? `TA ${vitals.sbp}` : null,
+      typeof vitals.tempC === 'number' ? `T ${vitals.tempC}°C` : null,
+    ].filter((value): value is string => Boolean(value));
+    const activeRisks = (watchedValues.risksStructured ?? [])
+      .filter((risk) => risk.present)
+      .map((risk) => risk.type)
+      .join(', ');
+    const pending = (watchedValues.pendingTasks ?? [])
+      .find((task) => task.priority === 'critical' || task.status === 'pending')?.title;
+
+    return {
+      unit: UNITS_BY_ID[unitId]?.name ?? unitId ?? 'Sin unidad',
+      bed: bannerSummary?.bed,
+      diagnosis: watchedValues.dxMedical?.display ?? 'Sin datos suficientes',
+      medications: (watchedValues.medications ?? []).map((medication) => medication.name).join(', ') || 'Sin datos disponibles',
+      vitals: vitalParts.join(' · ') || 'Sin datos suficientes',
+      risks: activeRisks || 'Sin datos suficientes',
+      pending: pending ?? 'Sin datos suficientes',
+      lastUpdated: vitals.recordedAt ?? 'Sin datos suficientes',
+    };
+  }, [bannerSummary?.bed, demoPrefill, isDemoSession, watchedValues]);
   // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
@@ -2260,6 +2306,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             bannerSummary={bannerSummary}
             bannerLoading={bannerLoading}
             patientSummaryError={patientSummaryError}
+            demoClinicalSummary={demoClinicalSummary}
           />
 
           <HandoverContextSections
@@ -2321,6 +2368,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               sbarRecommendationError={sbarRecommendationError}
               sbarFullTextError={sbarFullTextError}
               hideLegacyFields={!showLegacySbarNarrative}
+              isDemo={isDemoSession}
             />
           </CollapsibleSection>
         </View>
@@ -2337,13 +2385,13 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.signos}
             onToggle={() => toggleSection('signos')}
             lazy
-            unmountOnCollapse
             sectionKey="vitals"
           >
             <VitalsSection
               styles={styles}
               parseNumericInput={parseNumericInput}
               riskEvaluation={riskEvaluation}
+              isDemo={isDemoSession}
               loadingVitalTrends={loadingVitalTrends}
               vitalTrendsError={vitalTrendsError}
               vitalTrends={vitalTrends}
@@ -2532,7 +2580,6 @@ export default function HandoverForm({ navigation, route }: Props) {
           isCollapsed={collapsedSections.escalas}
           onToggle={() => toggleSection('escalas')}
           lazy
-          unmountOnCollapse
           sectionKey="clinicalScales"
         >
           <ClinicalScalesSection
@@ -2923,6 +2970,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         currentUser={signatureUser}
         administrativeUnitId={administrativeUnitValue}
         canSignOutgoing={canSignOutgoing}
+        allowedSignatureKind={demoActorKind}
         buildOutgoingSignature={buildOutgoingSignature}
         onAttestationCaptured={(kind, signature) => {
           void recordClosureAttestation(kind, signature);

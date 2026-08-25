@@ -11,6 +11,17 @@ import type { HandoverSyncStatus } from './useHandoverSyncStatus';
 
 type StyleRecord = Record<string, TextStyle | ViewStyle>;
 
+export type DemoClinicalSummary = {
+  unit: string;
+  bed?: string;
+  diagnosis: string;
+  medications: string;
+  vitals: string;
+  risks: string;
+  pending: string;
+  lastUpdated: string;
+};
+
 type Props = {
   styles: StyleRecord;
   colors: {
@@ -31,6 +42,7 @@ type Props = {
   bannerSummary: PatientSummary | null;
   bannerLoading: boolean;
   patientSummaryError?: string | null;
+  demoClinicalSummary?: DemoClinicalSummary | null;
 };
 
 const resolveSyncNoticeCopy = (
@@ -81,6 +93,7 @@ export function HandoverOverview({
   bannerSummary,
   bannerLoading,
   patientSummaryError,
+  demoClinicalSummary,
 }: Props) {
   const syncNoticeCopy = resolveSyncNoticeCopy(handoverSyncStatus, handoverSyncError);
   const syncNoticeColors = resolveSyncNoticeColors(handoverSyncStatus, colors);
@@ -126,6 +139,21 @@ export function HandoverOverview({
           </View>
         </View>
       ) : null}
+      {demoClinicalSummary ? (
+        <View testID="handover-profile-runtime">
+          <View style={styles.profileCard} testID="handover-demo-clinical-summary">
+            <Text style={styles.profileCardTitle}>Resumen clínico de relevo</Text>
+            <Text style={styles.profileCardMeta}>{`Unidad: ${demoClinicalSummary.unit}${demoClinicalSummary.bed ? ` · Cama: ${demoClinicalSummary.bed}` : ''}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Diagnóstico relevante: ${demoClinicalSummary.diagnosis}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Medicación relevante: ${demoClinicalSummary.medications}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Últimos signos vitales: ${demoClinicalSummary.vitals}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Riesgos activos: ${demoClinicalSummary.risks}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Pendiente crítico: ${demoClinicalSummary.pending}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Última actualización: ${demoClinicalSummary.lastUpdated}`}</Text>
+            <Text style={styles.profileCardMeta}>Datos sintéticos importados para revisión y confirmación; no hay conexión con una HCE institucional.</Text>
+          </View>
+        </View>
+      ) : (
       <View style={styles.profileCard} testID="handover-profile-runtime">
         <Text style={styles.profileCardTitle}>
           {profileRuntime.context.usesCoreFallback
@@ -185,6 +213,7 @@ export function HandoverOverview({
           </View>
         ) : null}
       </View>
+      )}
     </>
   );
 }

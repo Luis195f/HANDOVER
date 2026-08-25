@@ -141,7 +141,7 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="2024-01-01T08:00"
+              placeholder="2026-08-27T06:00"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -158,7 +158,7 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="2024-01-01T20:00"
+              placeholder="2026-08-27T14:00"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}

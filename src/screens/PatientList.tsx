@@ -39,6 +39,7 @@ import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
 import { apiGet } from "@/src/lib/api";
 import { createPatient } from "@/src/lib/patients";
+import { getDemoHandoverPrefill } from '@/src/demo/fixtures';
 import type { PatientListItem } from "@/src/types/patientList";
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
@@ -707,12 +708,14 @@ export default function PatientList({ navigation }: Props) {
       }
 
       mark("patientlist.navigate", { patientId: basePatient.id, unitId: unit.id });
+      const demoPrefill = session?.mode === 'demo' ? getDemoHandoverPrefill(basePatient.id) : undefined;
       navigation.navigate("HandoverForm", {
         patientIdParam: basePatient.id,
         unitIdParam: unit.id,
         specialtyId: unit.specialtyId,
         patientId: basePatient.id,
         unitId: selectedUnitId === ALL_UNITS_OPTION ? undefined : selectedUnitId,
+        ...(demoPrefill ? { demoPrefill } : {}),
       });
     },
     [navigation, patientById, selectedUnitId, session]

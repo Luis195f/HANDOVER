@@ -28,6 +28,7 @@ type Props = {
   administrativeUnitId?: string;
   getSignaturePayload?: () => unknown;
   disableOutgoingAction?: boolean;
+  allowedSignatureKind?: SignatureKind;
 };
 
 type SignatureKind = 'outgoing' | 'incoming';
@@ -91,6 +92,7 @@ export function SignaturesSection({
   administrativeUnitId,
   getSignaturePayload,
   disableOutgoingAction,
+  allowedSignatureKind,
 }: Props) {
   const outgoing = value?.outgoing;
   const incoming = value?.incoming;
@@ -105,7 +107,7 @@ export function SignaturesSection({
   );
 
   const applySignature = (kind: SignatureKind) => {
-    if (!currentUser || !activeUnitId) return;
+    if (!currentUser || !activeUnitId || (allowedSignatureKind && allowedSignatureKind !== kind)) return;
     const timestamp = new Date().toISOString();
     const contentToSign = JSON.stringify(getSignaturePayload?.() ?? {});
     const signatureHash = hashHex(`${contentToSign}${timestamp}`);
@@ -160,7 +162,7 @@ export function SignaturesSection({
         ) : (
           <View>
             <Text style={styles.emptyText}>{t('signatures.noSignature')}</Text>
-            {canSignWithUnit && !(isOutgoing && disableOutgoingAction) ? (
+            {canSignWithUnit && (!allowedSignatureKind || allowedSignatureKind === kind) && !(isOutgoing && disableOutgoingAction) ? (
               <View style={styles.action}>
                 <Button
                   title={isOutgoing ? t('signatures.signOutgoing') : t('signatures.signIncoming')}

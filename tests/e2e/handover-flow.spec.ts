@@ -138,15 +138,19 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await evolution.fill('Evolución sintética E2E sin datos clínicos reales.');
   await expect(evolution).toHaveValue('Evolución sintética E2E sin datos clínicos reales.');
 
+  await page.getByRole('button', { name: 'Sección Datos del turno. Contraída.' }).click();
   await page.getByTestId('handover-administrative-unit').fill('sjd-a');
   await page.getByTestId('handover-staffIn').fill('Profesional receptora demo');
   await page.getByTestId('handover-staffOut').fill('Profesional saliente demo');
+  await page.getByRole('button', { name: 'Sección Nutrición. Contraída.' }).click();
   await page.getByTestId('nutrition.dietType.trigger').click();
   await page.getByTestId('nutrition.dietType.option.oral').click();
   await expect(page.getByTestId('nutrition.dietType.trigger')).toContainText('Oral');
+  await page.getByRole('button', { name: 'Sección Psicosocial. Contraída.' }).click();
   await page.getByTestId('psychosocial-emotional-status').fill('Estable en escenario sintético E2E.');
   await page.getByTestId('psychosocial-family-notes').fill('Sin datos familiares reales.');
 
+  await page.getByRole('button', { name: 'Sección Diagnósticos médicos/ enfermería. Contraída.' }).click();
   const diagnosisSearch = page.getByTestId('diagnosis-search-dxMedicalStructured');
   await diagnosisSearch.fill('Sepsis');
   await page.getByTestId(`diagnosis-suggestion-SNOMED-${SNOMED_SEPSIS_CODE}`).click();

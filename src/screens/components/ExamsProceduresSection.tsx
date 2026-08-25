@@ -250,7 +250,7 @@ export function ExamsProceduresSection() {
             <TextInput
               accessibilityLabel="Hora objetivo de examen"
               style={styles.input}
-              placeholder="2026-03-19T11:00:00Z"
+              placeholder="2026-08-27T11:00:00Z"
               value={nextExam.dueBy ?? ''}
               onChangeText={(text) => setNextExam((prev) => ({ ...prev, dueBy: text }))}
             />
@@ -360,7 +360,7 @@ export function ExamsProceduresSection() {
             <TextInput
               accessibilityLabel="Hora de procedimiento"
               style={styles.input}
-              placeholder="2026-03-19T12:00:00Z"
+              placeholder="2026-08-27T12:00:00Z"
               value={nextProcedure.scheduledFor ?? ''}
               onChangeText={(text) => setNextProcedure((prev) => ({ ...prev, scheduledFor: text }))}
             />
