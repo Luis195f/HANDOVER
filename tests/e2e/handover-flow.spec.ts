@@ -26,6 +26,13 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   const unexpectedNetworkUrls: string[] = [];
   const fhirBundles: string[] = [];
   let loadedExpoJavaScriptBytes = 0;
+  const acceptedConfirmationMessages: string[] = [];
+
+  page.on('dialog', (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    acceptedConfirmationMessages.push(dialog.message());
+    void dialog.accept();
+  });
 
   page.on('request', (request) => {
     const url = new URL(request.url());
@@ -113,6 +120,13 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect(page.getByText('Modo demo - datos ficticios')).toBeVisible();
   await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional saliente demo');
 
+  const consentSwitch = page.getByRole('switch', { name: /Consentimiento de privacidad|Privacy consent/ });
+  const skipTutorial = page.getByRole('button', { name: /Saltar tutorial|Skip tutorial/ });
+  await consentSwitch.click();
+  await skipTutorial.click();
+  await expect.poll(() => acceptedConfirmationMessages.length).toBe(1);
+  await expect(skipTutorial).toHaveCount(0, { timeout: 15_000 });
+
   await page.getByRole('button', { name: 'Psiquiatria y salud mental', exact: true }).click();
   const patientCard = page.getByTestId('patient-card-demo-psych-adult-001');
   await expect(patientCard).toBeVisible();
@@ -166,7 +180,8 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
 
   await page.getByTestId('demo-switch-actor').click();
   await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional receptora demo');
-  await page.getByTestId('e2e-confirm-incoming-attestation').click();
+  await page.getByText(/Atestar como enfermera entrante|Attest as incoming nurse/).click();
+  await expect.poll(() => acceptedConfirmationMessages.length).toBe(2);
   await expect(page.getByTestId('signature-incoming-user')).toContainText('Profesional receptora demo');
   await expect(page.getByTestId('signature-outgoing-user')).not.toHaveText(
     await page.getByTestId('signature-incoming-user').innerText(),
@@ -174,8 +189,7 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
 
   await context.setOffline(true);
   await page.getByTestId('handover-finalize').click();
-  await expect(page.getByTestId('e2e-clinical-closure-confirmation')).toBeVisible();
-  await page.getByTestId('e2e-confirm-clinical-closure').click();
+  await expect.poll(() => acceptedConfirmationMessages.length).toBe(3);
   await expect(page.getByTestId('handover-sync-status')).toBeVisible();
   await expect(page.getByTestId('handover-sync-status')).toContainText(/cola|pendiente|offline|queued/i);
   expect(fhirBundles).toHaveLength(0);

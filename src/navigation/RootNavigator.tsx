@@ -95,7 +95,6 @@ function AuthGate() {
 
   const [onboardingCompleted, setOnboardingCompletedState] = React.useState<boolean | null>(null);
   const [privacyConsent, setPrivacyConsentState] = React.useState<boolean | null>(null);
-  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
   const hasSession = Boolean(session);
 
   React.useEffect(() => {
@@ -147,8 +146,8 @@ function AuthGate() {
   }, [hasSession]);
 
   // Splash mientras hidrata auth + flags (si hay sesión)
-  const onboardingReady = isE2E ? true : onboardingCompleted;
-  const consentReady = isE2E ? true : privacyConsent;
+  const onboardingReady = onboardingCompleted;
+  const consentReady = privacyConsent;
 
   if (loading || (session && (onboardingReady === null || consentReady === null))) {
     return (
@@ -206,10 +205,11 @@ if (!allowedAppEntry) {
             <OnboardingScreen
               {...props}
               onComplete={async () => {
-                // ✅ solo onboarding; el consentimiento se maneja en PrivacyConsentScreen
+                setPrivacyConsentState(true);
                 setOnboardingCompletedState(true);
               }}
               nextRoute={postOnboardingRoute}
+              syntheticDemo={isDemo}
             />
           )}
         </Stack.Screen>

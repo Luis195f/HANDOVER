@@ -8,6 +8,7 @@ import OnboardingScreen from '@/src/screens/OnboardingScreen';
 import RootNavigator from '@/src/navigation/RootNavigator';
 import { getOnboardingCompleted, setOnboardingCompleted } from '@/src/lib/onboarding-storage';
 import { hasPrivacyConsent, setPrivacyConsent } from '@/src/lib/privacy-consent';
+import { confirmAction } from '@/src/lib/platform-confirm';
 import { useAuth } from '@/src/security/auth';
 
 vi.mock('@/src/lib/onboarding-storage', () => ({
@@ -18,6 +19,10 @@ vi.mock('@/src/lib/onboarding-storage', () => ({
 vi.mock('@/src/lib/privacy-consent', () => ({
   hasPrivacyConsent: vi.fn(),
   setPrivacyConsent: vi.fn(),
+}));
+
+vi.mock('@/src/lib/platform-confirm', () => ({
+  confirmAction: vi.fn(async () => true),
 }));
 
 vi.mock('@/src/security/auth', () => ({
@@ -107,6 +112,7 @@ describe('OnboardingScreen', () => {
       expect(navigationMock.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'PatientList' }] });
     });
   });
+
 
   it('bloquea completar sin consentimiento', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => {});

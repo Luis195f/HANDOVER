@@ -1,9 +1,9 @@
 import React from 'react';
-import { Alert } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEMO_ACTORS } from '@/src/demo/fixtures';
+import { confirmAction } from '@/src/lib/platform-confirm';
 import { SignaturesSection } from '@/src/screens/components/SignaturesSection';
 import type { HandoverValues } from '@/src/validation/schemas';
 
@@ -11,15 +11,17 @@ vi.mock('@/src/i18n', () => ({
   t: (key: string) => key,
 }));
 
+vi.mock('@/src/lib/platform-confirm', () => ({
+  confirmAction: vi.fn(),
+}));
+
 describe('SignaturesSection demo actors', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('captures outgoing A and incoming B through the existing session attestation flow', () => {
-    vi.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
-      buttons?.find((button) => button.text === 'signatures.confirm')?.onPress?.();
-    });
+  it('captures outgoing A and incoming B through accepted confirmations', async () => {
+    vi.mocked(confirmAction).mockResolvedValue(true);
     const onChange = vi.fn();
     const [outgoingActor, incomingActor] = DEMO_ACTORS;
     const ui = render(
@@ -31,6 +33,7 @@ describe('SignaturesSection demo actors', () => {
     );
 
     fireEvent.press(ui.getByText('signatures.signOutgoing'));
+    await act(async () => undefined);
     const outgoingValue = onChange.mock.calls[0]?.[0] as HandoverValues['signatures'];
     expect(outgoingValue?.outgoing).toMatchObject({
       userId: outgoingActor.userId,
@@ -49,6 +52,7 @@ describe('SignaturesSection demo actors', () => {
       );
     });
     fireEvent.press(ui.getByText('signatures.signIncoming'));
+    await act(async () => undefined);
 
     const completedValue = onChange.mock.calls[1]?.[0] as HandoverValues['signatures'];
     expect(completedValue?.outgoing?.userId).toBe(outgoingActor.userId);
@@ -59,7 +63,8 @@ describe('SignaturesSection demo actors', () => {
     });
   });
 
-  it('uses the same incoming attestation mutation from the demo E2E confirmation', () => {
+  it('does not capture incoming B when the confirmation is cancelled', async () => {
+    vi.mocked(confirmAction).mockResolvedValue(false);
     const onChange = vi.fn();
     const [outgoingActor, incomingActor] = DEMO_ACTORS;
     const outgoing = {
@@ -76,18 +81,13 @@ describe('SignaturesSection demo actors', () => {
         currentUser={incomingActor}
         administrativeUnitId={incomingActor.units[0]}
         onChange={onChange}
-        allowE2EIncomingConfirmation
       />,
     );
 
-    fireEvent.press(ui.getByTestId('e2e-confirm-incoming-attestation'));
+    fireEvent.press(ui.getByText('signatures.signIncoming'));
+    await act(async () => undefined);
 
-    const completedValue = onChange.mock.calls[0]?.[0] as HandoverValues['signatures'];
-    expect(completedValue?.outgoing?.userId).toBe(outgoingActor.userId);
-    expect(completedValue?.incoming).toMatchObject({
-      userId: incomingActor.userId,
-      role: 'nurse',
-      method: 'session',
-    });
+    expect(confirmAction).toHaveBeenCalledOnce();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
