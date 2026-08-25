@@ -81,10 +81,6 @@ describe('HandoverOverview', () => {
         onRetrySync={() => {}}
         onOpenLogin={() => {}}
         onOpenSyncCenter={() => {}}
-        isE2E={false}
-        onSetFinalStatus={() => {}}
-        onAddSignature={() => {}}
-        onCompleteChecklist={() => {}}
         profileRuntime={profileRuntime}
         bannerSummary={null}
         bannerLoading={false}

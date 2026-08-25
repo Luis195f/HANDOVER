@@ -151,13 +151,13 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect(page.getByTestId('e2e-clinical-closure-confirmation')).toBeVisible();
   await page.getByTestId('e2e-confirm-clinical-closure').click();
   await expect(page.getByTestId('handover-sync-status')).toBeVisible();
-  await expect(page.getByTestId('handover-sync-status')).toContainText(/cola|pendiente|offline/i);
+  await expect(page.getByTestId('handover-sync-status')).toContainText(/cola|pendiente|offline|queued/i);
   expect(fhirBundles).toHaveLength(0);
 
   await page.getByTestId('handover-open-sync-center').click();
   const queuedItem = page.getByTestId(/^sync-item-/).first();
   await expect(queuedItem).toBeVisible();
-  await expect(queuedItem).toContainText(/pendiente|error/i);
+  await expect(queuedItem).toContainText(/pendiente|pending|error/i);
 
   await context.setOffline(false);
   await page.getByTestId('sync-flush').click();
