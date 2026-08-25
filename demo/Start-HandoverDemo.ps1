@@ -16,7 +16,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:ExpectedBranch = 'release/mvp-advanced-demo-rc'
+$script:ExpectedBranch = 'fix/p0-web-demo-interactions'
 $script:WebPort = 19006
 $script:LoopbackPort = 19007
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

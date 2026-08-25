@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HandoverForm from '@/src/screens/HandoverForm';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
+import { confirmAction } from '@/src/lib/platform-confirm';
+
+vi.mock('@/src/lib/platform-confirm', () => ({
+  confirmAction: vi.fn(),
+}));
 
 vi.mock('react-hook-form', async () => {
   const actual = await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
@@ -47,6 +52,7 @@ vi.mock('react-hook-form', async () => {
 const enqueueBundle = vi.fn();
 const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
 const ensureUnitAccess = vi.fn();
+const validSubmission = vi.fn();
 const mockSession = {
   userId: 'nurse-1',
   displayName: 'Nurse One',
@@ -71,6 +77,10 @@ vi.mock('@/src/security/acl', () => ({ ensureUnitAccess: (...args: unknown[]) =>
 vi.mock('@/src/lib/queue', () => ({ enqueueBundle: (...args: unknown[]) => enqueueBundle(...args) }));
 vi.mock('@/src/lib/fhir-map', () => ({
   buildHandoverBundleAsync: (...args: unknown[]) => buildHandoverBundleAsync(...args),
+}));
+vi.mock('@/src/lib/scores/handoverRisk', () => ({
+  confirmHighRiskSubmission: vi.fn(async () => true),
+  deriveRiskEvaluationFromValues: vi.fn(() => ({ level: 'low', reasons: [] })),
 }));
 
 vi.mock('@/src/lib/audit', () => ({
@@ -136,6 +146,8 @@ describe('HandoverForm signatures', () => {
     enqueueBundle.mockReset();
     buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
+    validSubmission.mockReset();
+    vi.mocked(confirmAction).mockReset();
     mockSession.roles = ['nurse'];
     mockSession.user.roles = ['nurse'];
     formValues = {
@@ -148,12 +160,13 @@ describe('HandoverForm signatures', () => {
     };
     mockUseZodForm.mockReturnValue({
       control: {},
-      formState: { errors: {} },
+      formState: { errors: {}, dirtyFields: {}, isSubmitting: false },
       handleSubmit: (onValid: any, onInvalid?: any) => () => {
         if (formValues.status === 'final' && !formValues.signatures?.outgoing) {
           onInvalid?.({});
           return;
         }
+        validSubmission();
         return onValid(formValues);
       },
       getValues: (field?: string) => (field ? formValues[field] : formValues),
@@ -292,6 +305,8 @@ describe('HandoverForm signatures', () => {
     expect(queryByTestId('e2e-set-final')).toBeNull();
     expect(queryByTestId('e2e-add-signature')).toBeNull();
     expect(queryByTestId('e2e-complete-checklist')).toBeNull();
+    expect(queryByTestId('e2e-confirm-incoming-attestation')).toBeNull();
+    expect(queryByTestId('e2e-confirm-clinical-closure')).toBeNull();
 
     if (originalE2E === undefined) {
       delete process.env.EXPO_PUBLIC_E2E;
@@ -381,5 +396,74 @@ describe('HandoverForm signatures', () => {
     });
 
     alertSpy.mockRestore();
+  });
+
+  it('finaliza el cierre cuando la confirmación es aceptada', async () => {
+    vi.mocked(confirmAction).mockResolvedValue(true);
+    formValues.status = 'final';
+    formValues.bedsideChecklist = {
+      patientIdentityConfirmed: true,
+      allergiesReviewed: true,
+      linesAndDevicesChecked: true,
+      medicationPlanReviewed: true,
+      safetyMeasuresApplied: true,
+      questionsAnswered: true,
+    };
+    formValues.signatures = {
+      outgoing: {
+        userId: 'nurse-1', fullName: 'Nurse One', unitId: 'unit-1',
+        signedAt: '2025-01-05T10:30:00.000Z', imageBase64: 'mock-signature', method: 'session',
+      },
+      incoming: {
+        userId: 'nurse-2', fullName: 'Nurse Two', unitId: 'unit-1',
+        signedAt: '2025-01-05T10:35:00.000Z', method: 'session',
+      },
+    };
+    const { getByText } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '8', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    fireEvent.press(getByText('Finalizar entrega'));
+
+    await waitFor(() => expect(validSubmission).toHaveBeenCalledOnce());
+  });
+
+  it('no finaliza el cierre cuando la confirmación es cancelada', async () => {
+    vi.mocked(confirmAction).mockResolvedValue(false);
+    formValues.status = 'final';
+    formValues.bedsideChecklist = {
+      patientIdentityConfirmed: true,
+      allergiesReviewed: true,
+      linesAndDevicesChecked: true,
+      medicationPlanReviewed: true,
+      safetyMeasuresApplied: true,
+      questionsAnswered: true,
+    };
+    formValues.signatures = {
+      outgoing: {
+        userId: 'nurse-1', fullName: 'Nurse One', unitId: 'unit-1',
+        signedAt: '2025-01-05T10:30:00.000Z', imageBase64: 'mock-signature', method: 'session',
+      },
+      incoming: {
+        userId: 'nurse-2', fullName: 'Nurse Two', unitId: 'unit-1',
+        signedAt: '2025-01-05T10:35:00.000Z', method: 'session',
+      },
+    };
+    const { getByText } = render(
+      <HandoverForm
+        navigation={{ navigate: vi.fn() } as any}
+        route={{ key: '9', name: 'HandoverForm', params: { patientId: 'P1', unitId: 'unit-1' } } as any}
+      />,
+    );
+
+    fireEvent.press(getByText('Finalizar entrega'));
+
+    await waitFor(() => expect(confirmAction).toHaveBeenCalledOnce());
+    expect(validSubmission).not.toHaveBeenCalled();
+    expect(buildHandoverBundleAsync).not.toHaveBeenCalled();
+    expect(enqueueBundle).not.toHaveBeenCalled();
   });
 });
