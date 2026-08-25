@@ -29,6 +29,7 @@ import { HANDOVER_SECTIONS_INFO, resolveHandoverProfileRuntime } from '@/src/lib
 import AudioAttach from '@/src/components/AudioAttach';
 import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
+import { confirmAction } from '@/src/lib/platform-confirm';
 import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type HandoverValues as FhirHandoverValues } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
@@ -422,7 +423,6 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [activeSection, setActiveSection] = useState<SectionKey | null>(ALL_SECTIONS_INFO[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
   const [bedsideChecklistHighlightMissing, setBedsideChecklistHighlightMissing] = useState(false);
-  const [e2eClosureConfirmationPending, setE2EClosureConfirmationPending] = useState(false);
   const timingInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -696,8 +696,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     'braden',
     'oxygenTherapy',
   ]);
-  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
-  const isE2EDemo = isE2E && (authSession?.mode === 'demo' || session?.mode === 'demo');
   const watchedValues = form.watch();
 
   useEffect(() => {
@@ -2116,15 +2114,17 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const handleConfirmedClosure = () => {
-    setE2EClosureConfirmationPending(false);
     onSubmit();
   };
 
-  const confirmClosureAttestation = () => {
-    Alert.alert(t('handover.legalConfirmTitle'), t('handover.legalConfirmMessage'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('handover.legalConfirmAction'), style: 'default', onPress: handleConfirmedClosure },
-    ]);
+  const confirmClosureAttestation = async () => {
+    const confirmed = await confirmAction({
+      title: t('handover.legalConfirmTitle'),
+      message: t('handover.legalConfirmMessage'),
+      confirmText: t('handover.legalConfirmAction'),
+      cancelText: t('common.cancel'),
+    });
+    if (confirmed) handleConfirmedClosure();
   };
 
   const finalizeSubmission = async () => {
@@ -2134,11 +2134,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       Alert.alert(attestationAlert.title, attestationAlert.message);
       return;
     }
-    if (isE2EDemo) {
-      setE2EClosureConfirmationPending(true);
-      return;
-    }
-    confirmClosureAttestation();
+    await confirmClosureAttestation();
   };
 
   const handleSaveDraft = () => {
@@ -2937,9 +2933,6 @@ export default function HandoverForm({ navigation, route }: Props) {
         onFinalize={handleFinalize}
         finalizeDisabled={formState.isSubmitting || hasValidationErrors}
         onBeforeExport={handleValidateForExport}
-        allowE2EConfirmation={isE2EDemo}
-        showE2EClosureConfirmation={isE2EDemo && e2eClosureConfirmationPending}
-        onConfirmClosure={handleConfirmedClosure}
       />
       </ScrollView>
       </View>

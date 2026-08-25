@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { Alert, Button, StyleSheet, Text, View } from 'react-native';
+import { Button, StyleSheet, Text, View } from 'react-native';
 
 import { hashHex } from '@/src/lib/crypto';
+import { confirmAction } from '@/src/lib/platform-confirm';
 import type { HandoverSignature } from '@/src/types/handover';
 import type { HandoverValues } from '@/src/validation/schemas';
 import { t } from '@/src/i18n';
@@ -27,7 +28,6 @@ type Props = {
   administrativeUnitId?: string;
   getSignaturePayload?: () => unknown;
   disableOutgoingAction?: boolean;
-  allowE2EIncomingConfirmation?: boolean;
 };
 
 type SignatureKind = 'outgoing' | 'incoming';
@@ -91,7 +91,6 @@ export function SignaturesSection({
   administrativeUnitId,
   getSignaturePayload,
   disableOutgoingAction,
-  allowE2EIncomingConfirmation,
 }: Props) {
   const outgoing = value?.outgoing;
   const incoming = value?.incoming;
@@ -122,19 +121,18 @@ export function SignaturesSection({
     });
   };
 
-  const confirmSignature = (kind: SignatureKind) => {
+  const confirmSignature = async (kind: SignatureKind) => {
     const message =
       kind === 'outgoing'
         ? t('signatures.confirmOutgoingMessage')
         : t('signatures.confirmIncomingMessage');
-    Alert.alert(t('signatures.confirmTitle'), message, [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('signatures.confirm'),
-        style: 'default',
-        onPress: () => applySignature(kind),
-      },
-    ]);
+    const confirmed = await confirmAction({
+      title: t('signatures.confirmTitle'),
+      message,
+      confirmText: t('signatures.confirm'),
+      cancelText: t('common.cancel'),
+    });
+    if (confirmed) applySignature(kind);
   };
 
   const renderBlock = (kind: SignatureKind, signature?: HandoverSignature | null) => {
@@ -166,16 +164,7 @@ export function SignaturesSection({
               <View style={styles.action}>
                 <Button
                   title={isOutgoing ? t('signatures.signOutgoing') : t('signatures.signIncoming')}
-                  onPress={() => confirmSignature(kind)}
-                />
-              </View>
-            ) : null}
-            {!isOutgoing && canSignWithUnit && allowE2EIncomingConfirmation ? (
-              <View style={styles.action}>
-                <Button
-                  title="Confirmar atestación entrante"
-                  onPress={() => applySignature('incoming')}
-                  testID="e2e-confirm-incoming-attestation"
+                  onPress={() => void confirmSignature(kind)}
                 />
               </View>
             ) : null}

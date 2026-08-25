@@ -14,11 +14,13 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import { setOnboardingCompleted } from "@/src/lib/onboarding-storage";
+import { confirmAction } from "@/src/lib/platform-confirm";
 import { hasPrivacyConsent, setPrivacyConsent } from "@/src/lib/privacy-consent";
 import type { RootStackParamList } from "@/src/navigation/types";
 import { t, useTranslation } from "@/src/i18n";
 
 type OnboardingStep = {
+  id: string;
   title: string;
   description: string;
   icon: string;
@@ -27,33 +29,40 @@ type OnboardingStep = {
 type Props = NativeStackScreenProps<RootStackParamList, "Onboarding"> & {
   onComplete?: () => Promise<void> | void;
   nextRoute?: keyof RootStackParamList;
+  syntheticDemo?: boolean;
 };
 
 const { width } = Dimensions.get("window");
 
 // BEGIN HANDOVER: ONBOARDING
 const STEP_DEFS = [
-  { titleKey: "onboarding.steps.welcome.title", descriptionKey: "onboarding.steps.welcome.description", icon: "👋" },
-  { titleKey: "onboarding.steps.form.title", descriptionKey: "onboarding.steps.form.description", icon: "📋" },
-  { titleKey: "onboarding.steps.offline.title", descriptionKey: "onboarding.steps.offline.description", icon: "📶" },
-  { titleKey: "onboarding.steps.qr.title", descriptionKey: "onboarding.steps.qr.description", icon: "🎯" },
-  { titleKey: "onboarding.steps.sync.title", descriptionKey: "onboarding.steps.sync.description", icon: "🔒" },
+  { id: "welcome", titleKey: "onboarding.steps.welcome.title", descriptionKey: "onboarding.steps.welcome.description", icon: "👋" },
+  { id: "form", titleKey: "onboarding.steps.form.title", descriptionKey: "onboarding.steps.form.description", icon: "📋" },
+  { id: "offline", titleKey: "onboarding.steps.offline.title", descriptionKey: "onboarding.steps.offline.description", icon: "📶" },
+  { id: "qr", titleKey: "onboarding.steps.qr.title", descriptionKey: "onboarding.steps.qr.description", icon: "🎯" },
+  { id: "sync", titleKey: "onboarding.steps.sync.title", descriptionKey: "onboarding.steps.sync.description", icon: "🔒" },
 ];
 // END HANDOVER: ONBOARDING
 
-export default function OnboardingScreen({ navigation, onComplete, nextRoute = "PatientList" }: Props) {
+export default function OnboardingScreen({
+  navigation,
+  onComplete,
+  nextRoute = "PatientList",
+  syntheticDemo = false,
+}: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const listRef = useRef<FlatList<OnboardingStep> | null>(null);
   const [consent, setConsent] = useState(false);
   const { i18n } = useTranslation();
   const steps = useMemo<OnboardingStep[]>(
     () =>
-      STEP_DEFS.map((step) => ({
+      STEP_DEFS.filter((step) => !(syntheticDemo && step.id === "qr")).map((step) => ({
+        id: step.id,
         title: t(step.titleKey),
         description: t(step.descriptionKey),
         icon: step.icon,
       })),
-    [i18n.language],
+    [i18n.language, syntheticDemo],
   );
 
   const isLastStep = currentIndex >= steps.length - 1;
@@ -82,13 +91,21 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
 
   const handleComplete = async () => {
     if (!requireConsent()) return;
-    await setOnboardingCompleted(true);
     await setPrivacyConsent(true);
-    if (onComplete) await onComplete();
+    await setOnboardingCompleted(true);
     navigation.reset({ index: 0, routes: [{ name: nextRoute }] });
+    if (onComplete) await onComplete();
   };
 
   const handleSkip = async () => {
+    if (!requireConsent()) return;
+    const confirmed = await confirmAction({
+      title: t("onboarding.skipConfirmTitle"),
+      message: t("onboarding.skipConfirmMessage"),
+      confirmText: t("onboarding.skipConfirmAction"),
+      cancelText: t("common.cancel"),
+    });
+    if (!confirmed) return;
     await handleComplete();
   };
 
@@ -133,7 +150,7 @@ export default function OnboardingScreen({ navigation, onComplete, nextRoute = "
       <FlatList
         ref={listRef}
         data={steps}
-        keyExtractor={(item) => item.title}
+        keyExtractor={(item) => item.id}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}

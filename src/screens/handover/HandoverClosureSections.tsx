@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Text, View, type LayoutChangeEvent, type TextStyle, type ViewStyle } from 'react-native';
+import { Text, View, type LayoutChangeEvent, type TextStyle, type ViewStyle } from 'react-native';
 import { useFormContext } from 'react-hook-form';
 
 import { SignaturePad, type SignaturePadValue } from '@/src/components/SignaturePad';
@@ -43,9 +43,6 @@ type Props = {
   onFinalize: () => void;
   finalizeDisabled: boolean;
   onBeforeExport: () => Promise<boolean> | boolean;
-  allowE2EConfirmation: boolean;
-  showE2EClosureConfirmation: boolean;
-  onConfirmClosure: () => void;
 };
 
 export function HandoverClosureSections({
@@ -72,9 +69,6 @@ export function HandoverClosureSections({
   onFinalize,
   finalizeDisabled,
   onBeforeExport,
-  allowE2EConfirmation,
-  showE2EClosureConfirmation,
-  onConfirmClosure,
 }: Props) {
   const form = useFormContext<HandoverValues>();
   const signaturesValue = form.watch('signatures');
@@ -184,7 +178,6 @@ export function HandoverClosureSections({
             administrativeUnitId={administrativeUnitId}
             getSignaturePayload={() => form.getValues()}
             disableOutgoingAction
-            allowE2EIncomingConfirmation={allowE2EConfirmation}
           />
 
           {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}
@@ -202,15 +195,6 @@ export function HandoverClosureSections({
           onBeforeExport={onBeforeExport}
         />
       </View>
-      {showE2EClosureConfirmation ? (
-        <View testID="e2e-clinical-closure-confirmation" style={styles.buttonRow}>
-          <Button
-            title={t('handover.legalConfirmAction')}
-            onPress={onConfirmClosure}
-            testID="e2e-confirm-clinical-closure"
-          />
-        </View>
-      ) : null}
     </>
   );
 }
