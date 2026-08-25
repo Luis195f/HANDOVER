@@ -1,83 +1,104 @@
-# MVP Demo / Piloto (5–7 min)
+# Demo MVP avanzada: salud mental (Windows / PowerShell)
 
-> Para el trabajo especifico del demo de salud mental, usa ademas [`docs/behavioral-health-demo-scope.md`](./behavioral-health-demo-scope.md). Ese documento fija alcance, limites y guardrails del seam de `behavioral-health`; este archivo sigue describiendo el walkthrough generico hoy soportado por el repo.
+Este runbook prepara exclusivamente la presentación sintética de salud mental del 27-28 de agosto. Mantiene un único HANDOVER Core con el runtime `behavioral-health`; no utiliza Django, HCE/FHIR institucional, datos reales, IA externa, telemetría ni scoring/writeback ICEA.
 
-> **Objetivo**: demostrar flujo clínico SBAR, offline queue, auditoría y FHIR con datos sintéticos.
+Consulta también [`docs/behavioral-health-demo-scope.md`](./behavioral-health-demo-scope.md) para el alcance clínico prudente.
 
-## Requisitos
+## Requisitos ya instalados
 
-- Node 20 + pnpm
-- Python 3.11+ (Django)
-- Datos **sintéticos** únicamente (sin PHI/PII real)
+- Windows con PowerShell 7 (`pwsh`).
+- Node.js y las dependencias del repositorio ya presentes en `node_modules`.
+- Microsoft Edge instalado para smoke o contingencia headed.
+- Rama exacta `release/mvp-advanced-demo-rc`.
+- Puertos loopback `19006` y `19007` libres.
 
-## Setup rápido (local)
+El launcher comprueba estos requisitos y nunca instala dependencias o navegadores. No modifica `.env` ni inicia Django.
 
-```bash
-pnpm -w install
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
+## Arranque reproducible
+
+Desde `C:\h\HANDOVER-COPIA-DEMO-2026-08-25`:
+
+```powershell
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Start
 ```
 
-En otra terminal:
+El launcher inicia Expo Web real en:
 
-```bash
-pnpm expo start
+```text
+http://127.0.0.1:19006/
 ```
 
-### Variables de entorno de ejemplo (sin secretos)
+OIDC/API/FHIR sintéticos quedan limitados a `http://127.0.0.1:19007`. Las variables se aplican solo a los procesos hijos: demo activada, `EXPO_PUBLIC_E2E=false`, QR desactivado, ICEA desactivado, IA externa desactivada y telemetría Expo desactivada. El launcher espera HTML y un bundle JavaScript real mayor de 800 bytes antes de mostrar la URL y permanece en primer plano.
 
-```bash
-# Backend (Django/DRF)
-export HANDOVER_ALLOWED_ORIGINS="http://localhost"
-export HANDOVER_FHIR_VALIDATION_MODE=off
+## Recorrido de 5-7 minutos
 
-# Frontend
-export EXPO_PUBLIC_API_BASE_URL="http://localhost:8000"
-export EXPO_PUBLIC_SESSION_IDLE_MINUTES=15
-export EXPO_PUBLIC_SESSION_HARD_MINUTES=30
+1. Pulsa **Entrar en modo demo** y señala el banner **Modo demo - datos ficticios**.
+2. Abre **Psiquiatría y salud mental** y selecciona el paciente adulto sintético. No muestres ni menciones QR.
+3. Explica el relevo único de continuidad, completa una evolución sintética y selecciona un diagnóstico SNOMED del catálogo.
+4. Revisa el checklist del relevo y finaliza con la firma del actor A, siempre como demostración técnica con datos ficticios.
+5. Cambia al actor B de demo, confirma su identidad y registra la atestación diferenciada.
+6. Simula offline, finaliza para dejar el Bundle en cola y muestra el estado pendiente sin servicios institucionales.
+7. Reconecta, abre el centro de sincronización y ejecuta el replay hasta vaciar la cola.
+
+No presentar QR, integración institucional, datos reales, producción, validación clínica/regulatoria ni ICEA individual o punitivo.
+
+## Cierre y limpieza
+
+Con el launcher en primer plano, pulsa `Ctrl+C`; el bloque de cierre elimina todos sus procesos. Desde otra terminal también se puede ejecutar:
+
+```powershell
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Stop
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Clean
 ```
 
-## Dataset sintético
+`Stop` solo termina PIDs registrados por el launcher y valida su hora de inicio para evitar PID reutilizado. `Clean` solo elimina `.tmp\handover-demo` después de comprobar que la ruta continúa dentro del temporal ignorado del repositorio.
 
-Los bundles FHIR de demo están en `demo/fhir-bundles/`:
+## Export local
 
-- `case-medical.json`
-- `case-postop.json`
-- `case-oncology-acute.json`
-- `case-geriatrics.json`
-
-Cargar un bundle (requiere token válido si el backend tiene JWT activo):
-
-```bash
-curl -X POST http://localhost:8000/api/fhir/transaction \
-  -H "Content-Type: application/fhir+json" \
-  -H "Authorization: Bearer <TOKEN_DEMO>" \
-  --data-binary @demo/fhir-bundles/case-medical.json
+```powershell
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Export
 ```
 
-## Guion demo (5–7 min)
+El export de Expo Web se crea en `.tmp\handover-demo\export`, comprueba HTML y assets JavaScript reales, y permanece ignorado por Git. Para otro nombre seguro dentro del mismo temporal:
 
-1. **Login** con usuario de demo.
-2. **Crear handover SBAR**: abrir un paciente del listado, completar Situation/Background/Assessment/Recommendation.
-3. **Adjuntar nota dummy**: usar el adjunto de archivo o nota breve (sin datos reales).
-4. **Offline → encolar → online → sync**:
-   - Desactiva conectividad (modo avión o deshabilitar red).
-   - Guarda el handover y verifica que queda en cola offline.
-   - Reactiva conectividad y abre `Sync Center` para sincronizar.
-5. **Auditoría**:
-   - Abrir pantalla de auditoría y mostrar eventos con hash/tamaño (sin PHI).
-
-## Validación rápida de SBAR IA (opcional)
-
-Con el backend de IA activo:
-
-```bash
-curl -X POST http://localhost:8000/ai/summarize-sbar \
-  -H "Content-Type: application/json" \
-  -d '{"language":"es","free_text":"Dolor leve, sin incidencias.","context":{"vitals":"TA 120/70"}}'
+```powershell
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Export -ExportName ensayo-27-agosto
 ```
 
-La respuesta incluye advertencia de asistente (no diagnóstico/prescripción) en `full_text`.
+## Contingencia con Edge
+
+Si se necesita abrir la ruta real con navegador visible, usa Expo real y Playwright headed con el Edge instalado, sin descargar Chromium:
+
+```powershell
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Start -OpenEdge
+```
+
+La opción usa exclusivamente `chromium.launch({ channel: 'msedge', headless: false })`. `Ctrl+C`, `Stop` y `Clean` también cierran Edge y sus procesos hijos.
+
+## Recuperación de puertos
+
+Primero ejecuta `Stop` y comprueba los listeners:
+
+```powershell
+pwsh -NoProfile -File .\demo\Start-HandoverDemo.ps1 Stop
+Get-NetTCPConnection -State Listen -LocalPort 19006,19007 -ErrorAction SilentlyContinue |
+    Select-Object LocalAddress,LocalPort,OwningProcess
+```
+
+Si queda un listener y no existe estado del launcher, inspecciona su propietario antes de intervenir:
+
+```powershell
+$listener = Get-NetTCPConnection -State Listen -LocalPort 19006,19007 -ErrorAction Stop
+Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" |
+    Select-Object ProcessId,ParentProcessId,Name,CommandLine
+```
+
+No finalices un PID no atribuido al repositorio. El launcher se negará a arrancar mientras cualquiera de los dos puertos esté ocupado.
+
+## Limitaciones declaradas
+
+- Esta es una demo profesional sintética, no un despliegue productivo ni una validación clínica o regulatoria.
+- El recorrido autorizado es únicamente el perfil de salud mental con QR desactivado.
+- Perfiles web que habiliten QR pueden seguir dependiendo de la implementación CDN de `expo-camera`; no se muestran ni utilizan en esta presentación.
+- El loopback responde contratos sintéticos mínimos y no sustituye Django, OIDC, FHIR/HCE ni servicios institucionales.
+- ICEA writeback/scoring, IA externa y telemetría están desactivados; no se presenta scoring individual, nominal o punitivo.
