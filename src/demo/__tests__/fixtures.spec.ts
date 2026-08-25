@@ -77,4 +77,18 @@ describe('demo fixtures', () => {
     const validation = validateBundle(bundle);
     expect(validation.errors).toEqual([]);
   });
+
+  it('limits elimination prefill to the synthetic psychogeriatric case', () => {
+    const psychogeriatric = getDemoHandoverPrefill('demo-psych-udcc-001');
+    const adult = getDemoHandoverPrefill('demo-psych-adult-001');
+
+    expect(psychogeriatric.elimination).toEqual({
+      urineMl: 450,
+      stoolPattern: 'constipation',
+      hasRectalTube: false,
+    });
+    expect(psychogeriatric.devices?.map((device) => device.name)).toContain('Sonda vesical sintetica');
+    expect(psychogeriatric.pendingTasks?.some((task) => task.title.includes('ultima deposicion'))).toBe(true);
+    expect(adult.elimination).toBeUndefined();
+  });
 });

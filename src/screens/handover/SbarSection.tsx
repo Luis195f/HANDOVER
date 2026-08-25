@@ -59,7 +59,12 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
 
   return (
     <>
-      {isDemo ? <Text style={styles.helperText}>Contenido sintético de ejemplo precargado</Text> : null}
+      <Text style={styles.helperText}>
+        {isDemo ? t('handover.sbarSyntheticProvenance') : t('handover.sbarLocalProvenance')}
+      </Text>
+      <View style={styles.inlineActions}>
+        <Button title={t('handover.sbarRegenerate')} onPress={handleGenerateSbarSuggestion} />
+      </View>
       {!isDemo ? <View style={styles.inlineActions}>
         <Button
           title={
@@ -72,9 +77,6 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
           onPress={handleGenerateSbarWithAi}
           disabled={!aiSbarGenerationAvailable || !canUseAiSbarAssist || isGeneratingSbarWithAI}
         />
-        <View style={styles.secondaryButton}>
-          <Button title={t('handover.sbarSuggested')} onPress={handleGenerateSbarSuggestion} />
-        </View>
         <View style={styles.secondaryButton}>
           <Button
             title={
@@ -94,7 +96,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
       </View> : null}
       {!isDemo && aiUnavailableMessage ? <Text style={styles.helperText}>{aiUnavailableMessage}</Text> : null}
       {!isDemo && sbarAiTraceabilityMessage ? <Text style={styles.helperText}>{sbarAiTraceabilityMessage}</Text> : null}
-      {!isDemo && sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
+      {sbarHelperMessage ? <Text style={styles.helperText}>{sbarHelperMessage}</Text> : null}
       {!isDemo && sbarAiError ? <Text style={styles.dictationError}>{sbarAiError}</Text> : null}
       {pendingSbarSuggestionPreview ? (
         <View style={styles.sbarPreview}>
@@ -118,6 +120,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-situation"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -135,6 +138,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-background"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -152,6 +156,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-assessment"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -169,6 +174,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
             <TextInput
               style={[styles.input, styles.textArea]}
               multiline
+              testID="handover-sbar-recommendation"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}

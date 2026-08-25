@@ -128,27 +128,40 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect(skipTutorial).toHaveCount(0, { timeout: 15_000 });
 
   await page.getByRole('button', { name: 'Psiquiatria y salud mental', exact: true }).click();
-  const patientCard = page.getByTestId('patient-card-demo-psych-adult-001');
+  const patientCard = page.getByTestId('patient-card-demo-psych-udcc-001');
   await expect(patientCard).toBeVisible();
   await patientCard.click();
   await expect(page.getByTestId('handover-profile-runtime')).toBeVisible();
   await expect(page.getByTestId('handover-scan-qr')).toHaveCount(0);
+
+  const sbarAssessment = page.getByTestId('handover-sbar-assessment');
+  await expect(sbarAssessment).toHaveValue(/estreñimiento.*dispositivo urinario/i);
+  const sbarSituation = page.getByTestId('handover-sbar-situation');
+  const automaticSituation = await sbarSituation.inputValue();
+  expect(automaticSituation).toContain('Delirium');
+  await sbarSituation.fill(`${automaticSituation} Ajuste profesional E2E preservado.`);
 
   const evolution = page.getByTestId('handover-evolution');
   await evolution.fill('Evolución sintética E2E sin datos clínicos reales.');
   await expect(evolution).toHaveValue('Evolución sintética E2E sin datos clínicos reales.');
 
   await page.getByRole('button', { name: 'Sección Datos del turno. Contraída.' }).click();
-  await page.getByTestId('handover-administrative-unit').fill('sjd-a');
+  await page.getByTestId('handover-administrative-unit').fill('udcc-psychogeriatrics');
   await page.getByTestId('handover-staffIn').fill('Profesional receptora demo');
   await page.getByTestId('handover-staffOut').fill('Profesional saliente demo');
   await page.getByRole('button', { name: 'Sección Nutrición. Contraída.' }).click();
   await page.getByTestId('nutrition.dietType.trigger').click();
   await page.getByTestId('nutrition.dietType.option.oral').click();
   await expect(page.getByTestId('nutrition.dietType.trigger')).toContainText('Oral');
+  const eliminationSection = page.getByRole('button', { name: 'Sección Eliminación. Contraída.' });
+  await expect(eliminationSection).toBeVisible();
+  await eliminationSection.click();
+  await expect(page.getByTestId('elimination.urineMl')).toHaveValue('450');
+  await expect(page.getByTestId('elimination.stoolPattern.trigger')).toContainText('Constipación');
   await page.getByRole('button', { name: 'Sección Psicosocial. Contraída.' }).click();
   await page.getByTestId('psychosocial-emotional-status').fill('Estable en escenario sintético E2E.');
   await page.getByTestId('psychosocial-family-notes').fill('Sin datos familiares reales.');
+  await expect(sbarSituation).toHaveValue(/Ajuste profesional E2E preservado/);
 
   await page.getByRole('button', { name: 'Sección Diagnósticos médicos/ enfermería. Contraída.' }).click();
   const diagnosisSearch = page.getByTestId('diagnosis-search-dxMedicalStructured');
@@ -212,6 +225,12 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   expect(transmittedBundle).toContain(SNOMED_SEPSIS_CODE);
   expect(transmittedBundle).toContain(OUTGOING_ACTOR_ID);
   expect(transmittedBundle).toContain(INCOMING_ACTOR_ID);
+  expect(transmittedBundle).toContain('Ajuste profesional E2E preservado');
+  expect(transmittedBundle).toMatch(
+    /Resumen automático local basado en datos sintéticos|Local automatic summary based on synthetic data/,
+  );
+  expect(transmittedBundle).toContain('constipation');
+  expect(transmittedBundle).toContain('Sonda vesical sintetica');
 
   const observedOrigins = [...observedNetworkOrigins].sort();
   await testInfo.attach('observed-network-origins.json', {

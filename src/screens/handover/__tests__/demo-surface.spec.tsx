@@ -39,6 +39,7 @@ const defaultValues: HandoverValues = {
     },
   ],
   devices: [{ name: 'Andador supervisado', active: true }],
+  elimination: { urineMl: 450, stoolPattern: 'constipation', hasRectalTube: false },
   treatments: [],
   exams: [],
   procedures: [],
@@ -62,8 +63,8 @@ function CollapsePayloadHarness({ onSerialized }: { onSerialized: (value: string
 
   return (
     <FormProvider {...form}>
-      <CollapsibleSection title="Signos vitales" isCollapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} lazy>
-        <TextInput value={String(form.watch('vitals.hr') ?? '')} onChangeText={(value) => form.setValue('vitals.hr', Number(value))} />
+      <CollapsibleSection title="Eliminación" isCollapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} lazy>
+        <TextInput value={String(form.watch('elimination.urineMl') ?? '')} onChangeText={(value) => form.setValue('elimination.urineMl', Number(value))} />
       </CollapsibleSection>
       <TextInput testID="toggle-collapse" onFocus={() => setCollapsed((value) => !value)} />
       <TextInput testID="serialize" onFocus={() => onSerialized(JSON.stringify(buildHandoverInputPayload(form.getValues(), {})))} />
@@ -85,5 +86,6 @@ describe('demo clinical surface', () => {
     expect(serializations).toHaveLength(3);
     expect(serializations[1]).toBe(serializations[0]);
     expect(serializations[2]).toBe(serializations[0]);
+    expect(serializations[0]).toContain('"elimination":{"urineMl":450');
   });
 });

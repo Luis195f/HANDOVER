@@ -17,6 +17,14 @@
   - Legado aceptado: `sbarFullText`.
   - Normalización: si `closingSummary` está vacío y `sbarFullText` tiene contenido, se copia al canónico. Si `sbarFullText` está vacío y `closingSummary` existe, se refleja en legacy.
   - IA SBAR: ahora la generación/refinado llena `closingSummary` para evitar doble fuente de verdad.
+  - SBAR local: al abrir un formulario nuevo con precarga finalizada y sin SBAR previo, `generateSbarSummary` genera una única versión determinística sin red ni IA. La versión existente o editada no se sobrescribe; `Regenerar SBAR` confirma antes de reemplazar cambios profesionales.
+  - Procedencia demo: el resumen indica que se basa en datos sintéticos y que no constituye inferencia clínica de IA.
+
+## Dictado y reescritura
+
+- La ruta de dictado móvil está implementada para iOS/Android mediante grabación Expo y el endpoint configurado; su funcionamiento end-to-end en dispositivo real, con backend y permisos, no fue verificado en esta corrección.
+- Expo Web no está soportado. La escritura permanece disponible y el primer intento de dictado muestra un único aviso; no se repiten errores rojos junto a cada campo ni se incorpora Web Speech API.
+- La reescritura SBAR por IA sigue siendo opcional. Sin backend configurado, sus acciones permanecen explícitamente desactivadas y no bloquean apertura, edición, guardado, cola ni finalización.
 
 - **Glucosa**
   - Unidad UI única: **mg/dL**.

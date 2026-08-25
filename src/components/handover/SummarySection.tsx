@@ -34,7 +34,7 @@ export const SummarySection: React.FC<SummarySectionProps> = ({
   const { control, formState, watch } = useFormContext<HandoverFormValues>();
   const errors = formState.errors ?? {};
   const closingSummaryError = errors.closingSummary?.message as string | undefined;
-  const { activeDictationField, sttStatus, dictationUnavailable, handleDictationPress, renderDictationStatus } =
+  const { activeDictationField, sttStatus, handleDictationPress, renderDictationStatus } =
     dictationState;
 
   return (
@@ -59,7 +59,6 @@ export const SummarySection: React.FC<SummarySectionProps> = ({
         </View>
         <DictationMicButton
           active={activeDictationField === 'closingSummary' && sttStatus === 'listening'}
-          disabled={dictationUnavailable}
           label="Dictar cierre"
           onPress={() =>
             handleDictationPress('closingSummary', {

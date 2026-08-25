@@ -202,7 +202,10 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
       unitId: 'udcc-psychogeriatrics',
       bedLabel: 'PG-03',
       vitals: { rr: 17, spo2: 96, tempC: 36.5, sbp: 124, hr: 79, o2: false, avpu: 'A' },
-      devices: [{ id: 'dev-demo-udcc-walker', label: 'Andador supervisado', category: 'support' }],
+      devices: [
+        { id: 'dev-demo-udcc-walker', label: 'Andador supervisado', category: 'support' },
+        { id: 'dev-demo-udcc-urinary', label: 'Sonda vesical sintetica', category: 'invasive' },
+      ],
       risks: { fall: true },
       pendingTasks: [
         {
@@ -215,7 +218,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
         },
         {
           id: 'task-demo-psych-udcc-hydration',
-          title: 'Cerrar hidratacion, adherencia terapeutica y resguardo de audifono removible',
+          title: 'Vigilar diuresis por sonda y estreñimiento; ultima deposicion sintetica hace 2 dias',
           urgent: true,
           priority: 'urgent',
           category: 'critical-task',
@@ -295,19 +298,21 @@ export type DemoHandoverPrefill = Pick<
   | 'medications'
   | 'devices'
   | 'nutrition'
+  | 'elimination'
   | 'exams'
   | 'evolution'
   | 'pendingTasks'
   | 'contingencyPlan'
-  | 'sbarSituation'
-  | 'sbarBackground'
-  | 'sbarAssessment'
-  | 'sbarRecommendation'
 > & {
   administrativeData: HandoverValues['administrativeData'];
   risks: NonNullable<HandoverValues['risks']>;
   risksStructured: NonNullable<HandoverValues['risksStructured']>;
-};
+} & Partial<
+  Pick<
+    HandoverValues,
+    'sbarSituation' | 'sbarBackground' | 'sbarAssessment' | 'sbarRecommendation'
+  >
+>;
 
 /** Synthetic read/confirm data for the controlled demo only. */
 export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverPrefill {
@@ -343,6 +348,10 @@ export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverP
       dietType: 'oral',
       tolerance: 'Sin incidencias sintéticas registradas en el turno previo.',
     },
+    elimination:
+      fixture.patient.id === 'demo-psych-udcc-001'
+        ? { urineMl: 450, stoolPattern: 'constipation', hasRectalTube: false }
+        : undefined,
     exams: [
       {
         type: 'other',
@@ -369,10 +378,6 @@ export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverP
       escalationContact: 'Referente clínico de guardia',
       fallbackPlan: 'Mantener observación y aplicar el protocolo local de seguridad.',
     },
-    sbarSituation: 'Contenido sintético de ejemplo precargado: relevo de paciente estable con pendiente de reevaluación prioritaria.',
-    sbarBackground: 'Alergias, ubicación y medicación relevante proceden del dataset sintético de demostración.',
-    sbarAssessment: 'Sin datos suficientes para un riesgo calculado adicional; revisar la valoración profesional del turno.',
-    sbarRecommendation: 'Confirmar pendientes, vigilancia y criterio de aviso con la profesional entrante.',
     risks: activeFallRisk ? { fall: true } : {},
     risksStructured: activeFallRisk
       ? [{ type: 'fall', present: true, actions: ['Mantener entorno seguro y supervisión indicada.'] }]

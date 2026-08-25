@@ -154,6 +154,13 @@ import {
 } from './handover/submission';
 import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
 import { getDemoActorIdentity, getDemoHandoverPrefill, type DemoHandoverPrefill } from '@/src/demo/fixtures';
+import {
+  createDeterministicSbar,
+  createInitialDeterministicSbar,
+  getSbarFingerprint,
+  hasSbarContent,
+  type DeterministicSbar,
+} from './handover/deterministicSbar';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
@@ -388,8 +395,10 @@ async function buildAudioAttachment(uri: string | undefined) {
 
 export default function HandoverForm({ navigation, route }: Props) {
   const {
-    patientId: patientIdParam,
-    unitId: unitIdParam,
+    patientId: legacyPatientIdParam,
+    patientIdParam: canonicalPatientIdParam,
+    unitId: legacyUnitIdParam,
+    unitIdParam: canonicalUnitIdParam,
     specialtyId,
     administrativeData: administrativeDataParam,
     prefilledValues: prefilledValuesParam,
@@ -398,6 +407,8 @@ export default function HandoverForm({ navigation, route }: Props) {
     demoPrefill: demoPrefillParam,
     audioNote: audioNoteParam,
   } = route.params ?? {};
+  const patientIdParam = canonicalPatientIdParam ?? legacyPatientIdParam;
+  const unitIdParam = canonicalUnitIdParam ?? legacyUnitIdParam;
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession, capabilities, logout } = useAuth();
   const isDemoSession = authSession?.mode === 'demo' || session?.mode === 'demo';
@@ -555,6 +566,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       oxygenTherapy: {},
       devices: demoPrefill?.devices ?? [],
       nutrition: demoPrefill?.nutrition,
+      elimination: demoPrefill?.elimination,
       fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
@@ -1081,6 +1093,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
   const [pendingSbarSuggestion, setPendingSbarSuggestion] = useState<PendingSbarSuggestion | null>(null);
+  const automaticSbarAttemptsRef = useRef<Set<string>>(new Set());
+  const lastAutomaticSbarFingerprintRef = useRef<string | null>(null);
+  const dictationUnavailableNotifiedRef = useRef(false);
   const [audioUploadToFhir, setAudioUploadToFhir] = useState(false);
   const [audioUploadStatus, setAudioUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
@@ -1188,6 +1203,10 @@ export default function HandoverForm({ navigation, route }: Props) {
       setSttError('UNSUPPORTED');
       setActiveDictationField(null);
       setLastDictationField(field);
+      if (!dictationUnavailableNotifiedRef.current) {
+        dictationUnavailableNotifiedRef.current = true;
+        Alert.alert(t('audioNote.dictationUnavailable'));
+      }
       return;
     }
     const togglingSameField = sttStatus === 'listening' && activeDictationField === field;
@@ -1233,11 +1252,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const renderDictationStatus = (field: DictationField) => {
     if (dictationUnavailable) {
-      return (
-        <Text style={[styles.dictationError, { color: colors.danger }]}>
-          {t('audioNote.dictationUnavailable')}
-        </Text>
-      );
+      return null;
     }
     if (activeDictationField === field && sttStatus === 'listening') {
       return (
@@ -1382,10 +1397,15 @@ export default function HandoverForm({ navigation, route }: Props) {
     return sections.join('\n\n');
   };
 
-  const buildSbarFullText = (summary: SBARSummary) => {
+  const buildSbarFullText = (summary: SBARSummary, source: 'local' | 'ai' = 'local') => {
     const base = formatSbar(summary, 'es');
+    const provenance =
+      source === 'local'
+        ? t(isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance')
+        : undefined;
     const notice = t('handover.sbarLegalNotice');
-    return base.trim() ? `${base}\n\n${notice}` : notice;
+    const notices = [provenance, notice].filter((value): value is string => Boolean(value));
+    return base.trim() ? `${base}\n\n${notices.join('\n')}` : notices.join('\n');
   };
 
   const buildSbarDecisionHash = (summary: Pick<SBARSummary, 'situation' | 'background' | 'assessment' | 'recommendation'>) =>
@@ -1448,7 +1468,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     clearPendingSbarSuggestion('rejected', 'replace_existing');
 
     const summary = input.summary;
-    const fullText = input.fullText ?? buildSbarFullText(summary);
+    const fullText = input.fullText ?? buildSbarFullText(summary, input.mode === 'ai' ? 'ai' : 'local');
     const nextPending: PendingSbarSuggestion = {
       patientId: traceableContext.patientId,
       unitId: traceableContext.unitId,
@@ -1585,18 +1605,49 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
+  const applyDeterministicSbar = (generated: DeterministicSbar, shouldDirty: boolean) => {
+    const flags = { shouldDirty, shouldValidate: shouldDirty };
+    form.setValue('sbarSituation', generated.summary.situation, flags);
+    form.setValue('sbarBackground', generated.summary.background, flags);
+    form.setValue('sbarAssessment', generated.summary.assessment, flags);
+    form.setValue('sbarRecommendation', generated.summary.recommendation, flags);
+    form.setValue('closingSummary', generated.fullText, flags);
+    lastAutomaticSbarFingerprintRef.current = generated.fingerprint;
+    setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
+    setSbarAiError(null);
+  };
+
+  const createCurrentDeterministicSbar = (values: HandoverFormValues) => {
+    const provenance = t(
+      isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
+    );
+    return createDeterministicSbar(values, `${provenance}\n${t('handover.sbarLegalNotice')}`);
+  };
+
   const handleGenerateSbarSuggestion = () => {
     try {
       clearPendingSbarSuggestion('rejected', 'replace_existing');
       const values = form.getValues();
-      const summary = generateSBARSummary(values, { maxCharsPerSection: 320 });
-      form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('closingSummary', buildSbarFullText(summary), { shouldDirty: true, shouldValidate: true });
-      setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
-      setSbarAiError(null);
+      const generated = createCurrentDeterministicSbar(values);
+      const replace = () => applyDeterministicSbar(generated, true);
+      const currentWasModified =
+        hasSbarContent(values) &&
+        lastAutomaticSbarFingerprintRef.current !== getSbarFingerprint(values);
+
+      if (currentWasModified) {
+        Alert.alert(
+          t('handover.sbarRegenerateTitle'),
+          t('handover.sbarRegenerateMessage'),
+          [
+            { text: t('common.cancel'), style: 'cancel' },
+            { text: t('handover.replaceLabel'), style: 'destructive', onPress: replace },
+          ],
+          { cancelable: true },
+        );
+        return;
+      }
+
+      replace();
     } catch {
       Alert.alert(
         t('handover.sbarAutoGenerateAlertTitle'),
@@ -1604,6 +1655,39 @@ export default function HandoverForm({ navigation, route }: Props) {
       );
     }
   };
+
+  useEffect(() => {
+    const patientId = typeof patientIdValue === 'string' ? patientIdValue.trim() : '';
+    if (!patientId) return;
+    if (patientId.startsWith('demo-') && !demoPrefill) return;
+
+    const attemptKey = `${patientId}|${effectivePilotUnitId ?? ''}`;
+    if (automaticSbarAttemptsRef.current.has(attemptKey)) return;
+    automaticSbarAttemptsRef.current.add(attemptKey);
+
+    const values = form.getValues();
+
+    try {
+      const provenance = t(
+        isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
+      );
+      const generated = createInitialDeterministicSbar(
+        values,
+        `${provenance}\n${t('handover.sbarLegalNotice')}`,
+      );
+      if (!generated) return;
+      const flags = { shouldDirty: false, shouldValidate: false };
+      form.setValue('sbarSituation', generated.summary.situation, flags);
+      form.setValue('sbarBackground', generated.summary.background, flags);
+      form.setValue('sbarAssessment', generated.summary.assessment, flags);
+      form.setValue('sbarRecommendation', generated.summary.recommendation, flags);
+      form.setValue('closingSummary', generated.fullText, flags);
+      lastAutomaticSbarFingerprintRef.current = generated.fingerprint;
+      setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
+    } catch {
+      // The form remains fully usable when local summary generation cannot complete.
+    }
+  }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue]);
 
   const handleGenerateSbar = async () => {
     const isValid = await form.trigger();
@@ -2655,7 +2739,6 @@ export default function HandoverForm({ navigation, route }: Props) {
                 </View>
                 <DictationMicButton
                   active={activeDictationField === 'meds' && sttStatus === 'listening'}
-                  disabled={dictationUnavailable}
                   label="Dictar medicación"
                   onPress={() =>
                     handleDictationPress('meds', {
@@ -2768,7 +2851,6 @@ export default function HandoverForm({ navigation, route }: Props) {
               </View>
               <DictationMicButton
                 active={activeDictationField === 'dxMedical' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
                 label="Dictar dx médico"
                 onPress={() =>
                   handleDictationPress('dxMedical', {
@@ -2823,7 +2905,6 @@ export default function HandoverForm({ navigation, route }: Props) {
               </View>
               <DictationMicButton
                 active={activeDictationField === 'dxNursing' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
                 label="Dictar dx enfermería"
                 onPress={() =>
                   handleDictationPress('dxNursing', {
@@ -2921,7 +3002,6 @@ export default function HandoverForm({ navigation, route }: Props) {
               </View>
               <DictationMicButton
                 active={activeDictationField === 'evolution' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
                 label="Dictar evolución"
                 onPress={() =>
                   handleDictationPress('evolution', {

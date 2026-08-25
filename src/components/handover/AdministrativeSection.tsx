@@ -91,7 +91,7 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
   const shiftTypeError = administrativeErrors.shiftType?.message as string | undefined;
   const generalNotesError = administrativeErrors.generalNotes?.message as string | undefined;
   const incidentsError = administrativeErrors.incidents?.message as string | undefined;
-  const { activeDictationField, sttStatus, dictationUnavailable, handleDictationPress, renderDictationStatus } =
+  const { activeDictationField, sttStatus, handleDictationPress, renderDictationStatus } =
     dictationState;
 
   return (
@@ -252,7 +252,6 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           </View>
           <DictationMicButton
             active={activeDictationField === 'incidents' && sttStatus === 'listening'}
-            disabled={dictationUnavailable}
             label="Dictar observaciones"
             onPress={() =>
               handleDictationPress('incidents', {
