@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
 import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
 import TtsButton from '@/src/components/TtsButton';
@@ -16,20 +16,12 @@ export type SummarySectionProps = {
     handleDictationPress: (field: DictationField, config: SttConfig) => void;
   };
   DictationMicButton: React.ComponentType<{ active: boolean; disabled?: boolean; label: string; onPress: () => void }>;
-  sbarPreview: string | null;
-  onGenerateSbar: () => void;
-  onInsertSbar: () => void;
-  onCloseSbarPreview: () => void;
 };
 
 export const SummarySection: React.FC<SummarySectionProps> = ({
   styles,
   dictationState,
   DictationMicButton,
-  sbarPreview,
-  onGenerateSbar,
-  onInsertSbar,
-  onCloseSbarPreview,
 }) => {
   const { control, formState, watch } = useFormContext<HandoverFormValues>();
   const errors = formState.errors ?? {};
@@ -73,26 +65,7 @@ export const SummarySection: React.FC<SummarySectionProps> = ({
       {closingSummaryError ? <Text style={styles.error}>{closingSummaryError}</Text> : null}
       <View style={styles.inlineActions}>
         <TtsButton text={watch('closingSummary') ?? ''} label="Escuchar resumen" />
-        <View style={styles.secondaryButton}>
-          <Button title="Generar SBAR" onPress={onGenerateSbar} />
-        </View>
       </View>
-      {sbarPreview ? (
-        <View style={styles.sbarPreview}>
-          <Text style={styles.sbarTitle}>Resumen SBAR sugerido</Text>
-          <Text style={styles.sbarText}>{sbarPreview}</Text>
-          <Text style={styles.helperText}>Revisa y ajusta el contenido según tu criterio clínico.</Text>
-          <View style={styles.inlineActions}>
-            <TtsButton text={sbarPreview ?? ''} label="Escuchar SBAR" />
-            <View style={styles.secondaryButton}>
-              <Button title="Insertar en resumen" onPress={onInsertSbar} />
-            </View>
-            <View style={styles.secondaryButton}>
-              <Button title="Cerrar" onPress={onCloseSbarPreview} />
-            </View>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 };

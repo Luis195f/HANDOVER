@@ -200,4 +200,25 @@ describe('generateSBARSummary', () => {
     expect(altered.assessment).toContain('Eliminación: estreñimiento, dispositivo urinario');
     expect(normal.assessment).not.toContain('Eliminación');
   });
+
+  it('localiza unidad y enums sin filtrar identificadores técnicos ni puntuación rota', () => {
+    const summary = generateSBARSummary(
+      buildData({
+        administrativeData: { ...administrativeData, unit: 'udcc-psychogeriatrics' },
+        turnContext: { workload: 'high', shiftPhase: 'closing' },
+        contingencyPlan: {
+          escalationCriteria: ['cambio conductual agudo'],
+          escalationContact: 'referente clínico',
+        },
+      }),
+    );
+    const visibleText = formatSbar(summary, 'es');
+
+    expect(visibleText).toContain('Unidad de Psicogeriatria');
+    expect(visibleText).toContain('Carga alta');
+    expect(visibleText).toContain('Fase: cierre');
+    for (const forbidden of ['udcc', 'sjd', 'high', 'closing', '::', 'Escalar sí Avisar']) {
+      expect(visibleText).not.toContain(forbidden);
+    }
+  });
 });

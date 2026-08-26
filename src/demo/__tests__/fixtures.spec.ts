@@ -21,7 +21,7 @@ describe('demo fixtures', () => {
     const childPrefill = getDemoHandoverPrefill(childPatient.id);
 
     expect(adultPrefill.administrativeData.unit).toBe(adultPatient.unitId);
-    expect(adultPrefill.administrativeData.census).toBe(2);
+    expect(adultPrefill.administrativeData.census).toBe(38);
     expect(childPrefill.administrativeData.census).toBe(1);
     expect(adultPrefill.pendingTasks?.length).toBeGreaterThan(0);
   });

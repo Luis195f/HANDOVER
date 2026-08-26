@@ -89,7 +89,29 @@ type DemoPatientFixture = {
   };
 };
 
-const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
+export type DemoExceptionStatus = 'unchanged' | 'changed' | 'critical';
+
+export type DemoExceptionHandoverPatient = {
+  patientId: string;
+  name: string;
+  bedLabel: string;
+  unitName: string;
+  status: DemoExceptionStatus;
+  change: string;
+  currentRisk: string;
+  nextAction: string;
+  owner: string;
+  dueAt: string;
+  contingency: {
+    trigger: string;
+    response: string;
+  };
+  lastSummaryAt: string;
+  lastSummarySource: string;
+  criticalItems: readonly string[];
+};
+
+const BASE_DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
   {
     patient: {
       id: 'demo-psych-adult-001',
@@ -281,6 +303,126 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
   },
 ] as const;
 
+const GENERATED_DEMO_PATIENT_FIXTURES: DemoPatientFixture[] = Array.from(
+  { length: 36 },
+  (_, offset) => {
+    const position = offset + 5;
+    const suffix = String(position).padStart(3, '0');
+    const id = `demo-psych-unit-${suffix}`;
+    const bedLabel = `SMA-A-${String(position).padStart(2, '0')}`;
+
+    return {
+      patient: {
+        id,
+        name: `Caso sintético de unidad ${String(position).padStart(2, '0')}`,
+        unitId: 'sjd-a',
+        bedLabel,
+        vitals: { rr: 17, spo2: 98, tempC: 36.6, sbp: 117, hr: 78, o2: false, avpu: 'A' },
+        pendingTasks: [],
+      },
+      summary: {
+        id,
+        name: `Caso sintético de unidad ${String(position).padStart(2, '0')}`,
+        gender: position % 2 === 0 ? 'female' : 'male',
+        age: 30 + (position % 35),
+        bed: bedLabel,
+        mrn: `MRN-DEMO-UNIT-${suffix}`,
+        allergies: ['Sin alergias sintéticas activas registradas'],
+      },
+      birthDate: `${1970 + (position % 30)}-01-15`,
+      gender: position % 2 === 0 ? 'female' : 'male',
+      encounterId: `enc-${id}`,
+      locationId: `loc-${id}`,
+      clinical: {
+        diagnosis: {
+          system: SNOMED_SYSTEM,
+          code: '31535000',
+          display: 'Contexto sintético de salud mental',
+        },
+        medications: [],
+      },
+    };
+  },
+);
+
+const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
+  ...BASE_DEMO_PATIENT_FIXTURES,
+  ...GENERATED_DEMO_PATIENT_FIXTURES,
+];
+
+const DEMO_UNIT_NAME = 'Unidad sintética de salud mental';
+
+export const DEMO_EXCEPTION_HANDOVER_PATIENTS: readonly DemoExceptionHandoverPatient[] =
+  DEMO_PATIENT_FIXTURES.map((fixture, index) => {
+    const position = index + 1;
+    const status: DemoExceptionStatus =
+      position === 1 || position === 3
+        ? 'critical'
+        : position === 2 || (position >= 5 && position <= 9)
+          ? 'changed'
+          : 'unchanged';
+    const isCritical = status === 'critical';
+    const isChanged = status === 'changed';
+
+    return {
+      patientId: fixture.patient.id,
+      name: fixture.patient.name,
+      bedLabel: fixture.patient.bedLabel ?? `SMA-A-${String(position).padStart(2, '0')}`,
+      unitName: DEMO_UNIT_NAME,
+      status,
+      change: isCritical
+        ? 'Cambio conductual agudo registrado durante el turno sintético.'
+        : isChanged
+          ? 'Cambio en descanso, adherencia o participación respecto al resumen sintético previo.'
+          : 'Sin novedades registradas para este relevo.',
+      currentRisk: isCritical
+        ? 'Prioridad alta por riesgo de seguridad y necesidad de observación reforzada registrada.'
+        : isChanged
+          ? 'Requiere seguimiento dirigido; no se registra inestabilidad en el resumen sintético.'
+          : 'La clasificación procede de un estado sintético explícito y no valida valores clínicos actuales.',
+      nextAction: isCritical
+        ? 'Reevaluar observación y acordar el plan inmediato con el referente clínico.'
+        : isChanged
+          ? 'Revisar la novedad y cerrar el pendiente principal con el equipo entrante.'
+          : 'Abrir el detalle solo si el equipo necesita contexto adicional.',
+      owner: isCritical ? 'Profesional entrante y referente clínico demo' : 'Profesional entrante demo',
+      dueAt: demoTime(isCritical ? 30 + position * 5 : 90 + position * 5),
+      contingency: {
+        trigger: isCritical ? 'aumenta el riesgo de seguridad o la agitación' : 'la novedad progresa o no puede cerrarse',
+        response: isCritical
+          ? 'mantener el entorno seguro y avisar al referente clínico según el protocolo local'
+          : 'reevaluar y avisar al referente clínico demo',
+      },
+      lastSummaryAt: demoTime(-20 - position),
+      lastSummarySource: 'Resumen sintético del turno previo',
+      criticalItems: isCritical
+        ? [
+            'Nivel de observación y medidas de entorno seguro.',
+            'Acción pendiente, responsable y momento objetivo.',
+            'Criterio de aviso al referente clínico.',
+          ]
+        : [],
+    };
+  });
+
+const DEMO_EXCEPTION_HANDOVER_BY_ID = Object.fromEntries(
+  DEMO_EXCEPTION_HANDOVER_PATIENTS.map((patient) => [patient.patientId, patient]),
+) as Record<string, DemoExceptionHandoverPatient>;
+
+export function getDemoExceptionHandoverPatient(
+  patientId?: string | null,
+): DemoExceptionHandoverPatient | null {
+  return patientId ? DEMO_EXCEPTION_HANDOVER_BY_ID[patientId] ?? null : null;
+}
+
+export function getDemoExceptionHandoverPatients(
+  patientIds?: readonly string[],
+): DemoExceptionHandoverPatient[] {
+  if (!patientIds) return [...DEMO_EXCEPTION_HANDOVER_PATIENTS];
+  const visibleIds = new Set(patientIds);
+  return DEMO_EXCEPTION_HANDOVER_PATIENTS.filter((patient) => visibleIds.has(patient.patientId));
+}
+
 const DEMO_PATIENT_FIXTURES_BY_ID = Object.fromEntries(
   DEMO_PATIENT_FIXTURES.map((fixture) => [fixture.patient.id, fixture]),
 ) as Record<string, DemoPatientFixture>;
@@ -317,6 +459,7 @@ export type DemoHandoverPrefill = Pick<
 /** Synthetic read/confirm data for the controlled demo only. */
 export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverPrefill {
   const fixture = getDemoPatientFixture(patientId);
+  const exceptionHandover = getDemoExceptionHandoverPatient(fixture.patient.id);
   const activeFallRisk = fixture.patient.risks?.fall === true;
   const census = DEMO_PATIENT_FIXTURES.filter((candidate) => candidate.patient.unitId === fixture.patient.unitId).length;
 
@@ -361,7 +504,10 @@ export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverP
         dueBy: demoTime(150),
       },
     ],
-    evolution: 'Sin cambios clínicos sintéticos relevantes desde la última revisión. Confirmar novedades con el equipo entrante.',
+    evolution:
+      exceptionHandover?.status === 'unchanged'
+        ? 'Sin novedades registradas explícitamente para este relevo sintético; no equivale a una validación clínica actual.'
+        : exceptionHandover?.change ?? 'Contexto sintético disponible para revisión profesional.',
     pendingTasks: (fixture.patient.pendingTasks ?? []).map((task) => ({
       id: task.id,
       category: task.category ?? 'other',
@@ -370,6 +516,7 @@ export function getDemoHandoverPrefill(patientId?: string | null): DemoHandoverP
       priority: task.priority ?? (task.critical ? 'critical' : task.urgent ? 'urgent' : 'routine'),
       dueBy: task.dueBy,
       escalationCriteria: task.escalationCriteria,
+      owner: exceptionHandover?.owner,
     })),
     contingencyPlan: {
       watchItems: ['Cambio en la observación, seguridad del entorno o adherencia terapéutica.'],

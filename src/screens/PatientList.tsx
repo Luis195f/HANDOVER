@@ -39,8 +39,9 @@ import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
 import { apiGet } from "@/src/lib/api";
 import { createPatient } from "@/src/lib/patients";
-import { getDemoHandoverPrefill } from '@/src/demo/fixtures';
+import { getDemoExceptionHandoverPatients, getDemoHandoverPrefill } from '@/src/demo/fixtures';
 import type { PatientListItem } from "@/src/types/patientList";
+import { UnitExceptionHandover } from './handover/UnitExceptionHandover';
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/types/patientList";
@@ -668,6 +669,11 @@ export default function PatientList({ navigation }: Props) {
   );
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
+  const isDemoExceptionRoute = session?.mode === 'demo' && selectedSpecialtyId === 'psych';
+  const demoExceptionPatients = useMemo(
+    () => getDemoExceptionHandoverPatients(patients.map((patient) => patient.id)),
+    [patients],
+  );
   const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
   const accessState = getPatientListAccessState(
     session,
@@ -837,6 +843,14 @@ export default function PatientList({ navigation }: Props) {
           </View>
         </View>
 
+        {isDemoExceptionRoute ? (
+          <UnitExceptionHandover
+            patients={demoExceptionPatients}
+            sessionUserId={session?.userId}
+            colors={colors}
+            onOpenFullHandover={onOpenPatient}
+          />
+        ) : (
         <View style={styles.priorityToggleCard}>
           <View style={styles.priorityToggle}>
             <Text style={styles.priorityToggleLabel}>Orden contextual de pacientes</Text>
@@ -863,6 +877,7 @@ export default function PatientList({ navigation }: Props) {
             </View>
           ) : null}
         </View>
+        )}
 
         {canViewSupervisorDashboard ? (
           <Pressable
@@ -886,11 +901,13 @@ export default function PatientList({ navigation }: Props) {
       colors.primary,
       colors.text,
       isLoadingPatients,
+      isDemoExceptionRoute,
       loadPatients,
       navigation,
       onSpecialtyChange,
       onUnitChange,
       openNewPatientForm,
+      onOpenPatient,
       patientLoadNotice,
       selectedSpecialtyId,
       selectedUnitId,
@@ -901,6 +918,8 @@ export default function PatientList({ navigation }: Props) {
       priorityCounts.high,
       specialtyChips,
       specialtyOptions,
+      demoExceptionPatients,
+      session?.userId,
       t,
       unitChips,
       unitOptions,
@@ -910,11 +929,11 @@ export default function PatientList({ navigation }: Props) {
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}> 
       <FlatList
-        data={patientsForList}
+        data={isDemoExceptionRoute ? [] : patientsForList}
         keyExtractor={(item) => item.patientId}
         ListHeaderComponent={listHeader}
         contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
+        ListEmptyComponent={isDemoExceptionRoute ? null : (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
               {isLoadingPatients
@@ -922,7 +941,7 @@ export default function PatientList({ navigation }: Props) {
                 : patientLoadNotice?.message ?? emptyStateMessage}
             </Text>
           </View>
-        }
+        )}
         renderItem={({ item }) => {
           const basePatient = patientById.get(item.patientId);
           const unit = basePatient ? UNITS_BY_ID[basePatient.unitId] : undefined;

@@ -1,6 +1,6 @@
 # Demo de Salud Mental: alcance prudente
 
-Estado revisado el 2026-05-10.
+Estado revisado el 2026-08-25.
 
 ## Objetivo
 
@@ -20,6 +20,18 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 - `src/demo/mock-api.ts` responde a `/api/patients`, `Patient/{id}`, `Encounter?...` y `AllergyIntolerance?...` sin tocar backend real;
 - `docs/MVP_DEMO.md` sigue siendo el walkthrough generico; este documento fija el seam de salud mental hoy soportado;
 - no se conectan materiales locales ni artefactos operativos del centro.
+
+## Ruta primaria por excepciones
+
+La selección demo `Psiquiatria y salud mental` abre una superficie compacta de unidad sobre `PatientList`, no un formulario clínico paralelo. El escenario determinista contiene 40 identidades sintéticas clasificadas mediante un atributo explícito del fixture:
+
+- 32 `unchanged`, visibles como listado compacto y revisables colectivamente sin apertura individual obligatoria;
+- 6 `changed`, con relevo breve editable y acceso bajo demanda al formulario completo;
+- 2 `critical`, con SBAR determinista local, tres puntos críticos como máximo y check-back de la profesional entrante.
+
+La clasificación nunca se deriva de que falte una nota o evolución. “Sin novedades registradas para este relevo” describe el estado sintético explícito del escenario y no valida valores clínicos actuales.
+
+La revisión colectiva, el relevo breve, el check-back y las atestaciones de unidad se registran como eventos diferenciados durante la sesión demo. Muestran actor y fecha/hora, pero no amplían el payload, auditoría, firma clínica, FHIR ni persistencia. La transferencia clínica persistida continúa en el `HandoverForm` existente.
 
 ## Variaciones ligeras permitidas
 
@@ -75,19 +87,22 @@ Preparar un demo prudente de HANDOVER + ICEA para salud mental usando el nucleo 
 
 ## Walkthrough recomendado
 
-1. Abrir `demo mode` y filtrar, si hace falta, por la unidad adultos A, la unidad infanto-adolescente o la unidad de psicogeriatria.
-2. Mostrar que el listado y el detalle siguen viniendo del seam demo aislado, con datos sinteticos y sin backend operativo.
-3. En cada recorrido, enfatizar continuidad del relevo, observacion especial o supervision, seguridad fisica y apoyo para movilidad o traslados cuando aplique, adherencia/rechazo, entorno seguro, elementos retirables y reevaluacion del siguiente turno.
-4. Si se menciona contencion, dejarla solo como evento trazable con autorizacion, revision, vigencia y reevaluacion, sin describir pasos operativos.
-5. Presentar MPAC solo como prioridades explicables de continuidad subordinadas al juicio enfermero.
-6. Cerrar recordando que HANDOVER se muestra aqui como piloto/demo profesional, no como producto production-ready ni clinicamente validado.
+1. Abrir `demo mode` y seleccionar `Psiquiatria y salud mental`.
+2. Mostrar los tres grupos y confirmar que los 32 casos `unchanged` no requieren apertura individual.
+3. Expandir opcionalmente la lista y registrar la revisión colectiva, sin presentarla como validación clínica ni transferencia formal.
+4. Abrir un caso `changed`, revisar la precarga y aceptar el relevo breve sin entrar al formulario completo.
+5. Cambiar a la profesional entrante demo, abrir un caso `critical` y registrar el check-back o la necesidad de aclaración.
+6. Usar `Ver detalle completo` para demostrar que el Core, firmas, payload y recorrido offline siguen disponibles.
+7. Cerrar recordando que HANDOVER se muestra aquí como demo sintética, no como producto production-ready, clínicamente validado o conectado a una HCE.
 
 ## Limites del demo
 
 - un unico formulario;
-- sin rutas, pantallas ni flujos nuevos;
+- una superficie de unidad por excepciones dentro del listado existente, sin formulario paralelo;
 - sin campos persistidos nuevos;
 - sin cambios en backend, FHIR, ICEA, auth, auditoria u offline queue;
+- los eventos de revisión colectiva, check-back y atestación de unidad no sobreviven al cierre o recarga de la sesión demo;
+- en web no se afirma persistencia offline tras recargar o cerrar la pestaña;
 - sin instrucciones operativas para contencion.
 
 ## Compatibilidad FHIR e ICEA shadow

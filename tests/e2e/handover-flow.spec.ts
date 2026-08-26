@@ -3,6 +3,11 @@ import { expect, test } from '@playwright/test';
 const OUTGOING_ACTOR_ID = 'demo@nurseos.app';
 const INCOMING_ACTOR_ID = 'demo.receiver@nurseos.app';
 const SNOMED_SEPSIS_CODE = '128045006';
+const CRITICAL_CHECK_BACK_ITEMS = [
+  'Nivel de observación y medidas de entorno seguro.',
+  'Acción pendiente, responsable y momento objetivo.',
+  'Criterio de aviso al referente clínico.',
+] as const;
 
 const CHECKLIST_LABELS = [
   'Paciente identificado (nombre + pulsera)',
@@ -127,10 +132,46 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect.poll(() => acceptedConfirmationMessages.length).toBe(1);
   await expect(skipTutorial).toHaveCount(0, { timeout: 15_000 });
 
+  const quickRouteStartedAt = Date.now();
   await page.getByRole('button', { name: 'Psiquiatria y salud mental', exact: true }).click();
-  const patientCard = page.getByTestId('patient-card-demo-psych-udcc-001');
-  await expect(patientCard).toBeVisible();
-  await patientCard.click();
+  await expect(page.getByTestId('unit-exception-handover')).toBeVisible();
+  await expect(page.getByText('32 sin novedades')).toBeVisible();
+  await expect(page.getByText('6 con novedades')).toBeVisible();
+  await expect(page.getByText('2 prioridad alta')).toBeVisible();
+
+  await page.getByTestId('expand-unchanged-list').click();
+  await page.getByTestId('confirm-unchanged-review').click();
+  await expect(page.getByTestId('unchanged-interaction-count')).toContainText('Interacciones relevantes: 2');
+
+  const changedPatientId = 'demo-psych-child-001';
+  await page.getByTestId(`open-exception-${changedPatientId}`).click();
+  await page.getByTestId(`accept-brief-${changedPatientId}`).click();
+  await expect(page.getByTestId(`quick-interactions-${changedPatientId}`)).toContainText('2');
+  await expect(page.getByTestId(`exception-detail-${changedPatientId}`)).toContainText('Relevo breve revisado');
+  await page.getByRole('button', { name: 'Cerrar' }).click();
+
+  const criticalPatientId = 'demo-psych-adult-001';
+  await page.getByTestId(`open-exception-${criticalPatientId}`).click();
+  const prioritySbar = page.getByTestId(`exception-sbar-${criticalPatientId}`);
+  await expect(prioritySbar).toBeVisible();
+  await expect(prioritySbar).not.toContainText(/udcc|sjd|high|closing|::|Escalar sí Avisar/);
+  await expect(page.getByTestId(`confirm-checkback-${criticalPatientId}`)).toBeDisabled();
+
+  await page.getByTestId('demo-switch-actor').click();
+  await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional receptora demo');
+  for (const item of CRITICAL_CHECK_BACK_ITEMS) {
+    await page.getByRole('switch', { name: item }).click();
+  }
+  await page.getByTestId(`confirm-checkback-${criticalPatientId}`).click();
+  await expect(page.getByTestId(`exception-event-critical_check_back-${criticalPatientId}`)).toContainText('Profesional receptora demo');
+  await expect(page.getByTestId(`quick-interactions-${criticalPatientId}`)).toContainText('5');
+  await page.getByRole('button', { name: 'Cerrar' }).click();
+
+  await page.getByTestId('demo-switch-actor').click();
+  await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional saliente demo');
+  const fullDetailPatientId = 'demo-psych-udcc-001';
+  await page.getByTestId(`open-exception-${fullDetailPatientId}`).click();
+  await page.getByRole('button', { name: 'Ver detalle completo' }).click();
   await expect(page.getByTestId('handover-profile-runtime')).toBeVisible();
   await expect(page.getByTestId('handover-scan-qr')).toHaveCount(0);
 
@@ -139,6 +180,13 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   const sbarSituation = page.getByTestId('handover-sbar-situation');
   const automaticSituation = await sbarSituation.inputValue();
   expect(automaticSituation).toContain('Delirium');
+  const visibleSbar = [
+    automaticSituation,
+    await page.getByTestId('handover-sbar-background').inputValue(),
+    await sbarAssessment.inputValue(),
+    await page.getByTestId('handover-sbar-recommendation').inputValue(),
+  ].join('\n');
+  expect(visibleSbar).not.toMatch(/udcc|sjd|high|closing|::|Escalar sí Avisar/);
   await sbarSituation.fill(`${automaticSituation} Ajuste profesional E2E preservado.`);
 
   const evolution = page.getByTestId('handover-evolution');
@@ -146,7 +194,7 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect(evolution).toHaveValue('Evolución sintética E2E sin datos clínicos reales.');
 
   await page.getByRole('button', { name: 'Sección Datos del turno. Contraída.' }).click();
-  await page.getByTestId('handover-administrative-unit').fill('udcc-psychogeriatrics');
+  await expect(page.getByTestId('handover-administrative-unit')).toHaveValue('udcc-psychogeriatrics');
   await page.getByTestId('handover-staffIn').fill('Profesional receptora demo');
   await page.getByTestId('handover-staffOut').fill('Profesional saliente demo');
   await page.getByRole('button', { name: 'Sección Nutrición. Contraída.' }).click();
@@ -241,4 +289,5 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
 
   expect(unexpectedNetworkUrls, `Unexpected network requests: ${unexpectedNetworkUrls.join(', ')}`).toEqual([]);
   expect(observedOrigins).not.toContain('https://cdn.jsdelivr.net');
+  console.info(`[e2e] quick exception route diagnostic time: ${Date.now() - quickRouteStartedAt} ms`);
 });
