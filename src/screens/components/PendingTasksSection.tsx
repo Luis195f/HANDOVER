@@ -173,7 +173,7 @@ export function PendingTasksSection() {
             <TextInput
               accessibilityLabel="Hora objetivo del pendiente"
               style={styles.input}
-              placeholder="2026-03-19T10:30:00Z"
+              placeholder="2026-08-27T10:30:00Z"
               value={draft.dueBy ?? ''}
               onChangeText={(text) => updateDraft((current) => ({ ...current, dueBy: text }))}
             />

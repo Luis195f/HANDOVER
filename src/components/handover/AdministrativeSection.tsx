@@ -51,6 +51,7 @@ const StaffListInput = ({
         name={`administrativeData.${fieldKey}` as const}
         render={({ field: { onChange, value } }) => (
           <TextInput
+            testID={`handover-${fieldKey}`}
             style={[styles.input, styles.textArea]}
             multiline
             placeholder={placeholder}
@@ -90,7 +91,7 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
   const shiftTypeError = administrativeErrors.shiftType?.message as string | undefined;
   const generalNotesError = administrativeErrors.generalNotes?.message as string | undefined;
   const incidentsError = administrativeErrors.incidents?.message as string | undefined;
-  const { activeDictationField, sttStatus, dictationUnavailable, handleDictationPress, renderDictationStatus } =
+  const { activeDictationField, sttStatus, handleDictationPress, renderDictationStatus } =
     dictationState;
 
   return (
@@ -102,6 +103,8 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           name="administrativeData.unit"
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
+              testID="handover-administrative-unit"
+              accessibilityLabel="Unidad"
               style={styles.input}
               placeholder="UCI Adulto"
               onBlur={onBlur}
@@ -138,7 +141,7 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="2024-01-01T08:00"
+              placeholder="2026-08-27T06:00"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -155,7 +158,7 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           render={({ field: { onChange, onBlur, value } }) => (
             <TextInput
               style={styles.input}
-              placeholder="2024-01-01T20:00"
+              placeholder="2026-08-27T14:00"
               onBlur={onBlur}
               value={value ?? ''}
               onChangeText={onChange}
@@ -249,7 +252,6 @@ export const AdministrativeSection: React.FC<AdministrativeSectionProps> = ({
           </View>
           <DictationMicButton
             active={activeDictationField === 'incidents' && sttStatus === 'listening'}
-            disabled={dictationUnavailable}
             label="Dictar observaciones"
             onPress={() =>
               handleDictationPress('incidents', {

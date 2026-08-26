@@ -61,6 +61,7 @@ Cada entrada define metadatos minimos y trazables:
 - `description`
 - `activation`
 - `enabledSections` o `allowedUnitProfiles` cuando aplica
+- La unidad `udcc-psychogeriatrics` habilita `elimination` mediante `features.enableElimination`; el UPP compartido `behavioral-health` no cambia y las unidades adultas e infanto-adolescentes no heredan esa visibilidad.
 - `prioritySignals` explicables
 - `iceaContextDefaults` solo como placeholder tipado
 - `iceaContextPlaceholders` para declarar el vector ICEA+ esperado por overlay

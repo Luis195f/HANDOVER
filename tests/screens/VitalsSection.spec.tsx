@@ -108,12 +108,12 @@ describe('VitalsSection', () => {
       />,
     );
 
-    fireEvent.changeText(getByPlaceholderText('2024-01-01T08:00:00Z'), '2025-03-01T09:00:00Z');
-    fireEvent.changeText(getByPlaceholderText('2024-01-01T08:05:00Z'), '2025-03-01T09:05:00Z');
+    fireEvent.changeText(getByPlaceholderText('2026-08-27T07:30:00Z'), '2026-08-27T09:00:00Z');
+    fireEvent.changeText(getByPlaceholderText('2026-08-27T07:35:00Z'), '2026-08-27T09:05:00Z');
 
     await waitFor(() => {
-      expect(methods.getValues('vitals.recordedAt')).toBe('2025-03-01T09:00:00Z');
-      expect(methods.getValues('vitals.issuedAt')).toBe('2025-03-01T09:05:00Z');
+      expect(methods.getValues('vitals.recordedAt')).toBe('2026-08-27T09:00:00Z');
+      expect(methods.getValues('vitals.issuedAt')).toBe('2026-08-27T09:05:00Z');
     });
   });
 

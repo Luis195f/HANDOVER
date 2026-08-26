@@ -291,7 +291,7 @@ describe('resolveHandoverProfileRuntime', () => {
       units: [
         {
           id: 'sjd-a',
-          name: 'Psiquiatria adulto · SJD A',
+          name: 'Unidad de Salud Mental Adultos A',
           specialty: 'psych',
           profileId: 'behavioral-health',
           features: { enablePsychosocialExtra: true },
@@ -400,6 +400,8 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.pack.id).toBe('behavioral-health');
     expect(runtime.basePack.id).toBe('behavioral-health');
     expect(runtime.activeOverlays).toEqual([]);
+    expect(runtime.sectionVisibility.elimination).toBe(true);
+    expect(runtime.notes).toContain('Eliminacion habilitada por contexto de unidad sobre el Core compartido.');
     expect(runtime.requiredExtraFields).toEqual(
       expect.arrayContaining([
         'Observacion especial, acompanamiento o nivel de supervision requerido',
@@ -433,6 +435,11 @@ describe('resolveHandoverProfileRuntime', () => {
       expect.arrayContaining(['psych-intake-sleep', 'psych-continuity']),
     );
     expect(runtime.checklistItems.some((item) => item.label.includes('familia o tutor'))).toBe(false);
+
+    const adultRuntime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
+    const childRuntime = resolveHandoverProfileRuntime({ unitId: 'sjd-infanto', specialtyId: 'psych' });
+    expect(adultRuntime.sectionVisibility.elimination).toBe(false);
+    expect(childRuntime.sectionVisibility.elimination).toBe(false);
   });
 
   it('keeps hidden sections monotonic across compatible overlay merges while preserving trace order', async () => {

@@ -1,14 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiGet } from '@/src/lib/api';
 import { fetchWithRetry } from '@/src/lib/net';
 import { buildDemoResponse } from '@/src/demo/mock-api';
 
+const getCurrentSessionMock = vi.hoisted(() => vi.fn());
+
 // IMPORTANTE:
 // apiGet ahora llama ensureFreshAccessToken() antes de hacer requests.
 // Este test mockeaba auth pero no incluía ese export, causando fallo.
 vi.mock('@/src/security/auth', () => ({
-  getCurrentSession: vi.fn(async () => ({ mode: 'demo' })),
+  getCurrentSession: getCurrentSessionMock,
   // Para compatibilidad con la nueva capa de "fresh token" antes de llamadas HTTP
   ensureFreshAccessToken: vi.fn(async () => 'test-access-token'),
   // Si en algún punto se importa el alias/función antigua, también lo cubrimos
@@ -16,6 +18,15 @@ vi.mock('@/src/security/auth', () => ({
 }));
 
 describe('Demo mode network interception', () => {
+  beforeEach(() => {
+    getCurrentSessionMock.mockResolvedValue({ mode: 'demo' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
   it('intercepta fetchWithRetry en modo demo', async () => {
     const fetchSpy = vi.fn();
 
@@ -29,6 +40,22 @@ describe('Demo mode network interception', () => {
   it('intercepta apiGet y devuelve datos mock', async () => {
     const data = await apiGet('/api/ping');
     expect(data).toMatchObject({ mode: 'demo' });
+  });
+
+  it('no activa demo ante un 503 operacional de FHIR', async () => {
+    getCurrentSessionMock.mockResolvedValue({ mode: 'normal' });
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ code: 'fhir_unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(apiGet('/api/patients')).rejects.toMatchObject({
+      status: 503,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('expone los tres recorridos psiquiatricos sinteticos solo en demo mode', async () => {
@@ -69,7 +96,7 @@ describe('Demo mode network interception', () => {
         expect.objectContaining({
           resource: expect.objectContaining({
             resourceType: 'Location',
-            identifier: [expect.objectContaining({ value: 'UDCC-03' })],
+            identifier: [expect.objectContaining({ value: 'PG-03' })],
           }),
         }),
       ],

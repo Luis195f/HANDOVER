@@ -108,12 +108,13 @@ function startExpo() {
         "--",
         "--no-dev",
         "--minify",
+        "--clear",
         "--port",
         String(port),
         "--host",
         "localhost",
       ]
-    : ["web", "--", "--no-dev", "--minify", "--port", String(port), "--host", "localhost"];
+    : ["web", "--", "--no-dev", "--minify", "--clear", "--port", String(port), "--host", "localhost"];
 
   console.log(
     `[e2e-webserver] Starting Expo web on ${baseURL}${filterName ? ` (filter=${filterName})` : ""}`,
@@ -123,6 +124,14 @@ function startExpo() {
     env: {
       ...process.env,
       EXPO_PUBLIC_E2E: "true",
+      EXPO_PUBLIC_ENABLE_DEMO: "true",
+      EXPO_PUBLIC_API_BASE_URL: "https://demo.local",
+      EXPO_PUBLIC_FHIR_BASE_URL: "https://demo.local/fhir",
+      EXPO_PUBLIC_OIDC_ISSUER: "https://oidc.e2e.invalid",
+      EXPO_PUBLIC_OIDC_CLIENT_ID: "handover-e2e-client",
+      EXPO_PUBLIC_OIDC_AUDIENCE: "https://api.e2e.invalid",
+      EXPO_PUBLIC_OIDC_SCOPE: "openid profile email offline_access",
+      EXPO_PUBLIC_OIDC_REDIRECT_SCHEME: "handover-e2e",
       EXPO_NO_TELEMETRY: "1",
       CI: process.env.CI ? "1" : process.env.CI,
       E2E_PORT: String(port),

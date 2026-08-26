@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { Alert, Button, StyleSheet, Text, View } from 'react-native';
+import { Button, StyleSheet, Text, View } from 'react-native';
 
 import { hashHex } from '@/src/lib/crypto';
+import { confirmAction } from '@/src/lib/platform-confirm';
 import type { HandoverSignature } from '@/src/types/handover';
 import type { HandoverValues } from '@/src/validation/schemas';
 import { t } from '@/src/i18n';
@@ -27,6 +28,7 @@ type Props = {
   administrativeUnitId?: string;
   getSignaturePayload?: () => unknown;
   disableOutgoingAction?: boolean;
+  allowedSignatureKind?: SignatureKind;
 };
 
 type SignatureKind = 'outgoing' | 'incoming';
@@ -90,6 +92,7 @@ export function SignaturesSection({
   administrativeUnitId,
   getSignaturePayload,
   disableOutgoingAction,
+  allowedSignatureKind,
 }: Props) {
   const outgoing = value?.outgoing;
   const incoming = value?.incoming;
@@ -103,46 +106,47 @@ export function SignaturesSection({
     [currentUser],
   );
 
-  const confirmSignature = (kind: SignatureKind) => {
-    if (!currentUser || !activeUnitId) return;
+  const applySignature = (kind: SignatureKind) => {
+    if (!currentUser || !activeUnitId || (allowedSignatureKind && allowedSignatureKind !== kind)) return;
+    const timestamp = new Date().toISOString();
+    const contentToSign = JSON.stringify(getSignaturePayload?.() ?? {});
+    const signatureHash = hashHex(`${contentToSign}${timestamp}`);
+    const nextSignature = buildSignatureFromUser(
+      currentUser,
+      activeUnitId,
+      signatureHash,
+      timestamp,
+    );
+    onChange({
+      ...value,
+      [kind]: nextSignature,
+    });
+  };
+
+  const confirmSignature = async (kind: SignatureKind) => {
     const message =
       kind === 'outgoing'
         ? t('signatures.confirmOutgoingMessage')
         : t('signatures.confirmIncomingMessage');
-    Alert.alert(t('signatures.confirmTitle'), message, [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('signatures.confirm'),
-        style: 'default',
-        onPress: () => {
-          const timestamp = new Date().toISOString();
-          const contentToSign = JSON.stringify(getSignaturePayload?.() ?? {});
-          const signatureHash = hashHex(`${contentToSign}${timestamp}`);
-          const nextSignature = buildSignatureFromUser(
-            currentUser,
-            activeUnitId,
-            signatureHash,
-            timestamp,
-          );
-          onChange({
-            ...value,
-            [kind]: nextSignature,
-          });
-        },
-      },
-    ]);
+    const confirmed = await confirmAction({
+      title: t('signatures.confirmTitle'),
+      message,
+      confirmText: t('signatures.confirm'),
+      cancelText: t('common.cancel'),
+    });
+    if (confirmed) applySignature(kind);
   };
 
   const renderBlock = (kind: SignatureKind, signature?: HandoverSignature | null) => {
     const isOutgoing = kind === 'outgoing';
     return (
-      <View style={styles.block}>
+      <View style={styles.block} testID={`signature-${kind}`}>
         <Text style={styles.label}>
           {isOutgoing ? t('signatures.outgoingLabel') : t('signatures.incomingLabel')}
         </Text>
         {signature ? (
           <View>
-            <Text style={styles.valueText}>
+            <Text style={styles.valueText} testID={`signature-${kind}-user`}>
               {t('signatures.nameLabel')}: {signature.fullName}
             </Text>
             <Text style={styles.valueText}>
@@ -158,11 +162,11 @@ export function SignaturesSection({
         ) : (
           <View>
             <Text style={styles.emptyText}>{t('signatures.noSignature')}</Text>
-            {canSignWithUnit && !(isOutgoing && disableOutgoingAction) ? (
+            {canSignWithUnit && (!allowedSignatureKind || allowedSignatureKind === kind) && !(isOutgoing && disableOutgoingAction) ? (
               <View style={styles.action}>
                 <Button
                   title={isOutgoing ? t('signatures.signOutgoing') : t('signatures.signIncoming')}
-                  onPress={() => confirmSignature(kind)}
+                  onPress={() => void confirmSignature(kind)}
                 />
               </View>
             ) : null}

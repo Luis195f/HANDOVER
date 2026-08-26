@@ -28,6 +28,7 @@ describe('terminology-validation', () => {
 
   it('detects SNOMED and LOINC codes from local catalogs', async () => {
     expect(isLocalSnomedCode('44054006')).toBe(true);
+    expect(isLocalSnomedCode('61277005')).toBe(true);
     expect(isLocalLoincCode('85354-9')).toBe(true);
 
     const fetchSpy = vi.spyOn(fhirClient, 'fetchFHIR');

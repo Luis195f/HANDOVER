@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
+import { DEMO_RECEIVER_USER_ID, DEMO_USER_ID } from '@/src/demo/fixtures';
 import { zHandover, type HandoverFormData } from "@/src/validation/schemas";
 
 const baseValidData: HandoverFormData = {
@@ -245,6 +246,33 @@ describe("zHandover", () => {
     expect(messages).toContain("La doble attestation del relevo requiere actores distintos.");
   });
 
+  it('acepta el cierre demo saliente A hacia receptora B', () => {
+    const valid: HandoverFormData = {
+      ...baseValidData,
+      signatures: {
+        outgoing: { ...baseValidData.signatures!.outgoing!, userId: DEMO_USER_ID },
+        incoming: { ...baseValidData.signatures!.incoming!, userId: DEMO_RECEIVER_USER_ID },
+      },
+    };
+
+    expect(zHandover.safeParse(valid).success).toBe(true);
+  });
+
+  it('continua rechazando el cierre demo A hacia A', () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      signatures: {
+        outgoing: { ...baseValidData.signatures!.outgoing!, userId: DEMO_USER_ID },
+        incoming: { ...baseValidData.signatures!.incoming!, userId: DEMO_USER_ID },
+      },
+    };
+
+    const result = zHandover.safeParse(invalid);
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+    expect(messages).toContain('La doble attestation del relevo requiere actores distintos.');
+  });
+
   it("acepta diagnósticos SNOMED válidos", () => {
     const valid: HandoverFormData = {
       ...baseValidData,
@@ -253,6 +281,36 @@ describe("zHandover", () => {
 
     const result = zHandover.safeParse(valid);
     expect(result.success).toBe(true);
+  });
+
+  it("acepta el contrato producido por la selección SNOMED canónica", () => {
+    const selectedFromAutocomplete: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: { system: SNOMED_SYSTEM, code: "61277005", display: "Asma" },
+      dxMedicalStructured: [],
+    };
+
+    const result = zHandover.safeParse(selectedFromAutocomplete);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.dxMedical).toEqual(selectedFromAutocomplete.dxMedical);
+      expect(result.data.dxMedicalStructured).toEqual([]);
+    }
+  });
+
+  it("no sustituye el diagnóstico principal requerido con un estructurado auxiliar", () => {
+    const invalid: HandoverFormData = {
+      ...baseValidData,
+      dxMedical: null,
+      dxMedicalStructured: [{ system: "SNOMED", code: "61277005", display: "Asma" }],
+    };
+
+    const result = zHandover.safeParse(invalid);
+
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+    expect(messages).toContain("Diagnóstico SNOMED requerido");
   });
 
   it("rechaza términos SNOMED no reconocidos", () => {

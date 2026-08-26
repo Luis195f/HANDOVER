@@ -13,6 +13,7 @@ import type {
 } from '../types/handover';
 import type { HandoverFormData } from '../validation/schemas';
 import type { SBARSummary } from '@/src/types/sbar';
+import { UNITS_BY_ID } from '@/src/config/units';
 
 export type SbarSection = 'situation' | 'background' | 'assessment' | 'recommendation';
 export type SbarSummary = SBARSummary;
@@ -56,6 +57,26 @@ const BRADEN_LABELS: Record<
   sin_riesgo: 'sin riesgo',
 };
 
+const WORKLOAD_LABELS: Record<NonNullable<TurnContext['workload']>, string> = {
+  stable: 'estable',
+  high: 'alta',
+  saturated: 'saturada',
+  contingency: 'en contingencia',
+};
+
+const SHIFT_PHASE_LABELS: Record<NonNullable<TurnContext['shiftPhase']>, string> = {
+  start: 'inicio',
+  mid: 'mitad de turno',
+  closing: 'cierre',
+  coverage: 'cobertura',
+};
+
+const TASK_PRIORITY_LABELS: Record<PendingTask['priority'], string> = {
+  routine: 'rutinaria',
+  urgent: 'urgente',
+  critical: 'crítica',
+};
+
 const isNonEmptyString = (value: string | undefined | null): value is string =>
   typeof value === 'string' && value.length > 0;
 
@@ -93,6 +114,19 @@ function truncateText(value: string, limit?: number): string {
 
 function joinSentences(parts: Array<string | undefined>): string {
   return parts.filter(isNonEmptyString).join('. ');
+}
+
+function formatSummaryDateTime(value: string): string {
+  return new Intl.DateTimeFormat('es-ES', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'Europe/Madrid',
+  }).format(new Date(value));
+}
+
+function getVisibleUnitName(unitId?: string): string | undefined {
+  if (!unitId?.trim()) return undefined;
+  return UNITS_BY_ID[unitId]?.name ?? 'Unidad clínica';
 }
 
 function formatOxygenTherapy(oxygen?: OxygenTherapy): string | undefined {
@@ -156,6 +190,33 @@ function describeFluidBalance(balance?: FluidBalanceInfo): string | undefined {
   return parts.filter(Boolean).length ? `Balance hídrico: ${parts.filter(Boolean).join('. ')}` : undefined;
 }
 
+function describeElimination(data: HandoverFormData): string | undefined {
+  const elimination = data.elimination;
+  const parts: string[] = [];
+  const stoolLabels = {
+    constipation: 'estreñimiento',
+    diarrhea: 'diarrea',
+    no_stool: 'sin deposición registrada',
+  } as const;
+
+  if (elimination?.stoolPattern && elimination.stoolPattern !== 'normal') {
+    parts.push(stoolLabels[elimination.stoolPattern]);
+  }
+  if (elimination?.hasRectalTube) {
+    parts.push('sonda rectal presente');
+  }
+
+  const urinaryDevices = (data.devices ?? [])
+    .filter((device) => device.active !== false && /urin|vesical|urostom|nefrostom/i.test(device.name))
+    .map((device) => device.name.trim())
+    .filter(isNonEmptyString);
+  if (urinaryDevices.length > 0) {
+    parts.push(`dispositivo urinario: ${urinaryDevices.join(', ')}`);
+  }
+
+  return parts.length > 0 ? `Eliminación: ${parts.join(', ')}` : undefined;
+}
+
 function describeMobility(mobilityLevel?: string, repositioningPlan?: string): string | undefined {
   if (!mobilityLevel && !repositioningPlan) return undefined;
   const details: string[] = [];
@@ -168,8 +229,8 @@ function describeTurnContext(turnContext?: TurnContext): string | undefined {
   if (!turnContext) return undefined;
 
   const parts: string[] = [];
-  if (turnContext.workload) parts.push(`Carga ${turnContext.workload}`);
-  if (turnContext.shiftPhase) parts.push(`franja ${turnContext.shiftPhase}`);
+  if (turnContext.workload) parts.push(`Carga ${WORKLOAD_LABELS[turnContext.workload]}`);
+  if (turnContext.shiftPhase) parts.push(`Fase: ${SHIFT_PHASE_LABELS[turnContext.shiftPhase]}`);
   if (turnContext.operationalSummary) parts.push(turnContext.operationalSummary);
 
   const incidents = (turnContext.serviceIncidents ?? [])
@@ -187,7 +248,10 @@ function describePendingTasks(tasks?: PendingTask[]): string | undefined {
     .filter((task) => task.status !== 'done')
     .slice(0, 3)
     .map((task) => {
-      const extras = [task.priority, task.dueBy].filter(isNonEmptyString).join(' / ');
+      const extras = [
+        TASK_PRIORITY_LABELS[task.priority],
+        task.dueBy ? formatSummaryDateTime(task.dueBy) : undefined,
+      ].filter(isNonEmptyString).join(' · ');
       return extras ? `${task.title} (${extras})` : task.title;
     });
 
@@ -204,11 +268,13 @@ function describeContingencyPlan(plan?: ContingencyPlan): string | undefined {
   if ((plan.immediateActions ?? []).length > 0) {
     parts.push(`Acciones inmediatas: ${plan.immediateActions?.join(', ')}`);
   }
-  if ((plan.escalationCriteria ?? []).length > 0) {
-    parts.push(`Escalar si ${plan.escalationCriteria?.join(', ')}`);
-  }
-  if (plan.escalationContact) {
-    parts.push(`Avisar a ${plan.escalationContact}`);
+  const escalationCriteria = plan.escalationCriteria?.join(', ');
+  if (escalationCriteria && plan.escalationContact) {
+    parts.push(`Ante ${escalationCriteria}, avisar a ${plan.escalationContact}`);
+  } else if (escalationCriteria) {
+    parts.push(`Ante ${escalationCriteria}, aplicar el circuito local de aviso`);
+  } else if (plan.escalationContact) {
+    parts.push(`Avisar a ${plan.escalationContact} si cambia la situación`);
   }
   if (plan.fallbackPlan?.trim()) {
     parts.push(`Plan alternativo: ${plan.fallbackPlan.trim()}`);
@@ -230,7 +296,8 @@ function buildSituation(data: HandoverFormData): string {
     data.dxNursingStructured?.[0]?.display?.trim();
 
   const admission = diagnosis ? `Paciente con ${diagnosis}` : 'Paciente con información parcial disponible';
-  const location = data.administrativeData?.unit ? `Ubicación: ${data.administrativeData.unit}` : undefined;
+  const visibleUnitName = getVisibleUnitName(data.administrativeData?.unit);
+  const location = visibleUnitName ? `Unidad: ${visibleUnitName}` : undefined;
 
   const vitals = data.vitals;
   const news2 = vitals
@@ -301,14 +368,17 @@ function buildAssessment(data: HandoverFormData): string {
   const risks = describeRisks((data as any).risks, (data as any).risksStructured);
   if (risks) parts.push(risks);
 
-  const pendingTasks = describePendingTasks(data.pendingTasks);
-  if (pendingTasks) parts.push(pendingTasks);
-
   const pain = describePain((data as any).painAssessment);
   if (pain) parts.push(pain);
 
   const balance = describeFluidBalance((data as any).fluidBalance);
   if (balance) parts.push(balance);
+
+  const elimination = describeElimination(data);
+  if (elimination) parts.push(elimination);
+
+  const pendingTasks = describePendingTasks(data.pendingTasks);
+  if (pendingTasks) parts.push(pendingTasks);
 
   const braden = data.braden
     ? `Braden ${data.braden.totalScore} (${BRADEN_LABELS[data.braden.riskLevel]} riesgo)`
@@ -319,7 +389,7 @@ function buildAssessment(data: HandoverFormData): string {
   if (glasgow) parts.push(glasgow);
 
   const assessment = parts.join('. ');
-  return assessment || 'Paciente sin hallazgos críticos reportados. Mantener vigilancia estándar.';
+  return assessment || 'Sin datos suficientes para sintetizar la valoración; revisar el registro clínico vigente.';
 }
 
 function buildRecommendation(data: HandoverFormData): string {
@@ -342,7 +412,7 @@ function buildRecommendation(data: HandoverFormData): string {
   const contingency = describeContingencyPlan(data.contingencyPlan);
   if (contingency) tasks.push(contingency);
 
-  if (!tasks.length) tasks.push('Control de signos vitales cada 4-6 h y revisar diuresis si aplica');
+  if (!tasks.length) tasks.push('Confirmar con el equipo entrante las prioridades del plan vigente');
   return tasks.join('. ');
 }
 
@@ -375,10 +445,10 @@ export function formatSbar(summary: SBARSummary, locale: 'es' | 'en' = 'es'): st
       : { situation: 'S: Situación', background: 'B: Antecedentes', assessment: 'A: Valoración', recommendation: 'R: Recomendación' };
 
   return [
-    `${labels.situation}: ${summary.situation}`,
-    `${labels.background}: ${summary.background}`,
-    `${labels.assessment}: ${summary.assessment}`,
-    `${labels.recommendation}: ${summary.recommendation}`,
+    `${labels.situation} - ${summary.situation}`,
+    `${labels.background} - ${summary.background}`,
+    `${labels.assessment} - ${summary.assessment}`,
+    `${labels.recommendation} - ${summary.recommendation}`,
   ].join('\n');
 }
 

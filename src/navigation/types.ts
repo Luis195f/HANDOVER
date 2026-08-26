@@ -1,6 +1,7 @@
 import type { AdministrativeData } from "@/src/types/administrative";
 import type { PrefillOutput } from "@/src/lib/prefill";
 import type { PatientSummary } from "@/src/lib/fhir-client";
+import type { DemoHandoverPrefill } from "@/src/demo/fixtures";
 
 /**
  * Nota de compatibilidad:
@@ -34,6 +35,7 @@ export type HandoverFormParams = {
   prefilledValues?: PrefillOutput | null;
   patientSummary?: PatientSummary | null;
   prefillMeta?: PrefillMeta;
+  demoPrefill?: DemoHandoverPrefill;
   audioNote?: AudioNotePayload;
 } & LegacyHandoverParams;
 

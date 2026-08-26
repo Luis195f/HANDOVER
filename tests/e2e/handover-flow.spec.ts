@@ -1,184 +1,303 @@
-import { test, expect } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 
-/**
- * This E2E specification runs against a self-contained stubbed UI instead of
- * depending on the Expo web bundle. In CI the real app frequently fails to
- * load or times out, causing Playwright to close the page before our tests
- * run. By supplying a minimal HTML/JS stub we can exercise the flows under
- * deterministic conditions and avoid flakiness. If you wish to run these
- * against the real app locally, comment out the beforeEach hook and let
- * Playwright navigate to the configured baseURL instead.
- */
+const OUTGOING_ACTOR_ID = 'demo@nurseos.app';
+const INCOMING_ACTOR_ID = 'demo.receiver@nurseos.app';
+const SNOMED_SEPSIS_CODE = '128045006';
+const CRITICAL_CHECK_BACK_ITEMS = [
+  'Nivel de observación y medidas de entorno seguro.',
+  'Acción pendiente, responsable y momento objetivo.',
+  'Criterio de aviso al referente clínico.',
+] as const;
 
-// Minimal HTML that exposes the same data-testid hooks expected by the tests.
-const STUB_HTML = `<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>handover-pro e2e stub</title>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:16px}
-    .card{border:1px solid #ddd;border-radius:10px;padding:12px;margin:10px 0;cursor:pointer}
-    .row{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
-    .btn{border:1px solid #ccc;border-radius:10px;padding:8px 10px;background:#f7f7f7;cursor:pointer}
-    .input{border:1px solid #ccc;border-radius:10px;padding:8px 10px;min-width:240px}
-    .sep{margin-top:12px;padding-top:12px;border-top:1px solid #eee}
-    .muted{opacity:.7;font-size:12px}
-  </style>
-</head>
-<body>
-  <div data-testid="e2e-stub-mounted">
-    <div><strong>E2E Stub UI</strong></div>
+async function expectInteractionBudget(locator: Locator, maximum: number) {
+  const text = await locator.innerText();
+  const count = Number(text.match(/Interacciones relevantes(?: de esta ruta)?:\s*(\d+)/)?.[1]);
+  expect(Number.isFinite(count), `No se pudo leer el contador de interacciones en: ${text}`).toBe(true);
+  expect(count).toBeLessThanOrEqual(maximum);
+}
 
-    <div class="sep" data-testid="patient-list">
-      <div>Pacientes</div>
-      <div class="card" data-testid="patient-card-1">Paciente Demo #1</div>
-    </div>
+const CHECKLIST_LABELS = [
+  'Paciente identificado (nombre + pulsera)',
+  'Alergias y alertas revisadas',
+  'Líneas, catéteres y dispositivos verificados',
+  'Plan de medicación y tratamientos verificado',
+  'Medidas de seguridad aplicadas (barandillas, cama baja, etc.)',
+  'Preguntas del equipo entrante resueltas',
+] as const;
 
-    <div class="sep" data-testid="handover-screen" style="display:none;">
-      <div class="row">
-        <input class="input" data-testid="handover-patient-id" value="PAT-1" />
-        <button class="btn" data-testid="handover-scan-qr">Scan QR</button>
-      </div>
+test('Expo Web real completes a dual-actor handover through offline queue replay', async ({
+  context,
+  page,
+}, testInfo) => {
+  const allowedNetworkOrigins = new Set([
+    'http://127.0.0.1:19006',
+    'https://demo.local',
+    'https://oidc.e2e.invalid',
+  ]);
+  const observedNetworkOrigins = new Set<string>();
+  const unexpectedNetworkUrls: string[] = [];
+  const fhirBundles: string[] = [];
+  let loadedExpoJavaScriptBytes = 0;
+  const acceptedConfirmationMessages: string[] = [];
 
-      <div class="row">
-        <button class="btn" data-testid="handover-open-audio-note">Audio note</button>
-        <button class="btn" data-testid="handover-finalize">Finalize</button>
-      </div>
-
-      <div class="sep" data-testid="qr-modal" style="display:none;">
-        <div>QR Mock</div>
-        <input class="input" data-testid="qr-e2e-input" value="" />
-        <div class="row">
-          <button class="btn" data-testid="qr-e2e-submit">Submit QR</button>
-          <button class="btn" data-testid="qr-continue">Continue</button>
-        </div>
-      </div>
-
-      <div class="sep" data-testid="audio-modal" style="display:none;">
-        <div>Audio Mock</div>
-        <div class="row">
-          <button class="btn" data-testid="audio-record-toggle">Rec</button>
-          <button class="btn" data-testid="audio-attach">Attach</button>
-        </div>
-
-        <div class="sep" data-testid="e2e-controls">
-          <div class="row">
-            <button class="btn" data-testid="e2e-set-final">Set Final</button>
-            <button class="btn" data-testid="e2e-add-signature">Add Signature</button>
-            <button class="btn" data-testid="e2e-complete-checklist">Checklist</button>
-          </div>
-        </div>
-
-        <div class="sep" data-testid="signature-pad">Signature Pad</div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    (function(){
-      const root = document.body;
-      const patientCard = root.querySelector('[data-testid="patient-card-1"]');
-      const handover = root.querySelector('[data-testid="handover-screen"]');
-
-      const scanQrBtn = root.querySelector('[data-testid="handover-scan-qr"]');
-      const qrModal = root.querySelector('[data-testid="qr-modal"]');
-      const qrInput = root.querySelector('[data-testid="qr-e2e-input"]');
-      const qrSubmit = root.querySelector('[data-testid="qr-e2e-submit"]');
-      const qrContinue = root.querySelector('[data-testid="qr-continue"]');
-      const patientIdInput = root.querySelector('[data-testid="handover-patient-id"]');
-
-      const openAudio = root.querySelector('[data-testid="handover-open-audio-note"]');
-      const audioModal = root.querySelector('[data-testid="audio-modal"]');
-
-      patientCard && patientCard.addEventListener('click', () => {
-        if (handover) handover.style.display = '';
-      });
-
-      scanQrBtn && scanQrBtn.addEventListener('click', () => {
-        if (qrModal) qrModal.style.display = '';
-      });
-
-      qrSubmit && qrSubmit.addEventListener('click', () => {
-        let pid = 'E2E-123';
-        try {
-          const parsed = JSON.parse((qrInput && qrInput.value) || '{}');
-          pid = parsed.patientId || pid;
-        } catch {}
-        if (patientIdInput) patientIdInput.value = pid;
-      });
-
-      qrContinue && qrContinue.addEventListener('click', () => {
-        if (qrModal) qrModal.style.display = 'none';
-      });
-
-      openAudio && openAudio.addEventListener('click', () => {
-        if (audioModal) audioModal.style.display = '';
-      });
-    })();
-  </script>
-</body>
-</html>`;
-
-test.describe('handover e2e flows', () => {
-  // Before each test, load the stub HTML into a fresh Playwright page. This
-  // eliminates reliance on an external web server and ensures that the
-  // interaction hooks are always present. Because page.setContent() may
-  // initialize a new document, there is no need to navigate to baseURL here.
-  test.beforeEach(async ({ page }) => {
-    await page.setContent(STUB_HTML);
+  page.on('dialog', (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    acceptedConfirmationMessages.push(dialog.message());
+    void dialog.accept();
   });
 
-  test('login and reach patient list', async ({ page }) => {
-    // Verify that the patient list and card are visible in the stubbed UI.
-    await expect(page.getByTestId('patient-list')).toBeVisible();
-    await expect(page.locator('[data-testid^="patient-card-"]').first()).toBeVisible();
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    observedNetworkOrigins.add(url.origin);
   });
 
-  test('scan QR mock and navigate to handover form', async ({ page }) => {
-    // Click the first patient card to navigate to the handover screen.
-    const firstCard = page.locator('[data-testid^="patient-card-"]').first();
-    await firstCard.click();
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
 
-    // The handover screen is now visible and exposes the patient-id input.
-    await expect(page.getByTestId('handover-patient-id')).toBeVisible();
+    if (!allowedNetworkOrigins.has(url.origin)) {
+      unexpectedNetworkUrls.push(request.url());
+      await route.abort('blockedbyclient');
+      return;
+    }
 
-    // Open the QR modal, fill a patientId payload and submit it.
-    await page.getByTestId('handover-scan-qr').click();
-    await page.getByTestId('qr-e2e-input').fill('{"patientId":"E2E-123"}');
-    await page.getByTestId('qr-e2e-submit').click();
-    await page.getByTestId('qr-continue').click();
+    if (url.origin === 'http://127.0.0.1:19006') {
+      await route.continue();
+      return;
+    }
 
-    // After scanning, the patient-id input should contain the submitted value.
-    await expect(page.getByTestId('handover-patient-id')).toHaveValue('E2E-123');
+    if (url.origin === 'https://oidc.e2e.invalid') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          issuer: 'https://oidc.e2e.invalid',
+          authorization_endpoint: 'https://oidc.e2e.invalid/authorize',
+          token_endpoint: 'https://oidc.e2e.invalid/token',
+          revocation_endpoint: 'https://oidc.e2e.invalid/revoke',
+          userinfo_endpoint: 'https://oidc.e2e.invalid/userinfo',
+          end_session_endpoint: 'https://oidc.e2e.invalid/logout',
+        }),
+      });
+      return;
+    }
+
+    const headers = {
+      'access-control-allow-headers': '*',
+      'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'access-control-allow-origin': '*',
+    };
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname.startsWith('/fhir/')) {
+      fhirBundles.push(request.postData() ?? '');
+      await route.fulfill({
+        status: 200,
+        headers: { ...headers, 'content-type': 'application/fhir+json' },
+        body: JSON.stringify({ resourceType: 'Bundle', type: 'transaction-response', entry: [] }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ ok: true, mode: 'demo' }),
+    });
   });
 
-  test('record audio, attach, sign, and finalize', async ({ page }) => {
-    // Enter the handover screen via the patient card.
-    const firstCard = page.locator('[data-testid^="patient-card-"]').first();
-    await firstCard.click();
-
-    // Open the audio note section.
-    await page.getByTestId('handover-open-audio-note').click();
-
-    // Simulate start/stop recording via the toggle.
-    const recordToggle = page.getByTestId('audio-record-toggle');
-    await recordToggle.click();
-    await recordToggle.click();
-
-    // Attach the recorded audio (no-op in stub).
-    await page.getByTestId('audio-attach').click();
-
-    // Complete the checklist actions: set final, add signature and complete checklist.
-    await page.getByTestId('e2e-set-final').click();
-    await page.getByTestId('e2e-add-signature').click();
-    await page.getByTestId('e2e-complete-checklist').click();
-
-    // The signature pad should be visible after adding a signature.
-    await expect(page.getByTestId('signature-pad')).toBeVisible();
-
-    // Finally click the finalize button to complete the handover.
-    await page.getByTestId('handover-finalize').click();
+  page.on('response', async (response) => {
+    const contentType = response.headers()['content-type'] ?? '';
+    if (
+      response.url().startsWith('http://127.0.0.1:19006/') &&
+      contentType.includes('javascript')
+    ) {
+      try {
+        const body = await response.body();
+        loadedExpoJavaScriptBytes = Math.max(loadedExpoJavaScriptBytes, body.byteLength);
+      } catch {
+        // A later bundle response can still provide the real-app evidence.
+      }
+    }
   });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect.poll(() => loadedExpoJavaScriptBytes).toBeGreaterThan(800);
+
+  await page.getByTestId('login-demo').click();
+  await expect(page.getByText('Modo demo - datos ficticios')).toBeVisible();
+  await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional saliente demo');
+
+  const consentSwitch = page.getByRole('switch', { name: /Consentimiento de privacidad|Privacy consent/ });
+  const skipTutorial = page.getByRole('button', { name: /Saltar tutorial|Skip tutorial/ });
+  await consentSwitch.click();
+  await skipTutorial.click();
+  await expect.poll(() => acceptedConfirmationMessages.length).toBe(1);
+  await expect(skipTutorial).toHaveCount(0, { timeout: 15_000 });
+
+  const quickRouteStartedAt = Date.now();
+  await page.getByRole('button', { name: 'Psiquiatria y salud mental', exact: true }).click();
+  await expect(page.getByTestId('unit-exception-handover')).toBeVisible();
+  await expect(page.getByText('32 sin novedades')).toBeVisible();
+  await expect(page.getByText('6 con novedades')).toBeVisible();
+  await expect(page.getByText('2 prioridad alta')).toBeVisible();
+
+  await page.getByTestId('expand-unchanged-list').click();
+  await page.getByTestId('confirm-unchanged-review').click();
+  await expect(page.getByTestId('unchanged-interaction-count')).toContainText('Interacciones relevantes: 2');
+  await expectInteractionBudget(page.getByTestId('unchanged-interaction-count'), 2);
+
+  const changedPatientId = 'demo-psych-child-001';
+  await page.getByTestId(`open-exception-${changedPatientId}`).click();
+  await page.getByTestId(`accept-brief-${changedPatientId}`).click();
+  await expect(page.getByTestId(`quick-interactions-${changedPatientId}`)).toContainText('2');
+  await expectInteractionBudget(page.getByTestId(`quick-interactions-${changedPatientId}`), 4);
+  await expect(page.getByTestId(`exception-detail-${changedPatientId}`)).toContainText('Relevo breve revisado');
+  await page.getByRole('button', { name: 'Cerrar' }).click();
+
+  const criticalPatientId = 'demo-psych-adult-001';
+  await page.getByTestId(`open-exception-${criticalPatientId}`).click();
+  const prioritySbar = page.getByTestId(`exception-sbar-${criticalPatientId}`);
+  await expect(prioritySbar).toBeVisible();
+  await expect(prioritySbar).not.toContainText(/udcc|sjd|high|closing|::|Escalar sí Avisar/);
+  await expect(page.getByTestId(`confirm-checkback-${criticalPatientId}`)).toBeDisabled();
+
+  await page.getByTestId('demo-switch-actor').click();
+  await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional receptora demo');
+  for (const item of CRITICAL_CHECK_BACK_ITEMS) {
+    await page.getByRole('switch', { name: item }).click();
+  }
+  await page.getByTestId(`confirm-checkback-${criticalPatientId}`).click();
+  await expect(page.getByTestId(`exception-event-critical_check_back-${criticalPatientId}`)).toContainText('Profesional receptora demo');
+  await expect(page.getByTestId(`quick-interactions-${criticalPatientId}`)).toContainText('5');
+  await expectInteractionBudget(page.getByTestId(`quick-interactions-${criticalPatientId}`), 8);
+  await page.getByRole('button', { name: 'Cerrar' }).click();
+
+  await page.getByTestId('demo-switch-actor').click();
+  await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional saliente demo');
+  const fullDetailPatientId = 'demo-psych-udcc-001';
+  await page.getByTestId(`open-exception-${fullDetailPatientId}`).click();
+  await page.getByRole('button', { name: 'Ver detalle completo' }).click();
+  await expect(page.getByTestId('handover-profile-runtime')).toBeVisible();
+  await expect(page.getByTestId('handover-scan-qr')).toHaveCount(0);
+
+  const sbarAssessment = page.getByTestId('handover-sbar-assessment');
+  await expect(sbarAssessment).toHaveValue(/estreñimiento.*dispositivo urinario/i);
+  const sbarSituation = page.getByTestId('handover-sbar-situation');
+  const automaticSituation = await sbarSituation.inputValue();
+  expect(automaticSituation).toContain('Delirium');
+  const visibleSbar = [
+    automaticSituation,
+    await page.getByTestId('handover-sbar-background').inputValue(),
+    await sbarAssessment.inputValue(),
+    await page.getByTestId('handover-sbar-recommendation').inputValue(),
+  ].join('\n');
+  expect(visibleSbar).not.toMatch(/udcc|sjd|high|closing|::|Escalar sí Avisar/);
+  await sbarSituation.fill(`${automaticSituation} Ajuste profesional E2E preservado.`);
+
+  const evolution = page.getByTestId('handover-evolution');
+  await evolution.fill('Evolución sintética E2E sin datos clínicos reales.');
+  await expect(evolution).toHaveValue('Evolución sintética E2E sin datos clínicos reales.');
+
+  await page.getByRole('button', { name: 'Sección Datos del turno. Contraída.' }).click();
+  await expect(page.getByTestId('handover-administrative-unit')).toHaveValue('udcc-psychogeriatrics');
+  await page.getByTestId('handover-staffIn').fill('Profesional receptora demo');
+  await page.getByTestId('handover-staffOut').fill('Profesional saliente demo');
+  await page.getByRole('button', { name: 'Sección Nutrición. Contraída.' }).click();
+  await page.getByTestId('nutrition.dietType.trigger').click();
+  await page.getByTestId('nutrition.dietType.option.oral').click();
+  await expect(page.getByTestId('nutrition.dietType.trigger')).toContainText('Oral');
+  const eliminationSection = page.getByRole('button', { name: 'Sección Eliminación. Contraída.' });
+  await expect(eliminationSection).toBeVisible();
+  await eliminationSection.click();
+  await expect(page.getByTestId('elimination.urineMl')).toHaveValue('450');
+  await expect(page.getByTestId('elimination.stoolPattern.trigger')).toContainText('Constipación');
+  await page.getByRole('button', { name: 'Sección Psicosocial. Contraída.' }).click();
+  await page.getByTestId('psychosocial-emotional-status').fill('Estable en escenario sintético E2E.');
+  await page.getByTestId('psychosocial-family-notes').fill('Sin datos familiares reales.');
+  await expect(sbarSituation).toHaveValue(/Ajuste profesional E2E preservado/);
+
+  await page.getByRole('button', { name: 'Sección Diagnósticos médicos/ enfermería. Contraída.' }).click();
+  const diagnosisSearch = page.getByTestId('diagnosis-search-dxMedicalStructured');
+  await diagnosisSearch.fill('Sepsis');
+  await page.getByTestId(`diagnosis-suggestion-SNOMED-${SNOMED_SEPSIS_CODE}`).click();
+  await expect(page.getByTestId('diagnosis-primary-snomed')).toContainText('Sepsis');
+  await expect(page.getByTestId('diagnosis-primary-snomed')).toContainText(SNOMED_SEPSIS_CODE);
+
+  for (const label of CHECKLIST_LABELS) {
+    const item = page.getByRole('switch', { name: label });
+    await item.click();
+    await expect(item).toBeChecked();
+  }
+
+  await expect(page.getByTestId('e2e-set-final')).toHaveCount(0);
+  await expect(page.getByTestId('e2e-add-signature')).toHaveCount(0);
+  await expect(page.getByTestId('e2e-complete-checklist')).toHaveCount(0);
+
+  await page.getByTestId('handover-finalize').click();
+  const canvas = page.getByTestId('signature-pad-canvas');
+  await expect(canvas).toBeVisible();
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) throw new Error('Signature canvas has no browser layout box');
+  await page.mouse.move(box.x + 20, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.move(box.x + box.width - 20, box.y + 25, { steps: 6 });
+  await page.mouse.up();
+  await page.getByTestId('signature-pad-save').click();
+  await expect(page.getByTestId('signature-outgoing-user')).toContainText('Profesional saliente demo');
+
+  await page.getByTestId('demo-switch-actor').click();
+  await expect(page.getByTestId('demo-active-actor')).toContainText('Profesional receptora demo');
+  await page.getByText(/Atestar como enfermera entrante|Attest as incoming nurse/).click();
+  await expect.poll(() => acceptedConfirmationMessages.length).toBe(2);
+  await expect(page.getByTestId('signature-incoming-user')).toContainText('Profesional receptora demo');
+  await expect(page.getByTestId('signature-outgoing-user')).not.toHaveText(
+    await page.getByTestId('signature-incoming-user').innerText(),
+  );
+
+  await context.setOffline(true);
+  await page.getByTestId('handover-finalize').click();
+  await expect.poll(() => acceptedConfirmationMessages.length).toBe(3);
+  await expect(page.getByTestId('handover-sync-status')).toBeVisible();
+  await expect(page.getByTestId('handover-sync-status')).toContainText(/cola|pendiente|offline|queued/i);
+  expect(fhirBundles).toHaveLength(0);
+
+  await page.getByTestId('handover-open-sync-center').click();
+  const queuedItem = page.getByTestId(/^sync-item-/).first();
+  await expect(queuedItem).toBeVisible();
+  await expect(queuedItem).toContainText(/pendiente|pending|error/i);
+
+  await context.setOffline(false);
+  await page.getByTestId('sync-flush').click();
+  await expect.poll(() => fhirBundles.length, { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect(page.getByTestId('sync-empty-queue')).toBeVisible();
+
+  const transmittedBundle = fhirBundles.join('\n');
+  expect(transmittedBundle).toContain(SNOMED_SEPSIS_CODE);
+  expect(transmittedBundle).toContain(OUTGOING_ACTOR_ID);
+  expect(transmittedBundle).toContain(INCOMING_ACTOR_ID);
+  expect(transmittedBundle).toContain('Ajuste profesional E2E preservado');
+  expect(transmittedBundle).toMatch(
+    /Resumen automático local basado en datos sintéticos|Local automatic summary based on synthetic data/,
+  );
+  expect(transmittedBundle).toContain('constipation');
+  expect(transmittedBundle).toContain('Sonda vesical sintetica');
+
+  const observedOrigins = [...observedNetworkOrigins].sort();
+  await testInfo.attach('observed-network-origins.json', {
+    body: Buffer.from(JSON.stringify(observedOrigins, null, 2)),
+    contentType: 'application/json',
+  });
+  console.info(`[e2e] observed network origins: ${observedOrigins.join(', ')}`);
+
+  expect(unexpectedNetworkUrls, `Unexpected network requests: ${unexpectedNetworkUrls.join(', ')}`).toEqual([]);
+  expect(observedOrigins).not.toContain('https://cdn.jsdelivr.net');
+  console.info(`[e2e] quick exception route diagnostic time: ${Date.now() - quickRouteStartedAt} ms`);
 });

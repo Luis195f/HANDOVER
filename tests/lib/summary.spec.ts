@@ -183,4 +183,42 @@ describe('generateSBARSummary', () => {
       'Plan alternativo: Trasladar a monitorización continua si no responde',
     );
   });
+
+  it('incluye eliminación solo ante alteración, dispositivo o vigilancia pendiente', () => {
+    const altered = generateSBARSummary(
+      buildData({
+        elimination: { urineMl: 450, stoolPattern: 'constipation', hasRectalTube: false },
+        devices: [{ name: 'Sonda vesical sintetica', active: true }],
+      }),
+    );
+    const normal = generateSBARSummary(
+      buildData({
+        elimination: { urineMl: 450, stoolPattern: 'normal', hasRectalTube: false },
+      }),
+    );
+
+    expect(altered.assessment).toContain('Eliminación: estreñimiento, dispositivo urinario');
+    expect(normal.assessment).not.toContain('Eliminación');
+  });
+
+  it('localiza unidad y enums sin filtrar identificadores técnicos ni puntuación rota', () => {
+    const summary = generateSBARSummary(
+      buildData({
+        administrativeData: { ...administrativeData, unit: 'udcc-psychogeriatrics' },
+        turnContext: { workload: 'high', shiftPhase: 'closing' },
+        contingencyPlan: {
+          escalationCriteria: ['cambio conductual agudo'],
+          escalationContact: 'referente clínico',
+        },
+      }),
+    );
+    const visibleText = formatSbar(summary, 'es');
+
+    expect(visibleText).toContain('Unidad de Psicogeriatria');
+    expect(visibleText).toContain('Carga alta');
+    expect(visibleText).toContain('Fase: cierre');
+    for (const forbidden of ['udcc', 'sjd', 'high', 'closing', '::', 'Escalar sí Avisar']) {
+      expect(visibleText).not.toContain(forbidden);
+    }
+  });
 });

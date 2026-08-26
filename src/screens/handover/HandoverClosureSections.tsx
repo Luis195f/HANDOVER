@@ -27,14 +27,11 @@ type Props = {
   onToggle: (key: ClosureSectionKey) => void;
   dictationState: SummarySectionProps['dictationState'];
   DictationMicButton: SummarySectionProps['DictationMicButton'];
-  sbarPreview: string | null;
-  onGenerateSbar: () => void;
-  onInsertSbar: () => void;
-  onCloseSbarPreview: () => void;
   checklistItems: BedsideChecklistItem[];
   currentUser?: SignatureUser | null;
   administrativeUnitId?: string;
   canSignOutgoing: boolean;
+  allowedSignatureKind?: 'outgoing' | 'incoming';
   buildOutgoingSignature: (payload: SignaturePadValue) => HandoverSignature | null;
   onAttestationCaptured: (kind: 'outgoing' | 'incoming', signature: HandoverSignature) => void;
   outgoingSignatureError?: string;
@@ -53,14 +50,11 @@ export function HandoverClosureSections({
   onToggle,
   dictationState,
   DictationMicButton,
-  sbarPreview,
-  onGenerateSbar,
-  onInsertSbar,
-  onCloseSbarPreview,
   checklistItems,
   currentUser,
   administrativeUnitId,
   canSignOutgoing,
+  allowedSignatureKind,
   buildOutgoingSignature,
   onAttestationCaptured,
   outgoingSignatureError,
@@ -120,10 +114,6 @@ export function HandoverClosureSections({
             styles={styles}
             dictationState={dictationState}
             DictationMicButton={DictationMicButton}
-            sbarPreview={sbarPreview}
-            onGenerateSbar={onGenerateSbar}
-            onInsertSbar={onInsertSbar}
-            onCloseSbarPreview={onCloseSbarPreview}
           />
         </CollapsibleSection>
       </View>
@@ -178,6 +168,7 @@ export function HandoverClosureSections({
             administrativeUnitId={administrativeUnitId}
             getSignaturePayload={() => form.getValues()}
             disableOutgoingAction
+            allowedSignatureKind={allowedSignatureKind}
           />
 
           {outgoingSignatureError ? <Text style={styles.error}>{outgoingSignatureError}</Text> : null}

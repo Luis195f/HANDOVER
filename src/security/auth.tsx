@@ -5,8 +5,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Alert } from 'react-native';
 import { Buffer } from 'buffer';
 import { t } from '@/src/i18n';
-import { isDemoAccessEnabled } from '@/src/security/demo-access';
-import { ensureDemoSessionTemplate } from '@/src/demo/fixtures';
+import { isDemoAccessEnabled, isDemoActorSwitchEnabled } from '@/src/security/demo-access';
+import {
+  ensureDemoSessionTemplate,
+  isDemoActorId,
+  type DemoActorId,
+} from '@/src/demo/fixtures';
 import type { AuthSession as StoredAuthSession, HandoverSession, HandoverUser, UserRole } from './auth-types';
 import { getToken, registerTokenSupplier } from '@/src/security/tokenSupplier';
 import { secureGetItem, secureSetItem, secureDeleteItem } from "@/src/security/secure-storage";
@@ -550,6 +554,20 @@ export async function loginDemo(): Promise<SessionModel> {
     return fallbackSession;
   }
 }
+
+export async function switchDemoActor(userId: DemoActorId): Promise<SessionModel> {
+  const activeSession = await getHydratedSession();
+  if (!isDemoActorSwitchEnabled(activeSession)) {
+    throw new Error('DEMO_ACTOR_SWITCH_FORBIDDEN');
+  }
+  if (!isDemoActorId(userId)) {
+    throw new Error('INVALID_DEMO_ACTOR');
+  }
+
+  const nextSession = ensureDemoSessionTemplate(userId);
+  await setSession(nextSession);
+  return nextSession;
+}
 // END HANDOVER: AUTH_DEMO_LOGIN
 
 // BEGIN HANDOVER: AUTH_LOGOUT
@@ -818,6 +836,7 @@ interface AuthContextValue {
   loginWithOAuth: (config?: Partial<OAuthConfig>) => Promise<SessionModel>;
   loginWithCredentials: (params: { username: string; password: string }) => Promise<SessionModel>;
   loginDemo: () => Promise<SessionModel>;
+  switchDemoActor: (userId: DemoActorId) => Promise<SessionModel>;
   logout: () => Promise<void>;
   refreshCapabilities: () => Promise<Capabilities | null>;
 }
@@ -1042,6 +1061,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithOAuth: loginWithAuth0,
       loginWithCredentials,
       loginDemo,
+      switchDemoActor,
       logout,
       refreshCapabilities,
     }),
@@ -1052,6 +1072,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithAuth0,
       loginWithCredentials,
       loginDemo,
+      switchDemoActor,
       logout,
       refreshCapabilities,
     ],

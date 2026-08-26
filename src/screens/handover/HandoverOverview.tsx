@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Pressable, Text, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Pressable, Text, View, type TextStyle, type ViewStyle } from 'react-native';
 
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import type { HandoverProfileRuntime } from '@/src/lib/profile-runtime';
@@ -10,6 +10,17 @@ import { PatientBanner } from '../components/PatientBanner';
 import type { HandoverSyncStatus } from './useHandoverSyncStatus';
 
 type StyleRecord = Record<string, TextStyle | ViewStyle>;
+
+export type DemoClinicalSummary = {
+  unit: string;
+  bed?: string;
+  diagnosis: string;
+  medications: string;
+  vitals: string;
+  risks: string;
+  pending: string;
+  lastUpdated: string;
+};
 
 type Props = {
   styles: StyleRecord;
@@ -27,14 +38,11 @@ type Props = {
   onRetrySync: () => void;
   onOpenLogin: () => void;
   onOpenSyncCenter: () => void;
-  isE2E: boolean;
-  onSetFinalStatus: () => void;
-  onAddSignature: () => void;
-  onCompleteChecklist: () => void;
   profileRuntime: HandoverProfileRuntime;
   bannerSummary: PatientSummary | null;
   bannerLoading: boolean;
   patientSummaryError?: string | null;
+  demoClinicalSummary?: DemoClinicalSummary | null;
 };
 
 const resolveSyncNoticeCopy = (
@@ -81,14 +89,11 @@ export function HandoverOverview({
   onRetrySync,
   onOpenLogin,
   onOpenSyncCenter,
-  isE2E,
-  onSetFinalStatus,
-  onAddSignature,
-  onCompleteChecklist,
   profileRuntime,
   bannerSummary,
   bannerLoading,
   patientSummaryError,
+  demoClinicalSummary,
 }: Props) {
   const syncNoticeCopy = resolveSyncNoticeCopy(handoverSyncStatus, handoverSyncError);
   const syncNoticeColors = resolveSyncNoticeColors(handoverSyncStatus, colors);
@@ -104,6 +109,8 @@ export function HandoverOverview({
       />
       {handoverSyncStatus !== 'idle' ? (
         <View
+          testID="handover-sync-status"
+          accessibilityLabel={syncNoticeCopy}
           style={[
             styles.syncNotice,
             { backgroundColor: syncNoticeColors.backgroundColor, borderColor: syncNoticeColors.borderColor },
@@ -122,22 +129,31 @@ export function HandoverOverview({
                 <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.loginCta')}</Text>
               </Pressable>
             ) : null}
-            <Pressable accessibilityRole="button" onPress={onOpenSyncCenter}>
+            <Pressable
+              accessibilityRole="button"
+              testID="handover-open-sync-center"
+              onPress={onOpenSyncCenter}
+            >
               <Text style={[styles.syncNoticeCta, { color: colors.primary }]}>{t('sync.openSyncCenter')}</Text>
             </Pressable>
           </View>
         </View>
       ) : null}
-      {isE2E ? (
-        <View style={styles.e2eControls} testID="e2e-controls">
-          <Text style={styles.e2eTitle}>Controles E2E</Text>
-          <View style={styles.e2eActions}>
-            <Button title="Marcar final" onPress={onSetFinalStatus} testID="e2e-set-final" />
-            <Button title="Registrar firma" onPress={onAddSignature} testID="e2e-add-signature" />
-            <Button title="Completar checklist" onPress={onCompleteChecklist} testID="e2e-complete-checklist" />
+      {demoClinicalSummary ? (
+        <View testID="handover-profile-runtime">
+          <View style={styles.profileCard} testID="handover-demo-clinical-summary">
+            <Text style={styles.profileCardTitle}>Resumen clínico de relevo</Text>
+            <Text style={styles.profileCardMeta}>{`Unidad: ${demoClinicalSummary.unit}${demoClinicalSummary.bed ? ` · Cama: ${demoClinicalSummary.bed}` : ''}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Diagnóstico relevante: ${demoClinicalSummary.diagnosis}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Medicación relevante: ${demoClinicalSummary.medications}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Últimos signos vitales: ${demoClinicalSummary.vitals}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Riesgos activos: ${demoClinicalSummary.risks}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Pendiente crítico: ${demoClinicalSummary.pending}`}</Text>
+            <Text style={styles.profileCardMeta}>{`Última actualización: ${demoClinicalSummary.lastUpdated}`}</Text>
+            <Text style={styles.profileCardMeta}>Datos sintéticos importados para revisión y confirmación; no hay conexión con una HCE institucional.</Text>
           </View>
         </View>
-      ) : null}
+      ) : (
       <View style={styles.profileCard} testID="handover-profile-runtime">
         <Text style={styles.profileCardTitle}>
           {profileRuntime.context.usesCoreFallback
@@ -197,6 +213,7 @@ export function HandoverOverview({
           </View>
         ) : null}
       </View>
+      )}
     </>
   );
 }

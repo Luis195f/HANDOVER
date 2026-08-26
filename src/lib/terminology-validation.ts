@@ -1,4 +1,5 @@
 import { DIAGNOSIS_CODES } from '../catalogs/diagnosisCodes';
+import { snomedTerms } from '../data/snomed-dict';
 import {
   FHIR_CODES,
   LOINC,
@@ -20,6 +21,7 @@ export type CodeValidationResult = {
 
 const snomedLocalCodes = new Set<string>([
   ...Object.values(SNOMED),
+  ...snomedTerms.map((term) => term.code),
   ...Object.values(FHIR_CODES.RISK).map((code) => code.code),
   ...DIAGNOSIS_CODES.filter((code) => code.system === 'SNOMED').map((code) => code.code),
   ...MEDICATIONS_QUICKPICK_ICU.filter((item) => item.code.system === TERMINOLOGY_SYSTEMS.SNOMED).map(

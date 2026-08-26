@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { FHIR_CODES } from '@/src/lib/codes';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { buildHandoverBundle } from '@/src/lib/fhir-map';
+import { zHandover } from '@/src/validation/schemas';
 import {
   buildHandoverInputPayload,
   buildProfileTraceInput,
@@ -94,6 +96,42 @@ describe('handover submission helpers', () => {
     expect(payload.status).toBe('draft');
     expect(payload.profileTrace).toEqual(profileTrace);
     expect('values' in payload).toBe(false);
+  });
+
+  it('preserves the canonical SNOMED diagnosis through the real submission payload boundary', () => {
+    const diagnosis = { system: SNOMED_SYSTEM, code: '61277005', display: 'Asma' } as const;
+    const values = zHandover.parse({
+      ...baseValues,
+      administrativeData: {
+        ...baseValues.administrativeData,
+        staffIn: ['nurse-a'],
+        staffOut: ['nurse-b'],
+        incidents: ['incident-a'],
+        shiftType: 'Mañana',
+      },
+      bedsideChecklist: {
+        patientIdentityConfirmed: true,
+        allergiesReviewed: true,
+        linesAndDevicesChecked: true,
+        medicationPlanReviewed: true,
+        safetyMeasuresApplied: true,
+        questionsAnswered: true,
+      },
+      dxMedical: diagnosis,
+      dxMedicalStructured: [],
+      dxNursing: '',
+      dxNursingStructured: [],
+    });
+
+    const payload = buildHandoverInputPayload(
+      values,
+      { status: 'draft' },
+    );
+
+    expect(payload).toMatchObject({
+      dxMedical: diagnosis,
+      dxMedicalStructured: [],
+    });
   });
 
   it('exports Clinical context through the real submission payload flow when profile trace is active', () => {

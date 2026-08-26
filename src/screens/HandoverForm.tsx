@@ -22,6 +22,7 @@ import * as Speech from 'expo-speech';
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 
 import { isOn } from '@/src/config/flags';
+import { UNITS_BY_ID } from '@/src/config/units';
 import { getPatientIdentificationHint, isQrPatientScanEnabled } from '@/src/config/patientIdentification';
 import { isPilotFeatureEnabled, usePilotControlContext } from '@/src/config/pilotControl';
 import { getHandoverVisibleSections } from '@/src/screens/handover/visibility';
@@ -29,6 +30,7 @@ import { HANDOVER_SECTIONS_INFO, resolveHandoverProfileRuntime } from '@/src/lib
 import AudioAttach from '@/src/components/AudioAttach';
 import FileAttach from '@/src/components/FileAttach';
 import { hashHex } from '@/src/lib/crypto';
+import { confirmAction } from '@/src/lib/platform-confirm';
 import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type HandoverValues as FhirHandoverValues } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
@@ -55,7 +57,7 @@ import {
   queueAndFlushAuditEvent,
   type AuditStorage,
 } from '@/src/lib/audit';
-import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
+import { formatSbar, generateSBARSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
@@ -126,7 +128,6 @@ import { HandoverContextSections } from './handover/HandoverContextSections';
 import {
   baseChecklistDefaults,
   buildChecklistDefaults,
-  buildCompletedChecklist,
   compactNumberMap,
   compactObject,
   deriveInitialRisksStructured,
@@ -142,7 +143,7 @@ import {
   safeJsonParse,
   truncateNote,
 } from './handover/formUtils';
-import { HandoverOverview } from './handover/HandoverOverview';
+import { HandoverOverview, type DemoClinicalSummary } from './handover/HandoverOverview';
 import {
   buildHandoverInputPayload,
   buildProfileTraceInput,
@@ -152,6 +153,14 @@ import {
   normalizeUnitSelection,
 } from './handover/submission';
 import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
+import { getDemoActorIdentity, getDemoHandoverPrefill, type DemoHandoverPrefill } from '@/src/demo/fixtures';
+import {
+  createDeterministicSbar,
+  createInitialDeterministicSbar,
+  getSbarFingerprint,
+  hasSbarContent,
+  type DeterministicSbar,
+} from './handover/deterministicSbar';
 
 const IS_TEST = process.env.NODE_ENV === 'test';
 const normalizeLegacyFormSnapshot = <T extends object>(value: T): T =>
@@ -307,6 +316,7 @@ export type DictationField =
 const ALL_SECTIONS_INFO = HANDOVER_SECTIONS_INFO;
 
 type SectionKey = (typeof HANDOVER_SECTIONS_INFO)[number]['key'];
+const DEMO_OPEN_SECTION_KEYS = new Set<SectionKey>(['sbar', 'examenes', 'evolucion', 'resumen', 'bedsideChecklist', 'firmas']);
 type PendingSbarSuggestion = {
   patientId: string;
   unitId: string;
@@ -385,17 +395,27 @@ async function buildAudioAttachment(uri: string | undefined) {
 
 export default function HandoverForm({ navigation, route }: Props) {
   const {
-    patientId: patientIdParam,
-    unitId: unitIdParam,
+    patientId: legacyPatientIdParam,
+    patientIdParam: canonicalPatientIdParam,
+    unitId: legacyUnitIdParam,
+    unitIdParam: canonicalUnitIdParam,
     specialtyId,
     administrativeData: administrativeDataParam,
     prefilledValues: prefilledValuesParam,
     patientSummary: patientSummaryParam,
     prefillMeta,
+    demoPrefill: demoPrefillParam,
     audioNote: audioNoteParam,
   } = route.params ?? {};
+  const patientIdParam = canonicalPatientIdParam ?? legacyPatientIdParam;
+  const unitIdParam = canonicalUnitIdParam ?? legacyUnitIdParam;
   const [session, setSession] = useState<Session | null>(null);
   const { session: authSession, capabilities, logout } = useAuth();
+  const isDemoSession = authSession?.mode === 'demo' || session?.mode === 'demo';
+  const demoPrefill = useMemo<DemoHandoverPrefill | undefined>(
+    () => (isDemoSession ? demoPrefillParam ?? getDemoHandoverPrefill(patientIdParam ?? patientSummaryParam?.id) : undefined),
+    [demoPrefillParam, isDemoSession, patientIdParam, patientSummaryParam?.id],
+  );
   const pilotRoles = authSession?.roles ?? session?.roles ?? [];
   const selectedUnitId = useSelectedUnitId();
   const auditStorageRef = useRef<AuditStorage>(createAsyncStorageAuditStorage());
@@ -418,7 +438,10 @@ export default function HandoverForm({ navigation, route }: Props) {
 );
   const [sectionPositions, setSectionPositions] = useState<Partial<Record<SectionKey, number>>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<SectionKey, boolean>>(() =>
-    ALL_SECTIONS_INFO.reduce((acc, { key }) => ({ ...acc, [key]: false }), {} as Record<SectionKey, boolean>),
+    ALL_SECTIONS_INFO.reduce(
+      (acc, { key }) => ({ ...acc, [key]: isDemoSession ? !DEMO_OPEN_SECTION_KEYS.has(key) : false }),
+      {} as Record<SectionKey, boolean>,
+    ),
   );
   const [activeSection, setActiveSection] = useState<SectionKey | null>(ALL_SECTIONS_INFO[0]?.key ?? null);
   const [bedsideModalVisible, setBedsideModalVisible] = useState(false);
@@ -464,6 +487,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const defaultValues = useMemo<HandoverFormValues>(() => {
     const initialAdministrativeUnitId = resolveEffectiveHandoverUnitId(
+      demoPrefill?.administrativeData.unit,
       administrativeDataParam?.unit,
       unitIdParam,
       selectedUnitId,
@@ -481,28 +505,28 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const bedsideChecklistDefaults = buildChecklistDefaults(checklistItems, baseChecklistDefaults)
 
-  const shiftStartDefault = administrativeDataParam?.shiftStart ?? new Date().toISOString();
+  const shiftStartDefault = demoPrefill?.administrativeData.shiftStart ?? administrativeDataParam?.shiftStart ?? new Date().toISOString();
   const shiftEndDefault =
-    administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+    demoPrefill?.administrativeData.shiftEnd ?? administrativeDataParam?.shiftEnd ?? new Date(Date.now() + 4 * 3600 * 1000).toISOString();
 
     const administrativeDefaults: AdministrativeData = {
       unit:
         initialAdministrativeUnitId ?? '',
-      census: administrativeDataParam?.census ?? 0,
-      staffIn: administrativeDataParam?.staffIn ?? [],
-      staffOut: administrativeDataParam?.staffOut ?? [],
+      census: demoPrefill?.administrativeData.census ?? administrativeDataParam?.census ?? 0,
+      staffIn: demoPrefill?.administrativeData.staffIn ?? administrativeDataParam?.staffIn ?? [],
+      staffOut: demoPrefill?.administrativeData.staffOut ?? administrativeDataParam?.staffOut ?? [],
       shiftStart: shiftStartDefault,
       shiftEnd: shiftEndDefault,
       shiftType:
-        administrativeDataParam?.shiftType ??
+        demoPrefill?.administrativeData.shiftType ?? administrativeDataParam?.shiftType ??
         deriveShiftType(shiftStartDefault),
-      generalNotes: administrativeDataParam?.generalNotes ?? undefined,
-      incidents: administrativeDataParam?.incidents ?? [],
+      generalNotes: demoPrefill?.administrativeData.generalNotes ?? administrativeDataParam?.generalNotes ?? undefined,
+      incidents: demoPrefill?.administrativeData.incidents ?? administrativeDataParam?.incidents ?? [],
     };
 
     const dxMedicalPrefill = prefilledValuesParam?.dxText;
     const dxMedicalValue: SnomedCoding =
-      normalizeLegacySnomedCoding(dxMedicalPrefill) ?? { ...emptySnomedCoding };
+      demoPrefill?.dxMedical ?? normalizeLegacySnomedCoding(dxMedicalPrefill) ?? { ...emptySnomedCoding };
     const base: HandoverFormValues = {
       administrativeData: administrativeDefaults,
       patientId: patientIdParam ?? patientSummaryParam?.id ?? '',
@@ -511,10 +535,10 @@ export default function HandoverForm({ navigation, route }: Props) {
       dxNursing: '',
       dxMedicalStructured: [],
       dxNursingStructured: [],
-      evolution: '',
+      evolution: demoPrefill?.evolution ?? '',
       closingSummary: '',
       meds: '',
-      medications: [],
+      medications: demoPrefill?.medications ?? [],
       treatments: [],
       outcomes: [],
       turnContext: {
@@ -523,24 +547,26 @@ export default function HandoverForm({ navigation, route }: Props) {
         operationalSummary: '',
         serviceIncidents: [],
       },
-      pendingTasks: [],
-      exams: [],
+      pendingTasks: demoPrefill?.pendingTasks ?? [],
+      exams: demoPrefill?.exams ?? [],
       procedures: [],
-      contingencyPlan: {
+      contingencyPlan: demoPrefill?.contingencyPlan ?? {
         watchItems: [],
         immediateActions: [],
         escalationCriteria: [],
         escalationContact: '',
         fallbackPlan: '',
       },
-      sbarSituation: '',
-      sbarBackground: '',
-      sbarAssessment: '',
-      sbarRecommendation: '',
+      sbarSituation: demoPrefill?.sbarSituation ?? '',
+      sbarBackground: demoPrefill?.sbarBackground ?? '',
+      sbarAssessment: demoPrefill?.sbarAssessment ?? '',
+      sbarRecommendation: demoPrefill?.sbarRecommendation ?? '',
       sbarFullText: '',
-      vitals: prefilledVitals ?? {},
+      vitals: demoPrefill?.vitals ?? prefilledVitals ?? {},
       oxygenTherapy: {},
-      devices: [],
+      devices: demoPrefill?.devices ?? [],
+      nutrition: demoPrefill?.nutrition,
+      elimination: demoPrefill?.elimination,
       fluidBalance: undefined,
       painAssessment: {
         hasPain: false,
@@ -551,8 +577,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       // BEGIN HANDOVER D1 – BedsideChecklist
       bedsideChecklist: bedsideChecklistDefaults,
       // END HANDOVER D1 – BedsideChecklist
-      risks: {},
-      risksStructured: [],
+      risks: demoPrefill?.risks ?? {},
+      risksStructured: demoPrefill?.risksStructured ?? [],
       signatures: {
         outgoing: undefined,
         incoming: undefined,
@@ -571,6 +597,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   prefilledValuesParam,
   prefilledVitals,
   prefillMeta,
+  demoPrefill,
   pilotRoles,
 ]);
 
@@ -594,10 +621,12 @@ export default function HandoverForm({ navigation, route }: Props) {
   const evolutionError = errors.evolution?.message as string | undefined;
   const signatureUser = useMemo(() => normalizeSignatureUser(authSession ?? session), [authSession, session]);
   const activeUnitId = administrativeUnitValue || signatureUser?.activeUnitId || signatureUser?.units?.[0];
+  const demoActorKind = isDemoSession ? getDemoActorIdentity(signatureUser?.userId ?? '')?.kind : undefined;
   const canSignOutgoing = Boolean(
     signatureUser &&
       (signatureUser.roles ?? (signatureUser.role ? [signatureUser.role] : [])).includes('nurse') &&
-      activeUnitId,
+      activeUnitId &&
+      demoActorKind !== 'incoming',
   );
   
   // BEGIN HANDOVER D4 – Get active unit
@@ -696,7 +725,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     'braden',
     'oxygenTherapy',
   ]);
-  const isE2E = process.env.EXPO_PUBLIC_E2E === 'true';
   const watchedValues = form.watch();
 
   useEffect(() => {
@@ -784,42 +812,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     },
     [form],
   );
-
-  const handleE2ESignature = () => {
-    const payload: SignaturePadValue = {
-      imageBase64:
-        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA' +
-        'AAC0lEQVR42mP8/5+hHgAFgwJ/lKX0LgAAAABJRU5ErkJggg==',
-      signedAt: new Date().toISOString(),
-    };
-    const built = buildOutgoingSignature(payload);
-    if (!built) return;
-
-    type OutgoingSig = NonNullable<NonNullable<HandoverValues['signatures']>['outgoing']>;
-    const nextSignature: OutgoingSig = {
-      ...built,
-      method: (built.method ?? 'session') as OutgoingSig['method'],
-    };
-    const currentSignatures = form.getValues('signatures');
-
-    form.setValue(
-      'signatures',
-      {
-        ...(currentSignatures ?? {}),
-        outgoing: nextSignature,
-      },
-      { shouldDirty: true, shouldValidate: true },
-    );
-    void recordClosureAttestation('outgoing', nextSignature);
-  };
-
-  const handleE2EChecklistComplete = () => {
-    const currentChecklist = form.getValues('bedsideChecklist');
-    const runtimeChecklistItems = normalizeChecklistItems(profileRuntime.checklistItems);
-    const completed = buildCompletedChecklist(currentChecklist, runtimeChecklistItems);
-
-    form.setValue('bedsideChecklist', completed, { shouldDirty: true, shouldValidate: true });
-  };
 
   const dxText = (value: unknown): string => {
     if (typeof value === 'string') return value.trim();
@@ -1095,12 +1087,14 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [lastDictationField, setLastDictationField] = useState<DictationField | null>(null);
   const [dictatedPartial, setDictatedPartial] = useState('');
   const activeFieldRef = useRef<DictationField | null>(null);
-  const [sbarPreview, setSbarPreview] = useState<string | null>(null);
   const [isRefiningSbarWithAI, setIsRefiningSbarWithAI] = useState(false);
   const [isGeneratingSbarWithAI, setIsGeneratingSbarWithAI] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
   const [pendingSbarSuggestion, setPendingSbarSuggestion] = useState<PendingSbarSuggestion | null>(null);
+  const automaticSbarAttemptsRef = useRef<Set<string>>(new Set());
+  const lastAutomaticSbarFingerprintRef = useRef<string | null>(null);
+  const dictationUnavailableNotifiedRef = useRef(false);
   const [audioUploadToFhir, setAudioUploadToFhir] = useState(false);
   const [audioUploadStatus, setAudioUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
@@ -1208,6 +1202,10 @@ export default function HandoverForm({ navigation, route }: Props) {
       setSttError('UNSUPPORTED');
       setActiveDictationField(null);
       setLastDictationField(field);
+      if (!dictationUnavailableNotifiedRef.current) {
+        dictationUnavailableNotifiedRef.current = true;
+        Alert.alert(t('audioNote.dictationUnavailable'));
+      }
       return;
     }
     const togglingSameField = sttStatus === 'listening' && activeDictationField === field;
@@ -1253,11 +1251,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const renderDictationStatus = (field: DictationField) => {
     if (dictationUnavailable) {
-      return (
-        <Text style={[styles.dictationError, { color: colors.danger }]}>
-          {t('audioNote.dictationUnavailable')}
-        </Text>
-      );
+      return null;
     }
     if (activeDictationField === field && sttStatus === 'listening') {
       return (
@@ -1402,10 +1396,15 @@ export default function HandoverForm({ navigation, route }: Props) {
     return sections.join('\n\n');
   };
 
-  const buildSbarFullText = (summary: SBARSummary) => {
+  const buildSbarFullText = (summary: SBARSummary, source: 'local' | 'ai' = 'local') => {
     const base = formatSbar(summary, 'es');
+    const provenance =
+      source === 'local'
+        ? t(isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance')
+        : undefined;
     const notice = t('handover.sbarLegalNotice');
-    return base.trim() ? `${base}\n\n${notice}` : notice;
+    const notices = [provenance, notice].filter((value): value is string => Boolean(value));
+    return base.trim() ? `${base}\n\n${notices.join('\n')}` : notices.join('\n');
   };
 
   const buildSbarDecisionHash = (summary: Pick<SBARSummary, 'situation' | 'background' | 'assessment' | 'recommendation'>) =>
@@ -1468,7 +1467,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     clearPendingSbarSuggestion('rejected', 'replace_existing');
 
     const summary = input.summary;
-    const fullText = input.fullText ?? buildSbarFullText(summary);
+    const fullText = input.fullText ?? buildSbarFullText(summary, input.mode === 'ai' ? 'ai' : 'local');
     const nextPending: PendingSbarSuggestion = {
       patientId: traceableContext.patientId,
       unitId: traceableContext.unitId,
@@ -1605,18 +1604,49 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
+  const applyDeterministicSbar = (generated: DeterministicSbar, shouldDirty: boolean) => {
+    const flags = { shouldDirty, shouldValidate: shouldDirty };
+    form.setValue('sbarSituation', generated.summary.situation, flags);
+    form.setValue('sbarBackground', generated.summary.background, flags);
+    form.setValue('sbarAssessment', generated.summary.assessment, flags);
+    form.setValue('sbarRecommendation', generated.summary.recommendation, flags);
+    form.setValue('closingSummary', generated.fullText, flags);
+    lastAutomaticSbarFingerprintRef.current = generated.fingerprint;
+    setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
+    setSbarAiError(null);
+  };
+
+  const createCurrentDeterministicSbar = (values: HandoverFormValues) => {
+    const provenance = t(
+      isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
+    );
+    return createDeterministicSbar(values, `${provenance}\n${t('handover.sbarLegalNotice')}`);
+  };
+
   const handleGenerateSbarSuggestion = () => {
     try {
       clearPendingSbarSuggestion('rejected', 'replace_existing');
       const values = form.getValues();
-      const summary = generateSBARSummary(values, { maxCharsPerSection: 320 });
-      form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
-      form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
-      form.setValue('closingSummary', buildSbarFullText(summary), { shouldDirty: true, shouldValidate: true });
-      setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
-      setSbarAiError(null);
+      const generated = createCurrentDeterministicSbar(values);
+      const replace = () => applyDeterministicSbar(generated, true);
+      const currentWasModified =
+        hasSbarContent(values) &&
+        lastAutomaticSbarFingerprintRef.current !== getSbarFingerprint(values);
+
+      if (currentWasModified) {
+        Alert.alert(
+          t('handover.sbarRegenerateTitle'),
+          t('handover.sbarRegenerateMessage'),
+          [
+            { text: t('common.cancel'), style: 'cancel' },
+            { text: t('handover.replaceLabel'), style: 'destructive', onPress: replace },
+          ],
+          { cancelable: true },
+        );
+        return;
+      }
+
+      replace();
     } catch {
       Alert.alert(
         t('handover.sbarAutoGenerateAlertTitle'),
@@ -1625,42 +1655,38 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
-  const handleGenerateSbar = async () => {
-    const isValid = await form.trigger();
-    if (!isValid) {
-      Alert.alert(t('handover.formReviewTitle'), t('handover.formReviewSbarMessage'));
-      return;
-    }
+  useEffect(() => {
+    const patientId = typeof patientIdValue === 'string' ? patientIdValue.trim() : '';
+    if (!patientId) return;
+    if (patientId.startsWith('demo-') && !demoPrefill) return;
+
+    const attemptKey = `${patientId}|${effectivePilotUnitId ?? ''}`;
+    if (automaticSbarAttemptsRef.current.has(attemptKey)) return;
+    automaticSbarAttemptsRef.current.add(attemptKey);
+
     const values = form.getValues();
-    const summary = generateSbarSummary(values, { locale: 'es', maxCharsPerSection: 280 });
-    const sbarText = formatSbar(summary, 'es');
-    setSbarPreview(sbarText);
-  };
 
-  const applySbarToClosingSummary = (text: string) => {
-    form.setValue('closingSummary', text, { shouldDirty: true, shouldValidate: true });
-    setSbarPreview(text);
-  };
-
-  const handleInsertSbar = () => {
-    if (!sbarPreview) return;
-    const current = form.getValues('closingSummary') ?? '';
-    if (current.trim()) {
-      Alert.alert(
-        t('handover.replaceSummaryTitle'),
-        t('handover.replaceSummaryMessage'),
-        [
-          { text: t('common.cancel'), style: 'cancel' },
-          { text: t('handover.replaceLabel'), style: 'destructive', onPress: () => applySbarToClosingSummary(sbarPreview) },
-        ],
-        { cancelable: true },
+    try {
+      const provenance = t(
+        isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
       );
-      return;
+      const generated = createInitialDeterministicSbar(
+        values,
+        `${provenance}\n${t('handover.sbarLegalNotice')}`,
+      );
+      if (!generated) return;
+      const flags = { shouldDirty: false, shouldValidate: false };
+      form.setValue('sbarSituation', generated.summary.situation, flags);
+      form.setValue('sbarBackground', generated.summary.background, flags);
+      form.setValue('sbarAssessment', generated.summary.assessment, flags);
+      form.setValue('sbarRecommendation', generated.summary.recommendation, flags);
+      form.setValue('closingSummary', generated.fullText, flags);
+      lastAutomaticSbarFingerprintRef.current = generated.fingerprint;
+      setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
+    } catch {
+      // The form remains fully usable when local summary generation cannot complete.
     }
-    applySbarToClosingSummary(sbarPreview);
-  };
-
-  const handleCloseSbarPreview = () => setSbarPreview(null);
+  }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue]);
 
   const trimmedPatientId =
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
@@ -1672,6 +1698,35 @@ export default function HandoverForm({ navigation, route }: Props) {
     [patientSummary, patientSummaryParam],
   );
   const bannerLoading = loadingPatient && !patientSummaryParam;
+  const demoClinicalSummary = useMemo<DemoClinicalSummary | null>(() => {
+    if (!isDemoSession || !demoPrefill) return null;
+    const unitId = watchedValues.administrativeData?.unit;
+    const vitals = watchedValues.vitals ?? {};
+    const vitalParts = [
+      typeof vitals.hr === 'number' ? `FC ${vitals.hr}` : null,
+      typeof vitals.rr === 'number' ? `FR ${vitals.rr}` : null,
+      typeof vitals.spo2 === 'number' ? `SpO₂ ${vitals.spo2}%` : null,
+      typeof vitals.sbp === 'number' ? `TA ${vitals.sbp}` : null,
+      typeof vitals.tempC === 'number' ? `T ${vitals.tempC}°C` : null,
+    ].filter((value): value is string => Boolean(value));
+    const activeRisks = (watchedValues.risksStructured ?? [])
+      .filter((risk) => risk.present)
+      .map((risk) => risk.type)
+      .join(', ');
+    const pending = (watchedValues.pendingTasks ?? [])
+      .find((task) => task.priority === 'critical' || task.status === 'pending')?.title;
+
+    return {
+      unit: UNITS_BY_ID[unitId]?.name ?? unitId ?? 'Sin unidad',
+      bed: bannerSummary?.bed,
+      diagnosis: watchedValues.dxMedical?.display ?? 'Sin datos suficientes',
+      medications: (watchedValues.medications ?? []).map((medication) => medication.name).join(', ') || 'Sin datos disponibles',
+      vitals: vitalParts.join(' · ') || 'Sin datos suficientes',
+      risks: activeRisks || 'Sin datos suficientes',
+      pending: pending ?? 'Sin datos suficientes',
+      lastUpdated: vitals.recordedAt ?? 'Sin datos suficientes',
+    };
+  }, [bannerSummary?.bed, demoPrefill, isDemoSession, watchedValues]);
   // END HANDOVER D6 – HandoverForm PatientBanner
 
   // BEGIN HANDOVER D2 – VitalTrends hook usage
@@ -2150,13 +2205,19 @@ export default function HandoverForm({ navigation, route }: Props) {
     return isValid;
   };
 
-  const confirmClosureAttestation = () =>
-    new Promise<boolean>((resolve) => {
-      Alert.alert(t('handover.legalConfirmTitle'), t('handover.legalConfirmMessage'), [
-        { text: t('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
-        { text: t('handover.legalConfirmAction'), style: 'default', onPress: () => resolve(true) },
-      ]);
+  const handleConfirmedClosure = () => {
+    onSubmit();
+  };
+
+  const confirmClosureAttestation = async () => {
+    const confirmed = await confirmAction({
+      title: t('handover.legalConfirmTitle'),
+      message: t('handover.legalConfirmMessage'),
+      confirmText: t('handover.legalConfirmAction'),
+      cancelText: t('common.cancel'),
     });
+    if (confirmed) handleConfirmedClosure();
+  };
 
   const finalizeSubmission = async () => {
     form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true });
@@ -2165,9 +2226,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       Alert.alert(attestationAlert.title, attestationAlert.message);
       return;
     }
-    const confirmed = await confirmClosureAttestation();
-    if (!confirmed) return;
-    onSubmit();
+    await confirmClosureAttestation();
   };
 
   const handleSaveDraft = () => {
@@ -2289,14 +2348,11 @@ export default function HandoverForm({ navigation, route }: Props) {
             }}
             onOpenLogin={() => navigation.navigate('Login')}
             onOpenSyncCenter={() => navigation.navigate('SyncCenter')}
-            isE2E={isE2E}
-            onSetFinalStatus={() => form.setValue('status', 'final', { shouldDirty: true, shouldValidate: true })}
-            onAddSignature={handleE2ESignature}
-            onCompleteChecklist={handleE2EChecklistComplete}
             profileRuntime={profileRuntime}
             bannerSummary={bannerSummary}
             bannerLoading={bannerLoading}
             patientSummaryError={patientSummaryError}
+            demoClinicalSummary={demoClinicalSummary}
           />
 
           <HandoverContextSections
@@ -2358,6 +2414,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               sbarRecommendationError={sbarRecommendationError}
               sbarFullTextError={sbarFullTextError}
               hideLegacyFields={!showLegacySbarNarrative}
+              isDemo={isDemoSession}
             />
           </CollapsibleSection>
         </View>
@@ -2374,13 +2431,13 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.signos}
             onToggle={() => toggleSection('signos')}
             lazy
-            unmountOnCollapse
             sectionKey="vitals"
           >
             <VitalsSection
               styles={styles}
               parseNumericInput={parseNumericInput}
               riskEvaluation={riskEvaluation}
+              isDemo={isDemoSession}
               loadingVitalTrends={loadingVitalTrends}
               vitalTrendsError={vitalTrendsError}
               vitalTrends={vitalTrends}
@@ -2569,7 +2626,6 @@ export default function HandoverForm({ navigation, route }: Props) {
           isCollapsed={collapsedSections.escalas}
           onToggle={() => toggleSection('escalas')}
           lazy
-          unmountOnCollapse
           sectionKey="clinicalScales"
         >
           <ClinicalScalesSection
@@ -2645,7 +2701,6 @@ export default function HandoverForm({ navigation, route }: Props) {
                 </View>
                 <DictationMicButton
                   active={activeDictationField === 'meds' && sttStatus === 'listening'}
-                  disabled={dictationUnavailable}
                   label="Dictar medicación"
                   onPress={() =>
                     handleDictationPress('meds', {
@@ -2758,7 +2813,6 @@ export default function HandoverForm({ navigation, route }: Props) {
               </View>
               <DictationMicButton
                 active={activeDictationField === 'dxMedical' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
                 label="Dictar dx médico"
                 onPress={() =>
                   handleDictationPress('dxMedical', {
@@ -2813,7 +2867,6 @@ export default function HandoverForm({ navigation, route }: Props) {
               </View>
               <DictationMicButton
                 active={activeDictationField === 'dxNursing' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
                 label="Dictar dx enfermería"
                 onPress={() =>
                   handleDictationPress('dxNursing', {
@@ -2896,6 +2949,8 @@ export default function HandoverForm({ navigation, route }: Props) {
                   name="evolution"
                   render={({ field: { onChange, onBlur, value } }) => (
                     <TextInput
+                      accessibilityLabel="Notas de evolución"
+                      testID="handover-evolution"
                       style={[styles.input, styles.textArea, tokenInputStyle]}
                       multiline
                       placeholder="Notas de evolución"
@@ -2909,7 +2964,6 @@ export default function HandoverForm({ navigation, route }: Props) {
               </View>
               <DictationMicButton
                 active={activeDictationField === 'evolution' && sttStatus === 'listening'}
-                disabled={dictationUnavailable}
                 label="Dictar evolución"
                 onPress={() =>
                   handleDictationPress('evolution', {
@@ -2950,14 +3004,11 @@ export default function HandoverForm({ navigation, route }: Props) {
           handleDictationPress,
         }}
         DictationMicButton={DictationMicButton}
-        sbarPreview={sbarPreview}
-        onGenerateSbar={handleGenerateSbar}
-        onInsertSbar={handleInsertSbar}
-        onCloseSbarPreview={handleCloseSbarPreview}
         checklistItems={checklistItems}
         currentUser={signatureUser}
         administrativeUnitId={administrativeUnitValue}
         canSignOutgoing={canSignOutgoing}
+        allowedSignatureKind={demoActorKind}
         buildOutgoingSignature={buildOutgoingSignature}
         onAttestationCaptured={(kind, signature) => {
           void recordClosureAttestation(kind, signature);

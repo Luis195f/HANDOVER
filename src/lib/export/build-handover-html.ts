@@ -53,6 +53,7 @@ export function buildHandoverHtml(ctx: HandoverPdfContext): string {
       </head>
       <body>
         <h1>Informe de Entrega de Turno – Handover Pro</h1>
+        ${user.mode === 'demo' ? '<p><strong>Datos sintéticos — demostración sin conexión a una HCE institucional</strong></p>' : ''}
 
         <div class="section meta">
           <p><strong>Unidad:</strong> ${safe(administrativeData.unit)}</p>

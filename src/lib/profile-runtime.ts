@@ -374,6 +374,9 @@ const resolveNotes = (pack: UnitProfileRuntimePack, features: UnitFeatureFlags):
   if (features.enableOncoFields) {
     notes.push('Contexto onco-hematologico: reforzar fase terapeutica, inmunosupresion, CVC y soporte anticipatorio.');
   }
+  if (features.enableElimination) {
+    notes.push('Eliminacion habilitada por contexto de unidad sobre el Core compartido.');
+  }
 
   return unique(notes);
 };
@@ -544,7 +547,13 @@ export const resolveHandoverProfileRuntime = ({
       audits: [],
     },
   );
-  const pack = overlayMergeResults.pack;
+  const resolvedPack = overlayMergeResults.pack;
+  const pack: UnitProfileRuntimePack = features.enableElimination
+    ? {
+        ...resolvedPack,
+        enabledSections: unique([...(resolvedPack.enabledSections ?? []), 'elimination']),
+      }
+    : resolvedPack;
   const fieldVisibility = resolveFieldVisibility(pack, features);
   const notes = resolveNotes(pack, features);
   const sectionVisibility = resolveSectionVisibility(pack, fieldVisibility);
