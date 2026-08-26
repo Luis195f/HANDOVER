@@ -32,8 +32,8 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
     patient: {
       id: 'demo-psych-adult-001',
       name: 'Caso sintetico adulto',
-      unitId: 'sjd-a',
-      bedLabel: 'SJD-A-01',
+      unitId: 'psych-adult-a',
+      bedLabel: 'PSY-A-01',
       vitals: { rr: 18, spo2: 97, tempC: 36.8, sbp: 118, hr: 84, o2: false, avpu: 'A' },
       risks: { fall: true },
       pendingTasks: [
@@ -58,7 +58,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
       name: 'Caso sintetico adulto',
       gender: 'female',
       age: 42,
-      bed: 'SJD-A-01',
+      bed: 'PSY-A-01',
       mrn: 'MRN-DEMO-PSY-001',
       allergies: ['Alergia sintetica documentada'],
     },
@@ -71,7 +71,7 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
     patient: {
       id: 'demo-psych-child-001',
       name: 'Caso sintetico infanto',
-      unitId: 'sjd-infanto',
+      unitId: 'psych-child-adolescent',
       bedLabel: 'INF-02',
       vitals: { rr: 19, spo2: 98, tempC: 36.7, sbp: 109, hr: 88, o2: false, avpu: 'A' },
       pendingTasks: [
@@ -107,23 +107,23 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
   },
   {
     patient: {
-      id: 'demo-psych-udcc-001',
+      id: 'demo-psychogeriatric-001',
       name: 'Caso sintetico psicogeriatria',
-      unitId: 'udcc-psychogeriatrics',
-      bedLabel: 'UDCC-03',
+      unitId: 'psychogeriatrics',
+      bedLabel: 'PSYG-03',
       vitals: { rr: 17, spo2: 96, tempC: 36.5, sbp: 124, hr: 79, o2: false, avpu: 'A' },
-      devices: [{ id: 'dev-demo-udcc-walker', label: 'Andador supervisado', category: 'support' }],
+      devices: [{ id: 'dev-demo-psychogeriatric-walker', label: 'Andador supervisado', category: 'support' }],
       risks: { fall: true },
       pendingTasks: [
         {
-          id: 'task-demo-psych-udcc-gait',
+          id: 'task-demo-psychogeriatric-gait',
           title: 'Reevaluar deambulacion supervisada, riesgo de caidas y continuidad del turno siguiente',
           critical: true,
           priority: 'critical',
           category: 'reevaluation',
         },
         {
-          id: 'task-demo-psych-udcc-hydration',
+          id: 'task-demo-psychogeriatric-hydration',
           title: 'Cerrar hidratacion, adherencia terapeutica y resguardo de audifono removible',
           urgent: true,
           priority: 'urgent',
@@ -132,18 +132,18 @@ const DEMO_PATIENT_FIXTURES: readonly DemoPatientFixture[] = [
       ],
     },
     summary: {
-      id: 'demo-psych-udcc-001',
+      id: 'demo-psychogeriatric-001',
       name: 'Caso sintetico psicogeriatria',
       gender: 'female',
       age: 82,
-      bed: 'UDCC-03',
+      bed: 'PSYG-03',
       mrn: 'MRN-DEMO-PSY-003',
       allergies: ['Alergia sintetica a antiinflamatorio'],
     },
     birthDate: '1943-07-09',
     gender: 'female',
-    encounterId: 'enc-demo-psych-udcc-001',
-    locationId: 'loc-demo-psych-udcc-001',
+    encounterId: 'enc-demo-psychogeriatric-001',
+    locationId: 'loc-demo-psychogeriatric-001',
   },
 ] as const;
 

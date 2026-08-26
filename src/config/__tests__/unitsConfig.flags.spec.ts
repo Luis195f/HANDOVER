@@ -168,6 +168,47 @@ describe('unitsConfig advanced flags by unit', () => {
     });
   });
 
+  it('keeps generic behavioral-health units on the shared profile with contextual checklists', async () => {
+    const { UNITS_CONFIG } = await import('../unitsConfig');
+
+    expect(UNITS_CONFIG).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'psych-adult-a',
+          name: 'Psiquiatria adulto · Unidad A',
+          specialty: 'psych',
+          profileId: 'behavioral-health',
+        }),
+        expect.objectContaining({
+          id: 'psych-adult-b',
+          name: 'Psiquiatria adulto · Unidad B',
+          specialty: 'psych',
+          profileId: 'behavioral-health',
+        }),
+        expect.objectContaining({
+          id: 'psych-child-adolescent',
+          name: 'Psiquiatria infanto-adolescente',
+          specialty: 'psych',
+          profileId: 'behavioral-health',
+        }),
+        expect.objectContaining({
+          id: 'psychogeriatrics',
+          name: 'Psicogeriatria',
+          specialty: 'psych',
+          profileId: 'behavioral-health',
+        }),
+      ]),
+    );
+
+    const childChecklist = UNITS_CONFIG.find((entry) => entry.id === 'psych-child-adolescent')?.features
+      ?.checklistItems;
+    const psychogeriatricChecklist = UNITS_CONFIG.find((entry) => entry.id === 'psychogeriatrics')?.features
+      ?.checklistItems;
+
+    expect(childChecklist?.some((item) => item.label.includes('familia o tutor'))).toBe(true);
+    expect(psychogeriatricChecklist?.some((item) => item.label.includes('basal cognitivo-funcional'))).toBe(true);
+  });
+
   it('normalizes legacy oncology profile ids contextually across compatible base units', async () => {
     process.env.EXPO_PUBLIC_HANDOVER_UNITS_JSON = JSON.stringify([
       {

@@ -14,10 +14,10 @@ const QR_DISABLED_SPECIALTY_IDS = new Set([
   'psych',
 ]);
 const QR_DISABLED_UNIT_IDS = new Set([
-  'sjd-a',
-  'sjd-b',
-  'sjd-infanto',
-  'udcc-psychogeriatrics',
+  'psych-adult-a',
+  'psych-adult-b',
+  'psych-child-adolescent',
+  'psychogeriatrics',
 ]);
 
 function isBehavioralHealthQrDisabledContext(

@@ -37,9 +37,9 @@ describe('Demo mode network interception', () => {
 
     expect(body).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'demo-psych-adult-001', unitId: 'sjd-a' }),
-        expect.objectContaining({ id: 'demo-psych-child-001', unitId: 'sjd-infanto' }),
-        expect.objectContaining({ id: 'demo-psych-udcc-001', unitId: 'udcc-psychogeriatrics' }),
+        expect.objectContaining({ id: 'demo-psych-adult-001', unitId: 'psych-adult-a' }),
+        expect.objectContaining({ id: 'demo-psych-child-001', unitId: 'psych-child-adolescent' }),
+        expect.objectContaining({ id: 'demo-psychogeriatric-001', unitId: 'psychogeriatrics' }),
       ]),
     );
     expect(body).toHaveLength(3);
@@ -48,7 +48,7 @@ describe('Demo mode network interception', () => {
   it('resuelve el detalle FHIR demo por patientId sin mezclar los casos sinteticos', async () => {
     const patientResponse = await buildDemoResponse('https://demo.hospital/fhir/Patient/demo-psych-child-001');
     const encounterResponse = await buildDemoResponse(
-      'https://demo.hospital/fhir/Encounter?subject=Patient/demo-psych-udcc-001&_include=Encounter:location',
+      'https://demo.hospital/fhir/Encounter?subject=Patient/demo-psychogeriatric-001&_include=Encounter:location',
     );
 
     const patientBody = await patientResponse?.json();
@@ -63,13 +63,13 @@ describe('Demo mode network interception', () => {
         expect.objectContaining({
           resource: expect.objectContaining({
             resourceType: 'Encounter',
-            subject: expect.objectContaining({ reference: 'Patient/demo-psych-udcc-001' }),
+            subject: expect.objectContaining({ reference: 'Patient/demo-psychogeriatric-001' }),
           }),
         }),
         expect.objectContaining({
           resource: expect.objectContaining({
             resourceType: 'Location',
-            identifier: [expect.objectContaining({ value: 'UDCC-03' })],
+            identifier: [expect.objectContaining({ value: 'PSYG-03' })],
           }),
         }),
       ],

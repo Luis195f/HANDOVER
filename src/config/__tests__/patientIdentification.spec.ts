@@ -32,10 +32,10 @@ describe('patientIdentification', () => {
 
     expect(isQrPatientScanEnabled({ specialtyId: 'behavioral-health' })).toBe(false);
     expect(isQrPatientScanEnabled({ specialtyId: ' psych ' })).toBe(false);
-    expect(isQrPatientScanEnabled({ unitId: 'sjd-a' })).toBe(false);
-    expect(isQrPatientScanEnabled({ unitId: 'sjd-b' })).toBe(false);
-    expect(isQrPatientScanEnabled({ unitId: 'sjd-infanto' })).toBe(false);
-    expect(isQrPatientScanEnabled({ unitId: 'udcc-psychogeriatrics' })).toBe(false);
+    expect(isQrPatientScanEnabled({ unitId: 'psych-adult-a' })).toBe(false);
+    expect(isQrPatientScanEnabled({ unitId: 'psych-adult-b' })).toBe(false);
+    expect(isQrPatientScanEnabled({ unitId: 'psych-child-adolescent' })).toBe(false);
+    expect(isQrPatientScanEnabled({ unitId: 'psychogeriatrics' })).toBe(false);
   });
 
   it('allows an explicit feature flag to re-enable QR when needed', async () => {
@@ -44,7 +44,7 @@ describe('patientIdentification', () => {
 
     expect(isQrPatientScanEnabled({ specialtyId: 'behavioral-health' })).toBe(true);
     expect(isQrPatientScanEnabled({ specialtyId: 'psych' })).toBe(true);
-    expect(isQrPatientScanEnabled({ unitId: 'sjd-a' })).toBe(true);
+    expect(isQrPatientScanEnabled({ unitId: 'psych-adult-a' })).toBe(true);
   });
 
   it('disables QR by default for a custom psych unit resolved from UNITS_CONFIG', async () => {

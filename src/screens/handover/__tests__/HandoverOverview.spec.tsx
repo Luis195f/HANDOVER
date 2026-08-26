@@ -50,7 +50,7 @@ describe('HandoverOverview', () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       units: [
         {
-          id: 'sjd-a',
+          id: 'psych-adult-a',
           name: 'Psiquiatria adulto demo',
           specialty: 'psych',
           profileId: 'behavioral-health',
@@ -62,7 +62,7 @@ describe('HandoverOverview', () => {
     });
 
     const { resolveHandoverProfileRuntime } = await import('@/src/lib/profile-runtime');
-    const profileRuntime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
+    const profileRuntime = resolveHandoverProfileRuntime({ unitId: 'psych-adult-a', specialtyId: 'psych' });
 
     const screen = render(
       <HandoverOverview

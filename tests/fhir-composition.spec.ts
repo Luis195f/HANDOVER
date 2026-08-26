@@ -432,7 +432,7 @@ describe('FHIR Composition', () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       units: [
         {
-          id: 'sjd-a',
+          id: 'psych-adult-a',
           name: 'Psiquiatria adulto demo',
           specialty: 'psych',
           profileId: 'behavioral-health',
@@ -447,7 +447,7 @@ describe('FHIR Composition', () => {
     const { buildHandoverInputPayload, buildProfileTraceInput } = await import('@/src/screens/handover/submission');
     const { buildHandoverBundle: buildBehavioralHealthBundle } = await import('@/src/lib/fhir-map');
 
-    const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'psych-adult-a', specialtyId: 'psych' });
     const behavioralHealthValues = {
       patientId: 'pat-psych-1',
       encounterId: 'enc-psych-1',

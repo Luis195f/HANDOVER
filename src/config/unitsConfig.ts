@@ -107,7 +107,7 @@ const BEHAVIORAL_HEALTH_CHILD_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] =
   },
 ];
 
-const BEHAVIORAL_HEALTH_UDCC_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] = [
+const BEHAVIORAL_HEALTH_PSYCHOGERIATRIC_CHECKLIST_ITEMS: readonly BedsideChecklistItem[] = [
   {
     key: 'patientIdentityConfirmed',
     label: 'Paciente, ubicacion funcional, basal cognitivo-funcional y supervision requerida confirmados',
@@ -167,21 +167,21 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     features: { ...BASE_FEATURES, enablePediatricScales: true },
   },
   {
-    id: 'sjd-a',
-    name: 'Psiquiatria adulto · SJD A',
+    id: 'psych-adult-a',
+    name: 'Psiquiatria adulto · Unidad A',
     specialty: 'psych',
     profileId: 'behavioral-health',
     features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
   },
   {
-    id: 'sjd-b',
-    name: 'Psiquiatria adulto · SJD B',
+    id: 'psych-adult-b',
+    name: 'Psiquiatria adulto · Unidad B',
     specialty: 'psych',
     profileId: 'behavioral-health',
     features: { ...BASE_FEATURES, enablePsychosocialExtra: true },
   },
   {
-    id: 'sjd-infanto',
+    id: 'psych-child-adolescent',
     name: 'Psiquiatria infanto-adolescente',
     specialty: 'psych',
     profileId: 'behavioral-health',
@@ -192,14 +192,14 @@ const STATIC_UNITS_CONFIG: HandoverUnitConfig[] = [
     },
   },
   {
-    id: 'udcc-psychogeriatrics',
-    name: 'Psicogeriatria / UDCC',
+    id: 'psychogeriatrics',
+    name: 'Psicogeriatria',
     specialty: 'psych',
     profileId: 'behavioral-health',
     features: {
       ...BASE_FEATURES,
       enablePsychosocialExtra: true,
-      checklistItems: [...BEHAVIORAL_HEALTH_UDCC_CHECKLIST_ITEMS],
+      checklistItems: [...BEHAVIORAL_HEALTH_PSYCHOGERIATRIC_CHECKLIST_ITEMS],
     },
   },
 ] as const;

@@ -28,7 +28,7 @@ const readBehavioralHealthPackSurfaces = (
   ...runtime.treatmentQuickPicks.map((quickPick) => quickPick.description),
 ].join(' | ');
 
-const expectNoUdccSpecificPackCopy = (
+const expectNoPsychogeriatricSpecificPackCopy = (
   runtime: Pick<
     Awaited<ReturnType<(typeof import('../profile-runtime'))['resolveHandoverProfileRuntime']>>,
     'requiredExtraFields' | 'optionalExtraFields' | 'focusAreas' | 'visibleOutputs' | 'treatmentQuickPicks'
@@ -286,12 +286,12 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(emergency.checklistItems.at(-1)?.label).toBe('Preguntas del equipo entrante resueltas');
   });
 
-  it('resolves SJD psychiatry units onto the shared behavioral-health runtime without opening a parallel form', async () => {
+  it('resolves adult psychiatry units onto the shared behavioral-health runtime without opening a parallel form', async () => {
     process.env.UNITS_CONFIG = JSON.stringify({
       units: [
         {
-          id: 'sjd-a',
-          name: 'Psiquiatria adulto · SJD A',
+          id: 'psych-adult-a',
+          name: 'Psiquiatria adulto · Unidad A',
           specialty: 'psych',
           profileId: 'behavioral-health',
           features: { enablePsychosocialExtra: true },
@@ -304,7 +304,7 @@ describe('resolveHandoverProfileRuntime', () => {
 
     const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
 
-    const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-a', specialtyId: 'psych' });
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'psych-adult-a', specialtyId: 'psych' });
 
     expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
@@ -346,7 +346,7 @@ describe('resolveHandoverProfileRuntime', () => {
     expect(runtime.visibleOutputs).toContain('Dispositivos o tratamientos retirables con trazabilidad para el relevo');
     expect(runtime.visibleOutputs).toContain('Observacion especial o acompanamiento explicitados');
     expect(runtime.visibleOutputs).toContain('Evento de contencion trazable sin instrucciones operativas');
-    expectNoUdccSpecificPackCopy(runtime);
+    expectNoPsychogeriatricSpecificPackCopy(runtime);
     expect(runtime.checklistItems[0]?.label).toContain('ubicacion funcional');
     expect(runtime.checklistItems[1]?.label).toContain('caidas');
     expect(runtime.checklistItems[2]?.label).toContain('elementos retirables');
@@ -362,7 +362,7 @@ describe('resolveHandoverProfileRuntime', () => {
 
     const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
 
-    const runtime = resolveHandoverProfileRuntime({ unitId: 'sjd-infanto', specialtyId: 'psych' });
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'psych-child-adolescent', specialtyId: 'psych' });
 
     expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
@@ -377,7 +377,7 @@ describe('resolveHandoverProfileRuntime', () => {
         'Coordinacion con familia, tutor o cuidadores cuando aplique',
       ]),
     );
-    expectNoUdccSpecificPackCopy(runtime);
+    expectNoPsychogeriatricSpecificPackCopy(runtime);
     expect(runtime.checklistItems[0]?.label).toBe('Paciente, ubicacion funcional y referente interno confirmados');
     expect(runtime.checklistItems[2]?.label).toContain('fuga/no retorno');
     expect(runtime.checklistItems[4]?.label).toContain('familia o tutor');
@@ -392,7 +392,7 @@ describe('resolveHandoverProfileRuntime', () => {
 
     const { resolveHandoverProfileRuntime } = await import('../profile-runtime');
 
-    const runtime = resolveHandoverProfileRuntime({ unitId: 'udcc-psychogeriatrics', specialtyId: 'psych' });
+    const runtime = resolveHandoverProfileRuntime({ unitId: 'psychogeriatrics', specialtyId: 'psych' });
 
     expect(runtime.context.catalogUnitProfileId).toBe('behavioral-health');
     expect(runtime.context.unitProfileId).toBe('behavioral-health');
@@ -421,7 +421,7 @@ describe('resolveHandoverProfileRuntime', () => {
     );
     expect(runtime.visibleOutputs).toContain('Coordinacion interna pendiente y referente del relevo explicitados');
     expect(runtime.visibleOutputs).toContain('Seguridad fisica y apoyo para movilidad explicitados cuando apliquen');
-    expectNoUdccSpecificPackCopy(runtime);
+    expectNoPsychogeriatricSpecificPackCopy(runtime);
     expect(runtime.checklistItems[0]?.label).toBe(
       'Paciente, ubicacion funcional, basal cognitivo-funcional y supervision requerida confirmados',
     );

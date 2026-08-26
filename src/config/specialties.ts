@@ -77,7 +77,14 @@ export const SPECIALTIES: Specialty[] = [
   {
     id: 'psych',
     name: 'Psiquiatria y salud mental',
-    aliases: ['salud-mental', 'psiquiatria', 'psiquiatria-adulto', 'psiquiatria-infanto-adolescente', 'udcc'],
+    aliases: [
+      'salud-mental',
+      'psiquiatria',
+      'psiquiatria-adulto',
+      'psiquiatria-infanto-adolescente',
+      'psicogeriatria',
+      'deterioro-cognitivo-conductual',
+    ],
     readiness: 'scaffold',
     defaultUnitProfileId: 'behavioral-health',
   },

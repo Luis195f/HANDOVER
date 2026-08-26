@@ -206,6 +206,9 @@ describe('profile master catalog', () => {
 
   it('keeps operational specialties limited to the visible subset while pilot-ready and registry-only stages stay explicit', () => {
     expect(SPECIALTIES.map((specialty) => specialty.id)).toEqual(['icu', 'ed', 'onc', 'neph', 'ped', 'ob', 'neuroicu', 'cvicu', 'psych']);
+    expect(SPECIALTIES.find((specialty) => specialty.id === 'psych')?.aliases).toEqual(
+      expect.arrayContaining(['psicogeriatria', 'deterioro-cognitivo-conductual']),
+    );
     expect(WAVE_1_UNIT_PROFILE_IDS).toEqual([
       'emergency',
       'general-inpatient',
@@ -257,11 +260,13 @@ describe('profile master catalog', () => {
     }
   });
 
-  it('matches existing locations through ids, names and migration aliases', () => {
+  it('matches existing locations through ids, names and generic clinical aliases', () => {
     expect(matchLocationToUnit('Paciente trasladado a UCI Adulto Ala A')).toBe('icu-a');
     expect(matchLocationToUnit('Pendiente en resucitacion de urgencias')).toBe('ed-obs');
     expect(matchLocationToUnit('Control post hemodialisis')).toBe('neph-hd');
-    expect(matchLocationToUnit('Observacion especial en Psiquiatria adulto SJD A')).toBe('sjd-a');
-    expect(matchLocationToUnit('Revisar continuidad en UDCC')).toBe('udcc-psychogeriatrics');
+    expect(matchLocationToUnit('Observacion especial en Psiquiatria adulto Unidad A')).toBe('psych-adult-a');
+    expect(matchLocationToUnit('Continuidad en psiquiatria adulto B')).toBe('psych-adult-b');
+    expect(matchLocationToUnit('Seguimiento en salud mental infanto')).toBe('psych-child-adolescent');
+    expect(matchLocationToUnit('Revisar continuidad en deterioro cognitivo conductual')).toBe('psychogeriatrics');
   });
 });
