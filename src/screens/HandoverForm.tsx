@@ -57,7 +57,7 @@ import {
   queueAndFlushAuditEvent,
   type AuditStorage,
 } from '@/src/lib/audit';
-import { formatSbar, generateSBARSummary, generateSbarSummary } from '@/src/lib/summary';
+import { formatSbar, generateSBARSummary } from '@/src/lib/summary';
 import { enqueueBundle } from '@/src/lib/queue';
 import NetInfo from '@/src/lib/netinfo';
 import { fastValidateBundleRemotely, hasNetwork, isFastValidateEnabled } from '@/src/lib/fast-validate';
@@ -1087,7 +1087,6 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [lastDictationField, setLastDictationField] = useState<DictationField | null>(null);
   const [dictatedPartial, setDictatedPartial] = useState('');
   const activeFieldRef = useRef<DictationField | null>(null);
-  const [sbarPreview, setSbarPreview] = useState<string | null>(null);
   const [isRefiningSbarWithAI, setIsRefiningSbarWithAI] = useState(false);
   const [isGeneratingSbarWithAI, setIsGeneratingSbarWithAI] = useState(false);
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
@@ -1688,43 +1687,6 @@ export default function HandoverForm({ navigation, route }: Props) {
       // The form remains fully usable when local summary generation cannot complete.
     }
   }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue]);
-
-  const handleGenerateSbar = async () => {
-    const isValid = await form.trigger();
-    if (!isValid) {
-      Alert.alert(t('handover.formReviewTitle'), t('handover.formReviewSbarMessage'));
-      return;
-    }
-    const values = form.getValues();
-    const summary = generateSbarSummary(values, { locale: 'es', maxCharsPerSection: 280 });
-    const sbarText = formatSbar(summary, 'es');
-    setSbarPreview(sbarText);
-  };
-
-  const applySbarToClosingSummary = (text: string) => {
-    form.setValue('closingSummary', text, { shouldDirty: true, shouldValidate: true });
-    setSbarPreview(text);
-  };
-
-  const handleInsertSbar = () => {
-    if (!sbarPreview) return;
-    const current = form.getValues('closingSummary') ?? '';
-    if (current.trim()) {
-      Alert.alert(
-        t('handover.replaceSummaryTitle'),
-        t('handover.replaceSummaryMessage'),
-        [
-          { text: t('common.cancel'), style: 'cancel' },
-          { text: t('handover.replaceLabel'), style: 'destructive', onPress: () => applySbarToClosingSummary(sbarPreview) },
-        ],
-        { cancelable: true },
-      );
-      return;
-    }
-    applySbarToClosingSummary(sbarPreview);
-  };
-
-  const handleCloseSbarPreview = () => setSbarPreview(null);
 
   const trimmedPatientId =
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
@@ -3042,10 +3004,6 @@ export default function HandoverForm({ navigation, route }: Props) {
           handleDictationPress,
         }}
         DictationMicButton={DictationMicButton}
-        sbarPreview={sbarPreview}
-        onGenerateSbar={handleGenerateSbar}
-        onInsertSbar={handleInsertSbar}
-        onCloseSbarPreview={handleCloseSbarPreview}
         checklistItems={checklistItems}
         currentUser={signatureUser}
         administrativeUnitId={administrativeUnitValue}

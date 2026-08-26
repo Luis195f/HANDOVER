@@ -53,7 +53,7 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   hideLegacyFields,
   isDemo = false,
 }) => {
-  const { control } = useFormContext<HandoverFormValues>();
+  const { control, formState } = useFormContext<HandoverFormValues>();
   const aiUnavailableMessage =
     !aiSbarAvailable || !aiSbarGenerationAvailable ? t('handover.sbarAiDisabled') : null;
 
@@ -62,9 +62,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
       <Text style={styles.helperText}>
         {isDemo ? t('handover.sbarSyntheticProvenance') : t('handover.sbarLocalProvenance')}
       </Text>
-      <View style={styles.inlineActions}>
-        <Button title={t('handover.sbarRegenerate')} onPress={handleGenerateSbarSuggestion} />
-      </View>
+      {formState.isDirty ? (
+        <View style={styles.inlineActions}>
+          <Button title={t('handover.sbarRegenerate')} onPress={handleGenerateSbarSuggestion} />
+        </View>
+      ) : null}
       {!isDemo ? <View style={styles.inlineActions}>
         <Button
           title={

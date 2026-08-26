@@ -19,7 +19,8 @@ $ErrorActionPreference = 'Stop'
 $script:AllowedBranches = @(
     'main',
     'fix/p0-web-demo-interactions',
-    'fix/p0-demo-clinical-surface'
+    'fix/p0-demo-clinical-surface',
+    'fix/p0-psychiatry-exception-handover'
 )
 $script:WebPort = 19006
 $script:LoopbackPort = 19007
