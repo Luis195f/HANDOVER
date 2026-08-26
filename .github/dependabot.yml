@@ -16,14 +16,16 @@ updates:
         patterns:
           - "expo*"
           - "react-native*"
-    ignore:
+     ignore:
       - dependency-name: "expo*"
         update-types:
           - "version-update:semver-major"
       - dependency-name: "react-native*"
         update-types:
           - "version-update:semver-major"
-
+      - dependency-name: "vitest"
+        update-types:
+          - "version-update:semver-major"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
