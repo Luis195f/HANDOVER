@@ -5,6 +5,7 @@ import type { PatientSummary } from '@/src/lib/fhir-client';
 import type { HandoverSession } from '@/src/security/auth-types';
 import type { PatientListItem } from '@/src/types/patientList';
 import type { HandoverValues } from '@/src/validation/schemas';
+import type { ExceptionPatientClassificationInput } from '@/src/lib/exception-handover';
 
 // BEGIN HANDOVER: DEMO_MODE
 export const DEMO_USER_ID = 'demo@nurseos.app';
@@ -91,7 +92,7 @@ type DemoPatientFixture = {
 
 export type DemoExceptionStatus = 'unchanged' | 'changed' | 'critical';
 
-export type DemoExceptionHandoverPatient = {
+export type DemoExceptionHandoverPatient = ExceptionPatientClassificationInput & {
   patientId: string;
   name: string;
   bedLabel: string;
@@ -363,6 +364,7 @@ export const DEMO_EXCEPTION_HANDOVER_PATIENTS: readonly DemoExceptionHandoverPat
           : 'unchanged';
     const isCritical = status === 'critical';
     const isChanged = status === 'changed';
+    const sourceObservedAt = demoTime(-20 - position);
 
     return {
       patientId: fixture.patient.id,
@@ -370,6 +372,24 @@ export const DEMO_EXCEPTION_HANDOVER_PATIENTS: readonly DemoExceptionHandoverPat
       bedLabel: fixture.patient.bedLabel ?? `SMA-A-${String(position).padStart(2, '0')}`,
       unitName: DEMO_UNIT_NAME,
       status,
+      profileId: 'behavioral-health',
+      shiftId: 'demo-2026-08-27-morning',
+      observationLevel: isCritical ? 'constant' : isChanged || position % 5 === 0 ? 'enhanced' : 'routine',
+      activeRisks: isCritical ? ['Riesgo de seguridad activo documentado'] : [],
+      plan: {
+        requiresDirectAssessment: true,
+        requiresMedicationVerification: position <= 9 || position % 7 === 0,
+        requiresLeaveReview: position === 2 || position === 8,
+        restrictiveInterventionReviewDue: isCritical,
+      },
+      sourceEvidence: {
+        'direct-assessment': { status: 'current', observedAt: sourceObservedAt },
+        'observation-record': { status: 'current', observedAt: sourceObservedAt },
+        'medication-administration': { status: 'current', observedAt: sourceObservedAt },
+        'care-plan': { status: 'current', observedAt: sourceObservedAt },
+        'incident-log': { status: 'current', observedAt: sourceObservedAt },
+      },
+      reviewOwner: 'Profesional entrante demo',
       change: isCritical
         ? 'Cambio conductual agudo registrado durante el turno sintético.'
         : isChanged
@@ -393,7 +413,7 @@ export const DEMO_EXCEPTION_HANDOVER_PATIENTS: readonly DemoExceptionHandoverPat
           ? 'mantener el entorno seguro y avisar al referente clínico según el protocolo local'
           : 'reevaluar y avisar al referente clínico demo',
       },
-      lastSummaryAt: demoTime(-20 - position),
+      lastSummaryAt: sourceObservedAt,
       lastSummarySource: 'Resumen sintético del turno previo',
       criticalItems: isCritical
         ? [

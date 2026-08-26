@@ -12,6 +12,54 @@ import {
 } from '@/src/lib/exception-handover';
 
 describe('synthetic exception handover fixtures', () => {
+  it('preserves the golden A/B/C baseline, reasons and source order', () => {
+    const baseline = DEMO_EXCEPTION_HANDOVER_PATIENTS.map((patient) => ({
+      patientId: patient.patientId,
+      lane: patient.status === 'critical' ? 'A' : patient.status === 'changed' ? 'B' : 'C',
+      reason: patient.change,
+    }));
+
+    expect(baseline.filter(({ lane }) => lane === 'A')).toEqual([
+      {
+        patientId: 'demo-psych-adult-001',
+        lane: 'A',
+        reason: 'Cambio conductual agudo registrado durante el turno sintético.',
+      },
+      {
+        patientId: 'demo-psych-udcc-001',
+        lane: 'A',
+        reason: 'Cambio conductual agudo registrado durante el turno sintético.',
+      },
+    ]);
+    expect(baseline.filter(({ lane }) => lane === 'B')).toEqual([
+      'demo-psych-child-001',
+      'demo-psych-unit-005',
+      'demo-psych-unit-006',
+      'demo-psych-unit-007',
+      'demo-psych-unit-008',
+      'demo-psych-unit-009',
+    ].map((patientId) => ({
+      patientId,
+      lane: 'B',
+      reason: 'Cambio en descanso, adherencia o participación respecto al resumen sintético previo.',
+    })));
+    expect(baseline.filter(({ lane }) => lane === 'C')).toEqual([
+      'demo-psych-adult-002',
+      ...Array.from({ length: 31 }, (_, index) => `demo-psych-unit-${String(index + 10).padStart(3, '0')}`),
+    ].map((patientId) => ({
+      patientId,
+      lane: 'C',
+      reason: 'Sin novedades registradas para este relevo.',
+    })));
+    expect(baseline.map(({ patientId }) => patientId)).toEqual([
+      'demo-psych-adult-001',
+      'demo-psych-child-001',
+      'demo-psych-udcc-001',
+      'demo-psych-adult-002',
+      ...Array.from({ length: 36 }, (_, index) => `demo-psych-unit-${String(index + 5).padStart(3, '0')}`),
+    ]);
+  });
+
   it('classifies a 40-patient unit only from the explicit synthetic status', () => {
     const groups = groupExceptionHandoverPatients(DEMO_EXCEPTION_HANDOVER_PATIENTS);
 
@@ -38,6 +86,7 @@ describe('synthetic exception handover fixtures', () => {
       DEMO_ACTORS[1],
       '2026-08-27T08:15:00.000Z',
       'demo-psych-adult-001',
+      { criticalPoints: ['Nivel de observación y medidas de entorno seguro.'] },
     );
 
     expect(event).toMatchObject({
@@ -45,6 +94,7 @@ describe('synthetic exception handover fixtures', () => {
       actorId: DEMO_ACTORS[1].userId,
       actorKind: 'incoming',
       recordedAt: '2026-08-27T08:15:00.000Z',
+      criticalPoints: ['Nivel de observación y medidas de entorno seguro.'],
     });
     expect(event.kind).not.toBe('incoming_attestation');
   });

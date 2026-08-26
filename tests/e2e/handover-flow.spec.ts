@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 
 const OUTGOING_ACTOR_ID = 'demo@nurseos.app';
 const INCOMING_ACTOR_ID = 'demo.receiver@nurseos.app';
@@ -8,6 +8,13 @@ const CRITICAL_CHECK_BACK_ITEMS = [
   'Acción pendiente, responsable y momento objetivo.',
   'Criterio de aviso al referente clínico.',
 ] as const;
+
+async function expectInteractionBudget(locator: Locator, maximum: number) {
+  const text = await locator.innerText();
+  const count = Number(text.match(/Interacciones relevantes(?: de esta ruta)?:\s*(\d+)/)?.[1]);
+  expect(Number.isFinite(count), `No se pudo leer el contador de interacciones en: ${text}`).toBe(true);
+  expect(count).toBeLessThanOrEqual(maximum);
+}
 
 const CHECKLIST_LABELS = [
   'Paciente identificado (nombre + pulsera)',
@@ -142,11 +149,13 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await page.getByTestId('expand-unchanged-list').click();
   await page.getByTestId('confirm-unchanged-review').click();
   await expect(page.getByTestId('unchanged-interaction-count')).toContainText('Interacciones relevantes: 2');
+  await expectInteractionBudget(page.getByTestId('unchanged-interaction-count'), 2);
 
   const changedPatientId = 'demo-psych-child-001';
   await page.getByTestId(`open-exception-${changedPatientId}`).click();
   await page.getByTestId(`accept-brief-${changedPatientId}`).click();
   await expect(page.getByTestId(`quick-interactions-${changedPatientId}`)).toContainText('2');
+  await expectInteractionBudget(page.getByTestId(`quick-interactions-${changedPatientId}`), 4);
   await expect(page.getByTestId(`exception-detail-${changedPatientId}`)).toContainText('Relevo breve revisado');
   await page.getByRole('button', { name: 'Cerrar' }).click();
 
@@ -165,6 +174,7 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await page.getByTestId(`confirm-checkback-${criticalPatientId}`).click();
   await expect(page.getByTestId(`exception-event-critical_check_back-${criticalPatientId}`)).toContainText('Profesional receptora demo');
   await expect(page.getByTestId(`quick-interactions-${criticalPatientId}`)).toContainText('5');
+  await expectInteractionBudget(page.getByTestId(`quick-interactions-${criticalPatientId}`), 8);
   await page.getByRole('button', { name: 'Cerrar' }).click();
 
   await page.getByTestId('demo-switch-actor').click();
