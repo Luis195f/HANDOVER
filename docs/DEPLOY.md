@@ -41,10 +41,10 @@ pnpm -w gate:any-sensitive
 pnpm -w test:pilot:coverage
 pnpm -w test:e2e
 pnpm -w validate:fhir
-pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
+python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
 ```
 
-Si solo cambias frontend web y documentación operativa, `pytest` sigue recomendado pero deja de ser bloqueante solo si el backend no fue tocado.
+Si solo cambias frontend web y documentación operativa, `python -m pytest` sigue recomendado pero deja de ser bloqueante solo si el backend no fue tocado.
 
 Wrapper reproducible del repo:
 
@@ -172,13 +172,15 @@ El backend no tiene `Dockerfile` ni `docker-compose` propio en este repo. Sigue 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-pip install -r backend/requirements.txt
+python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python manage.py migrate
 gunicorn backend.wsgi --preload --bind 0.0.0.0:${PORT:-8000}
 ```
 
 Ese comando es el mismo que declara el [`Procfile`](../Procfile). Si se usa nginx frontal, [`config/nginx/handover.conf`](../config/nginx/handover.conf) asume ese upstream en `127.0.0.1:8000`.
+
+`requirements.txt` y `backend/requirements.txt` son dependencias de runtime. El tooling de tests (`pytest`, `pytest-django`, cobertura y dobles de HTTP) vive en `requirements-dev.txt` y se instala solo en desarrollo/CI.
 
 En esta rama no hay `main.py` trackeado en la raíz; por eso no forma parte del arranque operativo documentado y la decisión de backend source of truth queda fijada en [`docs/adr/0001-backend-source-of-truth.md`](adr/0001-backend-source-of-truth.md).
 
