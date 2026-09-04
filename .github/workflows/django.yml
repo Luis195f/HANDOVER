@@ -47,16 +47,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r backend/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install -r requirements.txt
+          python -m pip install -r backend/requirements.txt
+          python -m pip install -r requirements-dev.txt
 
       - name: Run database migrations
         run: python manage.py migrate --noinput
 
       - name: Run Django backend test suite (pytest)
         run: |
-          pytest \
+          python -m pytest \
             --ds=backend.settings \
             --maxfail=1 \
             --disable-warnings \
@@ -99,9 +99,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r backend/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install -r requirements.txt
+          python -m pip install -r backend/requirements.txt
+          python -m pip install -r requirements-dev.txt
 
       - name: Record backend toolchain
         run: |
@@ -119,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          pytest \
+          python -m pytest \
             --ds=backend.settings \
             --maxfail=1 \
             --disable-warnings \
@@ -165,7 +165,8 @@ jobs:
             echo "## Reproducibility"
             echo
             echo "- Toolchain manifest: artifacts/backend-gate-toolchain.txt"
-            echo "- Dependency sources: requirements.txt, backend/requirements.txt, requirements-dev.txt"
+            echo "- Runtime dependency sources: requirements.txt, backend/requirements.txt"
+            echo "- Test tooling source: requirements-dev.txt"
             echo "- Network guard: pytest socket blocking with localhost-only allowlist"
             echo
             echo "## Human-readable evidence"
