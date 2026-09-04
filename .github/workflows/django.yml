@@ -160,7 +160,7 @@ jobs:
             echo "## Gate"
             echo
             echo "- Matrix smoke: pytest on Python 3.10, 3.11 and 3.12 after migrations."
-            echo "- Coverage gate: pytest --ds=backend.settings --maxfail=1 --disable-warnings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --junitxml=backend-pytest-junit.xml backend tests"
+            echo "- Coverage gate: python -m pytest --ds=backend.settings --maxfail=1 --disable-warnings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --junitxml=backend-pytest-junit.xml backend tests"
             echo
             echo "## Reproducibility"
             echo
