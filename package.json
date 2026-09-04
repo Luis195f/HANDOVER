@@ -27,8 +27,8 @@
     "gate:any-sensitive": "tsx scripts/check-sensitive-anys.ts",
     "gate:any-sensitive:write": "tsx scripts/check-sensitive-anys.ts --write-baseline",
     "quality:tree-hygiene": "git diff --check",
-    "quality:backend": "pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests",
-    "quality:backend:coverage": "pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml backend tests",
+    "quality:backend": "python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests",
+    "quality:backend:coverage": "python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml backend tests",
     "quality:pilot": "pnpm typecheck && pnpm lint:ci && pnpm gate:any-sensitive && pnpm test:pilot:coverage && pnpm validate:fhir",
     "quality:pilot:ci": "pnpm -w typecheck && pnpm -w lint:ci && pnpm -w gate:any-sensitive && pnpm -w test:pilot:coverage:ci && pnpm -w test:e2e && pnpm -w validate:fhir",
     "quality:release": "pnpm -w quality:tree-hygiene && pnpm -w quality:pilot:ci && pnpm -w quality:backend:coverage",
@@ -120,4 +120,3 @@
   },
   "private": true
 }
-
