@@ -59,7 +59,7 @@ switch ($Stage) {
     Invoke-Step "FHIR validation fixtures" { Invoke-External "pnpm" @("-w", "validate:fhir") }
     if (-not $SkipPytest) {
       Invoke-Step "Backend pytest" {
-        Invoke-External "pytest" @("--ds=backend.settings", "--disable-socket", "--allow-hosts=127.0.0.1,localhost", "backend", "tests")
+        Invoke-External $PythonCommand @("-m", "pytest", "--ds=backend.settings", "--disable-socket", "--allow-hosts=127.0.0.1,localhost", "backend", "tests")
       }
     }
     if (-not $SkipDockerConfig) {
