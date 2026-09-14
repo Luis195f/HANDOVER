@@ -56,6 +56,7 @@ type Props = {
   sessionUserId?: string;
   colors: Colors;
   onOpenFullHandover: (patientId: string) => void;
+  classificationReferenceTime?: string;
   now?: () => string;
   shiftId?: string;
   integrationState?: UnitIntegrationState;
@@ -96,12 +97,13 @@ export function UnitExceptionHandover({
   sessionUserId,
   colors,
   onOpenFullHandover,
+  classificationReferenceTime,
   now = () => new Date().toISOString(),
   shiftId = patients[0]?.shiftId ?? 'demo-2026-08-27-morning',
   integrationState = { availability: 'available' },
   storage,
 }: Props) {
-  const [classifiedAt] = useState(() => now());
+  const [classifiedAt] = useState(() => classificationReferenceTime ?? now());
   const [storageInstance] = useState<ExceptionHandoverStorage | null>(() =>
     storage === null ? null : (storage ?? createExceptionHandoverStorage()));
   const [sessionState, setSessionState] = useState<ExceptionHandoverSessionState>(() =>
