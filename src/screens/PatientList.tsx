@@ -849,7 +849,7 @@ export default function PatientList({ navigation }: Props) {
             sessionUserId={session?.userId}
             colors={colors}
             onOpenFullHandover={onOpenPatient}
-            now={() => DEMO_NOW}
+            classificationReferenceTime={DEMO_NOW}
           />
         ) : (
         <View style={styles.priorityToggleCard}>
@@ -1453,7 +1453,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
 
 
 
