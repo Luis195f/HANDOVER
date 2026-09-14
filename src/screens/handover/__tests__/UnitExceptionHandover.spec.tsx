@@ -2,7 +2,8 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS } from '@/src/demo/fixtures';
+import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS, DEMO_NOW } from '@/src/demo/fixtures';
+import { formatExceptionDateTime } from '@/src/lib/exception-handover';
 import { UnitExceptionHandover } from '../UnitExceptionHandover';
 
 const colors = {
@@ -21,6 +22,32 @@ const colors = {
 const now = () => '2026-08-27T08:15:00.000Z';
 
 describe('UnitExceptionHandover', () => {
+  it('separates the synthetic classification clock from the interaction clock', () => {
+    const interactionNow = '2026-09-14T19:45:00.000Z';
+    const screen = render(
+      <UnitExceptionHandover
+        patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        sessionUserId={DEMO_ACTORS[0].userId}
+        colors={colors}
+        onOpenFullHandover={() => {}}
+        classificationReferenceTime={DEMO_NOW}
+        now={() => interactionNow}
+        storage={null}
+      />,
+    );
+
+    expect(screen.getByText('2 prioridad alta')).toBeTruthy();
+    expect(screen.getByText('6 con novedades')).toBeTruthy();
+    expect(screen.getByText('32 sin novedades')).toBeTruthy();
+    expect(screen.getByText('0 revisión requerida')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('confirm-unchanged-review'));
+
+    const provenance = screen.getByTestId('unchanged-review-event').props.children.join('');
+    expect(provenance).toContain(formatExceptionDateTime(interactionNow));
+    expect(provenance).not.toContain(formatExceptionDateTime(DEMO_NOW));
+  });
+
   it('reviews unchanged collectively within two interactions and leaves individual cards closed', () => {
     const screen = render(
       <UnitExceptionHandover

@@ -39,7 +39,7 @@ import { useThemeTokens } from "../theme";
 import { t, useTranslation } from "@/src/i18n";
 import { apiGet } from "@/src/lib/api";
 import { createPatient } from "@/src/lib/patients";
-import { getDemoExceptionHandoverPatients, getDemoHandoverPrefill } from '@/src/demo/fixtures';
+import { DEMO_NOW, getDemoExceptionHandoverPatients, getDemoHandoverPrefill } from '@/src/demo/fixtures';
 import type { PatientListItem } from "@/src/types/patientList";
 import { UnitExceptionHandover } from './handover/UnitExceptionHandover';
 
@@ -849,6 +849,7 @@ export default function PatientList({ navigation }: Props) {
             sessionUserId={session?.userId}
             colors={colors}
             onOpenFullHandover={onOpenPatient}
+            classificationReferenceTime={DEMO_NOW}
           />
         ) : (
         <View style={styles.priorityToggleCard}>
@@ -1452,8 +1453,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-
 
 
 
