@@ -27,7 +27,7 @@ Eso ejecuta:
 - `pnpm -w lint:ci`
 - `pnpm test`
 - `pnpm -w validate:fhir`
-- `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
+- `python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
 - `docker compose --env-file config/staging.env config`
 
 Si el seam no toca backend, el operador puede usar `-SkipPytest`, pero debe dejar esa decisión explícita en la evidencia.
