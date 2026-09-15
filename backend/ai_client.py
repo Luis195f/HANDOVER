@@ -19,6 +19,7 @@ OPENAI_MODEL_SUGGESTIONS = os.getenv("OPENAI_MODEL_SUGGESTIONS", OPENAI_MODEL_SB
 ASYNC_TRANSCRIPTION_TIMEOUT = 60
 ASYNC_SBAR_TIMEOUT = 120
 ASYNC_SUGGESTIONS_TIMEOUT = 90
+MAX_COMPOSED_AI_PROMPT_LENGTH = 15000
 
 _client: Optional[OpenAI] = None
 
@@ -31,9 +32,16 @@ def _env_flag_enabled(name: str, default: bool) -> bool:
 
 
 def is_openai_enabled() -> bool:
-    ai_enabled = _env_flag_enabled("HANDOVER_AI_ENABLED", True)
+    ai_enabled = _env_flag_enabled("HANDOVER_AI_ENABLED", False)
+    external_clinical_ai_enabled = _env_flag_enabled("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", False)
     openai_disabled = _env_flag_enabled("HANDOVER_OPENAI_DISABLED", False)
-    return ai_enabled and not openai_disabled
+    deployment_mode = (os.getenv("HANDOVER_DEPLOYMENT_MODE") or "production").strip().lower()
+    return (
+        ai_enabled
+        and external_clinical_ai_enabled
+        and not openai_disabled
+        and deployment_mode not in {"pilot", "production", "prod", "stage", "staging"}
+    )
 
 
 def get_client() -> OpenAI:
@@ -109,7 +117,9 @@ async def transcribe_audio(file: Any, language: Optional[str]) -> str:
             raise ValueError("empty-audio")
 
         audio_buffer = io.BytesIO(data)
-        audio_buffer.name = (getattr(file, "name", None) or "audio.m4a")
+        original_name = getattr(file, "name", None) or getattr(file, "filename", None) or "audio.m4a"
+        suffix = os.path.splitext(str(original_name))[1].lower() or ".m4a"
+        audio_buffer.name = f"audio_input{suffix}"
 
         logger.info("[ai] transcribe start size_bytes=%s", size_bytes)
         client = get_client()
@@ -155,13 +165,16 @@ def build_sbar_prompt(text: str, language: str) -> str:
 async def generate_sbar(text: str, language: str = "es") -> Dict[str, str]:
     try:
         logger.info("[ai] sbar start length=%s language=%s", len(text), language)
+        prompt = build_sbar_prompt(text, language)
+        if len(prompt) > MAX_COMPOSED_AI_PROMPT_LENGTH:
+            raise ValueError("ai_prompt_too_large")
         client = get_client()
         completion = await _run_blocking(
             client.chat.completions.create,
             model=OPENAI_MODEL_SBAR,
             messages=[
                 {"role": "system", "content": "Asistente de enfermería"},
-                {"role": "user", "content": build_sbar_prompt(text, language)},
+                {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
@@ -348,4 +361,3 @@ async def generate_intervention_suggestions(ctx: ClinicalContext) -> Suggestions
     except Exception as exc:  # pragma: no cover - logged for observability
         logger.exception("[ai] suggestions failed section=%s error_type=%s", ctx.section, type(exc).__name__)
         raise
-

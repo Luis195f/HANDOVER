@@ -10,6 +10,15 @@ from rest_framework.test import APIClient
 from backend.security.auth import Auth0User
 from backend.api import views_ai
 from django.core.files.uploadedfile import SimpleUploadedFile
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _enable_external_ai_for_existing_tests(monkeypatch):
+    monkeypatch.setenv("HANDOVER_AI_ENABLED", "true")
+    monkeypatch.setenv("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", "true")
+    monkeypatch.setenv("HANDOVER_OPENAI_DISABLED", "false")
+    monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", "test")
 
 
 def _client():

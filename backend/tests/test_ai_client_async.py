@@ -50,6 +50,18 @@ def test_get_client_respects_ai_flags(monkeypatch):
         ai_client.get_client()
 
 
+def test_openai_api_key_alone_never_enables_external_ai(monkeypatch):
+    from backend import ai_client
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-present")
+    monkeypatch.delenv("HANDOVER_AI_ENABLED", raising=False)
+    monkeypatch.delenv("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", raising=False)
+    monkeypatch.delenv("HANDOVER_OPENAI_DISABLED", raising=False)
+    monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", "development")
+
+    assert ai_client.is_openai_enabled() is False
+
+
 def test_get_client_rejects_placeholder_api_key(monkeypatch):
     from backend import ai_client
 
@@ -98,8 +110,14 @@ def test_generate_sbar_is_awaitable_and_uses_thread_offload(monkeypatch):
 def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
     from backend import ai_client
 
+    transcription_request = {}
+
     async def fake_to_thread(func, *args, **kwargs):
         return func(*args, **kwargs)
+
+    def fake_transcription_create(**kwargs):
+        transcription_request.update(kwargs)
+        return transcription_response
 
     transcription_response = SimpleNamespace(text="  hola mundo  ")
     suggestions_payload = ai_client.json.dumps(
@@ -111,7 +129,7 @@ def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
 
     fake_client = SimpleNamespace(
         audio=SimpleNamespace(
-            transcriptions=SimpleNamespace(create=lambda **_: transcription_response)
+            transcriptions=SimpleNamespace(create=fake_transcription_create)
         ),
         chat=SimpleNamespace(
             completions=SimpleNamespace(create=lambda **_: suggestions_completion)
@@ -121,13 +139,14 @@ def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
     monkeypatch.setattr(ai_client, "get_client", lambda: fake_client)
     monkeypatch.setattr(ai_client.asyncio, "to_thread", fake_to_thread)
 
-    upload = UploadFile(filename="audio.m4a", file=io.BytesIO(b"bytes-audio"))
+    upload = UploadFile(filename="patient-identifier.m4a", file=io.BytesIO(b"bytes-audio"))
     transcription = asyncio.run(ai_client.transcribe_audio(upload, language="es"))
 
     ctx = ai_client.ClinicalContext(section="urgencias", notes="paciente estable")
     suggestions = asyncio.run(ai_client.generate_intervention_suggestions(ctx))
 
     assert transcription == "hola mundo"
+    assert transcription_request["file"].name == "audio_input.m4a"
     assert suggestions.interventions == ["Monitorizar constantes"]
     assert suggestions.section == "urgencias"
 

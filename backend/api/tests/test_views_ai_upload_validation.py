@@ -12,6 +12,14 @@ from backend.security.auth import Auth0User
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _enable_external_ai_for_existing_tests(monkeypatch):
+    monkeypatch.setenv("HANDOVER_AI_ENABLED", "true")
+    monkeypatch.setenv("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", "true")
+    monkeypatch.setenv("HANDOVER_OPENAI_DISABLED", "false")
+    monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", "test")
+
+
 def _auth_client(
     *,
     roles=("nurse",),
@@ -574,6 +582,175 @@ def test_transcribe_returns_503_when_openai_disabled(monkeypatch):
     assert response.status_code == 503
     assert "deshabilitado" in response.json()["detail"]
     assert response.json()["code"] == "ai_disabled"
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"patientId": "patient-phi"},
+        {"staff": ["nurse-phi"]},
+        {"vitals": {"hr": 80, "unexpected": "nested-phi"}},
+    ],
+)
+def test_summarize_rejects_undeclared_context_fields(monkeypatch, context):
+    import backend.api.views_ai as views_ai
+
+    async def _unexpected_generate(*_args, **_kwargs):
+        raise AssertionError("external generation must not run for an invalid context")
+
+    monkeypatch.setattr(views_ai, "generate_sbar", _unexpected_generate, raising=True)
+    response = _auth_client().post(
+        "/api/ai/summarize-sbar",
+        data={"free_text": "Paciente estable", "context": context, "language": "es"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_ai_payload"
+
+
+def test_openai_key_does_not_enable_summarize_when_external_flag_is_false(monkeypatch):
+    import backend.api.views_ai as views_ai
+
+    calls = 0
+
+    async def _unexpected_generate(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("external generation must remain disabled")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-present")
+    monkeypatch.setenv("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", "false")
+    monkeypatch.setattr(views_ai, "generate_sbar", _unexpected_generate, raising=True)
+
+    response = _post("summarize", _auth_client())
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "ai_disabled"
+    assert calls == 0
+
+
+@pytest.mark.parametrize("deployment_mode", ["pilot", "production"])
+@pytest.mark.parametrize("case", ["transcribe", "summarize", "refine", "suggest"])
+def test_strict_deployments_block_external_ai_egress(monkeypatch, deployment_mode, case):
+    import backend.api.views_ai as views_ai
+
+    calls = 0
+
+    async def _unexpected_call(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("strict deployments must not call external AI")
+
+    monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", deployment_mode)
+    monkeypatch.setenv("AI_SUGGESTIONS_ENABLED", "true")
+    monkeypatch.setattr(views_ai, "transcribe_audio", _unexpected_call, raising=True)
+    monkeypatch.setattr(views_ai, "generate_sbar", _unexpected_call, raising=True)
+    monkeypatch.setattr(views_ai, "generate_intervention_suggestions", _unexpected_call, raising=True)
+
+    response = _post(case, _auth_client())
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "ai_disabled"
+    assert calls == 0
+
+
+@pytest.mark.parametrize("case", ["transcribe", "summarize", "refine", "suggest"])
+def test_kill_switch_blocks_all_external_ai_routes(monkeypatch, case):
+    import backend.api.views_ai as views_ai
+
+    calls = 0
+
+    async def _unexpected_call(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("kill switch must prevent external calls")
+
+    monkeypatch.setenv("HANDOVER_OPENAI_DISABLED", "true")
+    monkeypatch.setenv("AI_SUGGESTIONS_ENABLED", "true")
+    monkeypatch.setattr(views_ai, "transcribe_audio", _unexpected_call, raising=True)
+    monkeypatch.setattr(views_ai, "generate_sbar", _unexpected_call, raising=True)
+    monkeypatch.setattr(views_ai, "generate_intervention_suggestions", _unexpected_call, raising=True)
+
+    response = _post(case, _auth_client())
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "ai_disabled"
+    assert calls == 0
+
+
+@pytest.mark.parametrize("case", ["summarize", "refine"])
+def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
+    import backend.api.views_ai as views_ai
+
+    calls = 0
+
+    async def _unexpected_generate(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("oversized prompts must not reach external AI")
+
+    monkeypatch.setattr(views_ai, "generate_sbar", _unexpected_generate, raising=True)
+    client = _auth_client()
+    if case == "summarize":
+        response = client.post(
+            "/api/ai/summarize-sbar",
+            data={
+                "free_text": "x" * 14900,
+                "context": {"dxMedical": "y" * 200},
+                "language": "es",
+            },
+            format="json",
+        )
+    else:
+        response = client.post(
+            "/api/ai/refine-sbar",
+            data={
+                "draft": {
+                    "situation": "x" * 14900,
+                    "background": "",
+                    "assessment": "",
+                    "recommendation": "",
+                },
+                "handover": {"dxMedical": "y" * 200},
+                "language": "es",
+            },
+            format="json",
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "ai_prompt_too_large"
+    assert calls == 0
+
+
+def test_ai_audit_and_logs_do_not_persist_phi(monkeypatch, caplog):
+    import backend.api.views_ai as views_ai
+
+    captured_events = []
+    phi_marker = "PHI-SENSITIVE-BEDSIDE-NOTE"
+
+    async def _fake_generate(*_args, **_kwargs):
+        return {
+            "situation": "S",
+            "background": "B",
+            "assessment": "A",
+            "recommendation": "R",
+            "full_text": "Full",
+        }
+
+    monkeypatch.setattr(views_ai, "generate_sbar", _fake_generate, raising=True)
+    monkeypatch.setattr(views_ai, "emit_audit_event", lambda **kwargs: captured_events.append(kwargs), raising=True)
+
+    response = _auth_client().post(
+        "/api/ai/summarize-sbar",
+        data={"free_text": phi_marker, "context": {"dxMedical": "estable"}, "language": "es"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert captured_events
+    assert phi_marker not in str(captured_events)
+    assert phi_marker not in caplog.text
 
 
 @override_settings(HANDOVER_DEPLOYMENT_MODE="test")
