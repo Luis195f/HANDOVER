@@ -9,6 +9,7 @@
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python manage.py migrate
 python manage.py runserver
 ```
@@ -26,8 +27,8 @@ expo start
 ## Tests locales
 Backend:
 ```bash
-pytest --ds=backend.settings
-pytest --cov=backend
+python -m pytest --ds=backend.settings
+python -m pytest --cov=backend
 ```
 
 Frontend (si aplica en tu flujo):

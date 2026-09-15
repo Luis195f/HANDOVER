@@ -4,6 +4,3 @@ python-dotenv
 python-jose
 httpx
 
-# Test tooling (backend pytest suite)
-pytest>=8.0
-pytest-django>=4.8

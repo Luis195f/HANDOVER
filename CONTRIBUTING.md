@@ -25,9 +25,10 @@ pnpm -w lint:ci
 Si tocas contratos, validación, FHIR, auth, sync, backend o perfiles, amplía con:
 
 ```bash
+python -m pip install -r requirements-dev.txt
 pnpm test
 pnpm -w validate:fhir
-pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
+python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
 ```
 
 ## Pull requests

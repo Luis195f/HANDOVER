@@ -17,7 +17,7 @@ Solo se autoriza retomar prompts posteriores cuando queden en verde, sin cambios
 ```bash
 pnpm -w quality:pilot
 pnpm -w test:smoke:forms
-pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend/api/tests/test_icea_bridge.py
+python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend/api/tests/test_icea_bridge.py
 ```
 
 Además, en CI deben quedar verdes:
@@ -115,7 +115,7 @@ Stop:
 
 - Quitar la activación problemática de `HANDOVER_PROFILE_ACTIVATION_JSON`.
 - Mantener el catálogo maestro intacto; no borrar packs por un incidente de rollout.
-- Repetir `pnpm -w quality:pilot`, `pnpm -w test:smoke:forms` y `pytest ... test_icea_bridge.py` antes de reabrir la unidad.
+- Repetir `pnpm -w quality:pilot`, `pnpm -w test:smoke:forms` y `python -m pytest ... test_icea_bridge.py` antes de reabrir la unidad.
 - Si el incidente afectó operación clínica, conservar la evidencia FHIR/ICEA+ emitida y anotar fecha, unidad y decisión del comité.
 
 ## Riesgos remanentes honestos

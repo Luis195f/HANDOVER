@@ -184,6 +184,7 @@ python manage.py transcribe_audio ./audio.m4a --language es
    python -m venv .venv
    source .venv/bin/activate  # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
+   python -m pip install -r requirements-dev.txt
    python manage.py migrate
    python manage.py runserver 0.0.0.0:8000
    ```
@@ -240,7 +241,7 @@ La automatización usa Vitest como runner principal de frontend y `pytest` para 
 - Espejo local del gate JS de CI (incluye `test:e2e`): `pnpm -w quality:pilot:ci`
 - Runner secundario Vitest general: `pnpm -w test:unit`
 - Runner legacy de compatibilidad: `pnpm -w test:legacy`
-- Runner backend: `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
+- Runner backend: `python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
 - Validación de bundles FHIR representativos: `pnpm -w validate:fhir`
 
 Los umbrales de cobertura sensibles están definidos en `vitest.pilot.config.ts` y se enfocan en auth/ACL, queue/sync, `src/lib/fhir-map.ts`, `src/validation/schemas.ts`, `src/lib/profile-runtime.ts`, `src/screens/HandoverForm.tsx` y `src/screens/handover/submission.ts`.
@@ -340,7 +341,7 @@ El estado consolidado de gobierno técnico y documental está en [`docs/MASTER_G
 
 Para publicar una RC nueva sin deriva documental:
 
-1. Ejecuta los cheques del gate sensible (`pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage`, `pnpm -w test:e2e`, `pnpm -w validate:fhir`, `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`).
+1. Ejecuta los cheques del gate sensible (`pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage`, `pnpm -w test:e2e`, `pnpm -w validate:fhir`, `python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`).
 2. Genera los binarios siguiendo la guía de despliegue.
 3. Crea el tag que realmente vaya a publicarse y actualiza `CHANGELOG.md`, `RELEASE_NOTES.md` y el registro maestro en el mismo corte.
 4. Trata el tag Git + `RELEASE_NOTES.md` + los artefactos CI del corte como fuente de verdad del release piloto; no asumas que `package.json` o `app.config.ts` reflejan ese identificador.

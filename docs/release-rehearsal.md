@@ -16,7 +16,10 @@ Dejar un ensayo de release/piloto utilizable, abortable y reversible sobre el es
 
 ## 2) Preflight reproducible
 
+En un entorno nuevo, instala primero el tooling exclusivo de desarrollo/rehearsal; la instalación de producción continúa limitada a las dependencias de runtime:
+
 ```powershell
+python -m pip install -r requirements-dev.txt
 pwsh -File scripts/release-rehearsal.ps1 -Stage preflight
 ```
 
@@ -27,7 +30,7 @@ Eso ejecuta:
 - `pnpm -w lint:ci`
 - `pnpm test`
 - `pnpm -w validate:fhir`
-- `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
+- `python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`
 - `docker compose --env-file config/staging.env config`
 
 Si el seam no toca backend, el operador puede usar `-SkipPytest`, pero debe dejar esa decisión explícita en la evidencia.
