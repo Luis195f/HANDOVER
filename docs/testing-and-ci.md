@@ -24,7 +24,7 @@
 - `pnpm -w test:unit`: Vitest general para explorar regresiones fuera del gate pilot-grade o ampliar cobertura durante desarrollo.
 - `pnpm -w test:smoke:forms`: smoke rápido del flujo crítico de `HandoverForm`.
 - `pnpm -w test:legacy`: Jest legacy solo para `jest-tests/**` o cuando se toca compatibilidad histórica que todavía no migró a Vitest.
-- `pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`: runner backend más cercano a GitHub Actions.
+- `python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`: runner backend más cercano a GitHub Actions.
 - `pnpm -w lint:ci` sigue siendo estricto (`--max-warnings=0`), pero ahora ignora caches y artefactos generados (`.pytest_cache`, `artifacts`, `playwright-report`, `test-results`, `htmlcov`) para no convertir residuos locales en ruido del gate.
 
 ## Pipeline local pilot-grade
@@ -62,6 +62,10 @@ Usa este pipeline cuando toques auth, sync/queue, FHIR mapping, validación clí
 
 Para rehearsal de release/piloto sin inventar un runner nuevo:
 
+- Tooling de pruebas en un entorno nuevo:
+  ```bash
+  python -m pip install -r requirements-dev.txt
+  ```
 - Preflight reproducible:
   ```powershell
   pwsh -File scripts/release-rehearsal.ps1 -Stage preflight
@@ -127,21 +131,23 @@ La ruta de control backend se centra en `pytest` sobre Django/DRF:
 
 Comandos locales recomendados:
 
+Antes de ejecutarlos en un entorno nuevo, instala el tooling de pruebas con `python -m pip install -r requirements-dev.txt`.
+
 - Suite backend:
   ```bash
-  pytest --ds=backend.settings
+  python -m pytest --ds=backend.settings
   ```
 - Suite backend sensible (auth/FHIR/firma/auditoría/AI):
   ```bash
-  pytest backend/api/tests/test_auth.py backend/api/tests/test_security_and_validation.py backend/api/tests/test_views_ai_upload_validation.py tests/test_fhir_transaction_validation.py tests/test_fhir_transaction_signatures.py tests/test_transaction_audit.py tests/test_resources_contract.py
+  python -m pytest backend/api/tests/test_auth.py backend/api/tests/test_security_and_validation.py backend/api/tests/test_views_ai_upload_validation.py tests/test_fhir_transaction_validation.py tests/test_fhir_transaction_signatures.py tests/test_transaction_audit.py tests/test_resources_contract.py
   ```
 - Cobertura backend:
   ```bash
-  pytest --cov=backend
+  python -m pytest --cov=backend
   ```
 - Reproducción cercana a CI:
   ```bash
-  pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
+  python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests
   ```
 
 ## Evidencia exacta por workflow
@@ -178,7 +184,7 @@ Gate ejecutado:
 - matrix `pytest` en Python `3.10`, `3.11` y `3.12` tras `python manage.py migrate --noinput`
 - job de cobertura backend en Python `3.12` con:
   ```bash
-  pytest --ds=backend.settings --maxfail=1 --disable-warnings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --junitxml=backend-pytest-junit.xml backend tests
+  python -m pytest --ds=backend.settings --maxfail=1 --disable-warnings --disable-socket --allow-hosts=127.0.0.1,localhost --cov=backend --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --junitxml=backend-pytest-junit.xml backend tests
   ```
 
 Evidencia publicada:
@@ -266,8 +272,8 @@ Valores de ejemplo usados en CI para evitar secretos reales y llamadas externas:
 
 ## Storage sensible
 
-- Ejecuta también `pytest backend/api/tests/test_handover_etl_read.py backend/api/tests/test_icea_transaction.py backend/api/tests/test_icea_bridge.py` cuando cambies retención, ETL readback o persistencia clínica.
-- Ejecuta tambien `pytest backend/api/tests/test_icea_ops_api.py backend/api/tests/test_icea_webhook.py` cuando cambies observabilidad operativa, redaccion segura o contratos `/api/icea/ops/*`.
+- Ejecuta también `python -m pytest backend/api/tests/test_handover_etl_read.py backend/api/tests/test_icea_transaction.py backend/api/tests/test_icea_bridge.py` cuando cambies retención, ETL readback o persistencia clínica.
+- Ejecuta tambien `python -m pytest backend/api/tests/test_icea_ops_api.py backend/api/tests/test_icea_webhook.py` cuando cambies observabilidad operativa, redaccion segura o contratos `/api/icea/ops/*`.
 - Ejecuta tambien `pnpm exec vitest run tests/admin-api.spec.ts tests/AdminDashboardScreen.spec.tsx tests/screens/SupervisorDashboard.spec.tsx` cuando cambies la UX de supervisor/admin para observabilidad ICEA.
 - Si tocas degradacion por feature flags o `available=false`, verifica tambien los contratos disabled de `/api/icea/ops/summary`, `/api/icea/ops/events` y `/api/icea/ops/unit/<unitId>` para evitar regresiones a `invalid_payload`.
 - Las regresiones de retención, cifrado del Bundle clínico y pruning de artefactos sensibles deben cubrirse en tests backend focalizados.

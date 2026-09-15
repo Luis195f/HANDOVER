@@ -192,8 +192,8 @@ Frontend:
 
 Backend:
 
-- `pytest backend/api/tests/test_pilot_control_api.py backend/api/tests/test_icea_ops_api.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py -q`
-- `pytest backend/api/tests/test_icea_webhook.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py backend/api/tests/test_handover_etl_read.py backend/api/tests/test_handover_timing_metrics.py -q`
+- `python -m pytest backend/api/tests/test_pilot_control_api.py backend/api/tests/test_icea_ops_api.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py -q`
+- `python -m pytest backend/api/tests/test_icea_webhook.py backend/api/tests/test_icea_pipeline_api.py backend/api/tests/test_icea_bridge.py backend/api/tests/test_handover_etl_read.py backend/api/tests/test_handover_timing_metrics.py -q`
 
 ## 10) Criterio de cierre de este paquete documental
 

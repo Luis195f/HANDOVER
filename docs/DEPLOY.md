@@ -31,6 +31,12 @@ Límite actual, explícito:
 
 ## Validaciones previas mínimas
 
+En un entorno nuevo destinado a desarrollo o rehearsal, instala primero el tooling de pruebas, separado de las dependencias de runtime:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
 Antes de generar artefactos o desplegar en piloto:
 
 ```bash

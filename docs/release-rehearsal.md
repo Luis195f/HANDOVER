@@ -16,7 +16,10 @@ Dejar un ensayo de release/piloto utilizable, abortable y reversible sobre el es
 
 ## 2) Preflight reproducible
 
+En un entorno nuevo, instala primero el tooling exclusivo de desarrollo/rehearsal; la instalación de producción continúa limitada a las dependencias de runtime:
+
 ```powershell
+python -m pip install -r requirements-dev.txt
 pwsh -File scripts/release-rehearsal.ps1 -Stage preflight
 ```
 
