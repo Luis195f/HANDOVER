@@ -23,6 +23,23 @@ interface RefineSbarResponse {
   sbar?: Partial<SBARSummary> | null;
 }
 
+export interface ExternalAiClinicalContext extends Record<string, unknown> {
+  dxMedical?: string;
+  dxNursing?: string;
+  vitals?: {
+    hr?: number;
+    rr?: number;
+    tempC?: number;
+    spo2?: number;
+    sbp?: number;
+    dbp?: number;
+    glucoseMgDl?: number;
+    glucoseMmolL?: number;
+    avpu?: 'A' | 'C' | 'V' | 'P' | 'U';
+  };
+  oxygenTherapy?: { device?: string; flowLMin?: number; fio2?: number };
+}
+
 export type AISbarErrorCode =
   | 'UNCONFIGURED'
   | 'UNAUTHORIZED'
@@ -122,6 +139,35 @@ const legacyDxNursingText = (value: unknown): string => {
   return '';
 };
 
+export function buildExternalAiClinicalContext(handover: HandoverFormData): ExternalAiClinicalContext {
+  const vitals = handover.vitals
+    ? {
+        hr: handover.vitals.hr,
+        rr: handover.vitals.rr,
+        tempC: handover.vitals.tempC,
+        spo2: handover.vitals.spo2,
+        sbp: handover.vitals.sbp,
+        dbp: handover.vitals.dbp,
+        glucoseMgDl: handover.vitals.glucoseMgDl,
+        glucoseMmolL: handover.vitals.glucoseMmolL,
+        avpu: handover.vitals.avpu,
+      }
+    : undefined;
+  const oxygenTherapy = handover.oxygenTherapy
+    ? {
+        device: handover.oxygenTherapy.device,
+        flowLMin: handover.oxygenTherapy.flowLMin,
+        fio2: handover.oxygenTherapy.fio2,
+      }
+    : undefined;
+  return {
+    dxMedical: handover.dxMedical?.display || handover.dxMedical?.code || undefined,
+    dxNursing: legacyDxNursingText(handover.dxNursing) || undefined,
+    vitals,
+    oxygenTherapy,
+  };
+}
+
 function toAISbarError(error: unknown): AISbarError {
   if (error instanceof AISbarError) return error;
   if (error instanceof TypeError || (error instanceof Error && /network|fetch/i.test(error.message))) {
@@ -157,16 +203,7 @@ export async function refineSBARWithAIResult(
   }
 
   const payload = {
-    handover: {
-      dxMedical: handover.dxMedical?.display ?? '',
-      dxNursing: legacyDxNursingText(handover.dxNursing),
-      vitals: handover.vitals,
-      oxygenTherapy: handover.oxygenTherapy,
-      risks: (handover as Record<string, unknown>).risks,
-      evolution: handover.evolution,
-      mobility: (handover as Record<string, unknown>).mobility,
-      nutrition: (handover as Record<string, unknown>).nutrition,
-    },
+    handover: buildExternalAiClinicalContext(handover),
     draft: { ...draft },
     language: 'es' as const,
   };
