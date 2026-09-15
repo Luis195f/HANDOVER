@@ -36,12 +36,8 @@ def is_openai_enabled() -> bool:
     external_clinical_ai_enabled = _env_flag_enabled("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", False)
     openai_disabled = _env_flag_enabled("HANDOVER_OPENAI_DISABLED", False)
     deployment_mode = (os.getenv("HANDOVER_DEPLOYMENT_MODE") or "production").strip().lower()
-    return (
-        ai_enabled
-        and external_clinical_ai_enabled
-        and not openai_disabled
-        and deployment_mode not in {"pilot", "production", "prod", "stage", "staging"}
-    )
+    clinical_deployment = deployment_mode in {"pilot", "production", "prod", "stage", "staging"}
+    return ai_enabled and external_clinical_ai_enabled and not openai_disabled and not clinical_deployment
 
 
 def get_client() -> OpenAI:

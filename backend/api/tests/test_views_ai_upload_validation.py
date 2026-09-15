@@ -684,6 +684,9 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
     import backend.api.views_ai as views_ai
 
     calls = 0
+    audit_events = []
+    phi_marker = "PHI-OVERSIZED-BEDSIDE-NOTE"
+    oversized_text = phi_marker + ("x" * 14850)
 
     async def _unexpected_generate(*_args, **_kwargs):
         nonlocal calls
@@ -691,12 +694,13 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
         raise AssertionError("oversized prompts must not reach external AI")
 
     monkeypatch.setattr(views_ai, "generate_sbar", _unexpected_generate, raising=True)
+    monkeypatch.setattr(views_ai, "emit_audit_event", lambda **kwargs: audit_events.append(kwargs), raising=True)
     client = _auth_client()
     if case == "summarize":
         response = client.post(
             "/api/ai/summarize-sbar",
             data={
-                "free_text": "x" * 14900,
+                "free_text": oversized_text,
                 "context": {"dxMedical": "y" * 200},
                 "language": "es",
             },
@@ -707,7 +711,7 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
             "/api/ai/refine-sbar",
             data={
                 "draft": {
-                    "situation": "x" * 14900,
+                    "situation": oversized_text,
                     "background": "",
                     "assessment": "",
                     "recommendation": "",
@@ -721,6 +725,12 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
     assert response.status_code == 400
     assert response.json()["code"] == "ai_prompt_too_large"
     assert calls == 0
+    assert len(audit_events) == 1
+    assert audit_events[0]["status"] == "fail"
+    assert audit_events[0]["http_status"] == 400
+    assert audit_events[0]["meta"]["errorCode"] == "ai_prompt_too_large"
+    assert phi_marker not in str(audit_events[0])
+    assert oversized_text not in str(audit_events[0])
 
 
 def test_ai_audit_and_logs_do_not_persist_phi(monkeypatch, caplog):
