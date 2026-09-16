@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
+import { SNOMED_SYSTEM, snomedTerms } from '@/src/data/snomed-dict';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
 
@@ -150,10 +150,46 @@ describe('result helpers', () => {
     vi.clearAllMocks();
   });
 
+  it('el catálogo médico vigente cabe íntegro en el límite de 240', () => {
+    expect(snomedTerms.length).toBeGreaterThan(0);
+    expect(snomedTerms.every(({ code, display }) => code.length <= 240 && display.length <= 240)).toBe(true);
+  });
+
+  it.each([
+    ['dxNursing', 241],
+    ['device', 120],
+  ] as const)('envía %s clínicamente válido completo en generate y refine', async (field, length) => {
+    const value = 'x'.repeat(length);
+    const clinicalData: HandoverFormData = {
+      ...handover,
+      dxNursing: field === 'dxNursing' ? value : handover.dxNursing,
+      oxygenTherapy: { device: field === 'device' ? value : 'cánula' },
+    };
+    const original = JSON.stringify(clinicalData);
+    const fetchMock = vi.fn(async (url: string, _options: RequestInit) => ({
+      ok: true,
+      json: async () => url.endsWith('refine-sbar') ? { sbar: draft } : { ...draft, full_text: 'SBAR' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { buildExternalAiClinicalContext, generateSbarViaBackendResult, refineSBARWithAIResult } = await import('@/src/lib/ai-sbar');
+    const context = buildExternalAiClinicalContext(clinicalData);
+
+    expect((await generateSbarViaBackendResult('nota breve', context)).ok).toBe(true);
+    expect((await refineSBARWithAIResult(clinicalData, draft)).ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [_url, options] of fetchMock.mock.calls) {
+      const body = JSON.parse(options.body);
+      expect((body.context ?? body.handover)[field === 'device' ? 'oxygenTherapy' : 'dxNursing']).toEqual(
+        field === 'device' ? { device: value } : value,
+      );
+    }
+    expect(JSON.stringify(clinicalData)).toBe(original);
+  });
+
   it.each(['dxMedical', 'dxNursing', 'device'] as const)(
     'acepta el límite del DTO de %s en generate y refine sin modificar el formulario',
     async (field) => {
-      const limit = field === 'device' ? 80 : 240;
+      const limit = field === 'device' ? 15000 : field === 'dxNursing' ? 500 : 240;
       const value = 'x'.repeat(limit);
       const clinicalData: HandoverFormData = {
         ...handover,
@@ -185,7 +221,8 @@ describe('result helpers', () => {
     'bloquea %s demasiado largo localmente en generate y refine sin reflejar PHI',
     async (field) => {
       const marker = 'PHI-EXTERNAL-DTO';
-      const value = marker + 'x'.repeat((field === 'device' ? 80 : 240) - marker.length + 1);
+      const limit = field === 'device' ? 15000 : field === 'dxNursing' ? 500 : 240;
+      const value = marker + 'x'.repeat(limit - marker.length + 1);
       const clinicalData: HandoverFormData = {
         ...handover,
         dxMedical: field === 'dxMedical' ? { ...handover.dxMedical!, display: value } : handover.dxMedical,

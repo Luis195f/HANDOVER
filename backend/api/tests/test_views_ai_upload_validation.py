@@ -776,6 +776,60 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
     assert oversized_text not in str(audit_events[0])
 
 
+@pytest.mark.parametrize("route", ["summarize-sbar", "refine-sbar"])
+@pytest.mark.parametrize(("field", "length"), [("dxNursing", 241), ("dxNursing", 500), ("device", 120), ("device", 10000)])
+def test_form_valid_context_reaches_provider_without_truncation(monkeypatch, route, field, length):
+    import backend.api.views_ai as views_ai
+
+    value = "x" * length
+    context = {"dxNursing": value} if field == "dxNursing" else {"oxygenTherapy": {"device": value}}
+    prompts = []
+
+    async def _fake_generate(prompt, **_kwargs):
+        prompts.append(prompt)
+        return {"situation": "S", "background": "B", "assessment": "A", "recommendation": "R", "full_text": "SBAR"}
+
+    monkeypatch.setattr(views_ai, "generate_sbar", _fake_generate, raising=True)
+    data = {"free_text": "nota breve", "context": context} if route == "summarize-sbar" else {"draft": {"situation": "S"}, "handover": context}
+    response = _auth_client().post(f"/api/ai/{route}", data=data, format="json")
+
+    assert response.status_code == 200
+    assert len(prompts) == 1
+    assert value in prompts[0]
+
+
+@pytest.mark.parametrize("route", ["summarize-sbar", "refine-sbar"])
+@pytest.mark.parametrize(("field", "length", "error_code"), [
+    ("dxNursing", 501, "invalid_ai_payload"),
+    ("device", 15001, "invalid_ai_payload"),
+    ("device", 15000, "ai_prompt_too_large"),
+])
+def test_context_limits_reject_without_phi_or_egress(monkeypatch, caplog, route, field, length, error_code):
+    import backend.api.views_ai as views_ai
+
+    marker = "PHI-CONTEXT-LIMIT"
+    value = marker + "x" * (length - len(marker))
+    context = {"dxNursing": value} if field == "dxNursing" else {"oxygenTherapy": {"device": value}}
+    events = []
+    provider_calls = []
+    monkeypatch.setattr(views_ai, "emit_audit_event", lambda **kwargs: events.append(kwargs), raising=True)
+    monkeypatch.setattr(views_ai, "generate_sbar", lambda *_args, **_kwargs: provider_calls.append(True), raising=True)
+    data = {"free_text": "nota breve", "context": context} if route == "summarize-sbar" else {"draft": {"situation": "S"}, "handover": context}
+
+    response = _auth_client().post(f"/api/ai/{route}", data=data, format="json")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == error_code
+    assert len(events) == 1
+    assert events[0]["status"] == "fail"
+    assert events[0]["user_sub"] == "auth0|test-user"
+    assert events[0]["meta"]["errorCode"] == error_code
+    assert provider_calls == []
+    assert marker not in str(response.json())
+    assert marker not in str(events)
+    assert marker not in caplog.text
+
+
 @pytest.mark.parametrize(
     ("route", "payload"),
     [
