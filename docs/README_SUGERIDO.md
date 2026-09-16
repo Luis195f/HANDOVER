@@ -63,6 +63,7 @@ pytest --cov=backend
 
 ### IA
 - `HANDOVER_AI_ENABLED`
+- `HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED`
 - `HANDOVER_OPENAI_DISABLED`
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
@@ -71,6 +72,8 @@ pytest --cov=backend
 
 ### CI/Test
 CI usa variables dummy para ejecución offline/determinista y evita llamadas externas.
+
+`HANDOVER_AI_ENABLED` y `HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED` tienen default `false`. Ni `OPENAI_API_KEY` ni `HANDOVER_AI_ENABLED` por sí solos habilitan IA externa. El opt-in para pruebas no clínicas (`development`, `demo`, `test`) requiere ambos flags en `true` y `HANDOVER_OPENAI_DISABLED=false`; este último es el kill switch. El gate bloquea `pilot`, `production`, `prod`, `stage` y `staging`, y sin modo configurado usa `production`: **external AI disabled for current pilot target**.
 
 #### `.env.example` orientativo (sin secretos)
 ```env
@@ -91,8 +94,9 @@ HANDOVER_MAX_AUDIO_BYTES=26214400
 AUTH0_ISSUER_BASE_URL=
 AUTH0_AUDIENCE=
 
-HANDOVER_AI_ENABLED=1
-HANDOVER_OPENAI_DISABLED=0
+HANDOVER_AI_ENABLED=0
+HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED=0
+HANDOVER_OPENAI_DISABLED=1
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL_WHISPER=whisper-1
