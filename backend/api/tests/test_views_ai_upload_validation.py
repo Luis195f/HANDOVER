@@ -797,7 +797,8 @@ def test_disabled_external_sbar_is_audited_once_without_phi_or_egress(monkeypatc
     phi_marker = "PHI-DISABLED-BEDSIDE-NOTE"
     payload = {"free_text": phi_marker} if route == "summarize-sbar" else {"draft": {"situation": phi_marker}}
 
-    response = _auth_client().post(f"/api/ai/{route}", data=payload, format="json")
+    authenticated_sub = "auth0|audited-clinician"
+    response = _auth_client(sub=authenticated_sub).post(f"/api/ai/{route}", data=payload, format="json")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Servicio de IA externa deshabilitado por configuración", "code": "ai_disabled"}
@@ -806,7 +807,7 @@ def test_disabled_external_sbar_is_audited_once_without_phi_or_egress(monkeypatc
     assert audit_events[0]["status"] == "fail"
     assert audit_events[0]["http_status"] == 503
     assert audit_events[0]["meta"]["errorCode"] == "ai_disabled"
-    assert audit_events[0]["user_sub"] is None
+    assert audit_events[0]["user_sub"] == authenticated_sub
     redacted_payload = {"notes": "ai_disabled", "language": ""}
     redacted_payload["context" if route == "summarize-sbar" else "payload"] = {}
     assert audit_events[0]["payload_hash"] == hash_payload(redacted_payload, settings.AUDIT_HASH_SECRET)

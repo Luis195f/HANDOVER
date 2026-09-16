@@ -643,7 +643,7 @@ class SummarizeSbarView(ProtectedAIAPIView):
             return Response({"detail": "Texto demasiado largo para resumir", "code": "ai_prompt_too_large"}, status=400)
         disabled_response = _ai_disabled_response()
         if disabled_response:
-            self._audit_ai_summary(status="fail", http_status=503, user_sub=None, notes="ai_disabled", context={}, language="")
+            self._audit_ai_summary(status="fail", http_status=503, user_sub=user_sub, notes="ai_disabled", context={}, language="")
             return disabled_response
         notes = self._truncate_audit_notes(free_text.strip())
 
@@ -812,7 +812,7 @@ class RefineSbarView(ProtectedAIAPIView):
             return Response({"detail": "Texto demasiado largo para refinar", "code": "ai_prompt_too_large"}, status=400)
         disabled_response = _ai_disabled_response()
         if disabled_response:
-            self._audit_ai_refine(status="fail", http_status=503, user_sub=None, notes="ai_disabled", payload={}, language="")
+            self._audit_ai_refine(status="fail", http_status=503, user_sub=user_sub, notes="ai_disabled", payload={}, language="")
             return disabled_response
 
         try:
