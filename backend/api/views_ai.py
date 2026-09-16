@@ -60,6 +60,7 @@ ALLOWED_AUDIO_MIME_TYPES = {
 DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
+AI_REJECTION_CODES = {"invalid_ai_payload", "ai_prompt_too_large"}
 
 CLINICAL_DECISION_ALLOWED_SOURCES = (
     "ai_generate_sbar",
@@ -104,7 +105,7 @@ class StrictFloatField(serializers.FloatField):
 class StrictSerializer(serializers.Serializer):
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         if not isinstance(data, dict):
-            raise serializers.ValidationError("Expected an object.")
+            raise serializers.ValidationError({"non_field_errors": ["Expected an object."]})
         if unexpected := sorted(set(data) - set(self.fields)):
             raise serializers.ValidationError({key: ["Unsupported field."] for key in unexpected})
         return super().to_internal_value(data)
@@ -156,10 +157,7 @@ class SbarRefineRequestSerializer(StrictSerializer):
 
 
 def _invalid_ai_payload(errors: Any) -> Response:
-    return Response(
-        {"detail": "Invalid external AI payload.", "code": "invalid_ai_payload", "errors": errors},
-        status=400,
-    )
+    return Response({"detail": "Invalid external AI payload.", "code": "invalid_ai_payload", "errors": errors}, status=400)
 
 
 def _ai_disabled_response() -> Response | None:
@@ -621,7 +619,7 @@ class SummarizeSbarView(ProtectedAIAPIView):
                 resource_id="",
                 payload_hash=payload_hash,
                 payload_size=payload_size,
-                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/summarize-sbar", "errorCode": "ai_prompt_too_large" if http_status == 400 else None},
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/summarize-sbar", "errorCode": notes if http_status == 400 and notes in AI_REJECTION_CODES else None},
             )
         except Exception:
             logger.exception("No se pudo registrar auditoría de IA")
@@ -629,6 +627,7 @@ class SummarizeSbarView(ProtectedAIAPIView):
     def post(self, request: HttpRequest) -> Response:
         serializer = SbarSummaryRequestSerializer(data=request.data)
         if not serializer.is_valid():
+            self._audit_ai_summary(status="fail", http_status=400, user_sub=None, notes="invalid_ai_payload", context={}, language="")
             return _invalid_ai_payload(serializer.errors)
         req = serializer.validated_data
         free_text = req["free_text"]
@@ -640,7 +639,7 @@ class SummarizeSbarView(ProtectedAIAPIView):
 
         combined_text, ctx = self._build_sbar_input(free_text, context)
         if _prompt_too_large(combined_text, language):
-            self._audit_ai_summary(status="fail", http_status=400, user_sub=user_sub, notes="", context={}, language=language)
+            self._audit_ai_summary(status="fail", http_status=400, user_sub=None, notes="ai_prompt_too_large", context={}, language="")
             return Response({"detail": "Texto demasiado largo para resumir", "code": "ai_prompt_too_large"}, status=400)
         disabled_response = _ai_disabled_response()
         if disabled_response:
@@ -773,7 +772,7 @@ class RefineSbarView(ProtectedAIAPIView):
                 resource_id="",
                 payload_hash=payload_hash,
                 payload_size=payload_size,
-                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar", "errorCode": "ai_prompt_too_large" if http_status == 400 else None},
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar", "errorCode": notes if http_status == 400 and notes in AI_REJECTION_CODES else None},
             )
         except Exception:
             logger.exception("No se pudo registrar auditoria de refinado SBAR")
@@ -799,6 +798,7 @@ class RefineSbarView(ProtectedAIAPIView):
                     )
         serializer = SbarRefineRequestSerializer(data=request.data)
         if not serializer.is_valid():
+            self._audit_ai_refine(status="fail", http_status=400, user_sub=None, notes="invalid_ai_payload", payload={}, language="")
             return _invalid_ai_payload(serializer.errors)
         req = serializer.validated_data
         draft = self._normalize_refine_draft(req["draft"])
@@ -807,7 +807,7 @@ class RefineSbarView(ProtectedAIAPIView):
         user_sub = _get_authenticated_user_sub(request)
         combined_text, audit_payload, audit_notes = self._build_refine_input(draft, handover)
         if _prompt_too_large(combined_text, language):
-            self._audit_ai_refine(status="fail", http_status=400, user_sub=user_sub, notes="", payload={}, language=language)
+            self._audit_ai_refine(status="fail", http_status=400, user_sub=None, notes="ai_prompt_too_large", payload={}, language="")
             return Response({"detail": "Texto demasiado largo para refinar", "code": "ai_prompt_too_large"}, status=400)
         disabled_response = _ai_disabled_response()
         if disabled_response:

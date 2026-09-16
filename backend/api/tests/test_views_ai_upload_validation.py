@@ -1,11 +1,13 @@
 import datetime
 import pytest
+from django.conf import settings
 from django.test import override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
 from backend.api.audit_pseudonymization import build_audit_patient_key
 from backend.audit.models import AuditEvent
+from backend.audit.utils import hash_payload
 from backend.security.auth import Auth0User
 
 
@@ -731,6 +733,46 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
     assert audit_events[0]["meta"]["errorCode"] == "ai_prompt_too_large"
     assert phi_marker not in str(audit_events[0])
     assert oversized_text not in str(audit_events[0])
+
+
+@pytest.mark.parametrize(
+    ("route", "payload"),
+    [
+        ("summarize-sbar", {"free_text": "PHI-REJECTED-" + "x" * 15000}),
+        ("summarize-sbar", {"free_text": "PHI-REJECTED", "PHI-REJECTED": "PHI-REJECTED"}),
+        ("summarize-sbar", {"context": {"vitals": {"PHI-REJECTED": "PHI-REJECTED"}}}),
+        ("summarize-sbar", {"context": {"vitals": "PHI-REJECTED"}}),
+        ("summarize-sbar", ["PHI-REJECTED"]),
+        ("refine-sbar", {"draft": {"situation": "PHI-REJECTED-" + "x" * 15000}}),
+        ("refine-sbar", {"draft": {"unexpected": "PHI-REJECTED"}}),
+        ("refine-sbar", {"handover": {"oxygenTherapy": {"unexpected": "PHI-REJECTED"}}}),
+        ("refine-sbar", {"handover": {"vitals": {"hr": "PHI-REJECTED"}}}),
+        ("refine-sbar", ["PHI-REJECTED"]),
+    ],
+)
+def test_invalid_ai_payload_is_audited_once_without_phi_or_egress(monkeypatch, caplog, route, payload):
+    import backend.api.views_ai as views_ai
+
+    audit_events = []
+    provider_calls = []
+    monkeypatch.setattr(views_ai, "emit_audit_event", lambda **kwargs: audit_events.append(kwargs), raising=True)
+    monkeypatch.setattr(views_ai, "generate_sbar", lambda *_args, **_kwargs: provider_calls.append(True), raising=True)
+
+    response = _auth_client().post(f"/api/ai/{route}", data=payload, format="json")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_ai_payload"
+    assert provider_calls == []
+    assert len(audit_events) == 1
+    assert audit_events[0]["status"] == "fail"
+    assert audit_events[0]["http_status"] == 400
+    assert audit_events[0]["meta"]["errorCode"] == "invalid_ai_payload"
+    assert audit_events[0]["user_sub"] is None
+    redacted_payload = {"notes": "invalid_ai_payload", "language": ""}
+    redacted_payload["context" if route == "summarize-sbar" else "payload"] = {}
+    assert audit_events[0]["payload_hash"] == hash_payload(redacted_payload, settings.AUDIT_HASH_SECRET)
+    assert "PHI-REJECTED" not in str(audit_events[0])
+    assert "PHI-REJECTED" not in caplog.text
 
 
 def test_ai_audit_and_logs_do_not_persist_phi(monkeypatch, caplog):

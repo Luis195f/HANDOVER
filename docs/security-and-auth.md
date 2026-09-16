@@ -66,6 +66,13 @@
 - En `POST /api/ai/refine-sbar`, los campos `draft.situation`, `draft.background`, `draft.assessment` y `draft.recommendation` sólo aceptan `string` o `null`; tipos no válidos responden `400` con `code=invalid_refine_draft`.
 - En `POST /api/ai/refine-sbar`, `handover` también debe ser un objeto JSON si viene explícitamente; otros tipos responden `400` con `code=invalid_refine_handover` y `detail=handover must be an object.`.
 
+### Contrato de payload SBAR externo
+- `summarize-sbar` admite únicamente `free_text` (string, máximo 15 000 caracteres), `context` (objeto) y `language` (`es` o `en`); `refine-sbar` admite únicamente `draft` (objeto), `handover` (objeto) y `language` (`es` o `en`). Los campos son opcionales; el prompt compuesto tiene un máximo de 15 000 caracteres antes del egress.
+- `draft` admite solo `situation`, `background`, `assessment` y `recommendation`: cada campo acepta string o `null`, con máximo 15 000 caracteres. Se conservan los errores `invalid_refine_draft` e `invalid_refine_handover` para los tipos incompatibles gestionados antes del serializer.
+- `context` y `handover` comparten la allowlist recursiva: `dxMedical` y `dxNursing` (strings, máximo 240 caracteres), `evolution` (string, máximo 4 000), `vitals` y `oxygenTherapy`. `evolution` se admite para compatibilidad, pero el DTO mínimo del cliente no la envía por defecto.
+- `vitals` admite únicamente `hr`, `rr`, `tempC`, `spo2`, `sbp`, `dbp`, `glucoseMgDl`, `glucoseMmolL` (números acotados por el serializer) y `avpu` (`A`, `C`, `V`, `P` o `U`). `oxygenTherapy` admite `device` (string, máximo 80 caracteres), `flowLMin` y `fio2` (números acotados).
+- Cualquier campo no declarado, incluso nested, o valor que no cumpla el esquema produce HTTP `400` con `code=invalid_ai_payload` y errores de validación; no se filtran campos silenciosamente. El rechazo emite una única auditoría fallida con código estable y metadatos censurados: no persiste valores del payload, contenido clínico, prompt ni PHI, y no llama al proveedor externo. La allowlist minimiza metadatos estructurados; no anonimiza texto libre.
+
 ## Identidad clínica y anti-spoofing
 - La identidad de usuario usada para attestation clínica y auditoría se deriva del claim `sub` del JWT validado.
 - No se confía en cabeceras cliente para identidad de usuario final.
