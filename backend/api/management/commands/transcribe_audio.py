@@ -16,7 +16,7 @@ DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 class _UploadedAudioFile:
     def __init__(self, path: Path):
         self._path = path
-        self.filename = path.name
+        self.content_type = f"audio/{path.suffix.lower().lstrip('.')}"
 
     def read(self) -> bytes:
         return self._path.read_bytes()

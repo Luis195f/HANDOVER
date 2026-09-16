@@ -20,6 +20,12 @@ ASYNC_TRANSCRIPTION_TIMEOUT = 60
 ASYNC_SBAR_TIMEOUT = 120
 ASYNC_SUGGESTIONS_TIMEOUT = 90
 MAX_COMPOSED_AI_PROMPT_LENGTH = 15000
+AUDIO_MIME_EXTENSIONS = {
+    "audio/aac": ".aac",
+    "audio/m4a": ".m4a", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",
+    "audio/mp3": ".mp3", "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg", "audio/wav": ".wav", "audio/webm": ".webm",
+}
 
 _client: Optional[OpenAI] = None
 
@@ -112,9 +118,11 @@ async def transcribe_audio(file: Any, language: Optional[str]) -> str:
         if not data:
             raise ValueError("empty-audio")
 
+        content_type = (getattr(file, "content_type", "") or "").split(";")[0].strip().lower()
+        suffix = AUDIO_MIME_EXTENSIONS.get(content_type)
+        if suffix is None:
+            raise ValueError("unsupported-audio-type")
         audio_buffer = io.BytesIO(data)
-        original_name = getattr(file, "name", None) or getattr(file, "filename", None) or "audio.m4a"
-        suffix = os.path.splitext(str(original_name))[1].lower() or ".m4a"
         audio_buffer.name = f"audio_input{suffix}"
 
         logger.info("[ai] transcribe start size_bytes=%s", size_bytes)

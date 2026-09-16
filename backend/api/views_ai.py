@@ -17,6 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from backend.ai_client import (
+    AUDIO_MIME_EXTENSIONS,
     ClinicalContext,
     MAX_COMPOSED_AI_PROMPT_LENGTH,
     OPENAI_MODEL_SBAR,
@@ -46,17 +47,7 @@ from backend.security.scope_permissions import HasAllScopes, HasAnyScope
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_AUDIO_MIME_TYPES = {
-    "audio/aac",
-    "audio/m4a",
-    "audio/mp4",
-    "audio/mp3",
-    "audio/mpeg",
-    "audio/ogg",
-    "audio/wav",
-    "audio/webm",
-    "audio/x-m4a",
-}
+ALLOWED_AUDIO_MIME_TYPES = set(AUDIO_MIME_EXTENSIONS)
 DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
@@ -545,6 +536,7 @@ class TranscribeView(ProtectedAIAPIView):
         validation_error = _validate_audio_upload(upload)
         if validation_error:
             return validation_error
+        upload.content_type = _normalize_audio_content_type(upload)
 
         disabled_response = _ai_disabled_response()
         if disabled_response:

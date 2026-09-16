@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from django.core.management import call_command
@@ -61,3 +62,39 @@ def test_transcribe_audio_command_is_marked_deprecated():
     from backend.api.management.commands.transcribe_audio import Command
 
     assert "@deprecated" in Command.help
+
+
+@pytest.mark.django_db
+def test_transcribe_audio_command_sends_only_server_filename(monkeypatch, tmp_path: Path, caplog):
+    from backend import ai_client
+
+    audio = tmp_path / "patient.sensitive.name.mp3"
+    audio.write_bytes(b"fake-audio")
+    provider_calls = []
+
+    def fake_create(**kwargs):
+        provider_calls.append(kwargs)
+        return SimpleNamespace(text="texto transcrito")
+
+    monkeypatch.setattr(ai_client, "get_client", lambda: SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))))
+
+    call_command("transcribe_audio", str(audio), "--language", "es")
+
+    assert len(provider_calls) == 1
+    assert provider_calls[0]["file"].name == "audio_input.mp3"
+    assert "patient.sensitive.name" not in caplog.text
+
+
+def test_transcribe_audio_command_rejects_unsupported_suffix_before_provider(monkeypatch, tmp_path: Path, caplog):
+    from backend import ai_client
+
+    audio = tmp_path / "PHI-audio.invalid"
+    audio.write_bytes(b"fake-audio")
+    provider_calls = []
+    monkeypatch.setattr(ai_client, "get_client", lambda: provider_calls.append(True))
+
+    with pytest.raises(CommandError, match="Unsupported audio format"):
+        call_command("transcribe_audio", str(audio), "--language", "es")
+
+    assert provider_calls == []
+    assert "PHI-audio" not in caplog.text

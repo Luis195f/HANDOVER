@@ -1,4 +1,5 @@
 import datetime
+from types import SimpleNamespace
 import pytest
 from django.conf import settings
 from django.test import override_settings
@@ -256,6 +257,45 @@ def test_transcribe_accepts_empty_content_type_with_safe_extension_inference(mon
 
     assert response.status_code == 200
     assert response.json()["text"] == "texto transcrito"
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [("patient.juan-perez", "audio/mpeg"), ("patient.juan-perez.mp3", "")],
+)
+def test_transcribe_http_uses_server_filename_despite_sensitive_upload_name(monkeypatch, caplog, filename, content_type):
+    from backend import ai_client
+
+    provider_calls = []
+
+    def fake_create(**kwargs):
+        provider_calls.append(kwargs)
+        return SimpleNamespace(text="texto transcrito")
+
+    monkeypatch.setattr(ai_client, "get_client", lambda: SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))))
+    upload = SimpleUploadedFile(filename, b"small", content_type=content_type)
+
+    response = _auth_client().post("/api/ai/transcribe", data={"file": upload}, format="multipart")
+
+    assert response.status_code == 200
+    assert len(provider_calls) == 1
+    assert provider_calls[0]["file"].name == "audio_input.mp3"
+    assert "patient.juan-perez" not in caplog.text
+
+
+def test_transcribe_http_rejects_unsupported_mime_without_provider(monkeypatch, caplog):
+    from backend import ai_client
+
+    provider_calls = []
+    monkeypatch.setattr(ai_client, "get_client", lambda: provider_calls.append(True))
+    upload = SimpleUploadedFile("PHI-unknown.mp3", b"small", content_type="application/octet-stream")
+
+    response = _auth_client().post("/api/ai/transcribe", data={"file": upload}, format="multipart")
+
+    assert response.status_code == 415
+    assert response.json()["code"] == "unsupported_audio_type"
+    assert provider_calls == []
+    assert "PHI-unknown" not in caplog.text
 
 
 def test_audio_to_fhir_accepts_safe_inference_and_keeps_existing_flow(monkeypatch):
