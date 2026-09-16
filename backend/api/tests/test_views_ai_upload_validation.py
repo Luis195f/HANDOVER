@@ -775,6 +775,57 @@ def test_invalid_ai_payload_is_audited_once_without_phi_or_egress(monkeypatch, c
     assert "PHI-REJECTED" not in caplog.text
 
 
+@pytest.mark.parametrize("route", ["summarize-sbar", "refine-sbar"])
+@pytest.mark.parametrize("gate", ["defaults", "general_off", "external_off", "kill_switch", "pilot", "production"])
+def test_disabled_external_sbar_is_audited_once_without_phi_or_egress(monkeypatch, caplog, route, gate):
+    import backend.api.views_ai as views_ai
+
+    for name in ("HANDOVER_AI_ENABLED", "HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", "HANDOVER_OPENAI_DISABLED"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", "test")
+    if gate != "defaults":
+        monkeypatch.setenv("HANDOVER_AI_ENABLED", "false" if gate == "general_off" else "true")
+        monkeypatch.setenv("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", "false" if gate == "external_off" else "true")
+        monkeypatch.setenv("HANDOVER_OPENAI_DISABLED", "true" if gate == "kill_switch" else "false")
+    if gate in {"pilot", "production"}:
+        monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", gate)
+
+    audit_events = []
+    provider_calls = []
+    monkeypatch.setattr(views_ai, "emit_audit_event", lambda **kwargs: audit_events.append(kwargs), raising=True)
+    monkeypatch.setattr(views_ai, "generate_sbar", lambda *_args, **_kwargs: provider_calls.append(True), raising=True)
+    phi_marker = "PHI-DISABLED-BEDSIDE-NOTE"
+    payload = {"free_text": phi_marker} if route == "summarize-sbar" else {"draft": {"situation": phi_marker}}
+
+    response = _auth_client().post(f"/api/ai/{route}", data=payload, format="json")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Servicio de IA externa deshabilitado por configuración", "code": "ai_disabled"}
+    assert provider_calls == []
+    assert len(audit_events) == 1
+    assert audit_events[0]["status"] == "fail"
+    assert audit_events[0]["http_status"] == 503
+    assert audit_events[0]["meta"]["errorCode"] == "ai_disabled"
+    assert audit_events[0]["user_sub"] is None
+    redacted_payload = {"notes": "ai_disabled", "language": ""}
+    redacted_payload["context" if route == "summarize-sbar" else "payload"] = {}
+    assert audit_events[0]["payload_hash"] == hash_payload(redacted_payload, settings.AUDIT_HASH_SECRET)
+    assert phi_marker not in str(audit_events[0])
+    assert phi_marker not in caplog.text
+
+
+@pytest.mark.parametrize("route", ["summarize-sbar", "refine-sbar"])
+def test_unauthenticated_external_sbar_does_not_emit_clinical_audit(monkeypatch, route):
+    import backend.api.views_ai as views_ai
+
+    audit_events = []
+    monkeypatch.setattr(views_ai, "emit_audit_event", lambda **kwargs: audit_events.append(kwargs), raising=True)
+    response = APIClient().post(f"/api/ai/{route}", data={}, format="json")
+
+    assert response.status_code == 401
+    assert audit_events == []
+
+
 def test_ai_audit_and_logs_do_not_persist_phi(monkeypatch, caplog):
     import backend.api.views_ai as views_ai
 

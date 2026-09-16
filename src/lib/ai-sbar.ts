@@ -26,17 +26,10 @@ interface RefineSbarResponse {
 export interface ExternalAiClinicalContext extends Record<string, unknown> {
   dxMedical?: string;
   dxNursing?: string;
-  vitals?: {
-    hr?: number;
-    rr?: number;
-    tempC?: number;
-    spo2?: number;
-    sbp?: number;
-    dbp?: number;
-    glucoseMgDl?: number;
-    glucoseMmolL?: number;
-    avpu?: 'A' | 'C' | 'V' | 'P' | 'U';
-  };
+  vitals?: Pick<
+    NonNullable<HandoverFormData['vitals']>,
+    'hr' | 'rr' | 'tempC' | 'spo2' | 'sbp' | 'dbp' | 'glucoseMgDl' | 'glucoseMmolL' | 'avpu'
+  >;
   oxygenTherapy?: { device?: string; flowLMin?: number; fio2?: number };
 }
 

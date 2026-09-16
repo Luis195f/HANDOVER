@@ -60,7 +60,7 @@ ALLOWED_AUDIO_MIME_TYPES = {
 DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
-AI_REJECTION_CODES = {"invalid_ai_payload", "ai_prompt_too_large"}
+AI_REJECTION_CODES = {"invalid_ai_payload", "ai_prompt_too_large", "ai_disabled"}
 
 CLINICAL_DECISION_ALLOWED_SOURCES = (
     "ai_generate_sbar",
@@ -619,7 +619,7 @@ class SummarizeSbarView(ProtectedAIAPIView):
                 resource_id="",
                 payload_hash=payload_hash,
                 payload_size=payload_size,
-                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/summarize-sbar", "errorCode": notes if http_status == 400 and notes in AI_REJECTION_CODES else None},
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/summarize-sbar", "errorCode": notes if http_status in (400, 503) and notes in AI_REJECTION_CODES else None},
             )
         except Exception:
             logger.exception("No se pudo registrar auditoría de IA")
@@ -643,6 +643,7 @@ class SummarizeSbarView(ProtectedAIAPIView):
             return Response({"detail": "Texto demasiado largo para resumir", "code": "ai_prompt_too_large"}, status=400)
         disabled_response = _ai_disabled_response()
         if disabled_response:
+            self._audit_ai_summary(status="fail", http_status=503, user_sub=None, notes="ai_disabled", context={}, language="")
             return disabled_response
         notes = self._truncate_audit_notes(free_text.strip())
 
@@ -772,7 +773,7 @@ class RefineSbarView(ProtectedAIAPIView):
                 resource_id="",
                 payload_hash=payload_hash,
                 payload_size=payload_size,
-                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar", "errorCode": notes if http_status == 400 and notes in AI_REJECTION_CODES else None},
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar", "errorCode": notes if http_status in (400, 503) and notes in AI_REJECTION_CODES else None},
             )
         except Exception:
             logger.exception("No se pudo registrar auditoria de refinado SBAR")
@@ -811,6 +812,7 @@ class RefineSbarView(ProtectedAIAPIView):
             return Response({"detail": "Texto demasiado largo para refinar", "code": "ai_prompt_too_large"}, status=400)
         disabled_response = _ai_disabled_response()
         if disabled_response:
+            self._audit_ai_refine(status="fail", http_status=503, user_sub=None, notes="ai_disabled", payload={}, language="")
             return disabled_response
 
         try:
