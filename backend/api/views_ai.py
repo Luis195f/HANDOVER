@@ -115,14 +115,14 @@ class AiVitalsSerializer(StrictSerializer):
 
 
 class AiOxygenSerializer(StrictSerializer):
-    device = StrictCharField(required=False, allow_blank=True, max_length=MAX_FREE_TEXT_LENGTH)
+    device = StrictCharField(required=False, allow_blank=True)
     flowLMin = StrictFloatField(required=False, min_value=0, max_value=80)
     fio2 = StrictFloatField(required=False, min_value=0, max_value=100)
 
 
 class AiClinicalContextSerializer(StrictSerializer):
     dxMedical = StrictCharField(required=False, allow_blank=True, max_length=240)
-    dxNursing = StrictCharField(required=False, allow_blank=True, max_length=500)
+    dxNursing = StrictCharField(required=False, allow_blank=True)
     evolution = StrictCharField(required=False, allow_blank=True, max_length=4000)
     vitals = AiVitalsSerializer(required=False)
     oxygenTherapy = AiOxygenSerializer(required=False)

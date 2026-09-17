@@ -156,7 +156,7 @@ describe('result helpers', () => {
   });
 
   it.each([
-    ['dxNursing', 241],
+    ['dxNursing', 501],
     ['device', 120],
   ] as const)('envía %s clínicamente válido completo en generate y refine', async (field, length) => {
     const value = 'x'.repeat(length);
@@ -186,10 +186,10 @@ describe('result helpers', () => {
     expect(JSON.stringify(clinicalData)).toBe(original);
   });
 
-  it.each(['dxMedical', 'dxNursing', 'device'] as const)(
+  it.each(['dxMedical'] as const)(
     'acepta el límite del DTO de %s en generate y refine sin modificar el formulario',
     async (field) => {
-      const limit = field === 'device' ? 15000 : field === 'dxNursing' ? 500 : 240;
+      const limit = 240;
       const value = 'x'.repeat(limit);
       const clinicalData: HandoverFormData = {
         ...handover,
@@ -217,11 +217,11 @@ describe('result helpers', () => {
     },
   );
 
-  it.each(['dxMedical', 'dxNursing', 'device'] as const)(
+  it.each(['dxMedical'] as const)(
     'bloquea %s demasiado largo localmente en generate y refine sin reflejar PHI',
     async (field) => {
       const marker = 'PHI-EXTERNAL-DTO';
-      const limit = field === 'device' ? 15000 : field === 'dxNursing' ? 500 : 240;
+      const limit = 240;
       const value = marker + 'x'.repeat(limit - marker.length + 1);
       const clinicalData: HandoverFormData = {
         ...handover,

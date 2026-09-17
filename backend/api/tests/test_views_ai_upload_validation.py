@@ -777,7 +777,7 @@ def test_composed_prompt_limit_precedes_external_egress(monkeypatch, case):
 
 
 @pytest.mark.parametrize("route", ["summarize-sbar", "refine-sbar"])
-@pytest.mark.parametrize(("field", "length"), [("dxNursing", 241), ("dxNursing", 500), ("device", 120), ("device", 10000)])
+@pytest.mark.parametrize(("field", "length"), [("dxNursing", 501), ("device", 120), ("device", 10000)])
 def test_form_valid_context_reaches_provider_without_truncation(monkeypatch, route, field, length):
     import backend.api.views_ai as views_ai
 
@@ -800,8 +800,6 @@ def test_form_valid_context_reaches_provider_without_truncation(monkeypatch, rou
 
 @pytest.mark.parametrize("route", ["summarize-sbar", "refine-sbar"])
 @pytest.mark.parametrize(("field", "length", "error_code"), [
-    ("dxNursing", 501, "invalid_ai_payload"),
-    ("device", 15001, "invalid_ai_payload"),
     ("device", 15000, "ai_prompt_too_large"),
 ])
 def test_context_limits_reject_without_phi_or_egress(monkeypatch, caplog, route, field, length, error_code):

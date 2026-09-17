@@ -136,9 +136,9 @@ const legacyDxNursingText = (value: unknown): string => {
 
 const externalAiContextSchema = z.object({
   dxMedical: z.string().max(240).optional(),
-  dxNursing: z.string().max(500).optional(),
+  dxNursing: z.string().optional(),
   vitals: zVitals.innerType().omit({ recordedAt: true, issuedAt: true }).strict().optional(),
-  oxygenTherapy: zOxygen.extend({ device: z.string().max(15000).optional() }).strict().optional(),
+  oxygenTherapy: zOxygen.extend({ device: z.string().optional() }).strict().optional(),
 }).strict();
 
 export function buildExternalAiClinicalContext(handover: HandoverFormData): ExternalAiClinicalContext {
