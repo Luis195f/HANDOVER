@@ -28,7 +28,7 @@ describe('generateSbarViaBackend', () => {
       json: async () => mockResponse,
     } as Response);
 
-    const result = await generateSbarViaBackend('Nota libre', { source: 'test' }, 'es');
+    const result = await generateSbarViaBackend('Nota libre', { vitals: { hr: 80 } }, 'es');
 
     expect(result.situation).toBe(mockResponse.situation);
     expect(result.background).toBe(mockResponse.background);

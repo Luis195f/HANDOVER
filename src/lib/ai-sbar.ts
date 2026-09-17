@@ -1,7 +1,8 @@
 import { AI_BACKEND_BASE_URL } from '@/src/config/env';
 import { ensureFreshAccessToken } from '@/src/security/auth';
+import { z } from 'zod';
 import type { SBARSummary } from '@/src/types/sbar';
-import type { HandoverFormData } from '@/src/validation/schemas';
+import { zOxygen, zVitals, type HandoverFormData } from '@/src/validation/schemas';
 
 export interface SbarResult {
   situation: string;
@@ -23,12 +24,23 @@ interface RefineSbarResponse {
   sbar?: Partial<SBARSummary> | null;
 }
 
+export interface ExternalAiClinicalContext extends Record<string, unknown> {
+  dxMedical?: string;
+  dxNursing?: string;
+  vitals?: Pick<
+    NonNullable<HandoverFormData['vitals']>,
+    'hr' | 'rr' | 'tempC' | 'spo2' | 'sbp' | 'dbp' | 'glucoseMgDl' | 'glucoseMmolL' | 'avpu'
+  >;
+  oxygenTherapy?: { device?: string; flowLMin?: number; fio2?: number };
+}
+
 export type AISbarErrorCode =
   | 'UNCONFIGURED'
   | 'UNAUTHORIZED'
   | 'UNAVAILABLE'
   | 'NETWORK'
   | 'INVALID_RESPONSE'
+  | 'INVALID_INPUT'
   | 'UNKNOWN';
 
 export class AISbarError extends Error {
@@ -122,6 +134,39 @@ const legacyDxNursingText = (value: unknown): string => {
   return '';
 };
 
+const externalAiContextSchema = z.object({
+  dxMedical: z.string().max(240).optional(),
+  dxNursing: z.string().optional(),
+  vitals: zVitals.innerType().omit({ recordedAt: true, issuedAt: true }).strict().optional(),
+  oxygenTherapy: zOxygen.extend({ device: z.string().optional() }).strict().optional(),
+}).strict();
+
+export function buildExternalAiClinicalContext(handover: HandoverFormData): ExternalAiClinicalContext {
+  const vitals = handover.vitals
+    ? {
+        hr: handover.vitals.hr,
+        rr: handover.vitals.rr,
+        tempC: handover.vitals.tempC,
+        spo2: handover.vitals.spo2,
+        sbp: handover.vitals.sbp,
+        dbp: handover.vitals.dbp,
+        glucoseMgDl: handover.vitals.glucoseMgDl,
+        glucoseMmolL: handover.vitals.glucoseMmolL,
+        avpu: handover.vitals.avpu,
+      }
+    : undefined;
+  const oxygen = handover.oxygenTherapy;
+  const oxygenTherapy = oxygen
+    ? { device: oxygen.device, flowLMin: oxygen.flowLMin, fio2: oxygen.fio2 }
+    : undefined;
+  return {
+    dxMedical: handover.dxMedical?.display || handover.dxMedical?.code || undefined,
+    dxNursing: legacyDxNursingText(handover.dxNursing) || undefined,
+    vitals,
+    oxygenTherapy,
+  };
+}
+
 function toAISbarError(error: unknown): AISbarError {
   if (error instanceof AISbarError) return error;
   if (error instanceof TypeError || (error instanceof Error && /network|fetch/i.test(error.message))) {
@@ -157,19 +202,14 @@ export async function refineSBARWithAIResult(
   }
 
   const payload = {
-    handover: {
-      dxMedical: handover.dxMedical?.display ?? '',
-      dxNursing: legacyDxNursingText(handover.dxNursing),
-      vitals: handover.vitals,
-      oxygenTherapy: handover.oxygenTherapy,
-      risks: (handover as Record<string, unknown>).risks,
-      evolution: handover.evolution,
-      mobility: (handover as Record<string, unknown>).mobility,
-      nutrition: (handover as Record<string, unknown>).nutrition,
-    },
+    handover: buildExternalAiClinicalContext(handover),
     draft: { ...draft },
     language: 'es' as const,
   };
+  if (!externalAiContextSchema.safeParse(payload.handover).success ||
+      Object.keys(draft).length !== 4 || Object.values(draft).some((value) => typeof value !== 'string' || value.length > 15000)) {
+    return { ok: false, error: new AISbarError('INVALID_INPUT', 'Datos fuera del contrato de IA externa') };
+  }
 
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
@@ -222,6 +262,10 @@ export async function generateSbarViaBackendResult(
       ok: false,
       error: new AISbarError('UNCONFIGURED', 'El backend de IA no está configurado'),
     };
+  }
+
+  if (trimmed.length > 15000 || !externalAiContextSchema.safeParse(context ?? {}).success || !['es', 'en'].includes(language)) {
+    return { ok: false, error: new AISbarError('INVALID_INPUT', 'Datos fuera del contrato de IA externa') };
   }
 
   try {

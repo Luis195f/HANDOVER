@@ -39,6 +39,8 @@ Los datos se conservan únicamente durante el tiempo necesario para cumplir las 
 
 No se comparten datos con terceros salvo obligación legal o cuando sea necesario para prestar el servicio (por ejemplo, proveedores de infraestructura con acuerdos de confidencialidad). No se realizan transferencias internacionales sin garantías adecuadas.
 
+Para el objetivo de piloto vigente, **external AI disabled for current pilot target**: la presencia de una credencial del proveedor no habilita el envío de contenido clínico. Los DTO permitidos aplican minimización de metadatos estructurados, pero el texto libre continúa siendo potencialmente PHI y no se considera anonimizado.
+
 ## Derechos RGPD
 
 Puedes ejercer los derechos de acceso, rectificación, supresión, oposición, limitación y portabilidad. Para ello, contacta con el responsable del tratamiento en el correo indicado.

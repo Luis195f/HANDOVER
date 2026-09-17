@@ -16,6 +16,7 @@ class UploadFile:
     def __init__(self, *, filename: str, file):
         self.filename = filename
         self.file = file
+        self.content_type = "audio/m4a"
 
     def read(self):
         return self.file.read()

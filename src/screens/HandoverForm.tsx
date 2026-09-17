@@ -35,6 +35,7 @@ import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
 import {
+  buildExternalAiClinicalContext,
   generateSbarViaBackendResult,
   refineSBARWithAIResult,
   type AISbarErrorCode,
@@ -149,7 +150,6 @@ import {
   buildProfileTraceInput,
   buildSubmissionAdministrativeData,
   buildSubmissionOxygenTherapy,
-  normalizeOxygenTherapyInput,
   normalizeUnitSelection,
 } from './handover/submission';
 import { useHandoverSyncStatus } from './handover/useHandoverSyncStatus';
@@ -1351,37 +1351,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
   };
 
-  const buildSbarContext = (values: HandoverFormValues) => ({
-    patientId: values.patientId,
-    administrativeData: values.administrativeData,
-    dxMedical: values.dxMedical ?? '',
-    dxNursing: values.dxNursing ?? '',
-    vitals: values.vitals,
-    medications: values.medications,
-    medsFreeText: values.meds,
-    treatments: values.treatments,
-    exams: values.exams,
-    procedures: values.procedures,
-    evolution: values.evolution,
-    audioTranscription: values.audioTranscription,
-    risks: values.risks,
-    risksStructured: values.risksStructured,
-    oxygenTherapy: normalizeOxygenTherapyInput(values.oxygenTherapy),
-    devices: values.devices,
-    nutrition: values.nutrition,
-    elimination: values.elimination,
-    mobility: values.mobility,
-    skin: values.skin,
-    psychosocial: values.psychosocial,
-    fluidBalance: values.fluidBalance,
-    painAssessment: values.painAssessment,
-    braden: values.braden,
-    glasgow: values.glasgow,
-    bedsideChecklist: values.bedsideChecklist,
-    turnContext: values.turnContext,
-    pendingTasks: values.pendingTasks,
-    contingencyPlan: values.contingencyPlan,
-  });
+  const buildSbarContext = (values: HandoverFormValues) => buildExternalAiClinicalContext(values);
 
   const buildSbarFreeText = (values: HandoverFormValues) => {
     const sections = [
@@ -3040,7 +3010,6 @@ export default function HandoverForm({ navigation, route }: Props) {
     </FormProvider>
   );
 }
-
 
 
 
