@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-staging
-  cancel-in-progress: true
+  group: ${{ inputs.confirm_staging_ready && 'deploy-staging' || format('deploy-staging-unconfirmed-{0}', github.run_id) }}
+  cancel-in-progress: ${{ inputs.confirm_staging_ready == true }}
 
 jobs:
   deploy:
