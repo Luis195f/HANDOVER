@@ -2,7 +2,7 @@
 
 > Estado del documento
 > - Estado: `implemented`.
-> - Última revisión: 2026-03-26.
+> - Última revisión: 2026-09-21.
 > - Fuente de verdad / evidencia base: árbol actual del repo, `git tag --list`, `git log --oneline --decorate -n 15`, `git for-each-ref --sort=-committerdate`, `.github/workflows/*`, `backend/api/urls.py`, `backend/api/icea_ops.py`.
 > - Riesgos o lagunas abiertas: este registro consolida el estado técnico verificable del repo, pero no sustituye evidencia operativa externa del piloto, actas clínicas, licencias NNN ni disponibilidad del upstream ICEA+.
 
@@ -29,7 +29,7 @@ Estados usados en este registro:
 | ICEA+ como capa analítica agregada y observacional | `pilot` | `docs/clinical-profiles-framework.md`, `docs/icea-integration.md`, `backend/api/icea_clinical_feedback.py` | Debe mantenerse prudente, no punitiva y no nominal. |
 | NNN con BYO-license | `pilot` | `README.md`, `docs/fhir-and-interoperability.md`, `docs/qa-mdr-plan-nnn-icea.md`, `src/catalogs/governedCatalog.ts`, `backend/api/views_catalogs.py` | El repo no embebe corpus licenciados completos. |
 | CI y gates sensibles | `implemented` | `package.json`, `.github/workflows/ci.yml`, `.github/workflows/django.yml`, `docs/testing-and-ci.md` | El job principal de `CI` es bloqueante en este corte. |
-| Deploy web staging | `pilot` | `.github/workflows/deploy-staging.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `docs/DEPLOY.md` | La web estática sí está automatizada; el backend sigue como pieza separada. |
+| Deploy web staging | `provisional` | `.github/workflows/deploy-staging.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `docs/DEPLOY.md` | `NOT_VERIFIED / MANUAL_GATED`: ya no corre por push a `main`. El dispatch con confirmación `false` queda `SKIPPED`, sin preflight ni SSH y sin interferir con ejecuciones confirmadas; con `true`, el grupo `deploy-staging` exige preflight de `STAGING_HOST`, `STAGING_USER` y `STAGING_SSH_KEY` antes de SSH. Un run omitido no valida el despliegue; VPS, secretos, health check y smoke test siguen pendientes de una tarea operativa independiente. |
 | Backup/restore drill y rehearsal operativo | `pilot` | `.github/workflows/backup.yml`, `scripts/backup-db.sh`, `scripts/backup-media.sh`, `scripts/restore-db.sh`, `scripts/restore-media.sh`, `scripts/release-rehearsal.ps1`, `docs/backup-restore-drill.md`, `docs/release-rehearsal.md` | El repo deja backup cifrado y restore scratch-first verificable, pero no un DR full-stack automatizado. |
 
 ## 3. Estado documental del repo

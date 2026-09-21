@@ -332,7 +332,7 @@ Se recomienda activar Dependabot para revisar automáticamente librerías fronte
 
 ## Despliegue y release candidate
 
-Consulta `docs/DEPLOY.md` para el estado real del despliegue. La topología automatizada prioritaria del repo es la exportación web estática en staging mediante `Dockerfile` + `docker-compose.yml` + `.github/workflows/deploy-staging.yml`; el backend Django sigue siendo un servicio separado con arranque `gunicorn` vía `Procfile`.
+Consulta `docs/DEPLOY.md` para el estado real del despliegue. La exportación web de staging conserva una ruta manual mediante `workflow_dispatch`: ya no se ejecuta en cada push a `main` y permanece `NOT_VERIFIED / MANUAL_GATED`. `confirm_staging_ready` usa `false` por defecto; en ese estado el job queda `SKIPPED`, no ejecuta preflight ni SSH, no interfiere con un despliegue confirmado y no constituye evidencia de despliegue satisfactorio. Con `true`, el grupo real `deploy-staging` ejecuta primero un preflight de los repository secrets `STAGING_HOST`, `STAGING_USER` y `STAGING_SSH_KEY`; si falta alguno, falla antes de SSH mostrando solo los nombres ausentes. Provisionar infraestructura y validar un despliegue real, health check y smoke test corresponde a una tarea operativa independiente y no implica preparación de piloto o producción. El backend Django sigue siendo un servicio separado con arranque `gunicorn` vía `Procfile`.
 
 El estado consolidado de gobierno técnico y documental está en [`docs/MASTER_GOVERNANCE_REGISTER.md`](docs/MASTER_GOVERNANCE_REGISTER.md). En este corte del repo:
 

@@ -2,9 +2,11 @@
 
 > Estado del documento
 > - Estado: `pilot`.
-> - Última revisión: 2026-03-26.
+> - Última revisión: 2026-09-21.
 > - Fuente de verdad / evidencia base: `scripts/release-rehearsal.ps1`, `scripts/perf-smoke.py`, `scripts/zip-project.ps1`, `docs/DEPLOY.md`, `docs/backup-restore-drill.md`, `.github/workflows/deploy-staging.yml`.
-> - Límite abierto: el repo automatiza la web estática de staging, pero no un deploy/rollback full-stack del backend Django.
+> - Límite abierto: staging no está provisionado y permanece `NOT_VERIFIED / MANUAL_GATED`; el repo conserva una ruta manual para la web estática, pero no un deploy/rollback full-stack del backend Django.
+
+El workflow de staging solo se inicia mediante `workflow_dispatch`; no se ejecuta en cada push a `main`. `confirm_staging_ready=false` deja el job `SKIPPED`, sin preflight ni SSH, aislado de despliegues confirmados, y no constituye evidencia operativa. Con `true`, el grupo `deploy-staging` valida primero los repository secrets `STAGING_HOST`, `STAGING_USER` y `STAGING_SSH_KEY`; cualquier ausencia falla antes de SSH mostrando únicamente los nombres. Cuando exista VPS y secretos, el propietario deberá ejecutar y validar el despliegue, health check y smoke test en una tarea operativa independiente. Nada de este gate permite inferir que staging, piloto o producción estén listos.
 
 ## 1) Objetivo
 
