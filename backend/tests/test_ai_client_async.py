@@ -8,9 +8,10 @@ import pytest
 
 
 class UploadFile:
-    def __init__(self, *, filename: str, file):
+    def __init__(self, *, filename: str, file, content_type: str = "audio/m4a"):
         self.filename = filename
         self.file = file
+        self.content_type = content_type
 
     def read(self):
         return self.file.read()
@@ -48,6 +49,18 @@ def test_get_client_respects_ai_flags(monkeypatch):
 
     with pytest.raises(RuntimeError, match="disabled by environment flags"):
         ai_client.get_client()
+
+
+def test_openai_api_key_alone_never_enables_external_ai(monkeypatch):
+    from backend import ai_client
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-present")
+    monkeypatch.delenv("HANDOVER_AI_ENABLED", raising=False)
+    monkeypatch.delenv("HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED", raising=False)
+    monkeypatch.delenv("HANDOVER_OPENAI_DISABLED", raising=False)
+    monkeypatch.setenv("HANDOVER_DEPLOYMENT_MODE", "development")
+
+    assert ai_client.is_openai_enabled() is False
 
 
 def test_get_client_rejects_placeholder_api_key(monkeypatch):
@@ -98,8 +111,14 @@ def test_generate_sbar_is_awaitable_and_uses_thread_offload(monkeypatch):
 def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
     from backend import ai_client
 
+    transcription_request = {}
+
     async def fake_to_thread(func, *args, **kwargs):
         return func(*args, **kwargs)
+
+    def fake_transcription_create(**kwargs):
+        transcription_request.update(kwargs)
+        return transcription_response
 
     transcription_response = SimpleNamespace(text="  hola mundo  ")
     suggestions_payload = ai_client.json.dumps(
@@ -111,7 +130,7 @@ def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
 
     fake_client = SimpleNamespace(
         audio=SimpleNamespace(
-            transcriptions=SimpleNamespace(create=lambda **_: transcription_response)
+            transcriptions=SimpleNamespace(create=fake_transcription_create)
         ),
         chat=SimpleNamespace(
             completions=SimpleNamespace(create=lambda **_: suggestions_completion)
@@ -121,15 +140,63 @@ def test_transcribe_and_suggestions_are_awaitable(monkeypatch):
     monkeypatch.setattr(ai_client, "get_client", lambda: fake_client)
     monkeypatch.setattr(ai_client.asyncio, "to_thread", fake_to_thread)
 
-    upload = UploadFile(filename="audio.m4a", file=io.BytesIO(b"bytes-audio"))
+    upload = UploadFile(filename="patient-identifier.m4a", file=io.BytesIO(b"bytes-audio"))
     transcription = asyncio.run(ai_client.transcribe_audio(upload, language="es"))
 
     ctx = ai_client.ClinicalContext(section="urgencias", notes="paciente estable")
     suggestions = asyncio.run(ai_client.generate_intervention_suggestions(ctx))
 
     assert transcription == "hola mundo"
+    assert transcription_request["file"].name == "audio_input.m4a"
     assert suggestions.interventions == ["Monitorizar constantes"]
     assert suggestions.section == "urgencias"
+
+
+@pytest.mark.parametrize(
+    ("content_type", "filename", "extension"),
+    [
+        ("audio/aac", "patient.juan-perez", ".aac"),
+        ("audio/m4a", "patient.name.with.dots.mp3", ".m4a"),
+        ("audio/mp4", "no-extension", ".m4a"),
+        ("audio/mp3", "paciente extraño.wav", ".mp3"),
+        ("audio/mpeg", "patient.juan-perez", ".mp3"),
+        ("audio/ogg", "patient.long.name.wav", ".ogg"),
+        ("audio/wav", "patient.juan-perez", ".wav"),
+        ("audio/webm", "patient.juan-perez", ".webm"),
+        ("audio/x-m4a", "patient.juan-perez", ".m4a"),
+    ],
+)
+def test_transcription_provider_name_comes_only_from_validated_mime(monkeypatch, caplog, content_type, filename, extension):
+    from backend import ai_client
+
+    provider_calls = []
+
+    def fake_create(**kwargs):
+        provider_calls.append(kwargs)
+        return SimpleNamespace(text="texto")
+
+    monkeypatch.setattr(ai_client, "get_client", lambda: SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))))
+    upload = UploadFile(filename=filename, file=io.BytesIO(b"audio"), content_type=content_type)
+
+    assert asyncio.run(ai_client.transcribe_audio(upload, language="es")) == "texto"
+    assert len(provider_calls) == 1
+    assert provider_calls[0]["file"].name == f"audio_input{extension}"
+    assert filename not in str(provider_calls[0]["file"].name)
+    assert filename not in caplog.text
+
+
+def test_transcription_rejects_unsupported_mime_before_provider(monkeypatch, caplog):
+    from backend import ai_client
+
+    provider_calls = []
+    monkeypatch.setattr(ai_client, "get_client", lambda: provider_calls.append(True))
+    upload = UploadFile(filename="PHI-audio.mp3", file=io.BytesIO(b"audio"), content_type="application/octet-stream")
+
+    with pytest.raises(ValueError, match="unsupported-audio-type"):
+        asyncio.run(ai_client.transcribe_audio(upload, language="es"))
+
+    assert provider_calls == []
+    assert "PHI-audio" not in caplog.text
 
 
 def test_outcomes_suggestions_support_structured_noc_payload(monkeypatch):

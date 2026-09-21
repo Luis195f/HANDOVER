@@ -3,7 +3,6 @@ import datetime
 import logging
 import mimetypes
 import os
-import backend.ai_client as ai_client
 from typing import Any, Dict
 from urllib.parse import quote
 
@@ -18,9 +17,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from backend.ai_client import (
+    AUDIO_MIME_EXTENSIONS,
     ClinicalContext,
+    MAX_COMPOSED_AI_PROMPT_LENGTH,
     OPENAI_MODEL_SBAR,
     OPENAI_MODEL_SUGGESTIONS,
+    build_sbar_prompt,
     generate_intervention_suggestions,
     generate_sbar,
     transcribe_audio,
@@ -45,20 +47,11 @@ from backend.security.scope_permissions import HasAllScopes, HasAnyScope
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_AUDIO_MIME_TYPES = {
-    "audio/aac",
-    "audio/m4a",
-    "audio/mp4",
-    "audio/mp3",
-    "audio/mpeg",
-    "audio/ogg",
-    "audio/wav",
-    "audio/webm",
-    "audio/x-m4a",
-}
+ALLOWED_AUDIO_MIME_TYPES = set(AUDIO_MIME_EXTENSIONS)
 DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_FREE_TEXT_LENGTH = 15000
 MAX_NOTES_LENGTH = 500
+AI_REJECTION_CODES = {"invalid_ai_payload", "invalid_refine_draft", "invalid_refine_handover", "ai_prompt_too_large", "ai_disabled"}
 
 CLINICAL_DECISION_ALLOWED_SOURCES = (
     "ai_generate_sbar",
@@ -84,6 +77,88 @@ CLINICAL_DECISION_ALLOWED_METADATA_KEYS = {
     "replaceExisting",
 }
 CLINICAL_DECISION_ALLOWED_SECTIONS = {"sbar", "treatments", "outcomes"}
+
+
+class StrictCharField(serializers.CharField):
+    def to_internal_value(self, data: Any) -> str:
+        if not isinstance(data, str):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
+class StrictFloatField(serializers.FloatField):
+    def to_internal_value(self, data: Any) -> float:
+        if isinstance(data, bool) or not isinstance(data, (int, float)):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
+class StrictSerializer(serializers.Serializer):
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        if not isinstance(data, dict):
+            raise serializers.ValidationError({"non_field_errors": ["Expected an object."]})
+        if unexpected := sorted(set(data) - set(self.fields)):
+            raise serializers.ValidationError({key: ["Unsupported field."] for key in unexpected})
+        return super().to_internal_value(data)
+
+
+class AiVitalsSerializer(StrictSerializer):
+    hr = StrictFloatField(required=False, min_value=30, max_value=220)
+    rr = StrictFloatField(required=False, min_value=5, max_value=60)
+    tempC = StrictFloatField(required=False, min_value=30, max_value=45)
+    spo2 = StrictFloatField(required=False, min_value=50, max_value=100)
+    sbp = StrictFloatField(required=False, min_value=50, max_value=260)
+    dbp = StrictFloatField(required=False, min_value=30, max_value=160)
+    glucoseMgDl = StrictFloatField(required=False, min_value=18, max_value=1000)
+    glucoseMmolL = StrictFloatField(required=False, min_value=1, max_value=55)
+    avpu = serializers.ChoiceField(required=False, choices=("A", "C", "V", "P", "U"))
+
+
+class AiOxygenSerializer(StrictSerializer):
+    device = StrictCharField(required=False, allow_blank=True)
+    flowLMin = StrictFloatField(required=False, min_value=0, max_value=80)
+    fio2 = StrictFloatField(required=False, min_value=0, max_value=100)
+
+
+class AiClinicalContextSerializer(StrictSerializer):
+    dxMedical = StrictCharField(required=False, allow_blank=True, max_length=240)
+    dxNursing = StrictCharField(required=False, allow_blank=True)
+    evolution = StrictCharField(required=False, allow_blank=True, max_length=4000)
+    vitals = AiVitalsSerializer(required=False)
+    oxygenTherapy = AiOxygenSerializer(required=False)
+
+
+class SbarSummaryRequestSerializer(StrictSerializer):
+    free_text = StrictCharField(required=False, allow_blank=True, max_length=MAX_FREE_TEXT_LENGTH, default="")
+    context = AiClinicalContextSerializer(required=False, default=dict)
+    language = serializers.ChoiceField(required=False, choices=("es", "en"), default="es")
+
+
+class SbarDraftSerializer(StrictSerializer):
+    situation = StrictCharField(required=False, allow_blank=True, allow_null=True, max_length=MAX_FREE_TEXT_LENGTH, default="")
+    background = StrictCharField(required=False, allow_blank=True, allow_null=True, max_length=MAX_FREE_TEXT_LENGTH, default="")
+    assessment = StrictCharField(required=False, allow_blank=True, allow_null=True, max_length=MAX_FREE_TEXT_LENGTH, default="")
+    recommendation = StrictCharField(required=False, allow_blank=True, allow_null=True, max_length=MAX_FREE_TEXT_LENGTH, default="")
+
+
+class SbarRefineRequestSerializer(StrictSerializer):
+    draft = SbarDraftSerializer(required=False, default=dict)
+    handover = AiClinicalContextSerializer(required=False, default=dict)
+    language = serializers.ChoiceField(required=False, choices=("es", "en"), default="es")
+
+
+def _invalid_ai_payload() -> Response:
+    return Response({"detail": "Invalid external AI payload.", "code": "invalid_ai_payload", "errors": {"non_field_errors": ["Invalid external AI payload."]}}, status=400)
+
+
+def _ai_disabled_response() -> Response | None:
+    if is_openai_enabled():
+        return None
+    return Response({"detail": "Servicio de IA externa deshabilitado por configuración", "code": "ai_disabled"}, status=503)
+
+
+def _prompt_too_large(text: str, language: str) -> bool:
+    return len(build_sbar_prompt(text, language)) > MAX_COMPOSED_AI_PROMPT_LENGTH
 
 
 def _suggestion_version_for_source(source: str) -> str:
@@ -461,12 +536,11 @@ class TranscribeView(ProtectedAIAPIView):
         validation_error = _validate_audio_upload(upload)
         if validation_error:
             return validation_error
+        upload.content_type = _normalize_audio_content_type(upload)
 
-        # If OpenAI is disabled, return 503 unless transcribe_audio has been monkeypatched in tests.
-        openai_enabled = is_openai_enabled()
-        transcribe_is_mocked = transcribe_audio is not ai_client.transcribe_audio
-        if not openai_enabled and not transcribe_is_mocked:
-            return Response({"detail": "Servicio de IA deshabilitado por configuración", "code": "ai_disabled"}, status=503)
+        disabled_response = _ai_disabled_response()
+        if disabled_response:
+            return disabled_response
 
         try:
             # Compatible con transcribe_audio(upload, language) y con transcribe_audio(file=..., language=...)
@@ -537,32 +611,30 @@ class SummarizeSbarView(ProtectedAIAPIView):
                 resource_id="",
                 payload_hash=payload_hash,
                 payload_size=payload_size,
-                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/summarize-sbar"},
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/summarize-sbar", "errorCode": notes if http_status in (400, 503) and notes in AI_REJECTION_CODES else None},
             )
         except Exception:
             logger.exception("No se pudo registrar auditoría de IA")
 
     def post(self, request: HttpRequest) -> Response:
-        req = request.data if isinstance(request.data, dict) else {}
-        free_text = req.get("free_text") or ""
-        language = req.get("language") or "es"
-        context = req.get("context") if isinstance(req.get("context"), dict) else {}
-
-        # Sujeto autenticado real (evita suplantación por header)
         user_sub = _get_authenticated_user_sub(request)
-
-        if len(free_text) > MAX_FREE_TEXT_LENGTH:
-            self._audit_ai_summary(
-                status="fail",
-                http_status=400,
-                user_sub=user_sub,
-                notes=self._truncate_audit_notes(free_text.strip()),
-                context=context,
-                language=language,
-            )
-            return Response({"detail": "Texto demasiado largo para resumir"}, status=400)
+        serializer = SbarSummaryRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            self._audit_ai_summary(status="fail", http_status=400, user_sub=user_sub, notes="invalid_ai_payload", context={}, language="")
+            return _invalid_ai_payload()
+        req = serializer.validated_data
+        free_text = req["free_text"]
+        language = req["language"]
+        context = req["context"]
 
         combined_text, ctx = self._build_sbar_input(free_text, context)
+        if _prompt_too_large(combined_text, language):
+            self._audit_ai_summary(status="fail", http_status=400, user_sub=user_sub, notes="ai_prompt_too_large", context={}, language="")
+            return Response({"detail": "Texto demasiado largo para resumir", "code": "ai_prompt_too_large"}, status=400)
+        disabled_response = _ai_disabled_response()
+        if disabled_response:
+            self._audit_ai_summary(status="fail", http_status=503, user_sub=user_sub, notes="ai_disabled", context={}, language="")
+            return disabled_response
         notes = self._truncate_audit_notes(free_text.strip())
 
         try:
@@ -691,49 +763,50 @@ class RefineSbarView(ProtectedAIAPIView):
                 resource_id="",
                 payload_hash=payload_hash,
                 payload_size=payload_size,
-                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar"},
+                meta={"model": OPENAI_MODEL_SBAR, "promptVersion": "v1", "source": "ai/refine-sbar", "errorCode": notes if http_status in (400, 503) and notes in AI_REJECTION_CODES else None},
             )
         except Exception:
             logger.exception("No se pudo registrar auditoria de refinado SBAR")
 
     def post(self, request: HttpRequest) -> Response:
-        req = request.data if isinstance(request.data, dict) else {}
-        raw_draft = req.get("draft")
-        if "draft" in req and not isinstance(raw_draft, dict):
-            return Response({"detail": "draft must be an object.", "code": "invalid_refine_draft"}, status=400)
-
-        raw_handover = req.get("handover")
-        if "handover" in req and not isinstance(raw_handover, dict):
-            return Response({"detail": "handover must be an object.", "code": "invalid_refine_handover"}, status=400)
-
-        draft = raw_draft if isinstance(raw_draft, dict) else {}
-        handover = raw_handover if isinstance(raw_handover, dict) else {}
-        language = req.get("language") or "es"
         user_sub = _get_authenticated_user_sub(request)
-
-        try:
-            normalized_draft = self._normalize_refine_draft(draft)
-        except ValueError as exc:
-            field_name = str(exc) or "draft"
-            return Response(
-                {
-                    "detail": f"draft.{field_name} must be a string or null.",
-                    "code": "invalid_refine_draft",
-                },
-                status=400,
-            )
-
-        combined_text, audit_payload, audit_notes = self._build_refine_input(normalized_draft, handover)
-        if len(combined_text) > MAX_FREE_TEXT_LENGTH:
-            self._audit_ai_refine(
-                status="fail",
-                http_status=400,
-                user_sub=user_sub,
-                notes=audit_notes,
-                payload=audit_payload,
-                language=language,
-            )
-            return Response({"detail": "Texto demasiado largo para refinar"}, status=400)
+        raw_request = request.data if isinstance(request.data, dict) else {}
+        raw_draft = raw_request.get("draft")
+        if "draft" in raw_request and not isinstance(raw_draft, dict):
+            self._audit_ai_refine(status="fail", http_status=400, user_sub=user_sub, notes="invalid_refine_draft", payload={}, language="")
+            return Response({"detail": "draft must be an object.", "code": "invalid_refine_draft"}, status=400)
+        raw_handover = raw_request.get("handover")
+        if "handover" in raw_request and not isinstance(raw_handover, dict):
+            self._audit_ai_refine(status="fail", http_status=400, user_sub=user_sub, notes="invalid_refine_handover", payload={}, language="")
+            return Response({"detail": "handover must be an object.", "code": "invalid_refine_handover"}, status=400)
+        if isinstance(raw_draft, dict):
+            for field_name in ("situation", "background", "assessment", "recommendation"):
+                field_value = raw_draft.get(field_name)
+                if field_value is not None and not isinstance(field_value, str):
+                    self._audit_ai_refine(status="fail", http_status=400, user_sub=user_sub, notes="invalid_refine_draft", payload={}, language="")
+                    return Response(
+                        {
+                            "detail": f"draft.{field_name} must be a string or null.",
+                            "code": "invalid_refine_draft",
+                        },
+                        status=400,
+                    )
+        serializer = SbarRefineRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            self._audit_ai_refine(status="fail", http_status=400, user_sub=user_sub, notes="invalid_ai_payload", payload={}, language="")
+            return _invalid_ai_payload()
+        req = serializer.validated_data
+        draft = self._normalize_refine_draft(req["draft"])
+        handover = req["handover"]
+        language = req["language"]
+        combined_text, audit_payload, audit_notes = self._build_refine_input(draft, handover)
+        if _prompt_too_large(combined_text, language):
+            self._audit_ai_refine(status="fail", http_status=400, user_sub=user_sub, notes="ai_prompt_too_large", payload={}, language="")
+            return Response({"detail": "Texto demasiado largo para refinar", "code": "ai_prompt_too_large"}, status=400)
+        disabled_response = _ai_disabled_response()
+        if disabled_response:
+            self._audit_ai_refine(status="fail", http_status=503, user_sub=user_sub, notes="ai_disabled", payload={}, language="")
+            return disabled_response
 
         try:
             payload = async_to_sync(generate_sbar)(combined_text, language=language)
@@ -789,6 +862,9 @@ class SuggestInterventionsView(ProtectedAIAPIView):
     parser_classes = [JSONParser]
 
     def post(self, request: HttpRequest) -> Response:
+        disabled_response = _ai_disabled_response()
+        if disabled_response:
+            return disabled_response
         feature = evaluate_pilot_feature(
             "ai_suggestions",
             unit_id=str(request.data.get("unitId") or "").strip() or None,
@@ -1090,5 +1166,3 @@ class AudioToFHIRView(ProtectedAIAPIView):
             resource_id=_extract_document_reference_id(response_payload),
         )
         return Response(response_payload, status=resp.status_code)
-
-

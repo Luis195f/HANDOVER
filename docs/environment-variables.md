@@ -30,12 +30,15 @@
 - `OIDC_ISSUER` y `OIDC_AUDIENCE`: aliases compatibles usados por parte del runtime/backend; fuera del perímetro local deben resolver al mismo valor canónico que `AUTH0_*`.
 
 ## IA
-- `HANDOVER_AI_ENABLED`: flag utilizado en CI para desactivar flujos AI externos.
-- `HANDOVER_OPENAI_DISABLED`: flag de compatibilidad usado en CI para garantizar ejecución offline.
-- `OPENAI_API_KEY`: credencial API para proveedor compatible OpenAI. Solo backend; el cliente Expo no admite equivalente público.
+- `HANDOVER_AI_ENABLED`: opt-in global de IA; default `false`.
+- `HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED`: opt-in dedicado de IA clínica externa; default `false`.
+- `HANDOVER_OPENAI_DISABLED`: kill switch de compatibilidad; cuando es `true` bloquea todo egress de IA externa.
+- `OPENAI_API_KEY`: credencial API para proveedor compatible OpenAI. Solo backend; el cliente Expo no admite equivalente público y su presencia aislada no habilita IA externa.
 - `OPENAI_BASE_URL`: URL base del proveedor LLM/STT (en CI se usa dummy local inválido).
 - `OPENAI_MODEL_WHISPER`: modelo de transcripción.
 - `OPENAI_MODEL_SBAR`: modelo para resumen clínico SBAR.
+
+Los tres gates deben permitirlo conjuntamente: `HANDOVER_AI_ENABLED=true`, `HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED=true` y `HANDOVER_OPENAI_DISABLED=false`. Esa combinación solo es operable en los modos no clínicos `development`, `demo` y `test`; `pilot` y `production` mantienen **external AI disabled for current pilot target**. Esta configuración no implica anonimización, aprobación institucional ni validación clínica.
 
 ## CI / Test flags
 En GitHub Actions se usan valores dummy para asegurar que CI **no realiza llamadas externas**.
@@ -68,8 +71,9 @@ HANDOVER_PUBLIC_KEY_PATH=/secure/path/handover-public.pem
 # HANDOVER_SIGNATURE_DISABLED=true
 
 # AI
-HANDOVER_AI_ENABLED=1
-HANDOVER_OPENAI_DISABLED=0
+HANDOVER_AI_ENABLED=0
+HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED=0
+HANDOVER_OPENAI_DISABLED=1
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL_WHISPER=whisper-1

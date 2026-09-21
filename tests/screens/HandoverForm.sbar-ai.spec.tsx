@@ -211,10 +211,14 @@ vi.mock('@/src/lib/stt', () => ({
     getLastError: () => null,
   }),
 }));
-vi.mock('@/src/lib/ai-sbar', () => ({
-  generateSbarViaBackendResult: (...args: unknown[]) => generateSbarViaBackendResult(...args),
-  refineSBARWithAIResult: (...args: unknown[]) => refineSBARWithAIResult(...args),
-}));
+vi.mock('@/src/lib/ai-sbar', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/src/lib/ai-sbar')>();
+  return {
+    ...actual,
+    generateSbarViaBackendResult: (...args: unknown[]) => generateSbarViaBackendResult(...args),
+    refineSBARWithAIResult: (...args: unknown[]) => refineSBARWithAIResult(...args),
+  };
+});
 vi.mock('@/src/lib/clinical-decision-log', () => ({
   logClinicalDecision: (...args: unknown[]) => logClinicalDecision(...args),
 }));
@@ -467,6 +471,11 @@ describe('HandoverForm SBAR AI traceability', () => {
     await waitFor(() => {
       expect(view.getByText('Sugerencia SBAR en revisión humana')).toBeTruthy();
     });
+
+    const sentContext = generateSbarViaBackendResult.mock.calls[0]?.[1];
+    expect(sentContext).not.toHaveProperty('patientId');
+    expect(sentContext).not.toHaveProperty('administrativeData');
+    expect(sentContext).not.toHaveProperty('staff');
 
     await waitFor(() => {
       expect(logClinicalDecision).toHaveBeenNthCalledWith(

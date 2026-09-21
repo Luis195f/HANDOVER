@@ -170,7 +170,8 @@ python manage.py transcribe_audio ./audio.m4a --language es
 - FHIR y validación: `FHIR_BASE`, `HANDOVER_FHIR_VALIDATION_MODE`, `HANDOVER_VALIDATE_STRICT`, `HANDOVER_REQUIRE_RBAC_ON_FHIR`.
 - ICEA+: `ICEA_WEBHOOK_ENABLED`, `ICEA_WEBHOOK_URL`, `ICEA_WEBHOOK_SECRET`, `ICEA_WEBHOOK_TIMEOUT_MS`, `ICEA_WEBHOOK_RETRY_MAX`, `ICEA_WEBHOOK_ANTI_REPLAY`, `ICEA_WEBHOOK_REPLAY_WINDOW_SECONDS`.
 - Firma digital: `HANDOVER_PRIVATE_KEY_PATH`, `HANDOVER_PUBLIC_KEY_PATH`, `HANDOVER_SIGNATURE_DISABLED`.
-- IA: `OPENAI_API_KEY`, `OPENAI_MODEL_SBAR`, `OPENAI_MODEL_WHISPER`, `OPENAI_MODEL_SUGGESTIONS`, `AI_SUGGESTIONS_ENABLED`.
+- IA: `HANDOVER_AI_ENABLED`, `HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED`, `HANDOVER_OPENAI_DISABLED`, `OPENAI_API_KEY`, `OPENAI_MODEL_SBAR`, `OPENAI_MODEL_WHISPER`, `OPENAI_MODEL_SUGGESTIONS`, `AI_SUGGESTIONS_ENABLED`.
+- `HANDOVER_AI_ENABLED` y `HANDOVER_EXTERNAL_CLINICAL_AI_ENABLED` tienen default `false`; ni la clave ni el flag general por sí solos habilitan IA externa. En pruebas no clínicas (`development`, `demo`, `test`) se requieren ambos flags en `true` y `HANDOVER_OPENAI_DISABLED=false`; este último es el kill switch. El gate bloquea `pilot`, `production`, `prod`, `stage` y `staging`, y el modo sin configurar usa `production`: **external AI disabled for current pilot target**.
 - Uploads de audio: `HANDOVER_MAX_AUDIO_BYTES` (por defecto `26214400`, equivalente a 25 MB).
 
 ## Instalación y ejecución
