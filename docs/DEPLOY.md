@@ -4,7 +4,7 @@
 > - Estado: `pilot`.
 > - Última revisión: 2026-03-26.
 > - Fuente de verdad / evidencia base: `.github/workflows/deploy-staging.yml`, `.github/workflows/backup.yml`, `Dockerfile`, `docker-compose.yml`, `Procfile`, `scripts/release-rehearsal.ps1`, `docs/release-rehearsal.md`, `docs/backup-restore-drill.md`, `git tag --list`.
-> - Riesgos o lagunas abiertas: la topología documentada es real para la web estática de staging, pero el backend sigue fuera de `docker-compose.yml` y el versionado de release requiere tag Git verificable.
+> - Riesgos o lagunas abiertas: staging no está provisionado ni verificado; el backend sigue fuera de `docker-compose.yml` y el versionado de release requiere tag Git verificable.
 
 Esta guía describe el estado real del despliegue en HANDOVER y deja una topología prioritaria explícita para el piloto.
 
@@ -14,7 +14,7 @@ La topología prioritaria que hoy sí está respaldada por archivos reales del r
 
 - Frontend web exportado con Expo usando el `Dockerfile` raíz.
 - Ese artefacto web se sirve desde `nginx:alpine` usando `docker-compose.yml`.
-- El workflow [`.github/workflows/deploy-staging.yml`](../.github/workflows/deploy-staging.yml) despliega esa web estática en el VPS `staging` bajo `/srv/handover-staging`.
+- El workflow [`.github/workflows/deploy-staging.yml`](../.github/workflows/deploy-staging.yml) conserva una ruta manual y condicionada para desplegar esa web estática cuando exista infraestructura de staging.
 - `config/staging.env` es la fuente de build args públicos para esa exportación.
 
 Límite actual, explícito:
@@ -153,9 +153,11 @@ Limitacion operativa explicita:
 
 - el estado `go/pause/no-go` es consultable, pero la aprobacion y auditoria institucional del cambio siguen fuera del repo.
 
-## Deploy web staging automatizado
+## Deploy web staging manual y condicionado
 
-El flujo automatizado real del repo es:
+Staging no está actualmente provisionado y permanece `NOT_VERIFIED`. El workflow solo puede iniciarse manualmente, requiere confirmar explícitamente que la infraestructura está preparada y valida la presencia de los repository secrets `STAGING_HOST`, `STAGING_USER` y `STAGING_SSH_KEY` antes de intentar SSH. Esta ruta no implica que piloto o producción estén listos. Cuando exista infraestructura deberá añadirse verificación real del despliegue, health check y smoke test.
+
+El flujo remoto conservado para una futura infraestructura provisionada es:
 
 ```bash
 docker compose --env-file config/staging.env config
@@ -163,7 +165,7 @@ docker compose --env-file config/staging.env pull
 docker compose --env-file config/staging.env up -d --build
 ```
 
-Eso coincide con el workflow de staging, que ahora valida `docker compose ... config` antes del `up -d --build`.
+Eso coincide con el script remoto del workflow manual, que valida `docker compose ... config` antes del `up -d --build`.
 
 Notas:
 

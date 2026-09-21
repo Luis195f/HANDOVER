@@ -1,8 +1,13 @@
 name: Deploy Web Staging (static export)
 
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      confirm_staging_ready:
+        description: "Confirm that the staging VPS and required repository secrets are provisioned"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -13,8 +18,25 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ inputs.confirm_staging_ready == true }}
     runs-on: ubuntu-latest
     steps:
+      - name: Validate staging deploy prerequisites
+        shell: bash
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+        run: |
+          missing=()
+          [[ -n "${STAGING_HOST:-}" ]] || missing+=("STAGING_HOST")
+          [[ -n "${STAGING_USER:-}" ]] || missing+=("STAGING_USER")
+          [[ -n "${STAGING_SSH_KEY:-}" ]] || missing+=("STAGING_SSH_KEY")
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required repository secrets: %s\n' "$(IFS=', '; echo "${missing[*]}")" >&2
+            exit 1
+          fi
+
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v0.1.5
         with:
