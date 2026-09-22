@@ -32,6 +32,7 @@ const PILOT_GRADE_SUITES = [
   'src/lib/__tests__/sync.validation.spec.ts',
   'src/lib/__tests__/sync-errors.spec.ts',
   'src/lib/__tests__/platform-confirm.spec.ts',
+  'src/lib/__tests__/news2.scale2.spec.ts',
   'tests/queue/offline-single-source-of-truth.spec.ts',
   'tests/queue/offline-queue.spec.ts',
   'src/lib/__tests__/fhir-map.bundle.integrity.spec.ts',

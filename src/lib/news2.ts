@@ -44,8 +44,9 @@ function sSpO2_scale2(spo2?: number, onO2?: boolean) {
   if (spo2 <= 87) return 1;       // 86–87
   if (spo2 <= 92) return 0;       // 88–92
   // >=93: depende del uso de oxígeno
-  if (!onO2) return 1;            // ≥93 en aire
-  if (spo2 <= 96) return 2;       // 93–96 en oxígeno
+  if (!onO2) return 0;
+  if (spo2 <= 94) return 1;
+  if (spo2 <= 96) return 2;
   return 3;                       // ≥97 en oxígeno
 }
 
