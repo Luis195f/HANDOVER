@@ -195,6 +195,39 @@ Toda unidad debe poder operar con este minimo comun incluso antes de activar su 
 - La seleccion, sustitucion o eliminacion del SNOMED principal en la UI debe actualizar `dxMedical` de forma atomica.
 - El prefill, la validacion, el submit, la persistencia y el mapping FHIR consumen el mismo valor canonico.
 
+## 6.4. NEWS2: semántica de SpO₂ Scale 2
+
+La calculadora `computeNEWS2` de [`src/lib/news2.ts`](../src/lib/news2.ts) puntúa SpO₂ Scale 2 conforme a los gráficos oficiales del Royal College of Physicians (RCP): [Chart 1: sistema de puntuación](https://www.rcp.ac.uk/media/alxev00t/news2-chart-1_the-news-scoring-system_0_0.pdf) y [Chart 3: observaciones NEWS2](https://www.rcp.ac.uk/media/eczf5mvm/news2-chart-3_news-observation-chart_2022_0_0.pdf). La siguiente matriz describe solo el componente SpO₂, antes de sumar el componente independiente de oxígeno suplementario.
+
+| SpO₂ Scale 2 | Puntos del componente SpO₂ |
+| --- | ---: |
+| ≤83% | 3 |
+| 84–85% | 2 |
+| 86–87% | 1 |
+| 88–92% | 0 |
+| ≥93% respirando aire ambiente | 0 |
+| 93–94% con oxígeno suplementario | 1 |
+| 95–96% con oxígeno suplementario | 2 |
+| ≥97% con oxígeno suplementario | 3 |
+
+El componente por oxígeno suplementario añade **2 puntos independientes** al total NEWS2, una sola vez. No está incluido en los puntos SpO₂ de la tabla. Con los demás parámetros fisiológicos neutros, los totales son: 93% en aire = 0; 94% con oxígeno = 1 + 2 = 3; 95–96% con oxígeno = 2 + 2 = 4; ≥97% con oxígeno = 3 + 2 = 5.
+
+### Selección de escala y administración de oxígeno
+
+- `scale2` representa la selección de SpO₂ Scale 2. No representa la administración de oxígeno. En `NEWS2Input`, `scale2: true` selecciona Scale 2; `false` o ausencia del campo conserva Scale 1.
+- `supplementalOxygen` designa aquí el concepto de administración de oxígeno suplementario, independiente de la selección de escala. El nombre del campo real en la API actual `NEWS2Input` es `o2`; esta documentación no introduce un campo `supplementalOxygen` nuevo. `o2: true` suma los 2 puntos y distingue los intervalos de SpO₂ con oxígeno de la tabla.
+- Scale 2 **no es la escala predeterminada** y **no debe seleccionarse solo por tener EPOC**, recibir oxígeno o presentar una saturación baja.
+- Debe utilizarse únicamente bajo indicación documentada de un profesional clínico competente, con un objetivo prescrito de SpO₂ de **88–92%**, en el contexto de insuficiencia respiratoria hipercápnica confirmada por gasometría en el ingreso actual o en uno previo. En otras circunstancias corresponde Scale 1. Véanse el [informe oficial RCP, sección 5](https://www.rcp.ac.uk/media/a4ibkkbf/news2-final-report_0_0.pdf) y los [recursos oficiales NEWS2](https://www.rcp.ac.uk/resources/national-early-warning-score-news-2/).
+- La calculadora recibe estos indicadores del llamador; no verifica por sí misma la prescripción ni la confirmación gasométrica. La corrección no añade inferencias automáticas ni acredita la suficiencia de datos ausentes.
+
+### Corrección y alcance de la evidencia
+
+La corrección de paridad RCP elimina el punto que se añadía indebidamente a SpO₂ ≥93% en aire (1 → 0) y separa 93–94% con oxígeno (2 → 1) de 95–96% con oxígeno (2, sin cambio). Puede modificar el total y, según los demás parámetros, la banda o las señales downstream de alertas y MPAC. No cambia las reglas de bandas, C17 ni las reglas de prioridad enfermera A/B/C/R; tampoco cambia Scale 1 ni otros parámetros NEWS2.
+
+Los 96 casos de [`news2.scale2.spec.ts`](../src/lib/__tests__/news2.scale2.spec.ts) verifican límites y valores adyacentes enteros, desglose, total, `anyThree`, oxígeno independiente, Scale 1, otros parámetros y el comportamiento heredado de datos parciales. La suite está incluida explícitamente en `PILOT_GRADE_SUITES` y en el comando CI `pnpm -w test:pilot:coverage:ci` (360 + 96 = 456 tests en la base de esta corrección). La excepción baseline de `pnpm -w test:unit` se mantiene limitada a los tres fallos preexistentes de `demo-mode`, `BedsideChecklistSection` y `unitConfig`, reproducidos en `ba20f29e`; el comando retorna exit code 1 y no se considera verde.
+
+NEWS2 apoya la detección del deterioro, pero **no sustituye el juicio clínico**. Esta corrección acredita paridad técnica del código con RCP; **no constituye validación clínica, institucional ni regulatoria**.
+
 ---
 
 # 7. Unit Profile Packs (UPP)
