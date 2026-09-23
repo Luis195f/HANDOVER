@@ -686,6 +686,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     (sectionKey: SectionKey) => visibleSectionKeys.has(sectionKey),
     [visibleSectionKeys],
   );
+  const vitalsSectionVisible = isOn('SHOW_VITALS') && isSectionVisible('signos');
   const showLegacySbarNarrative = profileRuntime.fieldVisibility['legacy-sbar-narrative'];
   const showLegacyMedicationText = profileRuntime.fieldVisibility['legacy-medication-text'];
   const showLegacyNursingDiagnosisText = profileRuntime.fieldVisibility['legacy-nursing-diagnosis-text'];
@@ -2328,7 +2329,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <FormProvider {...form}>
       <View style={styles.screen}>
-        {news2Blocked ? <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text> : null}
+        {news2Blocked && (!vitalsSectionVisible || collapsedSections.signos) ? <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text> : null}
         <SidebarIndex
           sectionsInfo={visibleSections}
           sectionPositions={sectionPositions}
@@ -2433,7 +2434,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         </View>
       )}
 
-      {isOn('SHOW_VITALS') && isSectionVisible('signos') && (
+      {vitalsSectionVisible && (
         <View
           ref={sectionRefs.signos}
           onLayout={handleSectionLayout('signos')}
@@ -2444,6 +2445,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             isCollapsed={collapsedSections.signos}
             onToggle={() => toggleSection('signos')}
             lazy
+            unmountOnCollapse
             sectionKey="vitals"
           >
             <VitalsSection

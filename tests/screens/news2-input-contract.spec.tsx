@@ -17,11 +17,19 @@ import * as aiSbar from '@/src/lib/ai-sbar';
 import { buildHandoverInputPayload } from '@/src/screens/handover/submission';
 import QRScanScreen from '@/src/screens/QRScan';
 import { snomedTerms, SNOMED_SYSTEM } from '@/src/data/snomed-dict';
+import * as profileRuntime from '@/src/lib/profile-runtime';
+
+const warningVisibility = vi.hoisted(() => ({ showVitals: true }));
+
+vi.mock('react-native', async importOriginal => ({
+  ...await importOriginal<typeof import('react-native')>(),
+  LayoutAnimation: { configureNext: vi.fn(), Presets: { easeInEaseOut: {} } },
+}));
 
 vi.mock('@/src/components/VitalSignsChart', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/VitalTrendsChart', () => ({ VitalTrendsChart: () => null }));
 vi.mock('@/src/components/ClinicalSuggestions', () => ({ default: () => null }));
-vi.mock('@/src/config/flags', () => ({ isOn: (name: string) => ['SHOW_VITALS', 'SHOW_OXY', 'SHOW_SBAR'].includes(name) }));
+vi.mock('@/src/config/flags', () => ({ isOn: (name: string) => name === 'SHOW_VITALS' ? warningVisibility.showVitals : ['SHOW_OXY', 'SHOW_SBAR'].includes(name) }));
 vi.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 vi.mock('expo-camera', () => ({
   CameraView: ({ onBarcodeScanned }: { onBarcodeScanned?: (result: { data: string }) => void }) =>
@@ -34,7 +42,7 @@ vi.mock('@/src/hooks/usePatientSummary', () => ({
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({ session: null }), ensureFreshAccessToken: async () => null, getSession: async () => null,
 }));
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); warningVisibility.showVitals = true; });
 
 const message = 'NEWS2 no calculable: verificar frecuencia respiratoria';
 const forbiddenResults = ['news2', 'total', 'anyThree', 'band', 'priority', 'priorityLabel'];
@@ -71,6 +79,53 @@ function PendingVitals() {
 }
 
 describe('NEWS2 integer respiratory input contract', () => {
+  it.each([
+    { showVitals: true, profileVisible: true },
+    { showVitals: false, profileVisible: true },
+    { showVitals: true, profileVisible: false },
+  ])('owns exactly one visible accessible warning with $showVitals / profile $profileVisible', async ({ showVitals, profileVisible }) => {
+    warningVisibility.showVitals = showVitals;
+    if (!profileVisible) {
+      const resolveRuntime = profileRuntime.resolveHandoverProfileRuntime;
+      vi.spyOn(profileRuntime, 'resolveHandoverProfileRuntime').mockImplementation((...args) => {
+        const runtime = resolveRuntime(...args);
+        return { ...runtime, sectionVisibility: { ...runtime.sectionVisibility, signos: false } };
+      });
+    }
+    const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
+    const prefilledValues = await prefillFromFHIR('synthetic', {
+      fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations([observation(8.5)]),
+    });
+    const screen = render(<HandoverForm navigation={{ navigate: vi.fn(), setParams: vi.fn(), addListener: () => () => {} }}
+      route={{ key: 'warning-owner', name: 'HandoverForm', params: { patientId: 'synthetic', prefilledValues } }} />);
+    try {
+      const notices = () => screen.root.findAll(node => typeof node.type === 'string' && node.props.children === message);
+      const announcements = () => screen.root.findAll(node => typeof node.type === 'string' &&
+        node.props.children === message && node.props.accessibilityRole === 'alert');
+      expect(notices()).toHaveLength(1);
+      expect(announcements()).toHaveLength(1);
+      if (showVitals && profileVisible) {
+        expect(screen.root.findByType(VitalsSection).findAll(node =>
+          typeof node.type === 'string' && node.props.children === message)).toHaveLength(1);
+        fireEvent.press(screen.getByLabelText('Sección Signos vitales. Expandida.'));
+        expect(screen.root.findAllByType(VitalsSection)).toHaveLength(0);
+        expect(notices()).toHaveLength(1);
+        expect(announcements()).toHaveLength(1);
+        fireEvent.press(screen.getByLabelText('Sección Signos vitales. Contraída.'));
+        expect(notices()).toHaveLength(1);
+        expect(announcements()).toHaveLength(1);
+        expect(screen.getByPlaceholderText('16').props.value).toBe('8.5');
+        fireEvent.changeText(screen.getByPlaceholderText('16'), '16');
+        expect(notices()).toHaveLength(0);
+        expect(announcements()).toHaveLength(0);
+      } else {
+        expect(screen.root.findAllByType(VitalsSection)).toHaveLength(0);
+      }
+    } finally {
+      screen.unmount();
+    }
+  }, 20000);
+
   it('persists and restores a cleared pending field through the real offline form route', async () => {
     const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
     const prefilledValues = await prefillFromFHIR('synthetic', {
