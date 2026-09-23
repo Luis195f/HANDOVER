@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
 
 const PILOT_GRADE_SUITES = [
+  'tests/screens/news2-input-contract.spec.tsx',
   'tests/lib/auth.spec.ts',
   'tests/lib/queue.spec.ts',
   'tests/lib/sync.spec.ts',

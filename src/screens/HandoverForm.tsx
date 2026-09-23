@@ -34,6 +34,7 @@ import { confirmAction } from '@/src/lib/platform-confirm';
 import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type HandoverValues as FhirHandoverValues } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
+import { NEWS2_RR_MESSAGE, createRrReviewGate, packRrDraft, unpackRrDraft, withoutNews2Vitals, type RrDraft } from '@/src/lib/news2-input';
 import {
   buildExternalAiClinicalContext,
   generateSbarViaBackendResult,
@@ -726,6 +727,14 @@ export default function HandoverForm({ navigation, route }: Props) {
     'oxygenTherapy',
   ]);
   const watchedValues = form.watch();
+  const rrGate = useMemo(() => createRrReviewGate(prefilledValuesParam?.rrReview), [patientIdValue, prefilledValuesParam?.rrReview]);
+  const news2Blocked = rrGate.observe(watchedVitals?.rr);
+  const rrRevision = rrGate.capture();
+  useEffect(() => {
+    const subscription = form.watch(values => rrGate.observe(values.vitals?.rr));
+    return () => subscription?.unsubscribe?.();
+  }, [form, rrGate]);
+  useEffect(() => () => rrGate.invalidate(), [rrGate]);
 
   useEffect(() => {
     if (showLegacySbarNarrative) {
@@ -824,13 +833,16 @@ export default function HandoverForm({ navigation, route }: Props) {
     return '';
   };    
 
-  const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<HandoverFormValues>({
+  const { loadNow: loadDraftNow, scheduleSave } = useDraftAutosave<RrDraft>({
     patientId: patientIdValue,
     enabled: true,
     delay: 800,
-    getSnapshot: () => form.getValues(),
-    onLoad: (data) => {
-      if (!data) return;
+    getSnapshot: () => packRrDraft(form.getValues(), rrGate.snapshot()),
+    onLoad: (snapshot) => {
+      if (!snapshot) return;
+      if (form.formState.isDirty || prefilledValuesParam?.rrReview) return;
+      const { values: data, review } = unpackRrDraft(snapshot);
+      rrGate.restore(data.vitals?.rr, review);
       const normalizedDxMedical =
         data.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(data.dxMedical);
 
@@ -871,8 +883,6 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [audioNoteParam, form, navigation]);
 
   useEffect(() => {
-    if (IS_TEST) return;
-
     let cancelled = false;
 
     (async () => {
@@ -880,13 +890,15 @@ export default function HandoverForm({ navigation, route }: Props) {
         const raw = await SecureStore.getItemAsync(draftKey);
         if (cancelled) return;
 
-        const draft = safeJsonParse<Partial<HandoverFormValues>>(raw);
-        if (!draft) return;
+        const snapshot = safeJsonParse<RrDraft>(raw);
+        if (!snapshot) return;
+        const { values: draft, review } = unpackRrDraft(snapshot);
 
         // Importante: NO pisar si ya hay datos
         const current = getValues();
         const isEmpty = !current || Object.keys(current).length === 0;
-        if (isEmpty) {
+        if (isEmpty || (!prefilledValuesParam?.rrReview && !form.formState.isDirty && (review || !Number.isInteger(draft.vitals?.rr) && draft.vitals?.rr != null))) {
+          rrGate.restore(draft.vitals?.rr, review);
           const normalizedDxMedical =
             draft?.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxMedical);
 
@@ -908,7 +920,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [draftKey, reset, getValues]);
+  }, [draftKey, reset, getValues, form, rrGate, prefilledValuesParam?.rrReview]);
 
   type BedsideChecklistSnapshot = HandoverFormValues['bedsideChecklist'] &
     Record<string, boolean | string | undefined>;
@@ -950,11 +962,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   useEffect(() => {
     if (IS_TEST) return;
 
-    const subscription = watch((values) => {
+    const subscription = watch(() => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
       saveTimerRef.current = setTimeout(() => {
-        void SecureStore.setItemAsync(draftKey, JSON.stringify(values)).catch(() => {});
+        void SecureStore.setItemAsync(draftKey, JSON.stringify(packRrDraft(getValues(), rrGate.snapshot()))).catch(() => {});
       }, 300);
     });
 
@@ -965,14 +977,15 @@ export default function HandoverForm({ navigation, route }: Props) {
         saveTimerRef.current = null;
       }
     };
-  }, [watch, draftKey]);
+  }, [watch, draftKey, getValues, rrGate]);
 
-  const computedAlerts = useMemo(() => computeAlerts(watchedValues), [watchedValues]);
+  const computedAlerts = useMemo(() => computeAlerts(withoutNews2Vitals(watchedValues, news2Blocked)), [watchedValues, news2Blocked]);
   const riskEvaluation = useMemo(
-    () => deriveRiskEvaluationFromValues(watchedVitals, watchedBraden, watchedOxygen),
-    [watchedBraden, watchedOxygen, watchedVitals],
+    () => deriveRiskEvaluationFromValues(news2Blocked ? undefined : watchedVitals, watchedBraden, news2Blocked ? undefined : watchedOxygen),
+    [watchedBraden, watchedOxygen, watchedVitals, news2Blocked],
   );
   const news2Breakdown = useMemo(() => {
+    if (news2Blocked) return undefined;
     const vitals = watchedVitals ?? {};
     const oxygen = watchedOxygen ?? {};
     const input = {
@@ -985,7 +998,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       avpu: vitals.avpu,
     };
     return computeNEWS2(input);
-  }, [watchedOxygen, watchedVitals]);
+  }, [watchedOxygen, watchedVitals, news2Blocked]);
   const bradenScore = useMemo(() => {
     if (!watchedBraden) return undefined;
     const values = [
@@ -1092,6 +1105,12 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [sbarAiError, setSbarAiError] = useState<string | null>(null);
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
   const [pendingSbarSuggestion, setPendingSbarSuggestion] = useState<PendingSbarSuggestion | null>(null);
+  const pendingRrRevision = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    setPendingSbarSuggestion(null);
+    setSuggestionsState({ vitals: null, diagnosis: null });
+    suggestionsCacheRef.current = {};
+  }, [rrRevision, rrGate]);
   const automaticSbarAttemptsRef = useRef<Set<string>>(new Set());
   const lastAutomaticSbarFingerprintRef = useRef<string | null>(null);
   const dictationUnavailableNotifiedRef = useRef(false);
@@ -1345,7 +1364,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
 
     try {
-      return generateSBARSummary(values, { maxCharsPerSection: 320 });
+      return generateSBARSummary(withoutNews2Vitals(values, news2Blocked), { maxCharsPerSection: 320 });
     } catch {
       return manualDraft;
     }
@@ -1450,6 +1469,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     };
 
     setPendingSbarSuggestion(nextPending);
+    pendingRrRevision.current = rrGate.capture();
     setSbarAiError(null);
     setSbarHelperMessage(input.helperMessage);
 
@@ -1470,7 +1490,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const applyPendingSbarSuggestion = () => {
-    if (!pendingSbarSuggestion) return;
+    if (!pendingSbarSuggestion || pendingRrRevision.current !== rrGate.capture()) return;
 
     const { summary, fullText, mode } = pendingSbarSuggestion;
     form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
@@ -1498,7 +1518,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const handleRefineSbarWithAi = async () => {
-    const values = form.getValues();
+    const token = rrGate.capture();
+    const values = withoutNews2Vitals(form.getValues(), news2Blocked);
     const draft = buildDraftSbar(values);
     if (!requireTraceableSbarAiContext(values)) {
       return;
@@ -1510,6 +1531,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     try {
       const result = await refineSBARWithAIResult(values, draft);
+      if (!rrGate.isCurrent(token)) return;
       if (result.ok) {
         showPendingSbarSuggestion(values, {
           source: 'ai_refine_sbar',
@@ -1520,7 +1542,8 @@ export default function HandoverForm({ navigation, route }: Props) {
         return;
       }
 
-      const fallbackSummary = await getBestAvailableSummary(values, { useLocalRules: true });
+      const fallbackSummary = news2Blocked ? generateSBARSummary(values) : await getBestAvailableSummary(values, { useLocalRules: true });
+      if (!rrGate.isCurrent(token)) return;
       showPendingSbarSuggestion(values, {
         source: 'ai_refine_sbar',
         mode: 'local_fallback',
@@ -1533,7 +1556,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const handleGenerateSbarWithAi = async () => {
-    const values = form.getValues();
+    const token = rrGate.capture();
+    const values = withoutNews2Vitals(form.getValues(), news2Blocked);
     if (!requireTraceableSbarAiContext(values)) {
       return;
     }
@@ -1545,6 +1569,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     try {
       const freeText = buildSbarFreeText(values);
       const result = await generateSbarViaBackendResult(freeText, buildSbarContext(values), 'es');
+      if (!rrGate.isCurrent(token)) return;
 
       if (result.ok) {
         showPendingSbarSuggestion(values, {
@@ -1562,7 +1587,8 @@ export default function HandoverForm({ navigation, route }: Props) {
         return;
       }
 
-      const fallbackSummary = await getBestAvailableSummary(values, { useLocalRules: true });
+      const fallbackSummary = news2Blocked ? generateSBARSummary(values) : await getBestAvailableSummary(values, { useLocalRules: true });
+      if (!rrGate.isCurrent(token)) return;
       showPendingSbarSuggestion(values, {
         source: 'ai_generate_sbar',
         mode: 'local_fallback',
@@ -1590,7 +1616,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     const provenance = t(
       isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
     );
-    return createDeterministicSbar(values, `${provenance}\n${t('handover.sbarLegalNotice')}`);
+    return createDeterministicSbar(withoutNews2Vitals(values, news2Blocked), `${provenance}\n${t('handover.sbarLegalNotice')}`);
   };
 
   const handleGenerateSbarSuggestion = () => {
@@ -1598,7 +1624,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       clearPendingSbarSuggestion('rejected', 'replace_existing');
       const values = form.getValues();
       const generated = createCurrentDeterministicSbar(values);
-      const replace = () => applyDeterministicSbar(generated, true);
+      const token = rrGate.capture();
+      const replace = () => { if (rrGate.isCurrent(token)) applyDeterministicSbar(generated, true); };
       const currentWasModified =
         hasSbarContent(values) &&
         lastAutomaticSbarFingerprintRef.current !== getSbarFingerprint(values);
@@ -1626,6 +1653,13 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   useEffect(() => {
+    if (!news2Blocked) return;
+    const values = form.getValues();
+    if (lastAutomaticSbarFingerprintRef.current !== getSbarFingerprint(values)) return;
+    applyDeterministicSbar(createCurrentDeterministicSbar(values), false);
+  }, [form, news2Blocked]);
+
+  useEffect(() => {
     const patientId = typeof patientIdValue === 'string' ? patientIdValue.trim() : '';
     if (!patientId) return;
     if (patientId.startsWith('demo-') && !demoPrefill) return;
@@ -1641,7 +1675,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
       );
       const generated = createInitialDeterministicSbar(
-        values,
+        withoutNews2Vitals(values, news2Blocked),
         `${provenance}\n${t('handover.sbarLegalNotice')}`,
       );
       if (!generated) return;
@@ -1656,7 +1690,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     } catch {
       // The form remains fully usable when local summary generation cannot complete.
     }
-  }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue]);
+  }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue, news2Blocked]);
 
   const trimmedPatientId =
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
@@ -1856,6 +1890,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const requestSuggestions = async (section: 'vitals' | 'diagnosis') => {
     if (!aiSuggestionsEnabled) return;
+    const token = rrGate.capture();
     setSuggestionsError(null);
     const context = buildClinicalContext(section);
     const contextHash = JSON.stringify(context);
@@ -1868,6 +1903,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     setSuggestionsLoading(section);
     try {
       const result = await fetchInterventionsSuggestions(context);
+      if (!rrGate.isCurrent(token)) return;
       setSuggestionsState((prev) => ({ ...prev, [section]: result }));
       suggestionsCacheRef.current[section] = { timestamp: now, contextHash, result };
     } catch (error: unknown) {
@@ -1892,6 +1928,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   );
 
   const submitHandover = async (values: HandoverFormValues, attempt = 0): Promise<void> => {
+    const submissionRrRevision = rrGate.capture();
     try {
       const status = values.status ?? 'draft';
       const unitFromForm = normalizeUnitSelection(values.administrativeData?.unit, ALL_UNITS_OPTION);
@@ -1899,9 +1936,9 @@ export default function HandoverForm({ navigation, route }: Props) {
       const unitFromStore = normalizeUnitSelection(selectedUnitId, ALL_UNITS_OPTION);
       const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
       const riskBeforeSubmit = deriveRiskEvaluationFromValues(
-        values.vitals,
+        news2Blocked ? undefined : values.vitals,
         values.braden,
-        values.oxygenTherapy,
+        news2Blocked ? undefined : values.oxygenTherapy,
       );
 
       const confirmed = await confirmHighRiskSubmission(status, riskBeforeSubmit, Alert.alert);
@@ -2079,8 +2116,8 @@ export default function HandoverForm({ navigation, route }: Props) {
           o2: hasOxygenValues,
           avpu: vitals.avpu,
         };
-        const breakdown = computeNEWS2(newsInput);
-        if (breakdown.total >= 5 || breakdown.anyThree) {
+        const breakdown = news2Blocked || !rrGate.isCurrent(submissionRrRevision) ? undefined : computeNEWS2(newsInput);
+        if (breakdown && (breakdown.total >= 5 || breakdown.anyThree)) {
           alerts.push(t('handover.news2AlertLine', { total: breakdown.total, band: breakdown.band }));
         }
         if (typeof vitals.spo2 === 'number' && vitals.spo2 < 90) {
@@ -2201,6 +2238,11 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleSaveDraft = () => {
     form.setValue('status', 'draft', { shouldDirty: true, shouldValidate: true });
+    if (news2Blocked) {
+      void SecureStore.setItemAsync(draftKey, JSON.stringify(packRrDraft(form.getValues(), rrGate.snapshot())))
+        .catch(() => Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback')));
+      return;
+    }
     onSubmit();
   };
 
@@ -2286,6 +2328,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <FormProvider {...form}>
       <View style={styles.screen}>
+        {news2Blocked ? <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text> : null}
         <SidebarIndex
           sectionsInfo={visibleSections}
           sectionPositions={sectionPositions}
@@ -2372,7 +2415,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               handleGenerateSbarWithAi={handleGenerateSbarWithAi}
               handleGenerateSbarSuggestion={handleGenerateSbarSuggestion}
               handleRefineSbarWithAi={handleRefineSbarWithAi}
-              pendingSbarSuggestionPreview={pendingSbarSuggestion ? formatSbar(pendingSbarSuggestion.summary, 'es') : null}
+              pendingSbarSuggestionPreview={pendingSbarSuggestion && pendingRrRevision.current === rrRevision ? formatSbar(pendingSbarSuggestion.summary, 'es') : null}
               onAcceptPendingSbarSuggestion={applyPendingSbarSuggestion}
               onRejectPendingSbarSuggestion={rejectPendingSbarSuggestion}
               sbarHelperMessage={sbarHelperMessage}
@@ -2404,6 +2447,8 @@ export default function HandoverForm({ navigation, route }: Props) {
             sectionKey="vitals"
           >
             <VitalsSection
+              news2Blocked={news2Blocked}
+              onRrChange={value => rrGate.observe(value, true)}
               styles={styles}
               parseNumericInput={parseNumericInput}
               riskEvaluation={riskEvaluation}

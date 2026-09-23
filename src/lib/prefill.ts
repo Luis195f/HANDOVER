@@ -7,6 +7,7 @@
 */
 
 import { LOINC, TERMINOLOGY_SYSTEMS } from "./codes";
+import { parseRespiratoryRate, readRrReview, type RrReview } from './news2-input';
 
 const LOINC_SYSTEM = TERMINOLOGY_SYSTEMS.LOINC;
 
@@ -36,11 +37,19 @@ export type PrefillOutput = {
   location?: string;
   bed?: string;
   vitals?: VitalPrefill;
-  // Añadidos
+} & ({
+  news2InputState?: { status: 'eligible' };
+  rrReview?: never;
   news2?: number;
   priority?: "low" | "medium" | "high";
   priorityLabel?: string; // "Low", "Medium", "High"
-};
+} | {
+  news2InputState: { status: 'not-calculable'; reason: 'RR_NON_INTEGER' };
+  rrReview: RrReview;
+  news2?: never;
+  priority?: never;
+  priorityLabel?: never;
+});
 
 /**
  * Prefill desde FHIR (opcional). Si no hay red/credenciales, retorna parcial seguro.
@@ -132,6 +141,11 @@ export async function prefillFromFHIR(
       hr: latest.hr,
       acvpu: acvpu ?? undefined,
       o2: o2 || undefined
+    };
+
+    if (latest.rrReview) return {
+      dxText, location: locationName, bed: bedName, vitals, rrReview: latest.rrReview,
+      news2InputState: { status: 'not-calculable', reason: 'RR_NON_INTEGER' },
     };
 
     // 4) NEWS2 + prioridad (escala 1 por defecto)
@@ -287,6 +301,7 @@ function guessO2FromNotes(obsList: any[]): boolean {
 
 /** Extrae los últimos valores por parámetro clave (según timestamp) */
 function extractLatestVitals(obsList: any[]) {
+  let rrReview: RrReview | undefined;
   type K = "rr" | "spo2" | "temp" | "sbp" | "dbp" | "hr" | "fio2Pct";
   const latest: Record<K, { t: number; v: number } | undefined> = {
     rr: undefined, spo2: undefined, temp: undefined, sbp: undefined, dbp: undefined, hr: undefined, fio2Pct: undefined
@@ -297,6 +312,11 @@ function extractLatestVitals(obsList: any[]) {
     const t = getTs(o);
     if (!latest[k] || t > (latest[k]!.t)) {
       latest[k] = { t, v: val };
+      if (k === 'rr') rrReview = readRrReview({
+        originalValue: val, source: 'fhir', reason: 'RR_NON_INTEGER', resolution: 'pending',
+        unit: o?.valueQuantity?.unit,
+        observedAt: o?.effectiveDateTime ?? o?.issued ?? o?.meta?.lastUpdated,
+      });
     }
   };
 
@@ -319,7 +339,7 @@ function extractLatestVitals(obsList: any[]) {
 
     // Variables simples
     if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.rr)) {
-      setLatest("rr", o, numOrUndefined(o?.valueQuantity?.value));
+      setLatest("rr", o, parseRespiratoryRate(o?.valueQuantity?.value));
     } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.spo2)) {
       setLatest("spo2", o, numOrUndefined(o?.valueQuantity?.value));
     } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.temp)) {
@@ -334,6 +354,7 @@ function extractLatestVitals(obsList: any[]) {
 
   return {
     rr: latest.rr?.v,
+    rrReview,
     spo2: latest.spo2?.v,
     temp: latest.temp?.v,
     sbp: latest.sbp?.v,

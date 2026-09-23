@@ -5,6 +5,7 @@ import { type HandoverValues as HandoverFormValues } from '@/src/validation/sche
 import { glucoseMgDlToMmolL } from '@/src/validation/normalization';
 import { VitalTrendsChart } from '@/src/screens/components/VitalTrendsChart';
 import ClinicalSuggestions from '@/src/components/ClinicalSuggestions';
+import { NEWS2_RR_MESSAGE } from '@/src/lib/news2-input';
 import type { SuggestionsResult } from '@/src/lib/ai-suggestions';
 import type { deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import type { VitalTrendsData } from '../../../types/vitals';
@@ -12,6 +13,8 @@ import VitalSignsChart from '@/src/components/VitalSignsChart';
 import { PickerField, avpuOptions } from '@/src/screens/components/nursingShared';
 
 export type VitalsSectionProps = {
+  news2Blocked?: boolean;
+  onRrChange?: (value: number | undefined) => void;
   styles: Record<string, TextStyle | ViewStyle>;
   parseNumericInput: (value: string) => number | undefined;
   riskEvaluation: ReturnType<typeof deriveRiskEvaluationFromValues>;
@@ -67,9 +70,11 @@ const VITAL_FIELD_CONFIG = [
 const VitalsGroup = ({
   styles,
   parseNumericInput,
+  onRrChange,
 }: {
   styles: Record<string, TextStyle | ViewStyle>;
   parseNumericInput: (value: string) => number | undefined;
+  onRrChange?: VitalsSectionProps['onRrChange'];
 }) => {
   const {
     control,
@@ -109,6 +114,7 @@ const VitalsGroup = ({
                       value={value == null ? '' : String(value)}
                       onChangeText={(text) => {
                         const parsed = parseNumericInput(text);
+                        if (item.key === 'rr') onRrChange?.(parsed);
                         onChange(parsed);
                         if (item.key === 'glucoseMgDl') {
                           setValue(
@@ -198,6 +204,8 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
   styles,
   parseNumericInput,
   riskEvaluation,
+  news2Blocked = false,
+  onRrChange,
   isDemo = false,
   loadingVitalTrends,
   vitalTrendsError,
@@ -231,7 +239,8 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
 
   return (
     <>
-      <VitalsGroup styles={styles} parseNumericInput={parseNumericInput} />
+      <VitalsGroup styles={styles} parseNumericInput={parseNumericInput} onRrChange={onRrChange} />
+      {news2Blocked ? <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text> : null}
       <View style={styles.vitalTrendsBlock}>
         <VitalSignsChart vitals={watchedVitals} />
       </View>
@@ -245,7 +254,7 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
       <View
         style={[
           styles.riskBanner,
-          showDemoUncalculatedRisk
+          showDemoUncalculatedRisk || (news2Blocked && !riskEvaluation.braden)
             ? styles.riskModerate
             : riskEvaluation.level === 'high'
             ? styles.riskHigh
@@ -255,7 +264,9 @@ export const VitalsSection: React.FC<VitalsSectionProps> = ({
         ]}
       >
         <Text style={styles.riskTitle}>
-          {showDemoUncalculatedRisk
+          {news2Blocked
+            ? riskEvaluation.braden ? `Braden: ${riskEvaluation.braden.total}` : 'Braden no calculado'
+            : showDemoUncalculatedRisk
             ? 'No calculado'
             : riskEvaluation.level === 'high'
             ? 'Riesgo alto detectado'
