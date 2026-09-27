@@ -80,7 +80,7 @@ ni mensajes públicos. Solo se muestra el aviso fijo, sin el contenido del metad
 La suite `tests/screens/news2-input-contract.spec.tsx` se registra en
 `vitest.pilot.config.ts`, dentro del comando obligatorio de coverage CI.
 RED inicial: prefill devolvía score/prioridad para 8.5, 11.5 y 20.5; faltaba
-el aviso tras borrar. GREEN focal: 38 pruebas, incluyendo QR y HandoverForm
+el aviso tras borrar. GREEN focal: 41 pruebas, incluyendo QR y HandoverForm
 reales, guardado/restauración offline, respuesta backend obsoleta,
 allowlist, exportación real FHIR/IA, enteros, Scale 1/2, oxígeno y Braden.
 La suite existente de borradores conserva sus 9 pruebas verdes.
@@ -93,9 +93,9 @@ Scale 2 ni valida clínicamente el calculador.
 
 ## Validación local del 23 de septiembre de 2026
 
-- Suite focal: 38/38; suite existente de borradores: 9/9.
+- Suite focal: 41/41; suite existente de borradores: 9/9.
 - `pnpm -w quality:pilot:ci`: PASS. Incluye typecheck, lint:ci,
-  gate:any-sensitive, test:pilot:coverage:ci (63 suites, 494 pruebas),
+  gate:any-sensitive, test:pilot:coverage:ci (63 suites, 497 pruebas),
   E2E Expo Web real (1 prueba) y validate:fhir (7 fixtures).
 - Typecheck, lint:ci, gate:any-sensitive y validate:fhir también se ejecutaron
   individualmente con resultado PASS; `git diff --check`: PASS.
@@ -105,7 +105,7 @@ Scale 2 ni valida clínicamente el calculador.
   se dio 20 s a la prueba de integración que importa la pantalla por primera vez.
   No se modificaron las suites existentes ni umbrales/configuración de coverage.
 - `pnpm -w test:unit`: **FAIL con excepción baseline**, no verde:
-  1074 pruebas pasan, 3 fallan y 1 se omite. Comparación exacta de nombre y
+  1077 pruebas pasan, 3 fallan y 1 se omite. Comparación exacta de nombre y
   bloque de error con el registro conservado `news2-scale2-unit-final.log`
   del 22 de septiembre; coinciden los tres y no hay nuevos fallos:
   - demo-mode: esperaba 3 recorridos y recibió 40 (`demo-mode.spec.ts:72`).
@@ -115,8 +115,8 @@ Scale 2 ni valida clínicamente el calculador.
 El comando solicitado `pnpm -w validar:fhir` no existe; el equivalente real
 `pnpm -w validate:fhir` pasa. No se cambia ningún script para ocultarlo.
 
-Presupuesto revisado: 5 archivos productivos, 234 líneas productivas cambiadas
-(altas + bajas); 1 suite de 337 líneas, 1 registro de CI y este documento,
+Presupuesto revisado: 5 archivos productivos, 238 líneas productivas cambiadas
+(altas + bajas); 1 suite de 392 líneas, 1 registro de CI y este documento,
 contabilizados separadamente: 8 archivos totales. No se superan 400 líneas
 productivas. Publicación y revisión remota se informan en el PR; los controles
 locales no acreditan validación clínica ni verificación institucional.
