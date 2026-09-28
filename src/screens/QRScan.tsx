@@ -11,6 +11,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/src/navigation/types';
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import { prefillFromFHIR, type PrefillOutput } from '@/src/lib/prefill';
+import { NEWS2_RR_MESSAGE } from '@/src/lib/news2-input';
 import { ensureFreshAccessToken, useAuth } from '@/src/security/auth';
 import { PatientBanner } from './components/PatientBanner';
 import { getUserFacingNetworkMessage, normalizeNetError } from '@/src/lib/net-errors';
@@ -369,6 +370,9 @@ export function QRScanScreen({ navigation, route }: Props) {
             ) : null}
             {prefillError ? (
               <Text style={[styles.errorText, { color: colors.danger }]}>{prefillError}</Text>
+            ) : null}
+            {prefilledValues?.news2InputState?.status === 'not-calculable' ? (
+              <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text>
             ) : null}
             <Pressable
               accessibilityRole="button"
