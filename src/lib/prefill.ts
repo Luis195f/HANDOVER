@@ -8,6 +8,9 @@
 
 import { LOINC, TERMINOLOGY_SYSTEMS } from "./codes";
 import { parseRespiratoryRate, readRrReview, type RrReview } from './news2-input';
+import { resolveSupplementalOxygen } from './oxygen';
+import type { OxygenTherapy } from '../types/handover';
+import { resolveAcvpu } from './fhir-map';
 
 const LOINC_SYSTEM = TERMINOLOGY_SYSTEMS.LOINC;
 
@@ -37,6 +40,8 @@ export type PrefillOutput = {
   location?: string;
   bed?: string;
   vitals?: VitalPrefill;
+  oxygenTherapy?: Pick<OxygenTherapy, 'fio2' | 'flowLMin'>;
+  legacyOxygen?: boolean;
 } & ({
   news2InputState?: { status: 'eligible' };
   rrReview?: never;
@@ -128,9 +133,13 @@ export async function prefillFromFHIR(
 
     const latest = extractLatestVitals(obs);
     const acvpu = findACVPU(obs);
-    const hasFiO2 = !!findByLoinc(obs, LOINC.fio2);
-    const hasO2Flow = !!findByLoinc(obs, LOINC.o2Flow);
-    const o2 = hasFiO2 || hasO2Flow || guessO2FromNotes(obs) || !!latest.fio2Pct;
+    if (acvpu === 'conflict') return baseOut;
+    const hasStructuredOxygen = latest.fio2Pct !== undefined || latest.flowLMin !== undefined;
+    const oxygenTherapy: Pick<OxygenTherapy, 'fio2' | 'flowLMin'> = {};
+    if (latest.fio2Pct !== undefined) oxygenTherapy.fio2 = latest.fio2Pct;
+    if (latest.flowLMin !== undefined) oxygenTherapy.flowLMin = latest.flowLMin;
+    const legacyOxygen = hasStructuredOxygen ? undefined : guessO2FromNotes(obs);
+    const o2 = resolveSupplementalOxygen(oxygenTherapy, legacyOxygen);
 
     const vitals: VitalPrefill = {
       rr: latest.rr,
@@ -140,11 +149,11 @@ export async function prefillFromFHIR(
       dbp: latest.dbp,
       hr: latest.hr,
       acvpu: acvpu ?? undefined,
-      o2: o2 || undefined
+      o2
     };
 
     if (latest.rrReview) return {
-      dxText, location: locationName, bed: bedName, vitals, rrReview: latest.rrReview,
+      dxText, location: locationName, bed: bedName, vitals, oxygenTherapy, legacyOxygen, rrReview: latest.rrReview,
       news2InputState: { status: 'not-calculable', reason: 'RR_NON_INTEGER' },
     };
 
@@ -165,6 +174,8 @@ export async function prefillFromFHIR(
       location: locationName,
       bed: bedName,
       vitals,
+      oxygenTherapy,
+      legacyOxygen,
       news2: news.score,
       priority,
       priorityLabel: label
@@ -257,28 +268,39 @@ function numOrUndefined(x: any): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function findByLoinc(obsList: any[], loincCode: string): any | undefined {
-  return obsList.find(o =>
-    (o?.code?.coding ?? []).some((c: any) => c?.system === LOINC_SYSTEM && c?.code === loincCode)
-  );
+function readOxygenQuantity(quantity: unknown, expectedUnit: '%' | 'L/min'): number | undefined {
+  if (!quantity || typeof quantity !== 'object' || !('value' in quantity) ||
+      typeof quantity.value !== 'number' || !Number.isFinite(quantity.value)) return undefined;
+  const code = 'code' in quantity ? quantity.code : undefined;
+  const unit = 'unit' in quantity ? quantity.unit : undefined;
+  const system = 'system' in quantity ? quantity.system : undefined;
+  if ((code ?? unit) !== expectedUnit || (system != null && system !== TERMINOLOGY_SYSTEMS.UCUM)) return undefined;
+  return quantity.value;
 }
 
-function findACVPU(obsList: any[]): VitalPrefill["acvpu"] | undefined {
-  // Busca Observations con code.text "ACVPU/AVPU scale" y lee valueCodeableConcept.text o valueString
-  // (Compat con lo que genera fhir-map.ts)
+function findACVPU(obsList: any[]): VitalPrefill["acvpu"] | 'conflict' {
   const cand = obsList
     .filter(o => {
       const t = (o?.code?.text as string | undefined)?.toLowerCase?.();
-      return t?.includes("acvpu") || t?.includes("avpu");
+      const codings: readonly { system?: unknown; code?: unknown }[] = Array.isArray(o?.code?.coding) ? o.code.coding : [];
+      return codings.some(coding => coding?.system === LOINC_SYSTEM && coding?.code === LOINC.acvpu) ||
+        t?.includes("acvpu") || t?.includes("avpu");
     })
     .sort((a, b) => getTs(b) - getTs(a))[0];
 
-  const val =
-    (cand?.valueCodeableConcept?.text as string | undefined) ??
-    (cand?.valueString as string | undefined);
-  if (!val) return undefined;
-  const v = val.trim().toUpperCase();
-  return ["A", "C", "V", "P", "U"].includes(v) ? (v as VitalPrefill["acvpu"]) : undefined;
+  const values: unknown[] = [cand?.valueCodeableConcept?.text, cand?.valueString];
+  const codings: readonly unknown[] = Array.isArray(cand?.valueCodeableConcept?.coding) ? cand.valueCodeableConcept.coding : [];
+  for (const coding of codings) {
+    if (!coding || typeof coding !== 'object') continue;
+    if ('code' in coding && (!('system' in coding) || coding.system == null || coding.system === TERMINOLOGY_SYSTEMS.SNOMED)) values.push(coding.code);
+    if ('display' in coding) values.push(coding.display);
+  }
+  const recognized = new Set<NonNullable<VitalPrefill['acvpu']>>();
+  for (const value of values) {
+    const state = resolveAcvpu(value);
+    if (state) recognized.add(state);
+  }
+  return recognized.size > 1 ? 'conflict' : recognized.values().next().value;
 }
 
 function guessO2FromNotes(obsList: any[]): boolean {
@@ -302,9 +324,9 @@ function guessO2FromNotes(obsList: any[]): boolean {
 /** Extrae los últimos valores por parámetro clave (según timestamp) */
 function extractLatestVitals(obsList: any[]) {
   let rrReview: RrReview | undefined;
-  type K = "rr" | "spo2" | "temp" | "sbp" | "dbp" | "hr" | "fio2Pct";
+  type K = "rr" | "spo2" | "temp" | "sbp" | "dbp" | "hr" | "fio2Pct" | "flowLMin";
   const latest: Record<K, { t: number; v: number } | undefined> = {
-    rr: undefined, spo2: undefined, temp: undefined, sbp: undefined, dbp: undefined, hr: undefined, fio2Pct: undefined
+    rr: undefined, spo2: undefined, temp: undefined, sbp: undefined, dbp: undefined, hr: undefined, fio2Pct: undefined, flowLMin: undefined
   };
 
   const setLatest = (k: K, o: any, val?: number) => {
@@ -348,7 +370,9 @@ function extractLatestVitals(obsList: any[]) {
       setLatest("hr", o, numOrUndefined(o?.valueQuantity?.value));
     } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.fio2)) {
       // FiO2 → porcentaje (value ya suele venir en %)
-      setLatest("fio2Pct", o, numOrUndefined(o?.valueQuantity?.value));
+      setLatest("fio2Pct", o, readOxygenQuantity(o?.valueQuantity, '%'));
+    } else if (codes.some(c => c?.system === LOINC_SYSTEM && c?.code === LOINC.o2Flow)) {
+      setLatest("flowLMin", o, readOxygenQuantity(o?.valueQuantity, 'L/min'));
     }
   }
 
@@ -360,7 +384,8 @@ function extractLatestVitals(obsList: any[]) {
     sbp: latest.sbp?.v,
     dbp: latest.dbp?.v,
     hr: latest.hr?.v,
-    fio2Pct: latest.fio2Pct?.v
+    fio2Pct: latest.fio2Pct?.v,
+    flowLMin: latest.flowLMin?.v
   };
 }
 

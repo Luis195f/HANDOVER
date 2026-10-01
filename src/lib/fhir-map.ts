@@ -682,6 +682,16 @@ const AVPU_MAP = {
   U: { code: SNOMED.avpuUnresponsive, display: 'Unresponsive' },
 } as const;
 
+export function resolveAcvpu(value: unknown): keyof typeof AVPU_MAP | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalize = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+  const normalized = normalize(value);
+  const isState = (state: string): state is keyof typeof AVPU_MAP =>
+    Object.prototype.hasOwnProperty.call(AVPU_MAP, state);
+  return Object.keys(AVPU_MAP).filter(isState).find(state =>
+    [state, AVPU_MAP[state].code, AVPU_MAP[state].display].some(candidate => normalize(candidate) === normalized));
+}
+
 const isoDateTime = z
   .string()
   .datetime({ offset: true })
@@ -3594,4 +3604,3 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
-

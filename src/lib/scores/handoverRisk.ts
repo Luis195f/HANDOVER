@@ -4,6 +4,7 @@ import type { AlertButton } from 'react-native';
 import { calculateBraden } from './braden';
 import type { BradenInput } from './braden';
 import { calculateNews2 } from './news2';
+import { readLegacyOxygen, resolveSupplementalOxygen } from '../oxygen';
 import type { News2Input } from './news2';
 import { evaluateRisk, type RiskEvaluation } from './riskRules';
 
@@ -14,10 +15,6 @@ function buildNews2Input(
   vitals?: PartialHandoverVitals,
   oxygenTherapy?: PartialOxygenTherapy,
 ): News2Input | null {
-  const hasOxygenValues = Object.values(oxygenTherapy ?? {}).some(
-    (value) => value !== undefined && value !== null && value !== '',
-  );
-
   const input: News2Input = {
     respiratoryRate: vitals?.rr ?? null,
     spo2: vitals?.spo2 ?? null,
@@ -25,7 +22,7 @@ function buildNews2Input(
     heartRate: vitals?.hr ?? null,
     temperature: vitals?.tempC ?? null,
     consciousness: vitals?.avpu ?? null,
-    onOxygen: hasOxygenValues ? true : null,
+    onOxygen: resolveSupplementalOxygen(oxygenTherapy, readLegacyOxygen(vitals)) ? true : null,
   };
 
   const hasAnyField = Object.values(input).some((value) => value !== null);
