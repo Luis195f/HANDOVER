@@ -18,6 +18,7 @@ import type {
   UnitProfileId,
 } from '../types/profile';
 import { computeNEWS2, type NEWS2Breakdown } from './news2';
+import { selectNews2Temperature } from './news2-input';
 
 export type MPACPriorityLevel = 'critical' | 'high' | 'medium' | 'low';
 
@@ -242,7 +243,7 @@ function computeNews2(vitals: VitalsSnapshot): NEWS2Breakdown {
   return computeNEWS2({
     rr: vitals.rr,
     spo2: vitals.spo2,
-    temp: vitals.tempC ?? vitals.temp,
+    temp: selectNews2Temperature(vitals),
     sbp: vitals.sbp,
     hr: vitals.hr,
     o2: vitals.o2,
@@ -804,6 +805,5 @@ export default {
   computeMPACFromInput,
   resolveMPACInput,
 };
-
 
 

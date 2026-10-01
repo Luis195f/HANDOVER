@@ -12,6 +12,20 @@ const reviewSchema = z.object({
 });
 export type RrReview = z.infer<typeof reviewSchema>;
 export type RrDraft = Partial<HandoverValues> & { news2RrReview?: unknown };
+export type News2InputResult<Result> =
+  | { status: 'calculated'; result: Result }
+  | { status: 'blocked'; code: 'NEWS2_NOT_CALCULABLE'; reason: 'rr_requires_integer' };
+
+export function evaluateNews2Input<Result>(rr: unknown, calculate: () => Result): News2InputResult<Result> {
+  if (createRrReviewGate().observe(rr)) {
+    return { status: 'blocked', code: 'NEWS2_NOT_CALCULABLE', reason: 'rr_requires_integer' };
+  }
+  return { status: 'calculated', result: calculate() };
+}
+
+export function selectNews2Temperature(vitals?: Readonly<{ tempC?: number | null; temp?: number }> | null): number | undefined {
+  return vitals?.tempC ?? vitals?.temp;
+}
 
 export function parseRespiratoryRate(value: unknown): number | undefined {
   if (typeof value !== 'number' && (typeof value !== 'string' || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value))) return undefined;
