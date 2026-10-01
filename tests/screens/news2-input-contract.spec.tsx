@@ -37,8 +37,9 @@ import * as patientData from '@/src/lib/patientListData';
 import * as priorities from '@/src/lib/priority';
 import * as patientAlerts from '@/src/lib/alerts';
 import * as pilotControl from '@/src/config/pilotControl';
+import { ClinicalSuggestions } from '@/src/components/ClinicalSuggestions';
 
-const warningVisibility = vi.hoisted(() => ({ showVitals: true, ai: false }));
+const warningVisibility = vi.hoisted(() => ({ showVitals: true, ai: false, realSuggestions: false }));
 const patientListAuth = vi.hoisted(() => ({ enabled: false,
   session: { userId: 'synthetic', roles: ['nurse'], units: ['icu-a'] } }));
 
@@ -49,7 +50,11 @@ vi.mock('react-native', async importOriginal => ({
 
 vi.mock('@/src/components/VitalSignsChart', () => ({ default: () => null }));
 vi.mock('@/src/screens/components/VitalTrendsChart', () => ({ VitalTrendsChart: () => null }));
-vi.mock('@/src/components/ClinicalSuggestions', () => ({ default: () => null }));
+vi.mock('@/src/components/ClinicalSuggestions', async importOriginal => {
+  const original = await importOriginal<typeof import('@/src/components/ClinicalSuggestions')>();
+  return { ...original, default: (props: React.ComponentProps<typeof original.default>) =>
+    warningVisibility.realSuggestions ? <original.default {...props} /> : null };
+});
 vi.mock('@/src/config/flags', () => ({ isOn: (name: string) => name === 'AI_SUGGESTIONS_ENABLED' ? warningVisibility.ai : name === 'SHOW_VITALS' ? warningVisibility.showVitals : ['SHOW_OXY', 'SHOW_SBAR'].includes(name) }));
 vi.mock('@/src/config/env', async importOriginal => {
   const original = await importOriginal<typeof import('@/src/config/env')>();
@@ -67,7 +72,7 @@ vi.mock('@/src/hooks/usePatientSummary', () => ({
 vi.mock('@/src/security/auth', () => ({
   useAuth: () => ({ session: patientListAuth.enabled ? patientListAuth.session : null }), ensureFreshAccessToken: async () => null, getSession: async () => null,
 }));
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); warningVisibility.showVitals = true; warningVisibility.ai = false; patientListAuth.enabled = false; });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); warningVisibility.showVitals = true; warningVisibility.ai = false; warningVisibility.realSuggestions = false; patientListAuth.enabled = false; });
 
 const message = 'NEWS2 no calculable: verificar frecuencia respiratoria';
 const forbiddenResults = ['news2', 'total', 'anyThree', 'band', 'priority', 'priorityLabel'];
@@ -168,6 +173,150 @@ describe('NEWS2 AI oxygen serialization parity', () => {
     return provider;
   };
   const navigation = () => ({ navigate: vi.fn(), setParams: vi.fn(), addListener: () => () => {} });
+  describe('independent suggestion sections', () => {
+    type Section = 'vitals' | 'diagnosis';
+    const sections: Section[] = ['vitals', 'diagnosis'];
+    const mountRequests = async () => {
+      const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
+      const prefilledValues = await readOxygenPrefill([], true);
+      const provider = enableProvider();
+      warningVisibility.realSuggestions = true;
+      const pending: { section: Section; resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
+      provider.mockImplementation((_input, init) => new Promise<Response>((resolve, reject) => {
+        const context: { section: Section } = JSON.parse(String(init?.body));
+        pending.push({ section: context.section, resolve, reject });
+      }));
+      const screen = render(<HandoverForm navigation={navigation()}
+        route={{ key: 'section-races', name: 'HandoverForm', params: { patientId: 'synthetic-section-races', unitId: 'icu', prefilledValues } }} />);
+      if (!screen.queryByText('Sugerencias IA de cuidados')) fireEvent.press(screen.getByText('Diagnósticos médicos/ enfermería'));
+      const panel = (section: Section) => {
+        const panels = screen.root.findAllByType(ClinicalSuggestions);
+        expect(panels).toHaveLength(2);
+        return panels[section === 'vitals' ? 0 : 1].props;
+      };
+      const start = async (section: Section) => {
+        await act(async () => { panel(section).onRefresh(); await Promise.resolve(); });
+      };
+      const finish = async (index: number, label: string, failure = false) => {
+        await act(async () => {
+          if (failure) pending[index].reject(new Error('synthetic section error'));
+          else pending[index].resolve(new Response(JSON.stringify({ section: pending[index].section, interventions: [label] }), { status: 200 }));
+        });
+      };
+      const editOxygen = () => {
+        if (!screen.queryByPlaceholderText('Cánula / Mascarilla')) fireEvent.press(screen.getByText(/Oxigenoterapia/));
+        fireEvent.changeText(screen.getByPlaceholderText('Cánula / Mascarilla'), 'cánula nasal');
+      };
+      return { screen, provider, panel, start, finish, editOxygen };
+    };
+
+    it.each(sections)('shows and caches both concurrent results when %s finishes first', async first => {
+      const { screen, provider, panel, start, finish } = await mountRequests();
+      const second = first === 'vitals' ? 'diagnosis' : 'vitals';
+      try {
+        await start('vitals');
+        expect(panel('vitals').isLoading).toBe(true);
+        expect(panel('diagnosis').isLoading).toBe(false);
+        await start('diagnosis');
+        expect(panel(first).isLoading).toBe(true);
+        expect(panel(second).isLoading).toBe(true);
+        await finish(first === 'vitals' ? 0 : 1, first + ' current');
+        expect(screen.queryByText(first + ' current')).not.toBeNull();
+        expect(panel(first).isLoading).toBe(false);
+        expect(panel(second).isLoading).toBe(true);
+        await finish(first === 'vitals' ? 1 : 0, second + ' current');
+        for (const section of sections) {
+          expect(screen.queryByText(section + ' current')).not.toBeNull();
+          expect(panel(section).isLoading).toBe(false);
+          expect(panel(section).errorMessage).toBeNull();
+          await start(section);
+        }
+        expect(provider).toHaveBeenCalledTimes(2);
+      } finally { screen.unmount(); }
+    });
+
+    it.each(sections)('keeps the latest request and cache within %s', async section => {
+      const { screen, provider, panel, start, finish } = await mountRequests();
+      try {
+        await start(section);
+        await start(section);
+        await finish(1, 'newer result');
+        await finish(0, 'obsolete result');
+        expect(panel(section).suggestions.interventions).toEqual(['newer result']);
+        expect(screen.queryByText('obsolete result')).toBeNull();
+        await start(section);
+        expect(provider).toHaveBeenCalledTimes(2);
+      } finally { screen.unmount(); }
+    });
+
+    it.each(sections)('isolates errors and completion in %s from the other pending section', async first => {
+      const { screen, panel, start, finish } = await mountRequests();
+      const other = first === 'vitals' ? 'diagnosis' : 'vitals';
+      try {
+        await start(first);
+        await start(other);
+        await finish(0, '', true);
+        expect(panel(first).errorMessage).toEqual(expect.any(String));
+        const error = panel(first).errorMessage;
+        expect(panel(first).isLoading).toBe(false);
+        expect(panel(other).isLoading).toBe(true);
+        expect(panel(other).errorMessage).toBeNull();
+        await finish(1, 'other current');
+        expect(panel(first).errorMessage).toBe(error);
+        expect(panel(other).suggestions.interventions).toEqual(['other current']);
+        await start(other);
+        expect(panel(first).errorMessage).toBe(error);
+        await start(first);
+        expect(panel(first).errorMessage).toBeNull();
+        expect(panel(other).suggestions.interventions).toEqual(['other current']);
+        await finish(2, 'retry current');
+      } finally { screen.unmount(); }
+    });
+
+    it.each(['rr', 'oxygen'])('invalidates both pending sections on shared %s revision', async change => {
+      const { screen, provider, panel, start, finish, editOxygen } = await mountRequests();
+      try {
+        await start('vitals');
+        await start('diagnosis');
+        if (change === 'rr') fireEvent.changeText(screen.getByPlaceholderText('16'), '21');
+        else editOxygen();
+        await finish(0, 'obsolete vitals');
+        await finish(1, 'obsolete diagnosis');
+        for (const section of sections) {
+          expect(panel(section).suggestions).toBeNull();
+          expect(panel(section).isLoading).toBe(false);
+          expect(panel(section).errorMessage).toBeNull();
+        }
+        expect(screen.queryByText('obsolete vitals')).toBeNull();
+        expect(screen.queryByText('obsolete diagnosis')).toBeNull();
+        await start('vitals');
+        await start('diagnosis');
+        expect(provider).toHaveBeenCalledTimes(4);
+        await finish(2, 'new vitals');
+        await finish(3, 'new diagnosis');
+        expect(panel('vitals').suggestions.interventions).toEqual(['new vitals']);
+        expect(panel('diagnosis').suggestions.interventions).toEqual(['new diagnosis']);
+      } finally { screen.unmount(); }
+    });
+
+    it.each(sections)('a cache hit in %s leaves the other request pending and valid', async cached => {
+      const { screen, provider, panel, start, finish } = await mountRequests();
+      const other = cached === 'vitals' ? 'diagnosis' : 'vitals';
+      try {
+        await start(cached);
+        await finish(0, 'cached result');
+        await start(other);
+        await start(cached);
+        expect(provider).toHaveBeenCalledTimes(2);
+        expect(panel(other).isLoading).toBe(true);
+        expect(panel(cached).suggestions.interventions).toEqual(['cached result']);
+        await finish(1, 'other result');
+        expect(panel(other).suggestions.interventions).toEqual(['other result']);
+        expect(panel(cached).suggestions.interventions).toEqual(['cached result']);
+      } finally { screen.unmount(); }
+    });
+  });
+
   it.each(['remove oxygen', 'add oxygen', 'change RR', 'same context'])('rejects obsolete suggestions: %s', async change => {
     const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
     const prefilledValues = await readOxygenPrefill([], true);

@@ -1041,9 +1041,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [suggestionsState, setSuggestionsState] = useState<{ vitals: SuggestionsResult | null; diagnosis: SuggestionsResult | null }>(
     { vitals: null, diagnosis: null },
   );
-  const [suggestionsLoading, setSuggestionsLoading] = useState<'vitals' | 'diagnosis' | null>(null);
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
-  const suggestionsRequestRef = useRef(0);
+  const [suggestionsLoading, setSuggestionsLoading] = useState({ vitals: false, diagnosis: false });
+  const [suggestionsError, setSuggestionsError] = useState<Record<'vitals' | 'diagnosis', string | null>>({ vitals: null, diagnosis: null });
+  const suggestionsRequestRef = useRef({ vitals: 0, diagnosis: 0 });
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
@@ -1133,11 +1133,12 @@ export default function HandoverForm({ navigation, route }: Props) {
   const pendingRrRevision = useRef<number | undefined>(undefined);
   const pendingOxygenRevision = useRef<number | undefined>(undefined);
   useEffect(() => {
-    suggestionsRequestRef.current += 1;
+    suggestionsRequestRef.current.vitals += 1;
+    suggestionsRequestRef.current.diagnosis += 1;
     setPendingSbarSuggestion(null);
     setSuggestionsState({ vitals: null, diagnosis: null });
-    setSuggestionsLoading(null);
-    setSuggestionsError(null);
+    setSuggestionsLoading({ vitals: false, diagnosis: false });
+    setSuggestionsError({ vitals: null, diagnosis: null });
     suggestionsCacheRef.current = {};
   }, [rrRevision, rrGate, summaryOxygenRevision]);
   const automaticSbarAttemptsRef = useRef<Set<string>>(new Set());
@@ -1926,9 +1927,9 @@ export default function HandoverForm({ navigation, route }: Props) {
     if (!aiSuggestionsEnabled) return;
     const token = rrGate.capture();
     const oxygenToken = summaryOxygenRevisionRef.current;
-    const requestId = ++suggestionsRequestRef.current;
-    const isCurrent = () => rrGate.isCurrent(token) && oxygenToken === summaryOxygenRevisionRef.current && requestId === suggestionsRequestRef.current;
-    setSuggestionsError(null);
+    const requestId = ++suggestionsRequestRef.current[section];
+    const isCurrent = () => rrGate.isCurrent(token) && oxygenToken === summaryOxygenRevisionRef.current && requestId === suggestionsRequestRef.current[section];
+    setSuggestionsError(prev => ({ ...prev, [section]: null }));
     const context = buildClinicalContext(section);
     const contextHash = JSON.stringify(context);
     const now = Date.now();
@@ -1936,10 +1937,10 @@ export default function HandoverForm({ navigation, route }: Props) {
     if (cacheEntry && cacheEntry.contextHash === contextHash && now - cacheEntry.timestamp < 15000) {
       if (!isCurrent()) return;
       setSuggestionsState((prev) => ({ ...prev, [section]: cacheEntry.result }));
-      setSuggestionsLoading(null);
+      setSuggestionsLoading(prev => ({ ...prev, [section]: false }));
       return;
     }
-    setSuggestionsLoading(section);
+    setSuggestionsLoading(prev => ({ ...prev, [section]: true }));
     try {
       const result = await fetchInterventionsSuggestions(context);
       if (!isCurrent()) return;
@@ -1949,9 +1950,9 @@ export default function HandoverForm({ navigation, route }: Props) {
       if (!isCurrent()) return;
       const netError = normalizeNetError(error);
       const ui = getUserFacingNetworkMessage(netError, { screen: 'HandoverForm', op: 'suggestions' });
-      setSuggestionsError(ui.message);
+      setSuggestionsError(prev => ({ ...prev, [section]: ui.message }));
     } finally {
-      if (isCurrent()) setSuggestionsLoading(null);
+      if (isCurrent()) setSuggestionsLoading(prev => ({ ...prev, [section]: false }));
     }
   };
 
@@ -2499,8 +2500,8 @@ export default function HandoverForm({ navigation, route }: Props) {
               vitalTrends={vitalTrends}
               aiSuggestionsEnabled={aiSuggestionsEnabled}
               suggestionsState={suggestionsState}
-              suggestionsLoading={suggestionsLoading}
-              suggestionsError={suggestionsError}
+              suggestionsLoading={suggestionsLoading.vitals ? 'vitals' : null}
+              suggestionsError={suggestionsError.vitals}
               requestSuggestions={requestSuggestions}
             />
           </CollapsibleSection>
@@ -2944,16 +2945,16 @@ export default function HandoverForm({ navigation, route }: Props) {
               <BotonPrimario
                 label="Sugerencias IA de cuidados"
                 onPress={() => requestSuggestions('diagnosis')}
-                disabled={suggestionsLoading === 'diagnosis'}
+                disabled={suggestionsLoading.diagnosis}
               />
             </View>
           ) : null}
           {aiSuggestionsEnabled ? (
             <ClinicalSuggestions
               suggestions={suggestionsState.diagnosis}
-              isLoading={suggestionsLoading === 'diagnosis'}
+              isLoading={suggestionsLoading.diagnosis}
               onRefresh={() => requestSuggestions('diagnosis')}
-              errorMessage={suggestionsError}
+              errorMessage={suggestionsError.diagnosis}
             />
           ) : null}
         </CollapsibleSection>

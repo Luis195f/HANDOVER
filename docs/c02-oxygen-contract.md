@@ -118,13 +118,17 @@ transporte simulado sin red real; comprueba la matriz de oxígeno y la
 invalidación tras edición, restauración y cambio de paciente.
 
 Las solicitudes de sugerencias capturan la revisión FR, la revisión de oxígeno
-existente y un identificador de solicitud en memoria. Solo la solicitud vigente
-puede publicar resultados, cachearlos, mostrar errores o finalizar la carga.
+existente y un identificador de solicitud en memoria por sección (vitals o
+diagnosis). Solo la solicitud vigente de cada sección puede publicar resultados,
+cachearlos, mostrar errores o finalizar su carga. Carga y errores también son
+independientes; cada componente recibe su estado con la interfaz existente.
 El cambio de revisión limpia sugerencias, caché, errores y carga del contexto
-anterior. Una respuesta fuera de orden no sustituye la más reciente, incluso
-si ambas solicitudes comparten contexto. Las pruebas montadas controlan el
-orden de resolución/rechazo con transporte simulado y verifican reutilización
-de caché únicamente para respuestas vigentes. No cambia el contrato externo.
+anterior en ambas secciones. Una respuesta fuera de orden no sustituye la más
+reciente de su misma sección; las peticiones de secciones distintas pueden
+completar en cualquier orden. Las pruebas montadas controlan resolución/rechazo,
+invalidación compartida y lectura de caché mientras el otro panel está pendiente,
+con transporte simulado. Se conserva la duración de caché de 15 segundos.
+No cambia el contrato externo.
 
 Ausencia, null, objeto vacío, dispositivo vacío o espacios no indican oxígeno.
 El dispositivo «aire ambiente» ignora mayúsculas y espacios redundantes.
