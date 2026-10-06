@@ -8,7 +8,7 @@ import { VitalsSection } from '@/src/components/handover/VitalsSection';
 import { prefillFromFHIR } from '@/src/lib/prefill';
 import { deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import { zVitals, zHandover, type HandoverValues } from '@/src/validation/schemas';
-import { buildHandoverBundle, mapObservationVitals } from '@/src/lib/fhir-map';
+import { buildHandoverBundle, mapObservationVitals, mapDeviceUse } from '@/src/lib/fhir-map';
 import * as fhirMapping from '@/src/lib/fhir-map';
 import uciFixture from '../fixtures/fhir/uci-adulto-contextual-bundle.json';
 import { createRrReviewGate, packRrDraft, unpackRrDraft, readRrReview, parseRespiratoryRate, withoutNews2Vitals, type RrDraft } from '@/src/lib/news2-input';
@@ -42,6 +42,7 @@ import { ClinicalSuggestions } from '@/src/components/ClinicalSuggestions';
 const warningVisibility = vi.hoisted(() => ({ showVitals: true, ai: false, realSuggestions: false }));
 const patientListAuth = vi.hoisted(() => ({ enabled: false,
   session: { userId: 'synthetic', roles: ['nurse'], units: ['icu-a'] } }));
+const enqueueBundleMock = vi.hoisted(() => vi.fn(async () => ({ id: 'synthetic-queued' })));
 
 vi.mock('react-native', async importOriginal => ({
   ...await importOriginal<typeof import('react-native')>(),
@@ -70,7 +71,10 @@ vi.mock('@/src/hooks/usePatientSummary', () => ({
   usePatientSummary: () => ({ loading: false, error: null, summary: null }),
 }));
 vi.mock('@/src/security/auth', () => ({
-  useAuth: () => ({ session: patientListAuth.enabled ? patientListAuth.session : null }), ensureFreshAccessToken: async () => null, getSession: async () => null,
+  useAuth: () => ({ session: patientListAuth.enabled ? patientListAuth.session : null }), ensureFreshAccessToken: async () => null, getSession: async () => patientListAuth.enabled ? patientListAuth.session : null,
+}));
+vi.mock('@/src/lib/queue', async importOriginal => ({
+  ...await importOriginal<typeof import('@/src/lib/queue')>(), enqueueBundle: enqueueBundleMock,
 }));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); warningVisibility.showVitals = true; warningVisibility.ai = false; warningVisibility.realSuggestions = false; patientListAuth.enabled = false; });
 
@@ -801,6 +805,82 @@ describe('NEWS2 transient summary context', () => {
       expect(form.getValues('sbarAssessment')).toContain('NEWS2 5 (');
     } finally { screen.unmount(); }
   }, 20000);
+});
+
+describe('FHIR oxygen administration from measured prefill', () => {
+  const cases = [
+    { label: 'FiO2 21', observations: [quantityObservation(LOINC.fio2, 21, '%')], therapy: { fio2: 21 }, total: 5, administered: false },
+    { label: 'flow 0', observations: [quantityObservation(LOINC.o2Flow, 0, 'L/min')], therapy: { flowLMin: 0 }, total: 5, administered: false },
+    { label: 'both ambient', observations: [quantityObservation(LOINC.fio2, 21, '%'), quantityObservation(LOINC.o2Flow, 0, 'L/min')], therapy: { fio2: 21, flowLMin: 0 }, total: 5, administered: false },
+    { label: 'room air', observations: [], therapy: { device: 'aire ambiente' }, total: 5, administered: false },
+    { label: 'text-only legacy', observations: [{ resourceType: 'Observation', valueString: 'oxygen' }], therapy: {}, total: 7, administered: false },
+    { label: 'FiO2 28', observations: [quantityObservation(LOINC.fio2, 28, '%')], therapy: { fio2: 28 }, total: 7, administered: true },
+    { label: 'positive flow', observations: [quantityObservation(LOINC.o2Flow, 2, 'L/min')], therapy: { flowLMin: 2 }, total: 7, administered: true },
+  ];
+  it.each(cases)('$label preserves measurements and maps only real administration after mounted submit', async ({ observations, therapy, total, administered }) => {
+    patientListAuth.enabled = true;
+    const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
+    const prefilledValues = await readOxygenPrefill(observations, true);
+    const screen = render(<HandoverForm navigation={{ navigate: vi.fn(), setParams: vi.fn(), addListener: () => () => {} }}
+      route={{ key: 'fhir-oxygen', name: 'HandoverForm', params: { patientId: 'synthetic', unitId: 'icu-a', prefilledValues } }} />);
+    try {
+      const form: UseFormReturn<HandoverValues> = screen.root.findByType(FormProvider).props;
+      if ('device' in therapy) act(() => form.setValue('oxygenTherapy', therapy));
+      expect(form.getValues('oxygenTherapy')).toMatchObject(therapy);
+      expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(total);
+      act(() => {
+        form.setValue('dxMedical', { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' });
+        form.setValue('administrativeData.staffIn', ['Synthetic nurse']);
+        form.setValue('administrativeData.staffOut', ['Synthetic nurse']);
+        form.setValue('fluidBalance', { intakeMl: 0, outputMl: 0 });
+        form.setValue('braden', { sensoryPerception: 4, moisture: 4, activity: 4, mobility: 4, nutrition: 4, frictionShear: 4, totalScore: 24, riskLevel: 'sin_riesgo' });
+        form.setValue('glasgow', { eye: 4, verbal: 5, motor: 6, total: 15, severity: 'leve' });
+        form.setValue('bedsideChecklist', {
+          ...form.getValues('bedsideChecklist'), patientIdentityConfirmed: true, allergiesReviewed: true,
+          linesAndDevicesChecked: true, medicationPlanReviewed: true, safetyMeasuresApplied: true, questionsAnswered: true,
+        });
+      });
+      const builder = vi.spyOn(fhirMapping, 'buildHandoverBundleAsync');
+      enqueueBundleMock.mockClear();
+      fireEvent.press(screen.getByText('Guardar borrador'));
+      await waitFor(() => expect(builder).toHaveBeenCalled());
+      await builder.mock.results[0].value;
+      await waitFor(() => expect(enqueueBundleMock).toHaveBeenCalled());
+      const bundle = enqueueBundleMock.mock.calls[0][0];
+      const resources = bundle.entry.map((entry: { resource: { resourceType: string; code?: { coding?: { code: string }[] } } }) => entry.resource);
+      expect(resources.filter((resource: { resourceType: string }) => resource.resourceType === 'DeviceUseStatement')).toHaveLength(0);
+      expect(resources.filter((resource: { resourceType: string; code?: { coding?: { code: string }[] } }) => resource.resourceType === 'Procedure' && resource.code?.coding?.[0]?.code === SNOMED.oxygenTherapy)).toHaveLength(administered ? 1 : 0);
+      for (const code of observations.flatMap(item => 'code' in item ? [item.code.coding[0].code] : [])) {
+        expect(resources.some((resource: { code?: { coding?: { code: string }[] } }) => resource.code?.coding?.[0]?.code === code)).toBe(true);
+      }
+    } finally { screen.unmount(); }
+  }, 30000);
+
+  it.each([
+    { device: 'aire ambiente' }, { fio2: 28 }, { flowLMin: 2 }, { device: 'cánula nasal' },
+    { device: 'aire ambiente', fio2: 28 }, { deviceDisplay: 'Cánula nasal' },
+  ])('maps oxygen administration only for real therapy %j', therapy => {
+    const resources = mapDeviceUse({ patientId: 'synthetic', oxygenTherapy: { status: 'in-progress', ...therapy } });
+    const administered = 'fio2' in therapy || 'flowLMin' in therapy || therapy.device !== 'aire ambiente';
+    expect(resources.some(resource => resource.resourceType === 'Procedure')).toBe(administered);
+    expect(resources.some(resource => resource.resourceType === 'DeviceUseStatement')).toBe(administered && ('device' in therapy || 'deviceDisplay' in therapy));
+  });
+
+  it('retains explicit historical treatment procedures and their completed/in-progress states', () => {
+    const completedOxygen = mapDeviceUse({ patientId: 'synthetic', oxygenTherapy: {
+      status: 'completed', device: 'cánula nasal', flowLMin: 2, end: '2026-09-28T12:00:00Z',
+    } });
+    expect(completedOxygen.find(resource => resource.resourceType === 'Procedure')?.status).toBe('completed');
+    const bundle = buildHandoverBundle({
+      patientId: 'synthetic', status: 'draft', oxygenTherapy: { status: 'in-progress', fio2: 21 },
+      treatments: [
+        { id: 'historical-oxygen', type: 'respiratory', description: 'Oxigenoterapia anterior', done: true },
+        { id: 'planned-care', type: 'respiratory', description: 'Tratamiento actual', done: false },
+      ],
+    });
+    const procedures = bundle.entry.map(entry => entry.resource).filter(resource => resource.resourceType === 'Procedure');
+    expect(procedures.map(resource => resource.status)).toEqual(['completed', 'in-progress']);
+  });
 });
 
 describe('NEWS2 transient oxygen transport', () => {

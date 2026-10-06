@@ -138,9 +138,17 @@ flujo positivo o FiO₂ > 21 prevalece el indicador objetivo, sin reescribir dat
 
 La corrección evita sumar +2 por la mera presencia de un objeto vacío o valores
 ambientales. No altera la fórmula NEWS2, escalas, bandas, bloqueo FR, Braden,
-prioridades, plantillas narrativas, FHIR, privacidad ni auditoría. Los textos
+prioridades, plantillas narrativas, privacidad ni auditoría. Los textos
 derivados pueden reflejar el total corregido. El wrapper de riesgo conserva
 su representación heredada null/NaN para componentes ausentes.
+
+El mapper FHIR conserva FiO₂ y flujo medidos como Observation, incluso 21 % y
+0 L/min, pero solo deriva Procedure/DeviceUseStatement de oxigenoterapia si
+`isSupplementalOxygen` acredita administración real. El booleano transitorio
+NEWS2 nunca se exporta como tratamiento. Los procedimientos explícitos del
+handover, incluidos los históricos y sus estados, siguen el mapeo independiente
+de tratamientos. Pruebas montadas cubren prefill → formulario → envío simulado
+→ bundle sin escritura externa. No cambia terminología ni contrato persistido.
 
 La matriz en `tests/screens/news2-input-contract.spec.tsx`, ya incluida en CI,
 cubre pureza, contradicciones y paridad de resúmenes, riesgo y formulario con

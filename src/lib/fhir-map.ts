@@ -36,6 +36,7 @@ import type {
   PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
+import { isSupplementalOxygen } from './oxygen';
 import { getSpecialtyOverlayDefinition, getUnitProfileDefinition } from '../config/profiles';
 import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, FHIR_EXTENSION_URLS, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
 import {
@@ -1636,6 +1637,11 @@ export function mapDeviceUse(
   const optionsMerged = resolveOptions(options);
   if (!values.oxygenTherapy) return [];
   const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
+  if (!isSupplementalOxygen({
+    device: parsed.device ?? parsed.deviceDisplay ?? parsed.deviceId,
+    flowLMin: parsed.flowLMin,
+    fio2: parsed.fio2,
+  })) return [];
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
 
