@@ -1636,8 +1636,9 @@ export function mapDeviceUse(
 ): Array<Procedure | DeviceUseStatement | Device> {
   const optionsMerged = resolveOptions(options);
   if (!values.oxygenTherapy) return [];
+  const explicitlyCompleted = values.oxygenTherapy.status === 'completed';
   const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
-  if (!isSupplementalOxygen({
+  if (!explicitlyCompleted && !isSupplementalOxygen({
     device: parsed.device ?? parsed.deviceDisplay ?? parsed.deviceId,
     flowLMin: parsed.flowLMin,
     fio2: parsed.fio2,

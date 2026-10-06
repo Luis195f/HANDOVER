@@ -143,12 +143,16 @@ derivados pueden reflejar el total corregido. El wrapper de riesgo conserva
 su representación heredada null/NaN para componentes ausentes.
 
 El mapper FHIR conserva FiO₂ y flujo medidos como Observation, incluso 21 % y
-0 L/min, pero solo deriva Procedure/DeviceUseStatement de oxigenoterapia si
-`isSupplementalOxygen` acredita administración real. El booleano transitorio
-NEWS2 nunca se exporta como tratamiento. Los procedimientos explícitos del
-handover, incluidos los históricos y sus estados, siguen el mapeo independiente
-de tratamientos. Pruebas montadas cubren prefill → formulario → envío simulado
-→ bundle sin escritura externa. No cambia terminología ni contrato persistido.
+0 L/min, pero solo deriva un tratamiento nuevo de oxigenoterapia si
+`isSupplementalOxygen` acredita administración real. Un `status: completed`
+recibido explícitamente conserva su Procedure histórica, fechas y nota aunque
+no haya indicadores de administración actual; no se confunde con el
+`in-progress` añadido por defecto al mapear el formulario. Sin dispositivo no
+se fabrica DeviceUseStatement. El booleano transitorio NEWS2 nunca se exporta
+como tratamiento. Los tratamientos explícitos del handover conservan sus
+estados mediante su mapeo independiente. Pruebas montadas cubren
+prefill → formulario → envío simulado → bundle sin escritura externa.
+No cambia terminología ni contrato persistido.
 
 La matriz en `tests/screens/news2-input-contract.spec.tsx`, ya incluida en CI,
 cubre pureza, contradicciones y paridad de resúmenes, riesgo y formulario con

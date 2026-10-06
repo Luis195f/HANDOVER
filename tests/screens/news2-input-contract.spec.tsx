@@ -881,6 +881,31 @@ describe('FHIR oxygen administration from measured prefill', () => {
     const procedures = bundle.entry.map(entry => entry.resource).filter(resource => resource.resourceType === 'Procedure');
     expect(procedures.map(resource => resource.status)).toEqual(['completed', 'in-progress']);
   });
+
+  it.each([
+    { label: 'completed without measurements', therapy: { status: 'completed' as const }, expectedPeriod: false },
+    { label: 'completed with historical metadata', therapy: { status: 'completed' as const, start: '2026-09-27T10:00:00Z', end: '2026-09-28T12:00:00Z', note: 'Terapia concluida' }, expectedPeriod: true },
+    { label: 'completed with ambient measurements', therapy: { status: 'completed' as const, fio2: 21, flowLMin: 0, start: '2026-09-27T10:00:00Z', end: '2026-09-28T12:00:00Z', note: 'Terapia concluida' }, expectedPeriod: true },
+  ])('$label retains its explicit oxygen Procedure without inventing a device', ({ therapy, expectedPeriod }) => {
+    const resources = mapDeviceUse({ patientId: 'synthetic', oxygenTherapy: therapy });
+    expect(resources.map(resource => resource.resourceType)).toEqual(['Procedure']);
+    const procedure = resources[0];
+    expect(procedure.status).toBe('completed');
+    if (procedure.resourceType !== 'Procedure') throw new Error('Expected historical Procedure');
+    if (expectedPeriod && 'start' in therapy) {
+      expect(procedure.performedPeriod).toEqual({
+        start: new Date(therapy.start).toISOString(), end: new Date(therapy.end).toISOString(),
+      });
+      expect(procedure.note).toEqual([{ text: therapy.note }]);
+    }
+    const bundle = buildHandoverBundle({ patientId: 'synthetic', status: 'draft', oxygenTherapy: therapy });
+    expect(bundle.entry.filter(entry => entry.resource.resourceType === 'Procedure')).toHaveLength(1);
+    expect(bundle.entry.filter(entry => entry.resource.resourceType === 'DeviceUseStatement')).toHaveLength(0);
+    const measurementCodes = bundle.entry.filter(entry => entry.resource.resourceType === 'Observation')
+      .map(entry => entry.resource.code?.coding?.[0]?.code);
+    if ('fio2' in therapy) expect(measurementCodes).toContain(LOINC.fio2);
+    if ('flowLMin' in therapy) expect(measurementCodes).toContain(LOINC.o2Flow);
+  });
 });
 
 describe('NEWS2 transient oxygen transport', () => {
