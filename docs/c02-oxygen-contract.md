@@ -1,7 +1,7 @@
 # C02: interpretación compartida de oxígeno para NEWS2
 
 Base: `3c471ba9c7f61abb199ecd9439d47c27ce10c4bc`.
-Estado: corrección local autorizada; consolidación e inventario pendientes.
+Estado: consolidación técnica local de NEWS2; pendiente de validación y revisión del PR.
 
 `src/lib/oxygen.ts` expone `isSupplementalOxygen`, una función pura sobre
 el tipo existente `OxygenTherapy`. Se comparte entre summary, ai-degrade,
@@ -23,7 +23,7 @@ unidad/código admitido no son utilizables. Si existe FiO₂ o flujo utilizable,
 el helper decide y el texto no puede contradecirlo. Sin valores utilizables,
 se conserva literalmente la heurística textual anterior, con sus limitaciones.
 La salida expresa `vitals.o2` como booleano cuando se procesan observaciones.
-Se preservan la fórmula privada, prioridades, bloqueo FR y el fallback offline.
+Se preservan las prioridades, el bloqueo FR y el fallback offline.
 
 Para los adaptadores NEWS2 con ambos alias de temperatura, `tempC` es canónico:
 `selectNews2Temperature` en `news2-input.ts` selecciona `tempC ?? temp` sin
@@ -159,7 +159,54 @@ cubre pureza, contradicciones y paridad de resúmenes, riesgo y formulario con
 SpO₂ 98 y 94, FR 16, temperatura 37, PAS 120, FC 110 y conciencia A:
 sin oxígeno, totales 1 y 2; con oxígeno, 3 y 4. Conserva pruebas de FR y Braden.
 
-El inventario debe revisar otros adaptadores por separado: esta intervención
-no acredita paridad global ni consolida todavía la fórmula privada de prefill.
+## Inventario final de NEWS2
+
+La búsqueda de `NEWS2`, `news2`, `computeNEWS2`, puntuaciones de componentes,
+umbrales, bandas y oxígeno en `src`, `backend`, tests y documentos distingue
+cálculo fisiológico de decisiones derivadas. La autoridad técnica de componentes,
+total, `anyThree` y banda es `src/lib/news2.ts:86`; Scale 1, Scale 2 RCP y el
+componente independiente +2 están descritos en
+`docs/clinical-profiles-framework.md:198`. No se selecciona Scale 2 desde
+prefill: se pasa explícitamente `scale2: false`.
+
+| Archivo / punto | Función y dependencia | Clasificación y acción |
+| --- | --- | --- |
+| `src/lib/news2.ts:86` | `computeNEWS2`: RR, SpO₂, oxígeno, T, PAS, FC, ACVPU, total, `anyThree`, banda | Fuente canónica; sin cambios |
+| `src/lib/news2-input.ts:17` | Gate FR entera, estado bloqueado y selección `tempC ?? temp` | Adaptador legítimo; sin fórmula ni cambios |
+| `src/lib/oxygen.ts:4` | Evidencia estructurada y fallback transitorio | Adaptador compartido; sin fórmula ni cambios |
+| `src/lib/prefill.ts:162` | FHIR → constantes, `acvpu` → `avpu`, Scale 1 → canónico → `priorityFromNEWS2` | Única fórmula duplicada eliminada; prioridad low/medium/high propia, conservada |
+| `src/screens/QRScan.tsx:374` | Resultado prefill y aviso FR | Consumidor de UI; sin cálculo ni cambios |
+| `src/screens/HandoverForm.tsx:1011,2160` | NEWS2 visible y alerta al enviar, ambos canónicos; gate FR y oxígeno transitorio | Consumidor directo; sin cambios en esta fase |
+| `src/components/handover/VitalsSection.tsx` | Desglose y aviso FR del formulario | Consumidor de UI; sin fórmula ni cambios |
+| `src/lib/summary.ts:298,344` | Resumen normal y narración breve desde canónico | Consumidor directo; etiquetas de banda, sin cambios |
+| `src/lib/ai-degrade.ts:84` | Resumen mínimo offline desde canónico | Consumidor directo; umbral narrativo ≥5, sin cambios |
+| `src/lib/alerts.ts:186,255` | Canónico y regla combinada NEWS2 ≥7 + riesgo; otras alertas independientes | Derivación legítima; sin cambios |
+| `src/lib/alerts.ts:74` | `alertsFromData` acepta score precomputado | Compatibilidad; solo referencias en pruebas encontradas, sin cambios |
+| `src/lib/mpac.ts:242,719` | Wrapper canónico y contribuciones MPAC por total/`anyThree` | Derivación legítima; reglas MPAC sin cambios |
+| `src/lib/priority.ts:20`, `src/lib/priority-ui.ts:259` | Orden y presentación de prioridad MPAC con `news2Score` | Decisión downstream, no fórmula; sin cambios |
+| `src/lib/scores/news2.ts:18` | Traduce nombres/null y desglose canónico | Wrapper legítimo; sin cambios |
+| `src/lib/scores/handoverRisk.ts:14,54`, `src/lib/scores/riskRules.ts:24` | Wrapper de riesgo, Braden independiente y umbrales de riesgo configurados | Derivación legítima; sin cambios |
+| `src/lib/patient-filters.ts:32,67` | `news2` > `latestNews2.score` > cálculo canónico desde `vitals`; orden estable de bloqueados | Compatibilidad legacy: scores precomputados sin procedencia temporal verificable; sin cambios |
+| `src/lib/patientListData.ts:54`, `src/screens/PatientList.tsx:632` | API → normalizador sin score precomputado → gate FR → MPAC/alertas/UI | Consumidor activo; sin cambios |
+| `src/lib/analytics.ts:39,56` | Agrega `news2Score` de entradas MPAC/demo | Consumidor indirecto; no puntúa, sin cambios |
+| `src/lib/ai-suggestions.ts:27`, `src/screens/HandoverForm.tsx:1887` | Envía score derivado en contexto IA, sin recalcularlo | Consumidor indirecto; sin cambios |
+| `src/features/news2/alerts.ts:8,14`, `src/lib/notifications.ts:39` | Clasificación/aviso local de score suministrado | Regla derivada distinta de la banda; sin llamador runtime hallado, no fórmula y sin cambios |
+| `src/lib/fhir-map.ts:2006`, `src/lib/fhir-map/*` | Observations, tratamientos y Bundle; no puntúa NEWS2 | Transporte FHIR, sin cambios en esta fase |
+| `backend/api/*`, `backend/*` | API, persistencia/bridge; búsqueda sin cálculo NEWS2 | Sin consumidor calculador encontrado; sin cambios |
+| `src/config/profiles/overlays/*`, `src/lib/codes.ts:422` | Etiquetas/configuración y código de alerta | Referencias, no fórmula; sin cambios |
+| `src/lib/__tests__/news2*`, `tests/screens/news2-input-contract.spec.tsx`, fixtures | RCP, límites, paridad y recorrido QR/formulario | Pruebas/fixtures; no fuente productiva |
+
+Flujos: Observation FHIR → `prefillFromFHIR` → gate FR → canónico Scale 1 →
+prioridad prefill → QRScan → HandoverForm. Formulario → gate FR → canónico →
+VitalsSection, alertas, riesgo y resúmenes → revisión/envío → mapper FHIR.
+API de pacientes → normalizador → gate FR → MPAC/canónico → prioridad y alertas
+independientes; el ordenador legacy mantiene los scores precomputados separados.
+La fórmula privada de prefill se caracterizó con límites, datos parciales,
+ACVPU, oxígeno, prioridades y recorrido QR antes de reemplazarla; ahora delega
+en `computeNEWS2` sin sustituir la regla de prioridad de prefill por la banda.
+La clasificación de notificaciones no cableadas y los scores legacy no
+acreditan procedencia ni paridad con las constantes actuales. El inventario
+estático no equivale a validación clínica, institucional o regulatoria.
+
 C17 sigue siendo una dependencia externa no definida. CLINICAL: NOT_VALIDATED.
 `test:unit` conserva tres fallos baseline autorizados y no se declara verde.

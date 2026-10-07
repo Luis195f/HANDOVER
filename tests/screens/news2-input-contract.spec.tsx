@@ -12,7 +12,7 @@ import { buildHandoverBundle, mapObservationVitals, mapDeviceUse } from '@/src/l
 import * as fhirMapping from '@/src/lib/fhir-map';
 import uciFixture from '../fixtures/fhir/uci-adulto-contextual-bundle.json';
 import { createRrReviewGate, packRrDraft, unpackRrDraft, readRrReview, parseRespiratoryRate, withoutNews2Vitals, type RrDraft } from '@/src/lib/news2-input';
-import { computeNEWS2 } from '@/src/lib/news2';
+import { computeNEWS2, type NEWS2Input } from '@/src/lib/news2';
 import { computeAlerts } from '@/src/lib/alerts';
 import { buildExternalAiClinicalContext } from '@/src/lib/ai-sbar';
 import * as aiSbar from '@/src/lib/ai-sbar';
@@ -148,6 +148,68 @@ const prefillPhysiology = (high = false) => [
 ];
 const readOxygenPrefill = (resources: unknown[], high = false) => prefillFromFHIR('synthetic', {
   fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations([...prefillPhysiology(high), ...resources]),
+});
+
+describe('NEWS2 prefill canonical characterization', () => {
+  const groups: Array<{
+    field: string;
+    values: Array<[number, number]>;
+    resource: (value: number) => unknown;
+    input: (value: number) => NEWS2Input;
+  }> = [
+    { field: 'RR', values: [[8, 3], [9, 1], [11, 1], [12, 0], [20, 0], [21, 2], [24, 2], [25, 3]],
+      resource: value => observation(value), input: value => ({ rr: value }) },
+    { field: 'SpO2 Scale 1', values: [[91, 3], [92, 2], [93, 2], [94, 1], [95, 1], [96, 0]],
+      resource: value => quantityObservation(LOINC.spo2, value, '%'), input: value => ({ spo2: value }) },
+    { field: 'temperature', values: [[35, 3], [35.1, 1], [36, 1], [36.1, 0], [38, 0], [38.1, 1], [39, 1], [39.1, 2]],
+      resource: value => quantityObservation(LOINC.temp, value, 'Cel'), input: value => ({ temp: value }) },
+    { field: 'SBP', values: [[90, 3], [91, 2], [100, 2], [101, 1], [110, 1], [111, 0], [219, 0], [220, 3]],
+      resource: value => ({ resourceType: 'Observation', code: { coding: [{ system: TERMINOLOGY_SYSTEMS.LOINC, code: LOINC.bpPanel }] },
+        component: [{ code: { coding: [{ system: TERMINOLOGY_SYSTEMS.LOINC, code: LOINC.sbp }] }, valueQuantity: { value } }] }),
+      input: value => ({ sbp: value }) },
+    { field: 'HR', values: [[40, 3], [41, 1], [50, 1], [51, 0], [90, 0], [91, 1], [110, 1], [111, 2], [130, 2], [131, 3]],
+      resource: value => quantityObservation(LOINC.hr, value, '/min'), input: value => ({ hr: value }) },
+  ];
+
+  it.each(groups.flatMap(group => group.values.map(([value, component]) => ({ ...group, value, component }))))
+    ('$field $value preserves the canonical component and partial-input priority', async ({ resource, input, value, component }) => {
+      expect(computeNEWS2(input(value))).toMatchObject({ total: component, anyThree: component === 3 });
+      const result = await prefillFromFHIR('synthetic', { fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations([resource(value)]) });
+      expect(result).toMatchObject({ news2: component, priority: component === 3 ? 'medium' : 'low',
+        priorityLabel: component === 3 ? 'Medium' : 'Low' });
+    });
+
+  it.each(['A', 'C', 'V', 'P', 'U'] as const)('maps ACVPU %s to canonical partial NEWS2', async avpu => {
+    const result = await prefillFromFHIR('synthetic', { fhirBase: 'https://fhir.invalid',
+      fetchImpl: fetchObservations([{ resourceType: 'Observation', code: { text: 'ACVPU' }, valueString: avpu }]) });
+    const expected = computeNEWS2({ avpu });
+    expect(result).toMatchObject({ news2: expected.total, priority: expected.anyThree ? 'medium' : 'low' });
+  });
+
+  it.each([[21, 0, 'low'], [28, 2, 'low']] as const)('keeps FiO2 %i, oxygen +2 and priority', async (fio2, total, priority) => {
+    const result = await prefillFromFHIR('synthetic', { fhirBase: 'https://fhir.invalid',
+      fetchImpl: fetchObservations([quantityObservation(LOINC.fio2, fio2, '%')]) });
+    expect(result).toMatchObject({ news2: total, priority, vitals: { o2: fio2 > 21 } });
+  });
+
+  it('keeps empty and partial observations calculable without fabricating fields', async () => {
+    const empty = await prefillFromFHIR('synthetic', { fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations([]) });
+    expect(empty).toMatchObject({ news2: 0, priority: 'low' });
+    const partial = await prefillFromFHIR('synthetic', { fhirBase: 'https://fhir.invalid',
+      fetchImpl: fetchObservations([quantityObservation(LOINC.spo2, 91, '%')]) });
+    expect(partial).toMatchObject({ news2: 3, priority: 'medium' });
+  });
+
+  it('delegates to the canonical calculator with mapped ACVPU and Scale 1', async () => {
+    const canonical = vi.spyOn(news2Calculator, 'computeNEWS2');
+    const resources = [...prefillPhysiology(true).slice(0, -1), quantityObservation(LOINC.fio2, 28, '%'),
+      { resourceType: 'Observation', code: { text: 'ACVPU' }, valueString: 'V' }];
+    const result = await prefillFromFHIR('synthetic', { fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations(resources) });
+    expect(canonical).toHaveBeenCalledWith(expect.objectContaining({ rr: 16, spo2: 94, temp: 39.1, sbp: 120,
+      hr: 111, avpu: 'V', o2: true }));
+    expect(canonical.mock.calls.every(([input]) => input.scale2 !== true)).toBe(true);
+    expect(result).toMatchObject({ news2: 10, priority: 'high', priorityLabel: 'High' });
+  });
 });
 
 describe('NEWS2 AI oxygen serialization parity', () => {

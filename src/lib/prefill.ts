@@ -8,6 +8,7 @@
 
 import { LOINC, TERMINOLOGY_SYSTEMS } from "./codes";
 import { parseRespiratoryRate, readRrReview, type RrReview } from './news2-input';
+import { computeNEWS2 as computeCanonicalNEWS2 } from './news2';
 import { resolveSupplementalOxygen } from './oxygen';
 import type { OxygenTherapy } from '../types/handover';
 import { resolveAcvpu } from './fhir-map';
@@ -158,16 +159,17 @@ export async function prefillFromFHIR(
     };
 
     // 4) NEWS2 + prioridad (escala 1 por defecto)
-    const news = computeNEWS2({
+    const news = computeCanonicalNEWS2({
       rr: vitals.rr,
       spo2: vitals.spo2,
       temp: vitals.temp,
       sbp: vitals.sbp,
       hr: vitals.hr,
-      acvpu: vitals.acvpu,
-      o2: vitals.o2
+      avpu: vitals.acvpu,
+      o2: vitals.o2,
+      scale2: false,
     });
-    const { priority, label } = priorityFromNEWS2(news.score, news.any3);
+    const { priority, label } = priorityFromNEWS2(news.total, news.anyThree);
 
     return {
       dxText,
@@ -176,7 +178,7 @@ export async function prefillFromFHIR(
       vitals,
       oxygenTherapy,
       legacyOxygen,
-      news2: news.score,
+      news2: news.total,
       priority,
       priorityLabel: label
     };
@@ -387,73 +389,6 @@ function extractLatestVitals(obsList: any[]) {
     fio2Pct: latest.fio2Pct?.v,
     flowLMin: latest.flowLMin?.v
   };
-}
-
-/** NEWS2 escala 1 (sin COPD). Devuelve score y si hay algún 3 en cualquier parámetro. */
-function computeNEWS2(v: {
-  rr?: number; spo2?: number; temp?: number; sbp?: number; hr?: number; acvpu?: VitalPrefill["acvpu"]; o2?: boolean;
-}) {
-  let score = 0;
-  let any3 = false;
-
-  // RR
-  const rrS =
-    v.rr === undefined ? 0 :
-    (v.rr <= 8 ? 3 :
-     v.rr <= 11 ? 1 :
-     v.rr <= 20 ? 0 :
-     v.rr <= 24 ? 2 : 3);
-  score += rrS; if (rrS === 3) any3 = true;
-
-  // SpO2 (escala 1)
-  const s = v.spo2;
-  const spo2S =
-    s === undefined ? 0 :
-    (s <= 91 ? 3 :
-     s <= 93 ? 2 :
-     s <= 95 ? 1 : 0);
-  score += spo2S; if (spo2S === 3) any3 = true;
-
-  // Temp
-  const t = v.temp;
-  const tempS =
-    t === undefined ? 0 :
-    (t <= 35.0 ? 3 :
-     t <= 36.0 ? 1 :
-     t <= 38.0 ? 0 :
-     t <= 39.0 ? 1 : 2);
-  score += tempS; if (tempS === 3) any3 = true;
-
-  // SBP
-  const p = v.sbp;
-  const sbpS =
-    p === undefined ? 0 :
-    (p <= 90 ? 3 :
-     p <= 100 ? 2 :
-     p <= 110 ? 1 :
-     p <= 219 ? 0 : 3);
-  score += sbpS; if (sbpS === 3) any3 = true;
-
-  // HR
-  const h = v.hr;
-  const hrS =
-    h === undefined ? 0 :
-    (h <= 40 ? 3 :
-     h <= 50 ? 1 :
-     h <= 90 ? 0 :
-     h <= 110 ? 1 :
-     h <= 130 ? 2 : 3);
-  score += hrS; if (hrS === 3) any3 = true;
-
-  // ACVPU
-  const concS = v.acvpu && v.acvpu !== "A" ? 3 : 0;
-  score += concS; if (concS === 3) any3 = true;
-
-  // O2 suplementario
-  const o2S = v.o2 ? 2 : 0;
-  score += o2S;
-
-  return { score, any3 };
 }
 
 function priorityFromNEWS2(score: number, any3: boolean) {
