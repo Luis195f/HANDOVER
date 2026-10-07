@@ -34,6 +34,7 @@ import { confirmAction } from '@/src/lib/platform-confirm';
 import { buildHandoverBundleAsync, type HandoverInput as FhirHandoverInput, type HandoverValues as FhirHandoverValues } from '@/src/lib/fhir-map';
 import { computeAlerts } from '@/src/lib/alerts';
 import { computeNEWS2 } from '@/src/lib/news2';
+import { resolveSupplementalOxygen, withTransientOxygen } from '@/src/lib/oxygen';
 import { NEWS2_RR_MESSAGE, createRrReviewGate, packRrDraft, unpackRrDraft, withoutNews2Vitals, type RrDraft } from '@/src/lib/news2-input';
 import {
   buildExternalAiClinicalContext,
@@ -564,7 +565,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbarRecommendation: demoPrefill?.sbarRecommendation ?? '',
       sbarFullText: '',
       vitals: demoPrefill?.vitals ?? prefilledVitals ?? {},
-      oxygenTherapy: {},
+      oxygenTherapy: prefilledValuesParam?.oxygenTherapy ?? {},
       devices: demoPrefill?.devices ?? [],
       nutrition: demoPrefill?.nutrition,
       elimination: demoPrefill?.elimination,
@@ -606,6 +607,25 @@ export default function HandoverForm({ navigation, route }: Props) {
   const { watch, reset, getValues } = form;
   const { control, formState } = form;
   const patientIdValue = form.watch('patientId');
+  const legacyOxygenRef = useRef(prefilledValuesParam?.legacyOxygen ?? prefilledValuesParam?.vitals?.o2);
+  const summaryOxygenRevisionRef = useRef(0);
+  const oxygenOrigin = useRef({ patientId: patientIdParam ?? patientSummaryParam?.id ?? patientIdValue, key: route.key, prefill: prefilledValuesParam });
+  if (oxygenOrigin.current.patientId !== (patientIdParam ?? patientSummaryParam?.id ?? patientIdValue) ||
+      oxygenOrigin.current.patientId !== patientIdValue || oxygenOrigin.current.key !== route.key ||
+      oxygenOrigin.current.prefill !== prefilledValuesParam) {
+    if (legacyOxygenRef.current !== undefined) summaryOxygenRevisionRef.current += 1;
+    legacyOxygenRef.current = undefined;
+  }
+  const transientO2Fallback = legacyOxygenRef.current;
+  const summaryContext = useMemo(() => ({ transientO2Fallback }), [transientO2Fallback]);
+  const summaryOxygenRevision = summaryOxygenRevisionRef.current;
+  useEffect(() => {
+    const subscription = form.watch((_values, { name, type }) => {
+      if (!name || name.startsWith('oxygenTherapy')) summaryOxygenRevisionRef.current += 1;
+      if (!name || (type === 'change' && name.startsWith('oxygenTherapy'))) legacyOxygenRef.current = undefined;
+    });
+    return () => { legacyOxygenRef.current = undefined; subscription?.unsubscribe?.(); };
+  }, [form]);
   const administrativeUnitValue = form.watch('administrativeData.unit');
   const draftKey = useMemo(
     () => `handoverDraft:${patientIdValue ?? 'unknown'}:${administrativeUnitValue ?? 'unknown'}`,
@@ -857,6 +877,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         ...(data.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
       });
 
+      legacyOxygenRef.current = undefined;
       form.reset({ ...form.getValues(), ...normalizedData });
     },
   });
@@ -911,6 +932,7 @@ export default function HandoverForm({ navigation, route }: Props) {
             ...(draft?.dxMedical !== undefined ? { dxMedical: normalizedDxMedical } : {}),
             ...(draft?.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
           });
+          legacyOxygenRef.current = undefined;
           reset(normalizedDraft);
         }
       } catch {
@@ -980,10 +1002,11 @@ export default function HandoverForm({ navigation, route }: Props) {
     };
   }, [watch, draftKey, getValues, rrGate]);
 
-  const computedAlerts = useMemo(() => computeAlerts(withoutNews2Vitals(watchedValues, news2Blocked)), [watchedValues, news2Blocked]);
+  const calculationVitals = withTransientOxygen(watchedVitals, () => legacyOxygenRef.current);
+  const computedAlerts = useMemo(() => computeAlerts(withoutNews2Vitals({ ...watchedValues, vitals: calculationVitals }, news2Blocked)), [watchedValues, calculationVitals, news2Blocked]);
   const riskEvaluation = useMemo(
-    () => deriveRiskEvaluationFromValues(news2Blocked ? undefined : watchedVitals, watchedBraden, news2Blocked ? undefined : watchedOxygen),
-    [watchedBraden, watchedOxygen, watchedVitals, news2Blocked],
+    () => deriveRiskEvaluationFromValues(news2Blocked ? undefined : calculationVitals, watchedBraden, news2Blocked ? undefined : watchedOxygen),
+    [watchedBraden, watchedOxygen, calculationVitals, news2Blocked],
   );
   const news2Breakdown = useMemo(() => {
     if (news2Blocked) return undefined;
@@ -995,11 +1018,11 @@ export default function HandoverForm({ navigation, route }: Props) {
       temp: vitals.tempC,
       sbp: vitals.sbp,
       hr: vitals.hr,
-      o2: Boolean(oxygen.device || oxygen.flowLMin != null || oxygen.fio2 != null),
+      o2: resolveSupplementalOxygen(oxygen, legacyOxygenRef.current),
       avpu: vitals.avpu,
     };
     return computeNEWS2(input);
-  }, [watchedOxygen, watchedVitals, news2Blocked]);
+  }, [watchedOxygen, watchedVitals, news2Blocked, calculationVitals]);
   const bradenScore = useMemo(() => {
     if (!watchedBraden) return undefined;
     const values = [
@@ -1018,8 +1041,9 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [suggestionsState, setSuggestionsState] = useState<{ vitals: SuggestionsResult | null; diagnosis: SuggestionsResult | null }>(
     { vitals: null, diagnosis: null },
   );
-  const [suggestionsLoading, setSuggestionsLoading] = useState<'vitals' | 'diagnosis' | null>(null);
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState({ vitals: false, diagnosis: false });
+  const [suggestionsError, setSuggestionsError] = useState<Record<'vitals' | 'diagnosis', string | null>>({ vitals: null, diagnosis: null });
+  const suggestionsRequestRef = useRef({ vitals: 0, diagnosis: 0 });
   const suggestionsCacheRef = useRef<
     Record<string, { timestamp: number; contextHash: string; result: SuggestionsResult | null }>
   >({});
@@ -1107,11 +1131,16 @@ export default function HandoverForm({ navigation, route }: Props) {
   const [sbarHelperMessage, setSbarHelperMessage] = useState<string | null>(null);
   const [pendingSbarSuggestion, setPendingSbarSuggestion] = useState<PendingSbarSuggestion | null>(null);
   const pendingRrRevision = useRef<number | undefined>(undefined);
+  const pendingOxygenRevision = useRef<number | undefined>(undefined);
   useEffect(() => {
+    suggestionsRequestRef.current.vitals += 1;
+    suggestionsRequestRef.current.diagnosis += 1;
     setPendingSbarSuggestion(null);
     setSuggestionsState({ vitals: null, diagnosis: null });
+    setSuggestionsLoading({ vitals: false, diagnosis: false });
+    setSuggestionsError({ vitals: null, diagnosis: null });
     suggestionsCacheRef.current = {};
-  }, [rrRevision, rrGate]);
+  }, [rrRevision, rrGate, summaryOxygenRevision]);
   const automaticSbarAttemptsRef = useRef<Set<string>>(new Set());
   const lastAutomaticSbarFingerprintRef = useRef<string | null>(null);
   const dictationUnavailableNotifiedRef = useRef(false);
@@ -1365,7 +1394,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     }
 
     try {
-      return generateSBARSummary(withoutNews2Vitals(values, news2Blocked), { maxCharsPerSection: 320 });
+      return generateSBARSummary(withoutNews2Vitals(values, news2Blocked), { maxCharsPerSection: 320, transientO2Fallback: summaryContext.transientO2Fallback });
     } catch {
       return manualDraft;
     }
@@ -1471,6 +1500,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     setPendingSbarSuggestion(nextPending);
     pendingRrRevision.current = rrGate.capture();
+    pendingOxygenRevision.current = summaryOxygenRevisionRef.current;
     setSbarAiError(null);
     setSbarHelperMessage(input.helperMessage);
 
@@ -1491,7 +1521,7 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   const applyPendingSbarSuggestion = () => {
-    if (!pendingSbarSuggestion || pendingRrRevision.current !== rrGate.capture()) return;
+    if (!pendingSbarSuggestion || pendingRrRevision.current !== rrGate.capture() || pendingOxygenRevision.current !== summaryOxygenRevisionRef.current) return;
 
     const { summary, fullText, mode } = pendingSbarSuggestion;
     form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
@@ -1520,6 +1550,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleRefineSbarWithAi = async () => {
     const token = rrGate.capture();
+    const oxygenToken = summaryOxygenRevisionRef.current;
     const values = withoutNews2Vitals(form.getValues(), news2Blocked);
     const draft = buildDraftSbar(values);
     if (!requireTraceableSbarAiContext(values)) {
@@ -1532,7 +1563,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
     try {
       const result = await refineSBARWithAIResult(values, draft);
-      if (!rrGate.isCurrent(token)) return;
+      if (!rrGate.isCurrent(token) || oxygenToken !== summaryOxygenRevisionRef.current) return;
       if (result.ok) {
         showPendingSbarSuggestion(values, {
           source: 'ai_refine_sbar',
@@ -1543,8 +1574,8 @@ export default function HandoverForm({ navigation, route }: Props) {
         return;
       }
 
-      const fallbackSummary = news2Blocked ? generateSBARSummary(values) : await getBestAvailableSummary(values, { useLocalRules: true });
-      if (!rrGate.isCurrent(token)) return;
+      const fallbackSummary = news2Blocked ? generateSBARSummary(values, summaryContext) : await getBestAvailableSummary(values, { useLocalRules: true, sbarOptions: summaryContext });
+      if (!rrGate.isCurrent(token) || oxygenToken !== summaryOxygenRevisionRef.current) return;
       showPendingSbarSuggestion(values, {
         source: 'ai_refine_sbar',
         mode: 'local_fallback',
@@ -1558,6 +1589,7 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   const handleGenerateSbarWithAi = async () => {
     const token = rrGate.capture();
+    const oxygenToken = summaryOxygenRevisionRef.current;
     const values = withoutNews2Vitals(form.getValues(), news2Blocked);
     if (!requireTraceableSbarAiContext(values)) {
       return;
@@ -1570,7 +1602,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     try {
       const freeText = buildSbarFreeText(values);
       const result = await generateSbarViaBackendResult(freeText, buildSbarContext(values), 'es');
-      if (!rrGate.isCurrent(token)) return;
+      if (!rrGate.isCurrent(token) || oxygenToken !== summaryOxygenRevisionRef.current) return;
 
       if (result.ok) {
         showPendingSbarSuggestion(values, {
@@ -1588,8 +1620,8 @@ export default function HandoverForm({ navigation, route }: Props) {
         return;
       }
 
-      const fallbackSummary = news2Blocked ? generateSBARSummary(values) : await getBestAvailableSummary(values, { useLocalRules: true });
-      if (!rrGate.isCurrent(token)) return;
+      const fallbackSummary = news2Blocked ? generateSBARSummary(values, summaryContext) : await getBestAvailableSummary(values, { useLocalRules: true, sbarOptions: summaryContext });
+      if (!rrGate.isCurrent(token) || oxygenToken !== summaryOxygenRevisionRef.current) return;
       showPendingSbarSuggestion(values, {
         source: 'ai_generate_sbar',
         mode: 'local_fallback',
@@ -1617,7 +1649,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     const provenance = t(
       isDemoSession ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance',
     );
-    return createDeterministicSbar(withoutNews2Vitals(values, news2Blocked), `${provenance}\n${t('handover.sbarLegalNotice')}`);
+    return createDeterministicSbar(withoutNews2Vitals(values, news2Blocked), `${provenance}\n${t('handover.sbarLegalNotice')}`, summaryContext);
   };
 
   const handleGenerateSbarSuggestion = () => {
@@ -1626,7 +1658,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       const values = form.getValues();
       const generated = createCurrentDeterministicSbar(values);
       const token = rrGate.capture();
-      const replace = () => { if (rrGate.isCurrent(token)) applyDeterministicSbar(generated, true); };
+      const oxygenToken = summaryOxygenRevisionRef.current;
+      const replace = () => { if (rrGate.isCurrent(token) && oxygenToken === summaryOxygenRevisionRef.current) applyDeterministicSbar(generated, true); };
       const currentWasModified =
         hasSbarContent(values) &&
         lastAutomaticSbarFingerprintRef.current !== getSbarFingerprint(values);
@@ -1654,11 +1687,11 @@ export default function HandoverForm({ navigation, route }: Props) {
   };
 
   useEffect(() => {
-    if (!news2Blocked) return;
+    if (!lastAutomaticSbarFingerprintRef.current) return;
     const values = form.getValues();
     if (lastAutomaticSbarFingerprintRef.current !== getSbarFingerprint(values)) return;
     applyDeterministicSbar(createCurrentDeterministicSbar(values), false);
-  }, [form, news2Blocked]);
+  }, [form, news2Blocked, summaryContext, summaryOxygenRevision]);
 
   useEffect(() => {
     const patientId = typeof patientIdValue === 'string' ? patientIdValue.trim() : '';
@@ -1678,6 +1711,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       const generated = createInitialDeterministicSbar(
         withoutNews2Vitals(values, news2Blocked),
         `${provenance}\n${t('handover.sbarLegalNotice')}`,
+        summaryContext,
       );
       if (!generated) return;
       const flags = { shouldDirty: false, shouldValidate: false };
@@ -1691,7 +1725,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     } catch {
       // The form remains fully usable when local summary generation cannot complete.
     }
-  }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue, news2Blocked]);
+  }, [demoPrefill, effectivePilotUnitId, form, isDemoSession, patientIdValue, news2Blocked, summaryContext]);
 
   const trimmedPatientId =
     typeof patientIdValue === 'string' ? patientIdValue.trim() || undefined : undefined;
@@ -1846,7 +1880,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       spo2: vitals.spo2,
       temperature: vitals.tempC,
       consciousness: vitals.avpu,
-      onOxygen: Boolean(oxygen.device || oxygen.flowLMin != null || oxygen.fio2 != null),
+      onOxygen: resolveSupplementalOxygen(oxygen, legacyOxygenRef.current),
     });
 
    const scores = compactNumberMap({
@@ -1892,27 +1926,33 @@ export default function HandoverForm({ navigation, route }: Props) {
   const requestSuggestions = async (section: 'vitals' | 'diagnosis') => {
     if (!aiSuggestionsEnabled) return;
     const token = rrGate.capture();
-    setSuggestionsError(null);
+    const oxygenToken = summaryOxygenRevisionRef.current;
+    const requestId = ++suggestionsRequestRef.current[section];
+    const isCurrent = () => rrGate.isCurrent(token) && oxygenToken === summaryOxygenRevisionRef.current && requestId === suggestionsRequestRef.current[section];
+    setSuggestionsError(prev => ({ ...prev, [section]: null }));
     const context = buildClinicalContext(section);
     const contextHash = JSON.stringify(context);
     const now = Date.now();
     const cacheEntry = suggestionsCacheRef.current[section];
     if (cacheEntry && cacheEntry.contextHash === contextHash && now - cacheEntry.timestamp < 15000) {
+      if (!isCurrent()) return;
       setSuggestionsState((prev) => ({ ...prev, [section]: cacheEntry.result }));
+      setSuggestionsLoading(prev => ({ ...prev, [section]: false }));
       return;
     }
-    setSuggestionsLoading(section);
+    setSuggestionsLoading(prev => ({ ...prev, [section]: true }));
     try {
       const result = await fetchInterventionsSuggestions(context);
-      if (!rrGate.isCurrent(token)) return;
+      if (!isCurrent()) return;
       setSuggestionsState((prev) => ({ ...prev, [section]: result }));
       suggestionsCacheRef.current[section] = { timestamp: now, contextHash, result };
     } catch (error: unknown) {
+      if (!isCurrent()) return;
       const netError = normalizeNetError(error);
       const ui = getUserFacingNetworkMessage(netError, { screen: 'HandoverForm', op: 'suggestions' });
-      setSuggestionsError(ui.message);
+      setSuggestionsError(prev => ({ ...prev, [section]: ui.message }));
     } finally {
-      setSuggestionsLoading(null);
+      if (isCurrent()) setSuggestionsLoading(prev => ({ ...prev, [section]: false }));
     }
   };
 
@@ -1937,7 +1977,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       const unitFromStore = normalizeUnitSelection(selectedUnitId, ALL_UNITS_OPTION);
       const unitEffective = unitFromForm ?? unitFromNav ?? unitFromStore ?? undefined;
       const riskBeforeSubmit = deriveRiskEvaluationFromValues(
-        news2Blocked ? undefined : values.vitals,
+        news2Blocked ? undefined : withTransientOxygen(values.vitals, () => legacyOxygenRef.current),
         values.braden,
         news2Blocked ? undefined : values.oxygenTherapy,
       );
@@ -1958,7 +1998,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       const medications = values.medications ?? [];
       const treatments = values.treatments ?? [];
       const medsText = values.meds;
-      const { hasOxygenValues, oxygenTherapy } = buildSubmissionOxygenTherapy(values.oxygenTherapy);
+      const { oxygenTherapy } = buildSubmissionOxygenTherapy(values.oxygenTherapy);
       if (audioUploadToFhir && values.audioUri) {
         setAudioUploadStatus('uploading');
         setAudioUploadError(null);
@@ -2114,7 +2154,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           temp: vitals.tempC,
           sbp: vitals.sbp,
           hr: vitals.hr,
-          o2: hasOxygenValues,
+          o2: resolveSupplementalOxygen(values.oxygenTherapy, legacyOxygenRef.current),
           avpu: vitals.avpu,
         };
         const breakdown = news2Blocked || !rrGate.isCurrent(submissionRrRevision) ? undefined : computeNEWS2(newsInput);
@@ -2416,7 +2456,7 @@ export default function HandoverForm({ navigation, route }: Props) {
               handleGenerateSbarWithAi={handleGenerateSbarWithAi}
               handleGenerateSbarSuggestion={handleGenerateSbarSuggestion}
               handleRefineSbarWithAi={handleRefineSbarWithAi}
-              pendingSbarSuggestionPreview={pendingSbarSuggestion && pendingRrRevision.current === rrRevision ? formatSbar(pendingSbarSuggestion.summary, 'es') : null}
+              pendingSbarSuggestionPreview={pendingSbarSuggestion && pendingRrRevision.current === rrRevision && pendingOxygenRevision.current === summaryOxygenRevision ? formatSbar(pendingSbarSuggestion.summary, 'es') : null}
               onAcceptPendingSbarSuggestion={applyPendingSbarSuggestion}
               onRejectPendingSbarSuggestion={rejectPendingSbarSuggestion}
               sbarHelperMessage={sbarHelperMessage}
@@ -2460,8 +2500,8 @@ export default function HandoverForm({ navigation, route }: Props) {
               vitalTrends={vitalTrends}
               aiSuggestionsEnabled={aiSuggestionsEnabled}
               suggestionsState={suggestionsState}
-              suggestionsLoading={suggestionsLoading}
-              suggestionsError={suggestionsError}
+              suggestionsLoading={suggestionsLoading.vitals ? 'vitals' : null}
+              suggestionsError={suggestionsError.vitals}
               requestSuggestions={requestSuggestions}
             />
           </CollapsibleSection>
@@ -2905,16 +2945,16 @@ export default function HandoverForm({ navigation, route }: Props) {
               <BotonPrimario
                 label="Sugerencias IA de cuidados"
                 onPress={() => requestSuggestions('diagnosis')}
-                disabled={suggestionsLoading === 'diagnosis'}
+                disabled={suggestionsLoading.diagnosis}
               />
             </View>
           ) : null}
           {aiSuggestionsEnabled ? (
             <ClinicalSuggestions
               suggestions={suggestionsState.diagnosis}
-              isLoading={suggestionsLoading === 'diagnosis'}
+              isLoading={suggestionsLoading.diagnosis}
               onRefresh={() => requestSuggestions('diagnosis')}
-              errorMessage={suggestionsError}
+              errorMessage={suggestionsError.diagnosis}
             />
           ) : null}
         </CollapsibleSection>
@@ -3057,6 +3097,3 @@ export default function HandoverForm({ navigation, route }: Props) {
     </FormProvider>
   );
 }
-
-
-

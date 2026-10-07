@@ -1,4 +1,4 @@
-import { formatSbar, generateSbarSummary } from '@/src/lib/summary';
+import { formatSbar, generateSbarSummary, type SbarOptions } from '@/src/lib/summary';
 import type { HandoverValues } from '@/src/validation/schemas';
 import type { SBARSummary } from '@/src/types/sbar';
 
@@ -34,8 +34,9 @@ export function getSbarFingerprint(values: HandoverValues): string {
 export function createDeterministicSbar(
   values: HandoverValues,
   provenanceNotice: string,
+  options: Pick<SbarOptions, 'transientO2Fallback'> = {},
 ): DeterministicSbar {
-  const summary = generateSbarSummary(values, { locale: 'es', maxCharsPerSection: 320 });
+  const summary = generateSbarSummary(values, { locale: 'es', maxCharsPerSection: 320, transientO2Fallback: options.transientO2Fallback });
   const formatted = formatSbar(summary, 'es');
   const fullText = provenanceNotice.trim()
     ? `${formatted}\n\n${provenanceNotice.trim()}`
@@ -54,6 +55,7 @@ export function createDeterministicSbar(
 export function createInitialDeterministicSbar(
   values: HandoverValues,
   provenanceNotice: string,
+  options: Pick<SbarOptions, 'transientO2Fallback'> = {},
 ): DeterministicSbar | null {
-  return hasSbarContent(values) ? null : createDeterministicSbar(values, provenanceNotice);
+  return hasSbarContent(values) ? null : createDeterministicSbar(values, provenanceNotice, options);
 }

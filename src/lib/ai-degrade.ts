@@ -1,4 +1,5 @@
 import { computeNEWS2 } from './news2';
+import { resolveSupplementalOxygen } from './oxygen';
 import { generateSBARSummary, type SbarOptions } from './summary';
 import type { SBARSummary } from '@/src/types/sbar';
 import type { HandoverFormData } from '@/src/validation/schemas';
@@ -78,7 +79,7 @@ function buildRiskSummary(handover: HandoverFormData): string | undefined {
   return `Riesgos: ${Array.from(labels).join(', ')}`;
 }
 
-function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
+function buildMinimalSummary(handover: HandoverFormData, options: SbarOptions = {}): SBARSummary {
   const diagnosis = resolveDiagnosis(handover);
   const news2 = handover.vitals
     ? computeNEWS2({
@@ -87,7 +88,7 @@ function buildMinimalSummary(handover: HandoverFormData): SBARSummary {
         temp: handover.vitals.tempC,
         sbp: handover.vitals.sbp,
         hr: handover.vitals.hr,
-        o2: Boolean(handover.oxygenTherapy),
+        o2: resolveSupplementalOxygen(handover.oxygenTherapy, options.transientO2Fallback),
         avpu: handover.vitals.avpu,
         scale2: false,
       })
@@ -128,7 +129,7 @@ export async function getBestAvailableSummary(
     try {
       return generateSBARSummary(handover, sbarOptions);
     } catch {
-      return buildMinimalSummary(handover);
+      return buildMinimalSummary(handover, sbarOptions);
     }
   })();
 
@@ -142,7 +143,7 @@ export async function getBestAvailableSummary(
   }
 
   if (useLocalRules) return draft;
-  return buildMinimalSummary(handover);
+  return buildMinimalSummary(handover, sbarOptions);
 }
 
 export const getDegradedSbarSummary = getBestAvailableSummary;

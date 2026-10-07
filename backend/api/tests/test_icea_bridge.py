@@ -1688,22 +1688,25 @@ class IceaBridgeServiceTests(TestCase):
 
         for remote_status, result_payload, root_payload, expected_status in scenarios:
             with self.subTest(remote_status=remote_status):
-                bridge_request = self._create_bridge_request_for_remote_payload(f'redacted-{remote_status}')
-
-                result = _apply_remote_payload(
-                    bridge_request,
-                    {
-                        **root_payload,
-                        'summary': {'rows_requested': 1, 'rows_scored': 0},
-                        'results': [
-                            {
-                                'row_id': f'window:bundle-bridge-redacted-{remote_status}',
-                                **result_payload,
-                            }
-                        ],
-                    },
-                    200,
-                )
+                with patch(
+                    'backend.api.icea_bridge_service.timezone.now',
+                    return_value=datetime.datetime(2026, 5, 10, 12, 0, tzinfo=datetime.timezone.utc),
+                ):
+                    bridge_request = self._create_bridge_request_for_remote_payload(f'redacted-{remote_status}')
+                    result = _apply_remote_payload(
+                        bridge_request,
+                        {
+                            **root_payload,
+                            'summary': {'rows_requested': 1, 'rows_scored': 0},
+                            'results': [
+                                {
+                                    'row_id': f'window:bundle-bridge-redacted-{remote_status}',
+                                    **result_payload,
+                                }
+                            ],
+                        },
+                        200,
+                    )
                 bridge_request.refresh_from_db()
                 serialized = serialize_bridge_request(bridge_request)
 
@@ -1726,6 +1729,8 @@ class IceaBridgeServiceTests(TestCase):
                 self.assertNotIn('99.0', json.dumps(serialized))
                 self.assertNotIn('41.0', json.dumps(serialized))
                 self.assertNotIn('0.52', json.dumps(serialized))
+                with self.assertRaises(AssertionError):
+                    self.assertNotIn('41.0', json.dumps({**serialized, 'scoreSummary': {'score': 41.0}}))
                 self.assertIn(
                     'score_summary_redacted_due_to_non_scoring_status',
                     {warning['code'] for warning in bridge_request.warnings_json},

@@ -26,6 +26,7 @@ import { listOfflineQueue, summarizePatientQueueState, type QueueItem, type Sync
 import { computePriority, computePriorityList, type PrioritizedPatient } from "@/src/lib/priority";
 import { buildPriorityUiModel, getPriorityToneStyles, hasActionablePrioritySignal, type PriorityUiTone } from "@/src/lib/priority-ui";
 import { buildPriorityInputs, normalizePatientListResponse } from "@/src/lib/patientListData";
+import { evaluateNews2Input, NEWS2_RR_MESSAGE, withoutNews2Vitals, type News2InputResult } from '@/src/lib/news2-input';
 import { normalizeNetError } from "@/src/lib/net-errors";
 import {
   ALL_UNITS_OPTION,
@@ -45,6 +46,11 @@ import { UnitExceptionHandover } from './handover/UnitExceptionHandover';
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/types/patientList";
+type PatientRow = PrioritizedPatient | {
+  patientId: string;
+  displayName: string;
+  news2State: Extract<News2InputResult<never>, { status: 'blocked' }>;
+};
 
 export const ALL_SPECIALTIES_OPTION = "all";
 function normalizeAuthorizedUnitIds(unitIds: readonly string[] | null | undefined): string[] {
@@ -622,8 +628,19 @@ export default function PatientList({ navigation }: Props) {
 
   const priorityInputs = useMemo(() => buildPriorityInputs(patients), [patients]);
 
-  const prioritizedPatients = useMemo<PrioritizedPatient[]>(() => priorityInputs.map(computePriority), [priorityInputs]);
-  const sortedByPriority = useMemo<PrioritizedPatient[]>(() => computePriorityList(priorityInputs), [priorityInputs]);
+  const priorityEntries = useMemo(() => priorityInputs.map(input => ({ input,
+    assessment: evaluateNews2Input(input.vitals.rr, () => computePriority(input)),
+  })), [priorityInputs]);
+  const prioritizedPatients = useMemo(() => priorityEntries.flatMap(({ assessment }) =>
+    assessment.status === 'calculated' ? [assessment.result] : []), [priorityEntries]);
+  const sortedByPriority = useMemo(() => computePriorityList(priorityEntries.flatMap(({ input, assessment }) =>
+    assessment.status === 'calculated' ? [input] : [])), [priorityEntries]);
+  const patientRows = useMemo<PatientRow[]>(() => priorityEntries.map(({ input, assessment }) =>
+    assessment.status === 'calculated' ? assessment.result : {
+      patientId: input.patientId, displayName: input.displayName, news2State: assessment,
+    }), [priorityEntries]);
+  const blockedPatients = useMemo(() => patientRows.filter(patient => 'news2State' in patient), [patientRows]);
+  const blockedPatientIds = useMemo(() => new Set(blockedPatients.map(patient => patient.patientId)), [blockedPatients]);
   const alertsByPatient = useMemo(() => {
     return patients.reduce<Record<string, ReturnType<typeof computeAlerts>>>((acc, patient) => {
       const source: HandoverAlertsSource = {
@@ -634,10 +651,10 @@ export default function PatientList({ navigation }: Props) {
         clinicalScales: (patient as any).clinicalScales,
       };
 
-      acc[patient.id] = computeAlerts(source);
+      acc[patient.id] = computeAlerts(withoutNews2Vitals(source, blockedPatientIds.has(patient.id)));
       return acc;
     }, {});
-  }, [patients]);
+  }, [blockedPatientIds, patients]);
   const priorityUiByPatientId = useMemo(() => {
     const patientsMap = new Map(patients.map((patient) => [patient.id, patient] as const));
     return prioritizedPatients.reduce((acc, patient) => {
@@ -655,7 +672,7 @@ export default function PatientList({ navigation }: Props) {
     [prioritizedPatients],
   );
   const effectiveSortByPriority = sortByPriorityOverride ?? actionablePriorityCount > 0;
-  const patientsForList = effectiveSortByPriority ? sortedByPriority : prioritizedPatients;
+  const patientsForList = effectiveSortByPriority ? [...sortedByPriority, ...blockedPatients] : patientRows;
   const priorityCounts = useMemo(
     () =>
       prioritizedPatients.reduce(
@@ -996,7 +1013,11 @@ export default function PatientList({ navigation }: Props) {
                   ) : null}
                 </View>
               ) : null}
-              <View style={styles.prioritySection}>
+              {'news2State' in item ? (
+                <Text accessibilityRole="alert" style={[styles.reasonText, { color: colors.text }]}>
+                  {NEWS2_RR_MESSAGE}
+                </Text>
+              ) : <View style={styles.prioritySection}>
                 <View style={styles.priorityRow}>
                   <PriorityBadge level={item.level} testID={`priority-badge-${item.patientId}`} />
                   {priorityUi?.omissionLabel
@@ -1022,7 +1043,7 @@ export default function PatientList({ navigation }: Props) {
                     {priorityUi.actionLabel}
                   </Text>
                 ) : null}
-              </View>
+              </View>}
               {alerts.length > 0 ? (
                 <View style={styles.alertChipRow}>
                   {hasCriticalAlert ? (
@@ -1453,8 +1474,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-
 
 
 

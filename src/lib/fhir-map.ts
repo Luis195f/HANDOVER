@@ -36,6 +36,7 @@ import type {
   PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
+import { isSupplementalOxygen } from './oxygen';
 import { getSpecialtyOverlayDefinition, getUnitProfileDefinition } from '../config/profiles';
 import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, FHIR_EXTENSION_URLS, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
 import {
@@ -681,6 +682,16 @@ const AVPU_MAP = {
   P: { code: SNOMED.avpuPain, display: 'Responds to pain' },
   U: { code: SNOMED.avpuUnresponsive, display: 'Unresponsive' },
 } as const;
+
+export function resolveAcvpu(value: unknown): keyof typeof AVPU_MAP | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalize = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+  const normalized = normalize(value);
+  const isState = (state: string): state is keyof typeof AVPU_MAP =>
+    Object.prototype.hasOwnProperty.call(AVPU_MAP, state);
+  return Object.keys(AVPU_MAP).filter(isState).find(state =>
+    [state, AVPU_MAP[state].code, AVPU_MAP[state].display].some(candidate => normalize(candidate) === normalized));
+}
 
 const isoDateTime = z
   .string()
@@ -1625,7 +1636,13 @@ export function mapDeviceUse(
 ): Array<Procedure | DeviceUseStatement | Device> {
   const optionsMerged = resolveOptions(options);
   if (!values.oxygenTherapy) return [];
+  const explicitlyCompleted = values.oxygenTherapy.status === 'completed';
   const parsed = OxygenTherapySchema.parse(values.oxygenTherapy);
+  if (!explicitlyCompleted && !isSupplementalOxygen({
+    device: parsed.device ?? parsed.deviceDisplay ?? parsed.deviceId,
+    flowLMin: parsed.flowLMin,
+    fio2: parsed.fio2,
+  })) return [];
   const subject = patientReference(values.patientId);
   const encounter = encounterReference(values.encounterId);
 
@@ -3594,4 +3611,3 @@ export const __test__ = {
   stableStringify,
   LOINC: TEST_LOINC,
 };
-

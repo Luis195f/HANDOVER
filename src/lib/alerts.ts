@@ -5,6 +5,8 @@ import { FALL_BASIC_ACTIONS, PRESSURE_ULCER_PREVENTION_ACTIONS } from '../config
 import type { RiskItem, RiskType } from '../types/handover';
 import type { HandoverFormData } from '../validation/schemas';
 import { computeNEWS2 } from './news2';
+import { selectNews2Temperature } from './news2-input';
+import { resolveSupplementalOxygen } from './oxygen';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 
@@ -137,6 +139,7 @@ export interface HandoverAlert {
 // ✅ Entrada flexible: el form actual (HandoverFormData) + opcional clinicalScales legacy
 export type HandoverAlertsSource = {
   vitals?: unknown;
+  oxygenTherapy?: HandoverFormData['oxygenTherapy'] | null;
   risks?: HandoverFormData['risks'];
   risksStructured?: RiskItem[];
   braden?: unknown;
@@ -148,7 +151,7 @@ const vitalsSchema = z
   .object({
     rr: z.number().optional(),
     spo2: z.number().optional(),
-    tempC: z.number().optional(),
+    tempC: z.number().nullish(),
     temp: z.number().optional(),
     sbp: z.number().optional(),
     hr: z.number().optional(),
@@ -167,7 +170,10 @@ function deriveRisksFromLegacy(risks?: HandoverFormData['risks']): RiskItem[] {
   return items;
 }
 
-function safeNews2ScoreFromVitals(vitalsValue: unknown): number | undefined {
+function safeNews2ScoreFromVitals(
+  vitalsValue: unknown,
+  oxygenTherapy: HandoverAlertsSource['oxygenTherapy'],
+): number | undefined {
   const parsed = vitalsSchema.safeParse(vitalsValue);
   if (!parsed.success) return undefined;
   const vitals = parsed.data;
@@ -180,10 +186,10 @@ function safeNews2ScoreFromVitals(vitalsValue: unknown): number | undefined {
   const breakdown = computeNEWS2({
     rr: vitals.rr,
     spo2: vitals.spo2,
-    temp: vitals.temp ?? vitals.tempC,
+    temp: selectNews2Temperature(vitals),
     sbp: vitals.sbp,
     hr: vitals.hr,
-    o2: vitals.o2,
+    o2: resolveSupplementalOxygen(oxygenTherapy, vitals.o2),
     avpu: vitals.avpu,
     scale2: vitals.scale2,
   });
@@ -211,7 +217,7 @@ export function computeAlerts(source: HandoverAlertsSource): HandoverAlert[] {
       ? source.risksStructured
       : deriveRisksFromLegacy(source.risks);
 
-  const news2 = safeNews2ScoreFromVitals(source.vitals);
+  const news2 = safeNews2ScoreFromVitals(source.vitals, source.oxygenTherapy);
 
   const bradenScore = (() => {
     const bradenAny = source.braden as any;

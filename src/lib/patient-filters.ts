@@ -6,6 +6,7 @@
 // - Desempate estable por name/id asc.
 
 import { computeNEWS2 } from "@/src/lib/news2";
+import { evaluateNews2Input, selectNews2Temperature, type News2InputResult } from "@/src/lib/news2-input";
 import type { VitalsSnapshot } from "@/src/types/handover";
 
 export type PatientLike = {
@@ -28,12 +29,15 @@ function normalize(s?: string) {
     .trim();
 }
 
-function scoreOf(p: PatientLike): number {
+export function resolvePatientNews2(patient: PatientLike): News2InputResult<{ score: number; source: 'news2' | 'latestNews2' | 'vitals' }> {
   // Preferencia explícita: news2 > latestNews2.score > cálculo por vitals
-  if (typeof p.news2 === "number") return p.news2;
-  const maybe = p.latestNews2?.score;
-  if (typeof maybe === "number") return maybe;
-  return computeNEWS2(p.vitals ?? {}).total;
+  if (typeof patient.news2 === "number") return { status: 'calculated', result: { score: patient.news2, source: 'news2' } };
+  const stored = patient.latestNews2?.score;
+  if (typeof stored === "number") return { status: 'calculated', result: { score: stored, source: 'latestNews2' } };
+  return evaluateNews2Input(patient.vitals?.rr, () => ({
+    score: computeNEWS2({ ...patient.vitals, temp: selectNews2Temperature(patient.vitals) }).total,
+    source: 'vitals',
+  }));
 }
 
 export function applyPatientFilters<T extends PatientLike>(
@@ -65,9 +69,11 @@ export function sortPatientsByNEWS2Desc<T extends PatientLike>(list: T[]): T[] {
   // 1) score desc
   // 2) tie-break por (name ?? id) asc
   return [...list].sort((a, b) => {
-    const sa = scoreOf(a);
-    const sb = scoreOf(b);
-    if (sb !== sa) return sb - sa;
+    const first = resolvePatientNews2(a);
+    const second = resolvePatientNews2(b);
+    if (first.status === 'blocked') return second.status === 'blocked' ? 0 : 1;
+    if (second.status === 'blocked') return -1;
+    if (second.result.score !== first.result.score) return second.result.score - first.result.score;
     const ka = normalize(a.name) || normalize(a.id);
     const kb = normalize(b.name) || normalize(b.id);
     return ka.localeCompare(kb);

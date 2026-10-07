@@ -1,5 +1,6 @@
 // Fase 3 – Bloque B (SBAR): generación de resúmenes SBAR a partir de HandoverFormData.
 import { computeNEWS2 } from './news2';
+import { resolveSupplementalOxygen } from './oxygen';
 import type {
   FluidBalanceInfo,
   ContingencyPlan,
@@ -21,6 +22,7 @@ export type SbarSummary = SBARSummary;
 export interface SbarOptions {
   locale?: 'es' | 'en';
   maxCharsPerSection?: number;
+  transientO2Fallback?: boolean;
 }
 
 const NEWS2_BAND_LABEL: Record<ReturnType<typeof computeNEWS2>['band'], string> = {
@@ -136,13 +138,6 @@ function formatOxygenTherapy(oxygen?: OxygenTherapy): string | undefined {
   if (typeof oxygen.flowLMin === 'number') pieces.push(`${oxygen.flowLMin} L/min`);
   if (typeof oxygen.fio2 === 'number') pieces.push(`FiO2 ${oxygen.fio2}%`);
   return pieces.length ? `Oxígeno: ${pieces.join(' | ')}` : undefined;
-}
-
-function isSupplementalOxygen(oxygen?: OxygenTherapy): boolean {
-  if (!oxygen) return false;
-  const device = oxygen.device?.toLowerCase().trim();
-  const hasDevice = device && device !== 'aire ambiente';
-  return Boolean(hasDevice || oxygen.flowLMin != null || oxygen.fio2 != null);
 }
 
 function collectRiskLabels(risks?: RiskFlags, structured: RiskItem[] = []): string[] {
@@ -288,7 +283,7 @@ function bestNursingDx(h: HandoverFormData): string | undefined {
   return getDxNursingText(h.dxNursing);
 }
 
-function buildSituation(data: HandoverFormData): string {
+function buildSituation(data: HandoverFormData, options: SbarOptions): string {
   const diagnosis =
     getDxMedicalDisplay(data.dxMedical) ??
     bestNursingDx(data) ??
@@ -307,7 +302,7 @@ function buildSituation(data: HandoverFormData): string {
         temp: vitals.tempC,
         sbp: vitals.sbp,
         hr: vitals.hr,
-        o2: isSupplementalOxygen((data as any).oxygenTherapy),
+        o2: resolveSupplementalOxygen(data.oxygenTherapy, options.transientO2Fallback),
         avpu: vitals.avpu,
         scale2: false,
       })
@@ -344,7 +339,7 @@ function buildBackground(data: HandoverFormData): string {
   return background || 'Antecedentes relevantes recogidos en la historia clínica, revisar para más detalles.';
 }
 
-function buildAssessment(data: HandoverFormData): string {
+function buildAssessment(data: HandoverFormData, options: SbarOptions): string {
   const vitals = data.vitals;
   const news2 = vitals
     ? computeNEWS2({
@@ -353,7 +348,7 @@ function buildAssessment(data: HandoverFormData): string {
         temp: vitals.tempC,
         sbp: vitals.sbp,
         hr: vitals.hr,
-        o2: isSupplementalOxygen((data as any).oxygenTherapy),
+        o2: resolveSupplementalOxygen(data.oxygenTherapy, options.transientO2Fallback),
         avpu: vitals.avpu,
         scale2: false,
       })
@@ -420,9 +415,9 @@ export function generateSBARSummary(handover: HandoverFormData, options: SbarOpt
   const maxChars = options.maxCharsPerSection;
 
   const raw: SBARSummary = {
-    situation: buildSituation(handover),
+    situation: buildSituation(handover, options),
     background: buildBackground(handover),
-    assessment: buildAssessment(handover),
+    assessment: buildAssessment(handover, options),
     recommendation: buildRecommendation(handover),
   };
 
@@ -456,7 +451,6 @@ export function generateSbarText(data: HandoverFormData, options: SbarOptions = 
   const summary = generateSbarSummary(data, options);
   return formatSbar(summary, options.locale ?? 'es');
 }
-
 
 
 
