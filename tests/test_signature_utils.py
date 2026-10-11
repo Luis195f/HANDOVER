@@ -198,6 +198,40 @@ def test_canonicalization_preserves_clinician_signature_lists():
 
     assert "clinician-signature-base64" in canonical_json
 
+
+def test_canonicalization_includes_clinical_signature_object_but_excludes_transport(tmp_path):
+    settings = generate_ec_keypair(tmp_path)
+    bundle = minimal_bundle()
+    bundle["signature"] = {
+        "type": [{"system": "urn:handover:signature-type", "code": "signature"}],
+        "when": "2026-10-08T10:00:00Z",
+        "who": {"identifier": {"value": "nurse-out"}},
+        "sigFormat": "image/png",
+        "data": "synthetic-png",
+    }
+    original = copy.deepcopy(bundle)
+    signed = sig.sign_bundle(bundle, user_id="nurse-out", settings=settings)
+    assert signed is not None
+    assert "synthetic-png" in sig.canonical_bundle_payload(bundle)[0]
+    assert bundle == original
+    changed = copy.deepcopy(bundle)
+    changed["signature"]["data"] = "altered-png"
+    assert sig.canonical_bundle_payload(changed)[2] != signed.bundle_hash
+    transport = copy.deepcopy(bundle)
+    transport["signature"] = signed.fhir_signature
+    assert "synthetic-png" not in sig.canonical_bundle_payload(transport)[0]
+
+
+def test_unknown_or_contradictory_signature_metadata_fails_closed():
+    bundle = minimal_bundle()
+    bundle["signature"] = {
+        "type": [{"system": "urn:handover:signature-type", "code": "signature"}],
+        "when": "2026-10-08T10:00:00Z", "who": {"reference": "Practitioner/synthetic"},
+        "sigFormat": "ecdsa-p256-sha256", "data": "synthetic",
+    }
+    with pytest.raises(sig.SignatureVerificationError):
+        sig.canonical_bundle_payload(bundle)
+
 def test_production_requires_cryptography(monkeypatch, tmp_path):
     settings = generate_ec_keypair(tmp_path)
 
@@ -216,7 +250,7 @@ def test_verification_reports_useful_errors_without_sensitive_data(tmp_path):
     assert result is not None
 
     bad_bundle = copy.deepcopy(bundle)
-    bad_bundle["signature"] = {"data": "invalid-base64"}
+    bad_bundle["signature"] = {**result.fhir_signature, "data": "invalid-base64"}
 
     with pytest.raises(sig.SignatureVerificationError, match="base64 válido") as exc_info:
         sig.verify_bundle_signature(bad_bundle, settings=settings)

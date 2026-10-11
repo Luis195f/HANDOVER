@@ -1,6 +1,13 @@
 {
   "resourceType": "Bundle",
   "type": "transaction",
+  "signature": {
+    "type": [{ "system": "urn:handover:signature-type", "code": "signature" }],
+    "when": "2026-10-08T10:00:00Z",
+    "who": { "identifier": { "value": "nurse-synthetic" } },
+    "sigFormat": "image/png",
+    "data": "c3ludGhldGljLXBuZw=="
+  },
   "entry": [
     {
       "fullUrl": "urn:uuid:patient-synthetic-1",

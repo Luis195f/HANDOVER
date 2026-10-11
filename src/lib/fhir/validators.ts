@@ -367,11 +367,23 @@ const bundleEntrySchema = z
   })
   .catchall(z.unknown());
 
+export const signatureSchema = z
+  .object({
+    type: z.array(codingSchema).min(1),
+    when: isoDateTime,
+    who: z.object({ reference: z.string().optional(), identifier: z.object({ value: z.string() }).catchall(z.unknown()).optional() }).catchall(z.unknown()),
+    onBehalfOf: z.record(z.string(), z.unknown()).optional(),
+    sigFormat: z.string().optional(),
+    data: z.string().optional(),
+  })
+  .catchall(z.unknown());
+
 const bundleSchema = z
   .object({
     resourceType: z.literal('Bundle'),
     type: z.literal('transaction'),
     entry: z.array(bundleEntrySchema).min(1),
+    signature: signatureSchema.optional(),
   })
   .catchall(z.unknown());
 

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildHandoverBundle } from '../fhir-map';
+import { buildFhirBundleFromFormData, buildHandoverBundle, validateBundle as validateMappedBundle } from '../fhir-map';
+import { validateBundle, validateBundleWithAjv } from '../fhir-validation';
+import { zHandover } from '../../validation/schemas';
 import { TEST_SYSTEMS, TEST_VITAL_CODES } from './fhir-map.test-constants';
 
 type Entry = { fullUrl?: string; resource?: any };
@@ -37,6 +39,63 @@ const findObsEntryByLoinc = (bundle: any, code: string) =>
     e?.resource?.resourceType === 'Observation' &&
     e?.resource?.code?.coding?.some((c: any) => c.system === TEST_SYSTEMS.LOINC && String(c.code) === String(code))
   );
+
+describe('FHIR R4 Bundle.signature cardinality', () => {
+  const outgoing = {
+    userId: 'nurse-out', fullName: 'Nurse Out', unitId: 'icu-a',
+    signedAt: '2026-10-08T10:00:00Z', imageBase64: 'synthetic-png', method: 'session' as const,
+  };
+  const incoming = {
+    userId: 'nurse-in', fullName: 'Nurse In', unitId: 'icu-a',
+    signedAt: '2026-10-08T10:01:00Z', method: 'session' as const,
+  };
+  const options = { now: () => '2026-10-08T10:01:00Z' };
+  const form = (signed: boolean) => zHandover.parse({
+    patientId: 'synthetic',
+    administrativeData: { unit: 'ICU', staffIn: ['Nurse In'], staffOut: ['Nurse Out'],
+      shiftStart: '2026-10-08T09:00:00Z', shiftEnd: '2026-10-08T10:01:00Z', shiftType: 'Mañana' },
+    dxMedical: { system: 'http://snomed.info/sct', code: '61277005', display: 'Asma' },
+    bedsideChecklist: { patientIdentityConfirmed: true, allergiesReviewed: true,
+      linesAndDevicesChecked: true, medicationPlanReviewed: true,
+      safetyMeasuresApplied: true, questionsAnswered: true },
+    signatures: signed ? { outgoing, incoming } : undefined,
+  });
+
+  it.each(['values', 'form'] as const)('%s emits one intact Signature object and both attesters', source => {
+    const input = { patientId: 'synthetic', signatures: { outgoing, incoming } };
+    const original = structuredClone(input);
+    const bundle = source === 'values'
+      ? buildHandoverBundle(input, options)
+      : buildFhirBundleFromFormData(form(true), options);
+    expect(Array.isArray(bundle.signature)).toBe(false);
+    expect(bundle.signature).toMatchObject({
+      type: [{ system: 'urn:handover:signature-type', code: 'signature' }],
+      when: outgoing.signedAt, who: { identifier: { value: outgoing.userId } },
+      onBehalfOf: { identifier: { value: outgoing.unitId } }, sigFormat: 'image/png', data: outgoing.imageBase64,
+    });
+    const composition = bundle.entry.find(entry => entry.resource.resourceType === 'Composition')?.resource;
+    expect(composition?.attester).toHaveLength(2);
+    expect(input).toEqual(original);
+    expect(validateBundle(bundle)).toEqual({ isValid: true, errors: [] });
+    expect(validateBundleWithAjv(bundle)).toEqual({ isValid: true, errors: [] });
+  });
+
+  it('accepts an unsigned Bundle and rejects every array cardinality in effective validators', () => {
+    const unsigned = buildFhirBundleFromFormData(form(false), options);
+    expect(unsigned.signature).toBeUndefined();
+    expect(validateMappedBundle(unsigned).ok).toBe(true);
+    expect(validateBundle(unsigned).isValid).toBe(true);
+    expect(validateBundleWithAjv(unsigned)).toEqual({ isValid: true, errors: [] });
+    const signed = buildFhirBundleFromFormData(form(true), options);
+    for (const signature of [[], [signed.signature], [signed.signature, signed.signature]]) {
+      const invalid = structuredClone(signed);
+      Object.assign(invalid, { signature });
+      expect(validateMappedBundle(invalid).ok).toBe(false);
+      expect(validateBundle(invalid).isValid).toBe(false);
+      expect(validateBundleWithAjv(invalid).isValid).toBe(false);
+    }
+  });
+});
 
 describe('Bundle — coherencia Composition.section.entry ↔ entry reference', () => {
   const patientId = 'pat-001';
