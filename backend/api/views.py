@@ -2199,18 +2199,29 @@ class BundleView(AuthenticatedAPIView):
             )
             return Response({"errors": minimal_errors, "code": "INVALID_BUNDLE"}, status=422)
 
+        def reject_signature(message: str) -> Response:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=400,
+                resource_id=_get_bundle_identifier_value(payload_obj) or getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "SIGNATURE_ERROR"},
+            )
+            return Response({"errors": [message]}, status=400)
+
         signature_node = payload_obj.get("signature")
         if isinstance(signature_node, list):
             if len(signature_node) != 1:
-                return Response({"errors": ["Ambiguous Bundle.signature"]}, status=400)
+                return reject_signature("Ambiguous Bundle.signature")
             signature_node = signature_node[0]
             if not isinstance(signature_node, dict):
-                return Response({"errors": ["Invalid Bundle.signature"]}, status=400)
+                return reject_signature("Invalid Bundle.signature")
         try:
             if classify_bundle_signature(signature_node) == "transport" and isinstance(payload_obj.get("signature"), list):
-                return Response({"errors": ["Ambiguous Bundle.signature"]}, status=400)
+                return reject_signature("Ambiguous Bundle.signature")
         except SignatureVerificationError:
-            return Response({"errors": ["Invalid Bundle.signature"]}, status=400)
+            return reject_signature("Invalid Bundle.signature")
         normalized_payload = copy.deepcopy(payload_obj)
         if isinstance(normalized_payload.get("signature"), list):
             normalized_payload["signature"] = normalized_payload["signature"][0]
