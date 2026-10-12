@@ -28,6 +28,7 @@ const bundle = {
 async function loadClient() {
   vi.resetModules();
   process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://fhir.test/api';
+  process.env.EXPO_PUBLIC_API_BASE_URL = 'https://handover.test';
   const mod = await import('@/src/lib/fhir-client');
   return mod;
 }
@@ -66,7 +67,7 @@ describe('postBundle', () => {
 
     const result = await postBundle(bundle, { token: 'token-123' });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://fhir.test/api/Bundle', expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith('https://handover.test/api/fhir/transaction', expect.any(Object));
     expect(result).toEqual({
       ok: true,
       status: 201,

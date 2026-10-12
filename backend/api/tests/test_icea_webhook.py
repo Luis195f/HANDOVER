@@ -379,7 +379,8 @@ class IceaWebhookIntegrationTests(TestCase):
             HTTP_IDEMPOTENCY_KEY="tx-icea-002",
         )
 
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'transaction_unknown')
         self.assertEqual(IceaOutboundEvent.objects.count(), 0)
         self.assertEqual(mock_icea_post.call_args_list, [])
 
@@ -565,6 +566,7 @@ class IceaWebhookIntegrationTests(TestCase):
         self.assertEqual(response_a.status_code, 201)
         self.assertEqual(response_b.status_code, 201)
         self.assertEqual(IceaOutboundEvent.objects.filter(request_id="tx-icea-006").count(), 1)
+        self.assertEqual(mock_fhir_post.call_count, 1)
         self.assertEqual(mock_icea_post.call_count, 1)
 
     @patch.dict(

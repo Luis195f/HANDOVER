@@ -68,10 +68,10 @@ Esto esta probado en:
 
 ## 4) Relacion con la transaccion clinica
 
-Cuando `POST /api/fhir/transaction` termina con exito:
+Antes del POST upstream, `HandoverBundleRecord` conserva una intención cifrada `pending/unknown`; esta no está disponible para ETL. Cuando la transacción queda confirmada:
 
 - se resuelve un `request_id`;
-- se persiste `HandoverBundleRecord` por `request_id`;
+- el registro durable pasa a `succeeded` por `request_id`;
 - se guarda `bundle_id`, `patient_id`, `unit_id`, `bundle_json`, `expires_at`;
 - luego se disparan side effects ICEA.
 

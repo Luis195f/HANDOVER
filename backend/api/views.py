@@ -16,7 +16,7 @@ from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
-from django.db import IntegrityError, OperationalError, connection
+from django.db import DatabaseError, IntegrityError, OperationalError, connection
 from django.db.models import CharField, Count, FloatField, Sum
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Lower
@@ -57,7 +57,15 @@ from backend.api.icea import (
 )
 from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
-from backend.api.icea_transaction import persist_handover_bundle_record, persist_successful_transaction_icea_side_effects
+from backend.api.icea_transaction import (
+    TransactionIntentConflict,
+    claim_transaction_intent,
+    has_transaction_intent,
+    persist_handover_bundle_record,
+    persist_successful_transaction_icea_side_effects,
+    transition_transaction_intent,
+)
+from backend.audit.utils import canonical_json
 from backend.audit.models import AuditEvent
 from backend.api.etl_access import get_claims_from_request as _get_claims_from_request
 from backend.api.etl_permissions import ClientCredentialsEtlPermission
@@ -498,6 +506,83 @@ def _resolve_patient_unit_scope(
 
 def _post_transaction_to_fhir(*args, **kwargs):
     return httpx.post(*args, **kwargs)
+
+
+def _transaction_unknown_response() -> Response:
+    return Response(
+        {"code": "transaction_unknown", "detail": "FHIR transaction outcome requires reconciliation."},
+        status=503,
+    )
+
+
+def _reconcile_transaction_record(record: HandoverBundleRecord, request: HttpRequest) -> dict[str, Any] | None:
+    if record.bundle_json is None:
+        return None
+    try:
+        bundle = _resolve_persisted_handover_bundle(record)
+        compositions = [
+            entry.get('resource') for entry in bundle.get('entry', [])
+            if isinstance(entry, dict) and isinstance(entry.get('resource'), dict)
+            and entry['resource'].get('resourceType') == 'Composition'
+        ]
+        if len(compositions) != 1:
+            return None
+        marker = compositions[0].get('identifier')
+        if not isinstance(marker, dict) or marker.get('system') != 'urn:handover:transaction-composition':
+            return None
+        marker_value = marker.get('value')
+        if not isinstance(marker_value, str) or not marker_value:
+            return None
+        headers = get_fhir_headers(request)
+        base = FHIR_BASE.rstrip('/')
+        capability = httpx.get(f'{base}/metadata', headers=headers, timeout=15)
+        if capability.status_code != 200:
+            return None
+        statement = capability.json()
+        supported = any(
+            resource.get('type') == 'Composition'
+            and any(param.get('name') == 'identifier' for param in resource.get('searchParam', []))
+            for rest in statement.get('rest', []) if rest.get('mode') == 'server'
+            for resource in rest.get('resource', [])
+        )
+        if not supported:
+            return None
+        search = httpx.get(
+            f'{base}/Composition', headers=headers, timeout=15,
+            params={'identifier': f"{marker['system']}|{marker_value}", '_count': 2},
+        )
+        if search.status_code != 200:
+            return None
+        result = search.json()
+        entries = result.get('entry') if isinstance(result, dict) else None
+        if result.get('resourceType') != 'Bundle' or result.get('total') != 1 or not isinstance(entries, list) or len(entries) != 1:
+            return None
+        found = entries[0].get('resource') if isinstance(entries[0], dict) else None
+        if not isinstance(found, dict) or found.get('resourceType') != 'Composition' or found.get('identifier') != marker:
+            return None
+        location = f"Composition/{found['id']}" if isinstance(found.get('id'), str) and found['id'] else None
+        if location is None:
+            return None
+        return {'resourceType': 'Bundle', 'type': 'transaction-response', 'entry': [
+            {'response': {'status': '200 OK', 'location': location}},
+        ]}
+    except (ClinicalBundleStorageError, httpx.HTTPError, ValueError, TypeError, AttributeError, KeyError):
+        return None
+
+
+def _complete_transaction_side_effects(
+    request: HttpRequest, *, bundle: dict[str, Any], user_id: str, unit_id: str,
+) -> None:
+    _create_audit_event_for_transaction(request, bundle=bundle, user_id=user_id, unit_id=unit_id)
+    _emit_handover_closure_attestation_event(request, bundle=bundle, user_id=user_id, unit_id=unit_id)
+    persist_successful_transaction_icea_side_effects(
+        bundle=bundle,
+        request=request,
+        outbox_callback=enqueue_icea_outbound_event_for_transaction,
+        persist_bundle_record=_persist_handover_bundle_record,
+        snapshot_callback=ensure_pipeline_snapshot_from_bundle,
+        bridge_callback=enqueue_icea_bridge_request_for_transaction,
+    )
 
 def _local_registry_not_ready_response() -> Response:
     return Response(
@@ -2248,6 +2333,7 @@ class BundleView(AuthenticatedAPIView):
             # no strict: usar payload tal cual (ya pasó validación mínima)
             bundle = normalized_payload
 
+        payload_hash = hashlib.sha256(canonical_json(bundle)).hexdigest()
         signature_error = _ensure_bundle_signature(bundle, user_id, original_bundle=payload_obj)
         if signature_error:
             _emit_bundle_audit(
@@ -2291,7 +2377,11 @@ class BundleView(AuthenticatedAPIView):
         bundle_meta["tag"] = tags
         bundle["meta"] = bundle_meta
 
-        validation_response = _validate_remotely(request, bundle, "Bundle")
+        try:
+            prior_intent = has_transaction_intent(bundle=bundle, request=request)
+        except DatabaseError:
+            return Response({'code': 'transaction_intent_unavailable'}, status=503)
+        validation_response = None if prior_intent else _validate_remotely(request, bundle, "Bundle")
         if validation_response:
             _emit_bundle_audit(
                 request=request,
@@ -2306,23 +2396,73 @@ class BundleView(AuthenticatedAPIView):
         headers = get_fhir_headers(request)
         headers["Prefer"] = "return=representation"
 
+        try:
+            record, created = claim_transaction_intent(
+                bundle=bundle, request=request, unit_id=resolved_unit_id, payload_hash=payload_hash,
+            )
+        except TransactionIntentConflict:
+            _emit_bundle_audit(
+                request=request, payload_obj=bundle, status='fail', http_status=409,
+                resource_id=_get_bundle_identifier_value(bundle) or getattr(request, 'audit_request_id', ''),
+                meta={'errorCode': 'IDEMPOTENCY_CONFLICT'},
+            )
+            return Response({'code': 'idempotency_conflict', 'detail': 'Transaction key conflicts with prior content.'}, status=409)
+        except DatabaseError:
+            return Response({'code': 'transaction_intent_unavailable'}, status=503)
+
+        if not created:
+            if record.status in (HandoverBundleRecord.STATUS_PENDING, HandoverBundleRecord.STATUS_UNKNOWN):
+                reconciled = _reconcile_transaction_record(record, request)
+                if reconciled is None:
+                    return _transaction_unknown_response()
+                try:
+                    recovered = transition_transaction_intent(
+                        record, status=HandoverBundleRecord.STATUS_SUCCEEDED,
+                        response=reconciled, response_status=200,
+                    )
+                except DatabaseError:
+                    return _transaction_unknown_response()
+                if recovered:
+                    stored_bundle = _resolve_persisted_handover_bundle(record)
+                    _complete_transaction_side_effects(
+                        request, bundle=stored_bundle, user_id=user_id, unit_id=resolved_unit_id,
+                    )
+                return Response(reconciled, status=200)
+            if record.response_json is None or record.response_status is None:
+                return Response({'code': 'transaction_result_unavailable'}, status=503)
+            try:
+                cached_response = decrypt_bundle_document(
+                    record.response_json, encryption_metadata=record.encryption_metadata,
+                )
+            except ClinicalBundleStorageError:
+                return Response({'code': 'transaction_result_unavailable'}, status=503)
+            return Response(cached_response, status=record.response_status)
+
+        try:
+            ready_to_send = transition_transaction_intent(record, status=HandoverBundleRecord.STATUS_UNKNOWN)
+        except DatabaseError:
+            return Response({'code': 'transaction_intent_unavailable'}, status=503)
+        if not ready_to_send:
+            return _transaction_unknown_response()
+
         fhir_tx_url = FHIR_BASE.rstrip("/")
         try:
             resp = _post_transaction_to_fhir(fhir_tx_url, json=bundle, headers=headers, timeout=60)
         except httpx.HTTPError as exc:
-            logger.error("No se pudo contactar FHIR server (tx) (%s): %s", fhir_tx_url, exc)
+            logger.warning("FHIR transaction outcome unknown: %s", exc.__class__.__name__)
             _emit_bundle_audit(
                 request=request,
                 payload_obj=bundle,
                 status="fail",
                 http_status=503,
                 resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
-                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+                meta={"errorCode": "TRANSACTION_UNKNOWN"},
             )
-            return Response({"errors": ["No se pudo contactar al servidor FHIR."]}, status=503)
+            return _transaction_unknown_response()
 
         if resp.status_code >= 400:
-            meta = {"errorCode": "FHIR_VALIDATION_ERROR"} if (resp.status_code == 422 or resp.status_code >= 500) else None
+            uncertain = resp.status_code >= 500 or resp.status_code in (408, 429)
+            meta = {'errorCode': 'TRANSACTION_UNKNOWN' if uncertain else 'FHIR_VALIDATION_ERROR'}
             _emit_bundle_audit(
                 request=request,
                 payload_obj=bundle,
@@ -2332,9 +2472,21 @@ class BundleView(AuthenticatedAPIView):
                 meta=meta,
             )
             outcome_payload = _extract_operation_outcome_payload(resp)
+            if uncertain:
+                return _transaction_unknown_response()
+            rejection = outcome_payload or {"errors": ["FHIR server rejected the request."]}
+            try:
+                rejected = transition_transaction_intent(
+                    record, status=HandoverBundleRecord.STATUS_FAILED,
+                    response=rejection, response_status=resp.status_code,
+                )
+            except DatabaseError:
+                return _transaction_unknown_response()
+            if not rejected:
+                return _transaction_unknown_response()
             if outcome_payload is not None:
                 return Response(outcome_payload, status=resp.status_code)
-            return Response({"errors": ["FHIR server rejected the request."]}, status=resp.status_code)
+            return Response(rejection, status=resp.status_code)
 
         try:
             payload = resp.json()
@@ -2345,9 +2497,21 @@ class BundleView(AuthenticatedAPIView):
                 status="fail",
                 http_status=502,
                 resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
-                meta={"errorCode": "FHIR_VALIDATION_ERROR"},
+                meta={"errorCode": "TRANSACTION_UNKNOWN"},
             )
-            return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
+            return _transaction_unknown_response()
+
+        if not isinstance(payload, dict) or payload.get('resourceType') != 'Bundle' or payload.get('type') != 'transaction-response':
+            return _transaction_unknown_response()
+        try:
+            confirmed = transition_transaction_intent(
+                record, status=HandoverBundleRecord.STATUS_SUCCEEDED,
+                response=payload, response_status=resp.status_code,
+            )
+        except DatabaseError:
+            return _transaction_unknown_response()
+        if not confirmed:
+            return _transaction_unknown_response()
 
         _emit_bundle_audit(
             request=request,
@@ -2356,25 +2520,8 @@ class BundleView(AuthenticatedAPIView):
             http_status=resp.status_code,
             resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
         )
-        _create_audit_event_for_transaction(
-            request,
-            bundle=bundle,
-            user_id=user_id,
-            unit_id=resolved_unit_id,
-        )
-        _emit_handover_closure_attestation_event(
-            request,
-            bundle=bundle,
-            user_id=user_id,
-            unit_id=resolved_unit_id,
-        )
-        persist_successful_transaction_icea_side_effects(
-            bundle=bundle,
-            request=request,
-            outbox_callback=enqueue_icea_outbound_event_for_transaction,
-            persist_bundle_record=_persist_handover_bundle_record,
-            snapshot_callback=ensure_pipeline_snapshot_from_bundle,
-            bridge_callback=enqueue_icea_bridge_request_for_transaction,
+        _complete_transaction_side_effects(
+            request, bundle=bundle, user_id=user_id, unit_id=resolved_unit_id,
         )
         return Response(payload, status=resp.status_code)
 
@@ -2392,14 +2539,13 @@ class HandoverEtlReadView(AuthenticatedAPIView):
 
     def get(self, request: HttpRequest, bundle_id: str) -> HttpResponse:
         record = (
-            HandoverBundleRecord.objects.filter(bundle_id=bundle_id)
+            HandoverBundleRecord.objects.filter(bundle_id=bundle_id, status=HandoverBundleRecord.STATUS_SUCCEEDED)
             .only("id", "bundle_id", "request_id", "bundle_json", "encryption_metadata", "expires_at", "created_at")
             .first()
         )
         if not record:
             return Response({"detail": "Not found"}, status=404)
         if record.expires_at <= timezone.now():
-            HandoverBundleRecord.objects.filter(id=record.id).delete()
             return Response({"detail": "Not found"}, status=404)
 
         try:

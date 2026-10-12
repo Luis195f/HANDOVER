@@ -91,11 +91,13 @@ def _stored_bundle_unavailable_response(bridge_request: IceaBridgeRequest) -> Re
 def _active_handover_record_for_bridge_request(bridge_request: IceaBridgeRequest) -> HandoverBundleRecord | None:
     record = HandoverBundleRecord.objects.filter(
         request_id=bridge_request.request_id,
+        status=HandoverBundleRecord.STATUS_SUCCEEDED,
         expires_at__gt=timezone.now(),
     ).first()
     if record is None:
         record = HandoverBundleRecord.objects.filter(
             bundle_id=bridge_request.bundle_id,
+            status=HandoverBundleRecord.STATUS_SUCCEEDED,
             expires_at__gt=timezone.now(),
         ).first()
     return record

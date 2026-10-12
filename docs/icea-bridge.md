@@ -14,7 +14,7 @@ Principios aplicados:
 ## Flujo real
 
 1. `POST /api/fhir/transaction` confirma primero la transaccion clinica contra FHIR.
-2. Solo despues de ese exito, HANDOVER dispara side effects tecnicos best-effort: outbox ICEA+, persistencia local `HandoverBundleRecord`, snapshot tecnico y bridge.
+2. La intención `HandoverBundleRecord` se persiste antes del POST FHIR; solo después de confirmar éxito se habilita para ETL y se disparan side effects técnicos best-effort: outbox ICEA+, snapshot técnico y bridge. `pending/unknown` no es éxito clínico.
 3. Si falla cualquiera de esas costuras tecnicas post-FHIR, HANDOVER conserva el exito clinico y degrada de forma honesta la trazabilidad/analitica derivada.
 4. Si `ENABLE_ICEA_BRIDGE=true`, HANDOVER crea o actualiza un `IceaBridgeRequest`.
 5. Se construye el payload analitico v1 en `backend/api/icea_payload_mapper.py`.

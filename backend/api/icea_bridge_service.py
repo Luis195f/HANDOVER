@@ -320,6 +320,12 @@ def enqueue_icea_bridge_request_for_bundle_record(
     scoring_mode: str,
     force_delivery: bool = False,
 ) -> IceaBridgeRequest | None:
+    if (
+        record.status != HandoverBundleRecord.STATUS_SUCCEEDED
+        or record.expires_at <= timezone.now()
+        or record.bundle_json is None
+    ):
+        return None
     settings = load_icea_bridge_settings()
     if (
         not settings.enabled

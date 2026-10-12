@@ -554,7 +554,9 @@ def build_dashboard_summary_payload(
     recent_cutoff = now - timezone.timedelta(hours=24)
 
     snapshots = IceaPipelineSnapshot.objects.all()
-    records = HandoverBundleRecord.objects.all()
+    records = HandoverBundleRecord.objects.filter(
+        status=HandoverBundleRecord.STATUS_SUCCEEDED, expires_at__gt=now, bundle_json__isnull=False,
+    )
     events = IceaPipelineEvent.objects.all()
     outbox = IceaOutboundEvent.objects.all()
     bridge = IceaBridgeRequest.objects.all()

@@ -7,6 +7,7 @@ const PILOT_GRADE_SUITES = [
   'tests/lib/auth.spec.ts',
   'tests/lib/queue.spec.ts',
   'tests/lib/sync.spec.ts',
+  'tests/fhir-client.spec.ts',
   'tests/lib/sync-validation.test.ts',
   'tests/security/auth.spec.ts',
   'tests/security/auth.refresh.spec.ts',

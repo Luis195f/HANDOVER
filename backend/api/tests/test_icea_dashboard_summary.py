@@ -208,6 +208,24 @@ class IceaDashboardSummaryContractTests(TestCase):
         self.assertEqual(payload["units"][0]["handoverTiming"][0]["sectionId"], "sbar")
         self.assertGreaterEqual(len(payload["alerts"]), 2)
 
+    def test_summary_counts_only_confirmed_handover_records(self):
+        for status in ('succeeded', 'pending', 'unknown'):
+            HandoverBundleRecord.objects.create(
+                bundle_id=f'bundle-dashboard-{status}', patient_id=f'pat-dashboard-{status}',
+                unit_id='icu-a', request_id=f'req-dashboard-{status}',
+                bundle_json=build_dashboard_clinical_bundle(), status=status,
+                expires_at=HandoverBundleRecord.default_expiry(),
+            )
+        HandoverBundleRecord.objects.create(
+            bundle_id='bundle-dashboard-expired', patient_id='', unit_id='icu-a',
+            request_id='req-dashboard-expired', bundle_json=None, status='succeeded',
+            expires_at=timezone.now() - timezone.timedelta(days=1),
+        )
+        self._auth(['supervisor'])
+        response = self.client.get(self.url, {'unitId': 'icu-a'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['units'][0]['totalHandovers'], 1)
+
     def test_summary_forbids_requested_unit_outside_supervisor_scope(self):
         self._auth(["supervisor"], unit_ids=("icu-a",))
 

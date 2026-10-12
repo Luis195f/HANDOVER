@@ -115,7 +115,7 @@ class SensitiveBundleStorageTests(TestCase):
             self.bundle,
         )
 
-    def test_expired_bundle_is_deleted_before_etl_read(self):
+    def test_expired_bundle_is_hidden_before_etl_read(self):
         encrypted_bundle, metadata = encrypt_bundle_document(self.bundle)
         record = HandoverBundleRecord.objects.create(
             bundle_id='bundle-sensitive-001',
@@ -131,14 +131,14 @@ class SensitiveBundleStorageTests(TestCase):
         response = self.client.get(self.read_url)
 
         self.assertEqual(response.status_code, 404)
-        self.assertFalse(HandoverBundleRecord.objects.filter(id=record.id).exists())
+        self.assertTrue(HandoverBundleRecord.objects.filter(id=record.id).exists())
 
 
 class SensitiveRetentionPruningTests(TestCase):
     def test_prune_sensitive_records_removes_expired_and_terminal_artifacts_only(self):
         old = timezone.now() - timedelta(days=3)
         encrypted_bundle, metadata = encrypt_bundle_document(build_icea_bundle(bundle_id='bundle-prune-001'))
-        HandoverBundleRecord.objects.create(
+        record = HandoverBundleRecord.objects.create(
             bundle_id='bundle-prune-001',
             patient_id='pat-prune-001',
             unit_id='icu-a',
@@ -228,6 +228,11 @@ class SensitiveRetentionPruningTests(TestCase):
         call_command('prune_sensitive_records', bundle_days=1, technical_days=1)
 
         self.assertFalse(HandoverBundleRecord.objects.filter(request_id='req-prune-001').exists())
+        tombstone = HandoverBundleRecord.objects.get(id=record.pk)
+        self.assertIsNone(tombstone.bundle_json)
+        self.assertIsNone(tombstone.response_json)
+        self.assertEqual(tombstone.patient_id, '')
+        self.assertEqual(tombstone.unit_id, '')
         self.assertFalse(IceaOutboundEvent.objects.filter(id=delivered.id).exists())
         self.assertTrue(IceaOutboundEvent.objects.filter(id=retry.id).exists())
         self.assertFalse(IceaBridgeRequest.objects.filter(id=scored.id).exists())

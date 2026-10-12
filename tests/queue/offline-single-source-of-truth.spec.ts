@@ -69,7 +69,7 @@ describe('offline sync single source of truth', () => {
 
     const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-sync-index' });
     const storedBundle = ((await queue.listOfflineQueue())[0]?.payload as { bundle?: unknown } | undefined)?.bundle;
-    (client.postBundle as unknown as Mock).mockResolvedValue({ ok: true, status: 200 });
+    (client.postBundle as unknown as Mock).mockResolvedValue({ ok: true, status: 200, json: { resourceType: 'Bundle', type: 'transaction-response' } });
 
     const first = await syncIndex.flushQueue({
       fhirBaseUrl: 'https://example.test',
@@ -97,7 +97,7 @@ describe('offline sync single source of truth', () => {
     expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
   });
 
-  it('sync/index consumes a 409 idempotent replay as delivered and removes the canonical queue item', async () => {
+  it('sync/index retains an unverified 409 conflict in the canonical queue', async () => {
     const queue = await import('@/src/lib/queue');
     const sync = await import('@/src/lib/sync');
     const syncIndex = await import('@/src/lib/sync/index');
@@ -115,10 +115,10 @@ describe('offline sync single source of truth', () => {
       backoff: { retries: 0, minMs: 0, maxMs: 0 },
     });
 
-    expect(result).toEqual({ processed: 1, remaining: 0, outcome: 'success', status: undefined });
-    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
+    expect(result).toEqual({ processed: 0, remaining: 1, outcome: 'client-error', status: 409 });
+    expect(syncIndex.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
     expect(client.postBundle).toHaveBeenCalledTimes(1);
-    expect(await queue.listOfflineQueue()).toHaveLength(0);
+    expect((await queue.listOfflineQueue())[0]?.syncStatus).toBe('error');
     expect(await queue.__getRawTxQueueRows()).toHaveLength(0);
   });
 
@@ -192,7 +192,7 @@ describe('offline sync single source of truth', () => {
 
     (client.postBundle as unknown as Mock).mockImplementationOnce(async () => {
       await inFlight;
-      return { ok: true, status: 200 };
+      return { ok: true, status: 200, json: { resourceType: 'Bundle', type: 'transaction-response' } };
     });
 
     const flushA = sync.flushSyncQueue({

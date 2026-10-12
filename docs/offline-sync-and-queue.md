@@ -6,9 +6,9 @@
 ## Queue and synchronization
 - `src/lib/queue.ts` persists bundles in SQLite alongside retry metadata on supported native Expo runtimes. Expo Web intentionally uses the in-memory fallback: enqueue/reconnect/replay works during the active tab session, but reloading or closing the tab can lose pending items.
 - `handover_offline_queue` is the canonical operational queue for clinical handover bundles. `tx_queue` remains only as a legacy compatibility path and must not be treated as the UI/sync source of truth for handover runtime state.
-- `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses and treats `409/412` as already-delivered duplicates.
+- `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses. Unverified `409/412` conflicts remain in the queue.
 - The mobile SQLite route is implemented, but persistence across a real app close/reopen has not been manually verified for the August 2026 synthetic demo correction. Session replay evidence must not be presented as proof of app-close durability.
-- Operational success evidence is strict: HANDOVER only transitions a bundle to `synced` after an explicit remote `2xx` response or an idempotent-accept contract already recognized by the repo (`409/412` in the current FHIR replay path). Local disappearance, cleanup, or malformed payloads without a clinical `bundle` are not success evidence and are retained as queue errors instead.
+- Operational success evidence is strict: HANDOVER only transitions a bundle to `synced` after a confirmed backend `2xx` or an explicitly attested duplicate result. `503 transaction_unknown`, unverified `409/412`, local disappearance, cleanup and malformed payloads are not success evidence.
 - Storage is encrypted by default; versioned client configuration no longer admite un flag público para desactivar el cifrado offline.
   - Each item keeps `firstEnqueuedAt`, `lastAttemptAt`, and `attemptCount`/`attempts` to compute retry windows.
   - A maximum number of attempts is enforced (`EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`, default 3). Items that exceed the limit are marked with `syncStatus="error"`.
@@ -36,7 +36,7 @@
 ## Canonical queue invariants
 - Local persistence for handover bundles is `handover_offline_queue` in `src/lib/queue.ts`, with encrypted payload-at-rest and plaintext metadata limited to non-PHI control fields.
 - Queue status is explicit and finite: `pending`, `inFlight`, `error`, `synced`. The canonical runtime in `src/lib/sync.ts` is the only active writer of replay status transitions.
-- Replay is safe by construction: canonical sends reuse the persisted payload, keep idempotency headers stable (`txId` or queue item id), and treat `409/412` as delivered evidence instead of duplicate writes.
+- Canonical sends reuse the persisted payload and keep the idempotency header stable (`txId` or queue item id). The backend durable-intent contract and its limits are described in `docs/fhir-transaction-idempotency.md`; unverified `409/412` are not delivered evidence.
 - Auth replay is fail-closed: `401` pauses the engine and requires a fresh bearer before resuming, while `403` is preserved as a terminal auth failure on the queue item instead of degrading into generic network/server retry paths.
 - Deduplication is based on stable identity (`buildOfflineQueueId`) so the same handover bundle does not fork into multiple queue rows across retry/reopen flows.
 

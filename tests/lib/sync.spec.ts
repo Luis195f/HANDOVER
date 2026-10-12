@@ -333,7 +333,7 @@ describe('sync engine state machine', () => {
     expect(item?.errorStatus).toBe(422);
   });
 
-  it.each([409, 412])('treats HTTP %s as explicit idempotent acceptance in the default sender', async (status) => {
+  it.each([409, 412])('keeps HTTP %s conflicts rather than assuming delivery', async (status) => {
     postBundleMock.mockResolvedValue({ ok: false, status, body: {} });
 
     await createOfflineQueueItem({
@@ -349,7 +349,9 @@ describe('sync engine state machine', () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(postBundleMock).toHaveBeenCalled();
-    expect(await listOfflineQueue()).toHaveLength(0);
+    const [item] = await listOfflineQueue();
+    expect(item?.syncStatus).toBe('error');
+    expect(item?.errorStatus).toBe(status);
   });
 });
 
@@ -380,7 +382,7 @@ describe('offline encryption integration', () => {
 
   it('encrypts stored payloads but sends decrypted JSON when encryption is enabled', async () => {
     process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'false';
-    postBundleMock.mockResolvedValue({ ok: true, status: 200 });
+    postBundleMock.mockResolvedValue({ ok: true, status: 200, json: { resourceType: 'Bundle', type: 'transaction-response' } });
 
     await createOfflineQueueItem({ payload: { bundle, txId: 'enc-sync' }, patientId: 'pat-encrypted' });
     const originalList = queueModule.listOfflineQueue;
@@ -414,7 +416,7 @@ describe('offline encryption integration', () => {
 
   it('sends decrypted JSON when encryption is disabled', async () => {
     process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
-    postBundleMock.mockResolvedValue({ ok: true, status: 200 });
+    postBundleMock.mockResolvedValue({ ok: true, status: 200, json: { resourceType: 'Bundle', type: 'transaction-response' } });
 
     await createOfflineQueueItem({ payload: { bundle, txId: 'plain-sync' }, patientId: 'pat-plain' });
     const originalList = queueModule.listOfflineQueue;

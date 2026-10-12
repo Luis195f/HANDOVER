@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import hmac
 import uuid
+from hashlib import sha256
 from typing import Any, Callable
 
 from django.conf import settings
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import HttpRequest
 
 from backend.api.clinical_storage import encrypt_bundle_document
@@ -16,6 +19,78 @@ from backend.api.models import HandoverBundleRecord
 
 
 logger = logging.getLogger(__name__)
+
+
+class TransactionIntentConflict(Exception):
+    pass
+
+
+def intent_digest(kind: str, value: str) -> str:
+    material = f"handover-intent:{kind}:{value}".encode('utf-8')
+    return hmac.new(settings.SECRET_KEY.encode('utf-8'), material, sha256).hexdigest()
+
+
+def has_transaction_intent(*, bundle: dict[str, Any], request: HttpRequest) -> bool:
+    request_id = _extract_request_id(request)
+    bundle_id = _extract_bundle_identifier(bundle, request, request_id=request_id)
+    return HandoverBundleRecord.objects.filter(
+        Q(request_id__in=[request_id, f"retained:{intent_digest('request', request_id)}"])
+        | Q(bundle_id__in=[bundle_id, f"retained:{intent_digest('bundle', bundle_id)}"])
+    ).exists()
+
+
+def claim_transaction_intent(
+    *, bundle: dict[str, Any], request: HttpRequest, unit_id: str, payload_hash: str,
+) -> tuple[HandoverBundleRecord, bool]:
+    request_id = _extract_request_id(request)
+    patient_id = _extract_patient_id_from_bundle(bundle)
+    encrypted_bundle, encryption_metadata = encrypt_bundle_document(bundle)
+    defaults = {
+        'bundle_id': _extract_bundle_identifier(bundle, request, request_id=request_id),
+        'patient_id': patient_id,
+        'unit_id': unit_id,
+        'bundle_json': encrypted_bundle,
+        'encryption_metadata': {**encryption_metadata, 'retention_days': settings.HANDOVER_BUNDLE_RETENTION_DAYS},
+        'expires_at': HandoverBundleRecord.default_expiry(),
+        'status': HandoverBundleRecord.STATUS_PENDING,
+        'payload_hash': payload_hash,
+        'patient_scope_hash': intent_digest('patient', patient_id),
+        'unit_scope_hash': intent_digest('unit', unit_id),
+    }
+    retained_id = f"retained:{intent_digest('request', request_id)}"
+    record = HandoverBundleRecord.objects.filter(request_id=retained_id).first()
+    created = False
+    if record is None:
+        retained_bundle_id = f"retained:{intent_digest('bundle', defaults['bundle_id'])}"
+        if HandoverBundleRecord.objects.filter(bundle_id=retained_bundle_id).exists():
+            raise TransactionIntentConflict
+        try:
+            record, created = HandoverBundleRecord.objects.get_or_create(request_id=request_id, defaults=defaults)
+        except IntegrityError as exc:
+            raise TransactionIntentConflict from exc
+    if not created and (
+        not record.payload_hash
+        or record.payload_hash != payload_hash
+        or (record.patient_scope_hash or intent_digest('patient', record.patient_id)) != defaults['patient_scope_hash']
+        or (record.unit_scope_hash or intent_digest('unit', record.unit_id)) != defaults['unit_scope_hash']
+    ):
+        raise TransactionIntentConflict
+    return record, created
+
+
+def transition_transaction_intent(
+    record: HandoverBundleRecord, *, status: str, response: dict[str, Any] | None = None,
+    response_status: int | None = None,
+) -> bool:
+    allowed = (
+        (HandoverBundleRecord.STATUS_PENDING,) if status == HandoverBundleRecord.STATUS_UNKNOWN
+        else (HandoverBundleRecord.STATUS_PENDING, HandoverBundleRecord.STATUS_UNKNOWN)
+    )
+    updates: dict[str, Any] = {'status': status}
+    if response is not None:
+        updates['response_json'], _ = encrypt_bundle_document(response)
+        updates['response_status'] = response_status
+    return HandoverBundleRecord.objects.filter(pk=record.pk, status__in=allowed).update(**updates) == 1
 
 
 def _extract_request_id(request: HttpRequest) -> str:
