@@ -1,4 +1,5 @@
 import os
+import copy
 import pathlib
 import sys
 from unittest.mock import patch
@@ -12,6 +13,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 from rest_framework.test import APIClient
 
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response
+from backend.api.icea_payload_mapper import _actors, _bundle_signatures, _clinical_reference_datetime, _unit_from_bundle
 
 
 def test_audit_event_with_dual_signatures():
@@ -69,6 +71,8 @@ def test_audit_event_with_dual_signatures():
 
     assert response.status_code == 200
     mock_fhir_post.assert_called_once()
+    assert isinstance(mock_fhir_post.call_args.kwargs["json"]["signature"], dict)
+    assert isinstance(bundle["signature"], list)
     mock_audit_post.assert_called_once()
 
     audit_payload = mock_audit_post.call_args.kwargs["json"]
@@ -84,6 +88,32 @@ def test_audit_event_with_dual_signatures():
     ]
     assert signature_status == ["outgoingSigned;incomingSigned"]
     assert "pat-sign-001" not in str(audit_payload)
+
+
+def test_clinical_signature_object_and_historical_list_preserve_unit_actor_and_date():
+    signature = {
+        "type": [{"system": "urn:handover:signature-type", "code": "signature"}],
+        "sigFormat": "image/png", "data": "synthetic-png",
+        "when": "2026-03-10T11:00:00Z",
+        "who": {"identifier": {"value": "nurse-out"}},
+        "onBehalfOf": {"identifier": {"value": "icu-a"}},
+    }
+    for node in (signature, [signature]):
+        bundle = {"signature": copy.deepcopy(node)}
+        original = copy.deepcopy(bundle)
+        assert _unit_from_bundle(bundle, [], {}) == "icu-a"
+        assert _actors(bundle, None, {})["primaryNurseId"] == "nurse-out"
+        assert _clinical_reference_datetime(
+            bundle=bundle, composition=None, encounter=None, window_start=None, window_end=None,
+        ).isoformat() == "2026-03-10T11:00:00+00:00"
+        assert bundle == original
+    historical = {"signature": [signature, {**signature, "who": {"identifier": {"value": "nurse-in"}}}]}
+    assert len(_bundle_signatures(historical)) == 2
+    assert _actors(historical, None, {})["coSignerIds"] == ["nurse-in"]
+    assert _bundle_signatures({"signature": {
+        "type": [{"system": "urn:iso-astm:E1762-95:2013", "code": "1.2.840.10065.1.12.1.1"}],
+        "sigFormat": "ecdsa-p256-sha256", "data": "synthetic",
+    }}) == []
 
 
 def test_audit_event_normalizes_reference_attester_and_keeps_legacy_clinical_pair_with_extra_professional_attesters():

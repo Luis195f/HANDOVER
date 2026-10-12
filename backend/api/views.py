@@ -1,3 +1,4 @@
+import copy
 import datetime
 import hashlib
 import json
@@ -31,6 +32,7 @@ from backend.signature import (
     SignatureSettings,
     SignatureOperationError,
     SignatureVerificationError,
+    classify_bundle_signature,
     load_settings,
     record_signature_audit,
     sign_bundle,
@@ -793,13 +795,16 @@ def _create_audit_event_for_transaction(
 
 def _bundle_signature_list(bundle: Dict[str, Any]) -> list[Dict[str, Any]]:
     signature_node = bundle.get("signature")
-    if not isinstance(signature_node, list):
-        return []
-    return [item for item in signature_node if isinstance(item, dict)]
+    if isinstance(signature_node, dict):
+        return [signature_node]
+    return [item for item in signature_node if isinstance(item, dict)] if isinstance(signature_node, list) else []
 
 
 def _bundle_has_clinician_signature(bundle: Dict[str, Any]) -> bool:
-    return any(isinstance(item.get("data"), str) and item.get("data").strip() for item in _bundle_signature_list(bundle))
+    return any(
+        classify_bundle_signature(item) == "clinical" and isinstance(item.get("data"), str) and item["data"].strip()
+        for item in _bundle_signature_list(bundle)
+    )
 
 
 def _normalize_actor_reference(reference: Any) -> str | None:
@@ -925,7 +930,8 @@ def _attester_record(attester: Dict[str, Any] | None) -> Dict[str, str] | None:
 
 
 def _bundle_has_transport_signature(bundle: Dict[str, Any]) -> bool:
-    return isinstance(bundle.get("signature"), dict)
+    signature_node = bundle.get("signature")
+    return isinstance(signature_node, dict) and classify_bundle_signature(signature_node) == "transport"
 
 
 def _strip_transport_signature(bundle: Dict[str, Any]) -> None:
@@ -947,7 +953,7 @@ def _bundle_is_final_handover(bundle: Dict[str, Any]) -> bool:
     return False
 
 
-def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Optional[Response]:
+def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None, *, original_bundle: Dict[str, Any] | None = None) -> Optional[Response]:
     if _bundle_is_final_handover(bundle):
         outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle, user_id=user_id)
         outgoing_actor = _attester_actor_id(outgoing_attester)
@@ -966,7 +972,7 @@ def _ensure_bundle_signature(bundle: Dict[str, Any], user_id: str | None) -> Opt
 
     if _bundle_has_transport_signature(bundle):
         try:
-            verification = verify_bundle_signature(bundle, settings=SIGNATURE_SETTINGS)
+            verification = verify_bundle_signature(original_bundle or bundle, settings=SIGNATURE_SETTINGS)
         except SignatureVerificationError:
             return Response({"errors": ["Invalid signature"]}, status=400)
         except SignatureOperationError:
@@ -2193,10 +2199,37 @@ class BundleView(AuthenticatedAPIView):
             )
             return Response({"errors": minimal_errors, "code": "INVALID_BUNDLE"}, status=422)
 
+        def reject_signature(message: str) -> Response:
+            _emit_bundle_audit(
+                request=request,
+                payload_obj=payload_obj,
+                status="fail",
+                http_status=400,
+                resource_id=_get_bundle_identifier_value(payload_obj) or getattr(request, "audit_request_id", ""),
+                meta={"errorCode": "SIGNATURE_ERROR"},
+            )
+            return Response({"errors": [message]}, status=400)
+
+        signature_node = payload_obj.get("signature")
+        if isinstance(signature_node, list):
+            if len(signature_node) != 1:
+                return reject_signature("Ambiguous Bundle.signature")
+            signature_node = signature_node[0]
+            if not isinstance(signature_node, dict):
+                return reject_signature("Invalid Bundle.signature")
+        try:
+            if classify_bundle_signature(signature_node) == "transport" and isinstance(payload_obj.get("signature"), list):
+                return reject_signature("Ambiguous Bundle.signature")
+        except SignatureVerificationError:
+            return reject_signature("Invalid Bundle.signature")
+        normalized_payload = copy.deepcopy(payload_obj)
+        if isinstance(normalized_payload.get("signature"), list):
+            normalized_payload["signature"] = normalized_payload["signature"][0]
+
         # ✅ Validación strict SOLO si está activado.
         if HANDOVER_FHIR_VALIDATION_MODE == "strict":
             try:
-                bundle_obj = Bundle.model_validate(payload_obj)  # Pydantic v2
+                bundle_obj = Bundle.model_validate(normalized_payload)  # Pydantic v2
                 bundle = bundle_obj.model_dump(exclude_none=True)
             except Exception:
                 _emit_bundle_audit(
@@ -2213,9 +2246,9 @@ class BundleView(AuthenticatedAPIView):
                 )
         else:
             # no strict: usar payload tal cual (ya pasó validación mínima)
-            bundle = payload_obj
+            bundle = normalized_payload
 
-        signature_error = _ensure_bundle_signature(bundle, user_id)
+        signature_error = _ensure_bundle_signature(bundle, user_id, original_bundle=payload_obj)
         if signature_error:
             _emit_bundle_audit(
                 request=request,

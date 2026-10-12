@@ -6,6 +6,7 @@
   "properties": {
     "resourceType": { "const": "Bundle" },
     "type": { "type": "string" },
+    "signature": { "$ref": "#/definitions/Signature" },
     "entry": {
       "type": "array",
       "items": {
@@ -41,6 +42,19 @@
   },
   "additionalProperties": true,
   "definitions": {
+    "Signature": {
+      "type": "object",
+      "required": ["type", "when", "who"],
+      "properties": {
+        "type": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/Coding" } },
+        "when": { "type": "string" },
+        "who": { "type": "object" },
+        "onBehalfOf": { "type": "object" },
+        "sigFormat": { "type": "string" },
+        "data": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
     "Coding": {
       "type": "object",
       "required": ["system", "code"],

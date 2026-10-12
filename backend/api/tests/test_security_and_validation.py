@@ -4,10 +4,12 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from django.test.utils import override_settings
 from rest_framework.test import APIClient
 
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response
+from backend.audit.models import AuditEvent
 from backend.signature import SignatureVerificationError
 
 
@@ -152,7 +154,7 @@ def test_invalid_payload_returns_422_with_valid_auth():
 def test_final_bundle_without_clinician_signature_returns_400():
     client = _authorized_client()
     unsigned_final = dict(FINAL_BUNDLE_WITH_SIGNATURE)
-    unsigned_final["signature"] = []
+    unsigned_final.pop("signature")
 
     response = _post_fhir(client, unsigned_final)
 
@@ -212,6 +214,145 @@ def test_final_bundle_accepts_normalized_reference_for_incoming_attestation(
 
     assert response.status_code == 200
     assert response.json()["type"] == "transaction-response"
+
+
+@patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
+@patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_final_bundle_preserves_clinical_signature_object_and_both_attesters(
+    mock_fhir_post, _mock_audit, _mock_side_effects,
+):
+    client = _authorized_client()
+    bundle = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    bundle["signature"] = {
+        **bundle["signature"][0],
+        "type": [{"system": "urn:handover:signature-type", "code": "signature"}],
+        "sigFormat": "image/png",
+    }
+    original = copy.deepcopy(bundle)
+    mock_fhir_post.return_value = build_fhir_response(status_code=200)
+
+    response = _post_fhir(client, bundle)
+
+    assert response.status_code == 200
+    sent = mock_fhir_post.call_args.kwargs["json"]
+    assert sent["signature"] == original["signature"]
+    assert len(sent["entry"][1]["resource"]["attester"]) == 2
+    assert bundle == original
+
+
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_transport_signature_cannot_replace_clinical_evidence(mock_fhir_post):
+    bundle = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    bundle["signature"] = {
+        "type": [{"system": "urn:iso-astm:E1762-95:2013", "code": "1.2.840.10065.1.12.1.1"}],
+        "when": "2026-03-10T11:00:00Z",
+        "who": {"identifier": {"value": "nurse-1"}},
+        "sigFormat": "ecdsa-p256-sha256",
+        "data": "synthetic-transport",
+    }
+    response = _post_fhir(_authorized_client(), bundle)
+    assert response.status_code == 400
+    assert response.json()["errors"] == ["Final handover bundle requires outgoing attestation evidence."]
+    mock_fhir_post.assert_not_called()
+
+
+@patch("backend.api.views._post_transaction_to_fhir")
+def test_ambiguous_or_multiple_legacy_signatures_never_reach_fhir(mock_fhir_post):
+    client = _authorized_client()
+    mock_fhir_post.return_value = build_fhir_response(status_code=200)
+    for signature in (
+        [],
+        [FINAL_BUNDLE_WITH_SIGNATURE["signature"][0]] * 2,
+        [{**FINAL_BUNDLE_WITH_SIGNATURE["signature"][0], "sigFormat": "unknown"}],
+    ):
+        bundle = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+        bundle["signature"] = signature
+        response = _post_fhir(client, bundle)
+        assert response.status_code == 400
+    mock_fhir_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("signature", "errors"),
+    [
+        ([], ["Ambiguous Bundle.signature"]),
+        ([FINAL_BUNDLE_WITH_SIGNATURE["signature"][0]] * 2, ["Ambiguous Bundle.signature"]),
+        (["invalid"], ["Invalid Bundle.signature"]),
+        ([{
+            "type": [{"system": "urn:iso-astm:E1762-95:2013", "code": "1.2.840.10065.1.12.1.1"}],
+            "sigFormat": "ecdsa-p256-sha256", "data": "secret-transport-signature",
+        }], ["Ambiguous Bundle.signature"]),
+        ({"type": [{"code": "unknown"}], "sigFormat": "image/png"}, ["Invalid Bundle.signature"]),
+        ({**FINAL_BUNDLE_WITH_SIGNATURE["signature"][0], "sigFormat": "unknown"}, ["Invalid Bundle.signature"]),
+        ("invalid", ["Invalid Bundle.signature"]),
+    ],
+)
+def test_rejected_signature_shape_records_one_minimized_audit_without_side_effects(signature, errors, caplog):
+    bundle = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    bundle["signature"] = copy.deepcopy(signature)
+    original = copy.deepcopy(bundle)
+    with (
+        patch("backend.api.views._post_transaction_to_fhir") as mock_fhir_post,
+        patch("backend.api.views.httpx.post") as mock_http_post,
+        patch("backend.api.views.persist_successful_transaction_icea_side_effects") as mock_side_effects,
+        patch("backend.api.views._persist_handover_bundle_record") as mock_persist,
+        patch("backend.api.views.enqueue_icea_outbound_event_for_transaction") as mock_enqueue,
+    ):
+        response = _post_fhir(_authorized_client(), bundle)
+    assert response.status_code == 400
+    assert response.json()["errors"] == errors
+    assert bundle == original
+    mock_fhir_post.assert_not_called()
+    mock_http_post.assert_not_called()
+    mock_side_effects.assert_not_called()
+    mock_persist.assert_not_called()
+    mock_enqueue.assert_not_called()
+    events = list(AuditEvent.objects.filter(event_type="fhir_transaction"))
+    assert len(events) == 1
+    event = events[0]
+    assert event.user_sub == "auth0|test-user"
+    assert event.status == "fail"
+    assert event.http_status == 400
+    assert event.meta["errorCode"] == "SIGNATURE_ERROR"
+    assert event.payload_hash and event.payload_size
+    recorded = json.dumps(event.meta, ensure_ascii=False)
+    assert "pat-test-001" not in recorded
+    assert "secret-transport-signature" not in recorded
+    assert FINAL_BUNDLE_WITH_SIGNATURE["signature"][0]["data"] not in recorded
+    assert "secret-transport-signature" not in caplog.text
+    assert "secret-transport-signature" not in json.dumps(response.json())
+
+
+@pytest.mark.django_db
+def test_previously_audited_signature_rejection_remains_single_event():
+    bundle = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
+    bundle.pop("signature")
+    with patch("backend.api.views._post_transaction_to_fhir") as mock_fhir_post:
+        response = _post_fhir(_authorized_client(), bundle)
+    assert response.status_code == 400
+    assert response.json()["errors"] == ["Final handover bundle requires outgoing attestation evidence."]
+    events = list(AuditEvent.objects.filter(event_type="fhir_transaction"))
+    assert len(events) == 1
+    assert events[0].meta["errorCode"] == "SIGNATURE_ERROR"
+    mock_fhir_post.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_valid_legacy_signature_retains_one_success_audit():
+    with (
+        patch("backend.api.views._post_transaction_to_fhir", return_value=build_fhir_response(status_code=200)) as mock_fhir_post,
+        patch("backend.api.views._create_audit_event_for_transaction"),
+        patch("backend.api.views.persist_successful_transaction_icea_side_effects"),
+    ):
+        response = _post_fhir(_authorized_client(), copy.deepcopy(VALID_BUNDLE))
+    assert response.status_code == 200
+    mock_fhir_post.assert_called_once()
+    events = list(AuditEvent.objects.filter(event_type="fhir_transaction"))
+    assert len(events) == 1
+    assert events[0].status == "success"
+    assert "errorCode" not in events[0].meta
 
 
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
@@ -306,6 +447,7 @@ def test_invalid_transport_signature_returns_400(
     client = _authorized_client()
     transport_signed = dict(VALID_BUNDLE)
     transport_signed["signature"] = {
+            "type": [{"system": "urn:iso-astm:E1762-95:2013", "code": "1.2.840.10065.1.12.1.1"}],
         "when": "2026-03-10T11:00:00Z",
         "data": "invalid-signature",
         "sigFormat": "ecdsa-p256-sha256",
@@ -409,7 +551,7 @@ def test_transaction_allows_admin_without_unit_claims_when_bundle_unit_is_resolv
 def test_later_final_composition_still_requires_clinician_signature():
     client = _authorized_client()
     unsigned_final = copy.deepcopy(FINAL_BUNDLE_WITH_SIGNATURE)
-    unsigned_final['signature'] = []
+    unsigned_final.pop('signature')
     unsigned_final['entry'].insert(
         1,
         {

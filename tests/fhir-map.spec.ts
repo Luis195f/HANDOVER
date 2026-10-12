@@ -381,8 +381,8 @@ describe('buildHandoverBundle', () => {
       { now: () => NOW },
     );
 
-    expect(bundle.signature).toHaveLength(1);
-    const signature = bundle.signature?.[0];
+    expect(Array.isArray(bundle.signature)).toBe(false);
+    const signature = bundle.signature;
     expect(signature?.who?.identifier?.value).toBe('nurse-33');
     expect(signature?.onBehalfOf?.identifier?.value).toBe('UCI-1');
     expect(signature?.data).toBe('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ');

@@ -79,7 +79,41 @@ def validate_signature_runtime_requirements(settings: Optional[SignatureSettings
 
 def _transport_signature_from_bundle(bundle: Dict[str, Any]) -> Dict[str, Any] | None:
     signature_node = bundle.get("signature")
-    return signature_node if isinstance(signature_node, dict) else None
+    if isinstance(signature_node, list):
+        return None
+    if isinstance(signature_node, dict) and classify_bundle_signature(signature_node) == "transport":
+        return signature_node
+    return None
+
+
+def classify_bundle_signature(signature_node: Any) -> str:
+    if signature_node is None:
+        return "absent"
+    if not isinstance(signature_node, dict):
+        raise SignatureVerificationError("Bundle.signature debe ser un objeto Signature.")
+    codings = signature_node.get("type")
+    if not isinstance(codings, list) or not codings:
+        raise SignatureVerificationError("Tipo de firma no reconocido.")
+    kinds = set()
+    for coding in codings:
+        if not isinstance(coding, dict):
+            raise SignatureVerificationError("Tipo de firma no reconocido.")
+        code, system = coding.get("code"), coding.get("system")
+        if code == "signature" and system in (None, "urn:handover:signature-type"):
+            kinds.add("clinical")
+        elif code == "1.2.840.10065.1.12.1.1" and system == "urn:iso-astm:E1762-95:2013":
+            kinds.add("transport")
+        else:
+            raise SignatureVerificationError("Tipo de firma no reconocido.")
+    if len(kinds) != 1:
+        raise SignatureVerificationError("Tipos de firma contradictorios.")
+    kind = kinds.pop()
+    sig_format = signature_node.get("sigFormat")
+    if (kind == "clinical" and sig_format not in (None, "image/png")) or (
+        kind == "transport" and sig_format != "ecdsa-p256-sha256"
+    ):
+        raise SignatureVerificationError("Formato de firma contradictorio o desconocido.")
+    return kind
 
 
 def _deep_copy_without_transport_signature(bundle: Dict[str, Any]) -> Dict[str, Any]:
@@ -240,14 +274,14 @@ class VerificationResult:
 def verify_bundle_signature(bundle: Dict[str, Any], settings: Optional[SignatureSettings] = None) -> Optional[VerificationResult]:
     settings = settings or load_settings()
     validate_signature_runtime_requirements(settings)
-    signature_node = bundle.get("signature")
-    if not signature_node:
+    signature_node = _transport_signature_from_bundle(bundle)
+    if signature_node is None:
         return None
     if not settings.enabled:
         logger.warning("Se recibió un bundle con firma pero la verificación está deshabilitada.")
         return None
 
-    signature_b64 = signature_node.get("data") if isinstance(signature_node, dict) else None
+    signature_b64 = signature_node.get("data")
     if not signature_b64:
         raise ValueError("El campo signature.data es obligatorio para verificar la firma.")
 

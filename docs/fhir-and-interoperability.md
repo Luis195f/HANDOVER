@@ -8,6 +8,8 @@
 
 ## 1) Arquitectura real
 
+FHIR R4 define `Bundle.signature` con cardinalidad 0..1: ausente o un objeto `Signature`, nunca un array ([definición oficial](https://hl7.org/fhir/R4/bundle-definitions.html#Bundle.signature)). `Signature.type` sí conserva su array de `Coding`. Los emisores guardan allí la rúbrica clínica PNG (`sigFormat=image/png`) y mantienen los attesters de `Composition`. La firma criptográfica de transporte (`sigFormat=ecdsa-p256-sha256`) permanece en la auditoría existente y no reemplaza la evidencia clínica de un cierre final. El hash canónico incluye la rúbrica clínica y excluye solo la firma de transporte reconocida. La API acepta únicamente como compatibilidad de entrada un array legacy con una rúbrica clínica inequívoca, que copia y convierte a objeto; arrays múltiples, mixtos o ambiguos se rechazan con un único evento de auditoría `SIGNATURE_ERROR` minimizado. Los lectores de registros históricos conservan sus firmas sin reescribir hashes ni auditorías. La validación local no demuestra conformidad externa completa.
+
 - La app envia bundles a `POST /api/fhir/transaction`.
 - Django/DRF concentra validación, enforcement de firma criptográfica de transporte según entorno, resolución autoritativa de unidad para el write clínico, auditoría y side effects ICEA.
 - La lectura ETL del Bundle clinico persistido ocurre via `GET /api/handover/{bundle_id}`.

@@ -36,6 +36,7 @@ import type {
   PsychosocialCare,
 } from '../types/handover';
 import { zHandover } from '../validation/schemas';
+import { signatureSchema } from './fhir/validators';
 import { isSupplementalOxygen } from './oxygen';
 import { getSpecialtyOverlayDefinition, getUnitProfileDefinition } from '../config/profiles';
 import { CATEGORY, CONDITION_CODES, DOCUMENT_CLASS_CODES, FHIR_CODES, FHIR_EXTENSION_URLS, LOINC, SNOMED, TERMINOLOGY_SYSTEMS, type TerminologyCode, type TerminologySystem } from './codes';
@@ -522,7 +523,7 @@ type Bundle = {
   resourceType: 'Bundle';
   type: 'transaction';
   entry: BundleEntry[];
-  signature?: Signature[];
+  signature?: Signature;
 };
 
 type ResourceWithMeta = FhirResource & { meta?: Meta };
@@ -535,7 +536,7 @@ export interface FhirBundleTransaction {
     resource: FhirResource;
     request: { method: 'POST'; url: string };
   }>;
-  signature?: Signature[];
+  signature?: Signature;
 }
 
 const TEST_LOINC = {
@@ -2911,7 +2912,7 @@ export function buildHandoverBundle(
     resourceType: 'Bundle',
     type: 'transaction',
     entry: entries,
-    signature: bundleSignature ? [bundleSignature] : undefined,
+    ...(bundleSignature ? { signature: bundleSignature } : {}),
   };
 
   // BEGIN HANDOVER_FHIR_VALIDATION
@@ -3462,7 +3463,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     resourceType: 'Bundle',
     type: 'transaction',
     entry: entries,
-    signature: bundleSignature ? [bundleSignature] : undefined,
+    ...(bundleSignature ? { signature: bundleSignature } : {}),
   } satisfies FhirBundleTransaction;
 }
 
@@ -3478,6 +3479,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
       }),
     )
     .min(1),
+  signature: signatureSchema.optional(),
 });
 
 export function validateBundle(bundle: FhirBundleTransaction): { ok: boolean; errors: string[] } {

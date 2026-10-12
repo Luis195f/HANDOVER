@@ -8,6 +8,7 @@ from typing import Any
 from django.utils import timezone
 
 from backend.audit.utils import canonical_json
+from backend.signature import classify_bundle_signature
 
 CONTRACT_VERSION = 'handover-icea-bridge-v1'
 CONTEXTUAL_SIGNAL_CONTRACT_VERSION = 'handover-icea-context-v1'
@@ -417,8 +418,15 @@ def _patient_id(resources: list[dict[str, Any]], full_urls: dict[str, dict[str, 
     return None
 
 
+def _bundle_signatures(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    node = bundle.get('signature')
+    if isinstance(node, dict):
+        return [node] if classify_bundle_signature(node) == 'clinical' else []
+    return [item for item in node if isinstance(item, dict)] if isinstance(node, list) else []
+
+
 def _unit_from_bundle(bundle: dict[str, Any], resources: list[dict[str, Any]], full_urls: dict[str, dict[str, Any]]) -> str | None:
-    for signature in bundle.get('signature') or []:
+    for signature in _bundle_signatures(bundle):
         if not isinstance(signature, dict):
             continue
         on_behalf = signature.get('onBehalfOf') or {}
@@ -728,7 +736,7 @@ def _actors(bundle: dict[str, Any], composition: dict[str, Any] | None, full_url
         if actor_id:
             actor_ids.append(actor_id)
         team_id = team_id or _identifier((attester.get('onBehalfOf') or {}).get('identifier'))
-    for signature in bundle.get('signature') or []:
+    for signature in _bundle_signatures(bundle):
         if not isinstance(signature, dict):
             continue
         who = signature.get('who') or {}
@@ -1112,7 +1120,7 @@ def _clinical_reference_datetime(
         _safe((composition or {}).get('date')),
         _safe(((encounter or {}).get('period') or {}).get('end')),
         _safe(((encounter or {}).get('period') or {}).get('start')),
-        _safe((bundle.get('signature') or [{}])[0].get('when')) if isinstance(bundle.get('signature'), list) else None,
+        _safe(_bundle_signatures(bundle)[0].get('when')) if len(_bundle_signatures(bundle)) == 1 else None,
         _safe(bundle.get('timestamp')),
     ):
         parsed = _dt(candidate)
