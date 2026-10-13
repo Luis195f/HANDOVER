@@ -543,5 +543,50 @@ describe('offline queue end-to-end', () => {
     expect((await queue.listOfflineQueue()).map((item) => item.id)).toContain(queued.id);
     expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
   });
+
+  it.each([undefined, 'false'])('normal demo confirms the canonical sender and drains the queue with E2E=%s', async (flag) => {
+    const previousFlag = process.env.EXPO_PUBLIC_E2E;
+    if (flag === undefined) delete process.env.EXPO_PUBLIC_E2E;
+    else process.env.EXPO_PUBLIC_E2E = flag;
+    vi.doMock('@/src/security/auth', () => ({ getCurrentSession: vi.fn(async () => ({ mode: 'demo' })) }));
+    vi.resetModules();
+    try {
+      const demoQueue = await import('@/src/lib/queue');
+      const demoSync = await import('@/src/lib/sync');
+      await demoQueue.clearOfflineQueue();
+      const bundle = demoSync.buildTransactionBundleForQueue({ patientId: 'demo-synthetic' } as any, {
+        now: '2025-01-01T00:00:00.000Z',
+      });
+      await demoQueue.enqueueBundle(bundle, { patientId: 'demo-synthetic' });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await demoSync.flushSyncQueue({
+        fhirBaseUrl: 'https://demo.local/fhir', getToken: async () => 'synthetic-demo-token',
+      });
+
+      expect(result.outcome).toBe('success');
+      expect(await demoQueue.listOfflineQueue()).toHaveLength(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@/src/security/auth');
+      if (previousFlag === undefined) delete process.env.EXPO_PUBLIC_E2E;
+      else process.env.EXPO_PUBLIC_E2E = previousFlag;
+    }
+  });
+
+  it('does not drain a queue item for a generic successful response', async () => {
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-generic' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+    await queue.enqueueBundle(bundle, { patientId: 'pat-generic' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await sync.flushSyncQueue({ fhirBaseUrl: 'https://example.test', getToken: async () => 'bearer' });
+
+    expect(await queue.listOfflineQueue()).toHaveLength(1);
+  });
 });
 

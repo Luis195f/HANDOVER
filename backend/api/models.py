@@ -214,6 +214,9 @@ class HandoverBundleRecord(models.Model):
     unit_scope_hash = models.CharField(max_length=64, blank=True)
     response_json = models.JSONField(null=True, blank=True)
     response_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    effects_pending = models.BooleanField(default=False, db_index=True)
+    effects_completed = models.JSONField(default=dict, blank=True)
+    effects_claimed_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

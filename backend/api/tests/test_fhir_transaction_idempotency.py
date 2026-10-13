@@ -1,10 +1,14 @@
 import copy
 import json
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Event
 from unittest.mock import Mock, patch
 
 import httpx
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
@@ -21,6 +25,7 @@ from backend.api.tests.icea_test_utils import (
     build_icea_bundle,
 )
 from backend.audit.models import AuditEvent
+from backend.signature import SignatureSettings, sign_bundle
 
 
 class FhirTransactionIdempotencyTests(TestCase):
@@ -97,6 +102,117 @@ class FhirTransactionIdempotencyTests(TestCase):
         self.assertEqual(second.data['code'], 'transaction_unknown')
         self.assertEqual(mock_post.call_count, 1)
         self.assertEqual(HandoverBundleRecord.objects.get(request_id='c04-request-001').status, 'unknown')
+
+    @patch('backend.api.views._post_transaction_to_fhir')
+    def test_resigned_transport_replay_keeps_logical_hash_and_unknown_intent(self, mock_post):
+        bundle = copy.deepcopy(self.bundle)
+        bundle['entry'][2]['resource']['status'] = 'preliminary'
+        bundle.pop('signature', None)
+        marker = {'system': 'urn:handover:transaction-composition', 'value': 'handover:c04-resigned'}
+        bundle['entry'][2]['resource']['identifier'] = marker
+        original = copy.deepcopy(bundle)
+        with tempfile.TemporaryDirectory() as directory:
+            private_key = ec.generate_private_key(ec.SECP256R1())
+            private_path = Path(directory) / 'private.pem'
+            public_path = Path(directory) / 'public.pem'
+            private_path.write_bytes(private_key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption(),
+            ))
+            public_path.write_bytes(private_key.public_key().public_bytes(
+                serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+            ))
+            settings = SignatureSettings(str(private_path), str(public_path), False)
+            first = copy.deepcopy(bundle)
+            second = copy.deepcopy(bundle)
+            first['signature'] = sign_bundle(bundle, user_id='auth0|nurse-c04', settings=settings).fhir_signature
+            second['signature'] = sign_bundle(bundle, user_id='auth0|nurse-c04', settings=settings).fhir_signature
+            self.assertNotEqual(first['signature']['data'], second['signature']['data'])
+            mock_post.side_effect = httpx.ReadTimeout('response lost')
+            capability = Mock(status_code=200)
+            capability.json.return_value = {'rest': [{'mode': 'server', 'resource': [
+                {'type': 'Composition', 'searchParam': [{'name': 'identifier'}]},
+            ]}]}
+            search = Mock(status_code=200)
+            search.json.return_value = {'resourceType': 'Bundle', 'total': 1, 'entry': [
+                {'resource': {'resourceType': 'Composition', 'id': 'remote-resigned', 'identifier': marker}},
+            ]}
+            with patch('backend.api.views.SIGNATURE_SETTINGS', settings):
+                first_response = self.post_bundle(first)
+                with patch('backend.api.views.httpx.get', side_effect=[capability, search]):
+                    second_response = self.post_bundle(second)
+        self.assertEqual(first_response.data['code'], 'transaction_unknown')
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.data['type'], 'transaction-response')
+        self.assertEqual(first, {**original, 'signature': first['signature']})
+        self.assertEqual(second, {**original, 'signature': second['signature']})
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_clinical_signature_change_conflicts_even_with_same_request_key(self, mock_post):
+        self.assertEqual(self.post_bundle().status_code, 201)
+        changed = copy.deepcopy(self.bundle)
+        changed['signature'][0]['data'] = 'different-clinical-rubric'
+        self.assertEqual(self.post_bundle(changed).data['code'], 'idempotency_conflict')
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_succeeded_replay_recovers_effects_after_interrupted_completion(self, mock_post):
+        with patch('backend.api.views._complete_transaction_side_effects', side_effect=RuntimeError('crash')):
+            with self.assertRaises(RuntimeError):
+                self.post_bundle()
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertEqual(record.status, 'succeeded')
+        self.assertTrue(record.effects_pending)
+        with patch('backend.api.views._complete_transaction_side_effects') as mock_complete:
+            self.assertEqual(self.post_bundle().status_code, 201)
+        mock_complete.assert_called_once()
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_swallowed_snapshot_failure_remains_pending_then_replay_completes_once(self, mock_post):
+        with patch('backend.api.views.ensure_pipeline_snapshot_from_bundle', side_effect=RuntimeError('storage')):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertTrue(record.effects_pending)
+        self.assertFalse(record.effects_completed.get('icea'))
+        closure_count = AuditEvent.objects.filter(event_type='handover_closure_attestation').count()
+        self.assertEqual(self.post_bundle().status_code, 201)
+        record.refresh_from_db()
+        self.assertFalse(record.effects_pending)
+        self.assertEqual(AuditEvent.objects.filter(event_type='handover_closure_attestation').count(), closure_count)
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_failed_fhir_audit_stays_pending_and_replays_without_clinical_post(self, mock_post):
+        with patch('backend.api.views._create_audit_event_for_transaction', return_value=False):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertTrue(record.effects_pending)
+        self.assertTrue(record.effects_completed.get('icea'))
+        with patch('backend.api.views._create_audit_event_for_transaction', return_value=True) as mock_audit:
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record.refresh_from_db()
+        self.assertFalse(record.effects_pending)
+        mock_audit.assert_called_once()
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_concurrent_succeeded_replay_claims_effects_once(self, mock_post):
+        with patch('backend.api.views.persist_successful_transaction_icea_side_effects', side_effect=RuntimeError('pause')):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        from backend.api import views
+
+        real_effects = views.persist_successful_transaction_icea_side_effects
+
+        def complete_with_overlap(*args, **kwargs):
+            self.assertEqual(self.post_bundle().status_code, 201)
+            return real_effects(*args, **kwargs)
+
+        with patch('backend.api.views.persist_successful_transaction_icea_side_effects', side_effect=complete_with_overlap) as effects:
+            self.assertEqual(self.post_bundle().status_code, 201)
+        self.assertEqual(effects.call_count, 1)
+        self.assertFalse(HandoverBundleRecord.objects.get(request_id='c04-request-001').effects_pending)
+        mock_post.assert_called_once()
 
     @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response(status_code=503))
     def test_upstream_five_hundred_is_unknown_and_never_resends(self, mock_post):
@@ -280,7 +396,7 @@ class FhirTransactionConcurrentTests(TransactionTestCase):
 class FhirTransactionMigrationTests(TransactionTestCase):
     def test_existing_successful_record_migrates_without_rewriting_bundle(self):
         previous = [('api', '0017_clinical_decision_shown_choice')]
-        current = [('api', '0018_handover_transaction_intent')]
+        current = [('api', '0019_handover_transaction_effects')]
         executor = MigrationExecutor(connection)
         executor.migrate(previous)
         historical = executor.loader.project_state(previous).apps.get_model('api', 'HandoverBundleRecord')
@@ -297,3 +413,4 @@ class FhirTransactionMigrationTests(TransactionTestCase):
         self.assertEqual(record.status, 'succeeded')
         self.assertEqual(record.bundle_json, original)
         self.assertEqual(record.payload_hash, '')
+        self.assertFalse(record.effects_pending)

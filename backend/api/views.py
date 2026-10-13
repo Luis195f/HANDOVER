@@ -16,7 +16,7 @@ from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
-from django.db import DatabaseError, IntegrityError, OperationalError, connection
+from django.db import DatabaseError, IntegrityError, OperationalError, connection, transaction
 from django.db.models import CharField, Count, FloatField, Sum
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Lower
@@ -46,7 +46,10 @@ from backend.api.audit_pseudonymization import (
 )
 from backend.security.auth import Auth0JWTAuthentication
 from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bundle_document
-from backend.api.models import ClientAuditEvent, HandoverBundleRecord, Patient as LocalPatient
+from backend.api.models import (
+    ClientAuditEvent, HandoverBundleRecord, IceaBridgeRequest, IceaOutboundEvent,
+    IceaPipelineSnapshot, Patient as LocalPatient,
+)
 from backend.api.views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
 from backend.api.icea import (
     _extract_unit_from_extensions,
@@ -55,10 +58,15 @@ from backend.api.icea import (
     _resource_index,
     enqueue_icea_outbound_event_for_transaction,
 )
-from backend.api.icea_bridge_service import enqueue_icea_bridge_request_for_transaction
+from backend.api.icea_bridge_service import (
+    _scoring_feature_key, enqueue_icea_bridge_request_for_transaction, load_icea_bridge_settings,
+)
+from backend.api.icea_client import load_icea_webhook_settings
+from backend.api.pilot_control import is_pilot_feature_enabled
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.api.icea_transaction import (
     TransactionIntentConflict,
+    claim_transaction_effects,
     claim_transaction_intent,
     has_transaction_intent,
     persist_handover_bundle_record,
@@ -571,18 +579,75 @@ def _reconcile_transaction_record(record: HandoverBundleRecord, request: HttpReq
 
 
 def _complete_transaction_side_effects(
-    request: HttpRequest, *, bundle: dict[str, Any], user_id: str, unit_id: str,
+    request: HttpRequest, *, record: HandoverBundleRecord, bundle: dict[str, Any], user_id: str, unit_id: str,
 ) -> None:
-    _create_audit_event_for_transaction(request, bundle=bundle, user_id=user_id, unit_id=unit_id)
-    _emit_handover_closure_attestation_event(request, bundle=bundle, user_id=user_id, unit_id=unit_id)
-    persist_successful_transaction_icea_side_effects(
-        bundle=bundle,
-        request=request,
-        outbox_callback=enqueue_icea_outbound_event_for_transaction,
-        persist_bundle_record=_persist_handover_bundle_record,
-        snapshot_callback=ensure_pipeline_snapshot_from_bundle,
-        bridge_callback=enqueue_icea_bridge_request_for_transaction,
-    )
+    claimed_at = claim_transaction_effects(record)
+    if claimed_at is None:
+        return
+    record.refresh_from_db()
+    completed = dict(record.effects_completed or {})
+
+    def mark_complete(name: str) -> None:
+        completed[name] = True
+        record.effects_completed = dict(completed)
+        record.effects_pending = not all(completed.get(part) for part in ('closure', 'icea', 'audit_fhir'))
+        updated = HandoverBundleRecord.objects.filter(pk=record.pk, effects_claimed_at=claimed_at).update(
+            effects_completed=record.effects_completed, effects_pending=record.effects_pending,
+        )
+        if not updated:
+            raise DatabaseError('Transaction effects lease was superseded')
+
+    try:
+        if not completed.get('closure'):
+            with transaction.atomic():
+                closure_key = _get_bundle_identifier_value(bundle)
+                if not _bundle_is_final_handover(bundle):
+                    mark_complete('closure')
+                elif closure_key:
+                    audit_query = AuditEvent.objects.filter(
+                        event_type='handover_closure_attestation', resource_id=closure_key, status='success',
+                    )
+                    if not audit_query.exists():
+                        _emit_handover_closure_attestation_event(
+                            request, bundle=bundle, user_id=user_id, unit_id=unit_id,
+                        )
+                    if audit_query.exists():
+                        mark_complete('closure')
+
+        if not completed.get('icea'):
+            try:
+                persist_successful_transaction_icea_side_effects(
+                    bundle=bundle, request=request,
+                    outbox_callback=enqueue_icea_outbound_event_for_transaction,
+                    persist_bundle_record=_persist_handover_bundle_record,
+                    snapshot_callback=ensure_pipeline_snapshot_from_bundle,
+                    bridge_callback=enqueue_icea_bridge_request_for_transaction,
+                )
+                mode = IceaBridgeRequest.SCORING_MODE_IMMEDIATE
+                bridge_settings = load_icea_bridge_settings()
+                needs_bridge = bridge_settings.enabled and bridge_settings.allows_mode(mode) and (
+                    is_pilot_feature_enabled('icea_bridge', unit_id=unit_id)
+                    and is_pilot_feature_enabled(_scoring_feature_key(mode), unit_id=unit_id)
+                )
+                has_snapshot = IceaPipelineSnapshot.objects.filter(request_id=record.request_id).exists()
+                has_outbox = not load_icea_webhook_settings().enabled or IceaOutboundEvent.objects.filter(
+                    request_id=record.request_id,
+                ).exists()
+                has_bridge = not needs_bridge or IceaBridgeRequest.objects.filter(
+                    request_id=record.request_id, scoring_mode=mode,
+                ).exists()
+                if has_snapshot and has_outbox and has_bridge:
+                    mark_complete('icea')
+            except Exception:
+                logger.exception('Local transaction effects remain pending')
+
+        if not completed.get('audit_fhir'):
+            if _create_audit_event_for_transaction(request, bundle=bundle, user_id=user_id, unit_id=unit_id):
+                mark_complete('audit_fhir')
+    finally:
+        HandoverBundleRecord.objects.filter(pk=record.pk, effects_claimed_at=claimed_at).update(
+            effects_claimed_at=None,
+        )
 
 def _local_registry_not_ready_response() -> Response:
     return Response(
@@ -781,7 +846,7 @@ def _create_audit_event_for_transaction(
     bundle: Dict[str, Any],
     user_id: str | None,
     unit_id: str | None,
-) -> None:
+) -> bool:
     patient_id = None
     composition = None
     outgoing_attester, incoming_attester = _extract_final_handover_attesters(bundle, user_id=user_id)
@@ -868,14 +933,16 @@ def _create_audit_event_for_transaction(
         }]
 
     try:
-        httpx.post(
+        response = httpx.post(
             f"{FHIR_BASE.rstrip('/')}/AuditEvent",
             json=audit,
             headers=get_fhir_headers(request),
             timeout=30,
         )
+        return isinstance(response.status_code, int) and 200 <= response.status_code < 300
     except Exception:
         logger.exception("No se pudo emitir AuditEvent para transacción FHIR")
+        return False
 
 
 def _bundle_signature_list(bundle: Dict[str, Any]) -> list[Dict[str, Any]]:
@@ -2333,7 +2400,6 @@ class BundleView(AuthenticatedAPIView):
             # no strict: usar payload tal cual (ya pasó validación mínima)
             bundle = normalized_payload
 
-        payload_hash = hashlib.sha256(canonical_json(bundle)).hexdigest()
         signature_error = _ensure_bundle_signature(bundle, user_id, original_bundle=payload_obj)
         if signature_error:
             _emit_bundle_audit(
@@ -2345,6 +2411,8 @@ class BundleView(AuthenticatedAPIView):
                 meta={"errorCode": "SIGNATURE_ERROR"},
             )
             return signature_error
+
+        payload_hash = hashlib.sha256(canonical_json(bundle)).hexdigest()
 
         resolved_unit_id, unit_scope_error = _resolve_fhir_transaction_unit_scope(
             request,
@@ -2425,7 +2493,7 @@ class BundleView(AuthenticatedAPIView):
                 if recovered:
                     stored_bundle = _resolve_persisted_handover_bundle(record)
                     _complete_transaction_side_effects(
-                        request, bundle=stored_bundle, user_id=user_id, unit_id=resolved_unit_id,
+                        request, record=record, bundle=stored_bundle, user_id=user_id, unit_id=resolved_unit_id,
                     )
                 return Response(reconciled, status=200)
             if record.response_json is None or record.response_status is None:
@@ -2436,6 +2504,14 @@ class BundleView(AuthenticatedAPIView):
                 )
             except ClinicalBundleStorageError:
                 return Response({'code': 'transaction_result_unavailable'}, status=503)
+            if record.status == HandoverBundleRecord.STATUS_SUCCEEDED and record.effects_pending:
+                try:
+                    stored_bundle = _resolve_persisted_handover_bundle(record)
+                    _complete_transaction_side_effects(
+                        request, record=record, bundle=stored_bundle, user_id=user_id, unit_id=resolved_unit_id,
+                    )
+                except ClinicalBundleStorageError:
+                    logger.warning('Confirmed transaction effects cannot recover without retained bundle')
             return Response(cached_response, status=record.response_status)
 
         try:
@@ -2521,7 +2597,7 @@ class BundleView(AuthenticatedAPIView):
             resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
         )
         _complete_transaction_side_effects(
-            request, bundle=bundle, user_id=user_id, unit_id=resolved_unit_id,
+            request, record=record, bundle=bundle, user_id=user_id, unit_id=resolved_unit_id,
         )
         return Response(payload, status=resp.status_code)
 

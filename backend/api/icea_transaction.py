@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import hmac
 import uuid
+from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any, Callable
 
@@ -10,6 +11,7 @@ from django.conf import settings
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import HttpRequest
+from django.utils import timezone
 
 from backend.api.clinical_storage import encrypt_bundle_document
 from backend.api.icea import enqueue_icea_outbound_event_for_transaction
@@ -87,10 +89,21 @@ def transition_transaction_intent(
         else (HandoverBundleRecord.STATUS_PENDING, HandoverBundleRecord.STATUS_UNKNOWN)
     )
     updates: dict[str, Any] = {'status': status}
+    if status == HandoverBundleRecord.STATUS_SUCCEEDED:
+        updates['effects_pending'] = True
     if response is not None:
         updates['response_json'], _ = encrypt_bundle_document(response)
         updates['response_status'] = response_status
     return HandoverBundleRecord.objects.filter(pk=record.pk, status__in=allowed).update(**updates) == 1
+
+
+def claim_transaction_effects(record: HandoverBundleRecord) -> datetime | None:
+    claimed_at = timezone.now()
+    stale_before = claimed_at - timedelta(minutes=5)
+    claimed = HandoverBundleRecord.objects.filter(pk=record.pk, effects_pending=True).filter(
+        Q(effects_claimed_at__isnull=True) | Q(effects_claimed_at__lt=stale_before)
+    ).update(effects_claimed_at=claimed_at)
+    return claimed_at if claimed == 1 else None
 
 
 def _extract_request_id(request: HttpRequest) -> str:
