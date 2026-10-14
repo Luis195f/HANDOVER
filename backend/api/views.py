@@ -2553,7 +2553,9 @@ class BundleView(AuthenticatedAPIView):
                 except ClinicalBundleStorageError:
                     logger.warning('Confirmed transaction effects cannot recover without retained bundle')
             _emit_bundle_audit(
-                request=request, payload_obj=bundle, status='success', http_status=record.response_status,
+                request=request, payload_obj=bundle,
+                status='success' if record.status == HandoverBundleRecord.STATUS_SUCCEEDED else 'fail',
+                http_status=record.response_status,
                 resource_id=_get_bundle_identifier_value(bundle), meta={'errorCode': 'TRANSACTION_REPLAY'},
             )
             return Response(cached_response, status=record.response_status)
@@ -2798,4 +2800,3 @@ class AuditLogView(AuthenticatedAPIView):
             "shiftCode": event.shift_code or None,
             "at": event.occurred_at.isoformat(),
         }
-

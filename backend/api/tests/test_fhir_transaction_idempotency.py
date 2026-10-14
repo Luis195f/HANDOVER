@@ -67,6 +67,87 @@ class FhirTransactionIdempotencyTests(TestCase):
         self.assertEqual(record.response_json['_storage'], 'handover_bundle_encrypted_v1')
         self.assertEqual(decrypt_bundle_document(record.response_json, encryption_metadata=record.encryption_metadata), first.data)
 
+    def test_rejected_replays_keep_failure_audit_and_original_response(self):
+        for http_status in (409, 412):
+            with self.subTest(http_status=http_status):
+                bundle = copy.deepcopy(self.bundle)
+                bundle['identifier']['value'] = f'bundle-c04-rejected-{http_status}'
+                request_key = f'c04-rejected-{http_status}'
+                outcome = {'resourceType': 'OperationOutcome', 'issue': [
+                    {'severity': 'error', 'code': 'conflict'},
+                ]}
+                upstream = Mock(status_code=http_status)
+                upstream.json.return_value = outcome
+                with patch('backend.api.views._post_transaction_to_fhir', return_value=upstream) as mock_post:
+                    first = self.post_bundle(bundle, key=request_key)
+                    record = HandoverBundleRecord.objects.get(request_id=request_key)
+                    self.assertEqual(record.status, 'failed')
+                    self.assertEqual(record.accepted_actor_sub, 'auth0|nurse-c04')
+                    self.assertFalse(record.effects_pending)
+                    authenticate_api_client(self.client, sub='auth0|nurse-b', unit_ids=['icu-a'])
+                    with patch('backend.api.views._complete_transaction_side_effects') as effects:
+                        replay = self.post_bundle(bundle, key=request_key)
+                        second_replay = self.post_bundle(bundle, key=request_key)
+                    effects.assert_not_called()
+                    mock_post.assert_called_once()
+                self.assertEqual((first.status_code, replay.status_code, second_replay.status_code),
+                                 (http_status, http_status, http_status))
+                self.assertEqual(first.data, outcome)
+                self.assertEqual(replay.data, first.data)
+                self.assertEqual(second_replay.data, first.data)
+                initial_audit = AuditEvent.objects.get(
+                    event_type='fhir_transaction', http_status=http_status,
+                    meta__errorCode='FHIR_VALIDATION_ERROR',
+                )
+                self.assertEqual((initial_audit.status, initial_audit.user_sub), ('fail', 'auth0|nurse-c04'))
+                replays = AuditEvent.objects.filter(
+                    event_type='fhir_transaction', http_status=http_status,
+                    meta__errorCode='TRANSACTION_REPLAY',
+                )
+                self.assertEqual(replays.count(), 2)
+                self.assertEqual({(event.status, event.user_sub) for event in replays},
+                                 {('fail', 'auth0|nurse-b')})
+                record.refresh_from_db()
+                self.assertEqual(record.accepted_actor_sub, 'auth0|nurse-c04')
+                authenticate_api_client(self.client, sub='auth0|nurse-c04', unit_ids=['icu-a'])
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_confirmed_replay_is_audited_as_success_for_replay_actor(self, mock_post):
+        first = self.post_bundle()
+        authenticate_api_client(self.client, sub='auth0|nurse-b', unit_ids=['icu-a'])
+        replay = self.post_bundle()
+        self.assertEqual((first.status_code, replay.status_code), (201, 201))
+        self.assertEqual(replay.data, first.data)
+        original = AuditEvent.objects.get(
+            event_type='fhir_transaction', status='success', user_sub='auth0|nurse-c04',
+        )
+        self.assertEqual(original.http_status, 201)
+        replay_audit = AuditEvent.objects.get(meta__errorCode='TRANSACTION_REPLAY')
+        self.assertEqual((replay_audit.status, replay_audit.user_sub), ('success', 'auth0|nurse-b'))
+        self.assertEqual(replay_audit.http_status, 201)
+        self.assertEqual(HandoverBundleRecord.objects.get(request_id='c04-request-001').accepted_actor_sub,
+                         'auth0|nurse-c04')
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir')
+    def test_pending_and_unknown_replays_never_emit_success_audit(self, mock_post):
+        with patch('backend.api.views.transition_transaction_intent', return_value=False):
+            pending = self.post_bundle(key='c04-pending')
+        self.assertEqual(pending.status_code, 503)
+        self.assertEqual(HandoverBundleRecord.objects.get(request_id='c04-pending').status, 'pending')
+        with patch('backend.api.views._reconcile_transaction_record', return_value=None):
+            self.assertEqual(self.post_bundle(key='c04-pending').status_code, 503)
+        mock_post.side_effect = httpx.ReadTimeout('response lost')
+        unknown_bundle = copy.deepcopy(self.bundle)
+        unknown_bundle['identifier']['value'] = 'bundle-c04-unknown'
+        self.assertEqual(self.post_bundle(unknown_bundle, key='c04-unknown').status_code, 503)
+        self.assertEqual(HandoverBundleRecord.objects.get(request_id='c04-unknown').status, 'unknown')
+        with patch('backend.api.views._reconcile_transaction_record', return_value=None):
+            self.assertEqual(self.post_bundle(unknown_bundle, key='c04-unknown').status_code, 503)
+        self.assertFalse(AuditEvent.objects.filter(event_type='fhir_transaction', status='success').exists())
+        self.assertFalse(AuditEvent.objects.filter(meta__errorCode='TRANSACTION_REPLAY').exists())
+        self.assertEqual(mock_post.call_count, 1)
+
     @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
     def test_confirmed_replay_does_not_require_remote_validation(self, mock_post):
         with patch('backend.api.views._validate_remotely', return_value=None) as mock_validate:
