@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import Any, Callable
 
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, OperationalError, connection
 from django.db.models import Q
 from django.http import HttpRequest
 from django.utils import timezone
@@ -101,9 +101,17 @@ def transition_transaction_intent(
 def claim_transaction_effects(record: HandoverBundleRecord) -> datetime | None:
     claimed_at = timezone.now()
     stale_before = claimed_at - timedelta(minutes=5)
-    claimed = HandoverBundleRecord.objects.filter(pk=record.pk, effects_pending=True).filter(
-        Q(effects_claimed_at__isnull=True) | Q(effects_claimed_at__lt=stale_before)
-    ).update(effects_claimed_at=claimed_at)
+    try:
+        claimed = HandoverBundleRecord.objects.filter(pk=record.pk, effects_pending=True).filter(
+            Q(effects_claimed_at__isnull=True) | Q(effects_claimed_at__lt=stale_before)
+        ).update(effects_claimed_at=claimed_at)
+    except OperationalError as exc:
+        sqlite_lock = str(exc).lower() in (
+            'database is locked', 'database table is locked: api_handoverbundlerecord',
+        )
+        if connection.vendor != 'sqlite' or not sqlite_lock:
+            raise
+        return None
     return claimed_at if claimed == 1 else None
 
 
@@ -204,6 +212,5 @@ def persist_successful_transaction_icea_side_effects(
         bridge_callback(bundle=bundle, request=request)
     except Exception:
         logger.exception("ICEA bridge enqueue failed after successful clinical transaction")
-
 
 

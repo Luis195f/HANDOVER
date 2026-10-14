@@ -3,14 +3,14 @@ import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event
 from unittest.mock import Mock, patch
 
 import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.management import call_command
-from django.db import connection
+from django.db import OperationalError, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
@@ -503,12 +503,72 @@ class FhirTransactionConcurrentTests(TransactionTestCase):
             expires_at=HandoverBundleRecord.default_expiry(),
         )
 
+        ready = Barrier(2)
+        executed = []
+        connections = []
+
         def claim():
-            return claim_transaction_effects(HandoverBundleRecord.objects.get(pk=record.pk))
+            try:
+                loaded = HandoverBundleRecord.objects.get(pk=record.pk)
+                connections.append(id(connection.connection))
+                ready.wait(timeout=5)
+                claimed_at = claim_transaction_effects(loaded)
+                if claimed_at is not None:
+                    executed.append(claimed_at)
+                return claimed_at
+            finally:
+                connection.close()
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             claims = list(executor.map(lambda _: claim(), range(2)))
         self.assertEqual(sum(value is not None for value in claims), 1)
+        self.assertEqual(len(executed), 1)
+        self.assertEqual(len(set(connections)), 2)
+
+    def test_sqlite_lock_leaves_effects_pending_for_a_later_claim(self):
+        record = HandoverBundleRecord.objects.create(
+            bundle_id='bundle-c04-locked', request_id='c04-locked', patient_id='pat-c04-locked',
+            unit_id='icu-a', status='succeeded', effects_pending=True,
+            expires_at=HandoverBundleRecord.default_expiry(),
+        )
+        for message in ('database table is locked: api_handoverbundlerecord', 'database is locked'):
+            with self.subTest(message=message):
+                with patch('django.db.models.query.QuerySet.update', side_effect=OperationalError(message)):
+                    self.assertIsNone(claim_transaction_effects(record))
+                record.refresh_from_db()
+                self.assertTrue(record.effects_pending)
+                self.assertIsNone(record.effects_claimed_at)
+        self.assertIsNotNone(claim_transaction_effects(record))
+
+    def test_active_expired_and_completed_effects_leases(self):
+        record = HandoverBundleRecord.objects.create(
+            bundle_id='bundle-c04-lease-states', request_id='c04-lease-states',
+            patient_id='pat-c04-lease-states', unit_id='icu-a', status='succeeded',
+            effects_pending=True, accepted_actor_sub='auth0|original',
+            expires_at=HandoverBundleRecord.default_expiry(),
+        )
+        self.assertIsNotNone(claim_transaction_effects(record))
+        self.assertIsNone(claim_transaction_effects(record))
+        HandoverBundleRecord.objects.filter(pk=record.pk).update(
+            effects_claimed_at=timezone.now() - timezone.timedelta(minutes=6),
+        )
+        self.assertIsNotNone(claim_transaction_effects(record))
+        HandoverBundleRecord.objects.filter(pk=record.pk).update(effects_pending=False)
+        self.assertIsNone(claim_transaction_effects(record))
+        record.refresh_from_db()
+        self.assertEqual(record.accepted_actor_sub, 'auth0|original')
+
+    def test_unrelated_operational_error_is_not_hidden(self):
+        record = HandoverBundleRecord.objects.create(
+            bundle_id='bundle-c04-db-error', request_id='c04-db-error', patient_id='pat-c04-db-error',
+            unit_id='icu-a', status='succeeded', effects_pending=True,
+            expires_at=HandoverBundleRecord.default_expiry(),
+        )
+        for message in ('no such table', 'database table is locked: unrelated_table'):
+            with self.subTest(message=message):
+                with patch('django.db.models.query.QuerySet.update', side_effect=OperationalError(message)):
+                    with self.assertRaisesMessage(OperationalError, message):
+                        claim_transaction_effects(record)
 
     @patch('backend.api.views._create_audit_event_for_transaction')
     @patch('backend.api.views._post_transaction_to_fhir')
