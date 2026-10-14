@@ -4,6 +4,8 @@ import pathlib
 import sys
 from unittest.mock import patch
 
+import pytest
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 import django
 
@@ -16,6 +18,7 @@ from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhi
 from backend.api.icea_payload_mapper import _actors, _bundle_signatures, _clinical_reference_datetime, _unit_from_bundle
 
 
+@pytest.mark.django_db
 def test_audit_event_with_dual_signatures():
     client = APIClient()
     authenticate_api_client(client, sub="auth0|nurse-in", unit_ids=["icu-a"])
@@ -116,6 +119,7 @@ def test_clinical_signature_object_and_historical_list_preserve_unit_actor_and_d
     }}) == []
 
 
+@pytest.mark.django_db
 def test_audit_event_normalizes_reference_attester_and_keeps_legacy_clinical_pair_with_extra_professional_attesters():
     client = APIClient()
     authenticate_api_client(client, sub="auth0|nurse-in", unit_ids=["icu-a"])

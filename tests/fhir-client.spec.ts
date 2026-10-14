@@ -28,6 +28,7 @@ const bundle = {
 async function loadClient() {
   vi.resetModules();
   process.env.EXPO_PUBLIC_FHIR_BASE_URL = 'https://fhir.test/api';
+  process.env.EXPO_PUBLIC_API_BASE_URL = 'https://handover.test';
   const mod = await import('@/src/lib/fhir-client');
   return mod;
 }
@@ -55,6 +56,25 @@ describe('postBundle', () => {
     expect(result.issue?.[0]?.diagnostics).toContain('OAuth token is required');
   });
 
+  it.each([undefined, 'false'])('confirms demo transaction without network when E2E=%s', async (e2eFlag) => {
+    const previousFlag = process.env.EXPO_PUBLIC_E2E;
+    if (e2eFlag === undefined) delete process.env.EXPO_PUBLIC_E2E;
+    else process.env.EXPO_PUBLIC_E2E = e2eFlag;
+    vi.doMock('@/src/security/auth', () => ({ getCurrentSession: vi.fn(async () => ({ mode: 'demo' })) }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { postBundle } = await loadClient();
+      const result = await postBundle(bundle, { token: 'synthetic-demo-token' });
+      expect(result.json).toMatchObject({ resourceType: 'Bundle', type: 'transaction-response' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@/src/security/auth');
+      if (previousFlag === undefined) delete process.env.EXPO_PUBLIC_E2E;
+      else process.env.EXPO_PUBLIC_E2E = previousFlag;
+    }
+  });
+
   it('sends bundle with correct headers and parses success body', async () => {
     const response = new Response(JSON.stringify({ resourceType: 'Bundle', id: 'abc' }), {
       status: 201,
@@ -66,7 +86,7 @@ describe('postBundle', () => {
 
     const result = await postBundle(bundle, { token: 'token-123' });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://fhir.test/api/Bundle', expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith('https://handover.test/api/fhir/transaction', expect.any(Object));
     expect(result).toEqual({
       ok: true,
       status: 201,

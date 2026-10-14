@@ -197,12 +197,30 @@ class IceaOutboundEvent(models.Model):
 
 
 class HandoverBundleRecord(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_UNKNOWN = "unknown"
+
     bundle_id = models.CharField(max_length=255, unique=True)
     patient_id = models.CharField(max_length=255, db_index=True)
     unit_id = models.CharField(max_length=255, db_index=True)
     request_id = models.CharField(max_length=255, unique=True)
-    bundle_json = models.JSONField()
+    bundle_json = models.JSONField(null=True, blank=True)
     encryption_metadata = models.JSONField(null=True, blank=True)
+    status = models.CharField(max_length=16, default=STATUS_SUCCEEDED, db_index=True)
+    payload_hash = models.CharField(max_length=64, blank=True)
+    patient_scope_hash = models.CharField(max_length=64, blank=True)
+    unit_scope_hash = models.CharField(max_length=64, blank=True)
+    response_json = models.JSONField(null=True, blank=True)
+    response_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    effects_pending = models.BooleanField(default=False, db_index=True)
+    effects_completed = models.JSONField(default=dict, blank=True)
+    effects_claimed_at = models.DateTimeField(null=True, blank=True)
+    accepted_actor_sub = models.CharField(max_length=255, blank=True, default='')
+    effects_attempts = models.PositiveSmallIntegerField(default=0)
+    effects_next_retry_at = models.DateTimeField(null=True, blank=True)
+    effects_last_error = models.CharField(max_length=64, blank=True, default='')
     expires_at = models.DateTimeField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

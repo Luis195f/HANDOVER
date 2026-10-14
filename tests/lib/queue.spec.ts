@@ -282,6 +282,24 @@ describe('tx queue (sqlite + fallback)', () => {
     expect(offlineItems[0]?.syncStatus).toBe('pending');
   });
 
+  it('marks one Composition for positive reconciliation without mutating the input', async () => {
+    process.env.EXPO_PUBLIC_CLIENT_SIGNING_ENABLED = 'false';
+    process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
+    const queue = await loadQueue();
+    const bundle = {
+      resourceType: 'Bundle', type: 'transaction',
+      entry: [{ resource: { resourceType: 'Composition', id: 'comp-1' }, request: { method: 'POST', url: 'Composition' } }],
+    };
+    const original = JSON.parse(JSON.stringify(bundle));
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-marker' });
+    const [item] = await queue.listOfflineQueue();
+    const payload = item?.payload as { bundle?: { entry?: Array<{ resource?: { identifier?: { system: string; value: string } } }> } };
+    expect(payload.bundle?.entry?.[0]?.resource?.identifier).toEqual({
+      system: 'urn:handover:transaction-composition', value: queued.id,
+    });
+    expect(bundle).toEqual(original);
+  });
+
   it('reads legacy plaintext entries without errors even when encryption is enabled', async () => {
     process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = 'true';
     const queue = await loadQueue();

@@ -93,7 +93,7 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
       return;
     }
 
-    if (request.method() === 'POST' && url.pathname.startsWith('/fhir/')) {
+    if (request.method() === 'POST' && url.pathname === '/api/fhir/transaction') {
       fhirBundles.push(request.postData() ?? '');
       await route.fulfill({
         status: 200,

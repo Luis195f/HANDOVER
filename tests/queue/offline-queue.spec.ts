@@ -138,6 +138,20 @@ describe('offline queue end-to-end', () => {
     vi.useRealTimers();
   });
 
+  it('retains transaction_unknown without marking clinical delivery', async () => {
+    await queue.createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } },
+      patientId: 'pat-unknown',
+    });
+    sync.setQueueSendHandler(async () => ({
+      ok: false as const, kind: 'server' as const, status: 503, message: 'transaction_unknown',
+    }));
+    await sync.processQueueOnce();
+    const [item] = await queue.listOfflineQueue();
+    expect(item?.syncStatus).toBe('pending');
+    expect(item?.errorStatus).toBe(503);
+  });
+
   it('keeps network errors retryable when the queue handler throws a plain Error', async () => {
     vi.useFakeTimers();
     const baseTime = new Date('2024-01-01T00:00:00.000Z').getTime();
@@ -274,7 +288,7 @@ describe('offline queue end-to-end', () => {
     vi.useRealTimers();
   });
 
-  it('treats duplicate 412 responses as delivered and removes the item', async () => {
+  it('keeps an unverified 412 conflict in the queue', async () => {
     await queue.createOfflineQueueItem({
       payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] }, txId: 'tx-dup' },
       patientId: 'pat-dup',
@@ -286,6 +300,18 @@ describe('offline queue end-to-end', () => {
     await sync.processQueueOnce();
 
     expect(sender).toHaveBeenCalledTimes(1);
+    const [item] = await queue.listOfflineQueue();
+    expect(item?.syncStatus).toBe('error');
+    expect(item?.errorStatus).toBe(412);
+  });
+
+  it('removes only an explicitly confirmed duplicate', async () => {
+    await queue.createOfflineQueueItem({
+      payload: { bundle: { resourceType: 'Bundle', type: 'transaction', entry: [] } },
+      patientId: 'pat-confirmed-dup',
+    });
+    sync.setQueueSendHandler(async () => ({ ok: false as const, status: 412, duplicate: true }));
+    await sync.processQueueOnce();
     expect(await queue.listOfflineQueue()).toHaveLength(0);
   });
 
@@ -474,7 +500,7 @@ describe('offline queue end-to-end', () => {
         });
       }
 
-      return new Response(JSON.stringify({ resourceType: 'Bundle', id: 'replay-ok' }), {
+      return new Response(JSON.stringify({ resourceType: 'Bundle', type: 'transaction-response', id: 'replay-ok' }), {
         status: 200,
         headers: { 'Content-Type': 'application/fhir+json' },
       });
@@ -491,11 +517,76 @@ describe('offline queue end-to-end', () => {
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     expect(logoutSpy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringMatching(/\/api\/fhir\/transaction$/),
+      expect.stringMatching(/\/api\/fhir\/transaction$/),
+    ]);
     expect(authHeaders).toEqual(['Bearer stale-bearer', 'Bearer fresh-bearer']);
     expect(idempotencyKeys).toEqual([queued.id, queued.id]);
     expect(await queue.listOfflineQueue()).toHaveLength(0);
     expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(true);
     expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+  });
+
+  it('keeps a queued transaction when the backend returns pending over HTTP 202', async () => {
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-pending' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-pending' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'transaction_unknown' }), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await sync.flushSyncQueue({ fhirBaseUrl: 'https://example.test', getToken: async () => 'bearer' });
+
+    expect((await queue.listOfflineQueue()).map((item) => item.id)).toContain(queued.id);
+    expect(sync.consumeRecentlySyncedQueueItem(queued.id)).toBe(false);
+  });
+
+  it.each([undefined, 'false'])('normal demo confirms the canonical sender and drains the queue with E2E=%s', async (flag) => {
+    const previousFlag = process.env.EXPO_PUBLIC_E2E;
+    if (flag === undefined) delete process.env.EXPO_PUBLIC_E2E;
+    else process.env.EXPO_PUBLIC_E2E = flag;
+    vi.doMock('@/src/security/auth', () => ({ getCurrentSession: vi.fn(async () => ({ mode: 'demo' })) }));
+    vi.resetModules();
+    try {
+      const demoQueue = await import('@/src/lib/queue');
+      const demoSync = await import('@/src/lib/sync');
+      await demoQueue.clearOfflineQueue();
+      const bundle = demoSync.buildTransactionBundleForQueue({ patientId: 'demo-synthetic' } as any, {
+        now: '2025-01-01T00:00:00.000Z',
+      });
+      await demoQueue.enqueueBundle(bundle, { patientId: 'demo-synthetic' });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await demoSync.flushSyncQueue({
+        fhirBaseUrl: 'https://demo.local/fhir', getToken: async () => 'synthetic-demo-token',
+      });
+
+      expect(result.outcome).toBe('success');
+      expect(await demoQueue.listOfflineQueue()).toHaveLength(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@/src/security/auth');
+      if (previousFlag === undefined) delete process.env.EXPO_PUBLIC_E2E;
+      else process.env.EXPO_PUBLIC_E2E = previousFlag;
+    }
+  });
+
+  it('does not drain a queue item for a generic successful response', async () => {
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-generic' } as any, {
+      now: '2025-01-01T00:00:00.000Z',
+    });
+    await queue.enqueueBundle(bundle, { patientId: 'pat-generic' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await sync.flushSyncQueue({ fhirBaseUrl: 'https://example.test', getToken: async () => 'bearer' });
+
+    expect(await queue.listOfflineQueue()).toHaveLength(1);
   });
 });
 

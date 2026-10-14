@@ -147,6 +147,7 @@ type QueueSendSuccess = { ok: true; status?: number; message?: string; duplicate
 type QueueSendFailure = {
   ok: false;
   kind: QueueFailureKind;
+  duplicate?: boolean;
   status?: number;
   message?: string;
   recoverable?: boolean;
@@ -508,9 +509,10 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
 
       if (isDuplicateStatus(response.status)) {
         return {
-          ok: true,
+          ok: false,
+          kind: 'client',
           status: response.status,
-          duplicate: true,
+          recoverable: false,
           message: message ?? `HTTP ${response.status}`,
         };
       }
@@ -538,6 +540,18 @@ function buildDefaultQueueSender(options: SyncEngineOptions): QueueSendHandler {
         };
       }
 
+      const confirmed = response.json && typeof response.json === 'object' && !Array.isArray(response.json)
+        && (response.json as Record<string, unknown>).resourceType === 'Bundle'
+        && (response.json as Record<string, unknown>).type === 'transaction-response';
+      if (!confirmed) {
+        return {
+          ok: false,
+          kind: 'server',
+          status: 503,
+          recoverable: true,
+          message: 'Transaction confirmation unavailable',
+        };
+      }
       return { ok: true, status: response.status };
     } catch (error) {
       if (error instanceof Error && error.message === 'unauthorized') {
@@ -675,7 +689,7 @@ export async function processQueueOnce(): Promise<void> {
       result = buildFailureOutcome(error);
     }
 
-    const duplicateDelivered = !result.ok && isDuplicateStatus(result.status);
+    const duplicateDelivered = !result.ok && result.duplicate === true && isDuplicateStatus(result.status);
     if (result.ok || duplicateDelivered) {
       rememberRecentlySyncedQueueItem(item.id);
       await updateOfflineQueueStatus(item.id, 'synced', {

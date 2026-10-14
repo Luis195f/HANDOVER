@@ -195,6 +195,7 @@ def test_final_bundle_rejects_incoming_actor_mismatch():
     assert response.json()["errors"] == ["Authenticated user must match the incoming handover attestation."]
 
 
+@pytest.mark.django_db
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
@@ -216,6 +217,7 @@ def test_final_bundle_accepts_normalized_reference_for_incoming_attestation(
     assert response.json()["type"] == "transaction-response"
 
 
+@pytest.mark.django_db
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
@@ -355,6 +357,7 @@ def test_valid_legacy_signature_retains_one_success_audit():
     assert "errorCode" not in events[0].meta
 
 
+@pytest.mark.django_db
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
@@ -384,6 +387,7 @@ def test_final_bundle_accepts_extra_attesters_before_clinical_pair(
     assert response.json()["type"] == "transaction-response"
 
 
+@pytest.mark.django_db
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
@@ -462,6 +466,7 @@ def test_invalid_transport_signature_returns_400(
     mock_fhir_post.assert_not_called()
 
 
+@pytest.mark.django_db
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")
@@ -524,6 +529,7 @@ def test_transaction_rejects_bundle_unit_outside_claims():
     assert response.json()["code"] == "fhir_transaction_forbidden_unit"
 
 
+@pytest.mark.django_db
 @patch("backend.api.views.persist_successful_transaction_icea_side_effects", autospec=True)
 @patch("backend.api.views._create_audit_event_for_transaction", autospec=True)
 @patch("backend.api.views._post_transaction_to_fhir")

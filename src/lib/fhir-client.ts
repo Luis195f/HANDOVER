@@ -1,5 +1,6 @@
 // src/lib/fhir-client.ts
 import { HTTPError, NetworkError, TimeoutError, fetchWithRetry } from './net';
+import { API_BASE_URL } from '../config/env';
 import { getValidationErrorsFromBundle, validateBundleWithZod as validateFhirBundle } from './fhir-validation';
 import { formatIssuesForUser, isOperationOutcome, type OperationOutcome, type OperationIssue } from './fhir-outcome';
 import type { GeneratedPdf } from './export/export-pdf';
@@ -560,7 +561,7 @@ export function createFHIRClient(config: ScopedFHIRClientConfig) {
 }
 
 /**
- * POST /Bundle with an OperationOutcome-compatible response shape.
+ * POST through the authenticated HANDOVER transaction endpoint with an OperationOutcome-compatible response shape.
  * On error, returns both `issues` and the `issue` alias for legacy tests
  * (planned removal after test callers migrate).
  * Accepts `opts` as an object or a string treated as an `Idempotency-Key` (sync compatibility).
@@ -656,7 +657,7 @@ const idempotencyKey =
 
   try {
     const result = await fetchFHIR<OperationOutcome | Record<string, unknown>, typeof bundle>({
-      path: '/Bundle',
+      path: `${API_BASE_URL}/api/fhir/transaction`,
       method: 'POST',
       body: bundle,
       token: hasAuthHeader ? '' : token,

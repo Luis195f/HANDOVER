@@ -3,6 +3,8 @@ import pathlib
 import sys
 from unittest.mock import patch
 
+import pytest
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 import django
 
@@ -15,6 +17,7 @@ from backend.api.audit_pseudonymization import build_audit_patient_key
 from backend.api.tests.icea_test_utils import authenticate_api_client, build_fhir_response
 
 
+@pytest.mark.django_db
 def test_transaction_resources_contract_and_audit():
     client = APIClient()
     authenticate_api_client(client, unit_ids=["icu-a"])

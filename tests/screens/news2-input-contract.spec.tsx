@@ -3,7 +3,7 @@ import { Text } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { FormProvider, useForm } from 'react-hook-form';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { VitalsSection } from '@/src/components/handover/VitalsSection';
 import { prefillFromFHIR } from '@/src/lib/prefill';
 import { deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
@@ -242,15 +242,18 @@ describe('NEWS2 AI oxygen serialization parity', () => {
   describe('independent suggestion sections', () => {
     type Section = 'vitals' | 'diagnosis';
     const sections: Section[] = ['vitals', 'diagnosis'];
+    let HandoverForm: (typeof import('@/src/screens/HandoverForm'))['default'];
+    beforeAll(async () => { ({ default: HandoverForm } = await import('@/src/screens/HandoverForm')); });
     const mountRequests = async () => {
-      const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
       const prefilledValues = await readOxygenPrefill([], true);
       const provider = enableProvider();
       warningVisibility.realSuggestions = true;
       const pending: { section: Section; resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
+      const requestStarts: Array<() => void> = [];
       provider.mockImplementation((_input, init) => new Promise<Response>((resolve, reject) => {
         const context: { section: Section } = JSON.parse(String(init?.body));
         pending.push({ section: context.section, resolve, reject });
+        requestStarts.shift()?.();
       }));
       const screen = render(<HandoverForm navigation={navigation()}
         route={{ key: 'section-races', name: 'HandoverForm', params: { patientId: 'synthetic-section-races', unitId: 'icu', prefilledValues } }} />);
@@ -260,8 +263,9 @@ describe('NEWS2 AI oxygen serialization parity', () => {
         expect(panels).toHaveLength(2);
         return panels[section === 'vitals' ? 0 : 1].props;
       };
-      const start = async (section: Section) => {
-        await act(async () => { panel(section).onRefresh(); await Promise.resolve(); });
+      const start = async (section: Section, expectNetwork = true) => {
+        const started = expectNetwork ? new Promise<void>(resolve => requestStarts.push(resolve)) : null;
+        await act(async () => { void panel(section).onRefresh(); if (started) await started; });
       };
       const finish = async (index: number, label: string, failure = false) => {
         await act(async () => {
@@ -295,7 +299,7 @@ describe('NEWS2 AI oxygen serialization parity', () => {
           expect(screen.queryByText(section + ' current')).not.toBeNull();
           expect(panel(section).isLoading).toBe(false);
           expect(panel(section).errorMessage).toBeNull();
-          await start(section);
+          await start(section, false);
         }
         expect(provider).toHaveBeenCalledTimes(2);
       } finally { screen.unmount(); }
@@ -310,7 +314,7 @@ describe('NEWS2 AI oxygen serialization parity', () => {
         await finish(0, 'obsolete result');
         expect(panel(section).suggestions.interventions).toEqual(['newer result']);
         expect(screen.queryByText('obsolete result')).toBeNull();
-        await start(section);
+        await start(section, false);
         expect(provider).toHaveBeenCalledTimes(2);
       } finally { screen.unmount(); }
     });
@@ -330,7 +334,7 @@ describe('NEWS2 AI oxygen serialization parity', () => {
         await finish(1, 'other current');
         expect(panel(first).errorMessage).toBe(error);
         expect(panel(other).suggestions.interventions).toEqual(['other current']);
-        await start(other);
+        await start(other, false);
         expect(panel(first).errorMessage).toBe(error);
         await start(first);
         expect(panel(first).errorMessage).toBeNull();
@@ -372,7 +376,7 @@ describe('NEWS2 AI oxygen serialization parity', () => {
         await start(cached);
         await finish(0, 'cached result');
         await start(other);
-        await start(cached);
+        await start(cached, false);
         expect(provider).toHaveBeenCalledTimes(2);
         expect(panel(other).isLoading).toBe(true);
         expect(panel(cached).suggestions.interventions).toEqual(['cached result']);

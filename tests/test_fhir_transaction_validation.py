@@ -3,6 +3,8 @@ import pathlib
 import sys
 from unittest.mock import Mock, patch
 
+import pytest
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.settings")
 import django
 
@@ -14,6 +16,7 @@ from rest_framework.test import APIClient
 from backend.api.tests.icea_test_utils import authenticate_api_client
 
 
+@pytest.mark.django_db
 def test_remote_validation_blocks_on_error():
     client = APIClient()
     authenticate_api_client(client, unit_ids=["icu-a"])
@@ -42,6 +45,7 @@ def test_remote_validation_blocks_on_error():
     assert mock_validate.call_args.args[0].endswith("/Bundle/$validate")
 
 
+@pytest.mark.django_db
 def test_transaction_passthrough_preserves_operation_outcome():
     client = APIClient()
     authenticate_api_client(client, unit_ids=["icu-a"])

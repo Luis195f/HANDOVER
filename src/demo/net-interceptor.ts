@@ -24,7 +24,9 @@ function shouldReachE2ENetwork(input: RequestInfo | URL, init?: RequestInit): bo
   const rawUrl = input instanceof URL ? input.toString() : request?.url ?? String(input);
   try {
     const url = new URL(rawUrl);
-    return url.origin === 'https://demo.local' && url.pathname.startsWith('/fhir/');
+    return url.origin === 'https://demo.local' && (
+      url.pathname.startsWith('/fhir/') || (method === 'POST' && url.pathname === '/api/fhir/transaction')
+    );
   } catch {
     return false;
   }

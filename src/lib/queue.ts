@@ -952,12 +952,29 @@ function deriveStableBundleId(bundle: unknown, patientId: string, overrideId?: s
 
 function attachBundleIdentifier(bundle: unknown, bundleId: string): unknown {
   if (!bundle || typeof bundle !== "object") return bundle;
+  const rawEntries = (bundle as { entry?: unknown }).entry;
+  const entries: unknown[] = Array.isArray(rawEntries) ? rawEntries : [];
+  const isComposition = (entry: unknown): entry is { resource: Record<string, unknown> } => {
+    if (typeof entry !== 'object' || entry === null || !('resource' in entry)) return false;
+    const resource = entry.resource;
+    return typeof resource === 'object' && resource !== null && 'resourceType' in resource
+      && resource.resourceType === 'Composition';
+  };
+  const compositions = entries.filter(isComposition);
   return {
     ...(bundle as Record<string, unknown>),
     identifier: {
       system: BUNDLE_IDENTIFIER_SYSTEM,
       value: bundleIdToKey(bundleId),
     },
+    ...(compositions.length === 1 ? {
+      entry: entries.map((entry) => isComposition(entry) && entry === compositions[0] && !entry.resource.identifier
+        ? { ...entry, resource: {
+          ...entry.resource,
+          identifier: { system: 'urn:handover:transaction-composition', value: bundleIdToKey(bundleId) },
+        } }
+        : entry),
+    } : {}),
   };
 }
 

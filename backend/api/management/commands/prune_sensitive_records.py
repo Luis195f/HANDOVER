@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import models
 from django.utils import timezone
 
 from backend.api.models import (
@@ -13,6 +14,7 @@ from backend.api.models import (
     IceaPipelineEvent,
     IceaPipelineSnapshot,
 )
+from backend.api.icea_transaction import intent_digest
 
 
 class Command(BaseCommand):
@@ -29,8 +31,31 @@ class Command(BaseCommand):
         bundle_cutoff = now - timedelta(days=bundle_days)
         technical_cutoff = now - timedelta(days=technical_days)
 
-        expired_bundles, _ = HandoverBundleRecord.objects.filter(expires_at__lte=now).delete()
-        legacy_bundles, _ = HandoverBundleRecord.objects.filter(expires_at__isnull=True, created_at__lt=bundle_cutoff).delete()
+        expired = HandoverBundleRecord.objects.filter(bundle_json__isnull=False).filter(
+            models.Q(expires_at__lte=now) | models.Q(expires_at__isnull=True, created_at__lt=bundle_cutoff)
+        )
+        redacted_bundles = 0
+        for record in expired.iterator():
+            record.patient_scope_hash = record.patient_scope_hash or intent_digest('patient', record.patient_id)
+            record.unit_scope_hash = record.unit_scope_hash or intent_digest('unit', record.unit_id)
+            record.request_id = f"retained:{intent_digest('request', record.request_id)}"
+            record.bundle_id = f"retained:{intent_digest('bundle', record.bundle_id)}"
+            record.patient_id = ''
+            record.unit_id = ''
+            record.bundle_json = None
+            record.encryption_metadata = None
+            record.response_json = None
+            record.response_status = None
+            record.accepted_actor_sub = ''
+            record.effects_claimed_at = None
+            record.effects_next_retry_at = None
+            record.save(update_fields=[
+                'patient_scope_hash', 'unit_scope_hash', 'request_id', 'bundle_id',
+                'patient_id', 'unit_id', 'bundle_json', 'encryption_metadata',
+                'response_json', 'response_status',
+                'accepted_actor_sub', 'effects_claimed_at', 'effects_next_retry_at',
+            ])
+            redacted_bundles += 1
         outbound_deleted, _ = IceaOutboundEvent.objects.filter(
             created_at__lt=technical_cutoff,
             status__in=[IceaOutboundEvent.STATUS_DELIVERED, IceaOutboundEvent.STATUS_FAILED],
@@ -55,7 +80,7 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 "Pruned sensitive records: "
-                f"handover_bundles={expired_bundles + legacy_bundles}, "
+                f"handover_bundles={redacted_bundles}, "
                 f"icea_outbound_events={outbound_deleted}, "
                 f"icea_bridge_requests={bridge_deleted}, "
                 f"icea_pipeline_snapshots={snapshot_deleted}, "

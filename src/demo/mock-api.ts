@@ -46,6 +46,11 @@ export async function buildDemoResponse(input: RequestInfo | URL, _init?: Reques
   const parsed = parseUrl(url);
   const patientId = readDemoPatientId(parsed);
 
+  const requestMethod = _init?.method ?? (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET');
+  if (requestMethod.toUpperCase() === 'POST' && parsed.pathname === '/api/fhir/transaction') {
+    return jsonResponse({ resourceType: 'Bundle', type: 'transaction-response', entry: [] });
+  }
+
   if (url.includes('/api/ping')) {
     return jsonResponse({ ok: true, mode: 'demo' });
   }

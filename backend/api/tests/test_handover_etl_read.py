@@ -118,6 +118,19 @@ class HandoverEtlReadTests(TestCase):
         response = self.client.get(reverse("handover-etl-read", kwargs={"bundle_id": "bundle-000"}))
         self.assertEqual(response.status_code, 401)
 
+    def test_etl_never_exposes_pending_or_unknown_intents(self):
+        for status in ('pending', 'unknown'):
+            bundle_id = f'bundle-{status}'
+            HandoverBundleRecord.objects.create(
+                bundle_id=bundle_id, patient_id='patient-c04', unit_id='uci-1',
+                request_id=f'req-{status}', bundle_json=self.bundle,
+                status=status, expires_at=HandoverBundleRecord.default_expiry(),
+            )
+        self._auth(roles=['service_etl'], scopes=['handover:etl:read'])
+        for status in ('pending', 'unknown'):
+            response = self.client.get(reverse('handover-etl-read', kwargs={'bundle_id': f'bundle-{status}'}))
+            self.assertEqual(response.status_code, 404)
+
     def test_get_requires_scope(self):
         HandoverBundleRecord.objects.create(
             bundle_id="bundle-002",
