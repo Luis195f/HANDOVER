@@ -217,6 +217,10 @@ class HandoverBundleRecord(models.Model):
     effects_pending = models.BooleanField(default=False, db_index=True)
     effects_completed = models.JSONField(default=dict, blank=True)
     effects_claimed_at = models.DateTimeField(null=True, blank=True)
+    accepted_actor_sub = models.CharField(max_length=255, blank=True, default='')
+    effects_attempts = models.PositiveSmallIntegerField(default=0)
+    effects_next_retry_at = models.DateTimeField(null=True, blank=True)
+    effects_last_error = models.CharField(max_length=64, blank=True, default='')
     expires_at = models.DateTimeField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

@@ -580,6 +580,7 @@ def _reconcile_transaction_record(record: HandoverBundleRecord, request: HttpReq
 
 def _complete_transaction_side_effects(
     request: HttpRequest, *, record: HandoverBundleRecord, bundle: dict[str, Any], user_id: str, unit_id: str,
+    automatic: bool = False,
 ) -> None:
     claimed_at = claim_transaction_effects(record)
     if claimed_at is None:
@@ -590,7 +591,7 @@ def _complete_transaction_side_effects(
     def mark_complete(name: str) -> None:
         completed[name] = True
         record.effects_completed = dict(completed)
-        record.effects_pending = not all(completed.get(part) for part in ('closure', 'icea', 'audit_fhir'))
+        record.effects_pending = not all(completed.get(part) for part in ('audit_local', 'closure', 'icea', 'audit_fhir'))
         updated = HandoverBundleRecord.objects.filter(pk=record.pk, effects_claimed_at=claimed_at).update(
             effects_completed=record.effects_completed, effects_pending=record.effects_pending,
         )
@@ -598,6 +599,20 @@ def _complete_transaction_side_effects(
             raise DatabaseError('Transaction effects lease was superseded')
 
     try:
+        if not completed.get('audit_local') and user_id:
+            with transaction.atomic():
+                audit_query = AuditEvent.objects.filter(
+                    event_type='fhir_transaction', resource_id=_get_bundle_identifier_value(bundle),
+                    status='success', user_sub=user_id,
+                )
+                if not audit_query.exists():
+                    _emit_bundle_audit(
+                        request=request, payload_obj=bundle, status='success',
+                        http_status=record.response_status or 200,
+                        resource_id=_get_bundle_identifier_value(bundle), user_sub=user_id,
+                    )
+                if audit_query.exists():
+                    mark_complete('audit_local')
         if not completed.get('closure'):
             with transaction.atomic():
                 closure_key = _get_bundle_identifier_value(bundle)
@@ -642,11 +657,31 @@ def _complete_transaction_side_effects(
                 logger.exception('Local transaction effects remain pending')
 
         if not completed.get('audit_fhir'):
-            if _create_audit_event_for_transaction(request, bundle=bundle, user_id=user_id, unit_id=unit_id):
+            if not user_id:
+                record.effects_last_error = 'original_actor_unverified'
+            elif automatic:
+                record.effects_last_error = 'fhir_service_credentials_unavailable'
+            elif _create_audit_event_for_transaction(request, bundle=bundle, user_id=user_id, unit_id=unit_id):
                 mark_complete('audit_fhir')
     finally:
+        remaining = HandoverBundleRecord.objects.filter(pk=record.pk, effects_claimed_at=claimed_at).first()
+        if remaining and automatic and remaining.effects_pending:
+            attempts = min(remaining.effects_attempts + 1, 8)
+            error_code = (
+                'original_actor_unverified' if not user_id else
+                'fhir_service_credentials_unavailable'
+                if all(remaining.effects_completed.get(part) for part in ('audit_local', 'closure', 'icea'))
+                else 'local_effects_pending'
+            )
+            HandoverBundleRecord.objects.filter(pk=record.pk, effects_claimed_at=claimed_at).update(
+                effects_attempts=8 if error_code != 'local_effects_pending' else attempts,
+                effects_next_retry_at=timezone.now() + datetime.timedelta(seconds=min(30 * 2 ** (attempts - 1), 3600)),
+                effects_last_error=error_code,
+            )
         HandoverBundleRecord.objects.filter(pk=record.pk, effects_claimed_at=claimed_at).update(
             effects_claimed_at=None,
+            **({'effects_attempts': 0, 'effects_next_retry_at': None, 'effects_last_error': ''}
+               if remaining and not remaining.effects_pending else {}),
         )
 
 def _local_registry_not_ready_response() -> Response:
@@ -1443,6 +1478,7 @@ def _emit_bundle_audit(
     http_status: int,
     resource_id: str,
     meta: Optional[Dict[str, Any]] = None,
+    user_sub: str | None = None,
 ) -> None:
     emit_audit_event(
         event_type="fhir_transaction",
@@ -1454,6 +1490,7 @@ def _emit_bundle_audit(
         resource_id=resource_id,
         payload_obj=payload_obj,
         meta=meta,
+        user_sub=user_sub,
     )
 
 
@@ -2467,6 +2504,7 @@ class BundleView(AuthenticatedAPIView):
         try:
             record, created = claim_transaction_intent(
                 bundle=bundle, request=request, unit_id=resolved_unit_id, payload_hash=payload_hash,
+                actor_sub=user_id,
             )
         except TransactionIntentConflict:
             _emit_bundle_audit(
@@ -2493,7 +2531,8 @@ class BundleView(AuthenticatedAPIView):
                 if recovered:
                     stored_bundle = _resolve_persisted_handover_bundle(record)
                     _complete_transaction_side_effects(
-                        request, record=record, bundle=stored_bundle, user_id=user_id, unit_id=resolved_unit_id,
+                        request, record=record, bundle=stored_bundle,
+                        user_id=record.accepted_actor_sub, unit_id=resolved_unit_id,
                     )
                 return Response(reconciled, status=200)
             if record.response_json is None or record.response_status is None:
@@ -2508,10 +2547,15 @@ class BundleView(AuthenticatedAPIView):
                 try:
                     stored_bundle = _resolve_persisted_handover_bundle(record)
                     _complete_transaction_side_effects(
-                        request, record=record, bundle=stored_bundle, user_id=user_id, unit_id=resolved_unit_id,
+                        request, record=record, bundle=stored_bundle,
+                        user_id=record.accepted_actor_sub, unit_id=resolved_unit_id,
                     )
                 except ClinicalBundleStorageError:
                     logger.warning('Confirmed transaction effects cannot recover without retained bundle')
+            _emit_bundle_audit(
+                request=request, payload_obj=bundle, status='success', http_status=record.response_status,
+                resource_id=_get_bundle_identifier_value(bundle), meta={'errorCode': 'TRANSACTION_REPLAY'},
+            )
             return Response(cached_response, status=record.response_status)
 
         try:
@@ -2589,13 +2633,6 @@ class BundleView(AuthenticatedAPIView):
         if not confirmed:
             return _transaction_unknown_response()
 
-        _emit_bundle_audit(
-            request=request,
-            payload_obj=bundle,
-            status="success",
-            http_status=resp.status_code,
-            resource_id=_get_bundle_identifier_value(bundle) or getattr(request, "audit_request_id", ""),
-        )
         _complete_transaction_side_effects(
             request, record=record, bundle=bundle, user_id=user_id, unit_id=resolved_unit_id,
         )

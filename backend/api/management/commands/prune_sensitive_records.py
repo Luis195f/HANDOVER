@@ -46,10 +46,14 @@ class Command(BaseCommand):
             record.encryption_metadata = None
             record.response_json = None
             record.response_status = None
+            record.accepted_actor_sub = ''
+            record.effects_claimed_at = None
+            record.effects_next_retry_at = None
             record.save(update_fields=[
                 'patient_scope_hash', 'unit_scope_hash', 'request_id', 'bundle_id',
                 'patient_id', 'unit_id', 'bundle_json', 'encryption_metadata',
                 'response_json', 'response_status',
+                'accepted_actor_sub', 'effects_claimed_at', 'effects_next_retry_at',
             ])
             redacted_bundles += 1
         outbound_deleted, _ = IceaOutboundEvent.objects.filter(

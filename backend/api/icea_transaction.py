@@ -42,7 +42,7 @@ def has_transaction_intent(*, bundle: dict[str, Any], request: HttpRequest) -> b
 
 
 def claim_transaction_intent(
-    *, bundle: dict[str, Any], request: HttpRequest, unit_id: str, payload_hash: str,
+    *, bundle: dict[str, Any], request: HttpRequest, unit_id: str, payload_hash: str, actor_sub: str,
 ) -> tuple[HandoverBundleRecord, bool]:
     request_id = _extract_request_id(request)
     patient_id = _extract_patient_id_from_bundle(bundle)
@@ -58,6 +58,7 @@ def claim_transaction_intent(
         'payload_hash': payload_hash,
         'patient_scope_hash': intent_digest('patient', patient_id),
         'unit_scope_hash': intent_digest('unit', unit_id),
+        'accepted_actor_sub': actor_sub,
     }
     retained_id = f"retained:{intent_digest('request', request_id)}"
     record = HandoverBundleRecord.objects.filter(request_id=retained_id).first()

@@ -19,6 +19,7 @@ from rest_framework.test import APIClient
 
 from backend.api.models import HandoverBundleRecord
 from backend.api.clinical_storage import decrypt_bundle_document
+from backend.api.icea_transaction import claim_transaction_effects
 from backend.api.tests.icea_test_utils import (
     authenticate_api_client,
     build_fhir_response,
@@ -214,6 +215,143 @@ class FhirTransactionIdempotencyTests(TestCase):
         self.assertFalse(HandoverBundleRecord.objects.get(request_id='c04-request-001').effects_pending)
         mock_post.assert_called_once()
 
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_worker_recovers_local_effects_after_confirmation_without_client_replay(self, mock_post):
+        with patch('backend.api.views.ensure_pipeline_snapshot_from_bundle', side_effect=RuntimeError('temporary storage')):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertTrue(record.effects_pending)
+        self.assertEqual(record.accepted_actor_sub, 'auth0|nurse-c04')
+
+        call_command('recover_transaction_effects')
+
+        record.refresh_from_db()
+        self.assertFalse(record.effects_pending)
+        self.assertTrue(record.effects_completed['icea'])
+        self.assertEqual(record.effects_attempts, 0)
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_worker_recovers_after_exit_immediately_following_succeeded(self, mock_post):
+        with patch('backend.api.views._complete_transaction_side_effects', side_effect=RuntimeError('worker exited')):
+            with self.assertRaises(RuntimeError):
+                self.post_bundle()
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertEqual(record.status, 'succeeded')
+        self.assertTrue(record.effects_pending)
+
+        call_command('recover_transaction_effects')
+
+        record.refresh_from_db()
+        self.assertTrue(record.effects_completed['icea'])
+        self.assertTrue(record.effects_pending)
+        self.assertEqual(record.effects_last_error, 'fhir_service_credentials_unavailable')
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_worker_retries_partial_failure_with_backoff_and_no_duplicate_send(self, mock_post):
+        with patch('backend.api.views.ensure_pipeline_snapshot_from_bundle', side_effect=RuntimeError('temporary storage')):
+            self.assertEqual(self.post_bundle().status_code, 201)
+            call_command('recover_transaction_effects')
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertTrue(record.effects_pending)
+        self.assertEqual(record.effects_attempts, 1)
+        self.assertGreater(record.effects_next_retry_at, timezone.now())
+        call_command('recover_transaction_effects')
+        record.refresh_from_db()
+        self.assertEqual(record.effects_attempts, 1)
+        HandoverBundleRecord.objects.filter(pk=record.pk).update(effects_next_retry_at=timezone.now() - timezone.timedelta(seconds=1))
+
+        call_command('recover_transaction_effects')
+
+        record.refresh_from_db()
+        self.assertFalse(record.effects_pending)
+        self.assertTrue(record.effects_completed['icea'])
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_stale_lease_is_recovered_but_active_lease_is_not_stolen(self, mock_post):
+        with patch('backend.api.views.ensure_pipeline_snapshot_from_bundle', side_effect=RuntimeError('temporary storage')):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        HandoverBundleRecord.objects.filter(pk=record.pk).update(effects_claimed_at=timezone.now())
+        call_command('recover_transaction_effects')
+        record.refresh_from_db()
+        self.assertTrue(record.effects_pending)
+        HandoverBundleRecord.objects.filter(pk=record.pk).update(
+            effects_claimed_at=timezone.now() - timezone.timedelta(minutes=6),
+        )
+        call_command('recover_transaction_effects')
+        record.refresh_from_db()
+        self.assertFalse(record.effects_pending)
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_worker_without_human_session_blocks_external_audit_but_recovers_local_effects(self, mock_post):
+        with patch('backend.api.views._create_audit_event_for_transaction', return_value=False) as audit:
+            self.assertEqual(self.post_bundle().status_code, 201)
+            self.assertEqual(audit.call_count, 1)
+            call_command('recover_transaction_effects')
+            self.assertEqual(audit.call_count, 1)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertTrue(record.effects_completed['icea'])
+        self.assertTrue(record.effects_pending)
+        self.assertEqual(record.effects_last_error, 'fhir_service_credentials_unavailable')
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_worker_counts_a_failed_claimed_attempt_only_once(self, mock_post):
+        with patch('backend.api.views._emit_bundle_audit'):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertTrue(record.effects_pending)
+
+        with patch('backend.api.views._emit_bundle_audit', side_effect=RuntimeError('temporary audit storage')):
+            call_command('recover_transaction_effects')
+
+        record.refresh_from_db()
+        self.assertEqual(record.effects_attempts, 1)
+        self.assertGreater(record.effects_next_retry_at, timezone.now())
+        self.assertTrue(record.effects_pending)
+        mock_post.assert_called_once()
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_original_actor_remains_a_when_authorized_b_replays(self, mock_post):
+        with patch('backend.api.views._create_audit_event_for_transaction', return_value=False):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        authenticate_api_client(self.client, sub='auth0|nurse-b', unit_ids=['icu-a'])
+        with patch('backend.api.views._create_audit_event_for_transaction', return_value=True) as audit:
+            self.assertEqual(self.post_bundle().status_code, 201)
+        self.assertEqual(audit.call_args.kwargs['user_id'], 'auth0|nurse-c04')
+        self.assertEqual(HandoverBundleRecord.objects.get(request_id='c04-request-001').accepted_actor_sub, 'auth0|nurse-c04')
+        self.assertTrue(AuditEvent.objects.filter(user_sub='auth0|nurse-b', meta__errorCode='TRANSACTION_REPLAY').exists())
+        mock_post.assert_called_once()
+
+    def test_procfile_starts_a_continuous_recovery_worker(self):
+        self.assertIn('worker: python manage.py recover_transaction_effects --continuous', Path('Procfile').read_text())
+        call_command('recover_transaction_effects', continuous=True, max_cycles=1, interval=0)
+
+    @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response())
+    def test_legacy_intent_without_actor_is_not_attributed_to_replay_user(self, mock_post):
+        with patch('backend.api.views._create_audit_event_for_transaction', return_value=False):
+            self.assertEqual(self.post_bundle().status_code, 201)
+        record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        HandoverBundleRecord.objects.filter(pk=record.pk).update(
+            accepted_actor_sub='', effects_pending=True,
+            effects_completed={'icea': True, 'closure': True},
+        )
+        authenticate_api_client(self.client, sub='auth0|nurse-b', unit_ids=['icu-a'])
+        with patch('backend.api.views._create_audit_event_for_transaction') as audit:
+            self.assertEqual(self.post_bundle().status_code, 201)
+            audit.assert_not_called()
+        call_command('recover_transaction_effects')
+        record.refresh_from_db()
+        self.assertEqual(record.effects_last_error, 'original_actor_unverified')
+        self.assertFalse(AuditEvent.objects.filter(
+            user_sub='auth0|nurse-b', event_type='fhir_transaction', status='success',
+        ).exclude(meta__errorCode='TRANSACTION_REPLAY').exists())
+        mock_post.assert_called_once()
+
     @patch('backend.api.views._post_transaction_to_fhir', return_value=build_fhir_response(status_code=503))
     def test_upstream_five_hundred_is_unknown_and_never_resends(self, mock_post):
         self.assertEqual(self.post_bundle().data['code'], 'transaction_unknown')
@@ -341,6 +479,7 @@ class FhirTransactionIdempotencyTests(TestCase):
         mock_post.side_effect = httpx.ReadTimeout('response lost')
         self.assertEqual(self.post_bundle().status_code, 503)
         record = HandoverBundleRecord.objects.get(request_id='c04-request-001')
+        self.assertEqual(record.accepted_actor_sub, 'auth0|nurse-c04')
         HandoverBundleRecord.objects.filter(pk=record.pk).update(expires_at=timezone.now() - timezone.timedelta(days=1))
 
         call_command('prune_sensitive_records', bundle_days=1, technical_days=1)
@@ -349,6 +488,7 @@ class FhirTransactionIdempotencyTests(TestCase):
         self.assertIsNone(record.bundle_json)
         self.assertEqual(record.patient_id, '')
         self.assertEqual(record.unit_id, '')
+        self.assertEqual(record.accepted_actor_sub, '')
         self.assertTrue(record.request_id.startswith('retained:'))
         self.assertEqual(self.post_bundle().data['code'], 'transaction_unknown')
         self.assertEqual(self.post_bundle(key='c04-new-key').status_code, 409)
@@ -356,6 +496,20 @@ class FhirTransactionIdempotencyTests(TestCase):
 
 
 class FhirTransactionConcurrentTests(TransactionTestCase):
+    def test_two_workers_cannot_claim_the_same_effects_lease(self):
+        record = HandoverBundleRecord.objects.create(
+            bundle_id='bundle-c04-workers', request_id='c04-workers', patient_id='pat-c04-workers',
+            unit_id='icu-a', status='succeeded', effects_pending=True,
+            expires_at=HandoverBundleRecord.default_expiry(),
+        )
+
+        def claim():
+            return claim_transaction_effects(HandoverBundleRecord.objects.get(pk=record.pk))
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            claims = list(executor.map(lambda _: claim(), range(2)))
+        self.assertEqual(sum(value is not None for value in claims), 1)
+
     @patch('backend.api.views._create_audit_event_for_transaction')
     @patch('backend.api.views._post_transaction_to_fhir')
     def test_concurrent_requests_share_one_durable_intent(self, mock_post, _mock_audit):
@@ -396,7 +550,7 @@ class FhirTransactionConcurrentTests(TransactionTestCase):
 class FhirTransactionMigrationTests(TransactionTestCase):
     def test_existing_successful_record_migrates_without_rewriting_bundle(self):
         previous = [('api', '0017_clinical_decision_shown_choice')]
-        current = [('api', '0019_handover_transaction_effects')]
+        current = [('api', '0020_handover_transaction_effects_recovery')]
         executor = MigrationExecutor(connection)
         executor.migrate(previous)
         historical = executor.loader.project_state(previous).apps.get_model('api', 'HandoverBundleRecord')
@@ -414,3 +568,4 @@ class FhirTransactionMigrationTests(TransactionTestCase):
         self.assertEqual(record.bundle_json, original)
         self.assertEqual(record.payload_hash, '')
         self.assertFalse(record.effects_pending)
+        self.assertEqual(record.accepted_actor_sub, '')
