@@ -30,9 +30,8 @@ from backend.api.pilot_control import (
     evaluate_pilot_feature_governance,
     resolve_roles_from_request,
 )
-from backend.api.views import AuthenticatedAPIView
+from backend.api.views import AuthenticatedAPIView, _resolve_unit_scope
 from backend.security.permissions_roles import HasAnyRole
-from backend.security.roles import extract_roles
 
 CLINICAL_ROLES = HasAnyRole.required('nurse', 'supervisor', 'admin')
 QUERY_ROLES = HasAnyRole.required('supervisor', 'admin')
@@ -64,10 +63,19 @@ def _truthy(value: str | None) -> bool:
     return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
-def _latest_bridge_request(*, handover_id: str, scoring_mode: str | None = None) -> IceaBridgeRequest | None:
+def _latest_bridge_request(
+    *, handover_id: str, scoring_mode: str | None = None,
+    authorized_unit_ids: set[str] | None = None, requested_unit: str | None = None,
+) -> IceaBridgeRequest | None:
     queryset = IceaBridgeRequest.objects.filter(bundle_id=handover_id)
     if scoring_mode:
         queryset = queryset.filter(scoring_mode=scoring_mode)
+    if authorized_unit_ids is not None:
+        queryset = queryset.filter(unit_id__in=sorted(authorized_unit_ids))
+    if requested_unit:
+        queryset = queryset.filter(unit_id=requested_unit)
+    if not queryset.exists():
+        return None
     materialize_icea_bridge_requests_if_due(queryset)
     return queryset.order_by('-updated_at').first()
 
@@ -112,59 +120,27 @@ def _first_query_param(request, *names: str) -> str:
 
 
 def _can_query_all_patient_risk(request) -> bool:
-    claims = getattr(request, 'auth', None)
-    if not isinstance(claims, dict):
-        claims = getattr(getattr(request, 'user', None), 'claims', None)
-    roles = extract_roles(claims) if isinstance(claims, dict) else set()
-    return bool(roles & {'supervisor', 'admin'})
-
-
-def _patient_risk_claims(request) -> dict[str, Any]:
-    claims = getattr(request, 'auth', None)
-    if isinstance(claims, dict):
-        return claims
-    user_claims = getattr(getattr(request, 'user', None), 'claims', None)
-    if isinstance(user_claims, dict):
-        return user_claims
-    return {}
-
-
-def _to_string_list(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple, set)):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [item.strip() for item in value.replace(',', ' ').split() if item.strip()]
-    return []
-
-
-def _extract_authorized_unit_ids(claims: dict[str, Any]) -> set[str]:
-    collected: set[str] = set()
-    for key in ('unitIds', 'units', 'https://handover/unitIds', 'https://handoverpro/unitIds'):
-        for value in _to_string_list(claims.get(key)):
-            collected.add(value)
-    return collected
+    return 'admin' in resolve_roles_from_request(request)
 
 
 def _resolve_patient_risk_scope(request, *, patient_id: str | None, unit_id: str | None) -> tuple[str | None, Response | None]:
-    claims = _patient_risk_claims(request)
-    roles = extract_roles(claims)
-    if roles & {'supervisor', 'admin'}:
+    authorized_unit_ids, scope_error = _resolve_unit_scope(
+        request,
+        requested_unit=unit_id,
+        scope_unavailable_detail='Patient risk unit scope could not be resolved for this token.',
+        scope_unavailable_code='icea_patient_risk_unit_scope_unavailable',
+        forbidden_detail='Requested unit is outside your authorized scope.',
+        forbidden_code='icea_patient_risk_forbidden_unit',
+    )
+    if scope_error is not None:
+        return None, scope_error
+    if _can_query_all_patient_risk(request):
         return unit_id, None
-
-    authorized_unit_ids = _extract_authorized_unit_ids(claims)
-
     if unit_id:
-        if unit_id not in authorized_unit_ids:
-            return None, _error_response(
-                detail='Requested unit is outside your authorized scope.',
-                code='icea_patient_risk_forbidden_unit',
-                status=403,
-            )
         return unit_id, None
-
+    if len(authorized_unit_ids) == 1:
+        return next(iter(authorized_unit_ids)), None
     if patient_id:
-        if len(authorized_unit_ids) == 1:
-            return next(iter(authorized_unit_ids)), None
         return None, _error_response(
             detail='unitId is required to resolve patient risk for this user scope.',
             code='icea_patient_risk_unit_required',
@@ -178,6 +154,17 @@ def _resolve_patient_risk_scope(request, *, patient_id: str | None, unit_id: str
     )
 
 
+def _resolve_bridge_unit_scope(request, *, requested_unit: str | None) -> tuple[set[str] | None, Response | None]:
+    return _resolve_unit_scope(
+        request,
+        requested_unit=requested_unit,
+        scope_unavailable_detail='ICEA bridge unit scope could not be resolved for this token.',
+        scope_unavailable_code='icea_bridge_unit_scope_unavailable',
+        forbidden_detail='Requested unit is outside your authorized scope.',
+        forbidden_code='icea_bridge_forbidden_unit',
+    )
+
+
 class IceaBridgeStatusDetailView(AuthenticatedAPIView):
     permission_classes = [IsAuthenticated, CLINICAL_ROLES]
 
@@ -186,7 +173,14 @@ class IceaBridgeStatusDetailView(AuthenticatedAPIView):
 
     def get(self, request, handover_id: str):
         scoring_mode = str(request.query_params.get('scoringMode') or '').strip() or None
-        bridge_request = _latest_bridge_request(handover_id=handover_id, scoring_mode=scoring_mode)
+        requested_unit = _first_query_param(request, 'unitId') or None
+        authorized_unit_ids, scope_error = _resolve_bridge_unit_scope(request, requested_unit=requested_unit)
+        if scope_error is not None:
+            return scope_error
+        bridge_request = _latest_bridge_request(
+            handover_id=handover_id, scoring_mode=scoring_mode,
+            authorized_unit_ids=authorized_unit_ids, requested_unit=requested_unit,
+        )
         if bridge_request is None:
             return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
 
@@ -239,7 +233,13 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
         return [permission() for permission in self.permission_classes]
 
     def get(self, request):
+        requested_unit = _first_query_param(request, 'unitId') or None
+        authorized_unit_ids, scope_error = _resolve_bridge_unit_scope(request, requested_unit=requested_unit)
+        if scope_error is not None:
+            return scope_error
         queryset = IceaBridgeRequest.objects.all()
+        if authorized_unit_ids is not None:
+            queryset = queryset.filter(unit_id__in=sorted(authorized_unit_ids))
         requested_status = ''
         for query_keys, model_key in (
             (('bridgeRequestId',), 'bridge_request_id'),
@@ -254,9 +254,6 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
             if value:
                 queryset = queryset.filter(**{model_key: value})
         requested_status = _first_query_param(request, 'status')
-        materialize_icea_bridge_requests_if_due(queryset)
-        if requested_status:
-            queryset = queryset.filter(status=requested_status)
         try:
             limit = int(request.query_params.get('limit') or 20)
         except (TypeError, ValueError):
@@ -264,10 +261,13 @@ class IceaBridgeStatusQueryView(AuthenticatedAPIView):
         limit = max(1, min(limit, 100))
         gate = _bridge_status_query_gate_response(
             request,
-            unit_id=str(request.query_params.get('unitId') or '').strip() or None,
+            unit_id=requested_unit,
         )
         if gate is not None:
             return gate
+        materialize_icea_bridge_requests_if_due(queryset)
+        if requested_status:
+            queryset = queryset.filter(status=requested_status)
         results = [serialize_bridge_request(item) for item in queryset.order_by('-updated_at')[:limit]]
         return Response({'results': results, 'count': len(results)}, status=200)
 
@@ -280,7 +280,14 @@ class IceaBridgeSummaryView(AuthenticatedAPIView):
 
     def get(self, request, handover_id: str):
         scoring_mode = str(request.query_params.get('scoringMode') or '').strip() or None
-        bridge_request = _latest_bridge_request(handover_id=handover_id, scoring_mode=scoring_mode)
+        requested_unit = _first_query_param(request, 'unitId') or None
+        authorized_unit_ids, scope_error = _resolve_bridge_unit_scope(request, requested_unit=requested_unit)
+        if scope_error is not None:
+            return scope_error
+        bridge_request = _latest_bridge_request(
+            handover_id=handover_id, scoring_mode=scoring_mode,
+            authorized_unit_ids=authorized_unit_ids, requested_unit=requested_unit,
+        )
         if bridge_request is None:
             return _error_response(detail='ICEA bridge request not found.', code='icea_bridge_not_found', status=404)
         return Response({'summary': serialize_bridge_summary(bridge_request)}, status=200)
@@ -294,9 +301,15 @@ class IceaPatientRiskSummaryView(AuthenticatedAPIView):
 
     def get(self, request):
         unit_id = str(request.query_params.get('unitId') or '').strip() or None
+        patient_id = str(request.query_params.get('patientId') or '').strip() or None
+        effective_unit_id, scope_error = _resolve_patient_risk_scope(
+            request, patient_id=patient_id, unit_id=unit_id,
+        )
+        if scope_error is not None:
+            return scope_error
         feature = evaluate_pilot_feature(
             'icea_patient_risk',
-            unit_id=unit_id,
+            unit_id=effective_unit_id,
             roles=resolve_roles_from_request(request),
         )
         if not icea_patient_risk_enabled() or not feature['enabled']:
@@ -311,20 +324,11 @@ class IceaPatientRiskSummaryView(AuthenticatedAPIView):
                 feature=feature,
             )
 
-        patient_id = str(request.query_params.get('patientId') or '').strip() or None
         try:
             limit = int(request.query_params.get('limit') or 20)
         except (TypeError, ValueError):
             limit = 20
         limit = max(1, min(limit, 100))
-
-        effective_unit_id, scope_error = _resolve_patient_risk_scope(
-            request,
-            patient_id=patient_id,
-            unit_id=unit_id,
-        )
-        if scope_error is not None:
-            return scope_error
 
         results = list_patient_risk_summaries(patient_id=patient_id, unit_id=effective_unit_id, limit=limit)
         return Response({'enabled': True, 'results': results, 'count': len(results)}, status=200)
@@ -400,7 +404,6 @@ class IceaBridgeRetryView(AuthenticatedAPIView):
             return _stored_bundle_unavailable_response(retriggered)
         retriggered.refresh_from_db()
         return Response({'bridgeRequest': serialize_bridge_request(retriggered)}, status=202)
-
 
 
 

@@ -206,6 +206,7 @@ Caracteristicas:
 - requiere autenticacion;
 - usa los roles autenticados reales del request como contexto efectivo;
 - admite `unitId` como query param;
+- para un rol no admin, `unitId` debe pertenecer a los claims autenticados; sin selector se infiere una unidad única y un token multiunidad debe indicar `unitId`;
 - devuelve un mapa estable por nombre canonico de feature;
 - cada feature expone al menos `enabled`, `shadow` y `pilotMode`;
 - es la fuente primaria consumida por `src/config/pilotControl.ts`.
@@ -239,7 +240,7 @@ Caracteristicas:
 - solo lectura;
 - requiere autenticacion;
 - requiere rol `supervisor` o `admin`;
-- admite `unitId` y `role`/`roles` como query params para evaluar el scope efectivo;
+- admite `unitId` solo dentro de las unidades autenticadas (`admin` conserva su excepción existente); en `pilot` y `production`, `role`/`roles` de query no sustituyen los roles autenticados; la simulación por query se conserva únicamente en modos locales/test;
 - devuelve `features`, `killSwitches`, contexto solicitado y el limite `stateChangeAuditLimit=env_backed_read_only_control_plane`.
 
 Uso previsto:

@@ -49,7 +49,7 @@ class AuditLogViewTests(TestCase):
             is_authenticated=True,
             sub="audit-user",
             username="audit-user",
-            claims={"sub": "audit-user"},
+            claims={"sub": "audit-user", "roles": ["admin"]},
         )
         self.client.force_authenticate(user=user, token=user.claims)
 
@@ -224,6 +224,7 @@ class AuditLogViewPermissionTests(TestCase):
             "permissions": ["handover:write"],
             "scope": "handover:write",
             "roles": ["nurse"],
+            "unitIds": ["icu-a"],
         }
         user = types.SimpleNamespace(
             is_authenticated=True,
@@ -237,6 +238,7 @@ class AuditLogViewPermissionTests(TestCase):
             "type": "patient_edit",
             "userId": "nurse-audit",
             "patientKey": build_audit_patient_key("pat-91"),
+            "unitId": "icu-a",
             "at": "2026-01-01T10:00:00Z",
         }
 

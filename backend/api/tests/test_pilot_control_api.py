@@ -14,7 +14,7 @@ class PilotControlApiTests(TestCase):
         self.features_url = reverse("pilot-control-features")
 
     def _auth(self, *, roles):
-        claims = {"sub": "auth0|pilot-control", "roles": roles, "permissions": ["handover:write"]}
+        claims = {"sub": "auth0|pilot-control", "roles": roles, "permissions": ["handover:write"], "unitIds": ["icu-a"]}
         user = types.SimpleNamespace(is_authenticated=True, claims=claims, sub="auth0|pilot-control", username="pilot-control")
         self.client.force_authenticate(user=user, token=claims)
         self.client.credentials(HTTP_AUTHORIZATION="Bearer pilot-control-token")

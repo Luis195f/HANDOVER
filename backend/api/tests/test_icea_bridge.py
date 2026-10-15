@@ -1812,7 +1812,7 @@ class IceaBridgeApiTests(TestCase):
         )
 
     def _auth(self, *, roles, sub='auth0|bridge-user'):
-        claims = {'sub': sub, 'roles': roles, 'permissions': ['handover:write']}
+        claims = {'sub': sub, 'roles': roles, 'permissions': ['handover:write'], 'unitIds': ['icu-a']}
         user = types.SimpleNamespace(is_authenticated=True, claims=claims, sub=sub, username=sub)
         self.client.force_authenticate(user=user, token=claims)
         self.client.credentials(HTTP_AUTHORIZATION='Bearer bridge-token')
@@ -2684,13 +2684,13 @@ class IceaPatientRiskApiTests(TestCase):
         },
         clear=False,
     )
-    def test_patient_risk_rejects_nurse_global_query_without_filters(self):
+    def test_patient_risk_infers_single_unit_for_nurse_without_filters(self):
         self._auth(roles=['nurse'], unit_ids=['icu-a'])
 
         response = self.client.get(self.url)
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()['code'], 'icea_patient_risk_filter_required')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
 
     @patch.dict(
         os.environ,
@@ -2721,8 +2721,8 @@ class IceaPatientRiskApiTests(TestCase):
 
         response = self.client.get(self.url, {'patientId': 'pat-risk-001'})
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()['code'], 'icea_patient_risk_unit_required')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_unit_scope_unavailable')
 
     @patch.dict(
         os.environ,
@@ -2732,13 +2732,13 @@ class IceaPatientRiskApiTests(TestCase):
         },
         clear=False,
     )
-    def test_patient_risk_allows_supervisor_global_query(self):
+    def test_patient_risk_supervisor_without_units_fails_closed(self):
         self._auth(roles=['supervisor'])
 
         response = self.client.get(self.url)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['count'], 1)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['code'], 'icea_patient_risk_unit_scope_unavailable')
 
     @patch.dict(
         os.environ,
