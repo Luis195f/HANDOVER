@@ -417,10 +417,6 @@ def _extract_patient_resource_unit_ids(resource: object) -> set[str]:
             if ref_id:
                 unit_ids.add(ref_id.strip())
 
-        display = str(managing_organization.get("display") or "").strip()
-        if display:
-            unit_ids.add(display)
-
     for extension in resource.get("extension") or []:
         if not isinstance(extension, dict):
             continue

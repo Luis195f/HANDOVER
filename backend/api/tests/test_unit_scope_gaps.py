@@ -65,6 +65,52 @@ class PatientScopeGapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(upstream.call_args.args[0].endswith('/Patient/pat..1'))
 
+    def test_reference_display_is_not_a_second_unit_identifier(self):
+        patient = patient_resource('icu-a')
+        patient['managingOrganization'] = {
+            'reference': 'Organization/icu-a', 'display': 'Intensive Care Unit',
+        }
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = patient
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            direct = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(direct.status_code, 200)
+
+        upstream_response.json.return_value = {
+            'resourceType': 'Bundle', 'type': 'searchset', 'entry': [{'resource': patient}],
+        }
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            search = self.client.get(self.url, {'unit': 'icu-a'})
+        self.assertEqual(search.data['total'], 1)
+
+        nurse = authenticated_client(units=['icu-a'], scopes=['patients:write'])
+        with patch('backend.api.views._validate_remotely', return_value=None), patch(
+            'backend.api.views._post_to_fhir', return_value=Response({'resourceType': 'Patient'}, status=201)
+        ):
+            write = nurse.post(self.url, patient, format='json')
+        self.assertEqual(write.status_code, 201)
+
+    def test_conflicting_authoritative_patient_units_still_fail_closed(self):
+        patient = patient_resource('icu-a')
+        patient['managingOrganization'] = {
+            'reference': 'Organization/icu-b', 'display': 'Intensive Care Unit',
+        }
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = patient
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            response = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_display_only_does_not_authorize_patient_access(self):
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = {
+            'resourceType': 'Patient', 'id': 'pat-1',
+            'managingOrganization': {'display': 'icu-a'},
+        }
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            response = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(response.status_code, 403)
+
     def test_search_never_returns_non_patient_entries_or_foreign_units(self):
         upstream_response = Mock(status_code=200)
         upstream_response.json.return_value = {
