@@ -10,7 +10,7 @@ import sys
 import uuid
 import httpx
 from typing import Any, Dict, Optional, Tuple, Type
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
@@ -451,8 +451,10 @@ def _filter_patient_bundle_to_authorized_units(
         if not isinstance(entry, dict):
             continue
         resource = entry.get("resource")
+        if not isinstance(resource, dict) or resource.get("resourceType") != "Patient":
+            continue
         resource_unit_ids = _extract_patient_resource_unit_ids(resource)
-        if not resource_unit_ids or resource_unit_ids.isdisjoint(authorized_unit_ids):
+        if not resource_unit_ids or not resource_unit_ids.issubset(authorized_unit_ids):
             continue
 
         resource_id = ""
@@ -1957,6 +1959,9 @@ class PatientView(AuthenticatedAPIView):
         if scope_error is not None:
             return scope_error
 
+        if patient_id and (patient_id in {".", ".."} or any(char in patient_id for char in "/\\%")):
+            return Response({"errors": ["Invalid Patient id."]}, status=400)
+
         if requested_unit:
             params["unit"] = requested_unit
             params.pop("unitId", None)
@@ -1971,7 +1976,7 @@ class PatientView(AuthenticatedAPIView):
                 )
 
         base_url = f"{FHIR_BASE.rstrip('/')}/Patient"
-        url = f"{base_url}/{patient_id}" if patient_id else base_url
+        url = f"{base_url}/{quote(patient_id, safe='')}" if patient_id else base_url
 
         try:
             resp = httpx.get(url, params=params, headers=get_fhir_headers(request), timeout=30)
@@ -1987,20 +1992,24 @@ class PatientView(AuthenticatedAPIView):
         except Exception:
             return Response({"errors": ["Respuesta del servidor FHIR no es JSON."]}, status=502)
 
+        expected_type = "Patient" if patient_id else "Bundle"
+        if not isinstance(payload, dict) or payload.get("resourceType") != expected_type:
+            return Response({"errors": ["Unexpected FHIR resource type."]}, status=502)
+
         if authorized_unit_ids is not None:
-            if isinstance(payload, dict) and payload.get("resourceType") == "Patient":
+            if patient_id:
                 patient_unit_ids = _extract_patient_resource_unit_ids(payload)
                 if not patient_unit_ids:
                     return _unit_scope_error_response(
                         detail="Patient unit could not be resolved for this lookup.",
                         code="patients_unit_scope_unavailable",
                     )
-                if patient_unit_ids.isdisjoint(authorized_unit_ids):
+                if not patient_unit_ids.issubset(authorized_unit_ids):
                     return _unit_scope_error_response(
                         detail="Requested patient is outside your authorized scope.",
                         code="patients_forbidden_unit",
                     )
-            elif isinstance(payload, dict) and payload.get("resourceType") == "Bundle":
+            else:
                 payload = _filter_patient_bundle_to_authorized_units(
                     payload,
                     authorized_unit_ids=authorized_unit_ids,
@@ -2039,6 +2048,22 @@ class PatientView(AuthenticatedAPIView):
             return Response({"errors": ["Invalid Patient payload."]}, status=422)
 
         patient = patient_obj.dict(exclude_none=True)
+        requested_unit = str(request.query_params.get("unit") or request.query_params.get("unitId") or "").strip() or None
+        authorized_unit_ids, scope_error = _resolve_patient_unit_scope(request, requested_unit=requested_unit)
+        if scope_error is not None:
+            return scope_error
+        if authorized_unit_ids is not None:
+            patient_unit_ids = _extract_patient_resource_unit_ids(patient)
+            if not patient_unit_ids:
+                return _unit_scope_error_response(
+                    detail="Patient unit could not be resolved for this write.",
+                    code="patients_unit_scope_unavailable",
+                )
+            if not patient_unit_ids.issubset(authorized_unit_ids):
+                return _unit_scope_error_response(
+                    detail="Requested patient is outside your authorized scope.",
+                    code="patients_forbidden_unit",
+                )
         validation_response = _validate_remotely(request, patient, "Patient")
         if validation_response:
             _emit_resource_audit(
@@ -2212,9 +2237,12 @@ class PatientsView(AuthenticatedAPIView):
                         )
 
                     try:
-                        remote_bundles.append(resp.json())
+                        remote_bundle = resp.json()
                     except Exception:
                         return Response({"errors": ["FHIR server response is not JSON."]}, status=502)
+                    if not isinstance(remote_bundle, dict) or remote_bundle.get("resourceType") != "Bundle":
+                        return Response({"errors": ["Unexpected FHIR resource type."]}, status=502)
+                    remote_bundles.append(remote_bundle)
 
                 return Response(
                     _filter_patient_bundle_to_authorized_units(
@@ -2236,6 +2264,8 @@ class PatientsView(AuthenticatedAPIView):
             payload = resp.json()
         except Exception:
             return Response({"errors": ["FHIR server response is not JSON."]}, status=502)
+        if not isinstance(payload, dict) or payload.get("resourceType") != "Bundle":
+            return Response({"errors": ["Unexpected FHIR resource type."]}, status=502)
 
         return Response(
             _filter_patient_bundle_to_authorized_units(
@@ -2275,10 +2305,14 @@ class PatientsView(AuthenticatedAPIView):
 
 class MedicationStatementView(AuthenticatedAPIView):
     permission_classes = [
-    IsAuthenticated,
-    HasAnyRole.required("nurse", "supervisor", "admin"),
-    HasAllScopes.required("fhir:transaction", "handover:write"),
-]
+        IsAuthenticated,
+        HasAnyRole.required("nurse", "supervisor", "admin"),
+        HasAllScopes.required("fhir:transaction", "handover:write"),
+    ]
+
+    def get_permissions(self):
+        return [permission() for permission in self.permission_classes]
+
     def post(self, request: HttpRequest) -> Response:
         if MedicationStatement is None:
             return Response({"errors": ["Dependencia fhir.resources no disponible."]}, status=500)
@@ -2711,7 +2745,23 @@ class AuditLogView(AuthenticatedAPIView):
             limit = 200
         limit = max(10, min(limit, 500))
 
-        logs = ClientAuditEvent.objects.all()[:limit]
+        requested_unit = str(request.query_params.get("unitId") or "").strip() or None
+        authorized_unit_ids, scope_error = _resolve_unit_scope(
+            request,
+            requested_unit=requested_unit,
+            scope_unavailable_detail="Audit unit scope could not be resolved for this token.",
+            scope_unavailable_code="audit_unit_scope_unavailable",
+            forbidden_detail="Requested audit unit is outside your authorized scope.",
+            forbidden_code="audit_forbidden_unit",
+        )
+        if scope_error is not None:
+            return scope_error
+        logs = ClientAuditEvent.objects.all()
+        if authorized_unit_ids is not None:
+            logs = logs.filter(unit_id__in=sorted(authorized_unit_ids))
+        if requested_unit:
+            logs = logs.filter(unit_id=requested_unit)
+        logs = logs[:limit]
         payload = [self._serialize_event(event) for event in logs]
         emit_audit_event(
             event_type="audit_access",
@@ -2757,6 +2807,17 @@ class AuditLogView(AuthenticatedAPIView):
                 meta={"errorCode": "ACTOR_MISMATCH"},
             )
             return Response({"errors": ["Authenticated audit actor mismatch."]}, status=403)
+
+        _, scope_error = _resolve_unit_scope(
+            request,
+            requested_unit=str(validated.get("unitId") or "").strip() or None,
+            scope_unavailable_detail="Audit unit scope could not be resolved for this token.",
+            scope_unavailable_code="audit_unit_scope_unavailable",
+            forbidden_detail="Requested audit unit is outside your authorized scope.",
+            forbidden_code="audit_forbidden_unit",
+        )
+        if scope_error is not None:
+            return scope_error
 
         raw_at = validated.get("at")
         occurred_at = parse_datetime(raw_at) if isinstance(raw_at, str) else None

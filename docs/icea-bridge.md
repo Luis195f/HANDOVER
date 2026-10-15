@@ -225,18 +225,23 @@ Politica operativa minima:
 
 - `GET /api/icea/bridge/status/<handoverId>`
   - roles: `nurse`, `supervisor`, `admin`
+  - para roles no admin, la búsqueda y la materialización se restringen a `unitIds` autenticados antes de cualquier refresh; un `handoverId` ajeno no revela el registro
   - devuelve `bridgeRequest` + `summary` + metadata aditiva: `remoteStatusSupported`, `remoteRefreshAttempted`, `localStatusIsAuthoritative`
   - el `scoreSummary` queda redactado en la respuesta publica; la salida visible conserva estado, warnings, request ids, modo y versionado
 - `GET /api/icea/bridge/status?bridgeRequestId=&requestId=&handoverId=&bundleId=&patientId=&unitId=&shift=&status=&scoringMode=`
   - roles: `supervisor`, `admin`
+  - `unitId` no amplía el scope; los listados, recuentos y la materialización quedan acotados a las unidades autorizadas
   - `handoverId` y `bundleId` filtran el mismo campo estable (`bundle_id`)
   - devuelve lista resumida para dashboards/operacion
 - `GET /api/icea/bridge/summary/<handoverId>`
   - roles: `nurse`, `supervisor`, `admin`
+  - aplica el mismo scope antes de materializar o serializar el resumen
   - devuelve resumen prudente para trazabilidad, sin score individual visible y sin obligar a una surface clinica paciente-a-paciente
 - `POST /api/icea/bridge/retry/<bridgeId>`
   - rol: `admin`
   - reintenta el mismo payload o relanza `enriched_followup`
+
+`GET /api/icea/patient-risk` conserva únicamente la consulta global del administrador autenticado. `nurse` y `supervisor` se limitan a sus `unitIds`: un `unitId` ajeno o la falta de unidades falla cerrado; una unidad única se infiere si se omite el selector, y varias requieren `unitId` para una consulta concreta. El scope se resuelve antes de evaluar o consultar resultados. Esto sustituye la antigua expectativa de supervisor global.
 
 ## Flags y configuracion
 
