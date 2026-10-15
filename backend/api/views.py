@@ -406,16 +406,16 @@ def _extract_patient_resource_unit_ids(resource: object) -> set[str]:
     managing_organization = resource.get("managingOrganization")
     if isinstance(managing_organization, dict):
         identifier = managing_organization.get("identifier")
-        if isinstance(identifier, dict):
+        if isinstance(identifier, dict) and identifier.get("system") == "urn:handover:unit-id":
             value = str(identifier.get("value") or "").strip()
             if value:
                 unit_ids.add(value)
 
         reference = str(managing_organization.get("reference") or "").strip()
         if reference:
-            _, _, ref_id = reference.rpartition("/")
-            if ref_id:
-                unit_ids.add(ref_id.strip())
+            match = re.search(r"(?:^|/)Organization/([^/?#]+)(?:/_history/[^/?#]+)?$", reference)
+            if match:
+                unit_ids.add(unquote(match.group(1)))
 
     for extension in resource.get("extension") or []:
         if not isinstance(extension, dict):
@@ -450,7 +450,7 @@ def _filter_patient_bundle_to_authorized_units(
         if not isinstance(resource, dict) or resource.get("resourceType") != "Patient":
             continue
         resource_unit_ids = _extract_patient_resource_unit_ids(resource)
-        if not resource_unit_ids or not resource_unit_ids.issubset(authorized_unit_ids):
+        if len(resource_unit_ids) != 1 or not resource_unit_ids.issubset(authorized_unit_ids):
             continue
 
         resource_id = ""
@@ -2000,7 +2000,7 @@ class PatientView(AuthenticatedAPIView):
                         detail="Patient unit could not be resolved for this lookup.",
                         code="patients_unit_scope_unavailable",
                     )
-                if not patient_unit_ids.issubset(authorized_unit_ids):
+                if len(patient_unit_ids) != 1 or not patient_unit_ids.issubset(authorized_unit_ids):
                     return _unit_scope_error_response(
                         detail="Requested patient is outside your authorized scope.",
                         code="patients_forbidden_unit",
@@ -2055,7 +2055,7 @@ class PatientView(AuthenticatedAPIView):
                     detail="Patient unit could not be resolved for this write.",
                     code="patients_unit_scope_unavailable",
                 )
-            if not patient_unit_ids.issubset(authorized_unit_ids):
+            if len(patient_unit_ids) != 1 or not patient_unit_ids.issubset(authorized_unit_ids):
                 return _unit_scope_error_response(
                     detail="Requested patient is outside your authorized scope.",
                     code="patients_forbidden_unit",

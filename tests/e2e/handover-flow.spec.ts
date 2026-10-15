@@ -183,6 +183,8 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await page.getByTestId(`open-exception-${fullDetailPatientId}`).click();
   await page.getByRole('button', { name: 'Ver detalle completo' }).click();
   await expect(page.getByTestId('handover-profile-runtime')).toBeVisible();
+  await expect(page.getByTestId('patient-banner-loading')).toHaveCount(0);
+  await expect(page.getByTestId('patient-name')).toBeVisible();
   await expect(page.getByTestId('handover-scan-qr')).toHaveCount(0);
 
   const sbarAssessment = page.getByTestId('handover-sbar-assessment');
@@ -217,6 +219,8 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await expect(page.getByTestId('elimination.urineMl')).toHaveValue('450');
   await expect(page.getByTestId('elimination.stoolPattern.trigger')).toContainText('Constipación');
   await page.getByRole('button', { name: 'Sección Psicosocial. Contraída.' }).click();
+  await expect(page.getByRole('button', { name: 'Sección Psicosocial. Expandida.' })).toBeVisible();
+  await expect(page.getByTestId('psychosocial-emotional-status')).toBeVisible();
   await page.getByTestId('psychosocial-emotional-status').fill('Estable en escenario sintético E2E.');
   await page.getByTestId('psychosocial-family-notes').fill('Sin datos familiares reales.');
   await expect(sbarSituation).toHaveValue(/Ajuste profesional E2E preservado/);

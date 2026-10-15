@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 from importlib import import_module
 from unittest.mock import Mock, patch
 
@@ -89,6 +90,107 @@ class PatientScopeGapTests(TestCase):
         ):
             write = nurse.post(self.url, patient, format='json')
         self.assertEqual(write.status_code, 201)
+
+    def test_managing_organization_identifier_uses_only_unit_id_system(self):
+        patient = patient_resource('icu-a')
+        patient['managingOrganization'] = {
+            'reference': 'Organization/icu-a',
+            'identifier': {'system': 'https://hospital.example/mrn', 'value': '12345'},
+        }
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = patient
+        original = deepcopy(patient)
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            response = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(patient, original)
+
+        upstream_response.json.return_value = {
+            'resourceType': 'Bundle', 'type': 'searchset', 'entry': [{'resource': patient}],
+        }
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            search = self.client.get(self.url, {'unit': 'icu-a'})
+        self.assertEqual(search.data['total'], 1)
+
+        writer = authenticated_client(units=['icu-a'], scopes=['patients:write'])
+        with patch('backend.api.views._validate_remotely', return_value=None), patch(
+            'backend.api.views._post_to_fhir', return_value=Response({'resourceType': 'Patient'}, status=201)
+        ) as upstream:
+            write = writer.post(self.url, patient, format='json')
+        self.assertEqual(write.status_code, 201)
+        upstream.assert_called_once()
+        self.assertEqual(patient, original)
+
+        patient['managingOrganization'] = {
+            'identifier': {'system': 'urn:handover:unit-id', 'value': 'icu-a'},
+        }
+        upstream_response.json.return_value = patient
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            canonical = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(canonical.status_code, 200)
+
+        patient['managingOrganization']['identifier']['system'] = 'https://hospital.example/mrn'
+        patient.pop('extension')
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            unrelated_only = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(unrelated_only.status_code, 403)
+
+    def test_versioned_organization_reference_keeps_its_unit_identity(self):
+        patient = patient_resource('icu-a')
+        patient['managingOrganization'] = {'reference': 'Organization/icu-a/_history/2'}
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = patient
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            response = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(response.status_code, 200)
+
+    def test_contained_reference_is_not_inferred_as_unit_id(self):
+        patient = {
+            'resourceType': 'Patient', 'id': 'pat-1',
+            'managingOrganization': {'reference': '#icu-a'},
+        }
+        original = deepcopy(patient)
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = patient
+        with patch('backend.api.views.httpx.get', return_value=upstream_response) as upstream:
+            direct = self.client.get(self.url, {'id': 'pat-1'})
+        self.assertEqual(direct.status_code, 403)
+        upstream.assert_called_once()
+
+        upstream_response.json.return_value = {
+            'resourceType': 'Bundle', 'type': 'searchset', 'entry': [{'resource': patient}],
+        }
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            search = self.client.get(self.url, {'unit': 'icu-a'})
+        self.assertEqual(search.data['total'], 0)
+        self.assertEqual(patient, original)
+
+    def test_multiunit_token_does_not_authorize_contradictory_patient_evidence(self):
+        patient = patient_resource('icu-a')
+        patient['managingOrganization'] = {'reference': 'Organization/icu-b'}
+        original = deepcopy(patient)
+        upstream_response = Mock(status_code=200)
+        upstream_response.json.return_value = patient
+        client = authenticated_client(role='supervisor', units=['icu-a', 'icu-b'], scopes=['patients:read'])
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            direct = client.get(self.url, {'id': 'pat-1', 'unit': 'icu-a'})
+        self.assertEqual(direct.status_code, 403)
+
+        upstream_response.json.return_value = {
+            'resourceType': 'Bundle', 'type': 'searchset', 'entry': [{'resource': patient}],
+        }
+        with patch('backend.api.views.httpx.get', return_value=upstream_response):
+            search = client.get(self.url, {'unit': 'icu-a'})
+        self.assertEqual(search.data['total'], 0)
+
+        writer = authenticated_client(role='supervisor', units=['icu-a', 'icu-b'], scopes=['patients:write'])
+        with patch('backend.api.views._validate_remotely', return_value=None), patch(
+            'backend.api.views._post_to_fhir'
+        ) as upstream:
+            write = writer.post(self.url, patient, format='json')
+        self.assertEqual(write.status_code, 403)
+        upstream.assert_not_called()
+        self.assertEqual(patient, original)
 
     def test_conflicting_authoritative_patient_units_still_fail_closed(self):
         patient = patient_resource('icu-a')
