@@ -3,7 +3,8 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS, DEMO_NOW } from '@/src/demo/fixtures';
-import { formatExceptionDateTime } from '@/src/lib/exception-handover';
+import { buildExceptionHandoverContextKey, classifyExceptionHandoverPatient, createExceptionReviewEvent, formatExceptionDateTime } from '@/src/lib/exception-handover';
+import { createEmptyExceptionHandoverState } from '@/src/lib/exception-handover-storage';
 import { UnitExceptionHandover } from '../UnitExceptionHandover';
 
 const colors = {
@@ -20,6 +21,9 @@ const colors = {
 };
 
 const now = () => '2026-08-27T08:15:00.000Z';
+const groupScope = { viewScope: 'all-units', members: DEMO_EXCEPTION_HANDOVER_PATIENTS.map((patient) => ({
+  patientId: patient.patientId, unitId: 'demo-unit',
+})) };
 
 describe('UnitExceptionHandover', () => {
   it('separates the synthetic classification clock from the interaction clock', () => {
@@ -27,6 +31,7 @@ describe('UnitExceptionHandover', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -52,6 +57,7 @@ describe('UnitExceptionHandover', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -77,6 +83,7 @@ describe('UnitExceptionHandover', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={openFull}
@@ -103,6 +110,7 @@ describe('UnitExceptionHandover', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -119,6 +127,7 @@ describe('UnitExceptionHandover', () => {
       screen.update(
         <UnitExceptionHandover
           patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+          groupScope={groupScope}
           sessionUserId={DEMO_ACTORS[1].userId}
           colors={colors}
           onOpenFullHandover={() => {}}
@@ -145,6 +154,7 @@ describe('UnitExceptionHandover', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -162,6 +172,7 @@ describe('UnitExceptionHandover', () => {
       screen.update(
         <UnitExceptionHandover
           patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+          groupScope={groupScope}
           sessionUserId={DEMO_ACTORS[1].userId}
           colors={colors}
           onOpenFullHandover={() => {}}
@@ -177,11 +188,20 @@ describe('UnitExceptionHandover', () => {
       fireEvent.press(screen.getByText('Registrar escalado'));
       fireEvent.press(screen.getByRole('button', { name: 'Cerrar' }));
     }
+    expect(String(screen.getByTestId('exception-closure-blocked').props.children)).toContain('pacientes B');
+    for (const patient of DEMO_EXCEPTION_HANDOVER_PATIENTS.filter((candidate) => candidate.status === 'changed')) {
+      fireEvent.press(screen.getByTestId(`open-exception-${patient.patientId}`));
+      fireEvent.press(screen.getByTestId(`accept-brief-${patient.patientId}`));
+      fireEvent.press(screen.getByRole('button', { name: 'Cerrar' }));
+    }
+    expect(String(screen.getByTestId('exception-closure-blocked').props.children)).toContain('grupo C');
+    fireEvent.press(screen.getByTestId('confirm-unchanged-review'));
 
     act(() => {
       screen.update(
         <UnitExceptionHandover
           patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+          groupScope={groupScope}
           sessionUserId={DEMO_ACTORS[0].userId}
           colors={colors}
           onOpenFullHandover={() => {}}
@@ -197,6 +217,7 @@ describe('UnitExceptionHandover', () => {
       screen.update(
         <UnitExceptionHandover
           patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+          groupScope={groupScope}
           sessionUserId={DEMO_ACTORS[1].userId}
           colors={colors}
           onOpenFullHandover={() => {}}
@@ -210,10 +231,97 @@ describe('UnitExceptionHandover', () => {
     expect(screen.getByTestId('incoming-attestation-event').props.children.join('')).toContain('Profesional receptora demo');
   });
 
+  it('requires fresh collective evidence after scope and census changes, but not reordering', () => {
+    const unchanged = DEMO_EXCEPTION_HANDOVER_PATIENTS.filter((patient) => patient.status === 'unchanged').slice(0, 2);
+    const scope = (viewScope: string, patients: typeof unchanged) => ({ viewScope,
+      members: patients.map((patient) => ({ patientId: patient.patientId, unitId: 'unit-a' })) });
+    const board = (patients: typeof unchanged, viewScope: string, userId: string) => (
+      <UnitExceptionHandover patients={patients} groupScope={scope(viewScope, patients)}
+        sessionUserId={userId} colors={colors} onOpenFullHandover={() => {}} now={now} storage={null} />
+    );
+    const screen = render(board(unchanged, 'unit-a', DEMO_ACTORS[0].userId));
+    fireEvent.press(screen.getByTestId('confirm-unchanged-review'));
+    act(() => screen.update(board([...unchanged].reverse(), 'unit-a', DEMO_ACTORS[0].userId)));
+    expect(screen.queryByTestId('exception-closure-blocked')).toBeNull();
+    fireEvent.press(screen.getByTestId('confirm-outgoing-transfer'));
+    act(() => screen.update(board(unchanged, 'unit-a', DEMO_ACTORS[1].userId)));
+    fireEvent.press(screen.getByTestId('confirm-incoming-attestation'));
+    expect(screen.getByTestId('incoming-attestation-event')).toBeTruthy();
+
+    act(() => screen.update(board(unchanged.slice(0, 1), 'unit-a', DEMO_ACTORS[0].userId)));
+    expect(screen.queryByTestId('outgoing-transfer-event')).toBeNull();
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(true);
+    fireEvent.press(screen.getByTestId('confirm-unchanged-review'));
+    expect(screen.queryByTestId('exception-closure-blocked')).toBeNull();
+    act(() => screen.update(board(unchanged, 'unit-a', DEMO_ACTORS[0].userId)));
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(true);
+    expect(screen.queryByTestId('incoming-attestation-event')).toBeNull();
+    act(() => screen.update(board(unchanged, 'all-units', DEMO_ACTORS[0].userId)));
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(true);
+  });
+
+  it('does not restore a legacy or stale closure after hydration changes context', async () => {
+    const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((candidate) => candidate.status === 'unchanged')!;
+    const first = [patient];
+    const second = DEMO_EXCEPTION_HANDOVER_PATIENTS.filter((candidate) => candidate.status === 'unchanged').slice(0, 2);
+    const scope = (patients: typeof first) => ({ viewScope: 'unit-a',
+      members: patients.map((candidate) => ({ patientId: candidate.patientId, unitId: 'unit-a' })) });
+    const key = buildExceptionHandoverContextKey(patient.shiftId!, 'unit-a', scope(first).members,
+      [classifyExceptionHandoverPatient(patient, { now: now(), shiftId: patient.shiftId })]);
+    const staleContext = { key, revision: 1, shiftId: patient.shiftId! };
+    let resolveLoad!: (value: ReturnType<typeof createEmptyExceptionHandoverState>) => void;
+    const storage = { load: vi.fn(() => new Promise<ReturnType<typeof createEmptyExceptionHandoverState>>((resolve) => {
+      resolveLoad = resolve;
+    })), save: vi.fn(async () => {}), clear: vi.fn(async () => {}) };
+    const board = (patients: typeof first) => <UnitExceptionHandover patients={patients} groupScope={scope(patients)}
+      sessionUserId={DEMO_ACTORS[0].userId} colors={colors} onOpenFullHandover={() => {}} now={now} storage={storage} />;
+    const screen = render(board(first));
+    act(() => screen.update(board(second)));
+    act(() => screen.update(board(first)));
+    await act(async () => resolveLoad({ ...createEmptyExceptionHandoverState(patient.shiftId!),
+      activeContext: staleContext,
+      events: [createExceptionReviewEvent('unchanged_group_review', DEMO_ACTORS[0], now(), undefined,
+        { shiftId: patient.shiftId, context: staleContext }),
+      createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], now(), undefined, { shiftId: patient.shiftId })],
+    }));
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(true);
+    expect(screen.queryByTestId('unchanged-review-event')).toBeNull();
+    expect(screen.getByText(/eventos anteriores sin contexto de grupo/)).toBeTruthy();
+  });
+
+  it('requires the incoming attestation to acknowledge the current outgoing transfer', async () => {
+    const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((candidate) => candidate.status === 'unchanged')!;
+    const patients = [patient];
+    const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };
+    const shiftId = patient.shiftId!;
+    const key = buildExceptionHandoverContextKey(shiftId, scoped.viewScope, scoped.members,
+      [classifyExceptionHandoverPatient(patient, { now: now(), shiftId })]);
+    const context = { key, revision: 1, shiftId };
+    const collective = createExceptionReviewEvent('unchanged_group_review', DEMO_ACTORS[0], now(), undefined, { shiftId, context });
+    const outgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], now(), undefined, { shiftId, context });
+    const wrongIncoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], now(), undefined,
+      { shiftId, context, acknowledgesKey: 'other-transfer' });
+    const state = { ...createEmptyExceptionHandoverState(shiftId), activeContext: context,
+      events: [collective, outgoing, wrongIncoming] };
+    let saved = state;
+    const storage = { load: vi.fn(async () => state), save: vi.fn(async (next: typeof state) => { saved = next; }),
+      clear: vi.fn(async () => {}) };
+    const screen = render(<UnitExceptionHandover patients={patients} groupScope={scoped}
+      sessionUserId={DEMO_ACTORS[1].userId} colors={colors} onOpenFullHandover={() => {}} now={now} storage={storage} />);
+    await act(async () => {});
+    expect(screen.getByTestId('outgoing-transfer-event')).toBeTruthy();
+    expect(screen.queryByTestId('incoming-attestation-event')).toBeNull();
+    fireEvent.press(screen.getByTestId('confirm-incoming-attestation'));
+    expect(screen.getByTestId('incoming-attestation-event')).toBeTruthy();
+    expect(saved.events).toHaveLength(4);
+    expect(saved.events.at(-1)?.acknowledgesKey).toBe(outgoing.idempotencyKey);
+  });
+
   it('shows one partial-degradation banner and moves only dependent baseline-C patients to R', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -243,6 +351,7 @@ describe('UnitExceptionHandover', () => {
     const renderBoard = (integrationState: React.ComponentProps<typeof UnitExceptionHandover>['integrationState']) => (
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -272,6 +381,7 @@ describe('UnitExceptionHandover', () => {
     const screen = render(
       <UnitExceptionHandover
         patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+        groupScope={groupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -301,9 +411,13 @@ describe('UnitExceptionHandover', () => {
       name: `Caso sintético ${index + 1}`,
       bedLabel: `SM-${index + 1}`,
     }));
+    const eightyGroupScope = { viewScope: 'demo-unit', members: eightyPatients.map((patient) => ({
+      patientId: patient.patientId, unitId: 'demo-unit',
+    })) };
     const screen = render(
       <UnitExceptionHandover
         patients={eightyPatients}
+        groupScope={eightyGroupScope}
         sessionUserId={DEMO_ACTORS[0].userId}
         colors={colors}
         onOpenFullHandover={() => {}}
@@ -316,6 +430,7 @@ describe('UnitExceptionHandover', () => {
       screen.update(
         <UnitExceptionHandover
           patients={eightyPatients}
+          groupScope={eightyGroupScope}
           sessionUserId={DEMO_ACTORS[0].userId}
           colors={colors}
           onOpenFullHandover={() => {}}
@@ -342,6 +457,7 @@ describe('UnitExceptionHandover', () => {
       screen.update(
         <UnitExceptionHandover
           patients={eightyPatients}
+          groupScope={eightyGroupScope}
           sessionUserId={DEMO_ACTORS[1].userId}
           colors={colors}
           onOpenFullHandover={() => {}}

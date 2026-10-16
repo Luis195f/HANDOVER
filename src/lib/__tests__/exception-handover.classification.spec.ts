@@ -5,6 +5,7 @@ import {
   appendUniqueExceptionEvent,
   appendUniqueOverride,
   assessHandoffClosure,
+  buildExceptionHandoverContextKey,
   assessUnitDataHealth,
   calculateCheckBackMetrics,
   calculateRMetrics,
@@ -20,6 +21,7 @@ import {
 
 const NOW = '2026-08-27T08:15:00.000Z';
 const SHIFT = 'demo-2026-08-27-morning';
+const context = { key: 'group-one', revision: 1, shiftId: SHIFT };
 
 const fixture = (patientId: string) => {
   const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((candidate) => candidate.patientId === patientId);
@@ -254,14 +256,14 @@ describe('overrides, check-back, R governance and closure', () => {
       ...patient,
       sourceEvidence: { ...patient.sourceEvidence, 'direct-assessment': { status: 'missing' } },
     });
-    expect(assessHandoffClosure([r], [], 'degraded')).toMatchObject({ canClose: false });
+    expect(assessHandoffClosure([r], [], 'degraded', context)).toMatchObject({ canClose: false });
 
     const transferred = createExceptionReviewEvent('r_transferred', DEMO_ACTORS[1], NOW, r.patientId, {
       reason: r.reasons[0],
       targetAt: '2026-08-27T09:00:00.000Z',
       receiverId: DEMO_ACTORS[1].userId,
     });
-    expect(assessHandoffClosure([r], [transferred], 'degraded')).toEqual({ canClose: true, blockingReasons: [] });
+    expect(assessHandoffClosure([r], [{ ...transferred, context }], 'degraded', context)).toEqual({ canClose: true, blockingReasons: [] });
   });
 
   it('requires all three unit-level degraded acknowledgements without inventing patient data', () => {
@@ -269,11 +271,12 @@ describe('overrides, check-back, R governance and closure', () => {
     const outgoing = createExceptionReviewEvent('degraded_outgoing_transfer', DEMO_ACTORS[0], NOW);
     const incoming = createExceptionReviewEvent('degraded_incoming_acknowledgement', DEMO_ACTORS[1], NOW);
 
-    expect(assessHandoffClosure([], [incident, outgoing], 'unavailable').canClose).toBe(false);
-    expect(assessHandoffClosure([], [incident, outgoing, incoming], 'unavailable')).toEqual({
+    expect(assessHandoffClosure([], [incident, outgoing], 'unavailable', context).canClose).toBe(false);
+    expect(assessHandoffClosure([], [incident, outgoing, incoming], 'unavailable', context)).toEqual({
       canClose: true,
       blockingReasons: [],
     });
+    expect(assessHandoffClosure([], [incident, outgoing, { ...incoming, shiftId: 'other-shift' }], 'unavailable', context).canClose).toBe(false);
     expect(validateDegradedUnitTransfer({
       priorityPatientIds: [],
       changedPatientIds: [],
@@ -281,6 +284,90 @@ describe('overrides, check-back, R governance and closure', () => {
       receiverId: DEMO_ACTORS[1].userId,
       recordedAt: NOW,
     })).toBe(true);
+  });
+
+  it('binds closure evidence to the current group, shift and patient lanes', () => {
+    const a = classify(fixture('demo-psych-adult-001'));
+    const b = classify(fixture('demo-psych-child-001'));
+    const c = classify(fixture('demo-psych-adult-002'));
+    const r = classify({ ...fixture('demo-psych-unit-010'), sourceEvidence: {
+      ...fixture('demo-psych-unit-010').sourceEvidence,
+      'direct-assessment': { status: 'missing' },
+    } });
+    const make = (kind: Parameters<typeof createExceptionReviewEvent>[0], patientId?: string) =>
+      createExceptionReviewEvent(kind, DEMO_ACTORS[1], NOW, patientId, { shiftId: SHIFT, context,
+        ...(kind === 'critical_check_back' ? { criticalPoints: ['Riesgo'] } : {}),
+        ...(kind === 'r_transferred' ? { reason: 'Pendiente', targetAt: NOW, receiverId: DEMO_ACTORS[1].userId } : {}),
+      });
+    const events = [make('critical_check_back', a.patientId), make('brief_review', b.patientId),
+      make('unchanged_group_review'), make('r_transferred', r.patientId)];
+    const classifications = [a, b, c, r];
+    expect(assessHandoffClosure(classifications, [], 'healthy', context).blockingReasons).toHaveLength(4);
+    expect(assessHandoffClosure(classifications, events, 'healthy', context).canClose).toBe(true);
+    for (const event of events) {
+      expect(assessHandoffClosure(classifications, events.filter((candidate) => candidate !== event), 'healthy', context).canClose).toBe(false);
+      expect(assessHandoffClosure(classifications, [{ ...event, context: { key: 'other-group', revision: 1, shiftId: SHIFT } },
+        ...events.filter((candidate) => candidate !== event)], 'healthy', context).canClose).toBe(false);
+      expect(assessHandoffClosure(classifications, [{ ...event, shiftId: 'other-shift' },
+        ...events.filter((candidate) => candidate !== event)], 'healthy', context).canClose).toBe(false);
+    }
+    expect(assessHandoffClosure(classifications, events.map(({ context: _context, ...event }) => event), 'healthy', context).canClose).toBe(false);
+    expect(assessHandoffClosure([], [], 'healthy', context).canClose).toBe(true);
+  });
+
+  it('distinguishes view, units, members and lanes but not ordering', () => {
+    const a = classify(fixture('demo-psych-adult-001'));
+    const b = classify(fixture('demo-psych-child-001'));
+    const members = [{ patientId: a.patientId, unitId: 'unit-a' }, { patientId: b.patientId, unitId: 'unit-b' }];
+    const key = buildExceptionHandoverContextKey(SHIFT, 'all-units', members, [a, b]);
+    expect(buildExceptionHandoverContextKey(SHIFT, 'all-units', [...members].reverse(), [b, a])).toBe(key);
+    expect(buildExceptionHandoverContextKey(SHIFT, 'unit-a', members, [a, b])).not.toBe(key);
+    expect(buildExceptionHandoverContextKey(SHIFT, 'all-units', members.slice(0, 1), [a])).not.toBe(key);
+    expect(buildExceptionHandoverContextKey('other-shift', 'all-units', members, [a, b])).not.toBe(key);
+    expect(buildExceptionHandoverContextKey(SHIFT, 'all-units', members, [{ ...a, handoffLane: 'B' }, b])).not.toBe(key);
+    const review = classify({ ...fixture('demo-psych-adult-002'), sourceEvidence: {
+      ...fixture('demo-psych-adult-002').sourceEvidence,
+      'direct-assessment': { status: 'missing' },
+    } });
+    const reviewMembers = [{ patientId: review.patientId, unitId: 'unit-a' }];
+    expect(buildExceptionHandoverContextKey(SHIFT, 'unit-a', reviewMembers, [review])).toBe(
+      buildExceptionHandoverContextKey(SHIFT, 'unit-a', reviewMembers, [{ ...review,
+        classifiedAt: '2026-08-27T08:30:00.000Z',
+        reviewRequirements: review.reviewRequirements.map((requirement) => ({
+          ...requirement, enteredAt: '2026-08-27T08:30:00.000Z',
+        })),
+      }]),
+    );
+  });
+
+  it('requires every B, one collective C, and accepts the existing A and R alternatives', () => {
+    const a = classify(fixture('demo-psych-adult-001'));
+    const b = classify(fixture('demo-psych-child-001'));
+    const secondB = { ...b, patientId: 'second-b' };
+    const c = classify(fixture('demo-psych-adult-002'));
+    const secondC = { ...c, patientId: 'second-c' };
+    const r = { ...c, patientId: 'review-r', handoffLane: 'R' as const };
+    const event = (kind: Parameters<typeof createExceptionReviewEvent>[0], patientId?: string) =>
+      createExceptionReviewEvent(kind, DEMO_ACTORS[1], NOW, patientId, { shiftId: SHIFT, context });
+    const escalation = event('critical_escalated', a.patientId);
+    const firstBrief = event('brief_review', b.patientId);
+    const secondBrief = event('brief_review', secondB.patientId);
+    const collective = event('unchanged_group_review');
+    const resolved = event('r_resolved', r.patientId);
+    const group = [a, b, secondB, c, secondC, r];
+    expect(assessHandoffClosure(group, [escalation, firstBrief, collective, resolved], 'healthy', context).blockingReasons)
+      .toContain('Hay pacientes B sin revisión de relevo breve');
+    expect(assessHandoffClosure(group, [escalation, firstBrief, secondBrief, collective, resolved], 'healthy', context))
+      .toEqual({ canClose: true, blockingReasons: [] });
+    expect(assessHandoffClosure(group, [escalation, firstBrief, secondBrief, resolved], 'healthy', context).canClose).toBe(false);
+    expect(assessHandoffClosure([c, secondC], [collective, collective], 'healthy', context).canClose).toBe(true);
+    expect(assessHandoffClosure([c], [event('unchanged_group_review', c.patientId)], 'healthy', context).canClose).toBe(false);
+    expect(assessHandoffClosure([r], [event('r_transferred', r.patientId)], 'healthy', context).canClose).toBe(false);
+    expect(assessHandoffClosure([a], [escalation], 'healthy', context).canClose).toBe(true);
+    expect(assessHandoffClosure([], [], 'healthy', context).canClose).toBe(true);
+    expect(createExceptionReviewEvent('brief_review', DEMO_ACTORS[1], NOW, b.patientId, { shiftId: SHIFT, context }).idempotencyKey)
+      .not.toBe(createExceptionReviewEvent('brief_review', DEMO_ACTORS[1], NOW, b.patientId,
+        { shiftId: SHIFT, context: { ...context, revision: 2 } }).idempotencyKey);
   });
 
   it('enforces configurable interaction budgets', () => {

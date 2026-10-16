@@ -87,6 +87,12 @@ Cada R muestra motivo, fuente, antigüedad, responsable, estado y tiempo acumula
 
 R nunca cuenta como C. Para cerrar, R debe resolverse/reclasificarse o transferirse como información incompleta con motivo, momento objetivo y reconocimiento del receptor. El reconocimiento colectivo de una causa técnica no resuelve a los pacientes afectados.
 
+El cierre ordinario exige además check-back o escalado de cada A, revisión breve de cada B y una revisión colectiva para el grupo C si no está vacío. La transferencia saliente y la atestación entrante se vinculan al mismo contexto vigente; la atestación referencia la transferencia concreta. Deshabilitar controles no sustituye la comprobación en el validador y los handlers.
+
+El contexto técnico se deriva del turno, ámbito de vista (unidad o multiunidad), unidades y pares ordenados de ID de paciente/unidad, más la clasificación relevante. El orden visual no lo altera. Una revisión local persistida avanza al cambiar el contexto, de modo que volver a un grupo anterior exige confirmación nueva. La vista multiunidad identifica solo el conjunto recibido, no concede permisos. No es una identidad clínica ni una revisión hospitalaria.
+
+Los eventos anteriores sin contexto se retienen como historial cifrado, pero no acreditan un cierre ordinario nuevo. La hidratación tardía tampoco recupera confirmaciones de otro contexto. El modo de indisponibilidad total mantiene sus tres reconocimientos específicos y no usa esos eventos como evidencia A/B/C/R.
+
 El copy de responsabilidad es:
 
 > Revisión colectiva del resumen de unidad. No constituye validación individual de valores clínicos ni genera evoluciones individuales. La responsabilidad asistencial del turno se transfiere al equipo receptor.

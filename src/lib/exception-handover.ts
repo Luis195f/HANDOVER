@@ -4,6 +4,7 @@ import {
   type ClinicalSource,
   type ExceptionHandoverProfileConfig,
 } from '@/src/config/profiles/exceptionHandover';
+import { sha256 } from 'js-sha256';
 
 export type ClinicalStatus = 'stable' | 'watcher' | 'unstable';
 export type HandoffLane = 'A' | 'B' | 'C' | 'R';
@@ -140,13 +141,35 @@ export type ExceptionReviewEvent = {
   actorKind: ExceptionActorIdentity['kind'];
   recordedAt: string;
   shiftId: string;
+  context?: ExceptionHandoverContext;
   patientId?: string;
   source?: ClinicalSource;
   reason?: string;
   targetAt?: string;
   receiverId?: string;
+  acknowledgesKey?: string;
   criticalPoints?: string[];
 };
+
+export type ExceptionHandoverContext = { key: string; revision: number; shiftId: string };
+
+export function buildExceptionHandoverContextKey(
+  shiftId: string,
+  viewScope: string,
+  members: readonly { patientId: string; unitId: string }[],
+  classifications: readonly HandoffClassification[],
+): string {
+  const group = members.map(({ patientId, unitId }) => [patientId, unitId] as const)
+    .sort(([leftId, leftUnit], [rightId, rightUnit]) =>
+      leftId.localeCompare(rightId) || leftUnit.localeCompare(rightUnit));
+  const lanes = classifications.map(({ patientId, handoffLane, clinicalStatus, reasons, sourceStatuses, reviewRequirements }) =>
+    [patientId, handoffLane, clinicalStatus, [...reasons].sort(),
+      Object.entries(sourceStatuses).sort(([left], [right]) => left.localeCompare(right)),
+      reviewRequirements.map(({ source, sourceStatus, reason, owner, state }) =>
+        [source, sourceStatus, reason, owner, state]).sort(([left], [right]) => left.localeCompare(right))] as const)
+    .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+  return sha256(JSON.stringify({ shiftId, viewScope, units: [...new Set(members.map(({ unitId }) => unitId))].sort(), group, lanes }));
+}
 
 export type ExceptionSbar = {
   situation: string;
@@ -511,10 +534,12 @@ export function buildExceptionSbarForClassification(
 
 type EventDetails = {
   shiftId?: string;
+  context?: ExceptionHandoverContext;
   source?: ClinicalSource;
   reason?: string;
   targetAt?: string;
   receiverId?: string;
+  acknowledgesKey?: string;
   criticalPoints?: readonly string[];
 };
 
@@ -534,18 +559,20 @@ export function createExceptionReviewEvent(
     throw new Error('El check-back requiere entre uno y tres puntos críticos');
   }
   return {
-    idempotencyKey: `exception-handoff:${shiftId}:${kind}:${scope}:${actor.userId}`,
+    idempotencyKey: `exception-handoff:${shiftId}:${kind}:${scope}:${actor.userId}${details.context ? `:${details.context.key}:${details.context.revision}` : ''}${details.acknowledgesKey ? `:ack:${sha256(details.acknowledgesKey)}` : ''}`,
     kind,
     actorId: actor.userId,
     actorName: actor.displayName,
     actorKind: actor.kind,
     recordedAt,
     shiftId,
+    ...(details.context ? { context: details.context } : {}),
     ...(patientId ? { patientId } : {}),
     ...(details.source ? { source: details.source } : {}),
     ...(details.reason?.trim() ? { reason: details.reason.trim() } : {}),
     ...(details.targetAt ? { targetAt: details.targetAt } : {}),
     ...(details.receiverId ? { receiverId: details.receiverId } : {}),
+    ...(details.acknowledgesKey ? { acknowledgesKey: details.acknowledgesKey } : {}),
     ...(criticalPoints.length > 0 ? { criticalPoints } : {}),
   };
 }
@@ -597,11 +624,17 @@ export function appendUniqueOverride(
 export function getPatientTransferStatus(
   patientId: string,
   events: readonly ExceptionReviewEvent[],
+  context?: ExceptionHandoverContext,
 ): TransferStatus {
-  const patientEvents = events.filter((event) => event.patientId === patientId);
+  const patientEvents = events.filter((event) => event.patientId === patientId && (!context || eventMatchesContext(event, context)));
   if (patientEvents.some(({ kind }) => kind === 'critical_escalated')) return 'escalated';
   if (patientEvents.some(({ kind }) => kind === 'critical_check_back')) return 'completed';
   return 'pending-acknowledgement';
+}
+
+function eventMatchesContext(event: ExceptionReviewEvent, context: ExceptionHandoverContext): boolean {
+  return event.shiftId === context.shiftId && event.context?.key === context.key &&
+    event.context.revision === context.revision;
 }
 
 export function calculateCheckBackMetrics(
@@ -657,11 +690,13 @@ export function assessHandoffClosure(
   classifications: readonly HandoffClassification[],
   events: readonly ExceptionReviewEvent[],
   unitHealth: UnitDataHealth,
+  context: ExceptionHandoverContext,
 ): HandoffClosureAssessment {
+  const shiftEvents = events.filter((event) => event.shiftId === context.shiftId);
   if (unitHealth === 'unavailable') {
-    const hasIncidentAcknowledgement = events.some(({ kind }) => kind === 'unit_incident_acknowledgement');
-    const hasOutgoingTransfer = events.some(({ kind }) => kind === 'degraded_outgoing_transfer');
-    const hasIncomingAcknowledgement = events.some(({ kind }) => kind === 'degraded_incoming_acknowledgement');
+    const hasIncidentAcknowledgement = shiftEvents.some(({ kind }) => kind === 'unit_incident_acknowledgement');
+    const hasOutgoingTransfer = shiftEvents.some(({ kind }) => kind === 'degraded_outgoing_transfer');
+    const hasIncomingAcknowledgement = shiftEvents.some(({ kind }) => kind === 'degraded_incoming_acknowledgement');
     const blockingReasons = [
       ...(!hasIncidentAcknowledgement ? ['Falta reconocer la incidencia de unidad'] : []),
       ...(!hasOutgoingTransfer ? ['Falta registrar el relevo degradado saliente'] : []),
@@ -670,14 +705,21 @@ export function assessHandoffClosure(
     return { canClose: blockingReasons.length === 0, blockingReasons };
   }
 
+  const currentEvents = shiftEvents.filter((event) => eventMatchesContext(event, context));
+
   const pendingCritical = classifications
     .filter(({ handoffLane }) => handoffLane === 'A')
-    .filter(({ patientId }) => getPatientTransferStatus(patientId, events) === 'pending-acknowledgement');
+    .filter(({ patientId }) => getPatientTransferStatus(patientId, currentEvents) === 'pending-acknowledgement');
+  const pendingBriefs = classifications
+    .filter(({ handoffLane }) => handoffLane === 'B')
+    .filter(({ patientId }) => !currentEvents.some((event) => event.patientId === patientId && event.kind === 'brief_review'));
+  const pendingCollective = classifications.some(({ handoffLane }) => handoffLane === 'C') &&
+    !currentEvents.some((event) => event.kind === 'unchanged_group_review' && !event.patientId);
   const unresolvedR = classifications
     .filter(({ handoffLane }) => handoffLane === 'R')
     .filter(({ patientId }) => {
-      const resolved = events.some((event) => event.patientId === patientId && event.kind === 'r_resolved');
-      const transferred = events.some((event) =>
+      const resolved = currentEvents.some((event) => event.patientId === patientId && event.kind === 'r_resolved');
+      const transferred = currentEvents.some((event) =>
         event.patientId === patientId &&
         event.kind === 'r_transferred' &&
         event.actorKind === 'incoming' &&
@@ -688,6 +730,8 @@ export function assessHandoffClosure(
     });
   const blockingReasons = [
     ...(pendingCritical.length > 0 ? ['Hay prioridades A sin check-back o escalado'] : []),
+    ...(pendingBriefs.length > 0 ? ['Hay pacientes B sin revisión de relevo breve'] : []),
+    ...(pendingCollective ? ['Falta la revisión colectiva del grupo C'] : []),
     ...(unresolvedR.length > 0 ? ['Hay pacientes R ocultos, sin resolver o sin responsable receptor'] : []),
   ];
   return { canClose: blockingReasons.length === 0, blockingReasons };

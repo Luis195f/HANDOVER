@@ -863,6 +863,13 @@ export default function PatientList({ navigation }: Props) {
         {isDemoExceptionRoute ? (
           <UnitExceptionHandover
             patients={demoExceptionPatients}
+            groupScope={{
+              viewScope: selectedUnitId,
+              members: demoExceptionPatients.map((patient) => ({
+                patientId: patient.patientId,
+                unitId: patientById.get(patient.patientId)?.unitId ?? '',
+              })),
+            }}
             sessionUserId={session?.userId}
             colors={colors}
             onOpenFullHandover={onOpenPatient}
@@ -1474,7 +1481,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
 
 
 
