@@ -91,6 +91,8 @@ El cierre ordinario exige además check-back o escalado de cada A, revisión bre
 
 El contexto técnico se deriva del turno, ámbito de vista (unidad o multiunidad), unidades y pares ordenados de ID de paciente/unidad, más la clasificación relevante. El orden visual no lo altera. Una revisión local persistida avanza al cambiar el contexto, de modo que volver a un grupo anterior exige confirmación nueva. La vista multiunidad identifica solo el conjunto recibido, no concede permisos. No es una identidad clínica ni una revisión hospitalaria.
 
+Editar el contenido clínico de un borrador B ya revisado también avanza esa revisión técnica: el brief, la transferencia y la atestación anteriores dejan de acreditar el cierre. Al rehidratar, primero se aplican los overrides persistidos y después se compara el contexto, para no invalidar evidencia vigente por el orden de carga.
+
 Los eventos anteriores sin contexto se retienen como historial cifrado, pero no acreditan un cierre ordinario nuevo. La hidratación tardía tampoco recupera confirmaciones de otro contexto. El modo de indisponibilidad total mantiene sus tres reconocimientos específicos y no usa esos eventos como evidencia A/B/C/R.
 
 El copy de responsabilidad es:

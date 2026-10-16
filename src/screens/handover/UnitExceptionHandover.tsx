@@ -202,7 +202,17 @@ export function UnitExceptionHandover({
       if (!active) return;
       setSessionState((current) => {
         const merged = mergeExceptionHandoverState(current, loaded);
-        const key = latestGroupKey.current;
+        const hydratedPatients = patients.map((patient) => ({ ...patient, previousOverrides: [
+          ...(patient.previousOverrides ?? []),
+          ...merged.overrides.filter((override) => override.patientId === patient.patientId),
+        ] }));
+        const hydratedClassifications = classifyExceptionHandoverUnit(hydratedPatients, {
+          now: classifiedAt, shiftId, integration: integrationState,
+          previousStatus: previousUnitDataHealth, lastKnownClassifications,
+        }).classifications;
+        const hydratedKey = buildExceptionHandoverContextKey(shiftId, groupScope.viewScope,
+          groupScope.members, hydratedClassifications);
+        const key = groupChangedDuringHydration.current ? latestGroupKey.current : hydratedKey;
         return groupChangedDuringHydration.current || merged.activeContext?.key !== key
           ? { ...merged, activeContext: { key, shiftId, revision: (merged.activeContext?.revision ?? 0) + 1 } }
           : merged;
@@ -286,13 +296,20 @@ export function UnitExceptionHandover({
 
   const updateActiveDraft = (field: keyof PersistedBriefDraft, value: string) => {
     if (!activePatient || !activeDraft) return;
-    updateSessionState((current) => ({
-      ...current,
-      briefDrafts: {
-        ...current.briefDrafts,
-        [activePatient.patientId]: { ...activeDraft, [field]: value },
-      },
-    }));
+    updateSessionState((current) => {
+      const previous = current.briefDrafts[activePatient.patientId] ?? makeBriefDraft(activePatient);
+      if (previous[field] === value) return current;
+      const context = current.activeContext;
+      const reviewed = activeClassification?.handoffLane === 'B' && context?.key === groupKey &&
+        current.events.some((event) => event.kind === 'brief_review' &&
+          event.patientId === activePatient.patientId && event.shiftId === shiftId &&
+          event.context?.key === context.key && event.context.revision === context.revision);
+      return {
+        ...current,
+        briefDrafts: { ...current.briefDrafts, [activePatient.patientId]: { ...previous, [field]: value } },
+        ...(reviewed && context ? { activeContext: { ...context, revision: context.revision + 1 } } : {}),
+      };
+    });
   };
 
   const recordBriefReview = () => {

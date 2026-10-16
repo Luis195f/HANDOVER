@@ -3,7 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS, DEMO_NOW } from '@/src/demo/fixtures';
-import { buildExceptionHandoverContextKey, classifyExceptionHandoverPatient, createExceptionReviewEvent, formatExceptionDateTime } from '@/src/lib/exception-handover';
+import { buildExceptionHandoverContextKey, classifyExceptionHandoverPatient, createExceptionReviewEvent, createHandoffOverride, formatExceptionDateTime } from '@/src/lib/exception-handover';
 import { createEmptyExceptionHandoverState } from '@/src/lib/exception-handover-storage';
 import { UnitExceptionHandover } from '../UnitExceptionHandover';
 
@@ -315,6 +315,49 @@ describe('UnitExceptionHandover', () => {
     expect(screen.getByTestId('incoming-attestation-event')).toBeTruthy();
     expect(saved.events).toHaveLength(4);
     expect(saved.events.at(-1)?.acknowledgesKey).toBe(outgoing.idempotencyKey);
+  });
+
+  it('resumes matching reviewed evidence after loading a persisted classification override', async () => {
+    const source = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((patient) => patient.status === 'unchanged')!;
+    const patient = { ...source, sourceEvidence: { ...source.sourceEvidence,
+      'direct-assessment': { status: 'missing' as const } } };
+    const shiftId = patient.shiftId!;
+    const override = createHandoffOverride({ patientId: patient.patientId, previousLane: 'R', newLane: 'B',
+      reason: 'Valoración manual completada', professional: DEMO_ACTORS[0], shiftId,
+      recordedAt: now(), sourceStatuses: { 'direct-assessment': 'missing' } });
+    const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };
+    const classified = classifyExceptionHandoverPatient({ ...patient, previousOverrides: [override] }, { now: now(), shiftId });
+    const context = { key: buildExceptionHandoverContextKey(shiftId, scoped.viewScope, scoped.members, [classified]),
+      revision: 1, shiftId };
+    const state = { ...createEmptyExceptionHandoverState(shiftId), overrides: [override], activeContext: context,
+      events: [createExceptionReviewEvent('brief_review', DEMO_ACTORS[0], now(), patient.patientId, { shiftId, context }),
+        createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], now(), undefined, { shiftId, context })] };
+    const storage = { load: vi.fn(async () => state), save: vi.fn(async () => {}), clear: vi.fn(async () => {}) };
+    const screen = render(<UnitExceptionHandover patients={[patient]} groupScope={scoped}
+      sessionUserId={DEMO_ACTORS[0].userId} colors={colors} onOpenFullHandover={() => {}}
+      now={now} storage={storage} />);
+    await act(async () => {});
+    expect(screen.getByTestId('outgoing-transfer-event')).toBeTruthy();
+    expect(screen.queryByTestId('exception-closure-blocked')).toBeNull();
+  });
+
+  it('invalidates a reviewed B brief and transfer when its clinical draft is edited', () => {
+    const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((candidate) => candidate.status === 'changed')!;
+    const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };
+    const screen = render(<UnitExceptionHandover patients={[patient]} groupScope={scoped}
+      sessionUserId={DEMO_ACTORS[0].userId} colors={colors} onOpenFullHandover={() => {}}
+      now={now} storage={null} />);
+    fireEvent.press(screen.getByTestId(`open-exception-${patient.patientId}`));
+    fireEvent.press(screen.getByTestId(`accept-brief-${patient.patientId}`));
+    fireEvent.press(screen.getByTestId('confirm-outgoing-transfer'));
+    expect(screen.getByTestId('outgoing-transfer-event')).toBeTruthy();
+    const riskInput = screen.root.find((node) => node.props.value === patient.currentRisk &&
+      typeof node.props.onChangeText === 'function');
+    fireEvent.changeText(riskInput, 'Riesgo actualizado durante el relevo');
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(true);
+    expect(screen.queryByTestId('outgoing-transfer-event')).toBeNull();
+    fireEvent.press(screen.getByTestId(`accept-brief-${patient.patientId}`));
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(false);
   });
 
   it('shows one partial-degradation banner and moves only dependent baseline-C patients to R', () => {
