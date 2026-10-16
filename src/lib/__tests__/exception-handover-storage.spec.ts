@@ -75,4 +75,19 @@ describe('exception handoff encrypted persistence', () => {
     await storage.clear();
     expect(await storage.load(SHIFT)).toEqual(createEmptyExceptionHandoverState(SHIFT));
   });
+
+  it('keeps the newest technical context revision while retaining legacy events as history', async () => {
+    const adapter = memoryAdapter();
+    const storage = createExceptionHandoverStorage('test:context', adapter);
+    const legacy = createExceptionReviewEvent('unchanged_group_review', DEMO_ACTORS[0], NOW, undefined,
+      { shiftId: SHIFT });
+    const first = { ...createEmptyExceptionHandoverState(SHIFT),
+      activeContext: { key: 'group-a', revision: 1, shiftId: SHIFT }, events: [legacy] };
+    const later = { ...first, activeContext: { key: 'group-b', revision: 2, shiftId: SHIFT } };
+    await Promise.all([storage.save(first), storage.save(later)]);
+    await storage.save(first);
+    const loaded = await storage.load(SHIFT);
+    expect(loaded.activeContext).toEqual(later.activeContext);
+    expect(loaded.events).toContainEqual(legacy);
+  });
 });

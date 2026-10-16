@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import {
@@ -9,6 +9,7 @@ import {
   appendUniqueExceptionEvent,
   appendUniqueOverride,
   assessHandoffClosure,
+  buildExceptionHandoverContextKey,
   buildExceptionSbarForClassification,
   calculateCheckBackMetrics,
   calculateRMetrics,
@@ -24,6 +25,7 @@ import {
   validateDegradedUnitTransfer,
   type ClinicalSource,
   type ExceptionReviewEvent,
+  type ExceptionHandoverContext,
   type HandoffClassification,
   type HandoffLane,
   type UnitDataHealth,
@@ -59,6 +61,7 @@ type Props = {
   classificationReferenceTime?: string;
   now?: () => string;
   shiftId?: string;
+  groupScope: { viewScope: string; members: readonly { patientId: string; unitId: string }[] };
   integrationState?: UnitIntegrationState;
   storage?: ExceptionHandoverStorage | null;
 };
@@ -100,6 +103,7 @@ export function UnitExceptionHandover({
   classificationReferenceTime,
   now = () => new Date().toISOString(),
   shiftId = patients[0]?.shiftId ?? 'demo-2026-08-27-morning',
+  groupScope,
   integrationState = { availability: 'available' },
   storage,
 }: Props) {
@@ -136,6 +140,22 @@ export function UnitExceptionHandover({
     lastKnownClassifications,
   }), [classifiedAt, integrationState, lastKnownClassifications, patientsWithOverrides, previousUnitDataHealth, shiftId]);
   const classifications = unitResult.classifications;
+  const groupScopeValid = Boolean(groupScope.viewScope) && groupScope.members.length === patients.length &&
+    new Set(groupScope.members.map(({ patientId }) => patientId)).size === patients.length &&
+    patients.every((patient) => groupScope.members.some((member) => member.patientId === patient.patientId && Boolean(member.unitId)));
+  const groupKey = buildExceptionHandoverContextKey(shiftId, groupScope.viewScope, groupScope.members, classifications);
+  const latestGroupKey = useRef(groupKey);
+  const groupChangedDuringHydration = useRef(false);
+  useEffect(() => {
+    if (latestGroupKey.current === groupKey) return;
+    latestGroupKey.current = groupKey;
+    groupChangedDuringHydration.current = true;
+  }, [groupKey]);
+  const activeContext = sessionState.activeContext;
+  const contextReady = hydrated && groupScopeValid && sessionState.shiftId === shiftId &&
+    activeContext?.key === groupKey && activeContext.shiftId === shiftId &&
+    Number.isSafeInteger(activeContext.revision) && activeContext.revision > 0;
+  const currentContext: ExceptionHandoverContext | null = contextReady ? activeContext : null;
   const classificationByPatientId = useMemo(
     () => new Map(classifications.map((classification) => [classification.patientId, classification])),
     [classifications],
@@ -152,29 +172,61 @@ export function UnitExceptionHandover({
     ? sessionState.briefDrafts[activePatient.patientId] ?? makeBriefDraft(activePatient)
     : null;
   const activeCheckItems = activePatient ? checkedItems[activePatient.patientId] ?? [] : [];
-  const events = sessionState.events;
-  const outgoingTransfer = events.find((event) => event.kind === 'outgoing_transfer');
-  const incomingAttestation = events.find((event) => event.kind === 'incoming_attestation');
-  const collectiveReview = events.find((event) => event.kind === 'unchanged_group_review');
-  const rMetrics = calculateRMetrics(classifications, events, classifiedAt);
-  const checkBackMetrics = calculateCheckBackMetrics(classifications, events);
-  const closure = assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status);
+  const events = sessionState.events.filter((event) => event.shiftId === shiftId);
+  const currentEvents = currentContext ? events.filter((event) =>
+    event.context?.key === currentContext.key && event.context.revision === currentContext.revision) : [];
+  const outgoingTransfer = currentEvents.find((event) => event.kind === 'outgoing_transfer');
+  const incomingAttestation = currentEvents.find((event) => event.kind === 'incoming_attestation' &&
+    event.acknowledgesKey === outgoingTransfer?.idempotencyKey);
+  const collectiveReview = currentEvents.find((event) => event.kind === 'unchanged_group_review' && !event.patientId);
+  const legacyClosureEvents = events.some((event) => !event.context &&
+    ['critical_check_back', 'critical_escalated', 'brief_review', 'unchanged_group_review', 'r_resolved', 'r_transferred', 'outgoing_transfer', 'incoming_attestation'].includes(event.kind));
+  const rMetrics = calculateRMetrics(classifications, currentEvents, classifiedAt);
+  const checkBackMetrics = calculateCheckBackMetrics(classifications, currentEvents);
+  const closure = currentContext
+    ? assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext)
+    : { canClose: false, blockingReasons: ['Contexto de grupo pendiente de confirmación'] };
+
+  useEffect(() => {
+    if (!hydrated || !groupScopeValid || (storageInstance && sessionState.shiftId !== shiftId)) return;
+    setSessionState((current) => current.shiftId === shiftId && current.activeContext?.key === groupKey
+      ? current
+      : { ...current, shiftId, activeContext: { key: groupKey, shiftId, revision: (current.activeContext?.revision ?? 0) + 1 } });
+  }, [groupKey, groupScopeValid, hydrated, shiftId]);
 
   useEffect(() => {
     if (!storageInstance) return;
     let active = true;
+    groupChangedDuringHydration.current = false;
+    setHydrated(false);
     void storageInstance.load(shiftId).then((loaded) => {
       if (!active) return;
-      setSessionState((current) => mergeExceptionHandoverState(current, loaded));
+      setSessionState((current) => {
+        const merged = mergeExceptionHandoverState(current, loaded);
+        const hydratedPatients = patients.map((patient) => ({ ...patient, previousOverrides: [
+          ...(patient.previousOverrides ?? []),
+          ...merged.overrides.filter((override) => override.patientId === patient.patientId),
+        ] }));
+        const hydratedClassifications = classifyExceptionHandoverUnit(hydratedPatients, {
+          now: classifiedAt, shiftId, integration: integrationState,
+          previousStatus: previousUnitDataHealth, lastKnownClassifications,
+        }).classifications;
+        const hydratedKey = buildExceptionHandoverContextKey(shiftId, groupScope.viewScope,
+          groupScope.members, hydratedClassifications);
+        const key = groupChangedDuringHydration.current ? latestGroupKey.current : hydratedKey;
+        return groupChangedDuringHydration.current || merged.activeContext?.key !== key
+          ? { ...merged, activeContext: { key, shiftId, revision: (merged.activeContext?.revision ?? 0) + 1 } }
+          : merged;
+      });
       setHydrated(true);
     });
     return () => { active = false; };
   }, [shiftId, storageInstance]);
 
   useEffect(() => {
-    if (!hydrated || !storageInstance) return;
+    if (!hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
     void storageInstance.save(sessionState);
-  }, [hydrated, sessionState, storageInstance]);
+  }, [hydrated, sessionState, shiftId, storageInstance]);
 
   useEffect(() => {
     if (unitResult.automaticClassificationSuspended || unitResult.classifications.length === 0) return;
@@ -222,8 +274,10 @@ export function UnitExceptionHandover({
     patientId?: string,
     details?: Parameters<typeof createExceptionReviewEvent>[4],
   ) => {
-    if (!actor) return;
-    const event = createExceptionReviewEvent(kind, actor, now(), patientId, { shiftId, ...details });
+    if (!actor || (unitResult.unitDataHealth.status !== 'unavailable' && !currentContext)) return;
+    const event = createExceptionReviewEvent(kind, actor, now(), patientId, {
+      shiftId, ...details, ...(currentContext ? { context: currentContext } : {}),
+    });
     updateSessionState((current) => ({
       ...current,
       events: appendUniqueExceptionEvent(current.events, event),
@@ -243,13 +297,20 @@ export function UnitExceptionHandover({
 
   const updateActiveDraft = (field: keyof PersistedBriefDraft, value: string) => {
     if (!activePatient || !activeDraft) return;
-    updateSessionState((current) => ({
-      ...current,
-      briefDrafts: {
-        ...current.briefDrafts,
-        [activePatient.patientId]: { ...activeDraft, [field]: value },
-      },
-    }));
+    updateSessionState((current) => {
+      const previous = current.briefDrafts[activePatient.patientId] ?? makeBriefDraft(activePatient);
+      if (previous[field] === value) return current;
+      const context = current.activeContext;
+      const reviewed = activeClassification?.handoffLane === 'B' && context?.key === groupKey &&
+        current.events.some((event) => event.kind === 'brief_review' &&
+          event.patientId === activePatient.patientId && event.shiftId === shiftId &&
+          event.context?.key === context.key && event.context.revision === context.revision);
+      return {
+        ...current,
+        briefDrafts: { ...current.briefDrafts, [activePatient.patientId]: { ...previous, [field]: value } },
+        ...(reviewed && context ? { activeContext: { ...context, revision: context.revision + 1 } } : {}),
+      };
+    });
   };
 
   const recordBriefReview = () => {
@@ -287,7 +348,7 @@ export function UnitExceptionHandover({
   };
 
   const recordOverride = () => {
-    if (!activePatient || !activeClassification || !actor) return;
+    if (!activePatient || !activeClassification || !actor || !currentContext) return;
     const reason = overrideReasons[activePatient.patientId] ?? '';
     if (!reason.trim()) return;
     const override = createHandoffOverride({
@@ -308,11 +369,13 @@ export function UnitExceptionHandover({
           current.events,
           createExceptionReviewEvent('r_resolved', actor, override.recordedAt, activePatient.patientId, {
             shiftId,
+            ...(currentContext ? { context: currentContext } : {}),
             reason: override.reason,
           }),
         ),
         createExceptionReviewEvent('override_recorded', actor, override.recordedAt, activePatient.patientId, {
           shiftId,
+          ...(currentContext ? { context: currentContext } : {}),
           reason: override.reason,
         }),
       ),
@@ -331,7 +394,7 @@ export function UnitExceptionHandover({
   };
 
   const renderProvenance = (patient: DemoExceptionHandoverPatient) => {
-    const patientEvents = events.filter((event) => event.patientId === patient.patientId);
+    const patientEvents = currentEvents.filter((event) => event.patientId === patient.patientId);
     return (
       <View style={styles.provenanceBlock} testID={`exception-provenance-${patient.patientId}`}>
         <Text style={[styles.provenanceText, { color: colors.muted }]}>Importado del contexto clínico sintético · {formatExceptionDateTime(patient.lastSummaryAt)}</Text>
@@ -409,10 +472,10 @@ export function UnitExceptionHandover({
     if (!activePatient || !activeDraft || !activeClassification) return null;
     const lane = activeClassification.handoffLane;
     const sbar = buildExceptionSbarForClassification(activePatient, activeClassification);
-    const reviewEvent = events.find((event) => event.patientId === activePatient.patientId && event.kind === 'brief_review');
-    const transferStatus = getPatientTransferStatus(activePatient.patientId, events);
+    const reviewEvent = currentEvents.find((event) => event.patientId === activePatient.patientId && event.kind === 'brief_review');
+    const transferStatus = getPatientTransferStatus(activePatient.patientId, currentEvents);
     const interactionCount = sessionState.interactionCounts[activePatient.patientId] ?? 0;
-    const transferredR = events.some((event) => event.patientId === activePatient.patientId && event.kind === 'r_transferred');
+    const transferredR = currentEvents.some((event) => event.patientId === activePatient.patientId && event.kind === 'r_transferred');
     const checkBackPoints = activePatient.criticalItems.slice(0, 3);
     const checkBackReady = checkBackPoints.length > 0 &&
       checkBackPoints.every((_, index) => activeCheckItems[index] === true);
@@ -618,10 +681,15 @@ export function UnitExceptionHandover({
           <View style={[styles.transferCard, { borderColor: colors.primary }]} testID="exception-transfer">
             <Text style={[styles.sectionLabel, { color: colors.text }]}>Transferencia y atestación de responsabilidad</Text>
             <Text style={[styles.cardMeta, { color: colors.muted }]}>{COLLECTIVE_REVIEW_RESPONSIBILITY_COPY}</Text>
-            {!closure.canClose ? <Text testID="exception-closure-blocked" style={[styles.cardMeta, { color: colors.danger }]}>{closure.blockingReasons.join('. ')}</Text> : null}
+            {!closure.canClose ? <Text accessibilityRole="alert" testID="exception-closure-blocked" style={[styles.cardMeta, { color: colors.danger }]}>{closure.blockingReasons.join('. ')}</Text> : null}
+            {legacyClosureEvents && !incomingAttestation ? <Text style={[styles.cardMeta, { color: colors.muted }]}>Los eventos anteriores sin contexto de grupo se conservan como historial; requieren nueva confirmación para este cierre.</Text> : null}
             <View style={styles.actionRow}>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || !closure.canClose} onPress={() => appendEvent('outgoing_transfer')} style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: actor?.kind === 'outgoing' && closure.canClose ? 1 : 0.5 }]} testID="confirm-outgoing-transfer"><Text style={styles.primaryButtonText}>Confirmar transferencia saliente</Text></Pressable>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose} onPress={() => appendEvent('incoming_attestation')} style={[styles.secondaryButton, { borderColor: colors.primary }]} testID="confirm-incoming-attestation"><Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Atestar recepción entrante</Text></Pressable>
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || !closure.canClose} onPress={() => {
+                if (actor?.kind === 'outgoing' && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('outgoing_transfer');
+              }} style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: actor?.kind === 'outgoing' && closure.canClose ? 1 : 0.5 }]} testID="confirm-outgoing-transfer"><Text style={styles.primaryButtonText}>Confirmar transferencia saliente</Text></Pressable>
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose} onPress={() => {
+                if (actor?.kind === 'incoming' && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
+              }} style={[styles.secondaryButton, { borderColor: colors.primary }]} testID="confirm-incoming-attestation"><Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Atestar recepción entrante</Text></Pressable>
             </View>
             {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>Confirmado por profesional saliente · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}
             {incomingAttestation ? <Text testID="incoming-attestation-event" style={[styles.provenanceText, { color: colors.muted }]}>Atestado por profesional entrante · {incomingAttestation.actorName} · {formatExceptionDateTime(incomingAttestation.recordedAt)}</Text> : null}

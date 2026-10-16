@@ -10,6 +10,7 @@ import {
   appendUniqueOverride,
   type DegradedUnitTransfer,
   type ExceptionReviewEvent,
+  type ExceptionHandoverContext,
   type HandoffOverride,
 } from './exception-handover';
 
@@ -31,6 +32,7 @@ export type ExceptionHandoverSessionState = {
   interactionCounts: Record<string, number>;
   briefDrafts: Record<string, PersistedBriefDraft>;
   degradedTransfer: DegradedUnitTransfer | null;
+  activeContext?: ExceptionHandoverContext;
 };
 
 export type ExceptionHandoverStorage = {
@@ -66,8 +68,11 @@ export function mergeExceptionHandoverState(
   current: ExceptionHandoverSessionState,
   incoming: ExceptionHandoverSessionState,
 ): ExceptionHandoverSessionState {
+  if (current.shiftId !== incoming.shiftId) return incoming;
   const events = incoming.events.reduce(appendUniqueExceptionEvent, current.events);
   const overrides = incoming.overrides.reduce(appendUniqueOverride, current.overrides);
+  const activeContext = (current.activeContext?.revision ?? 0) > (incoming.activeContext?.revision ?? 0)
+    ? current.activeContext : incoming.activeContext;
   return {
     version: 1,
     shiftId: incoming.shiftId,
@@ -76,6 +81,7 @@ export function mergeExceptionHandoverState(
     interactionCounts: { ...current.interactionCounts, ...incoming.interactionCounts },
     briefDrafts: { ...current.briefDrafts, ...incoming.briefDrafts },
     degradedTransfer: incoming.degradedTransfer ?? current.degradedTransfer,
+    ...(activeContext ? { activeContext } : {}),
   };
 }
 
@@ -85,6 +91,7 @@ export function createExceptionHandoverStorage(
 ): ExceptionHandoverStorage {
   let memoizedStorage = providedStorage ?? null;
   let memoryCopy: ExceptionHandoverSessionState | null = null;
+  let pendingSave = Promise.resolve();
 
   const getStorage = async () => {
     if (memoizedStorage) return memoizedStorage;
@@ -111,15 +118,19 @@ export function createExceptionHandoverStorage(
         return createEmptyExceptionHandoverState(shiftId);
       }
     },
-    async save(state) {
-      const storage = await getStorage();
-      if (!storage) {
-        memoryCopy = { ...state };
-        return;
-      }
-      const current = await this.load(state.shiftId);
-      await encryptedSetItem(key, JSON.stringify(mergeExceptionHandoverState(current, state)), storage);
-      memoryCopy = null;
+    save(state) {
+      const operation = pendingSave.then(async () => {
+        const storage = await getStorage();
+        if (!storage) {
+          memoryCopy = mergeExceptionHandoverState(memoryCopy ?? createEmptyExceptionHandoverState(state.shiftId), state);
+          return;
+        }
+        const current = await this.load(state.shiftId);
+        await encryptedSetItem(key, JSON.stringify(mergeExceptionHandoverState(current, state)), storage);
+        memoryCopy = null;
+      });
+      pendingSave = operation.catch(() => {});
+      return operation;
     },
     async clear() {
       const storage = await getStorage();
