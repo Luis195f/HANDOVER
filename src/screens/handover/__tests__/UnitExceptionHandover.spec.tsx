@@ -341,6 +341,39 @@ describe('UnitExceptionHandover', () => {
     expect(screen.queryByTestId('exception-closure-blocked')).toBeNull();
   });
 
+  it('resumes a new shift after an earlier group change without carrying its hydration flag', async () => {
+    const source = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((patient) => patient.status === 'unchanged')!;
+    const patient = { ...source, sourceEvidence: { ...source.sourceEvidence,
+      'direct-assessment': { status: 'missing' as const } } };
+    const nextShift = 'demo-next-shift';
+    const override = createHandoffOverride({ patientId: patient.patientId, previousLane: 'R', newLane: 'B',
+      reason: 'Valoración manual completada', professional: DEMO_ACTORS[0], shiftId: nextShift,
+      recordedAt: now(), sourceStatuses: { 'direct-assessment': 'missing' } });
+    const scope = (viewScope: string) => ({ viewScope,
+      members: [{ patientId: patient.patientId, unitId: 'unit-a' }] });
+    const classified = classifyExceptionHandoverPatient({ ...patient, previousOverrides: [override] },
+      { now: now(), shiftId: nextShift });
+    const context = { key: buildExceptionHandoverContextKey(nextShift, 'unit-a', scope('unit-a').members, [classified]),
+      revision: 1, shiftId: nextShift };
+    const loaded = { ...createEmptyExceptionHandoverState(nextShift), overrides: [override], activeContext: context,
+      events: [createExceptionReviewEvent('brief_review', DEMO_ACTORS[0], now(), patient.patientId,
+        { shiftId: nextShift, context }),
+      createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], now(), undefined,
+        { shiftId: nextShift, context })] };
+    const storage = { load: vi.fn(async (shiftId: string) => shiftId === nextShift
+      ? loaded : createEmptyExceptionHandoverState(shiftId)), save: vi.fn(async () => {}), clear: vi.fn(async () => {}) };
+    const board = (shiftId: string, viewScope: string) => <UnitExceptionHandover patients={[patient]}
+      shiftId={shiftId} groupScope={scope(viewScope)} sessionUserId={DEMO_ACTORS[0].userId}
+      colors={colors} onOpenFullHandover={() => {}} now={now} storage={storage} />;
+    const screen = render(board('demo-first-shift', 'unit-a'));
+    await act(async () => {});
+    act(() => screen.update(board('demo-first-shift', 'all-units')));
+    act(() => screen.update(board(nextShift, 'unit-a')));
+    await act(async () => {});
+    expect(screen.getByTestId('outgoing-transfer-event')).toBeTruthy();
+    expect(screen.queryByTestId('exception-closure-blocked')).toBeNull();
+  });
+
   it('invalidates a reviewed B brief and transfer when its clinical draft is edited', () => {
     const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((candidate) => candidate.status === 'changed')!;
     const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };

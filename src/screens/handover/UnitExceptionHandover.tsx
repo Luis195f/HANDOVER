@@ -188,7 +188,7 @@ export function UnitExceptionHandover({
     : { canClose: false, blockingReasons: ['Contexto de grupo pendiente de confirmación'] };
 
   useEffect(() => {
-    if (!hydrated || !groupScopeValid) return;
+    if (!hydrated || !groupScopeValid || (storageInstance && sessionState.shiftId !== shiftId)) return;
     setSessionState((current) => current.shiftId === shiftId && current.activeContext?.key === groupKey
       ? current
       : { ...current, shiftId, activeContext: { key: groupKey, shiftId, revision: (current.activeContext?.revision ?? 0) + 1 } });
@@ -197,6 +197,7 @@ export function UnitExceptionHandover({
   useEffect(() => {
     if (!storageInstance) return;
     let active = true;
+    groupChangedDuringHydration.current = false;
     setHydrated(false);
     void storageInstance.load(shiftId).then((loaded) => {
       if (!active) return;
