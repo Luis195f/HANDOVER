@@ -4,7 +4,7 @@
 - `src/lib/net.ts` implements `safeFetch`: enforces HTTPS in production, applies timeouts and backoff retries for 502/503/504, and adds idempotency headers to prevent duplicates.
 
 ## Queue and synchronization
-- `src/lib/queue.ts` persists bundles in SQLite alongside retry metadata on supported native Expo runtimes. Expo Web intentionally uses the in-memory fallback: enqueue/reconnect/replay works during the active tab session, but reloading or closing the tab can lose pending items.
+- `src/lib/queue.ts` persists bundles in SQLite alongside retry metadata on supported native Expo runtimes. Expo Web intentionally uses the in-memory fallback with a session-only encryption key: enqueue/reconnect/replay works during the active tab session, but reloading or closing the tab loses pending items and their key. This is not durable storage.
 - `handover_offline_queue` is the canonical operational queue for clinical handover bundles. `tx_queue` remains only as a legacy compatibility path and must not be treated as the UI/sync source of truth for handover runtime state.
 - `src/lib/sync.ts` detects connectivity, retries with exponential backoff (`getNextDelayMs`), and removes successful items; it also uses the FHIR client to interpret `OperationOutcome` responses. Unverified `409/412` conflicts remain in the queue.
 - The mobile SQLite route is implemented, but persistence across a real app close/reopen has not been manually verified for the August 2026 synthetic demo correction. Session replay evidence must not be presented as proof of app-close durability.
@@ -47,7 +47,7 @@
 
 ## Offline queue encryption
 - FHIR bundles stored in the SQLite queue are encrypted by default using symmetric AEAD (AES-256-GCM via `@noble/ciphers` + `expo-crypto`).
-- New clinical queue writes are AEAD-only: an AES-GCM failure goes directly to the observable hash-only sentinel path and never falls back to CBC.
+- New clinical queue writes are AEAD-only: an AES-GCM/key-persistence failure rejects enqueue and never stores a hash-only sentinel as a clinical handover or falls back to CBC. Historical sentinels remain visible as unreadable/error items, never as delivered evidence.
 - Only the clinical payload (FHIR bundle) is encrypted; queue metadata (status, timestamps, response code) stays in plaintext for debugging and control flow.
 - Storage format for new envelopes (`EncryptedEnvelopeV1`, handled in `src/lib/crypto.ts`):
 
@@ -78,6 +78,10 @@
 
 ## UI
 - `src/screens/SyncCenter.tsx` lets users inspect, retry, or clear the queue. Items with `syncStatus="error"` show an “Error” badge, differentiate `422 FHIR validation errors`, and allow viewing server-provided details (`expression` + `diagnostics`).
+- Queue and sync surfaces show an explicit unverified state when a read fails; an unreadable item is isolated from healthy items and its original ciphertext is retained. Metadata-only updates do not re-encrypt the clinical payload.
+- Draft keys are indexed in protected storage before payload creation. The form migrates only the exact legacy `handoverDraft:<patient>:<unit>` key available from its current patient/unit context, after verifying the managed destination. A failed read blocks autosave rather than replacing existing bytes.
+- Logout invalidates the session even when local purge is incomplete. Purge reports incomplete status and retains encryption keys when any ciphertext store could not be cleared. The managed and discoverable legacy stores are covered; historical native SecureStore draft keys without an existing reference cannot be enumerated through the public API, so retrospective purge is **not verified** and C19A retirement remains blocked on independent evidence.
+- The Expo Web queue fallback is memory-only and does not prove durability after tab close. Automated restart simulations do not replace verification on a real device.
 
 ## Related environment variables
 - `EXPO_PUBLIC_OFFLINE_REPLAY_MAX_ATTEMPTS`: maximum number of retries.
@@ -99,7 +103,5 @@
 - `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of the canonical runtime entrypoints in `src/lib/sync.ts`.
 - `postBundleSmart` (alias of `postBundle` in `src/lib/fhir-client.ts`) is deprecated. Prefer `postBundle`.
 - These aliases remain for compatibility but will be removed in a future major release. Update imports to the canonical names when migrating.
-
-
 
 

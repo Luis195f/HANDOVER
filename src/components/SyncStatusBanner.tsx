@@ -71,7 +71,7 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
     const refreshQueueCount = async () => {
       const count = await getCanonicalQueueSize().catch(() => -1);
       if (!active) return;
-      setCanonicalPendingCount(count < 0 ? 0 : count);
+      setCanonicalPendingCount(count);
     };
 
     void refreshQueueCount();
@@ -91,14 +91,15 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
     return () => clearInterval(interval);
   }, [snapshot.status]);
 
-  const effectivePendingCount = Math.max(snapshot.pendingCount, canonicalPendingCount);
-  const shouldShow = snapshot.status !== 'idle' || effectivePendingCount > 0 || !!snapshot.lastError;
+  const queueUnreadable = canonicalPendingCount < 0;
+  const effectivePendingCount = Math.max(snapshot.pendingCount, queueUnreadable ? 0 : canonicalPendingCount);
+  const shouldShow = queueUnreadable || snapshot.status !== 'idle' || effectivePendingCount > 0 || !!snapshot.lastError;
   if (!shouldShow) return null;
 
-  const message = resolveStatusMessage(snapshot, effectivePendingCount, tt, now);
+  const message = queueUnreadable ? 'Estado de cola no verificable' : resolveStatusMessage(snapshot, effectivePendingCount, tt, now);
 
   const errorText = toErrorText(snapshot.lastError);
-  const hasError = errorText.length > 0;
+  const hasError = errorText.length > 0 || queueUnreadable;
   const isPaused = snapshot.status === 'paused';
 
   const bannerBackground = isPaused
@@ -136,7 +137,7 @@ export default function SyncStatusBanner({ onOpenSyncCenter }: Props) {
 
         {hasError ? (
           <Text style={[styles.detail, { color: colors.danger }]}>
-            {tt('sync.lastErrorMessage', { error: errorText })}
+            {tt('sync.lastErrorMessage', { error: queueUnreadable ? 'Lectura de cola fallida' : errorText })}
           </Text>
         ) : null}
 

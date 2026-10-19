@@ -249,11 +249,9 @@ describe('NEWS2 AI oxygen serialization parity', () => {
       const provider = enableProvider();
       warningVisibility.realSuggestions = true;
       const pending: { section: Section; resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
-      const requestStarts: Array<() => void> = [];
       provider.mockImplementation((_input, init) => new Promise<Response>((resolve, reject) => {
         const context: { section: Section } = JSON.parse(String(init?.body));
         pending.push({ section: context.section, resolve, reject });
-        requestStarts.shift()?.();
       }));
       const screen = render(<HandoverForm navigation={navigation()}
         route={{ key: 'section-races', name: 'HandoverForm', params: { patientId: 'synthetic-section-races', unitId: 'icu', prefilledValues } }} />);
@@ -264,8 +262,9 @@ describe('NEWS2 AI oxygen serialization parity', () => {
         return panels[section === 'vitals' ? 0 : 1].props;
       };
       const start = async (section: Section, expectNetwork = true) => {
-        const started = expectNetwork ? new Promise<void>(resolve => requestStarts.push(resolve)) : null;
-        await act(async () => { void panel(section).onRefresh(); if (started) await started; });
+        const previousRequests = provider.mock.calls.length;
+        act(() => { void panel(section).onRefresh(); });
+        if (expectNetwork) await waitFor(() => expect(provider).toHaveBeenCalledTimes(previousRequests + 1));
       };
       const finish = async (index: number, label: string, failure = false) => {
         await act(async () => {
@@ -1019,7 +1018,9 @@ describe('NEWS2 transient oxygen transport', () => {
       route={{ key: 'restoration', name: 'HandoverForm', params: { patientId: 'synthetic-restore-oxygen', unitId: 'icu', prefilledValues } }} />);
     try {
       expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(7);
+      expect(screen.root.findByType(FormProvider).props.getValues('administrativeData.unit')).toBe('icu');
       await act(async () => { await Promise.resolve(); });
+      expect(screen.queryByText('Borrador ilegible: no se guardará automáticamente.')).toBeNull();
       await waitFor(() => expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(5));
       const form: UseFormReturn<HandoverValues> = screen.root.findByType(FormProvider).props;
       expect(form.getValues('vitals')).not.toHaveProperty('o2');
@@ -1392,27 +1393,29 @@ describe('NEWS2 integer respiratory input contract', () => {
       fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations([observation(8.5)]),
     });
     const navigation = { navigate: vi.fn(), setParams: vi.fn(), addListener: () => () => {} };
-    const write = vi.spyOn(SecureStore, 'setItemAsync');
+    const drafts = await import('@/src/lib/drafts');
     const screen = render(<HandoverForm navigation={navigation}
       route={{ key: 'handover', name: 'HandoverForm', params: { patientId: 'synthetic', unitId: 'icu', prefilledValues } }} />);
+    await act(async () => { await Promise.resolve(); });
     if (!screen.queryByPlaceholderText('16')) fireEvent.press(screen.getByText(/Signos vitales/));
     fireEvent.changeText(screen.getByPlaceholderText('16'), '');
     await act(async () => {
       screen.root.find(node => typeof node.props.onSaveDraft === 'function').props.onSaveDraft();
     });
-    const saved = write.mock.calls.find(([key]) => key.startsWith('handoverDraft:'));
-    expect(saved).toBeDefined();
-    const snapshot: RrDraft = JSON.parse(saved?.[1] ?? '{}');
-    expect(snapshot.vitals?.rr).toBeUndefined();
-    expect(snapshot.news2RrReview).toEqual({ originalValue: 8.5, source: 'fhir', unit: '/min',
+    await waitFor(async () => expect(await drafts.getHandoverDraft<RrDraft>('synthetic', 'icu')).not.toBeNull());
+    const snapshot = await drafts.getHandoverDraft<RrDraft>('synthetic', 'icu');
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.vitals?.rr).toBeUndefined();
+    expect(snapshot?.news2RrReview).toEqual({ originalValue: 8.5, source: 'fhir', unit: '/min',
       observedAt: '2026-09-22T10:00:00Z', reason: 'RR_NON_INTEGER', resolution: 'pending' });
-    expect(saved?.[1]).not.toContain('forbidden-');
+    const managedKey = drafts.__test__.keyNorm('form:synthetic:icu');
+    const encrypted = await drafts.__test__.readRaw(managedKey);
+    expect(JSON.parse(encrypted ?? '{}')).toMatchObject({ v: 1, algo: 'AES-256-GCM' });
+    expect(encrypted).not.toContain('forbidden-');
     screen.unmount();
-    const read = vi.spyOn(SecureStore, 'getItemAsync');
     const restored = render(<HandoverForm navigation={navigation}
       route={{ key: 'restore', name: 'HandoverForm', params: { patientId: 'synthetic', unitId: 'icu' } }} />);
     await act(async () => { await Promise.resolve(); });
-    expect(read).toHaveBeenCalledWith(saved?.[0]);
     expect(restored.root.find(node => typeof node.props.getValues === 'function').props.formState.dirtyFields).toEqual({});
     await waitFor(() => expect(restored.getByText(message)).toBeTruthy());
     if (!restored.queryByPlaceholderText('16')) fireEvent.press(restored.getByText(/Signos vitales/));

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigationMock = {
@@ -77,5 +77,14 @@ describe('SyncStatusBanner', () => {
 
     expect(view.getByText('sync.runningMessage:2')).toBeTruthy();
     expect(view.getByText('sync.pendingCountMessage:2')).toBeTruthy();
+  });
+
+  it('never presents an unreadable queue as idle or empty', async () => {
+    queueSizeMock.mockResolvedValue(-1);
+    const { default: SyncStatusBanner } = await import('@/src/components/SyncStatusBanner');
+    const view = render(<SyncStatusBanner />);
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(view.getByText('Estado de cola no verificable')).toBeTruthy());
+    expect(view.queryByText('sync.idleMessage')).toBeNull();
   });
 });

@@ -615,13 +615,14 @@ export async function logout(): Promise<void> {
     }
 
     await setSession(null);
-    await clearSensitiveLocalData();
+    const cleanup = await clearSensitiveLocalData().catch(() => ({ status: 'failed' as const }));
 
     if (message) {
       Alert.alert(t('auth.sessionExpiredTitle'), message);
     }
 
     resetTo('Login');
+    if (cleanup?.status !== 'complete') Alert.alert('Limpieza local incompleta', 'Algunos datos locales cifrados requieren reintento de borrado.');
   };
 
   logoutInFlight = runner().finally(() => {
@@ -640,13 +641,14 @@ export async function logoutAndClear(options: LogoutOptions = {}): Promise<void>
 
     logoutInFlight = (async () => {
       await setSession(null);
-      await clearSensitiveLocalData();
+      const cleanup = await clearSensitiveLocalData().catch(() => ({ status: 'failed' as const }));
 
       if (options.message) {
         Alert.alert(t('auth.sessionExpiredTitle'), options.message);
       }
 
       resetTo('Login');
+      if (cleanup?.status !== 'complete') Alert.alert('Limpieza local incompleta', 'Algunos datos locales cifrados requieren reintento de borrado.');
     })().finally(() => {
       logoutInFlight = null;
       pendingLogoutMessage = undefined;
@@ -1089,4 +1091,3 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 // END HANDOVER_AUTH
-

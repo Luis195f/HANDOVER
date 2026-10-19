@@ -13,19 +13,19 @@ export default function OfflineBanner({ onPress }: Props) {
   const C = scheme === 'dark' ? D_COLORS : L_COLORS;
 
   const { isConnected, isInternetReachable } = useNetInfo();
-  const [count, setCount] = React.useState<number>(0);
+  const [count, setCount] = React.useState<number | null>(null);
 
   const lastTapRef = React.useRef<number>(0);
   const [cooldown, setCooldown] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = React.useCallback(async () => {
-    const n = await getCanonicalQueueSize();
-    setCount(n < 0 ? 0 : n);
+    const n = await getCanonicalQueueSize().catch(() => -1);
+    setCount(n < 0 ? null : n);
   }, []);
 
   React.useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh, isConnected, isInternetReachable]);
 
   React.useEffect(() => {
@@ -48,10 +48,10 @@ export default function OfflineBanner({ onPress }: Props) {
   }, [onPress]);
 
   const offline = !((isConnected ?? false) && (isInternetReachable ?? true));
-  const show = offline || count > 0;
+  const show = offline || count === null || count > 0;
   if (!show) return null;
 
-  const text = offline
+  const text = count === null ? 'Estado de cola no verificable · abrir sincronización' : offline
     ? `Sin conexión · ${count} en cola`
     : `${count} en cola · toca para ver`;
 
