@@ -6,6 +6,7 @@ vi.mock('expo-secure-store', () => ({
   getItemAsync: vi.fn(async (key: string) => secureStoreData.get(key) ?? null),
   setItemAsync: vi.fn(async (key: string, value: string) => { secureStoreData.set(key, value); }),
   deleteItemAsync: vi.fn(async (key: string) => { secureStoreData.delete(key); }),
+  isAvailableAsync: vi.fn(async () => true),
   __store: secureStoreData,
 }));
 

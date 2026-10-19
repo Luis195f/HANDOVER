@@ -12,6 +12,7 @@ vi.mock('@/src/security/user-switch', () => ({
   clearAllUsers: vi.fn(async () => {}),
   createUserSwitchStorage: vi.fn(() => ({})),
 }));
+vi.mock('@/src/security/secure-storage', () => ({ secureDeleteSensitiveItem: vi.fn(async () => {}) }));
 
 import { clearSensitiveLocalData } from '@/src/security/secure-cleanup';
 import { clearAll as clearLegacyOfflineQueue } from '@/src/lib/offlineQueue';
@@ -23,10 +24,11 @@ import { clearOfflineQueue, clearTxQueue } from '@/src/lib/queue';
 import { invalidateCapabilitiesCache } from '@/src/security/capabilities';
 import { clearCryptoKeys } from '@/src/security/crypto';
 import { clearAllUsers, createUserSwitchStorage } from '@/src/security/user-switch';
+import { secureDeleteSensitiveItem } from '@/src/security/secure-storage';
 
 describe('clearSensitiveLocalData', () => {
   it('clears all sensitive local stores', async () => {
-    await clearSensitiveLocalData();
+    expect((await clearSensitiveLocalData()).status).toBe('complete');
 
     expect(clearTxQueue).toHaveBeenCalled();
     expect(clearOfflineQueue).toHaveBeenCalled();
@@ -39,5 +41,18 @@ describe('clearSensitiveLocalData', () => {
     expect(clearOfflineEncryptionKeys).toHaveBeenCalled();
     expect(createUserSwitchStorage).toHaveBeenCalled();
     expect(clearAllUsers).toHaveBeenCalled();
+    expect(secureDeleteSensitiveItem).toHaveBeenCalledWith('handover.queue.v1');
+    expect(secureDeleteSensitiveItem).toHaveBeenCalledWith('handover.queue.dead.v1');
+    expect(secureDeleteSensitiveItem).toHaveBeenCalledWith('@handover/tx-queue');
+  });
+
+  it('retains encryption keys when a payload store cannot be cleared', async () => {
+    vi.mocked(clearAllDrafts).mockRejectedValueOnce(new Error('synthetic failure'));
+    vi.mocked(clearCryptoKeys).mockClear();
+    vi.mocked(clearOfflineEncryptionKeys).mockClear();
+    const result = await clearSensitiveLocalData();
+    expect(result).toEqual({ status: 'incomplete', failedStores: ['drafts'] });
+    expect(clearCryptoKeys).not.toHaveBeenCalled();
+    expect(clearOfflineEncryptionKeys).not.toHaveBeenCalled();
   });
 });

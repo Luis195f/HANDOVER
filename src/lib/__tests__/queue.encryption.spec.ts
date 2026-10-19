@@ -8,14 +8,16 @@ import {
   listOfflineQueue,
   updateOfflineQueueItem,
 } from '@/src/lib/queue';
-import { encryptPayload } from '@/src/lib/crypto';
+import { clearOfflineEncryptionKeys, encryptPayload } from '@/src/lib/crypto';
 import { processQueueOnce, setQueueSendHandler } from '@/src/lib/sync';
 
 const secureStore = SecureStore as typeof SecureStore & { __reset?: () => void };
 
 describe('offline queue encryption', () => {
   beforeEach(async () => {
+    vi.restoreAllMocks();
     secureStore.__reset?.();
+    await clearOfflineEncryptionKeys();
     await SecureStore.setItemAsync('handover_offline_queue_key', 'test-key-123');
     await clearOfflineQueue();
     setQueueSendHandler(async () => ({ ok: true }));
@@ -32,6 +34,12 @@ describe('offline queue encryption', () => {
     expect(payloadString).not.toContain('SECRET-VALUE-12345');
     const parsed = payloadString ? JSON.parse(payloadString) : null;
     expect(parsed?.algo).toBe('AES-256-GCM');
+  });
+
+  it('never acknowledges a hash-only sentinel as a saved clinical payload', async () => {
+    vi.spyOn(SecureStore, 'setItemAsync').mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(createOfflineQueueItem({ payload: { marker: 'clinical' }, patientId: 'pat-fail' })).rejects.toThrow();
+    expect(await listOfflineQueue({ decrypt: false })).toEqual([]);
   });
 
   it('procesa registros legacy sin cifrar y los migra', async () => {
@@ -118,4 +126,3 @@ describe('offline queue encryption', () => {
     expect((sentPayload as { bundle?: unknown }).bundle).toEqual(bundle);
   });
 });
-

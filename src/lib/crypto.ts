@@ -57,6 +57,7 @@ const OFFLINE_KEY_STORAGE = 'handover_offline_encryption_key_v1';
 const GCM_KEY_SIZE = 32;
 const GCM_IV_SIZE = 12;
 let cachedOfflineKey: Uint8Array | null = null;
+let memoryQueueKey: Uint8Array | null = null;
 
 async function sha256Bytes(input: Uint8Array | string): Promise<Uint8Array> {
   const encoder = new TextEncoder();
@@ -92,28 +93,20 @@ function fromBase64(base64: string): Uint8Array {
 
 async function persistOfflineKey(bytes: Uint8Array): Promise<void> {
   const base64 = toBase64(bytes);
-  try {
-    await secureSetSensitiveItem(OFFLINE_KEY_STORAGE, base64);
-  } catch {
-    // ignore
-  }
+  await secureSetSensitiveItem(OFFLINE_KEY_STORAGE, base64);
 }
 
-async function deriveKeyBytes(): Promise<Uint8Array> {
+async function deriveKeyBytes(allowCreate: boolean): Promise<Uint8Array> {
   if (cachedOfflineKey?.length === GCM_KEY_SIZE) return cachedOfflineKey;
 
-  try {
-    const stored = await secureGetSensitiveItem(OFFLINE_KEY_STORAGE);
-    if (stored) {
-      const decoded = fromBase64(stored);
-      if (decoded.length === GCM_KEY_SIZE) {
-        cachedOfflineKey = decoded;
-        return decoded;
-      }
-    }
-  } catch {
-    // ignore
+  const stored = await secureGetSensitiveItem(OFFLINE_KEY_STORAGE);
+  if (stored != null) {
+    const decoded = fromBase64(stored);
+    if (decoded.length !== GCM_KEY_SIZE) throw new OfflineDecryptionError('Invalid offline encryption key');
+    cachedOfflineKey = decoded;
+    return decoded;
   }
+  if (!allowCreate) throw new OfflineDecryptionError('Offline encryption key unavailable');
 
   let keyBytes = await Crypto.getRandomBytesAsync(GCM_KEY_SIZE);
 
@@ -130,17 +123,26 @@ async function deriveKeyBytes(): Promise<Uint8Array> {
   return keyBytes;
 }
 
+async function memoryOnlyKey(allowCreate: boolean): Promise<Uint8Array> {
+  if (memoryQueueKey) return memoryQueueKey;
+  if (!allowCreate) throw new OfflineDecryptionError('Memory-only queue key unavailable');
+  const generated = await Crypto.getRandomBytesAsync(GCM_KEY_SIZE);
+  if (generated.length !== GCM_KEY_SIZE) throw new OfflineDecryptionError('Invalid memory-only queue key');
+  memoryQueueKey = generated;
+  return generated;
+}
+
 function ensurePlaintext(payload: unknown): string {
   if (typeof payload === 'string') return payload;
   return JSON.stringify(payload ?? null);
 }
 
-export async function encryptOfflinePayload(plaintext: unknown): Promise<string> {
+export async function encryptOfflinePayload(plaintext: unknown, options?: { memoryOnly?: boolean }): Promise<string> {
   if (isEncryptionDisabled()) {
     return ensurePlaintext(plaintext);
   }
 
-  const keyBytes = await deriveKeyBytes();
+  const keyBytes = options?.memoryOnly ? await memoryOnlyKey(true) : await deriveKeyBytes(true);
   const iv = await Crypto.getRandomBytesAsync(GCM_IV_SIZE);
   const encoder = new TextEncoder();
   const data = encoder.encode(ensurePlaintext(plaintext));
@@ -190,8 +192,8 @@ function tryParseEncryptedEnvelope(stored: string): EncryptedEnvelopeV1 | null {
   return null;
 }
 
-async function decryptEnvelope(envelope: EncryptedEnvelopeV1): Promise<string> {
-  const keyBytes = await deriveKeyBytes();
+async function decryptEnvelope(envelope: EncryptedEnvelopeV1, memoryOnly = false): Promise<string> {
+  const keyBytes = memoryOnly ? await memoryOnlyKey(false) : await deriveKeyBytes(false);
   const iv = fromBase64(envelope.iv);
   const ctBytes = fromBase64(envelope.ct);
   const tagBytes = envelope.tag ? fromBase64(envelope.tag) : new Uint8Array();
@@ -211,13 +213,21 @@ async function decryptEnvelope(envelope: EncryptedEnvelopeV1): Promise<string> {
   }
 }
 
-export async function decryptOfflinePayload(stored: string): Promise<string> {
+export async function decryptOfflinePayload(stored: string, options?: { memoryOnly?: boolean }): Promise<string> {
   const envelope = tryParseEncryptedEnvelope(stored);
   if (!envelope) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object' && ('algo' in parsed || 'ct' in parsed || 'tag' in parsed)) {
+        throw new OfflineDecryptionError('Corrupt offline encryption envelope');
+      }
+    } catch (error) {
+      if (error instanceof OfflineDecryptionError) throw error;
+    }
     return stored;
   }
 
-  return decryptEnvelope(envelope);
+  return decryptEnvelope(envelope, options?.memoryOnly);
 }
 
 /**
@@ -247,45 +257,20 @@ export const OFFLINE_ENCRYPTION_DISABLED = isEncryptionDisabled();
 let cachedLegacyKey: string | null = null;
 
 export async function clearOfflineEncryptionKeys(): Promise<void> {
+  await Promise.all([secureDeleteSensitiveItem(OFFLINE_KEY_STORAGE), secureDeleteSensitiveItem(LEGACY_QUEUE_KEY)]);
   cachedOfflineKey = null;
   cachedLegacyKey = null;
-  await Promise.allSettled([secureDeleteSensitiveItem(OFFLINE_KEY_STORAGE), secureDeleteSensitiveItem(LEGACY_QUEUE_KEY)]);
-}
-
-function generateLegacyKey(): string {
-  const randomBytes = CryptoJS.lib.WordArray.random(32);
-  return CryptoJS.enc.Base64.stringify(randomBytes);
+  memoryQueueKey = null;
 }
 
 async function readLegacyKey(): Promise<string | null> {
   if (cachedLegacyKey) return cachedLegacyKey;
-  try {
-    const stored = await secureGetSensitiveItem(LEGACY_QUEUE_KEY);
-    if (stored) {
-      cachedLegacyKey = stored;
-      return stored;
-    }
-  } catch {
-    // ignore
+  const stored = await secureGetSensitiveItem(LEGACY_QUEUE_KEY);
+  if (stored) {
+    cachedLegacyKey = stored;
+    return stored;
   }
   return null;
-}
-
-async function persistLegacyKey(key: string): Promise<void> {
-  try {
-    await secureSetSensitiveItem(LEGACY_QUEUE_KEY, key);
-  } catch {
-    // ignore
-  }
-}
-
-async function getOrCreateLegacyKey(): Promise<string> {
-  const existing = await readLegacyKey();
-  if (existing) return existing;
-  const key = generateLegacyKey();
-  await persistLegacyKey(key);
-  cachedLegacyKey = key;
-  return key;
 }
 
 function decryptLegacyPayload(ciphertext: string): string {
@@ -325,7 +310,8 @@ export async function decryptPayload(ciphertext: string): Promise<string> {
 
   if (ciphertext.startsWith(LEGACY_ENCRYPTION_PREFIX)) {
     if (!cachedLegacyKey) {
-      await getOrCreateLegacyKey();
+      const stored = await readLegacyKey();
+      if (!stored) throw new OfflineDecryptionError('Legacy offline encryption key unavailable');
     }
     return decryptLegacyPayload(ciphertext);
   }

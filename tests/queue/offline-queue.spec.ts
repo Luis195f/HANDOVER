@@ -87,6 +87,25 @@ describe('offline queue end-to-end', () => {
     expect(await queue.listOfflineQueue()).toHaveLength(0);
   });
 
+  it('isolates an unreadable row, keeps its ciphertext on metadata changes, and sends healthy rows only', async () => {
+    const first = await queue.createOfflineQueueItem({ payload: { bundle: { marker: 'old' } }, patientId: 'one' });
+    const [before] = await queue.listOfflineQueue({ decrypt: false });
+    const crypto = await import('@/src/lib/crypto');
+    await crypto.clearOfflineEncryptionKeys();
+    const second = await queue.createOfflineQueueItem({ payload: { bundle: { marker: 'new' } }, patientId: 'two' });
+    const rows = await queue.listOfflineQueue();
+    expect(rows.find((row) => row.id === first.id)?.readError).toBe('decrypt-failed');
+    expect(rows.find((row) => row.id === second.id)?.readError).toBeUndefined();
+    await queue.updateOfflineQueueStatus(first.id, 'error', { errorMessage: 'Unreadable' });
+    const raw = await queue.listOfflineQueue({ decrypt: false });
+    expect(raw.find((row) => row.id === first.id)?.payload).toBe(before.payload);
+    const sent = vi.fn(async () => ({ ok: true } as const));
+    sync.setQueueSendHandler(sent);
+    await sync.processQueueOnce();
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect((await queue.listOfflineQueue({ decrypt: false })).map((row) => row.id)).toEqual([first.id]);
+  });
+
   it('encola bundles con DocumentReference adjunto y data base64', async () => {
     const bundle = buildHandoverBundle(
       {
@@ -362,18 +381,13 @@ describe('offline queue end-to-end', () => {
     const isolatedQueue = await import('@/src/lib/queue');
     await isolatedQueue.clearOfflineQueue();
 
-    const item = await isolatedQueue.createOfflineQueueItem({
+    await expect(isolatedQueue.createOfflineQueueItem({
       payload: { bundle: { resourceType: 'Bundle', marker: 'PHI-SECRET' } },
       patientId: 'pat-prod',
-    });
-    const [stored] = await isolatedQueue.listOfflineQueue({ decrypt: false });
-    const rawPayload = String(stored?.payload ?? '');
+    })).rejects.toThrow('OFFLINE_QUEUE_NOT_PERSISTED');
+    const stored = await isolatedQueue.listOfflineQueue({ decrypt: false });
 
-    expect(item.syncStatus).toBe('error');
-    expect(item.errorMessage).toBe('No se pudo proteger el payload offline; no se persistio contenido clinico.');
-    expect(rawPayload).not.toContain('PHI-SECRET');
-    expect(rawPayload).not.toContain('pat-prod');
-    expect(rawPayload).toContain('__encryptionFailed');
+    expect(stored).toEqual([]);
     expect(warnSpy.mock.calls.some(([message]) => typeof message === 'string' && message.includes('HNDR_QUEUE_003'))).toBe(true);
   });
 
@@ -400,31 +414,22 @@ describe('offline queue end-to-end', () => {
 
     const isolatedQueue = await import('@/src/lib/queue');
     await isolatedQueue.clearOfflineQueue();
-    const first = await isolatedQueue.createOfflineQueueItem({
+    await expect(isolatedQueue.createOfflineQueueItem({
       payload: { bundle: { resourceType: 'Bundle', marker: 'PHI-FIRST' } },
       patientId: 'pat-sensitive-first',
-    });
-    const second = await isolatedQueue.createOfflineQueueItem({
+    })).rejects.toThrow('OFFLINE_QUEUE_NOT_PERSISTED');
+    await expect(isolatedQueue.createOfflineQueueItem({
       payload: { bundle: { resourceType: 'Bundle', marker: 'PHI-SECOND' } },
       patientId: 'pat-sensitive-second',
-    });
+    })).rejects.toThrow('OFFLINE_QUEUE_NOT_PERSISTED');
 
     const protectionWarnings = warnSpy.mock.calls.filter(([message]) =>
       typeof message === 'string' && message.includes('HNDR_QUEUE_002')
     );
     const stored = await isolatedQueue.listOfflineQueue({ decrypt: false });
-    const persisted = stored.map((item) => String(item.payload ?? '')).join('\n');
-    const sentinels = stored.map((item) => JSON.parse(String(item.payload ?? '')) as Record<string, unknown>);
 
     expect(cbcEncryptSpy).not.toHaveBeenCalled();
-    expect(first.syncStatus).toBe('error');
-    expect(second.syncStatus).toBe('error');
-    expect(sentinels).toHaveLength(2);
-    expect(sentinels.every((sentinel) => sentinel.__encryptionFailed === true && sentinel.v === 1)).toBe(true);
-    expect(sentinels.every((sentinel) => typeof sentinel.payloadHash === 'string' && /^[a-f0-9]{64}$/.test(sentinel.payloadHash))).toBe(true);
-    expect(persisted).not.toContain('PHI-FIRST');
-    expect(persisted).not.toContain('PHI-SECOND');
-    expect(persisted).not.toContain('pat-sensitive');
+    expect(stored).toEqual([]);
     expect(protectionWarnings).toHaveLength(1);
     expect(JSON.stringify(protectionWarnings)).not.toContain('pat-sensitive');
     expect(JSON.stringify(protectionWarnings)).not.toContain('patientId');
@@ -589,4 +594,3 @@ describe('offline queue end-to-end', () => {
     expect(await queue.listOfflineQueue()).toHaveLength(1);
   });
 });
-

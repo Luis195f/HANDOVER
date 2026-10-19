@@ -90,7 +90,6 @@ export function createExceptionHandoverStorage(
   providedStorage?: AsyncStorageAdapter | null,
 ): ExceptionHandoverStorage {
   let memoizedStorage = providedStorage ?? null;
-  let memoryCopy: ExceptionHandoverSessionState | null = null;
   let pendingSave = Promise.resolve();
 
   const getStorage = async () => {
@@ -102,40 +101,27 @@ export function createExceptionHandoverStorage(
   return {
     async load(shiftId) {
       const storage = await getStorage();
-      if (!storage) {
-        return memoryCopy?.shiftId === shiftId
-          ? { ...memoryCopy }
-          : createEmptyExceptionHandoverState(shiftId);
-      }
-      try {
-        const raw = await encryptedGetItem(key, storage);
-        if (!raw) return createEmptyExceptionHandoverState(shiftId);
-        const parsed = JSON.parse(raw) as unknown;
-        return isPersistedState(parsed) && parsed.shiftId === shiftId
-          ? parsed
-          : createEmptyExceptionHandoverState(shiftId);
-      } catch {
-        return createEmptyExceptionHandoverState(shiftId);
-      }
+      if (!storage) throw new Error('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
+      const raw = await encryptedGetItem(key, storage);
+      if (raw === null) return createEmptyExceptionHandoverState(shiftId);
+      const parsed: unknown = JSON.parse(raw);
+      if (!isPersistedState(parsed)) throw new Error('EXCEPTION_HANDOVER_CORRUPT');
+      return parsed.shiftId === shiftId ? parsed : createEmptyExceptionHandoverState(shiftId);
     },
     save(state) {
       const operation = pendingSave.then(async () => {
         const storage = await getStorage();
-        if (!storage) {
-          memoryCopy = mergeExceptionHandoverState(memoryCopy ?? createEmptyExceptionHandoverState(state.shiftId), state);
-          return;
-        }
+        if (!storage) throw new Error('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
         const current = await this.load(state.shiftId);
         await encryptedSetItem(key, JSON.stringify(mergeExceptionHandoverState(current, state)), storage);
-        memoryCopy = null;
       });
       pendingSave = operation.catch(() => {});
       return operation;
     },
     async clear() {
       const storage = await getStorage();
-      memoryCopy = null;
-      if (storage) await encryptedRemoveItem(key, storage);
+      if (!storage) throw new Error('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
+      await encryptedRemoveItem(key, storage);
     },
   };
 }
@@ -144,5 +130,6 @@ export async function clearExceptionHandoverStorage(
   key = EXCEPTION_HANDOVER_STORAGE_KEY,
 ): Promise<void> {
   const storage = await getAsyncStorageAdapter();
-  if (storage) await encryptedRemoveItem(key, storage);
+  if (!storage) throw new Error('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
+  await encryptedRemoveItem(key, storage);
 }

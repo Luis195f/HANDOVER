@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as encryptedStorage from '../encryptedStorage';
 
 vi.mock('@/src/lib/crypto', () => ({
   encryptOfflinePayload: vi.fn(async (value: string) => `encrypted:${value}`),
@@ -26,6 +27,22 @@ function memoryAdapter() {
 }
 
 describe('exception handoff encrypted persistence', () => {
+  it('does not present unavailable evidence as an empty C06 context', async () => {
+    vi.spyOn(encryptedStorage, 'getAsyncStorageAdapter').mockResolvedValue(null);
+    const storage = createExceptionHandoverStorage('synthetic:unavailable');
+    await expect(storage.load(SHIFT)).rejects.toThrow('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
+    await expect(storage.save(createEmptyExceptionHandoverState(SHIFT))).rejects.toThrow('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
+    await expect(storage.clear()).rejects.toThrow('EXCEPTION_HANDOVER_STORAGE_UNAVAILABLE');
+    vi.restoreAllMocks();
+  });
+  it('does not overwrite corrupt evidence with an empty session', async () => {
+    const adapter = memoryAdapter();
+    await adapter.setItem('test:corrupt', '{broken');
+    const storage = createExceptionHandoverStorage('test:corrupt', adapter);
+    await expect(storage.load(SHIFT)).rejects.toThrow();
+    await expect(storage.save(createEmptyExceptionHandoverState(SHIFT))).rejects.toThrow();
+    expect(await adapter.getItem('test:corrupt')).toBe('{broken');
+  });
   it('resumes after restart and keeps retry/idempotent events once', async () => {
     const adapter = memoryAdapter();
     const event = createExceptionReviewEvent('critical_check_back', DEMO_ACTORS[1], NOW, 'patient-1', {

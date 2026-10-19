@@ -25,13 +25,13 @@ describe('clearAllDrafts legacy cleanup', () => {
     await expect(__test__.readRaw(__test__.indexKey)).resolves.toBeNull();
   });
 
-  it('no revienta con keys huérfanas', async () => {
+  it('no atribuye a la purga una clave histórica sin referencia localizable', async () => {
     const orphanPrefix = __test__.legacyPrefixes[0];
     const orphanKey = `${orphanPrefix}orphan`;
 
     await __test__.writeRaw(orphanKey, JSON.stringify({ note: 'orphan' }));
 
     await expect(clearAllDrafts()).resolves.toBeUndefined();
-    await expect(__test__.readRaw(orphanKey)).resolves.toBeNull();
+    await expect(__test__.readRaw(orphanKey)).resolves.toBe(JSON.stringify({ note: 'orphan' }));
   });
 });

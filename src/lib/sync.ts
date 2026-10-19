@@ -24,6 +24,7 @@ import {
 } from './queue';
 import { signBundleIfEnabled } from '../security/crypto';
 import { secureGetSensitiveItem, secureSetSensitiveItem } from '../security/secure-storage';
+import { assertLocalWriteAllowed, isLocalCleanupInProgress } from '../security/local-cleanup-state';
 import { notifySyncStopped } from './notifications';
 import { resolveSyncErrorMessage } from './sync-errors';
 import {
@@ -617,6 +618,7 @@ function nextEligibleAt(item: OfflineQueueItem): number {
 }
 
 export async function processQueueOnce(): Promise<void> {
+  if (isLocalCleanupInProgress()) return;
   const now = Date.now();
   const items = await listOfflineQueue();
   const normalizeAttemptCount = (item: OfflineQueueItem): number => item.attemptCount ?? item.attempts ?? 0;
@@ -782,6 +784,7 @@ export async function processQueueOnce(): Promise<void> {
 }
 
 async function runSyncCycle(): Promise<SyncSnapshot> {
+  if (isLocalCleanupInProgress()) return updateSyncSnapshot({ status: 'paused', lastError: 'Limpieza local en curso' });
   if (pausedForAuth) {
     return updateSyncSnapshot({ status: 'paused' });
   }
@@ -822,11 +825,11 @@ async function runSyncCycle(): Promise<SyncSnapshot> {
 
   const refreshed = await listOfflineQueue();
   const pending = refreshed.filter((item) => item.syncStatus === 'pending' || item.syncStatus === 'inFlight');
-  const errored = refreshed.find((item) => item.syncStatus === 'error' && item.errorMessage);
+  const errored = refreshed.find((item) => item.syncStatus === 'error' && (item.errorMessage || item.readError));
   updateSyncSnapshot({
     pendingCount: pending.length,
     lastRunAt: new Date().toISOString(),
-    lastError: errored?.errorMessage ?? syncSnapshot.lastError ?? null,
+    lastError: errored?.readError ? 'Payload local no legible; sincronización detenida.' : errored?.errorMessage ?? syncSnapshot.lastError ?? null,
   });
 
   // Clean up entries marked as synced to avoid leaving stale data in the queue.
@@ -841,7 +844,7 @@ async function runSyncCycle(): Promise<SyncSnapshot> {
 
   if (pending.length === 0) {
     cancelSyncTimer();
-    return updateSyncSnapshot({ status: 'idle', nextRetryAt: null });
+    return updateSyncSnapshot({ status: errored?.readError ? 'paused' : 'idle', nextRetryAt: null });
   }
 
   const now = Date.now();
@@ -980,13 +983,15 @@ export async function flushSyncQueue(opts: SyncOpts): Promise<FlushResult> {
     const after = await listOfflineQueue();
     const afterIds = new Set(after.map((item) => item.id));
     const processed = before.filter((item) => !afterIds.has(item.id)).length;
-    const base = classifyFlushOutcome(trackedFailure.current);
+    const base = after.some((item) => item.readError)
+      ? { outcome: 'client-error' as const, status: undefined }
+      : classifyFlushOutcome(trackedFailure.current);
 
     return {
       processed,
       remaining: after.length,
-      outcome: processed > 0 && trackedFailure.current == null ? 'success' : base.outcome,
-      status: processed > 0 && trackedFailure.current == null ? undefined : base.status,
+      outcome: processed > 0 && trackedFailure.current == null && !after.some((item) => item.readError) ? 'success' : base.outcome,
+      status: processed > 0 && trackedFailure.current == null && !after.some((item) => item.readError) ? undefined : base.status,
     };
   })();
 
@@ -1138,6 +1143,7 @@ function ensureBundleTx(
 }
 
 async function safeSetItemAsync(key: string, value: string) {
+  assertLocalWriteAllowed();
   await secureSetSensitiveItem(key, value);
 }
 
@@ -1240,15 +1246,11 @@ function normalizeQueueItem(value: StoredQueueItem): QueueItem {
 async function readSecureQueue(): Promise<QueueItem[]> {
   const raw = await safeGetItemAsync(SECURE_QUEUE_KEY);
   if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item): item is StoredQueueItem => isRecord(item) && typeof item.id === 'string')
-      .map((item) => normalizeQueueItem(item));
-  } catch {
-    return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every((item) => isRecord(item) && typeof item.id === 'string')) {
+    throw new Error('SECURE_QUEUE_CORRUPT');
   }
+  return parsed.map((item) => normalizeQueueItem(item as StoredQueueItem));
 }
 
 async function writeSecureQueue(items: QueueItem[]): Promise<void> {
@@ -1260,7 +1262,7 @@ async function pushDeadEntry(item: QueueItem, context?: { response?: ResponseLik
   const raw = await safeGetItemAsync(DEAD_QUEUE_KEY);
   let existing: DeadQueueItem[] = [];
   if (raw) {
-    try {
+    {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed)) {
         existing = parsed
@@ -1272,9 +1274,9 @@ async function pushDeadEntry(item: QueueItem, context?: { response?: ResponseLik
             issue: Array.isArray(value.issue) ? (value.issue as OperationIssue[]) : undefined,
             error: typeof value.error === 'string' ? value.error : undefined,
           }));
+      } else {
+        throw new Error('DEAD_QUEUE_CORRUPT');
       }
-    } catch {
-      existing = [];
     }
   }
 
@@ -1589,16 +1591,11 @@ function migrateLegacyQueueItem(raw: any): LegacyQueueItem | null {
 async function loadQueue(): Promise<LegacyQueueItem[]> {
   const s = await safeGetItemAsync(QUEUE_KEY);
   if (!s) return [];
-  try {
-    const arr = JSON.parse(s);
-    if (!Array.isArray(arr)) return [];
-    const migrated = arr
-      .map((raw) => migrateLegacyQueueItem(raw))
-      .filter((it): it is LegacyQueueItem => !!it);
-    return migrated;
-  } catch {
-    return [];
-  }
+  const arr: unknown = JSON.parse(s);
+  if (!Array.isArray(arr)) throw new Error('LEGACY_QUEUE_CORRUPT');
+  const migrated = arr.map((raw) => migrateLegacyQueueItem(raw));
+  if (migrated.some((item) => !item)) throw new Error('LEGACY_QUEUE_CORRUPT');
+  return migrated as LegacyQueueItem[];
 }
 
 async function saveQueue(items: LegacyQueueItem[]) {
@@ -2071,4 +2068,3 @@ export function validateHandoverInput(input: unknown) {
 export const __test__ = {
   ensureBundleTx,
 };
-
