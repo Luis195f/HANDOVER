@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Text } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { clearAllDrafts, getHandoverDraft, setHandoverDraft } from '@/src/lib/drafts';
 import { FormProvider, useForm } from 'react-hook-form';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -1012,20 +1013,19 @@ describe('NEWS2 transient oxygen transport', () => {
       administrativeData: { unit: 'icu', census: 0, staffIn: [], staffOut: [],
         shiftStart: '2026-09-29T08:00:00Z', shiftEnd: '2026-09-29T20:00:00Z', shiftType: 'Mañana' },
       vitals: { rr: 16, spo2: 94, tempC: 39.1, sbp: 120, hr: 111, avpu: 'A' }, oxygenTherapy: {} }, gate.snapshot());
-    const key = 'handoverDraft:synthetic-restore-oxygen:icu';
-    await SecureStore.setItemAsync(key, JSON.stringify(draft));
+    await setHandoverDraft('synthetic-restore-oxygen', 'icu', draft);
     const screen = render(<HandoverForm navigation={navigation()}
       route={{ key: 'restoration', name: 'HandoverForm', params: { patientId: 'synthetic-restore-oxygen', unitId: 'icu', prefilledValues } }} />);
     try {
       expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(7);
       expect(screen.root.findByType(FormProvider).props.getValues('administrativeData.unit')).toBe('icu');
       await act(async () => { await Promise.resolve(); });
-      expect(screen.queryByText('Borrador ilegible: no se guardará automáticamente.')).toBeNull();
+      expect(screen.queryByText('No se pudo leer el borrador; guardado automático bloqueado.')).toBeNull();
       await waitFor(() => expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(5));
       const form: UseFormReturn<HandoverValues> = screen.root.findByType(FormProvider).props;
       expect(form.getValues('vitals')).not.toHaveProperty('o2');
       assertNoLegacy(packRrDraft(form.getValues(), undefined));
-    } finally { screen.unmount(); await SecureStore.deleteItemAsync(key); }
+    } finally { screen.unmount(); await clearAllDrafts(); }
   }, 20000);
   it.each(cases)('$label reaches the mounted form without hidden persisted oxygen', async ({ observations, therapy, total }) => {
     const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
@@ -1530,11 +1530,11 @@ describe('NEWS2 integer respiratory input contract', () => {
     const serialized = JSON.stringify(snapshot);
     expect(serialized).not.toContain('forbidden-');
     expect(serialized).not.toContain('Observation');
-    await SecureStore.setItemAsync('handoverDraft:synthetic:unit', serialized);
-    const raw = await SecureStore.getItemAsync('handoverDraft:synthetic:unit');
-    const restored: RrDraft = JSON.parse(raw ?? '{}');
-    const unpacked = unpackRrDraft(restored);
-    expect(Object.keys(restored.news2RrReview ?? {}).sort()).toEqual(['originalValue', 'reason', 'resolution', 'source']);
+    await setHandoverDraft('synthetic', 'unit', snapshot);
+    const restored = await getHandoverDraft<RrDraft>('synthetic', 'unit');
+    expect(restored).not.toBeNull();
+    const unpacked = unpackRrDraft(restored ?? snapshot);
+    expect(Object.keys(restored?.news2RrReview ?? {}).sort()).toEqual(['originalValue', 'reason', 'resolution', 'source']);
     expect(unpacked.values).not.toHaveProperty('news2RrReview');
     const fresh = createRrReviewGate();
     expect(fresh.restore(unpacked.values.vitals?.rr, unpacked.review)).toBe(true);

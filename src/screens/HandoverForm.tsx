@@ -632,6 +632,13 @@ export default function HandoverForm({ navigation, route }: Props) {
   );
   const hydratedDraftKeyRef = useRef<string | null>(null);
   const [draftSaveState, setDraftSaveState] = useState<'persisted' | 'memory' | 'failed'>('memory');
+  const [draftHydration, setDraftHydration] = useState<{ key: string; status: 'loading' | 'ready' | 'failed' }>({ key: draftKey, status: 'loading' });
+  const activeDraftKeyRef = useRef(draftKey);
+  const draftSaveRevisionRef = useRef(0);
+  if (activeDraftKeyRef.current !== draftKey) {
+    activeDraftKeyRef.current = draftKey;
+    draftSaveRevisionRef.current += 1;
+  }
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -910,6 +917,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   useEffect(() => {
     let cancelled = false;
     hydratedDraftKeyRef.current = null;
+    setDraftHydration({ key: draftKey, status: 'loading' });
+    setDraftSaveState('memory');
     const { form: currentForm, reset: currentReset, getValues: currentGetValues, rrGate: currentRrGate,
       prefilledValuesParam: currentPrefill } = draftHydrationContext.current;
 
@@ -918,6 +927,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         const snapshot = await getHandoverDraft<RrDraft>(patientIdValue ?? 'unknown', administrativeUnitValue ?? 'unknown');
         if (cancelled) return;
         hydratedDraftKeyRef.current = draftKey;
+        setDraftHydration({ key: draftKey, status: 'ready' });
         if (!snapshot) return;
         const { values: draft, review } = unpackRrDraft(snapshot);
 
@@ -941,7 +951,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           currentReset(normalizedDraft);
         }
       } catch {
-        if (!cancelled) setDraftSaveState('failed');
+        if (!cancelled) setDraftHydration({ key: draftKey, status: 'failed' });
       }
     })();
 
@@ -988,16 +998,18 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [form]);
 
   useEffect(() => {
-    if (IS_TEST) return;
+    if (IS_TEST && process.env.HANDOVER_TEST_DRAFT_AUTOSAVE !== 'true') return;
 
     const subscription = watch(() => {
       if (hydratedDraftKeyRef.current !== draftKey) return;
+      const revision = ++draftSaveRevisionRef.current;
+      setDraftSaveState('memory');
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
       saveTimerRef.current = setTimeout(() => {
         void setHandoverDraft(patientIdValue ?? 'unknown', administrativeUnitValue ?? 'unknown', packRrDraft(getValues(), rrGate.snapshot()))
-          .then(setDraftSaveState)
-          .catch(() => setDraftSaveState('failed'));
+          .then((state) => { if (activeDraftKeyRef.current === draftKey && draftSaveRevisionRef.current === revision) setDraftSaveState(state); })
+          .catch(() => { if (activeDraftKeyRef.current === draftKey && draftSaveRevisionRef.current === revision) setDraftSaveState('failed'); });
       }, 300);
     });
 
@@ -2292,9 +2304,11 @@ export default function HandoverForm({ navigation, route }: Props) {
         Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback'));
         return;
       }
+      const revision = ++draftSaveRevisionRef.current;
+      setDraftSaveState('memory');
       void setHandoverDraft(patientIdValue ?? 'unknown', administrativeUnitValue ?? 'unknown', packRrDraft(form.getValues(), rrGate.snapshot()))
-        .then(setDraftSaveState)
-        .catch(() => { setDraftSaveState('failed'); Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback')); });
+        .then((state) => { if (activeDraftKeyRef.current === draftKey && draftSaveRevisionRef.current === revision) setDraftSaveState(state); })
+        .catch(() => { if (activeDraftKeyRef.current !== draftKey || draftSaveRevisionRef.current !== revision) return; setDraftSaveState('failed'); Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback')); });
       return;
     }
     onSubmit();
@@ -2372,9 +2386,6 @@ export default function HandoverForm({ navigation, route }: Props) {
   if (writeAccessDeniedOnRender || unitAccessDeniedOnRender) {
     return (
       <View style={styles.screen}>
-        {hydratedDraftKeyRef.current !== draftKey || draftSaveState !== 'persisted'
-          ? <Text accessibilityRole="alert">{draftSaveState === 'failed' ? 'Borrador ilegible: no se guardará automáticamente.' : 'Borrador solo en memoria; persistencia no confirmada.'}</Text>
-          : null}
         <View style={[styles.container, { padding: spacing.lg }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('handover.unitAccessDeniedTitle')}</Text>
         </View>
@@ -2385,6 +2396,15 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <FormProvider {...form}>
       <View style={styles.screen}>
+        <Text accessibilityRole="alert">{draftHydration.key !== draftKey || draftHydration.status === 'loading'
+          ? 'Comprobando almacenamiento del borrador; persistencia no confirmada.'
+          : draftHydration.status === 'failed'
+            ? 'No se pudo leer el borrador; guardado automático bloqueado.'
+            : draftSaveState === 'failed'
+              ? 'No se pudo guardar el borrador; persistencia no confirmada.'
+              : draftSaveState === 'memory'
+                ? 'Borrador solo en memoria; persistencia no confirmada.'
+                : 'Borrador guardado en este dispositivo.'}</Text>
         {news2Blocked && (!vitalsSectionVisible || collapsedSections.signos) ? <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text> : null}
         <SidebarIndex
           sectionsInfo={visibleSections}

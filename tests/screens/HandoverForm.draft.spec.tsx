@@ -4,7 +4,10 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
+import { getHandoverDraft } from '@/src/lib/drafts';
 import type { HandoverFormData } from '@/src/validation/schemas';
+import * as SecureStore from 'expo-secure-store';
+import { __setSetItemFailure } from '../__mocks__/expo-secure-store';
 
 const enqueueBundle = vi.fn();
 const buildHandoverBundleAsync = vi.fn(async () => ({ bundle: true }));
@@ -354,18 +357,26 @@ const setByPath = (value: any, path: string, next: unknown) => {
 
 function buildFormMock(values: HandoverFormData = baseValues) {
   const currentValues: any = { ...values };
+  const subscribers = new Set<(values: HandoverFormData, meta: { name: string; type: string }) => void>();
   const setValue = vi.fn((key: string, nextValue: any) => {
     if (key.includes('.')) {
       setByPath(currentValues, key, nextValue);
     } else {
       currentValues[key] = nextValue;
     }
+    if (process.env.HANDOVER_TEST_DRAFT_AUTOSAVE === 'true') {
+      subscribers.forEach((notify) => notify(currentValues, { name: key, type: 'change' }));
+    }
   });
   return {
     ...values,
     control: {},
     formState: { errors: {}, dirtyFields: {}, isSubmitting: false },
-    watch: (fields?: string[]) => {
+    watch: (fields?: string[] | string | ((values: HandoverFormData, meta: { name: string; type: string }) => void)) => {
+      if (typeof fields === 'function') {
+        subscribers.add(fields);
+        return { unsubscribe: () => subscribers.delete(fields) };
+      }
       if (Array.isArray(fields)) {
         return fields.map((field) => getByPath(currentValues, field));
       }
@@ -394,6 +405,7 @@ describe('HandoverForm drafts', () => {
   });
 
   beforeEach(() => {
+    delete process.env.HANDOVER_TEST_DRAFT_AUTOSAVE;
     enqueueBundle.mockReset();
     buildHandoverBundleAsync.mockReset();
     ensureUnitAccess.mockReset();
@@ -432,6 +444,74 @@ describe('HandoverForm drafts', () => {
       fhir: { version: 'R4', transaction: true, profiles: [] },
     };
     mockUseZodForm.mockImplementation((_: unknown, defaultValues: HandoverFormData) => buildFormMock(defaultValues));
+  });
+
+  it('shows a read failure on the editable form and blocks autosave', async () => {
+    process.env.HANDOVER_TEST_DRAFT_AUTOSAVE = 'true';
+    const formInstance = buildFormMock(baseValues);
+    mockUseZodForm.mockReturnValue(formInstance);
+    const read = vi.spyOn(SecureStore, 'getItemAsync').mockRejectedValueOnce(new Error('synthetic read failure'));
+    const write = vi.spyOn(SecureStore, 'setItemAsync');
+    const screen = render(<HandoverForm navigation={{ navigate: vi.fn() } as any}
+      route={{ key: 'read-failure', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any} />);
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByText('No se pudo leer el borrador; guardado automático bloqueado.')).toBeTruthy());
+    act(() => formInstance.setValue('closingSummary', 'synthetic edit'));
+    vi.useFakeTimers();
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(write.mock.calls.filter(([key]) => String(key).startsWith('handover.draft.'))).toHaveLength(0);
+    vi.useRealTimers();
+    read.mockRestore();
+    write.mockRestore();
+    screen.unmount();
+  });
+
+  it('shows confirmed persistence after the real autosave and a distinct write failure', async () => {
+    process.env.HANDOVER_TEST_DRAFT_AUTOSAVE = 'true';
+    const formInstance = buildFormMock(baseValues);
+    mockUseZodForm.mockReturnValue(formInstance);
+    const screen = render(<HandoverForm navigation={{ navigate: vi.fn() } as any}
+      route={{ key: 'save-state', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any} />);
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByText('Borrador solo en memoria; persistencia no confirmada.')).toBeTruthy());
+    vi.useFakeTimers();
+    act(() => formInstance.setValue('sbarRecommendation', 'synthetic saved edit'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    vi.useRealTimers();
+    await waitFor(async () => expect(await getHandoverDraft('pat-1', 'unit-1')).toMatchObject({ sbarRecommendation: 'synthetic saved edit' }));
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByText('Borrador guardado en este dispositivo.')).toBeTruthy());
+    __setSetItemFailure((key) => key.startsWith('handover.draft.') ? new Error('synthetic write failure') : null);
+    vi.useFakeTimers();
+    act(() => formInstance.setValue('sbarRecommendation', 'synthetic failed edit'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    vi.useRealTimers();
+    await waitFor(() => expect(screen.getByText('No se pudo guardar el borrador; persistencia no confirmada.')).toBeTruthy());
+    expect(screen.queryByText('No se pudo leer el borrador; guardado automático bloqueado.')).toBeNull();
+    __setSetItemFailure(null);
+    screen.unmount();
+  });
+
+  it('does not carry a confirmed save into another patient context', async () => {
+    process.env.HANDOVER_TEST_DRAFT_AUTOSAVE = 'true';
+    const formInstance = buildFormMock(baseValues);
+    mockUseZodForm.mockReturnValue(formInstance);
+    const navigation = { navigate: vi.fn() } as any;
+    const screen = render(<HandoverForm navigation={navigation}
+      route={{ key: 'patient-a', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any} />);
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByText('Borrador solo en memoria; persistencia no confirmada.')).toBeTruthy());
+    vi.useFakeTimers();
+    act(() => formInstance.setValue('sbarRecommendation', 'synthetic saved edit'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    vi.useRealTimers();
+    await waitFor(async () => expect(await getHandoverDraft('pat-1', 'unit-1')).toMatchObject({ sbarRecommendation: 'synthetic saved edit' }));
+    await waitFor(() => expect(screen.getByText('Borrador guardado en este dispositivo.')).toBeTruthy());
+    act(() => formInstance.setValue('patientId', 'pat-2'));
+    await act(async () => screen.update(<HandoverForm navigation={navigation}
+      route={{ key: 'patient-b', name: 'HandoverForm', params: { patientId: 'pat-2', unitId: 'unit-1' } } as any} />));
+    expect(screen.queryByText('Borrador guardado en este dispositivo.')).toBeNull();
+    screen.unmount();
   });
 
 

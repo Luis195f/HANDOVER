@@ -80,6 +80,8 @@
 - `src/screens/SyncCenter.tsx` lets users inspect, retry, or clear the queue. Items with `syncStatus="error"` show an “Error” badge, differentiate `422 FHIR validation errors`, and allow viewing server-provided details (`expression` + `diagnostics`).
 - Queue and sync surfaces show an explicit unverified state when a read fails; an unreadable item is isolated from healthy items and its original ciphertext is retained. Metadata-only updates do not re-encrypt the clinical payload.
 - Draft keys are indexed in protected storage before payload creation. The form migrates only the exact legacy `handoverDraft:<patient>:<unit>` key available from its current patient/unit context, after verifying the managed destination. A failed read blocks autosave rather than replacing existing bytes.
+- On native SecureStore, draft/index logical keys map to deterministic SHA-256-based physical keys containing only SDK 54-permitted characters. This avoids sending colon-containing legacy keys to SecureStore; the original logical patient/unit identity remains in the encrypted draft index. The historical `@handover/tx-queue` key belongs to the compatible AsyncStorage fallback and is purged there, not passed to SecureStore. No new plaintext queue writes are authorized.
+- The editable form distinguishes draft hydration failure (autosave blocked), unconfirmed/in-memory state, failed write, and confirmed durable write. A new patient/unit or edit clears a prior save confirmation. Historical native draft keys without discoverable references remain unverified for retrospective purge; C19A stays blocked.
 - Logout invalidates the session even when local purge is incomplete. Purge reports incomplete status and retains encryption keys when any ciphertext store could not be cleared. The managed and discoverable legacy stores are covered; historical native SecureStore draft keys without an existing reference cannot be enumerated through the public API, so retrospective purge is **not verified** and C19A retirement remains blocked on independent evidence.
 - The Expo Web queue fallback is memory-only and does not prove durability after tab close. Automated restart simulations do not replace verification on a real device.
 
@@ -103,5 +105,4 @@
 - `flushQueueNow` (legacy UI helper in `src/lib/sync/index.ts` and legacy queue alias in `src/lib/sync.ts`) is deprecated in favor of the canonical runtime entrypoints in `src/lib/sync.ts`.
 - `postBundleSmart` (alias of `postBundle` in `src/lib/fhir-client.ts`) is deprecated. Prefer `postBundle`.
 - These aliases remain for compatibility but will be removed in a future major release. Update imports to the canonical names when migrating.
-
 
