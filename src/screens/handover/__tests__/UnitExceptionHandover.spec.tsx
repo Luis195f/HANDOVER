@@ -26,6 +26,17 @@ const groupScope = { viewScope: 'all-units', members: DEMO_EXCEPTION_HANDOVER_PA
 })) };
 
 describe('UnitExceptionHandover', () => {
+  it('blocks closure and autosave after persisted evidence fails to hydrate', async () => {
+    const save = vi.fn(async () => {});
+    const storage = { load: vi.fn(async () => { throw new Error('synthetic corruption'); }), save, clear: vi.fn(async () => {}) };
+    const screen = render(<UnitExceptionHandover patients={DEMO_EXCEPTION_HANDOVER_PATIENTS}
+      groupScope={groupScope} sessionUserId={DEMO_ACTORS[0].userId} colors={colors}
+      onOpenFullHandover={() => {}} now={now} storage={storage} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText('Evidencia local no legible o no persistida; cierre bloqueado.')).toBeTruthy();
+    expect(screen.getByTestId('confirm-outgoing-transfer').props.disabled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+  });
   it('separates the synthetic classification clock from the interaction clock', () => {
     const interactionNow = '2026-09-14T19:45:00.000Z';
     const screen = render(

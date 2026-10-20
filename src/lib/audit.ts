@@ -168,7 +168,6 @@ export function pruneOldEvents(events: AuditEvent[], options: PruneOptions): Aud
 
 export function createAsyncStorageAuditStorage(key = 'handover:audit:v1'): AuditStorage {
   let memoizedStorage: Awaited<ReturnType<typeof getAsyncStorageAdapter>> | null = null;
-  let memoryCopy: AuditEvent[] | null = null;
 
   const getStorage = async () => {
     if (memoizedStorage) return memoizedStorage;
@@ -179,36 +178,23 @@ export function createAsyncStorageAuditStorage(key = 'handover:audit:v1'): Audit
   return {
     async load(): Promise<AuditEvent[]> {
       const storage = await getStorage();
-      if (!storage) {
-        return memoryCopy ? [...memoryCopy] : [];
-      }
-      try {
-        const raw = await encryptedGetItem(key, storage);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw) as AuditEvent[];
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
+      if (!storage) throw new Error('AUDIT_STORAGE_UNAVAILABLE');
+      const raw = await encryptedGetItem(key, storage);
+      if (raw === null) return [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error('AUDIT_STORAGE_CORRUPT');
+      return parsed as AuditEvent[];
     },
     async save(events: AuditEvent[]): Promise<void> {
       const storage = await getStorage();
       const serialized = JSON.stringify(events);
-      if (!storage) {
-        memoryCopy = [...events];
-        return;
-      }
+      if (!storage) throw new Error('AUDIT_STORAGE_UNAVAILABLE');
       await encryptedSetItem(key, serialized, storage);
-      memoryCopy = null;
     },
     async clear(): Promise<void> {
       const storage = await getStorage();
-      if (!storage) {
-        memoryCopy = [];
-        return;
-      }
+      if (!storage) throw new Error('AUDIT_STORAGE_UNAVAILABLE');
       await encryptedRemoveItem(key, storage);
-      memoryCopy = [];
     },
   };
 }
@@ -257,7 +243,6 @@ export async function queueAndFlushAuditEvent(storage: AuditStorage, event: Audi
 
 export async function clearAuditStorage(key = 'handover:audit:v1'): Promise<void> {
   const storage = await getAsyncStorageAdapter();
-  if (!storage) return;
+  if (!storage) throw new Error('AUDIT_STORAGE_UNAVAILABLE');
   await encryptedRemoveItem(key, storage);
 }
-

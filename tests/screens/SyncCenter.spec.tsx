@@ -81,6 +81,14 @@ describe('SyncCenter', () => {
     flushSyncQueue.mockResolvedValue({ processed: 2, remaining: 0 });
   });
 
+  it('shows an explicit read failure instead of an empty queue', async () => {
+    listOfflineQueue.mockRejectedValue(new Error('synthetic storage failure'));
+    const view = render(<SyncCenter />);
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(view.getByText('Cola local no legible; el estado de sincronización no está verificado.')).toBeTruthy());
+    expect(view.queryByTestId('sync-empty-queue')).toBeNull();
+  });
+
   it('renders queue items with the expected statuses', async () => {
     const view = render(<SyncCenter />);
 

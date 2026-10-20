@@ -1,4 +1,5 @@
 import { decryptOfflinePayload, encryptOfflinePayload } from './crypto';
+import { assertLocalWriteAllowed } from '@/src/security/local-cleanup-state';
 
 export type AsyncStorageAdapter = {
   getItem: (key: string) => Promise<string | null>;
@@ -28,7 +29,8 @@ export async function encryptedSetItem(
   storage?: AsyncStorageAdapter | null
 ): Promise<void> {
   const adapter = storage ?? (await getAsyncStorageAdapter());
-  if (!adapter) return;
+  if (!adapter) throw new Error('ENCRYPTED_STORAGE_UNAVAILABLE');
+  assertLocalWriteAllowed();
   const serialized = serializeValue(value);
   const encrypted = await encryptOfflinePayload(serialized);
   await adapter.setItem(key, encrypted);
@@ -39,14 +41,10 @@ export async function encryptedGetItem(
   storage?: AsyncStorageAdapter | null
 ): Promise<string | null> {
   const adapter = storage ?? (await getAsyncStorageAdapter());
-  if (!adapter) return null;
+  if (!adapter) throw new Error('ENCRYPTED_STORAGE_UNAVAILABLE');
   const raw = await adapter.getItem(key);
   if (!raw) return raw;
-  try {
-    return await decryptOfflinePayload(raw);
-  } catch {
-    return raw;
-  }
+  return decryptOfflinePayload(raw);
 }
 
 export async function encryptedRemoveItem(
@@ -54,6 +52,6 @@ export async function encryptedRemoveItem(
   storage?: AsyncStorageAdapter | null
 ): Promise<void> {
   const adapter = storage ?? (await getAsyncStorageAdapter());
-  if (!adapter) return;
+  if (!adapter) throw new Error('ENCRYPTED_STORAGE_UNAVAILABLE');
   await adapter.removeItem(key);
 }

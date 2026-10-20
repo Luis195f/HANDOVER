@@ -113,6 +113,7 @@ export function UnitExceptionHandover({
   const [sessionState, setSessionState] = useState<ExceptionHandoverSessionState>(() =>
     createEmptyExceptionHandoverState(shiftId));
   const [hydrated, setHydrated] = useState(storageInstance === null);
+  const [storageError, setStorageError] = useState(false);
   const [expandedUnchanged, setExpandedUnchanged] = useState(false);
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean[]>>({});
@@ -183,9 +184,9 @@ export function UnitExceptionHandover({
     ['critical_check_back', 'critical_escalated', 'brief_review', 'unchanged_group_review', 'r_resolved', 'r_transferred', 'outgoing_transfer', 'incoming_attestation'].includes(event.kind));
   const rMetrics = calculateRMetrics(classifications, currentEvents, classifiedAt);
   const checkBackMetrics = calculateCheckBackMetrics(classifications, currentEvents);
-  const closure = currentContext
+  const closure = currentContext && hydrated && !storageError
     ? assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext)
-    : { canClose: false, blockingReasons: ['Contexto de grupo pendiente de confirmación'] };
+    : { canClose: false, blockingReasons: [storageError ? 'Evidencia local no legible o no persistida' : 'Contexto de grupo pendiente de confirmación'] };
 
   useEffect(() => {
     if (!hydrated || !groupScopeValid || (storageInstance && sessionState.shiftId !== shiftId)) return;
@@ -199,6 +200,7 @@ export function UnitExceptionHandover({
     let active = true;
     groupChangedDuringHydration.current = false;
     setHydrated(false);
+    setStorageError(false);
     void storageInstance.load(shiftId).then((loaded) => {
       if (!active) return;
       setSessionState((current) => {
@@ -219,13 +221,13 @@ export function UnitExceptionHandover({
           : merged;
       });
       setHydrated(true);
-    });
+    }).catch(() => { if (active) setStorageError(true); });
     return () => { active = false; };
   }, [shiftId, storageInstance]);
 
   useEffect(() => {
     if (!hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
-    void storageInstance.save(sessionState);
+    void storageInstance.save(sessionState).catch(() => setStorageError(true));
   }, [hydrated, sessionState, shiftId, storageInstance]);
 
   useEffect(() => {
@@ -629,6 +631,7 @@ export function UnitExceptionHandover({
 
   return (
     <View style={[styles.board, { borderColor: colors.border, backgroundColor: colors.surface }]} testID="unit-exception-handover">
+      {storageError ? <Text accessibilityRole="alert">Evidencia local no legible o no persistida; cierre bloqueado.</Text> : null}
       <Text style={[styles.eyebrow, { color: colors.info }]}>DEMO SINTÉTICA · RELEVO POR EXCEPCIONES</Text>
       <Text style={[styles.title, { color: colors.text }]}>{patients[0]?.unitName ?? 'Unidad sintética de salud mental'}</Text>
       <Text style={[styles.subtitle, { color: colors.muted }]}>Clasificación explicable por perfil, plan, fuentes esperadas y vigencia. La indisponibilidad técnica se muestra separada del estado clínico.</Text>
@@ -685,10 +688,10 @@ export function UnitExceptionHandover({
             {legacyClosureEvents && !incomingAttestation ? <Text style={[styles.cardMeta, { color: colors.muted }]}>Los eventos anteriores sin contexto de grupo se conservan como historial; requieren nueva confirmación para este cierre.</Text> : null}
             <View style={styles.actionRow}>
               <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || !closure.canClose} onPress={() => {
-                if (actor?.kind === 'outgoing' && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('outgoing_transfer');
+                if (actor?.kind === 'outgoing' && hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('outgoing_transfer');
               }} style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: actor?.kind === 'outgoing' && closure.canClose ? 1 : 0.5 }]} testID="confirm-outgoing-transfer"><Text style={styles.primaryButtonText}>Confirmar transferencia saliente</Text></Pressable>
               <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose} onPress={() => {
-                if (actor?.kind === 'incoming' && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
+                if (actor?.kind === 'incoming' && hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
               }} style={[styles.secondaryButton, { borderColor: colors.primary }]} testID="confirm-incoming-attestation"><Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Atestar recepción entrante</Text></Pressable>
             </View>
             {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>Confirmado por profesional saliente · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}

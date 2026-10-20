@@ -73,6 +73,7 @@ export default function SyncCenter() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [authMessage, setAuthMessage] = React.useState<string | null>(null);
+  const [queueReadError, setQueueReadError] = React.useState(false);
 
   // Auto-retry
   const [autoRetry, setAutoRetry] = React.useState(true);
@@ -96,6 +97,11 @@ export default function SyncCenter() {
           errorIssuesJson: item.errorIssuesJson,
         }));
       setItems(meta);
+      setQueueReadError(false);
+      return true;
+    } catch {
+      setQueueReadError(true);
+      return false;
     } finally {
       setRefreshing(false);
     }
@@ -144,8 +150,7 @@ export default function SyncCenter() {
         return res;
       }
       setAuthMessage(null);
-      await refresh();
-      setLastRun(new Date().toLocaleTimeString());
+      if (await refresh()) setLastRun(new Date().toLocaleTimeString());
       return res;
     } catch (e: unknown) {
       const netError = normalizeNetError(e);
@@ -209,6 +214,7 @@ export default function SyncCenter() {
           {authMessage}
         </Text>
       )}
+      {queueReadError ? <Text accessibilityRole="alert" style={{ color: palette.stateError }}>Cola local no legible; el estado de sincronización no está verificado.</Text> : null}
 
       {/* Controles de Auto-retry */}
       <View style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}>
@@ -271,7 +277,7 @@ export default function SyncCenter() {
           />
         }
         renderItem={({ item }) => <ItemRow item={item} C={palette} />}
-        ListEmptyComponent={
+        ListEmptyComponent={queueReadError ? null :
           <View style={styles.empty} testID="sync-empty-queue">
             <Text allowFontScaling style={{ color: palette.textSecondary }}>{t('sync.emptyQueue')}</Text>
           </View>

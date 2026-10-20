@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -93,6 +94,28 @@ describe('encryptOfflinePayload / decryptOfflinePayload', () => {
     await expect(decryptOfflinePayload(JSON.stringify(envelope))).rejects.toBeInstanceOf(OfflineDecryptionError);
   });
 
+  it('does not regenerate a missing key while decrypting existing ciphertext', async () => {
+    const ciphertext = await encryptOfflinePayload('clinical-draft');
+    await clearOfflineEncryptionKeys();
+    await expect(decryptOfflinePayload(ciphertext)).rejects.toBeInstanceOf(OfflineDecryptionError);
+  });
+
+  it('does not confirm encryption when key persistence fails', async () => {
+    await clearOfflineEncryptionKeys();
+    vi.spyOn(SecureStore, 'setItemAsync').mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(encryptOfflinePayload('clinical-draft')).rejects.toThrow();
+  });
+
+  it('encrypts a web memory queue without persisting or claiming a durable key', async () => {
+    const writeKey = vi.spyOn(SecureStore, 'setItemAsync');
+    const encrypted = await encryptOfflinePayload('synthetic-queue', { memoryOnly: true });
+    expect(JSON.parse(encrypted)).toMatchObject({ v: 1, algo: 'AES-256-GCM' });
+    expect(encrypted).not.toContain('synthetic-queue');
+    expect(writeKey).not.toHaveBeenCalled();
+    expect(await decryptOfflinePayload(encrypted, { memoryOnly: true })).toBe('synthetic-queue');
+    await expect(decryptOfflinePayload(encrypted)).rejects.toBeInstanceOf(OfflineDecryptionError);
+  });
+
   it('returns plaintext unchanged when encryption is disabled', async () => {
     setEnv('true');
     const plaintext = JSON.stringify({ hello: 'world' });
@@ -124,4 +147,3 @@ describe('encryptOfflinePayload / decryptOfflinePayload', () => {
     expect(decoded).toBe(plaintext);
   });
 });
-

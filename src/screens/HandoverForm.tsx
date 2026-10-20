@@ -47,6 +47,7 @@ import { fetchInterventionsSuggestions, type ClinicalContext, type SuggestionsRe
 import { logClinicalDecision } from '@/src/lib/clinical-decision-log';
 import { confirmHighRiskSubmission, deriveRiskEvaluationFromValues } from '@/src/lib/scores/handoverRisk';
 import useDraftAutosave from '@/src/lib/useDraftAutosave';
+import { getHandoverDraft, setHandoverDraft } from '@/src/lib/drafts';
 import {
   createSttService,
   type SttConfig,
@@ -123,7 +124,6 @@ import OxygenGroupSection from './components/OxygenGroupSection';
 import DevicesSection from './components/DevicesSection';
 import { isBedsideChecklistComplete } from '@/src/lib/bedsideChecklist';
 import { SbarSection } from './handover/SbarSection';
-import * as SecureStore from 'expo-secure-store';
 import { uploadAudioToFhir } from '@/src/lib/audio-upload';
 import { useHandoverTiming } from '@/src/hooks/useHandoverTiming';
 import { HandoverClosureSections } from './handover/HandoverClosureSections';
@@ -143,7 +143,6 @@ import {
   normalizeSignatureUser,
   resolveCanonicalPilotContextUnitId,
   resolveEffectiveHandoverUnitId,
-  safeJsonParse,
   truncateNote,
 } from './handover/formUtils';
 import { HandoverOverview, type DemoClinicalSummary } from './handover/HandoverOverview';
@@ -631,6 +630,15 @@ export default function HandoverForm({ navigation, route }: Props) {
     () => `handoverDraft:${patientIdValue ?? 'unknown'}:${administrativeUnitValue ?? 'unknown'}`,
     [patientIdValue, administrativeUnitValue],
   );
+  const hydratedDraftKeyRef = useRef<string | null>(null);
+  const [draftSaveState, setDraftSaveState] = useState<'persisted' | 'memory' | 'failed'>('memory');
+  const [draftHydration, setDraftHydration] = useState<{ key: string; status: 'loading' | 'ready' | 'failed' }>({ key: draftKey, status: 'loading' });
+  const activeDraftKeyRef = useRef(draftKey);
+  const draftSaveRevisionRef = useRef(0);
+  if (activeDraftKeyRef.current !== draftKey) {
+    activeDraftKeyRef.current = draftKey;
+    draftSaveRevisionRef.current += 1;
+  }
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -749,6 +757,8 @@ export default function HandoverForm({ navigation, route }: Props) {
   ]);
   const watchedValues = form.watch();
   const rrGate = useMemo(() => createRrReviewGate(prefilledValuesParam?.rrReview), [patientIdValue, prefilledValuesParam?.rrReview]);
+  const draftHydrationContext = useRef({ form, reset, getValues, rrGate, prefilledValuesParam });
+  draftHydrationContext.current = { form, reset, getValues, rrGate, prefilledValuesParam };
   const news2Blocked = rrGate.observe(watchedVitals?.rr);
   const rrRevision = rrGate.capture();
   useEffect(() => {
@@ -906,21 +916,26 @@ export default function HandoverForm({ navigation, route }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    hydratedDraftKeyRef.current = null;
+    setDraftHydration({ key: draftKey, status: 'loading' });
+    setDraftSaveState('memory');
+    const { form: currentForm, reset: currentReset, getValues: currentGetValues, rrGate: currentRrGate,
+      prefilledValuesParam: currentPrefill } = draftHydrationContext.current;
 
     (async () => {
       try {
-        const raw = await SecureStore.getItemAsync(draftKey);
+        const snapshot = await getHandoverDraft<RrDraft>(patientIdValue ?? 'unknown', administrativeUnitValue ?? 'unknown');
         if (cancelled) return;
-
-        const snapshot = safeJsonParse<RrDraft>(raw);
+        hydratedDraftKeyRef.current = draftKey;
+        setDraftHydration({ key: draftKey, status: 'ready' });
         if (!snapshot) return;
         const { values: draft, review } = unpackRrDraft(snapshot);
 
         // Importante: NO pisar si ya hay datos
-        const current = getValues();
+        const current = currentGetValues();
         const isEmpty = !current || Object.keys(current).length === 0;
-        if (isEmpty || (!prefilledValuesParam?.rrReview && !form.formState.isDirty && (review || !Number.isInteger(draft.vitals?.rr) && draft.vitals?.rr != null))) {
-          rrGate.restore(draft.vitals?.rr, review);
+        if (isEmpty || (!currentPrefill?.rrReview && !currentForm.formState.isDirty && (review || !Number.isInteger(draft.vitals?.rr) && draft.vitals?.rr != null))) {
+          currentRrGate.restore(draft.vitals?.rr, review);
           const normalizedDxMedical =
             draft?.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxMedical);
 
@@ -933,17 +948,17 @@ export default function HandoverForm({ navigation, route }: Props) {
             ...(draft?.dxNursing !== undefined ? { dxNursing: normalizedDxNursing } : {}),
           });
           legacyOxygenRef.current = undefined;
-          reset(normalizedDraft);
+          currentReset(normalizedDraft);
         }
       } catch {
-        // no-op
+        if (!cancelled) setDraftHydration({ key: draftKey, status: 'failed' });
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [draftKey, reset, getValues, form, rrGate, prefilledValuesParam?.rrReview]);
+  }, [draftKey, patientIdValue, administrativeUnitValue, prefilledValuesParam?.rrReview]);
 
   type BedsideChecklistSnapshot = HandoverFormValues['bedsideChecklist'] &
     Record<string, boolean | string | undefined>;
@@ -983,13 +998,18 @@ export default function HandoverForm({ navigation, route }: Props) {
   }, [form]);
 
   useEffect(() => {
-    if (IS_TEST) return;
+    if (IS_TEST && process.env.HANDOVER_TEST_DRAFT_AUTOSAVE !== 'true') return;
 
     const subscription = watch(() => {
+      if (hydratedDraftKeyRef.current !== draftKey) return;
+      const revision = ++draftSaveRevisionRef.current;
+      setDraftSaveState('memory');
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
       saveTimerRef.current = setTimeout(() => {
-        void SecureStore.setItemAsync(draftKey, JSON.stringify(packRrDraft(getValues(), rrGate.snapshot()))).catch(() => {});
+        void setHandoverDraft(patientIdValue ?? 'unknown', administrativeUnitValue ?? 'unknown', packRrDraft(getValues(), rrGate.snapshot()))
+          .then((state) => { if (activeDraftKeyRef.current === draftKey && draftSaveRevisionRef.current === revision) setDraftSaveState(state); })
+          .catch(() => { if (activeDraftKeyRef.current === draftKey && draftSaveRevisionRef.current === revision) setDraftSaveState('failed'); });
       }, 300);
     });
 
@@ -1000,7 +1020,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         saveTimerRef.current = null;
       }
     };
-  }, [watch, draftKey, getValues, rrGate]);
+  }, [watch, draftKey, patientIdValue, administrativeUnitValue, getValues, rrGate]);
 
   const calculationVitals = withTransientOxygen(watchedVitals, () => legacyOxygenRef.current);
   const computedAlerts = useMemo(() => computeAlerts(withoutNews2Vitals({ ...watchedValues, vitals: calculationVitals }, news2Blocked)), [watchedValues, calculationVitals, news2Blocked]);
@@ -2280,8 +2300,15 @@ export default function HandoverForm({ navigation, route }: Props) {
   const handleSaveDraft = () => {
     form.setValue('status', 'draft', { shouldDirty: true, shouldValidate: true });
     if (news2Blocked) {
-      void SecureStore.setItemAsync(draftKey, JSON.stringify(packRrDraft(form.getValues(), rrGate.snapshot())))
-        .catch(() => Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback')));
+      if (hydratedDraftKeyRef.current !== draftKey) {
+        Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback'));
+        return;
+      }
+      const revision = ++draftSaveRevisionRef.current;
+      setDraftSaveState('memory');
+      void setHandoverDraft(patientIdValue ?? 'unknown', administrativeUnitValue ?? 'unknown', packRrDraft(form.getValues(), rrGate.snapshot()))
+        .then((state) => { if (activeDraftKeyRef.current === draftKey && draftSaveRevisionRef.current === revision) setDraftSaveState(state); })
+        .catch(() => { if (activeDraftKeyRef.current !== draftKey || draftSaveRevisionRef.current !== revision) return; setDraftSaveState('failed'); Alert.alert(t('common.error'), t('handover.saveErrorMessageFallback')); });
       return;
     }
     onSubmit();
@@ -2369,6 +2396,15 @@ export default function HandoverForm({ navigation, route }: Props) {
   return (
     <FormProvider {...form}>
       <View style={styles.screen}>
+        <Text accessibilityRole="alert">{draftHydration.key !== draftKey || draftHydration.status === 'loading'
+          ? 'Comprobando almacenamiento del borrador; persistencia no confirmada.'
+          : draftHydration.status === 'failed'
+            ? 'No se pudo leer el borrador; guardado automático bloqueado.'
+            : draftSaveState === 'failed'
+              ? 'No se pudo guardar el borrador; persistencia no confirmada.'
+              : draftSaveState === 'memory'
+                ? 'Borrador solo en memoria; persistencia no confirmada.'
+                : 'Borrador guardado en este dispositivo.'}</Text>
         {news2Blocked && (!vitalsSectionVisible || collapsedSections.signos) ? <Text accessibilityRole="alert">{NEWS2_RR_MESSAGE}</Text> : null}
         <SidebarIndex
           sectionsInfo={visibleSections}

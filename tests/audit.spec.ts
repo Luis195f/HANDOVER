@@ -18,8 +18,16 @@ import {
   sendAuditEvent,
   type AuditEvent,
 } from '@/src/lib/audit';
+import * as encryptedStorage from '@/src/lib/encryptedStorage';
 
 describe('audit module', () => {
+  it('does not report an unavailable audit store as empty or saved', async () => {
+    vi.spyOn(encryptedStorage, 'getAsyncStorageAdapter').mockResolvedValue(null);
+    const storage = createAsyncStorageAuditStorage('synthetic:unavailable');
+    await expect(storage.load()).rejects.toThrow('AUDIT_STORAGE_UNAVAILABLE');
+    await expect(storage.save([])).rejects.toThrow('AUDIT_STORAGE_UNAVAILABLE');
+    await expect(storage.clear?.()).rejects.toThrow('AUDIT_STORAGE_UNAVAILABLE');
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
@@ -180,6 +188,15 @@ describe('audit module', () => {
 
       expect(loaded).toHaveLength(1);
       expect(loaded[0]).toEqual(event);
+    });
+
+    it('does not overwrite unreadable audit history while appending', async () => {
+      const adapter = (await import('@react-native-async-storage/async-storage')).default;
+      await adapter.setItem('test:audit:corrupt', '{broken');
+      const storage = createAsyncStorageAuditStorage('test:audit:corrupt');
+      const event: AuditEvent = { id: 'safe', type: 'patient_open', at: '2024-01-01T00:00:00Z', userId: 'u1' };
+      await expect(appendAuditEvent(storage, event)).rejects.toThrow();
+      expect(await adapter.getItem('test:audit:corrupt')).toBe('{broken');
     });
   });
 

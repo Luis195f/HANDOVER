@@ -369,6 +369,7 @@ export default function PatientList({ navigation }: Props) {
   const selectedUnitId = useSelectedUnitId();
   const [sortByPriorityOverride, setSortByPriorityOverride] = useState<boolean | null>(null);
   const [patientSyncStatuses, setPatientSyncStatuses] = useState<Record<string, SyncStatus>>({});
+  const [queueReadError, setQueueReadError] = useState(false);
   const [patients, setPatients] = useState<PatientListItem[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [patientLoadNotice, setPatientLoadNotice] = useState<PatientListLoadNotice | null>(null);
@@ -382,8 +383,13 @@ export default function PatientList({ navigation }: Props) {
   currentPatientsRef.current = patients;
 
   const refreshSyncStatuses = useCallback(async () => {
-    const queue = await listOfflineQueue();
-    setPatientSyncStatuses(buildPatientSyncStatusMap(queue));
+    try {
+      const queue = await listOfflineQueue();
+      setPatientSyncStatuses(buildPatientSyncStatusMap(queue));
+      setQueueReadError(false);
+    } catch {
+      setQueueReadError(true);
+    }
   }, []);
 
   const loadPatients = useCallback(async () => {
@@ -953,6 +959,7 @@ export default function PatientList({ navigation }: Props) {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}> 
+      {queueReadError ? <Text accessibilityRole="alert">Estado de cola no verificable; no se confirma sincronización.</Text> : null}
       <FlatList
         data={isDemoExceptionRoute ? [] : patientsForList}
         keyExtractor={(item) => item.patientId}
@@ -1481,7 +1488,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
 
 
 

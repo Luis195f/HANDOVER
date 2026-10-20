@@ -22,4 +22,10 @@ describe('encryptedStorage', () => {
     expect(decrypted).not.toBeNull();
     expect(JSON.parse(decrypted as string)).toEqual(payload);
   });
+
+  it('rejects unreadable ciphertext without exposing it as content', async () => {
+    await AsyncStorage.setItem(storageKey, JSON.stringify({ v: 1, algo: 'AES-256-GCM', ct: 'broken' }));
+    await expect(encryptedGetItem(storageKey)).rejects.toThrow();
+    expect(await AsyncStorage.getItem(storageKey)).toContain('broken');
+  });
 });

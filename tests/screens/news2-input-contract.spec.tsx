@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Text } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { clearAllDrafts, getHandoverDraft, setHandoverDraft } from '@/src/lib/drafts';
 import { FormProvider, useForm } from 'react-hook-form';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -249,11 +250,9 @@ describe('NEWS2 AI oxygen serialization parity', () => {
       const provider = enableProvider();
       warningVisibility.realSuggestions = true;
       const pending: { section: Section; resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
-      const requestStarts: Array<() => void> = [];
       provider.mockImplementation((_input, init) => new Promise<Response>((resolve, reject) => {
         const context: { section: Section } = JSON.parse(String(init?.body));
         pending.push({ section: context.section, resolve, reject });
-        requestStarts.shift()?.();
       }));
       const screen = render(<HandoverForm navigation={navigation()}
         route={{ key: 'section-races', name: 'HandoverForm', params: { patientId: 'synthetic-section-races', unitId: 'icu', prefilledValues } }} />);
@@ -264,8 +263,9 @@ describe('NEWS2 AI oxygen serialization parity', () => {
         return panels[section === 'vitals' ? 0 : 1].props;
       };
       const start = async (section: Section, expectNetwork = true) => {
-        const started = expectNetwork ? new Promise<void>(resolve => requestStarts.push(resolve)) : null;
-        await act(async () => { void panel(section).onRefresh(); if (started) await started; });
+        const previousRequests = provider.mock.calls.length;
+        act(() => { void panel(section).onRefresh(); });
+        if (expectNetwork) await waitFor(() => expect(provider).toHaveBeenCalledTimes(previousRequests + 1));
       };
       const finish = async (index: number, label: string, failure = false) => {
         await act(async () => {
@@ -1013,18 +1013,19 @@ describe('NEWS2 transient oxygen transport', () => {
       administrativeData: { unit: 'icu', census: 0, staffIn: [], staffOut: [],
         shiftStart: '2026-09-29T08:00:00Z', shiftEnd: '2026-09-29T20:00:00Z', shiftType: 'Mañana' },
       vitals: { rr: 16, spo2: 94, tempC: 39.1, sbp: 120, hr: 111, avpu: 'A' }, oxygenTherapy: {} }, gate.snapshot());
-    const key = 'handoverDraft:synthetic-restore-oxygen:icu';
-    await SecureStore.setItemAsync(key, JSON.stringify(draft));
+    await setHandoverDraft('synthetic-restore-oxygen', 'icu', draft);
     const screen = render(<HandoverForm navigation={navigation()}
       route={{ key: 'restoration', name: 'HandoverForm', params: { patientId: 'synthetic-restore-oxygen', unitId: 'icu', prefilledValues } }} />);
     try {
       expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(7);
+      expect(screen.root.findByType(FormProvider).props.getValues('administrativeData.unit')).toBe('icu');
       await act(async () => { await Promise.resolve(); });
+      expect(screen.queryByText('No se pudo leer el borrador; guardado automático bloqueado.')).toBeNull();
       await waitFor(() => expect(screen.root.findByType(VitalsSection).props.riskEvaluation.news2.total).toBe(5));
       const form: UseFormReturn<HandoverValues> = screen.root.findByType(FormProvider).props;
       expect(form.getValues('vitals')).not.toHaveProperty('o2');
       assertNoLegacy(packRrDraft(form.getValues(), undefined));
-    } finally { screen.unmount(); await SecureStore.deleteItemAsync(key); }
+    } finally { screen.unmount(); await clearAllDrafts(); }
   }, 20000);
   it.each(cases)('$label reaches the mounted form without hidden persisted oxygen', async ({ observations, therapy, total }) => {
     const { default: HandoverForm } = await import('@/src/screens/HandoverForm');
@@ -1392,27 +1393,29 @@ describe('NEWS2 integer respiratory input contract', () => {
       fhirBase: 'https://fhir.invalid', fetchImpl: fetchObservations([observation(8.5)]),
     });
     const navigation = { navigate: vi.fn(), setParams: vi.fn(), addListener: () => () => {} };
-    const write = vi.spyOn(SecureStore, 'setItemAsync');
+    const drafts = await import('@/src/lib/drafts');
     const screen = render(<HandoverForm navigation={navigation}
       route={{ key: 'handover', name: 'HandoverForm', params: { patientId: 'synthetic', unitId: 'icu', prefilledValues } }} />);
+    await act(async () => { await Promise.resolve(); });
     if (!screen.queryByPlaceholderText('16')) fireEvent.press(screen.getByText(/Signos vitales/));
     fireEvent.changeText(screen.getByPlaceholderText('16'), '');
     await act(async () => {
       screen.root.find(node => typeof node.props.onSaveDraft === 'function').props.onSaveDraft();
     });
-    const saved = write.mock.calls.find(([key]) => key.startsWith('handoverDraft:'));
-    expect(saved).toBeDefined();
-    const snapshot: RrDraft = JSON.parse(saved?.[1] ?? '{}');
-    expect(snapshot.vitals?.rr).toBeUndefined();
-    expect(snapshot.news2RrReview).toEqual({ originalValue: 8.5, source: 'fhir', unit: '/min',
+    await waitFor(async () => expect(await drafts.getHandoverDraft<RrDraft>('synthetic', 'icu')).not.toBeNull());
+    const snapshot = await drafts.getHandoverDraft<RrDraft>('synthetic', 'icu');
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.vitals?.rr).toBeUndefined();
+    expect(snapshot?.news2RrReview).toEqual({ originalValue: 8.5, source: 'fhir', unit: '/min',
       observedAt: '2026-09-22T10:00:00Z', reason: 'RR_NON_INTEGER', resolution: 'pending' });
-    expect(saved?.[1]).not.toContain('forbidden-');
+    const managedKey = drafts.__test__.keyNorm('form:synthetic:icu');
+    const encrypted = await drafts.__test__.readRaw(managedKey);
+    expect(JSON.parse(encrypted ?? '{}')).toMatchObject({ v: 1, algo: 'AES-256-GCM' });
+    expect(encrypted).not.toContain('forbidden-');
     screen.unmount();
-    const read = vi.spyOn(SecureStore, 'getItemAsync');
     const restored = render(<HandoverForm navigation={navigation}
       route={{ key: 'restore', name: 'HandoverForm', params: { patientId: 'synthetic', unitId: 'icu' } }} />);
     await act(async () => { await Promise.resolve(); });
-    expect(read).toHaveBeenCalledWith(saved?.[0]);
     expect(restored.root.find(node => typeof node.props.getValues === 'function').props.formState.dirtyFields).toEqual({});
     await waitFor(() => expect(restored.getByText(message)).toBeTruthy());
     if (!restored.queryByPlaceholderText('16')) fireEvent.press(restored.getByText(/Signos vitales/));
@@ -1527,11 +1530,11 @@ describe('NEWS2 integer respiratory input contract', () => {
     const serialized = JSON.stringify(snapshot);
     expect(serialized).not.toContain('forbidden-');
     expect(serialized).not.toContain('Observation');
-    await SecureStore.setItemAsync('handoverDraft:synthetic:unit', serialized);
-    const raw = await SecureStore.getItemAsync('handoverDraft:synthetic:unit');
-    const restored: RrDraft = JSON.parse(raw ?? '{}');
-    const unpacked = unpackRrDraft(restored);
-    expect(Object.keys(restored.news2RrReview ?? {}).sort()).toEqual(['originalValue', 'reason', 'resolution', 'source']);
+    await setHandoverDraft('synthetic', 'unit', snapshot);
+    const restored = await getHandoverDraft<RrDraft>('synthetic', 'unit');
+    expect(restored).not.toBeNull();
+    const unpacked = unpackRrDraft(restored ?? snapshot);
+    expect(Object.keys(restored?.news2RrReview ?? {}).sort()).toEqual(['originalValue', 'reason', 'resolution', 'source']);
     expect(unpacked.values).not.toHaveProperty('news2RrReview');
     const fresh = createRrReviewGate();
     expect(fresh.restore(unpacked.values.vitals?.rr, unpacked.review)).toBe(true);

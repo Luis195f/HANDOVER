@@ -17,10 +17,10 @@ const LEGACY_PREFIX = 'enc:v1:'; // compatibilidad con versiones previas
 let cachedKey: string | null = null;
 
 export async function clearCryptoKeys(): Promise<void> {
-  cachedKey = null;
-  await Promise.allSettled(
+  await Promise.all(
     [...STORAGE_KEYS, CLIENT_SIGNING_KEY_STORAGE].map((key) => secureDeleteSensitiveItem(key)),
   );
+  cachedKey = null;
 }
 
 function getRandomKeyBase64(): string {
@@ -43,7 +43,7 @@ function normalizeKey(keyBase64: string | null): CryptoJS.lib.WordArray | null {
     const bytes = parsed.sigBytes;
     if (bytes === 16 || bytes === 24 || bytes === 32) return parsed;
   } catch {
-    // swallow to regenerate
+    return null;
   }
   return null;
 }
@@ -72,14 +72,16 @@ async function persistKey(base64: string): Promise<void> {
 }
 
 async function readStoredKey(): Promise<string | null> {
+  let readError: unknown;
   for (const storageKey of STORAGE_KEYS) {
     try {
       const stored = await secureGetSensitiveItem(storageKey);
       if (stored) return stored;
-    } catch {
-      // ignore and try next slot
+    } catch (error) {
+      readError = error;
     }
   }
+  if (readError) throw readError;
   return null;
 }
 
@@ -92,6 +94,7 @@ export async function getOrCreateEncryptionKey(): Promise<string> {
     cachedKey = key;
     return key;
   }
+  if (stored !== null) throw new Error('ENCRYPTION_KEY_INVALID');
 
   const nextKey = getRandomKeyBase64();
   await persistKey(nextKey);
@@ -155,11 +158,12 @@ export async function decryptPayload(cipherText: string): Promise<unknown> {
 
   const parsed = parseNewFormat(cipherText);
   if (!parsed) {
-    return cipherText;
+    throw new Error('ENCRYPTED_PAYLOAD_CORRUPT');
   }
 
-  const keyBase64 = await getOrCreateEncryptionKey();
-  const key = normalizeKey(keyBase64) ?? CryptoJS.enc.Base64.parse(getRandomKeyBase64());
+  const keyBase64 = cachedKey ?? await readStoredKey();
+  const key = normalizeKey(keyBase64);
+  if (!key) throw new Error('ENCRYPTION_KEY_UNAVAILABLE');
   const decrypted = CryptoJS.AES.decrypt(parsed.cipher, key, {
     iv: parsed.iv,
     mode: CryptoJS.mode.CBC,
@@ -406,4 +410,3 @@ export async function signBundleIfEnabled<T extends Record<string, unknown>>(
     return { bundle, signed: false };
   }
 }
-

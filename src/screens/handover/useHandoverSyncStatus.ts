@@ -33,7 +33,14 @@ export function useHandoverSyncStatus() {
     if (!trackedQueueId || handoverSyncStatus === 'idle') return;
     if (manualRetryInFlightRef.current) return;
 
-    const queueItem = await getOfflineQueueItem(trackedQueueId);
+    let queueItem;
+    try {
+      queueItem = await getOfflineQueueItem(trackedQueueId);
+    } catch {
+      setHandoverSyncStatus('error');
+      setHandoverSyncError('Estado de cola no verificable');
+      return;
+    }
     if (manualSyncBlockRef.current) {
       setHandoverSyncStatus('error');
       setHandoverSyncError(manualSyncBlockRef.current);
@@ -69,7 +76,7 @@ export function useHandoverSyncStatus() {
 
     if (queueItem.syncStatus === 'error') {
       setHandoverSyncStatus('error');
-      setHandoverSyncError(queueItem.errorMessage ?? null);
+      setHandoverSyncError(queueItem.readError ? 'Payload local no legible; sincronización detenida.' : queueItem.errorMessage ?? null);
       return;
     }
 

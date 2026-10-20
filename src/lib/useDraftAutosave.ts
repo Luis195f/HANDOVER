@@ -50,17 +50,13 @@ export type UseDraftAutosaveReturn = {
     lastSavedAt?: number;
     loadedAt?: number;
     lastError?: string;
+    durability: 'persisted' | 'memory' | 'failed';
   };
 };
 
 /** Pequeña utilidad para garantizar que el snapshot sea serializable. */
 function serialize<T>(v: T): T {
-  try {
-    return JSON.parse(JSON.stringify(v));
-  } catch {
-    // Si no es 100% serializable, intentamos salvar lo posible
-    return v as T;
-  }
+  return JSON.parse(JSON.stringify(v));
 }
 
 export function useDraftAutosave<T = any>(
@@ -70,10 +66,12 @@ export function useDraftAutosave<T = any>(
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const loadFailedRef = useRef(false);
   const [pending, setPending] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | undefined>(undefined);
   const [loadedAt, setLoadedAt] = useState<number | undefined>(undefined);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const [durability, setDurability] = useState<'persisted' | 'memory' | 'failed'>('memory');
 
   // Limpieza al desmontar
   useEffect(() => {
@@ -90,28 +88,33 @@ export function useDraftAutosave<T = any>(
     if (!enabled || !patientId) return undefined;
     try {
       const data = await getDraft(patientId);
+      loadFailedRef.current = false;
       if (data && onLoad) onLoad(data as T);
       if (mountedRef.current) setLoadedAt(Date.now());
       return data;
-    } catch (err: any) {
-      if (mountedRef.current) setLastError(String(err?.message ?? err));
-      return undefined;
+    } catch {
+      loadFailedRef.current = true;
+      if (mountedRef.current) setLastError('DRAFT_READ_FAILED');
+      throw new Error('DRAFT_READ_FAILED');
     }
   }, [enabled, patientId, onLoad]);
 
   const saveNow = useCallback(async () => {
     if (!enabled || !patientId) return;
     try {
+      if (loadFailedRef.current) throw new Error('DRAFT_READ_FAILED');
       const snap = serialize(getSnapshot());
-      await saveDraft(patientId, snap);
+      const result = await saveDraft(patientId, snap);
       if (!mountedRef.current) return;
-      setLastSavedAt(Date.now());
+      setDurability(result);
+      setLastSavedAt(result === 'persisted' ? Date.now() : undefined);
       setPending(false);
       setLastError(undefined);
-    } catch (err: any) {
+    } catch {
       if (!mountedRef.current) return;
       setPending(false);
-      setLastError(String(err?.message ?? err));
+      setDurability('failed');
+      setLastError('DRAFT_SAVE_FAILED');
     }
   }, [enabled, patientId, getSnapshot]);
 
@@ -140,8 +143,8 @@ export function useDraftAutosave<T = any>(
   }, [patientId]);
 
   const status = useMemo(
-    () => ({ enabled, pending, lastSavedAt, loadedAt, lastError }),
-    [enabled, pending, lastSavedAt, loadedAt, lastError]
+    () => ({ enabled, pending, lastSavedAt, loadedAt, lastError, durability }),
+    [enabled, pending, lastSavedAt, loadedAt, lastError, durability]
   );
 
   return { loadNow, saveNow, scheduleSave, clear, status };

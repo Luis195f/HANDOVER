@@ -4,7 +4,6 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '@/src/navigation/types';
 import { emitConsentAuditEvent, revokePrivacyConsent } from '@/src/lib/privacy-consent';
-import { clearSensitiveLocalData } from '@/src/security/secure-cleanup';
 import { logoutAndClear } from '@/src/security/auth';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PrivacyPolicy'>;
@@ -64,7 +63,6 @@ export default function PrivacyPolicy({ navigation }: Props) {
           onPress: async () => {
             const record = await revokePrivacyConsent({ source: 'privacy-policy' });
             void emitConsentAuditEvent('revoked', record);
-            await clearSensitiveLocalData();
             await logoutAndClear({
               skipRemote: true,
               message: 'Consentimiento revocado. Inicia sesión nuevamente para continuar.',

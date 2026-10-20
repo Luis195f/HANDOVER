@@ -24,6 +24,16 @@ const PILOT_GRADE_SUITES = [
   'src/security/__tests__/capabilities.cache.spec.ts',
   'src/lib/__tests__/acl.bypass.production.spec.ts',
   'src/lib/__tests__/queue.encryption.spec.ts',
+  'src/lib/__tests__/encryptedStorage.spec.ts',
+  'tests/lib/crypto.offline-encryption.spec.ts',
+  'tests/drafts.spec.ts',
+  'src/lib/__tests__/drafts.securestore.cleanup.spec.ts',
+  'tests/audit.spec.ts',
+  'tests/security/secure-cleanup.spec.ts',
+  'tests/screens/SyncCenter.source-of-truth.spec.tsx',
+  'tests/screens/SyncCenter.spec.tsx',
+  'src/screens/handover/__tests__/useHandoverSyncStatus.spec.tsx',
+  'src/components/__tests__/SyncStatusBanner.spec.tsx',
   'src/lib/__tests__/queueBootstrap.auth.spec.ts',
   'src/lib/__tests__/sync.index.auth.spec.ts',
   'src/lib/__tests__/queue.test.ts',
@@ -126,4 +136,3 @@ export default defineConfig({
     },
   },
 });
-

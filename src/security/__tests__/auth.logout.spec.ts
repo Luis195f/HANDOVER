@@ -13,7 +13,7 @@ vi.mock('@/src/security/secure-storage', () => ({
   secureDeleteItem: vi.fn(async () => undefined),
 }));
 vi.mock('@/src/security/secure-cleanup', () => ({
-  clearSensitiveLocalData: vi.fn(async () => undefined),
+  clearSensitiveLocalData: vi.fn(async () => ({ status: 'complete', failedStores: [] })),
 }));
 vi.mock('@/src/navigation/navigation', () => ({
   resetTo: vi.fn(),
@@ -71,6 +71,7 @@ vi.mock('react-native', async () => {
 import { logoutAndClear } from '@/src/security/auth';
 import { clearSensitiveLocalData } from '@/src/security/secure-cleanup';
 import { resetTo } from '@/src/navigation/navigation';
+import { Alert } from 'react-native';
 
 describe('logoutAndClear', () => {
   it('clears sensitive data on logout', async () => {
@@ -78,5 +79,12 @@ describe('logoutAndClear', () => {
 
     expect(clearSensitiveLocalData).toHaveBeenCalled();
     expect(resetTo).toHaveBeenCalledWith('Login');
+  });
+
+  it('invalidates the session and leaves protected screens after incomplete cleanup', async () => {
+    vi.mocked(clearSensitiveLocalData).mockResolvedValueOnce({ status: 'incomplete', failedStores: ['drafts'] });
+    await logoutAndClear({ skipRemote: true });
+    expect(resetTo).toHaveBeenCalledWith('Login');
+    expect(Alert.alert).toHaveBeenCalledWith('Limpieza local incompleta', expect.any(String));
   });
 });

@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 async function setup(encryptionDisabled = false) {
   vi.resetModules();
   process.env.HANDOVER_TEST_DISABLE_OFFLINE_ENCRYPTION = encryptionDisabled ? "true" : "false";
-  vi.mock("expo-secure-store");
 
   const crypto = await import("@/src/lib/crypto");
+  await crypto.clearOfflineEncryptionKeys();
+  const secureStore = await import('expo-secure-store');
+  expect(await secureStore.getItemAsync('handover_offline_encryption_key_v1')).toBeFalsy();
   const drafts = await import("@/src/lib/drafts");
 
   return { crypto, drafts } as const;
@@ -106,5 +108,46 @@ describe("drafts.ts (get/set/clear)", () => {
     const decrypted = await crypto.decryptOfflinePayload(stored ?? "");
     expect(JSON.parse(decrypted)).toEqual(data);
   });
-});
 
+  it('does not overwrite a draft when its protected index is corrupt', async () => {
+    const { drafts } = await setup();
+    await drafts.__test__.writeRaw(drafts.__test__.indexKey, '{broken');
+    await expect(drafts.setDraft('patient', { note: 'synthetic' })).rejects.toThrow();
+    expect(await drafts.__test__.readRaw(drafts.__test__.keyNorm('patient'))).toBeFalsy();
+    expect(await drafts.__test__.readRaw(drafts.__test__.indexKey)).toBe('{broken');
+  });
+
+  it('serializes concurrent index additions before writing either payload', async () => {
+    const { drafts, crypto } = await setup();
+    await Promise.all([drafts.setDraft('one', { value: 1 }), drafts.setDraft('two', { value: 2 })]);
+    const raw = await drafts.__test__.readRaw(drafts.__test__.indexKey);
+    const index = JSON.parse(await crypto.decryptOfflinePayload(raw ?? '')) as string[];
+    expect(index).toEqual(expect.arrayContaining([drafts.__test__.keyNorm('one'), drafts.__test__.keyNorm('two')]));
+  });
+
+  it('migrates only the known patient/unit legacy form key without changing its contents', async () => {
+    const { drafts } = await setup();
+    const original = { values: { patientId: 'synthetic', vitals: { rr: 20.5 } }, review: { reason: 'RR_NON_INTEGER' } };
+    await drafts.__test__.writeRaw('handoverDraft:synthetic:unit-a', JSON.stringify(original));
+    expect(await drafts.getHandoverDraft('synthetic', 'unit-a')).toEqual(original);
+    expect(await drafts.getHandoverDraft('synthetic', 'unit-b')).toBeNull();
+    expect(await drafts.__test__.readRaw('handoverDraft:synthetic:unit-a')).toBeFalsy();
+    expect(await drafts.getHandoverDraft('synthetic', 'unit-a')).toEqual(original);
+  });
+
+  it('keeps the failed deletion referenced for a later purge retry', async () => {
+    const { drafts } = await setup();
+    await drafts.setDraft('synthetic', { value: 'protected' });
+    const key = drafts.__test__.keyNorm('synthetic');
+    const originalDelete = drafts.__test__.storage.removeItem;
+    const failingDelete = vi.spyOn(drafts.__test__.storage, 'removeItem').mockImplementation(async (candidate: string) => {
+      if (candidate === key) throw new Error('synthetic delete failure');
+      return originalDelete(candidate);
+    });
+    await expect(drafts.clearAllDrafts()).rejects.toThrow('DRAFT_PURGE_INCOMPLETE');
+    expect(await drafts.__test__.readRaw(key)).toBeTruthy();
+    failingDelete.mockRestore();
+    await drafts.clearAllDrafts();
+    expect(await drafts.__test__.readRaw(key)).toBeFalsy();
+  });
+});

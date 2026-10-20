@@ -7,7 +7,10 @@ import {
   encryptOfflinePayload,
   isEncryptionDisabled,
   payloadIsEncrypted,
+  hashHex,
 } from './crypto';
+import { assertLocalWriteAllowed } from '@/src/security/local-cleanup-state';
+import * as SecureStore from 'expo-secure-store';
 
 /**
  * Almacenamiento de borradores por paciente, con prioridad:
@@ -37,41 +40,38 @@ const memStore: Store = {
 
 const localStore: Store = {
   async getItem(k) {
-    try { return typeof localStorage === 'undefined' ? null : localStorage.getItem(k); }
-    catch { return null; }
+    if (typeof localStorage === 'undefined') throw new Error('DRAFT_STORAGE_UNAVAILABLE');
+    return localStorage.getItem(k);
   },
   async setItem(k, v) {
-    try { if (typeof localStorage !== 'undefined') localStorage.setItem(k, v); }
-    catch {}
+    if (typeof localStorage === 'undefined') throw new Error('DRAFT_STORAGE_UNAVAILABLE');
+    localStorage.setItem(k, v);
   },
   async removeItem(k) {
-    try { if (typeof localStorage !== 'undefined') localStorage.removeItem(k); }
-    catch {}
+    if (typeof localStorage === 'undefined') throw new Error('DRAFT_STORAGE_UNAVAILABLE');
+    localStorage.removeItem(k);
   },
   async listKeys() {
-    try { return typeof localStorage === 'undefined' ? [] : Object.keys(localStorage); }
-    catch { return []; }
+    if (typeof localStorage === 'undefined') throw new Error('DRAFT_STORAGE_UNAVAILABLE');
+    return Object.keys(localStorage);
   },
 };
 
 function secureStore(): Store | null {
-  try {
-    // expo-secure-store puede exportar default o named
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('expo-secure-store');
-    const SS = mod?.default ?? mod;
-    if (!SS?.getItemAsync) return null;
-    return {
-      async getItem(k) { try { return await SS.getItemAsync(k); } catch { return null; } },
-      async setItem(k, v) { try { await SS.setItemAsync(k, v); } catch {} },
-      async removeItem(k) { try { await SS.deleteItemAsync(k); } catch {} },
-    };
-  } catch { return null; }
+  if (typeof SecureStore.getItemAsync !== 'function') return null;
+  const physicalKey = (key: string) => `handover.draft.${hashHex(key)}`;
+  return {
+    async getItem(k) { return SecureStore.getItemAsync(physicalKey(k)); },
+    async setItem(k, v) { await SecureStore.setItemAsync(physicalKey(k), v); },
+    async removeItem(k) { await SecureStore.deleteItemAsync(physicalKey(k)); },
+  };
 }
 
+const secureDraftStore = secureStore();
 const storage: Store =
-  secureStore() ??
+  secureDraftStore ??
   (typeof localStorage !== 'undefined' ? localStore : memStore);
+const draftDurability = storage === memStore ? 'memory' as const : 'persisted' as const;
 
 // ----------------------------
 // Namespace + keys
@@ -104,24 +104,25 @@ const keyNorm = (patientId: string) => `${PREFIX}:${normalizePatientId(patientId
 const keyLegacy = (patientId: string) => `${PREFIX}:${patientId}`;
 
 async function loadIndex(): Promise<string[]> {
-  try {
-    const raw = await storage.getItem(INDEX_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as string[];
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
-  } catch {
-    return [];
+  const raw = await storage.getItem(INDEX_KEY);
+  if (raw == null) return [];
+  const parsed: unknown = JSON.parse(await decryptOfflinePayload(raw));
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === 'string')) {
+    throw new Error('DRAFT_INDEX_CORRUPT');
   }
+  return parsed;
 }
 
 async function saveIndex(keys: string[]): Promise<void> {
-  try {
-    if (!keys.length) {
-      await storage.removeItem(INDEX_KEY);
-      return;
-    }
-    await storage.setItem(INDEX_KEY, JSON.stringify(keys));
-  } catch {}
+  if (!keys.length) return storage.removeItem(INDEX_KEY);
+  await storage.setItem(INDEX_KEY, await encryptOfflinePayload(JSON.stringify(keys)));
+}
+
+let pendingIndex = Promise.resolve();
+function withIndexLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = pendingIndex.then(operation);
+  pendingIndex = result.then(() => {}, () => {});
+  return result;
 }
 
 // ----------------------------
@@ -138,20 +139,14 @@ function safeStringify(v: unknown): string {
 
 type ParsedDraft<T> = { value: T | null; shouldEncrypt: boolean };
 
-const DRAFT_ENCRYPTION_WARNING = '[HNDV][WARN][DRAFT_ENCRYPTION_FAILED]';
-const DRAFT_DECRYPTION_WARNING = '[HNDV][WARN][DRAFT_DECRYPTION_FAILED]';
-
 async function parseStoredDraft<T>(raw: string | null): Promise<ParsedDraft<T>> {
-  if (!raw) return { value: null, shouldEncrypt: false };
+  if (raw == null) return { value: null, shouldEncrypt: false };
 
   if (payloadIsEncrypted(raw)) {
-    try {
-      const decrypted = await decryptPayload(raw);
-      return { value: safeParse<T>(decrypted), shouldEncrypt: !isEncryptionDisabled() };
-    } catch (error) {
-      console.warn(DRAFT_DECRYPTION_WARNING, error);
-      return { value: null, shouldEncrypt: false };
-    }
+    const decrypted = await decryptPayload(raw);
+    const value = safeParse<T>(decrypted);
+    if (value === null) throw new Error('DRAFT_CORRUPT');
+    return { value, shouldEncrypt: !isEncryptionDisabled() };
   }
 
   try {
@@ -159,12 +154,10 @@ async function parseStoredDraft<T>(raw: string | null): Promise<ParsedDraft<T>> 
     if (decrypted !== raw) {
       return { value: safeParse<T>(decrypted), shouldEncrypt: false };
     }
-  } catch (error) {
-    console.warn(DRAFT_DECRYPTION_WARNING, error);
-    return { value: null, shouldEncrypt: false };
-  }
+  } catch { throw new Error('DRAFT_DECRYPTION_FAILED'); }
 
   const parsed = safeParse<T>(raw);
+  if (parsed === null) throw new Error('DRAFT_CORRUPT');
   return { value: parsed, shouldEncrypt: parsed !== null && !isEncryptionDisabled() };
 }
 
@@ -182,12 +175,7 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
 
   if (parsed1.value != null) {
     if (parsed1.shouldEncrypt && !isEncryptionDisabled()) {
-      try {
-        const encrypted = await encryptOfflinePayload(safeStringify(parsed1.value));
-        try { await storage.setItem(k1, encrypted); } catch {}
-      } catch (error) {
-        console.warn(DRAFT_ENCRYPTION_WARNING, error);
-      }
+      await setDraft(patientId, parsed1.value);
     }
     return parsed1.value;
   }
@@ -199,12 +187,8 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
     const parsed2 = await parseStoredDraft<T>(raw2);
     if (parsed2.value != null) {
       if (parsed2.shouldEncrypt && !isEncryptionDisabled()) {
-        try {
-          const encrypted = await encryptOfflinePayload(safeStringify(parsed2.value));
-          try { await storage.setItem(k1, encrypted); } catch {}
-        } catch (error) {
-          console.warn(DRAFT_ENCRYPTION_WARNING, error);
-        }
+        const existing = await storage.getItem(k1);
+        if (existing == null) await setDraft(patientId, parsed2.value);
       }
       return parsed2.value;
     }
@@ -212,23 +196,17 @@ export async function getDraft<T = any>(patientId: string): Promise<T | null> {
   return null;
 }
 
-export async function setDraft<T = any>(patientId: string, data: T): Promise<void> {
+export async function setDraft<T = any>(patientId: string, data: T): Promise<'persisted' | 'memory'> {
+  assertLocalWriteAllowed();
   const k1 = keyNorm(patientId);
   const serialized = safeStringify(data ?? {});
-  let payload = serialized;
-  if (!isEncryptionDisabled()) {
-    try {
-      payload = await encryptOfflinePayload(serialized);
-    } catch (error) {
-      console.warn(DRAFT_ENCRYPTION_WARNING, error);
-      return;
-    }
-  }
-  await storage.setItem(k1, payload);
-  const index = await loadIndex();
-  if (!index.includes(k1)) {
-    await saveIndex([...index, k1]);
-  }
+  const payload = isEncryptionDisabled() ? serialized : await encryptOfflinePayload(serialized);
+  await withIndexLock(async () => {
+    const index = await loadIndex();
+    if (!index.includes(k1)) await saveIndex([...index, k1]);
+    await storage.setItem(k1, payload);
+  });
+  return draftDurability;
 }
 
 export async function clearDraft(patientId?: string): Promise<void> {
@@ -236,18 +214,19 @@ export async function clearDraft(patientId?: string): Promise<void> {
   const k1 = keyNorm(patientId);
   const k2 = keyLegacy(patientId);
   // Borra ambas posibles claves para idempotencia/compat
-  try { await storage.removeItem(k1); } catch {}
-  if (k2 !== k1) { try { await storage.removeItem(k2); } catch {} }
-  const index = await loadIndex();
-  if (index.length) {
+  await withIndexLock(async () => {
+    const index = await loadIndex();
+    await storage.removeItem(k1);
+    if (k2 !== k1) await storage.removeItem(k2);
     await saveIndex(index.filter((item) => item !== k1 && item !== k2));
-  }
+  });
 }
 
 export async function clearAllDrafts(): Promise<void> {
-  const index = await loadIndex();
-  const keysToRemove = new Set(index);
-  const allKeys = await storage.listKeys?.();
+  await withIndexLock(async () => {
+    const index = await loadIndex();
+    const keysToRemove = new Set(index);
+    const allKeys = await storage.listKeys?.();
 
   if (allKeys?.length) {
     for (const key of allKeys) {
@@ -275,7 +254,7 @@ export async function clearAllDrafts(): Promise<void> {
             patientIdsFromLegacyMaps.add(entry);
           }
         }
-      } catch {}
+      } catch (error) { throw error; }
     }
     const patientIds = new Set([...patientIdsFromIndex, ...patientIdsFromLegacyMaps]);
     for (const patientId of patientIds) {
@@ -292,8 +271,51 @@ export async function clearAllDrafts(): Promise<void> {
     }
   }
 
-  await Promise.allSettled(Array.from(keysToRemove).map((key) => storage.removeItem(key)));
-  await saveIndex([]);
+    await saveIndex(Array.from(keysToRemove));
+    const failures: string[] = [];
+    for (const key of keysToRemove) {
+      try { await storage.removeItem(key); }
+      catch { failures.push(key); }
+    }
+    await saveIndex(failures);
+    if (failures.length) throw new Error('DRAFT_PURGE_INCOMPLETE');
+  });
+}
+
+function handoverDraftIdentity(patientId: string, unitId: string): string {
+  return `form:${encodeURIComponent(patientId)}:${encodeURIComponent(unitId)}`;
+}
+
+export async function getHandoverDraft<T>(patientId: string, unitId: string): Promise<T | null> {
+  const identity = handoverDraftIdentity(patientId, unitId);
+  const legacyKey = `handoverDraft:${patientId}:${unitId}`;
+  const raw = await storage.getItem(legacyKey);
+  if (raw != null) {
+    await withIndexLock(async () => {
+      assertLocalWriteAllowed();
+      const index = await loadIndex();
+      if (!index.includes(legacyKey)) await saveIndex([...index, legacyKey]);
+    });
+  }
+  const managed = await getDraft<T>(identity);
+  if (raw == null) return managed;
+  const legacy = (await parseStoredDraft<T>(raw)).value;
+  if (legacy === null) throw new Error('DRAFT_CORRUPT');
+  if (managed !== null && JSON.stringify(managed) !== JSON.stringify(legacy)) throw new Error('DRAFT_CONFLICT');
+  if (managed === null) {
+    await setDraft(identity, legacy);
+    if (JSON.stringify(await getDraft<T>(identity)) !== JSON.stringify(legacy)) throw new Error('DRAFT_MIGRATION_FAILED');
+  }
+  await storage.removeItem(legacyKey);
+  await withIndexLock(async () => {
+    const index = await loadIndex();
+    await saveIndex(index.filter((key) => key !== legacyKey));
+  });
+  return managed ?? legacy;
+}
+
+export async function setHandoverDraft<T>(patientId: string, unitId: string, draft: T): Promise<'persisted' | 'memory'> {
+  return setDraft(handoverDraftIdentity(patientId, unitId), draft);
 }
 
 // ----------------------------
@@ -307,6 +329,7 @@ export const __test__ = {
   legacyPrefixes: LEGACY_PREFIXES,
   readRaw: (key: string) => storage.getItem(key),
   writeRaw: (key: string, value: string) => storage.setItem(key, value),
+  storage,
 };
 // Back-compat: algunos lugares llaman saveDraft
 export async function saveDraft(patientId: string, data: any) {
