@@ -27,6 +27,7 @@ type Props = {
   onToggle: (key: ClosureSectionKey) => void;
   dictationState: SummarySectionProps['dictationState'];
   DictationMicButton: SummarySectionProps['DictationMicButton'];
+  onClosingSummaryHumanEdit: SummarySectionProps['onHumanEdit'];
   checklistItems: BedsideChecklistItem[];
   currentUser?: SignatureUser | null;
   administrativeUnitId?: string;
@@ -50,6 +51,7 @@ export function HandoverClosureSections({
   onToggle,
   dictationState,
   DictationMicButton,
+  onClosingSummaryHumanEdit,
   checklistItems,
   currentUser,
   administrativeUnitId,
@@ -114,6 +116,7 @@ export function HandoverClosureSections({
             styles={styles}
             dictationState={dictationState}
             DictationMicButton={DictationMicButton}
+            onHumanEdit={onClosingSummaryHumanEdit}
           />
         </CollapsibleSection>
       </View>

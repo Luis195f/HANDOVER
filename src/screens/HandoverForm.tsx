@@ -85,7 +85,7 @@ import {
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
-import { zHandover, type HandoverValues, type SbarProvenanceField, type SbarTextProvenance } from '@/src/validation/schemas';
+import { zHandover, type HandoverValues, type SbarProvenance, type SbarProvenanceField, type SbarTextProvenance } from '@/src/validation/schemas';
 import { normalizeLegacyHandoverPayload } from '@/src/validation/normalization';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import type { SignaturePadValue } from '@/src/components/SignaturePad';
@@ -627,20 +627,19 @@ export default function HandoverForm({ navigation, route }: Props) {
       ...(decisionHash ? { decisionHash } : {}),
       ...(accepted ? { acceptedBy: accepted.by, acceptedAt: accepted.at } : {}),
     };
-    const next = {
-      sbarSituation: { ...common, contentHash: hashHex(summary.situation.trim()) },
-      sbarBackground: { ...common, contentHash: hashHex(summary.background.trim()) },
-      sbarAssessment: { ...common, contentHash: hashHex(summary.assessment.trim()) },
-      sbarRecommendation: { ...common, contentHash: hashHex(summary.recommendation.trim()) },
-      closingSummary: { ...common, contentHash: hashHex(fullText.trim()) },
-    };
+    const entries: Array<[SbarProvenanceField, string]> = [
+      ['sbarSituation', summary.situation], ['sbarBackground', summary.background],
+      ['sbarAssessment', summary.assessment], ['sbarRecommendation', summary.recommendation],
+      ['closingSummary', fullText],
+    ];
+    const next: SbarProvenance = {};
+    for (const [field, text] of entries) {
+      if (text.trim()) next[field] = { ...common, contentHash: hashHex(text.trim()) };
+    }
     const previous = form.getValues('sbarProvenance');
-    if (previous?.closingSummary?.source === source &&
-        previous.sbarSituation?.contentHash === next.sbarSituation.contentHash &&
-        previous.sbarBackground?.contentHash === next.sbarBackground.contentHash &&
-        previous.sbarAssessment?.contentHash === next.sbarAssessment.contentHash &&
-        previous.sbarRecommendation?.contentHash === next.sbarRecommendation.contentHash &&
-        previous.closingSummary.contentHash === next.closingSummary.contentHash) return;
+    if (Object.keys(previous ?? {}).length === Object.keys(next).length &&
+        entries.every(([field]) => previous?.[field]?.source === next[field]?.source &&
+          previous?.[field]?.contentHash === next[field]?.contentHash)) return;
     form.setValue('sbarProvenance', next, { shouldDirty: markDirty });
   };
   const { watch, reset, getValues } = form;
@@ -3156,6 +3155,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           handleDictationPress,
         }}
         DictationMicButton={DictationMicButton}
+        onClosingSummaryHumanEdit={(text) => onHumanSbarEdit('closingSummary', text)}
         checklistItems={checklistItems}
         currentUser={signatureUser}
         administrativeUnitId={administrativeUnitValue}

@@ -33,10 +33,13 @@ describe("drafts.ts (get/set/clear)", () => {
       acceptedAt: '2026-10-20T10:00:00.000Z',
       decisionHash: sha256('synthetic decision'),
     };
-    const snapshot = packRrDraft({ sbarSituation: 'synthetic SBAR', sbarProvenance: { sbarSituation: provenance } }, undefined);
+    const edited = { ...provenance, source: 'ai-edited-by-human' as const, contentHash: sha256('synthetic edited') };
+    const snapshot = packRrDraft({ sbarSituation: 'synthetic SBAR', closingSummary: 'synthetic edited',
+      sbarProvenance: { sbarSituation: provenance, closingSummary: edited } }, undefined);
     await drafts.setHandoverDraft('patient-a', 'unit-a', snapshot);
     const restored = unpackRrDraft((await drafts.getHandoverDraft<typeof snapshot>('patient-a', 'unit-a'))!);
     expect(restored.values.sbarProvenance?.sbarSituation).toEqual(provenance);
+    expect(restored.values.sbarProvenance?.closingSummary).toEqual(edited);
     expect(await drafts.getHandoverDraft('patient-a', 'unit-b')).toBeNull();
   });
   it("setDraft cifra el payload y getDraft lo descifra", async () => {

@@ -16,12 +16,14 @@ export type SummarySectionProps = {
     handleDictationPress: (field: DictationField, config: SttConfig) => void;
   };
   DictationMicButton: React.ComponentType<{ active: boolean; disabled?: boolean; label: string; onPress: () => void }>;
+  onHumanEdit: (text: string) => void;
 };
 
 export const SummarySection: React.FC<SummarySectionProps> = ({
   styles,
   dictationState,
   DictationMicButton,
+  onHumanEdit,
 }) => {
   const { control, formState, watch } = useFormContext<HandoverFormValues>();
   const errors = formState.errors ?? {};
@@ -44,7 +46,7 @@ export const SummarySection: React.FC<SummarySectionProps> = ({
                 placeholder="Resumen breve para el equipo entrante"
                 onBlur={onBlur}
                 value={value ?? ''}
-                onChangeText={onChange}
+                onChangeText={(text) => { onHumanEdit(text); onChange(text); }}
               />
             )}
           />

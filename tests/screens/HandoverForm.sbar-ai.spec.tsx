@@ -5,7 +5,7 @@ import { sha256 } from 'js-sha256';
 
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { SbarSection } from '@/src/screens/handover/SbarSection';
-import type { HandoverFormData } from '@/src/validation/schemas';
+import { zHandover, type HandoverFormData } from '@/src/validation/schemas';
 
 const flagState = vi.hoisted(() => ({
   values: { SHOW_SBAR: true } as Record<string, boolean>,
@@ -31,9 +31,9 @@ vi.mock('react-hook-form', async () => {
   let currentContext: any;
   return {
     ...actual,
-    Controller: ({ render, defaultValue }: any) =>
+    Controller: ({ render, defaultValue, name }: any) =>
       render({
-        field: { onChange: vi.fn(), onBlur: vi.fn(), value: defaultValue },
+        field: { onChange: (value: string) => currentContext.setValue(name, value), onBlur: vi.fn(), value: defaultValue },
         fieldState: { error: undefined },
       }),
     FormProvider: ({ children, ...ctx }: any) => {
@@ -340,6 +340,18 @@ const baseValues: HandoverFormData = {
   audioUri: null,
 };
 
+const validDraft = (values: HandoverFormData): HandoverFormData => ({
+  ...values,
+  oxygenTherapy: undefined,
+  painAssessment: undefined,
+  audioUri: undefined,
+  administrativeData: { ...values.administrativeData, staffIn: ['Nurse A'], staffOut: ['Nurse B'] },
+  bedsideChecklist: {
+    patientIdentityConfirmed: true, allergiesReviewed: true, linesAndDevicesChecked: true,
+    medicationPlanReviewed: true, safetyMeasuresApplied: true, questionsAnswered: true,
+  },
+});
+
 function renderHandoverForm(options?: {
   routeParams?: Record<string, unknown>;
   selectedUnitId?: string | undefined;
@@ -531,6 +543,83 @@ describe('HandoverForm SBAR AI traceability', () => {
         }),
       );
     });
+  });
+
+  it('keeps a typed closing summary valid after local generation and preserves AI acceptance after a human edit', async () => {
+    generateSbarViaBackendResult.mockResolvedValue({ ok: false, error: { code: 'UNCONFIGURED' } });
+    const { view, form } = renderHandoverForm({ defaultValuesOverride: validDraft(baseValues) });
+    await act(async () => {
+      await view.root.findByType(SbarSection).props.handleGenerateSbarWithAi();
+    });
+    await act(async () => {
+      view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
+    });
+    expect(form.getValues('sbarProvenance').closingSummary.source).toBe('local-deterministic');
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), 'Local summary edited'));
+    expect(form.getValues('sbarProvenance').closingSummary).toEqual({ source: 'clinician-authored', contentHash: sha256('Local summary edited') });
+    const localValidation = zHandover.safeParse(form.getValues());
+    expect(localValidation.success ? [] : localValidation.error.issues.map((issue) => issue.path.join('.'))).toEqual([]);
+
+    generateSbarViaBackendResult.mockResolvedValue({ ok: true, result: {
+      situation: 'AI situation', background: 'AI background', assessment: 'AI assessment',
+      recommendation: 'AI recommendation', fullText: 'AI summary',
+    } });
+    await act(async () => {
+      await view.root.findByType(SbarSection).props.handleGenerateSbarWithAi();
+    });
+    await act(async () => {
+      view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
+    });
+    const accepted = form.getValues('sbarProvenance').closingSummary;
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), 'AI summary edited'));
+    expect(form.getValues('sbarProvenance').closingSummary).toEqual({
+      ...accepted, source: 'ai-edited-by-human', contentHash: sha256('AI summary edited'),
+    });
+    const editedValidation = zHandover.safeParse(form.getValues());
+    expect(editedValidation.success ? [] : editedValidation.error.issues.map((issue) => issue.path.join('.'))).toEqual([]);
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), 'AI summary edited'));
+    expect(form.getValues('sbarProvenance').closingSummary).toEqual({
+      ...accepted, source: 'ai-edited-by-human', contentHash: sha256('AI summary edited'),
+    });
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), ''));
+    expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), '   '));
+    expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
+    const clearedValidation = zHandover.safeParse(form.getValues());
+    expect(clearedValidation.success ? [] : clearedValidation.error.issues.map((issue) => issue.path.join('.'))).toEqual([]);
+  });
+
+  it('removes provenance for emptied AI sections and accepts whitespace-only optional text', async () => {
+    generateSbarViaBackendResult.mockResolvedValueOnce({ ok: true, result: {
+      situation: 'Prior situation', background: 'Background', assessment: 'Assessment',
+      recommendation: 'Recommendation', fullText: 'Prior summary',
+    } }).mockResolvedValueOnce({ ok: true, result: {
+      situation: '   ', background: 'Background', assessment: 'Assessment',
+      recommendation: 'Recommendation', fullText: '   ',
+    } });
+    const { view, form } = renderHandoverForm({ defaultValuesOverride: validDraft(baseValues) });
+    await act(async () => {
+      await view.root.findByType(SbarSection).props.handleGenerateSbarWithAi();
+    });
+    await act(async () => {
+      view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
+    });
+    expect(form.getValues('sbarProvenance').sbarSituation.source).toBe('external-ai');
+    await act(async () => {
+      await view.root.findByType(SbarSection).props.handleGenerateSbarWithAi();
+    });
+    await act(async () => {
+      view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
+    });
+    expect(form.getValues('sbarProvenance').sbarSituation).toBeUndefined();
+    expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
+    expect(form.getValues('sbarProvenance').sbarBackground.source).toBe('external-ai');
+    const emptyValidation = zHandover.safeParse(form.getValues());
+    expect(emptyValidation.success ? [] : emptyValidation.error.issues.map((issue) => issue.path.join('.'))).toEqual([]);
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), ''));
+    expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), '   '));
+    expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
   });
 
   it('con patientId y unitId válidos muestra revisión humana y registra shown + rejected', async () => {
