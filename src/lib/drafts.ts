@@ -7,6 +7,7 @@ import {
   encryptOfflinePayload,
   isEncryptionDisabled,
   payloadIsEncrypted,
+  hashHex,
 } from './crypto';
 import { assertLocalWriteAllowed } from '@/src/security/local-cleanup-state';
 import * as SecureStore from 'expo-secure-store';
@@ -58,10 +59,11 @@ const localStore: Store = {
 
 function secureStore(): Store | null {
   if (typeof SecureStore.getItemAsync !== 'function') return null;
+  const physicalKey = (key: string) => `handover.draft.${hashHex(key)}`;
   return {
-    async getItem(k) { return SecureStore.getItemAsync(k); },
-    async setItem(k, v) { await SecureStore.setItemAsync(k, v); },
-    async removeItem(k) { await SecureStore.deleteItemAsync(k); },
+    async getItem(k) { return SecureStore.getItemAsync(physicalKey(k)); },
+    async setItem(k, v) { await SecureStore.setItemAsync(physicalKey(k), v); },
+    async removeItem(k) { await SecureStore.deleteItemAsync(physicalKey(k)); },
   };
 }
 

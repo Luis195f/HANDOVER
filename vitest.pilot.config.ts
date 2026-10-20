@@ -27,6 +27,7 @@ const PILOT_GRADE_SUITES = [
   'src/lib/__tests__/encryptedStorage.spec.ts',
   'tests/lib/crypto.offline-encryption.spec.ts',
   'tests/drafts.spec.ts',
+  'src/lib/__tests__/drafts.securestore.cleanup.spec.ts',
   'tests/audit.spec.ts',
   'tests/security/secure-cleanup.spec.ts',
   'tests/screens/SyncCenter.source-of-truth.spec.tsx',

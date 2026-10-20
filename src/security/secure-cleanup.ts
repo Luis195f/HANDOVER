@@ -9,6 +9,7 @@ import { clearCryptoKeys } from '@/src/security/crypto';
 import { clearAllUsers, createUserSwitchStorage } from '@/src/security/user-switch';
 import { secureDeleteSensitiveItem } from '@/src/security/secure-storage';
 import { beginLocalCleanup, endLocalCleanup } from '@/src/security/local-cleanup-state';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type LocalCleanupResult = {
   status: 'complete' | 'incomplete' | 'failed';
@@ -27,7 +28,7 @@ export async function clearSensitiveLocalData(): Promise<LocalCleanupResult> {
       ['exception-handover', clearExceptionHandoverStorage],
       ['secure-queue', () => secureDeleteSensitiveItem('handover.queue.v1')],
       ['dead-queue', () => secureDeleteSensitiveItem('handover.queue.dead.v1')],
-      ['legacy-tx-queue', () => secureDeleteSensitiveItem('@handover/tx-queue')],
+      ['legacy-tx-queue', () => AsyncStorage.removeItem('@handover/tx-queue')],
       ['capabilities', invalidateCapabilitiesCache],
       ['users', () => clearAllUsers(createUserSwitchStorage())],
     ] as const;
