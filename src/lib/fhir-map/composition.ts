@@ -1,4 +1,6 @@
 import { BOOLEAN_CODES, type TerminologyCode } from '../codes';
+import { sha256 } from 'js-sha256';
+import type { SbarTextProvenance } from '../../validation/schemas';
 import type { HandoverBedsideChecklist, PsychosocialCare } from '../../types/handover';
 import type {
   BuildOptions,
@@ -41,8 +43,28 @@ export type CompositionMapperDependencies = {
     notes: TerminologyCode<string>;
   };
   surveyCategoryConcept: CodeableConcept;
+  sbarProvenanceUrl: string;
   warnCompositionSectionOmitted: (section: 'exams' | 'procedures') => void;
 };
+
+function textProvenanceExtension(
+  deps: CompositionMapperDependencies,
+  text: string,
+  provenance?: SbarTextProvenance,
+) {
+  if (!provenance || sha256(text.trim()) !== provenance.contentHash) return undefined;
+  return [{
+    url: deps.sbarProvenanceUrl,
+    extension: [
+      { url: 'source', valueString: provenance.source },
+      { url: 'contentHash', valueString: provenance.contentHash },
+      ...(provenance.version ? [{ url: 'version', valueString: provenance.version }] : []),
+      ...(provenance.acceptedBy ? [{ url: 'acceptedBy', valueString: provenance.acceptedBy }] : []),
+      ...(provenance.acceptedAt ? [{ url: 'acceptedAt', valueDateTime: provenance.acceptedAt }] : []),
+      ...(provenance.decisionHash ? [{ url: 'decisionHash', valueString: provenance.decisionHash }] : []),
+    ],
+  }];
+}
 
 export function mapAdministrativeObservationImpl(
   deps: CompositionMapperDependencies,
@@ -74,11 +96,13 @@ export function mapSbarObservationsImpl(
 
   const components: ObservationComponent[] = [];
 
-  const addComponent = (code: string, display: string, value?: string | null) => {
+  const addComponent = (code: string, display: string, value?: string | null, provenance?: SbarTextProvenance) => {
     const trimmed = value?.trim();
     if (!trimmed) return;
+    const extension = textProvenanceExtension(deps, trimmed, provenance);
 
     components.push({
+      ...(extension ? { extension } : {}),
       code: {
         coding: [
           {
@@ -93,10 +117,10 @@ export function mapSbarObservationsImpl(
     });
   };
 
-  addComponent('situation', 'Situation', sbar.situation);
-  addComponent('background', 'Background', sbar.background);
-  addComponent('assessment', 'Assessment', sbar.assessment);
-  addComponent('recommendation', 'Recommendation', sbar.recommendation);
+  addComponent('situation', 'Situation', sbar.situation, values.sbarProvenance?.sbarSituation);
+  addComponent('background', 'Background', sbar.background, values.sbarProvenance?.sbarBackground);
+  addComponent('assessment', 'Assessment', sbar.assessment, values.sbarProvenance?.sbarAssessment);
+  addComponent('recommendation', 'Recommendation', sbar.recommendation, values.sbarProvenance?.sbarRecommendation);
 
   if (components.length === 0) return [];
 
@@ -177,12 +201,15 @@ export function mapSummaryObservationImpl(
   deps: CompositionMapperDependencies,
   summary: string | null | undefined,
   context: MappingContext,
+  provenance?: SbarTextProvenance,
 ): Observation | null {
   const trimmed = summary?.trim();
   if (!trimmed) return null;
+  const extension = textProvenanceExtension(deps, trimmed, provenance);
 
   return {
     resourceType: 'Observation',
+    ...(extension ? { extension } : {}),
     status: 'final',
     category: [deps.surveyCategoryConcept],
     code: deps.codeableConceptFromCode(deps.handoverObservationCodes.notes),

@@ -62,11 +62,19 @@ Cubierto en esta iteracion:
 - lectura agregada piloto-grade para comite/supervision sin ranking individual.
 - acceso a la lectura agregada con traza auditable no nominal en backend.
 
-Fuera de esta iteracion:
+Fuera del contrato del log remoto (no del registro local de procedencia C08):
 - otras sugerencias visualizadas fuera de SBAR sin accion humana dedicada;
 - mezcla con ICEA scoring, submit FHIR, queue/sync u otras superficies no tocadas.
 - lectura nominal de eventos individuales de decision clinica para vigilancia operacional fina.
 - cualquier uso nominal, retributivo o punitivo.
+
+## Procedencia local SBAR (C08)
+
+El formulario conserva `sbarProvenance` por campo SBAR y por texto de cierre/legacy. Cada entrada contiene `source` (`clinician-authored`, `local-deterministic`, `external-ai` o `ai-edited-by-human`) y SHA-256 del texto normalizado por el schema; puede incluir versión solo si el proveedor la entrega realmente. La aceptación humana efectiva captura una vez `acceptedBy`, `acceptedAt` y el hash de decisión. La edición posterior conserva la referencia de aceptación IA, pero actualiza el hash del texto. Rechazar una sugerencia no cambia el texto ni su procedencia.
+
+Los borradores protegidos conservan la metadata; la validación rechaza hashes que no correspondan al texto. Un texto legacy/importado sin metadata permanece sin procedencia acreditada. La UI no infiere origen por el modo demo ni por la mera presencia de texto. El log remoto best-effort no sustituye este registro persistido.
+
+El Bundle incluye únicamente para texto con hash coincidente la extensión local `https://handover.app/fhir/StructureDefinition/handover-sbar-text-provenance` sobre cada componente de la Observation SBAR y la Observation del resumen. Sus subextensiones son `source`, `contentHash` y, cuando existen, `version`, `acceptedBy`, `acceptedAt` y `decisionHash`. No se emite un recurso FHIR Provenance. El namespace es un contrato local; soporte del servidor, interoperabilidad externa y conformidad institucional permanecen sin verificar hasta C11V. No se duplica texto clínico en la metadata ni en el log.
 
 ## Comportamiento ante fallo
 

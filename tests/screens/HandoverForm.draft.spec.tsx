@@ -4,7 +4,9 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
-import { getHandoverDraft } from '@/src/lib/drafts';
+import { getHandoverDraft, setHandoverDraft } from '@/src/lib/drafts';
+import { packRrDraft } from '@/src/lib/news2-input';
+import { sha256 } from 'js-sha256';
 import type { HandoverFormData } from '@/src/validation/schemas';
 import * as SecureStore from 'expo-secure-store';
 import { __setSetItemFailure } from '../__mocks__/expo-secure-store';
@@ -396,10 +398,34 @@ function buildFormMock(values: HandoverFormData = baseValues) {
       return submit;
     },
     setValue,
+    reset: vi.fn((next: HandoverFormData) => {
+      Object.keys(currentValues).forEach((key) => delete currentValues[key]);
+      Object.assign(currentValues, next);
+    }),
   } as any;
 }
 
 describe('HandoverForm drafts', () => {
+  it('hydrates persisted SBAR provenance without reclassifying it as local', async () => {
+    const patientId = 'pat-c08-restored';
+    const provenance = {
+      source: 'external-ai' as const, contentHash: sha256('Restored SBAR'),
+      acceptedBy: 'nurse-1', acceptedAt: '2026-10-20T10:00:00.000Z', decisionHash: sha256('synthetic decision'),
+    };
+    await setHandoverDraft(patientId, 'unit-1', packRrDraft({
+      ...baseValues, patientId, sbarSituation: 'Restored SBAR', closingSummary: 'Restored SBAR',
+      sbarProvenance: { sbarSituation: provenance, closingSummary: provenance },
+    }, undefined));
+    const formInstance = buildFormMock({ ...baseValues, patientId, sbarSituation: '', closingSummary: '' });
+    mockUseZodForm.mockReturnValue(formInstance);
+    flagState.values = { SHOW_SBAR: true };
+    const screen = render(<HandoverForm navigation={{ navigate: vi.fn() } as any}
+      route={{ key: 'restore-provenance', name: 'HandoverForm', params: { patientId, unitId: 'unit-1' } } as any} />);
+    await waitFor(() => expect(formInstance.reset).toHaveBeenCalled());
+    expect(formInstance.getValues('sbarProvenance').closingSummary).toEqual(provenance);
+    expect(screen.getByText('Texto SBAR generado con IA externa y aceptado por un profesional.')).toBeTruthy();
+    screen.unmount();
+  });
   beforeAll(async () => {
     ({ default: HandoverForm } = await import('@/src/screens/HandoverForm'));
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { sha256 } from 'js-sha256';
 
 async function setup(encryptionDisabled = false) {
   vi.resetModules();
@@ -22,6 +23,27 @@ afterEach(async () => {
 });
 
 describe("drafts.ts (get/set/clear)", () => {
+  it('round-trips the original SBAR decision metadata through the protected form draft', async () => {
+    const { drafts } = await setup();
+    const { packRrDraft, unpackRrDraft } = await import('@/src/lib/news2-input');
+    const provenance = {
+      source: 'external-ai' as const,
+      contentHash: sha256('synthetic SBAR'),
+      acceptedBy: 'nurse-1',
+      acceptedAt: '2026-10-20T10:00:00.000Z',
+      decisionHash: sha256('synthetic decision'),
+    };
+    const edited = { ...provenance, source: 'ai-edited-by-human' as const, contentHash: sha256('synthetic edited') };
+    const snapshot = packRrDraft({ sbarSituation: 'synthetic SBAR', closingSummary: 'synthetic edited',
+      sbarFullText: 'synthetic SBAR',
+      sbarProvenance: { sbarSituation: provenance, closingSummary: edited, sbarFullText: provenance } }, undefined);
+    await drafts.setHandoverDraft('patient-a', 'unit-a', snapshot);
+    const restored = unpackRrDraft((await drafts.getHandoverDraft<typeof snapshot>('patient-a', 'unit-a'))!);
+    expect(restored.values.sbarProvenance?.sbarSituation).toEqual(provenance);
+    expect(restored.values.sbarProvenance?.closingSummary).toEqual(edited);
+    expect(restored.values.sbarProvenance?.sbarFullText).toEqual(provenance);
+    expect(await drafts.getHandoverDraft('patient-a', 'unit-b')).toBeNull();
+  });
   it("setDraft cifra el payload y getDraft lo descifra", async () => {
     const { crypto, drafts } = await setup();
     const pid = "pat-enc-001";

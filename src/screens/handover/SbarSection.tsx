@@ -1,7 +1,8 @@
 import React from 'react';
 import { ActivityIndicator, Button, Text, TextInput, View } from 'react-native';
 import { Controller, useFormContext } from 'react-hook-form';
-import { type HandoverValues as HandoverFormValues } from '@/src/validation/schemas';
+import { sha256 } from 'js-sha256';
+import { type HandoverValues as HandoverFormValues, type SbarProvenance, type SbarProvenanceField } from '@/src/validation/schemas';
 import { t } from '@/src/i18n';
 
 export type SbarSectionProps = {
@@ -27,6 +28,8 @@ export type SbarSectionProps = {
   sbarFullTextError?: string;
   hideLegacyFields?: boolean;
   isDemo?: boolean;
+  provenance?: SbarProvenance;
+  onHumanEdit?: (field: SbarProvenanceField, text: string) => void;
 };
 
 export const SbarSection: React.FC<SbarSectionProps> = ({
@@ -52,15 +55,34 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
   sbarFullTextError,
   hideLegacyFields,
   isDemo = false,
+  provenance,
+  onHumanEdit,
 }) => {
-  const { control, formState } = useFormContext<HandoverFormValues>();
+  const { control, formState, getValues } = useFormContext<HandoverFormValues>();
+  const sourceFor = (field: SbarProvenanceField) => {
+    const record = provenance?.[field];
+    const text = getValues(field);
+    return record && typeof text === 'string' && sha256(text.trim()) === record.contentHash ? record.source : undefined;
+  };
+  const labelFor = (field: SbarProvenanceField) => {
+    switch (sourceFor(field)) {
+      case 'clinician-authored': return t('handover.sbarClinicianProvenance');
+      case 'local-deterministic': return t(isDemo ? 'handover.sbarSyntheticProvenance' : 'handover.sbarLocalProvenance');
+      case 'external-ai': return t('handover.sbarExternalProvenance');
+      case 'ai-edited-by-human': return t('handover.sbarAiEditedProvenance');
+      default: return t('handover.sbarUnknownProvenance');
+    }
+  };
+  const primarySource = sourceFor('closingSummary');
+  const differingLabel = (field: SbarProvenanceField) => sourceFor(field) !== primarySource
+    ? <Text style={styles.helperText}>{labelFor(field)}</Text> : null;
   const aiUnavailableMessage =
     !aiSbarAvailable || !aiSbarGenerationAvailable ? t('handover.sbarAiDisabled') : null;
 
   return (
     <>
       <Text style={styles.helperText}>
-        {isDemo ? t('handover.sbarSyntheticProvenance') : t('handover.sbarLocalProvenance')}
+        {labelFor('closingSummary')}
       </Text>
       {formState.isDirty ? (
         <View style={styles.inlineActions}>
@@ -125,10 +147,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
               testID="handover-sbar-situation"
               onBlur={onBlur}
               value={value ?? ''}
-              onChangeText={onChange}
+              onChangeText={(text) => { onHumanEdit?.('sbarSituation', text); onChange(text); }}
             />
           )}
         />
+        {differingLabel('sbarSituation')}
         {sbarSituationError ? <Text style={styles.error}>{sbarSituationError}</Text> : null}
       </View>
       <View style={styles.field}>
@@ -143,10 +166,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
               testID="handover-sbar-background"
               onBlur={onBlur}
               value={value ?? ''}
-              onChangeText={onChange}
+              onChangeText={(text) => { onHumanEdit?.('sbarBackground', text); onChange(text); }}
             />
           )}
         />
+        {differingLabel('sbarBackground')}
         {sbarBackgroundError ? <Text style={styles.error}>{sbarBackgroundError}</Text> : null}
       </View>
       <View style={styles.field}>
@@ -161,10 +185,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
               testID="handover-sbar-assessment"
               onBlur={onBlur}
               value={value ?? ''}
-              onChangeText={onChange}
+              onChangeText={(text) => { onHumanEdit?.('sbarAssessment', text); onChange(text); }}
             />
           )}
         />
+        {differingLabel('sbarAssessment')}
         {sbarAssessmentError ? <Text style={styles.error}>{sbarAssessmentError}</Text> : null}
       </View>
       <View style={styles.field}>
@@ -179,10 +204,11 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
               testID="handover-sbar-recommendation"
               onBlur={onBlur}
               value={value ?? ''}
-              onChangeText={onChange}
+              onChangeText={(text) => { onHumanEdit?.('sbarRecommendation', text); onChange(text); }}
             />
           )}
         />
+        {differingLabel('sbarRecommendation')}
         {sbarRecommendationError ? <Text style={styles.error}>{sbarRecommendationError}</Text> : null}
       </View>
       {!hideLegacyFields ? (
@@ -197,11 +223,12 @@ export const SbarSection: React.FC<SbarSectionProps> = ({
                 multiline
                 onBlur={onBlur}
                 value={value ?? ''}
-                onChangeText={onChange}
+                onChangeText={(text) => { onHumanEdit?.('sbarFullText', text); onChange(text); }}
                 placeholder={t('handover.sbarFullTextPlaceholder')}
               />
             )}
           />
+          {differingLabel('sbarFullText')}
           {sbarFullTextError ? <Text style={styles.error}>{sbarFullTextError}</Text> : null}
         </View>
       ) : null}

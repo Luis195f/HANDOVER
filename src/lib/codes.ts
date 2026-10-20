@@ -106,6 +106,7 @@ export type ObservationCategory =
 export const FHIR_EXTENSION_URLS = {
   CONTEXT_VERSION: 'https://handover.app/fhir/StructureDefinition/handover-context-version',
   ACTIVE_PROFILE: 'https://handover.app/fhir/StructureDefinition/handover-active-profile',
+  SBAR_TEXT_PROVENANCE: 'https://handover.app/fhir/StructureDefinition/handover-sbar-text-provenance',
 } as const;
 
 export type FhirCode = TerminologyCode<string>;

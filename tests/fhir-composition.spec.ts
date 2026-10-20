@@ -1,8 +1,12 @@
 import { readFileSync } from 'node:fs';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { sha256 } from 'js-sha256';
 
-import { buildHandoverBundle } from '@/src/lib/fhir-map';
+import { buildHandoverBundle, buildFhirBundleFromFormData } from '@/src/lib/fhir-map';
+import { validateBundle } from '@/src/lib/fhir-validation';
+import { zHandover } from '@/src/validation/schemas';
+import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { FHIR_CODES, FHIR_EXTENSION_URLS } from '@/src/lib/codes';
 import { PROFILE_REGRESSION_SCENARIOS } from './fixtures/fhir/profileRegressionScenarios';
 
@@ -242,6 +246,75 @@ async function buildScenarioBundle(
 }
 
 describe('FHIR Composition', () => {
+  it('exports only matching section-level provenance and keeps it stable across retries', () => {
+    const accepted = {
+      source: 'external-ai' as const,
+      acceptedBy: 'nurse-1',
+      acceptedAt: '2026-10-20T10:00:00.000Z',
+      decisionHash: sha256('synthetic decision'),
+    };
+    const input = {
+      patientId: 'synthetic-patient',
+      bedsideChecklist: {},
+      sbar: { situation: 'Synthetic situation', background: 'Synthetic background' },
+      closingSummary: 'Synthetic summary',
+      sbarProvenance: {
+        sbarSituation: { ...accepted, contentHash: sha256('Synthetic situation') },
+        sbarBackground: { source: 'clinician-authored' as const, contentHash: sha256('Synthetic background') },
+        closingSummary: { ...accepted, source: 'ai-edited-by-human' as const, contentHash: sha256('Synthetic summary') },
+        sbarFullText: { ...accepted, contentHash: sha256('Prior legacy text') },
+      },
+    };
+    const original = JSON.stringify(input);
+    const options = { now: () => '2026-10-20T10:00:00.000Z' };
+    const first = buildHandoverBundle(input, options);
+    const second = buildHandoverBundle(input, options);
+    expect(first).toEqual(second);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(validateBundle(first).isValid).toBe(true);
+    const observations = first.entry.map((entry) => entry.resource).filter((resource) => resource.resourceType === 'Observation');
+    const sbar = observations.find((resource) => resource.component?.some((item) => item.code.coding.some((coding) => coding.code === 'situation')));
+    const summary = observations.find((resource) => resource.valueString === 'Synthetic summary');
+    expect(sbar?.component?.[0]?.extension?.[0]?.url).toBe(FHIR_EXTENSION_URLS.SBAR_TEXT_PROVENANCE);
+    expect(sbar?.component?.[0]?.extension?.[0]?.extension).toEqual(expect.arrayContaining([
+      { url: 'source', valueString: 'external-ai' },
+      { url: 'acceptedBy', valueString: 'nurse-1' },
+      { url: 'acceptedAt', valueDateTime: accepted.acceptedAt },
+    ]));
+    expect(sbar?.component?.[1]?.extension?.[0]?.extension).toContainEqual({ url: 'source', valueString: 'clinician-authored' });
+    expect(summary?.extension?.[0]?.url).toBe(FHIR_EXTENSION_URLS.SBAR_TEXT_PROVENANCE);
+    expect(summary?.extension?.[0]?.extension).toEqual(expect.arrayContaining([
+      { url: 'source', valueString: 'ai-edited-by-human' },
+      { url: 'decisionHash', valueString: accepted.decisionHash },
+    ]));
+    expect(summary?.extension?.[0]?.extension).not.toContainEqual({ url: 'source', valueString: 'external-ai' });
+
+    const stale = buildHandoverBundle({ ...input, sbarProvenance: { sbarSituation: { ...accepted, contentHash: sha256('different') } } }, options);
+    const staleSbar = stale.entry.map((entry) => entry.resource).find((resource) => resource.resourceType === 'Observation' && resource.component?.some((item) => item.code.coding.some((coding) => coding.code === 'situation')));
+    expect(staleSbar?.component?.[0]?.extension).toBeUndefined();
+  });
+
+  it('carries schema-validated SBAR provenance through the form-data bundle emitter', () => {
+    const formData = zHandover.parse({
+      administrativeData: {
+        unit: 'synthetic-unit', census: 1, staffIn: ['Synthetic nurse A'], staffOut: ['Synthetic nurse B'],
+        shiftStart: '2026-10-20T08:00:00.000Z', shiftEnd: '2026-10-20T12:00:00.000Z', shiftType: 'Mañana',
+      },
+      patientId: 'synthetic-patient', status: 'draft',
+      dxMedical: { system: SNOMED_SYSTEM, code: '195967001', display: 'Neumonía' },
+      dxNursing: '', dxMedicalStructured: [], dxNursingStructured: [],
+      bedsideChecklist: {
+        patientIdentityConfirmed: true, allergiesReviewed: true, linesAndDevicesChecked: true,
+        medicationPlanReviewed: true, safetyMeasuresApplied: true, questionsAnswered: true,
+      },
+      medications: [], treatments: [], risksStructured: [],
+      sbarSituation: 'Synthetic situation',
+      sbarProvenance: { sbarSituation: { source: 'local-deterministic', contentHash: sha256('Synthetic situation') } },
+    });
+    const bundle = buildFhirBundleFromFormData(formData, { now: () => '2026-10-20T12:00:00.000Z' });
+    const sbar = bundle.entry.map((entry) => entry.resource).find((resource) => resource.resourceType === 'Observation' && resource.component?.some((item) => item.code.coding.some((coding) => coding.code === 'situation')));
+    expect(sbar?.component?.[0]?.extension?.[0]?.extension).toContainEqual({ url: 'source', valueString: 'local-deterministic' });
+  });
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
