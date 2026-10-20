@@ -632,11 +632,12 @@ export default function HandoverForm({ navigation, route }: Props) {
       ['sbarAssessment', summary.assessment], ['sbarRecommendation', summary.recommendation],
       ['closingSummary', fullText],
     ];
-    const next: SbarProvenance = {};
+    const previous = form.getValues('sbarProvenance');
+    const next: SbarProvenance = { ...previous };
     for (const [field, text] of entries) {
       if (text.trim()) next[field] = { ...common, contentHash: hashHex(text.trim()) };
+      else delete next[field];
     }
-    const previous = form.getValues('sbarProvenance');
     if (Object.keys(previous ?? {}).length === Object.keys(next).length &&
         entries.every(([field]) => previous?.[field]?.source === next[field]?.source &&
           previous?.[field]?.contentHash === next[field]?.contentHash)) return;

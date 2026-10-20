@@ -506,9 +506,10 @@ describe('HandoverForm SBAR AI traceability', () => {
       view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
     });
 
-    expect(view.queryByText('Resumen automático local basado en los datos del formulario; no es una inferencia clínica de IA.')).toBeNull();
     expect(view.getByText('Texto SBAR generado con IA externa y aceptado por un profesional.')).toBeTruthy();
     const accepted = form.getValues('sbarProvenance');
+    expect(Boolean(view.queryByText('Resumen automático local basado en los datos del formulario; no es una inferencia clínica de IA.')))
+      .toBe(accepted.sbarFullText?.source === 'local-deterministic');
     expect(accepted.sbarSituation).toMatchObject({ source: 'external-ai', acceptedBy: 'nurse-1', decisionHash: expect.any(String) });
     expect(accepted.closingSummary).toMatchObject({ source: 'external-ai', acceptedAt: expect.any(String) });
     expect(accepted.sbarSituation.version).toBeUndefined();
@@ -620,6 +621,49 @@ describe('HandoverForm SBAR AI traceability', () => {
     expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
     await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen breve para el equipo entrante'), '   '));
     expect(form.getValues('sbarProvenance').closingSummary).toBeUndefined();
+  });
+
+  it('preserves verified legacy text across later AI and local SBAR replacements', async () => {
+    generateSbarViaBackendResult.mockResolvedValueOnce({ ok: true, result: {
+      situation: 'First situation', background: 'First background', assessment: 'First assessment',
+      recommendation: 'First recommendation', fullText: 'First AI summary',
+    } }).mockResolvedValueOnce({ ok: true, result: {
+      situation: '   ', background: 'Second background', assessment: 'Second assessment',
+      recommendation: 'Second recommendation', fullText: 'Second AI summary',
+    } }).mockResolvedValueOnce({ ok: false, error: { code: 'UNCONFIGURED' } });
+    const { view, form } = renderHandoverForm({ defaultValuesOverride: validDraft(baseValues) });
+    const accept = async () => {
+      await act(async () => { await view.root.findByType(SbarSection).props.handleGenerateSbarWithAi(); });
+      await act(async () => { view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion(); });
+    };
+    await accept();
+    await waitFor(() => expect(form.getValues('sbarFullText')).toBe('First AI summary'));
+    const copied = form.getValues('sbarProvenance').sbarFullText;
+    expect(copied).toEqual(form.getValues('sbarProvenance').closingSummary);
+    form.setValue('sbarProvenance', { ...form.getValues('sbarProvenance'),
+      sbarFullText: { ...copied, version: 'available-version' } });
+    const originalLegacy = form.getValues('sbarProvenance').sbarFullText;
+
+    await accept();
+    expect(form.getValues('sbarFullText')).toBe('First AI summary');
+    expect(form.getValues('sbarProvenance').sbarFullText).toEqual(originalLegacy);
+    expect(form.getValues('sbarProvenance').sbarSituation).toBeUndefined();
+    expect(form.getValues('sbarProvenance').sbarBackground).toMatchObject({
+      source: 'external-ai', contentHash: sha256('Second background'),
+    });
+    expect(form.getValues('sbarProvenance').closingSummary).toMatchObject({
+      source: 'external-ai', contentHash: sha256('Second AI summary'),
+    });
+    await accept();
+    expect(form.getValues('sbarProvenance').sbarFullText).toEqual(originalLegacy);
+    expect(form.getValues('sbarProvenance').closingSummary.source).toBe('local-deterministic');
+
+    await act(async () => fireEvent.changeText(view.getByPlaceholderText('Resumen SBAR completo'), 'Legacy edited by clinician'));
+    expect(form.getValues('sbarProvenance').sbarFullText).toEqual({
+      ...originalLegacy, source: 'ai-edited-by-human', contentHash: sha256('Legacy edited by clinician'),
+    });
+    const validation = zHandover.safeParse(form.getValues());
+    expect(validation.success ? [] : validation.error.issues.map((issue) => issue.path.join('.'))).toEqual([]);
   });
 
   it('con patientId y unitId válidos muestra revisión humana y registra shown + rejected', async () => {

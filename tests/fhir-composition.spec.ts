@@ -262,6 +262,7 @@ describe('FHIR Composition', () => {
         sbarSituation: { ...accepted, contentHash: sha256('Synthetic situation') },
         sbarBackground: { source: 'clinician-authored' as const, contentHash: sha256('Synthetic background') },
         closingSummary: { ...accepted, source: 'ai-edited-by-human' as const, contentHash: sha256('Synthetic summary') },
+        sbarFullText: { ...accepted, contentHash: sha256('Prior legacy text') },
       },
     };
     const original = JSON.stringify(input);
@@ -286,6 +287,7 @@ describe('FHIR Composition', () => {
       { url: 'source', valueString: 'ai-edited-by-human' },
       { url: 'decisionHash', valueString: accepted.decisionHash },
     ]));
+    expect(summary?.extension?.[0]?.extension).not.toContainEqual({ url: 'source', valueString: 'external-ai' });
 
     const stale = buildHandoverBundle({ ...input, sbarProvenance: { sbarSituation: { ...accepted, contentHash: sha256('different') } } }, options);
     const staleSbar = stale.entry.map((entry) => entry.resource).find((resource) => resource.resourceType === 'Observation' && resource.component?.some((item) => item.code.coding.some((coding) => coding.code === 'situation')));
