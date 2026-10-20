@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sha256 } from "js-sha256";
 
 import { SHIFT_TYPES } from "../types/administrative";
 import { normalizeTerm, SNOMED_SYSTEM, snomedTerms } from "../data/snomed-dict";
@@ -693,6 +694,33 @@ const zDxFreeText = z.preprocess((val) => {
   return '';
 }, z.string());
 
+const zSbarTextProvenance = z.object({
+  source: z.enum(['clinician-authored', 'local-deterministic', 'external-ai', 'ai-edited-by-human']),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  version: z.string().max(80).optional(),
+  acceptedBy: z.string().min(1).max(160).optional(),
+  acceptedAt: z.string().datetime().optional(),
+  decisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).superRefine((value, ctx) => {
+  if ((value.source === 'external-ai' || value.source === 'ai-edited-by-human') &&
+      (!value.acceptedBy || !value.acceptedAt || !value.decisionHash)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Falta la aceptación verificable del texto IA.' });
+  }
+});
+
+const zSbarProvenance = z.object({
+  sbarSituation: zSbarTextProvenance.optional(),
+  sbarBackground: zSbarTextProvenance.optional(),
+  sbarAssessment: zSbarTextProvenance.optional(),
+  sbarRecommendation: zSbarTextProvenance.optional(),
+  closingSummary: zSbarTextProvenance.optional(),
+  sbarFullText: zSbarTextProvenance.optional(),
+}).optional();
+
+export type SbarTextProvenance = z.infer<typeof zSbarTextProvenance>;
+export type SbarProvenance = NonNullable<z.infer<typeof zSbarProvenance>>;
+export type SbarProvenanceField = keyof SbarProvenance;
+
 export const zHandoverObject = z.object({
   administrativeData: zAdministrativeData,
 
@@ -714,6 +742,7 @@ export const zHandoverObject = z.object({
   sbarAssessment: optionalTrimmedString(800).optional(),
   sbarRecommendation: optionalTrimmedString(800).optional(),
   sbarFullText: optionalTrimmedString(2000).optional(),
+  sbarProvenance: zSbarProvenance,
 
   meds: optionalTrimmedString(1000).optional(),
 
@@ -759,6 +788,13 @@ export const zHandoverObject = z.object({
 });
 
 export const zHandoverBase = zHandoverObject.superRefine((value, ctx) => {
+  for (const [field, provenance] of Object.entries(value.sbarProvenance ?? {})) {
+    if (!provenance) continue;
+    const text = value[field as SbarProvenanceField];
+    if (typeof text !== 'string' || sha256(text.trim()) !== provenance.contentHash) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sbarProvenance', field], message: 'La procedencia no corresponde al texto actual.' });
+    }
+  }
   // BEGIN HANDOVER D1 – BedsideChecklist rules
   const checklist = value.bedsideChecklist ?? ({} as Record<string, unknown>);
 

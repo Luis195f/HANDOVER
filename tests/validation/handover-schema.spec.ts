@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { sha256 } from 'js-sha256';
 
 import { SNOMED_SYSTEM } from "@/src/data/snomed-dict";
 import { DEMO_RECEIVER_USER_ID, DEMO_USER_ID } from '@/src/demo/fixtures';
@@ -155,6 +156,20 @@ const baseValidData: HandoverFormData = {
 };
 
 describe("zHandover", () => {
+  it('preserves verified SBAR metadata and rejects a mismatched or unaccepted AI claim', () => {
+    const record = {
+      source: 'external-ai' as const,
+      contentHash: sha256(baseValidData.sbarSituation ?? ''),
+      acceptedBy: 'nurse-1',
+      acceptedAt: '2026-10-20T10:00:00.000Z',
+      decisionHash: sha256('synthetic decision'),
+    };
+    const withProvenance = { ...baseValidData, status: 'draft' as const, sbarProvenance: { sbarSituation: record } };
+    expect(zHandover.parse(withProvenance).sbarProvenance?.sbarSituation).toEqual(record);
+    expect(zHandover.safeParse({ ...withProvenance, sbarSituation: 'changed' }).success).toBe(false);
+    expect(zHandover.safeParse({ ...withProvenance, sbarProvenance: { sbarSituation: { ...record, acceptedBy: undefined } } }).success).toBe(false);
+    expect(zHandover.parse({ ...baseValidData, status: 'draft' }).sbarProvenance).toBeUndefined();
+  });
   it("acepta datos clínicos completos y coherentes", () => {
     const result = zHandover.safeParse(baseValidData);
     expect(result.success).toBe(true);

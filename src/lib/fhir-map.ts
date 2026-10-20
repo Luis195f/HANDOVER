@@ -35,7 +35,7 @@ import type {
   DeviceItem,
   PsychosocialCare,
 } from '../types/handover';
-import { zHandover } from '../validation/schemas';
+import { zHandover, type SbarProvenance, type SbarTextProvenance } from '../validation/schemas';
 import { signatureSchema } from './fhir/validators';
 import { isSupplementalOxygen } from './oxygen';
 import { getSpecialtyOverlayDefinition, getUnitProfileDefinition } from '../config/profiles';
@@ -238,6 +238,7 @@ type Extension = {
   valueBoolean?: boolean;
   valueInteger?: number;
   valueString?: string;
+  valueDateTime?: string;
 };
 
 type Signature = {
@@ -278,6 +279,7 @@ type Period = {
 
 type ObservationComponent = {
   code: CodeableConcept;
+  extension?: Extension[];
   valueQuantity?: Quantity;
   valueCodeableConcept?: CodeableConcept;
   valueString?: string;
@@ -286,6 +288,7 @@ type ObservationComponent = {
 
 type Observation = {
   resourceType: 'Observation';
+  extension?: Extension[];
   id?: string;
   meta?: Meta;
   status: 'final' | 'registered' | 'preliminary';
@@ -872,6 +875,7 @@ type CompositionValues = {
   composition?: CompositionInput;
   closingSummary?: string | null;
   sbar?: SbarValues;
+  sbarProvenance?: SbarProvenance;
   administrativeData?: AdministrativeData;
   psychosocial?: PsychosocialCare;
   signatures?: HandoverSignatures;
@@ -949,6 +953,7 @@ export type HandoverValues = {
   composition?: CompositionInput;
   closingSummary?: string | null;
   sbar?: SbarValues;
+  sbarProvenance?: SbarProvenance;
   signatures?: HandoverSignatures;
   nutrition?: NutritionInfo;
   elimination?: EliminationInfo;
@@ -1308,6 +1313,7 @@ const compositionMapperDependencies: CompositionMapperDependencies = {
   compositionSectionConcept,
   handoverObservationCodes: HANDOVER_OBSERVATION_CODES,
   surveyCategoryConcept,
+  sbarProvenanceUrl: FHIR_EXTENSION_URLS.SBAR_TEXT_PROVENANCE,
   warnCompositionSectionOmitted,
 };
 
@@ -1959,8 +1965,8 @@ function mapBedsideChecklistObservation(
   return mapBedsideChecklistObservationImpl(compositionMapperDependencies, checklist, context);
 }
 
-function mapSummaryObservation(summary: string | null | undefined, context: MappingContext): Observation | null {
-  return mapSummaryObservationImpl(compositionMapperDependencies, summary, context);
+function mapSummaryObservation(summary: string | null | undefined, context: MappingContext, provenance?: SbarTextProvenance): Observation | null {
+  return mapSummaryObservationImpl(compositionMapperDependencies, summary, context, provenance);
 }
 
 function mapPsychosocialObservation(
@@ -2079,14 +2085,14 @@ export function buildHandoverBundle(
     mappingContext,
   );
   const sbarObservations = mapSbarObservations(
-    { sbar: values.sbar } as CompositionValues,
+    { sbar: values.sbar, sbarProvenance: values.sbarProvenance } as CompositionValues,
     mappingContext,
   );
   const bedsideChecklistObservation = mapBedsideChecklistObservation(
     values.bedsideChecklist,
     mappingContext,
   );
-  const summaryObservation = mapSummaryObservation(values.closingSummary, mappingContext);
+  const summaryObservation = mapSummaryObservation(values.closingSummary, mappingContext, values.sbarProvenance?.closingSummary ?? values.sbarProvenance?.sbarFullText);
   const psychosocialObservation = mapPsychosocialObservation(values.psychosocial, mappingContext);
   const clinicalContextObservation = mapClinicalContextObservation(clinicalContext, mappingContext);
 
@@ -3171,6 +3177,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
         assessment: data.sbarAssessment,
         recommendation: data.sbarRecommendation,
       },
+      sbarProvenance: data.sbarProvenance,
     } as CompositionValues,
     mappingContext,
   );
@@ -3178,7 +3185,7 @@ export function buildFhirBundleFromFormData(data: HandoverData, options?: BuildO
     (data as { bedsideChecklist?: HandoverBedsideChecklist }).bedsideChecklist ?? {},
     mappingContext,
   );
-  const summaryObservation = mapSummaryObservation(data.closingSummary ?? data.evolution, mappingContext);
+  const summaryObservation = mapSummaryObservation(data.closingSummary ?? data.evolution, mappingContext, data.sbarProvenance?.closingSummary ?? data.sbarProvenance?.sbarFullText);
   const psychosocialObservation = mapPsychosocialObservation(data.psychosocial, mappingContext);
   const medications = mapMedicationStatements(
     {

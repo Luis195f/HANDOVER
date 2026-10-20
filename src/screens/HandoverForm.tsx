@@ -85,7 +85,7 @@ import {
 import { usePatientSummary } from '@/src/hooks/usePatientSummary';
 import type { PatientSummary } from '@/src/lib/fhir-client';
 import { useZodForm } from '@/src/validation/form-hooks';
-import { zHandover, type HandoverValues } from '@/src/validation/schemas';
+import { zHandover, type HandoverValues, type SbarProvenanceField, type SbarTextProvenance } from '@/src/validation/schemas';
 import { normalizeLegacyHandoverPayload } from '@/src/validation/normalization';
 import { DEFAULT_BEDSIDE_CHECKLIST_ITEMS } from '@/src/config/bedsideChecklist';
 import type { SignaturePadValue } from '@/src/components/SignaturePad';
@@ -563,6 +563,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       sbarAssessment: demoPrefill?.sbarAssessment ?? '',
       sbarRecommendation: demoPrefill?.sbarRecommendation ?? '',
       sbarFullText: '',
+      sbarProvenance: undefined,
       vitals: demoPrefill?.vitals ?? prefilledVitals ?? {},
       oxygenTherapy: prefilledValuesParam?.oxygenTherapy ?? {},
       devices: demoPrefill?.devices ?? [],
@@ -603,6 +604,45 @@ export default function HandoverForm({ navigation, route }: Props) {
 ]);
 
   const form = useZodForm(zHandover, defaultValues);
+  const setSbarProvenance = (field: SbarProvenanceField, text: string, provenance?: Omit<SbarTextProvenance, 'contentHash'>, markDirty = true) => {
+    const existing = form.getValues('sbarProvenance') ?? {};
+    const next = { ...existing };
+    if (text.trim() && provenance) next[field] = { ...provenance, contentHash: hashHex(text.trim()) };
+    else delete next[field];
+    form.setValue('sbarProvenance', next, { shouldDirty: markDirty });
+  };
+  const onHumanSbarEdit = (field: SbarProvenanceField, text: string) => {
+    if (form.getValues(field) === text) return;
+    const prior = form.getValues('sbarProvenance')?.[field];
+    const current = form.getValues(field);
+    const fromAi = typeof current === 'string' && prior?.contentHash === hashHex(current.trim()) &&
+      (prior.source === 'external-ai' || prior.source === 'ai-edited-by-human');
+    setSbarProvenance(field, text, fromAi
+      ? { source: 'ai-edited-by-human', acceptedBy: prior.acceptedBy, acceptedAt: prior.acceptedAt, decisionHash: prior.decisionHash, version: prior.version }
+      : { source: 'clinician-authored' });
+  };
+  const setGeneratedSbarProvenance = (summary: SBARSummary, fullText: string, source: 'local-deterministic' | 'external-ai', decisionHash?: string, accepted?: { by: string; at: string }, markDirty = true) => {
+    const common = {
+      source,
+      ...(decisionHash ? { decisionHash } : {}),
+      ...(accepted ? { acceptedBy: accepted.by, acceptedAt: accepted.at } : {}),
+    };
+    const next = {
+      sbarSituation: { ...common, contentHash: hashHex(summary.situation.trim()) },
+      sbarBackground: { ...common, contentHash: hashHex(summary.background.trim()) },
+      sbarAssessment: { ...common, contentHash: hashHex(summary.assessment.trim()) },
+      sbarRecommendation: { ...common, contentHash: hashHex(summary.recommendation.trim()) },
+      closingSummary: { ...common, contentHash: hashHex(fullText.trim()) },
+    };
+    const previous = form.getValues('sbarProvenance');
+    if (previous?.closingSummary?.source === source &&
+        previous.sbarSituation?.contentHash === next.sbarSituation.contentHash &&
+        previous.sbarBackground?.contentHash === next.sbarBackground.contentHash &&
+        previous.sbarAssessment?.contentHash === next.sbarAssessment.contentHash &&
+        previous.sbarRecommendation?.contentHash === next.sbarRecommendation.contentHash &&
+        previous.closingSummary.contentHash === next.closingSummary.contentHash) return;
+    form.setValue('sbarProvenance', next, { shouldDirty: markDirty });
+  };
   const { watch, reset, getValues } = form;
   const { control, formState } = form;
   const patientIdValue = form.watch('patientId');
@@ -773,6 +813,8 @@ export default function HandoverForm({ navigation, route }: Props) {
       const sbarLegacy = form.getValues('sbarFullText')?.trim() ?? '';
       if (summary && !sbarLegacy) {
         form.setValue('sbarFullText', summary, { shouldDirty: false, shouldValidate: false });
+        const provenance = form.getValues('sbarProvenance')?.closingSummary;
+        if (provenance?.contentHash === hashHex(summary)) setSbarProvenance('sbarFullText', summary, provenance, false);
       }
     }
 
@@ -934,7 +976,7 @@ export default function HandoverForm({ navigation, route }: Props) {
         // Importante: NO pisar si ya hay datos
         const current = currentGetValues();
         const isEmpty = !current || Object.keys(current).length === 0;
-        if (isEmpty || (!currentPrefill?.rrReview && !currentForm.formState.isDirty && (review || !Number.isInteger(draft.vitals?.rr) && draft.vitals?.rr != null))) {
+        if (isEmpty || (!currentForm.formState.isDirty && ((!currentPrefill && !demoPrefill) || (!currentPrefill?.rrReview && (review || !Number.isInteger(draft.vitals?.rr) && draft.vitals?.rr != null))))) {
           currentRrGate.restore(draft.vitals?.rr, review);
           const normalizedDxMedical =
             draft?.dxMedical === undefined ? undefined : normalizeLegacySnomedCoding(draft.dxMedical);
@@ -958,7 +1000,7 @@ export default function HandoverForm({ navigation, route }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [draftKey, patientIdValue, administrativeUnitValue, prefilledValuesParam?.rrReview]);
+  }, [draftKey, patientIdValue, administrativeUnitValue, prefilledValuesParam?.rrReview, demoPrefill]);
 
   type BedsideChecklistSnapshot = HandoverFormValues['bedsideChecklist'] &
     Record<string, boolean | string | undefined>;
@@ -1114,7 +1156,10 @@ export default function HandoverForm({ navigation, route }: Props) {
       },
       closingSummary: {
         get: () => form.getValues('closingSummary') ?? '',
-        set: (text: string) => form.setValue('closingSummary', text, { shouldDirty: true, shouldValidate: true }),
+        set: (text: string) => {
+          onHumanSbarEdit('closingSummary', text);
+          form.setValue('closingSummary', text, { shouldDirty: true, shouldValidate: true });
+        },
       },
       incidents: {
         get: () => {
@@ -1544,11 +1589,19 @@ export default function HandoverForm({ navigation, route }: Props) {
     if (!pendingSbarSuggestion || pendingRrRevision.current !== rrGate.capture() || pendingOxygenRevision.current !== summaryOxygenRevisionRef.current) return;
 
     const { summary, fullText, mode } = pendingSbarSuggestion;
+    const actor = signatureUser?.userId;
+    if (mode === 'ai' && !actor) {
+      setSbarHelperMessage(t('handover.sbarAiTraceabilityRequired'));
+      return;
+    }
     form.setValue('sbarSituation', summary.situation, { shouldDirty: true, shouldValidate: true });
     form.setValue('sbarBackground', summary.background, { shouldDirty: true, shouldValidate: true });
     form.setValue('sbarAssessment', summary.assessment, { shouldDirty: true, shouldValidate: true });
     form.setValue('sbarRecommendation', summary.recommendation, { shouldDirty: true, shouldValidate: true });
     form.setValue('closingSummary', fullText, { shouldDirty: true, shouldValidate: true });
+    setGeneratedSbarProvenance(summary, fullText, mode === 'ai' ? 'external-ai' : 'local-deterministic', pendingSbarSuggestion.hash,
+      actor ? { by: actor, at: new Date().toISOString() } : undefined);
+    lastAutomaticSbarFingerprintRef.current = null;
 
     clearPendingSbarSuggestion('accepted', 'direct_apply');
     setSbarAiError(null);
@@ -1660,6 +1713,8 @@ export default function HandoverForm({ navigation, route }: Props) {
     form.setValue('sbarAssessment', generated.summary.assessment, flags);
     form.setValue('sbarRecommendation', generated.summary.recommendation, flags);
     form.setValue('closingSummary', generated.fullText, flags);
+    setGeneratedSbarProvenance(generated.summary, generated.fullText, 'local-deterministic', undefined,
+      shouldDirty && signatureUser?.userId ? { by: signatureUser.userId, at: new Date().toISOString() } : undefined, shouldDirty);
     lastAutomaticSbarFingerprintRef.current = generated.fingerprint;
     setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
     setSbarAiError(null);
@@ -1740,6 +1795,7 @@ export default function HandoverForm({ navigation, route }: Props) {
       form.setValue('sbarAssessment', generated.summary.assessment, flags);
       form.setValue('sbarRecommendation', generated.summary.recommendation, flags);
       form.setValue('closingSummary', generated.fullText, flags);
+      setGeneratedSbarProvenance(generated.summary, generated.fullText, 'local-deterministic', undefined, undefined, false);
       lastAutomaticSbarFingerprintRef.current = generated.fingerprint;
       setSbarHelperMessage(t('handover.sbarAutoGeneratedHelper'));
     } catch {
@@ -2069,6 +2125,7 @@ export default function HandoverForm({ navigation, route }: Props) {
           assessment: values.sbarAssessment,
           recommendation: values.sbarRecommendation,
         },
+        sbarProvenance: values.sbarProvenance,
         painAssessment: values.painAssessment,
         signatures: values.signatures,
         attachments: values.attachments ?? [],
@@ -2505,6 +2562,8 @@ export default function HandoverForm({ navigation, route }: Props) {
               sbarFullTextError={sbarFullTextError}
               hideLegacyFields={!showLegacySbarNarrative}
               isDemo={isDemoSession}
+              provenance={watchedValues.sbarProvenance}
+              onHumanEdit={onHumanSbarEdit}
             />
           </CollapsibleSection>
         </View>

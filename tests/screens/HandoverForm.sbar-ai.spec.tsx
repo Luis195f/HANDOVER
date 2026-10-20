@@ -1,6 +1,7 @@
 import React from 'react';
-import { act, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sha256 } from 'js-sha256';
 
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
 import { SbarSection } from '@/src/screens/handover/SbarSection';
@@ -376,7 +377,7 @@ function renderHandoverForm(options?: {
     />,
   );
 
-  return { view, navigation };
+  return { view, navigation, form: formInstance };
 }
 
 describe('HandoverForm SBAR AI traceability', () => {
@@ -461,7 +462,7 @@ describe('HandoverForm SBAR AI traceability', () => {
       },
     });
 
-    const { view } = renderHandoverForm();
+    const { view, form, navigation } = renderHandoverForm();
 
     const sbarSection = view.root.findByType(SbarSection);
     await act(async () => {
@@ -493,6 +494,31 @@ describe('HandoverForm SBAR AI traceability', () => {
       view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
     });
 
+    expect(view.queryByText('Resumen automático local basado en los datos del formulario; no es una inferencia clínica de IA.')).toBeNull();
+    expect(view.getByText('Texto SBAR generado con IA externa y aceptado por un profesional.')).toBeTruthy();
+    const accepted = form.getValues('sbarProvenance');
+    expect(accepted.sbarSituation).toMatchObject({ source: 'external-ai', acceptedBy: 'nurse-1', decisionHash: expect.any(String) });
+    expect(accepted.closingSummary).toMatchObject({ source: 'external-ai', acceptedAt: expect.any(String) });
+    expect(accepted.sbarSituation.version).toBeUndefined();
+    const saved = JSON.parse(JSON.stringify(form.getValues()));
+    expect(saved.sbarProvenance).toEqual(accepted);
+
+    await act(async () => {
+      fireEvent.changeText(view.getByTestId('handover-sbar-situation'), 'IA situation edited');
+      form.setValue('sbarSituation', 'IA situation edited');
+    });
+    expect(form.getValues('sbarProvenance').sbarSituation).toMatchObject({
+      source: 'ai-edited-by-human',
+      acceptedBy: 'nurse-1',
+      acceptedAt: accepted.sbarSituation.acceptedAt,
+      decisionHash: accepted.sbarSituation.decisionHash,
+    });
+    expect(form.getValues('sbarProvenance').sbarBackground.source).toBe('external-ai');
+    await act(async () => {
+      view.update(<HandoverForm navigation={navigation} route={{ key: 'sbar-ai-traceability', name: 'HandoverForm', params: { patientId: 'pat-1', unitId: 'unit-1' } } as any} />);
+    });
+    expect(view.getByText('Texto asistido por IA externa y editado por un profesional.')).toBeTruthy();
+
     await waitFor(() => {
       expect(logClinicalDecision).toHaveBeenNthCalledWith(
         2,
@@ -518,7 +544,8 @@ describe('HandoverForm SBAR AI traceability', () => {
       },
     });
 
-    const { view } = renderHandoverForm();
+    const { view, form } = renderHandoverForm();
+    const existingProvenance = JSON.parse(JSON.stringify(form.getValues('sbarProvenance') ?? null));
 
     const sbarSection = view.root.findByType(SbarSection);
     await act(async () => {
@@ -544,6 +571,7 @@ describe('HandoverForm SBAR AI traceability', () => {
     await act(async () => {
       view.root.findByType(SbarSection).props.onRejectPendingSbarSuggestion();
     });
+    expect(form.getValues('sbarProvenance') ?? null).toEqual(existingProvenance);
 
     await waitFor(() => {
       expect(logClinicalDecision).toHaveBeenNthCalledWith(
@@ -557,5 +585,44 @@ describe('HandoverForm SBAR AI traceability', () => {
         }),
       );
     });
+  });
+
+  it('keeps imported SBAR unverified until a clinician edits the affected section', async () => {
+    const { view, form } = renderHandoverForm({ defaultValuesOverride: baseValues });
+    expect(view.getByText('Procedencia de este texto no acreditada.')).toBeTruthy();
+    expect(form.getValues('sbarProvenance')).toBeUndefined();
+
+    await act(async () => {
+      fireEvent.changeText(view.getByTestId('handover-sbar-situation'), 'clinical edit');
+      form.setValue('sbarSituation', 'clinical edit');
+    });
+    expect(form.getValues('sbarProvenance').sbarSituation.source).toBe('clinician-authored');
+    expect(form.getValues('sbarProvenance').sbarBackground).toBeUndefined();
+  });
+
+  it('renders restored provenance from the form values rather than the demo flag', () => {
+    const { view } = renderHandoverForm({ defaultValuesOverride: {
+      ...baseValues,
+      closingSummary: 'Restored external SBAR',
+      sbarProvenance: { closingSummary: {
+        source: 'external-ai', contentHash: sha256('Restored external SBAR'),
+        acceptedBy: 'nurse-1', acceptedAt: '2026-10-20T10:00:00.000Z', decisionHash: sha256('synthetic decision'),
+      } },
+    } });
+    expect(view.getByText('Texto SBAR generado con IA externa y aceptado por un profesional.')).toBeTruthy();
+    expect(view.queryByText('Resumen automático local basado en los datos del formulario; no es una inferencia clínica de IA.')).toBeNull();
+  });
+
+  it('records a deterministic fallback as local rather than external AI', async () => {
+    generateSbarViaBackendResult.mockResolvedValue({ ok: false, error: { code: 'UNCONFIGURED' } });
+    const { view, form } = renderHandoverForm();
+    await act(async () => {
+      await view.root.findByType(SbarSection).props.handleGenerateSbarWithAi();
+    });
+    await act(async () => {
+      view.root.findByType(SbarSection).props.onAcceptPendingSbarSuggestion();
+    });
+    expect(form.getValues('sbarProvenance').sbarSituation.source).toBe('local-deterministic');
+    expect(view.getByText('Resumen automático local basado en los datos del formulario; no es una inferencia clínica de IA.')).toBeTruthy();
   });
 });
