@@ -13,7 +13,6 @@ vi.mock('@/src/lib/fhir-client', () => ({
 type State = ReturnType<typeof usePatientSummary>;
 
 const TestComponent = ({ patientId }: { patientId?: string }) => {
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const state = usePatientSummary(patientId);
   (TestComponent as any).state = state as State;
   return null;

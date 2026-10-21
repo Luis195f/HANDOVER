@@ -44,11 +44,27 @@ jobs:
           } > artifacts/pilot-gate-toolchain.txt
 
       - name: Type check
+        id: typecheck
         run: pnpm -w typecheck
 
-      - name: Lint
+      - name: Lint JavaScript (blocking)
+        id: lint_js
         run: pnpm -w lint:ci
 
+      - name: Measure TypeScript ESLint baseline
+        id: lint_ts
+        run: pnpm -w lint:ts:baseline
+
+      - name: Upload TypeScript ESLint baseline
+        if: always() && hashFiles('artifacts/eslint-ts-baseline.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-typescript-baseline
+          path: |
+            artifacts/eslint-ts-baseline.json
+            artifacts/eslint-ts-baseline.md
+          if-no-files-found: error
+          retention-days: 7
       - name: Sensitive any guard
         run: pnpm -w gate:any-sensitive
 
@@ -151,8 +167,9 @@ jobs:
             echo
             echo "## Gate"
             echo
-            echo "- Commands: pnpm -w typecheck, pnpm -w lint:ci, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
-            echo "- Scope: strict TypeScript gate, ESLint with zero warnings, explicit sensitive-any guard, pilot-grade frontend suites with coverage, browser E2E and representative FHIR fixture validation."
+            echo "- Commands: pnpm -w typecheck, pnpm -w lint:ci, pnpm -w lint:ts:baseline, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
+            echo "- Scope: independent blocking TypeScript typecheck; blocking JavaScript ESLint with zero warnings; non-blocking TypeScript ESLint rule debt baseline; explicit sensitive-any guard, pilot-grade frontend suites with coverage, browser E2E and representative FHIR fixture validation."
+            echo "- Results: typecheck=${{ steps.typecheck.outcome }}, JavaScript lint=${{ steps.lint_js.outcome }}, TypeScript baseline execution=${{ steps.lint_ts.outcome }}."
             echo
             echo "## Reproducibility"
             echo
@@ -169,6 +186,11 @@ jobs:
               echo "- coverage-pilot: missing cobertura evidence."
             fi
             echo "- coverage-badge: one-file SVG snapshot of frontend pilot coverage."
+            if [ "${{ steps.lint_ts.outcome }}" = success ] && [ -f artifacts/eslint-ts-baseline.md ]; then
+              cat artifacts/eslint-ts-baseline.md
+            else
+              echo "- TypeScript ESLint baseline: not available; execution or configuration did not succeed."
+            fi
             echo "- playwright-evidence: HTML report plus raw Playwright test-results when generated."
             if [ -f artifacts/fhir-validation.txt ]; then
               echo "- fhir-validation: plain-text transcript of validate:fhir over representative bundles."
@@ -189,4 +211,3 @@ jobs:
             artifacts/pilot-gate-toolchain.txt
           if-no-files-found: error
           retention-days: 7
-
