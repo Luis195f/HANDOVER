@@ -5,6 +5,11 @@ const { ESLint } = require('eslint');
 const compareCounts = (left, right) =>
   right.errors + right.warnings - left.errors - left.warnings || left.name.localeCompare(right.name);
 
+const isUnavailableRule = (message) => message.ruleId && (
+  message.message === `Definition for rule '${message.ruleId}' was not found.` ||
+  message.message.startsWith(`Rule '${message.ruleId}' was removed and replaced by: `)
+);
+
 async function main() {
   await fs.rm('artifacts/eslint-ts-baseline.json', { force: true });
   await fs.rm('artifacts/eslint-ts-baseline.md', { force: true });
@@ -21,11 +26,11 @@ async function main() {
     throw new Error('ESLint did not analyze both TypeScript and TSX files');
   }
 
-  const fatal = results.flatMap((result) =>
-    result.messages.filter((message) => message.fatal).map((message) =>
+  const invalid = results.flatMap((result) =>
+    result.messages.filter((message) => message.fatal || isUnavailableRule(message)).map((message) =>
       `${path.relative(process.cwd(), result.filePath)}: ${message.message}`));
-  if (fatal.length > 0) {
-    throw new Error(`ESLint configuration or parsing failed:\n${fatal.join('\n')}`);
+  if (invalid.length > 0) {
+    throw new Error(`ESLint configuration or parsing failed:\n${invalid.join('\n')}`);
   }
 
   const byRule = new Map();

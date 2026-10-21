@@ -256,6 +256,11 @@ describe('NEWS2 AI oxygen serialization parity', () => {
       }));
       const screen = render(<HandoverForm navigation={navigation()}
         route={{ key: 'section-races', name: 'HandoverForm', params: { patientId: 'synthetic-section-races', unitId: 'icu', prefilledValues } }} />);
+      await act(async () => { await getHandoverDraft<RrDraft>('synthetic-section-races', 'icu'); });
+      await waitFor(() => {
+        expect(screen.queryByText('Comprobando almacenamiento del borrador; persistencia no confirmada.')).toBeNull();
+        expect(screen.queryByText('No se pudo leer el borrador; guardado automático bloqueado.')).toBeNull();
+      });
       if (!screen.queryByText('Sugerencias IA de cuidados')) fireEvent.press(screen.getByText('Diagnósticos médicos/ enfermería'));
       const panel = (section: Section) => {
         const panels = screen.root.findAllByType(ClinicalSuggestions);
@@ -265,7 +270,10 @@ describe('NEWS2 AI oxygen serialization parity', () => {
       const start = async (section: Section, expectNetwork = true) => {
         const previousRequests = provider.mock.calls.length;
         act(() => { void panel(section).onRefresh(); });
-        if (expectNetwork) await waitFor(() => expect(provider).toHaveBeenCalledTimes(previousRequests + 1));
+        if (expectNetwork) await waitFor(() => {
+          expect(provider).toHaveBeenCalledTimes(previousRequests + 1);
+          expect(pending).toHaveLength(previousRequests + 1);
+        });
       };
       const finish = async (index: number, label: string, failure = false) => {
         await act(async () => {

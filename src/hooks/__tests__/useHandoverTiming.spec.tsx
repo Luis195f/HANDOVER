@@ -13,7 +13,6 @@ const TestComponent = ({
   sender: (input: { sectionId: string; durationMs: number; unitId?: string; requestId?: string }) => Promise<unknown>;
   now: () => number;
 }) => {
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const state = useHandoverTiming({ enabled, sender, now });
   (TestComponent as any).state = state;
   return null;
