@@ -8,7 +8,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
+    "lint": "eslint \"**/*.{js,jsx,mjs,cjs}\"",
+    "lint:ts:baseline": "node scripts/eslint-ts-baseline.cjs",
     "test:legacy": "jest --config jest.config.cjs --passWithNoTests",
     "test": "vitest run --config vitest.pilot.config.ts",
     "test:watch": "vitest --config vitest.pilot.config.ts",
@@ -33,7 +34,7 @@
     "quality:pilot:ci": "pnpm -w typecheck && pnpm -w lint:ci && pnpm -w gate:any-sensitive && pnpm -w test:pilot:coverage:ci && pnpm -w test:e2e && pnpm -w validate:fhir",
     "quality:release": "pnpm -w quality:tree-hygiene && pnpm -w quality:pilot:ci && pnpm -w quality:backend:coverage",
     "test:e2e": "playwright test",
-    "lint:ci": "eslint . --max-warnings=0"
+    "lint:ci": "eslint \"**/*.{js,jsx,mjs,cjs}\" --max-warnings=0"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -104,6 +105,7 @@
     "babel-plugin-module-resolver": "^5.0.2",
     "babel-preset-expo": "^54.0.10",
     "eslint": "^9.39.1",
+    "typescript-eslint": "8.68.0",
     "jest": "29.7.0",
     "jest-expo": "54.0.16",
     "jsdom": "^27.0.0",

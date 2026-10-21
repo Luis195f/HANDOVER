@@ -1,3 +1,5 @@
+const tseslint = require('typescript-eslint');
+
 module.exports = [
   {
     ignores: [
@@ -19,7 +21,6 @@ module.exports = [
       '**/android/**',
       '**/ios/**',
       '**/*.d.ts',
-      '**/*.{ts,tsx}',
     ],
   },
   {
@@ -60,5 +61,8 @@ module.exports = [
       ],
     },
   },
+  ...tseslint.configs.recommended.map((config) => ({
+    ...config,
+    files: ['**/*.{ts,tsx}'],
+  })),
 ];
-
