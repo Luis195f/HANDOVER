@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const BASELINE_PATH = path.resolve(process.cwd(), 'scripts/sensitive-any-baseline.json');
 const WRITE_BASELINE = process.argv.includes('--write-baseline');
-const MATCH_PATTERN = /\bany\b|@ts-ignore|@ts-nocheck/g;
+const MATCH_PATTERN = /\bany\b|@ts-ignore|@ts-nocheck|@ts-expect-error/g;
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx']);
 const TARGETS = [
   'src/lib/auth.ts',
@@ -159,22 +159,21 @@ const removedEntries = uniqueEntries(baseline.entries).filter((entry) => {
 });
 
 if (unexpectedEntries.length > 0) {
-  console.error('Sensitive any gate failed. Review the new usages before merging:');
+  console.error('Sensitive type-escape gate failed. Review the new usages before merging:');
   unexpectedEntries.forEach((entry) => {
     const key = entryKey(entry);
     const baselineCount = baselineCounts.get(key) ?? 0;
     const currentCount = currentCounts.get(key) ?? 0;
     console.error(`- ${entry.file} [${entry.kind}] (+${currentCount - baselineCount}): ${entry.text.trim()}`);
   });
-  console.error('If an explicit any is truly required, document the reason and refresh the baseline with `pnpm gate:any-sensitive:write`.');
+  console.error('If a type escape is truly required, document the reason and review the baseline change explicitly.');
   process.exit(1);
 }
 
-console.log(`Sensitive any gate passed (${currentEntries.length} baseline entries, no regressions).`);
+console.log(`Sensitive type-escape gate passed (${currentEntries.length} baseline entries, no regressions).`);
 if (removedEntries.length > 0) {
   console.log('Info: baseline can be reduced because some legacy usages disappeared:');
   removedEntries.forEach((entry) => {
     console.log(`- ${entry.file} [${entry.kind}]: ${entry.text.trim()}`);
   });
 }
-
