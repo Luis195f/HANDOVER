@@ -25,7 +25,13 @@
 - `pnpm -w test:smoke:forms`: smoke rápido del flujo crítico de `HandoverForm`.
 - `pnpm -w test:legacy`: Jest legacy solo para `jest-tests/**` o cuando se toca compatibilidad histórica que todavía no migró a Vitest.
 - `python -m pytest --ds=backend.settings --disable-socket --allow-hosts=127.0.0.1,localhost backend tests`: runner backend más cercano a GitHub Actions.
-- `pnpm -w lint:ci` sigue siendo estricto (`--max-warnings=0`), pero ahora ignora caches y artefactos generados (`.pytest_cache`, `artifacts`, `playwright-report`, `test-results`, `htmlcov`) para no convertir residuos locales en ruido del gate.
+- `pnpm -w lint:ci` encadena ESLint JavaScript estricto (`--max-warnings=0`) y el gate TypeScript/TSX descrito abajo; ignora caches y artefactos generados (`.pytest_cache`, `artifacts`, `playwright-report`, `test-results`, `htmlcov`).
+
+## ESLint TypeScript (C09B)
+
+`lint:ci` encadena `lint:js:ci` y `lint:ts:ci`; ambos bloquean el comando local y CI. El typecheck sigue siendo independiente. El gate TS analiza TS y TSX con la configuración `typescript-eslint@8.68.0` recomendada: sus reglas son bloqueantes salvo `no-explicit-any`, `no-unused-vars` y `no-require-imports`, que siguen como deuda medida en `lint:ts:baseline` (no como pases limpios). Entre las reglas bloqueantes están `ban-ts-comment`, `no-empty-object-type`, `no-extra-non-null-assertion`, `no-unsafe-declaration-merging`, `no-unsafe-function-type`, `no-wrapper-object-types` y las demás reglas recomendadas no exceptuadas.
+
+Tres diagnósticos anteriores no suprimidos se admiten por **ruta, regla y línea de código exacta**, una vez cada uno: `no-empty-object-type` en `src/lib/priority.ts`, `triple-slash-reference` en `vitest.setup.ts` y `prefer-const` en `src/lib/prefill.ts`. Otra infracción, incluso en el mismo archivo, bloquea; una excepción que ya no corresponda a un diagnóstico también falla hasta retirarla. No se regeneran automáticamente estas excepciones. Persisten tres directivas inline de una sola línea para `no-namespace` en `__tests__/lib/ai-sbar.spec.ts`, `__tests__/lib/ai-suggestions.spec.ts` y `__tests__/lib/stt.spec.ts`; no son una dispensa de ruta. El guard sensible también rechaza `@ts-expect-error` nuevo en sus rutas actuales; su baseline no se amplió. El inventario reproducible de diagnósticos C09A (597 archivos; 1185 errores y 12 warnings antes de C09B) sigue publicándose como JSON/Markdown; las directivas inline existentes no figuran como infracciones, y no se afirma que toda la deuda TS esté resuelta o bloqueada.
 
 ## Pipeline local pilot-grade
 

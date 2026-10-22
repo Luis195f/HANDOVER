@@ -50,7 +50,11 @@ jobs:
 
       - name: Lint JavaScript (blocking)
         id: lint_js
-        run: pnpm -w lint:ci
+        run: pnpm -w lint:js:ci
+
+      - name: Lint TypeScript (blocking)
+        id: lint_ts_gate
+        run: pnpm -w lint:ts:ci
 
       - name: Measure TypeScript ESLint baseline
         id: lint_ts
@@ -168,9 +172,9 @@ jobs:
             echo
             echo "## Gate"
             echo
-            echo "- Commands: pnpm -w typecheck, pnpm -w lint:ci, pnpm -w lint:ts:baseline, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
-            echo "- Scope: independent blocking TypeScript typecheck; blocking JavaScript ESLint with zero warnings; non-blocking TypeScript ESLint rule debt baseline; explicit sensitive-any guard, pilot-grade frontend suites with coverage, browser E2E and representative FHIR fixture validation."
-            echo "- Results: typecheck=${{ steps.typecheck.outcome }}, JavaScript lint=${{ steps.lint_js.outcome }}, TypeScript baseline execution=${{ steps.lint_ts.outcome }}."
+            echo "- Commands: pnpm -w typecheck, pnpm -w lint:js:ci, pnpm -w lint:ts:ci, pnpm -w lint:ts:baseline, pnpm -w gate:any-sensitive, pnpm -w test:pilot:coverage:ci, pnpm -w test:e2e, pnpm -w validate:fhir"
+            echo "- Scope: independent blocking TypeScript typecheck; blocking JavaScript ESLint; blocking TypeScript recommended rules except documented legacy entries and measured-only rules; reported TypeScript debt inventory; sensitive-any guard, pilot coverage, browser E2E and FHIR fixture validation."
+            echo "- Results: typecheck=${{ steps.typecheck.outcome }}, JavaScript lint=${{ steps.lint_js.outcome }}, TypeScript lint=${{ steps.lint_ts_gate.outcome }}, TypeScript baseline execution=${{ steps.lint_ts.outcome }}."
             echo
             echo "## Reproducibility"
             echo

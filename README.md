@@ -250,7 +250,7 @@ En local, `pnpm -w test:pilot:coverage` deja `lcov.info` bajo `coverage/pilot-gr
 
 ### CI y resiliencia del registry
 
-El workflow `CI` usa `.nvmrc` (`20.17.0`) y `packageManager=pnpm@10.17.1` para fijar el toolchain del gate JS. En el estado actual del repo, el job de Node es bloqueante: instala dependencias con `pnpm install --frozen-lockfile`, ejecuta `pnpm -w typecheck`, `pnpm -w lint:ci`, `pnpm -w gate:any-sensitive`, `pnpm -w test:pilot:coverage:ci`, instala Playwright, corre `pnpm -w test:e2e` y valida bundles con `pnpm -w validate:fhir`.
+El workflow `CI` usa `.nvmrc` (`20.17.0`) y `packageManager=pnpm@10.17.1` para fijar el toolchain. El job de Node instala dependencias con `pnpm install --frozen-lockfile`, ejecuta typecheck independiente, gates ESLint JS y TS/TSX bloqueantes (`pnpm -w lint:ci` los encadena localmente), publica el inventario reproducible de diagnósticos TS con `pnpm -w lint:ts:baseline`, ejecuta `pnpm -w gate:any-sensitive` y `pnpm -w test:pilot:coverage:ci`, instala Playwright, corre `pnpm -w test:e2e` y valida bundles con `pnpm -w validate:fhir`. Las reglas y excepciones TS se documentan en `docs/testing-and-ci.md`.
 
 La evidencia de RC publicada por `CI` incluye `coverage-badge`, `coverage-pilot`, `playwright-evidence` y `fhir-validation`. La evidencia backend (`backend-coverage-xml`) sigue en el workflow separado `Django CI`.
 

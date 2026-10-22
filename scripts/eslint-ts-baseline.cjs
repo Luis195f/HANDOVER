@@ -58,7 +58,7 @@ async function main() {
   };
 
   const lines = [
-    '### TypeScript ESLint baseline (non-blocking rule debt)',
+    '### TypeScript ESLint baseline (reported diagnostics; gate is separate)',
     `- Files analyzed: ${report.filesAnalyzed} (${report.tsFiles} TS, ${report.tsxFiles} TSX)`,
     `- Rule violations: ${report.errors} errors, ${report.warnings} warnings`,
     '',
