@@ -73,6 +73,9 @@ jobs:
       - name: Sensitive any guard
         run: pnpm -w gate:any-sensitive
 
+      - name: Verify pilot suite collection
+        run: pnpm -w gate:pilot-collection
+
       # Misma bateria que `pnpm test`; en CI usamos la variante con cobertura
       # para publicar artefactos lcov + Cobertura sin abrir otro runner JS.
       - name: Primary JS test runner (pilot-grade, with coverage)

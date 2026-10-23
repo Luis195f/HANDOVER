@@ -24,14 +24,12 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/.pnpm/**",
-      "src/validation/**",
       "tests/e2e/**",
       "src/**/__tests__/**/fhir-map.test.ts",
       "src/**/__tests__/**/news2.test.ts",
       "src/**/__tests__/**/prefill.test.ts",
       "src/**/__tests__/**/media.test.ts",
       "src/**/__tests__/**/fetchPatientsFromFHIR.test.ts",
-      "src/**/__tests__/**/queue.test.ts",
       "src/**/__tests__/**/patient-filters.test.ts",
       "src/**/__tests__/**/drafts.test.ts",
     ],
@@ -262,4 +260,3 @@ export default defineConfig({
     ],
   },
 });
-
