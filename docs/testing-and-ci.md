@@ -92,6 +92,12 @@ Para rehearsal de release/piloto sin inventar un runner nuevo:
 
 ## Alcance del gate pilot-grade
 
+### Inventario de colección C10
+
+`pnpm -w gate:pilot-collection` usa `vitest list --json` de Vitest 2.1.9 y compara las rutas de tests realmente colectados con la lista efectiva de `vitest.pilot.config.ts`. También exige rutas críticas de cola SQLite, sender HTTP canónico, cliente FHIR y validación; una suite declarada pero excluida, o una crítica retirada de la declaración, falla antes de coverage. `quality:pilot:ci` y el workflow `CI` ejecutan este gate. El inventario no acredita que una aserción pase: coverage ejecuta las suites después.
+
+El mock `expo-sqlite` ejercita solo el SQL síncrono que usa `src/lib/queue.ts` y falla ante sentencias no soportadas. Su estado y registro de operaciones son simulados; la prueba de cola exige operaciones SQL observables y no acepta el fallback en memoria como evidencia SQLite. La prueba de transacción mantiene cola y cliente/sender productivos, simulando únicamente HTTP: una respuesta genérica no confirma la transacción y un `transaction-response` sí. Esto no acredita SQLite en dispositivo ni integración FHIR externa. La suite legacy antes omitida por buscar `HandoverFormSchema` ahora prueba los tres casos pertinentes sobre el `zVitals` vigente; no afirma validar el relevo completo. Braden, medicación y dolor también se ejecutan. Se conservan sin rebaja los umbrales por archivo y el guard sensible de escapes de tipos.
+
 La configuración `vitest.pilot.config.ts` concentra suites reales para estos dominios:
 
 - auth, OAuth, ACL y capabilities
@@ -112,6 +118,7 @@ La cobertura pilot-grade se evalúa por archivo sobre estas rutas sensibles:
 - `src/lib/queue.ts`
 - `src/lib/sync.ts`
 - `src/lib/fhir-map.ts`
+- `src/lib/fhir-client.ts` (medición C10 sin umbral específico nuevo)
 - `src/validation/schemas.ts`
 - `src/lib/profile-runtime.ts`
 - `src/screens/HandoverForm.tsx`

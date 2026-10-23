@@ -1,28 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
 import values from '../../../tests/fixtures/handover-values.json';
+import { zVitals } from '../schemas';
 
-let Schemas: any = {};
-try { Schemas = await import('@/src/validation/schemas'); } catch {}
-
-const has = (k: string) => Schemas && Object.prototype.hasOwnProperty.call(Schemas, k);
-
-(has('HandoverFormSchema') ? describe : describe.skip)('HandoverFormSchema', () => {
-  const { HandoverFormSchema } = Schemas;
-
-  it('valida un payload mínimo correcto', () => {
-    const res = HandoverFormSchema.safeParse(values);
-    expect(res.success).toBe(true);
+describe('zVitals with the legacy handover fixture', () => {
+  it('valida las constantes presentes en el fixture', () => {
+    expect(zVitals.safeParse(values.vitals).success).toBe(true);
   });
 
-  it('rechaza ACVPU inválido', () => {
-    const bad = { ...values, acvpu: 'X' };
-    const res = HandoverFormSchema.safeParse(bad);
-    expect(res.success).toBe(false);
+  it('rechaza AVPU inválido', () => {
+    const bad = { ...values.vitals, avpu: 'X' };
+    expect(zVitals.safeParse(bad).success).toBe(false);
   });
 
-  it('enforce rangos NEWS2 (ej: RR < 3 inválido)', () => {
-    const bad = { ...values, vitals: { ...values.vitals, rr: 0 } };
-    const res = HandoverFormSchema.safeParse(bad);
-    expect(res.success).toBe(false);
+  it('rechaza una frecuencia respiratoria fuera del rango admitido', () => {
+    const bad = { ...values.vitals, rr: 0 };
+    expect(zVitals.safeParse(bad).success).toBe(false);
   });
 });

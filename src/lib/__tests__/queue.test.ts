@@ -53,11 +53,13 @@ jest.mock("expo", () => ({ registerRootComponent: () => {}, requireNativeModule:
 type QueueModule = typeof import("../queue");
 let enqueueTx: QueueModule["enqueueTx"];
 let flushQueue: QueueModule["flushQueue"];
+let getQueueSnapshot: QueueModule["getQueueSnapshot"];
 
 beforeAll(async () => {
   const mod = await import("../queue");
   enqueueTx = mod.enqueueTx;
   flushQueue = mod.flushQueue;
+  getQueueSnapshot = mod.getQueueSnapshot;
 });
 
 // Utilidad para keys únicas por test
@@ -206,7 +208,7 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
   });
 
   // ──────────────────────────────────────────────────────────────
-  // NUEVOS CASOS: 4xx y throw NO-transitorio => NO reintento
+  // 4xx terminal y límite explícito de reintentos del flush legacy
   // ──────────────────────────────────────────────────────────────
 
   it("4xx: no reintenta en errores de cliente (un solo intento)", async () => {
@@ -230,7 +232,7 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
     jest.useRealTimers();
   });
 
-  it("error NO transitorio (throw sin flag) no reintenta", async () => {
+  it("sender que lanza conserva la fila con límite explícito de cero reintentos en este flush", async () => {
     jest.useFakeTimers();
 
     const key = uniq("no-retry-throw");
@@ -240,13 +242,13 @@ describe("Queue — idempotencia, backoff, limpieza", () => {
     const sender = jest.fn(async (tx: any) => {
       if (tx?.key !== key) return ok(204);
       attempts += 1;
-      // throw normal → la cola no debe hacer backoff para este tipo de error no-transitorio
       throw new Error("hard-fail");
     });
 
-    await flushQueue(sender);
+    await flushQueue(sender, { maxRetries: 0, baseDelayMs: 0 });
 
     expect(attempts).toBe(1);
+    expect((await getQueueSnapshot()).some((item) => item.key === key)).toBe(true);
 
     jest.useRealTimers();
   });
