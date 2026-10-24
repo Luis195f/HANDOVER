@@ -1,0 +1,100 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "identifier": { "system": "urn:handover:exception-handoff:bundle", "value": "synthetic-group:1:synthetic-transfer" },
+  "timestamp": "2026-08-27T08:25:00.000Z",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000001",
+      "resource": {
+        "resourceType": "Group", "id": "group-1", "type": "person", "actual": true,
+        "identifier": [{ "system": "urn:handover:exception-handoff:context", "value": "synthetic-shift:group-key:1" }],
+        "member": [{ "entity": { "reference": "Patient/pat-1" }, "extension": [
+          { "url": "urn:handover:exception-handoff:unit", "valueIdentifier": { "system": "urn:handover:unit-id", "value": "unit-a" } }
+        ] }]
+      },
+      "request": { "method": "POST", "url": "Group" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000002",
+      "resource": { "resourceType": "Patient", "id": "pat-1", "identifier": [
+        { "system": "urn:handover:exception-handoff:patient", "value": "synthetic-patient" }
+      ] },
+      "request": { "method": "POST", "url": "Patient" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000003",
+      "resource": { "resourceType": "Practitioner", "id": "prac-out", "identifier": [
+        { "system": "urn:handover:user-id", "value": "synthetic-outgoing" }
+      ] },
+      "request": { "method": "POST", "url": "Practitioner" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000004",
+      "resource": { "resourceType": "Practitioner", "id": "prac-in", "identifier": [
+        { "system": "urn:handover:user-id", "value": "synthetic-incoming" }
+      ] },
+      "request": { "method": "POST", "url": "Practitioner" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000005",
+      "resource": {
+        "resourceType": "Communication", "id": "comm-out", "status": "completed",
+        "identifier": [{ "system": "urn:handover:exception-handoff:event", "value": "synthetic-transfer" }],
+        "category": [{ "coding": [{ "system": "urn:handover:exception-handoff", "code": "outgoing_transfer" }] }],
+        "subject": { "reference": "Group/group-1" }, "sender": { "reference": "Practitioner/prac-out" },
+        "sent": "2026-08-27T08:20:00.000Z"
+      },
+      "request": { "method": "POST", "url": "Communication" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000006",
+      "resource": {
+        "resourceType": "Communication", "id": "comm-in", "status": "completed",
+        "identifier": [{ "system": "urn:handover:exception-handoff:event", "value": "synthetic-ack" }],
+        "category": [{ "coding": [{ "system": "urn:handover:exception-handoff", "code": "incoming_attestation" }] }],
+        "subject": { "reference": "Group/group-1" }, "sender": { "reference": "Practitioner/prac-in" },
+        "sent": "2026-08-27T08:25:00.000Z",
+        "extension": [{ "url": "urn:handover:exception-handoff:acknowledges-key", "valueString": "synthetic-transfer" }]
+      },
+      "request": { "method": "POST", "url": "Communication" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000007",
+      "resource": {
+        "resourceType": "Task", "id": "task-1", "status": "requested", "intent": "proposal",
+        "for": { "reference": "Patient/pat-1" }, "authoredOn": "2026-08-27T08:15:00.000Z",
+        "description": "Synthetic review pending"
+      },
+      "request": { "method": "POST", "url": "Task" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000008",
+      "resource": {
+        "resourceType": "Observation", "id": "obs-1", "status": "final",
+        "code": { "coding": [{ "system": "urn:handover:exception-handoff", "code": "handover-summary" }] },
+        "subject": { "reference": "Group/group-1" }, "effectiveDateTime": "2026-08-27T08:20:00.000Z",
+        "valueString": "Synthetic group summary"
+      },
+      "request": { "method": "POST", "url": "Observation" }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-4000-8000-000000000009",
+      "resource": {
+        "resourceType": "Composition", "id": "comp-1", "status": "final",
+        "type": { "coding": [{ "system": "urn:handover:exception-handoff", "code": "exception-handover" }] },
+        "subject": { "reference": "Group/group-1" }, "date": "2026-08-27T08:25:00.000Z",
+        "author": [{ "reference": "Practitioner/prac-out" }], "title": "Synthetic exception handover",
+        "attester": [
+          { "mode": "professional", "time": "2026-08-27T08:20:00.000Z", "party": { "reference": "Practitioner/prac-out" } },
+          { "mode": "professional", "time": "2026-08-27T08:25:00.000Z", "party": { "reference": "Practitioner/prac-in" } }
+        ],
+        "section": [{ "title": "Clinical communication and pending review", "entry": [
+          { "reference": "Communication/comm-out" }, { "reference": "Communication/comm-in" },
+          { "reference": "Task/task-1" }, { "reference": "Observation/obs-1" }
+        ] }]
+      },
+      "request": { "method": "POST", "url": "Composition" }
+    }
+  ]
+}

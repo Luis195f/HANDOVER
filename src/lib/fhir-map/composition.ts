@@ -47,14 +47,14 @@ export type CompositionMapperDependencies = {
   warnCompositionSectionOmitted: (section: 'exams' | 'procedures') => void;
 };
 
-function textProvenanceExtension(
-  deps: CompositionMapperDependencies,
+export function buildTextProvenanceExtension(
+  url: string,
   text: string,
   provenance?: SbarTextProvenance,
 ) {
   if (!provenance || sha256(text.trim()) !== provenance.contentHash) return undefined;
   return [{
-    url: deps.sbarProvenanceUrl,
+    url,
     extension: [
       { url: 'source', valueString: provenance.source },
       { url: 'contentHash', valueString: provenance.contentHash },
@@ -99,7 +99,7 @@ export function mapSbarObservationsImpl(
   const addComponent = (code: string, display: string, value?: string | null, provenance?: SbarTextProvenance) => {
     const trimmed = value?.trim();
     if (!trimmed) return;
-    const extension = textProvenanceExtension(deps, trimmed, provenance);
+    const extension = buildTextProvenanceExtension(deps.sbarProvenanceUrl, trimmed, provenance);
 
     components.push({
       ...(extension ? { extension } : {}),
@@ -205,7 +205,7 @@ export function mapSummaryObservationImpl(
 ): Observation | null {
   const trimmed = summary?.trim();
   if (!trimmed) return null;
-  const extension = textProvenanceExtension(deps, trimmed, provenance);
+  const extension = buildTextProvenanceExtension(deps.sbarProvenanceUrl, trimmed, provenance);
 
   return {
     resourceType: 'Observation',
@@ -485,8 +485,6 @@ export function buildCompositionImpl(
     attester: attesters.length > 0 ? (attesters as CompositionAttester[]) : undefined,
   };
 }
-
-
 
 
 

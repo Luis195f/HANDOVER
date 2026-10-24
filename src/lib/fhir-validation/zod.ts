@@ -225,6 +225,7 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
     if (typeof reference !== 'string' || expectedIndexes.length !== 1) return;
     const resolvedIndex = resolveReferenceIndex(reference);
     if (resolvedIndex === undefined) return;
+    if (path === 'subject' && entries[resolvedIndex]?.resource?.resourceType === 'Group') return;
     if (resolvedIndex !== expectedIndexes[0]) {
       errors.push({
         path: `entry[${entry.index}].resource.${path}.reference`,
