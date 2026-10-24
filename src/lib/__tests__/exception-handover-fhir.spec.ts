@@ -3,14 +3,14 @@ import { describe, expect, it } from 'vitest';
 import candidateFixture from '../../../tests/fixtures/fhir/exception-handover-candidate-bundle.json';
 
 import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS } from '@/src/demo/fixtures';
-import { validateBundle } from '@/src/lib/fhir-validation';
+import { validateBundle, validateExceptionHandoverCandidate } from '@/src/lib/fhir-validation';
 import { buildExceptionHandoverFhirCandidate } from '../exception-handover-fhir';
 import {
   buildExceptionHandoverContextKey,
   classifyExceptionHandoverPatient,
   createExceptionReviewEvent,
 } from '../exception-handover';
-import { HANDOFF_FHIR_CAPABILITY_MATRIX } from '../handoff-contract';
+import { buildExceptionHandoffContract, HANDOFF_FHIR_CAPABILITY_MATRIX } from '../handoff-contract';
 
 const SHIFT = 'synthetic-shift';
 const NOW = '2026-08-27T08:15:00.000Z';
@@ -78,7 +78,7 @@ describe('exception handover FHIR candidate, isolated from runtime', () => {
     expect(input).toEqual(original);
     expect(copy).toEqual(bundle);
     expect(buildExceptionHandoverFhirCandidate(input)).toEqual(bundle);
-    expect(validateBundle(copy)).toEqual({ isValid: true, errors: [] });
+    expect(validateExceptionHandoverCandidate(copy)).toEqual({ isValid: true, errors: [] });
     expect(bundle).toMatchObject({ resourceType: 'Bundle', type: 'transaction' });
     expect(bundle.entry.map(({ resource }) => resource.resourceType)).toEqual(expect.arrayContaining([
       'Group', 'Patient', 'Practitioner', 'Communication', 'Task', 'Observation', 'Composition',
@@ -134,7 +134,7 @@ describe('exception handover FHIR candidate, isolated from runtime', () => {
     if (!group) throw new Error('Missing Group');
     if (!group.resource.member) throw new Error('Missing group members');
     group.resource.member[0].entity.reference = 'Patient/not-in-bundle';
-    expect(validateBundle(broken).isValid).toBe(false);
+    expect(validateExceptionHandoverCandidate(broken).isValid).toBe(false);
     expect(() => buildExceptionHandoverFhirCandidate({ ...input, events: [
       ...input.events, { ...input.events[0], actorName: 'Contradictory actor' },
     ] })).toThrow();
@@ -162,6 +162,7 @@ describe('exception handover FHIR candidate, isolated from runtime', () => {
     const bundle = buildExceptionHandoverFhirCandidate(withoutSummary);
     expect(bundle.entry.some(({ resource }) => resource.resourceType === 'Observation')).toBe(false);
     expect(HANDOFF_FHIR_CAPABILITY_MATRIX.find(({ internal }) => internal === 'HandoffCommunication')?.status).toBe('pending');
+    expect(buildExceptionHandoffContract(input.classifications[0]).productiveFhirResources).toEqual([]);
     expect(() => buildExceptionHandoverFhirCandidate({ ...input, summary: {
       text: SUMMARY,
       provenance: { source: 'external-ai', contentHash: sha256(SUMMARY) },
@@ -169,9 +170,55 @@ describe('exception handover FHIR candidate, isolated from runtime', () => {
   });
 
   it('validates a single-patient group subject without relaxing unrelated patient references', () => {
-    expect(validateBundle(candidateFixture)).toEqual({ isValid: true, errors: [] });
+    expect(validateExceptionHandoverCandidate(candidateFixture)).toEqual({ isValid: true, errors: [] });
     const broken = structuredClone(candidateFixture);
     broken.entry[7].resource.subject.reference = 'Patient/not-in-bundle';
-    expect(validateBundle(broken).isValid).toBe(false);
+    expect(validateExceptionHandoverCandidate(broken).isValid).toBe(false);
+  });
+
+  it('keeps the production single-patient validator closed to Group subjects', () => {
+    expect(validateBundle(candidateFixture).isValid).toBe(false);
+  });
+
+  it('uses each entry fullUrl as the only internal reference target', () => {
+    const bundle = buildExceptionHandoverFhirCandidate(candidateInput());
+    const fullUrls = new Set(bundle.entry.map(({ fullUrl }) => fullUrl));
+    const references = JSON.stringify(bundle).match(/"reference":"([^"]+)"/g) ?? [];
+    expect(references.length).toBeGreaterThan(0);
+    for (const match of references) {
+      const target = match.slice('"reference":"'.length, -1);
+      expect(target.startsWith('urn:uuid:')).toBe(true);
+      expect(fullUrls.has(target)).toBe(true);
+    }
+  });
+
+  it('rejects missing or ambiguous UUID targets and incomplete Group membership', () => {
+    const missing = structuredClone(candidateFixture);
+    missing.entry.splice(1, 1);
+    expect(validateExceptionHandoverCandidate(missing).isValid).toBe(false);
+
+    const duplicate = structuredClone(candidateFixture);
+    duplicate.entry[1].fullUrl = duplicate.entry[0].fullUrl;
+    expect(validateExceptionHandoverCandidate(duplicate).isValid).toBe(false);
+
+    const orphan = structuredClone(candidateFixture);
+    orphan.entry[4].resource.subject.reference = 'urn:uuid:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    expect(validateExceptionHandoverCandidate(orphan).isValid).toBe(false);
+
+    const relative = structuredClone(candidateFixture);
+    relative.entry[0].resource.member[0].entity.reference = 'Patient/pat-1';
+    expect(validateExceptionHandoverCandidate(relative).isValid).toBe(false);
+
+    const incomplete = structuredClone(candidateFixture);
+    incomplete.entry[0].resource.member = [];
+    expect(validateExceptionHandoverCandidate(incomplete).isValid).toBe(false);
+
+    const secondPatient = structuredClone(candidateFixture);
+    secondPatient.entry.splice(2, 0, {
+      ...structuredClone(secondPatient.entry[1]),
+      fullUrl: 'urn:uuid:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      resource: { ...secondPatient.entry[1].resource, id: 'another-patient' },
+    });
+    expect(validateExceptionHandoverCandidate(secondPatient).isValid).toBe(false);
   });
 });

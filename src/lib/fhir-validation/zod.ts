@@ -70,6 +70,8 @@ type IndexedEntry = {
     subject?: { reference?: string };
     encounter?: { reference?: string };
     context?: { reference?: string };
+    member?: Array<{ entity?: { reference?: string } }>;
+    for?: { reference?: string };
   };
 };
 
@@ -113,7 +115,7 @@ function normalizeResourceReference(reference: string): string | undefined {
   }
 }
 
-function validateBundleContract(entries: IndexedEntry[]): ValidationResult['errors'] {
+function validateBundleContract(entries: IndexedEntry[], candidateGroup = false): ValidationResult['errors'] {
   const errors: ValidationResult['errors'] = [];
   const entryTypes = new Set<string>();
   const fullUrlToIndex = new Map<string, number>();
@@ -125,6 +127,10 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
   entries.forEach((entry) => {
     const resourceType = entry.resource?.resourceType;
     if (resourceType) entryTypes.add(resourceType);
+
+    if (candidateGroup && (!entry.fullUrl || !/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.fullUrl))) {
+      errors.push({ path: `entry[${entry.index}].fullUrl`, message: 'Candidate entry requires a UUID fullUrl' });
+    }
 
     if (typeof entry.fullUrl === 'string') {
       if (fullUrlToIndex.has(entry.fullUrl)) {
@@ -191,6 +197,12 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
     if (!entry.resource) return;
 
     collectReferenceNodes(entry.resource).forEach(({ path, reference }) => {
+      if (candidateGroup) {
+        if (!fullUrlToIndex.has(reference)) {
+          errors.push({ path: `entry[${entry.index}].resource.${formatPath(path)}`, message: 'Candidate reference must match one entry fullUrl' });
+        }
+        return;
+      }
       if (reference.startsWith('urn:uuid:')) {
         if (!fullUrlToIndex.has(reference)) {
           errors.push({
@@ -225,7 +237,6 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
     if (typeof reference !== 'string' || expectedIndexes.length !== 1) return;
     const resolvedIndex = resolveReferenceIndex(reference);
     if (resolvedIndex === undefined) return;
-    if (path === 'subject' && entries[resolvedIndex]?.resource?.resourceType === 'Group') return;
     if (resolvedIndex !== expectedIndexes[0]) {
       errors.push({
         path: `entry[${entry.index}].resource.${path}.reference`,
@@ -238,7 +249,7 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
     const resourceType = entry.resource?.resourceType;
     if (!resourceType || resourceType === 'Patient') return;
 
-    enforceResolvedDirectReference(entry, 'subject', patientIndexes);
+    if (!candidateGroup) enforceResolvedDirectReference(entry, 'subject', patientIndexes);
 
     if (resourceType !== 'Encounter') {
       enforceResolvedDirectReference(entry, 'encounter', encounterIndexes);
@@ -286,6 +297,33 @@ function validateBundleContract(entries: IndexedEntry[]): ValidationResult['erro
       }
     });
 
+  if (candidateGroup) {
+    const groups = entries.filter((entry) => entry.resource?.resourceType === 'Group');
+    if (groups.length !== 1 || patientIndexes.length === 0) {
+      errors.push({ path: 'entry', message: 'Candidate requires one Group and its Patient members' });
+    } else {
+      const group = groups[0];
+      const patientUrls = patientIndexes.map((index) => entries[index].fullUrl);
+      const memberRefs = group.resource?.member?.map((member) => member.entity?.reference);
+      if (!memberRefs || memberRefs.length !== patientUrls.length ||
+          new Set(memberRefs).size !== memberRefs.length ||
+          memberRefs.some((member) => !patientUrls.includes(member))) {
+        errors.push({ path: `entry[${group.index}].resource.member`, message: 'Group members must match exactly the candidate Patients' });
+      }
+      const permittedSubjects = new Set([group.fullUrl, ...(memberRefs ?? [])]);
+      entries.forEach((entry) => {
+        const subject = entry.resource?.subject?.reference;
+        const taskPatient = entry.resource?.for?.reference;
+        if (subject && !permittedSubjects.has(subject)) {
+          errors.push({ path: `entry[${entry.index}].resource.subject.reference`, message: 'Candidate subject is outside its Group' });
+        }
+        if (taskPatient && !memberRefs?.includes(taskPatient)) {
+          errors.push({ path: `entry[${entry.index}].resource.for.reference`, message: 'Candidate Task patient is outside its Group' });
+        }
+      });
+    }
+  }
+
   return errors;
 }
 
@@ -319,7 +357,7 @@ export function validateResourceWithZod(resource: unknown): ValidationResult {
   return { isValid: true, errors: [] };
 }
 
-export function validateBundle(bundle: unknown): ValidationResult {
+function validateBundleInternal(bundle: unknown, candidateGroup: boolean): ValidationResult {
   const parsed = bundleSchema.safeParse(bundle);
   if (!parsed.success) {
     return { isValid: false, errors: formatIssues(parsed.error.issues) };
@@ -360,13 +398,21 @@ export function validateBundle(bundle: unknown): ValidationResult {
     }
   });
 
-  errors.push(...validateBundleContract(entries));
+  errors.push(...validateBundleContract(entries, candidateGroup));
 
   if (errors.length > 0) {
     return { isValid: false, errors };
   }
 
   return { isValid: true, errors: [] };
+}
+
+export function validateBundle(bundle: unknown): ValidationResult {
+  return validateBundleInternal(bundle, false);
+}
+
+export function validateExceptionHandoverCandidate(bundle: unknown): ValidationResult {
+  return validateBundleInternal(bundle, true);
 }
 
 export function getValidationErrorsFromBundle(bundle: unknown): ValidationResult['errors'] | undefined {

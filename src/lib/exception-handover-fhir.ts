@@ -48,12 +48,15 @@ const extension = (name: string, valueString: string) => ({ url: `${SYSTEM}:${na
 const identifier = (name: string, value: string) => ({ system: `${SYSTEM}:${name}`, value });
 const code = (name: string) => ({ coding: [{ system: SYSTEM, code: name }] });
 const stableId = (prefix: string, key: string) => `${prefix}-${sha256(key).slice(0, 32)}`;
-const reference = (resource: CandidateResource) => ({ reference: `${resource.resourceType}/${resource.id}` });
+function fullUrl(resource: CandidateResource): string {
+  const hash = sha256(`${resource.resourceType}|${resource.id}`);
+  return `urn:uuid:${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+const reference = (resource: CandidateResource) => ({ reference: fullUrl(resource) });
 
 function entry(resource: CandidateResource): CandidateEntry {
-  const hash = sha256(`${resource.resourceType}|${resource.id}`);
   return {
-    fullUrl: `urn:uuid:${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`,
+    fullUrl: fullUrl(resource),
     resource,
     request: { method: 'POST', url: resource.resourceType },
   };

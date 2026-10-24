@@ -33,7 +33,16 @@ del resumen no existe en todos los estados C06: sin texto explícito no se crea
 de contexto no acreditan cierre ordinario. El modo degradado no tiene mapeo
 candidato y se rechaza, sin alterar su contrato local.
 
-`validateBundle` comprueba estructura básica de Bundle/Composition/Observation,
+`validateBundle` sigue siendo la entrada individual de producción, usada por
+`postBundle` en modo estricto: un `subject` colectivo no relaja su comprobación.
+Solo `validateExceptionHandoverCandidate`, invocado explícitamente por código
+local y por la fixture C11 de `validate:fhir`, admite el sujeto `Group`. Exige
+que cada referencia interna coincida exactamente con un `entry.fullUrl` UUID
+único y que los miembros del grupo sean exactamente los pacientes del bundle.
+`request.url` conserva el tipo de recurso de la operación POST; ningún vínculo
+depende de que el servidor conserve `resource.id`.
+
+Ambas entradas comprueban estructura básica de Bundle/Composition/Observation,
 unicidad y resolución local de referencias; las pruebas comprueban además los
 campos de `Group`, `Communication` y `Task`. Los validadores del repositorio usan
 schema genérico para esos tres tipos y no prueban sus invariantes R4 completas,

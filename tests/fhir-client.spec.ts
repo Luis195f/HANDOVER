@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import candidateFixture from './fixtures/fhir/exception-handover-candidate-bundle.json';
+import individualFixture from './fixtures/fhir/minimal-transaction-bundle.json';
 
 const bundle = {
   resourceType: 'Bundle' as const,
@@ -252,6 +254,27 @@ describe('postBundle', () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe(400);
     expect(result.issues?.[0]?.diagnostics).toContain('entry');
+  });
+
+  it('strictly rejects a Group subject in an individual transaction before HTTP', async () => {
+    const previous = process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION;
+    process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION = 'true';
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { postBundle } = await loadClient();
+      const rejected = await postBundle(candidateFixture, { token: 'synthetic-token' });
+      expect(rejected.ok).toBe(false);
+      expect(rejected.status).toBe(400);
+      expect(rejected.issues?.some(({ diagnostics }) => diagnostics.includes('subject.reference'))).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+      const accepted = await postBundle(individualFixture, { token: 'synthetic-token' });
+      expect(accepted.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION;
+      else process.env.EXPO_PUBLIC_STRICT_FHIR_VALIDATION = previous;
+    }
   });
 
   it('uses Authorization header without requiring token', async () => {
