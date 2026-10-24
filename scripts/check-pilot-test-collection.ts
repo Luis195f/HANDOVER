@@ -14,6 +14,7 @@ const requiredSuites = [
   'tests/queue/sqlite-product-path.spec.ts',
   'tests/queue/canonical-http-transaction.spec.ts',
   'tests/validation/handover.schemas.spec.ts',
+  'src/lib/__tests__/exception-handover-fhir.spec.ts',
 ];
 
 const declaredPaths = config.test?.include;

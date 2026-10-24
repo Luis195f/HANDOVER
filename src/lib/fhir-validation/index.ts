@@ -12,6 +12,7 @@ import procedureSchema from './schemas/Procedure.json';
 import {
   getValidationErrorsFromBundle,
   validateBundle as validateBundleWithZod,
+  validateExceptionHandoverCandidate,
   validateResourceWithZod,
   type ValidationResult,
 } from './zod';
@@ -96,6 +97,7 @@ export const validateResource = validateResourceWithZod;
 export const validateBundle = validateBundleWithZod;
 
 export {
+  validateExceptionHandoverCandidate,
   getValidationErrorsFromBundle,
   validateBundleWithZod,
   validateResourceWithZod,

@@ -74,6 +74,7 @@ const PILOT_GRADE_SUITES = [
   'src/lib/__tests__/exception-handover.classification.spec.ts',
   'src/lib/__tests__/exception-handover-storage.spec.ts',
   'src/lib/__tests__/handoff-contract.spec.ts',
+  'src/lib/__tests__/exception-handover-fhir.spec.ts',
   'src/screens/handover/__tests__/UnitExceptionHandover.spec.tsx',
   'tests/lib/summary.spec.ts',
   'tests/screens/HandoverForm.draft.spec.tsx',
