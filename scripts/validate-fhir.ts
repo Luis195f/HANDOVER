@@ -6,6 +6,7 @@ import process, { stdin as input } from 'node:process';
 import {
   getValidationErrorsFromBundle,
   validateBundle,
+  validateExceptionHandoverCandidate,
   type ValidationResult,
 } from '../src/lib/fhir-validation';
 
@@ -88,8 +89,10 @@ function printFailure(label: string, error: unknown) {
   }
 }
 
-function validateBundleWithEmbeddedErrors(bundle: unknown): ValidationResult {
-  const result = validateBundle(bundle);
+const candidateFixturePath = resolve('tests/fixtures/fhir/exception-handover-candidate-bundle.json');
+
+function validateBundleWithEmbeddedErrors(bundle: unknown, candidateFixture = false): ValidationResult {
+  const result = candidateFixture ? validateExceptionHandoverCandidate(bundle) : validateBundle(bundle);
   const bundledErrors = getValidationErrorsFromBundle(bundle) ?? [];
   if (result.isValid && bundledErrors.length === 0) {
     return result;
@@ -143,7 +146,7 @@ async function findFixtureBundles(): Promise<string[]> {
 async function validateSource(source: string) {
   const label = source === '-' ? 'stdin' : resolve(source);
   const data = await readJson(source);
-  const result = validateBundleWithEmbeddedErrors(data);
+  const result = validateBundleWithEmbeddedErrors(data, source !== '-' && resolve(source) === candidateFixturePath);
 
   if (!result.isValid) {
     throw result;
