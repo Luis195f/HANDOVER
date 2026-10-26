@@ -6,8 +6,8 @@ vi.mock('@/src/lib/crypto', () => ({
   decryptOfflinePayload: vi.fn(async (value: string) => value.replace(/^encrypted:/, '')),
 }));
 
-import { DEMO_ACTORS } from '@/src/demo/fixtures';
-import { createExceptionReviewEvent, createHandoffOverride } from '../exception-handover';
+import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS } from '@/src/demo/fixtures';
+import { acceptComparableManifest, buildComparableSnapshot, createExceptionReviewEvent, createHandoffOverride, freezeComparableManifest, selectAcceptedComparableReference } from '../exception-handover';
 import {
   createEmptyExceptionHandoverState,
   createExceptionHandoverStorage,
@@ -27,6 +27,68 @@ function memoryAdapter() {
 }
 
 describe('exception handoff encrypted persistence', () => {
+  it('retains only an explicitly accepted manifest across shifts, without renewing expiry', async () => {
+    const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS[3];
+    const sourceEvidence = {
+      'direct-assessment': { status: 'current' as const, observedAt: '2026-08-27T08:00:00.000Z', reference: 'synthetic:assessment:1', patientId: patient.patientId, unitId: 'unit-a' },
+      'care-plan': { status: 'current' as const, observedAt: '2026-08-27T08:00:00.000Z', reference: 'synthetic:plan:1', patientId: patient.patientId, unitId: 'unit-a' },
+    };
+    const snapshot = buildComparableSnapshot({ ...patient, sourceEvidence }, 'unit-a', NOW);
+    const context = { key: 'group-a', revision: 1, shiftId: patient.shiftId! };
+    const frozen = freezeComparableManifest(context, [snapshot]);
+    const outgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], NOW, undefined, { shiftId: context.shiftId, context, manifestHash: frozen.hash });
+    const incoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], NOW, undefined,
+      { shiftId: context.shiftId, context, acknowledgesKey: outgoing.idempotencyKey, manifestHash: frozen.hash });
+    const accepted = acceptComparableManifest(frozen, [snapshot], outgoing, incoming);
+    const adapter = memoryAdapter();
+    const first = createExceptionHandoverStorage('synthetic:reference', adapter, () => NOW);
+    await first.save({ ...createEmptyExceptionHandoverState(context.shiftId), acceptedReferences: [accepted] });
+    const next = await createExceptionHandoverStorage('synthetic:reference', adapter, () => NOW).load('next-shift');
+    expect(next.acceptedReferences).toEqual([accepted]);
+    expect(next.events).toEqual([]);
+    expect(next.acceptedReferences[0]?.expiresAt).toBe(accepted.expiresAt);
+    const otherPatient = { ...patient, patientId: 'synthetic-other' };
+    const other = buildComparableSnapshot({ ...otherPatient, sourceEvidence: {
+      'direct-assessment': { ...sourceEvidence['direct-assessment'], patientId: otherPatient.patientId, unitId: 'unit-b' },
+      'care-plan': { ...sourceEvidence['care-plan'], patientId: otherPatient.patientId, unitId: 'unit-b' },
+    } }, 'unit-b', NOW);
+    const otherContext = { key: 'group-b', revision: 1, shiftId: context.shiftId };
+    const otherManifest = freezeComparableManifest(otherContext, [other]);
+    const otherOutgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], NOW, undefined,
+      { shiftId: context.shiftId, context: otherContext, manifestHash: otherManifest.hash });
+    const otherIncoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], NOW, undefined,
+      { shiftId: context.shiftId, context: otherContext, manifestHash: otherManifest.hash,
+        acknowledgesKey: otherOutgoing.idempotencyKey });
+    await first.save({ ...createEmptyExceptionHandoverState(context.shiftId), acceptedReferences: [
+      acceptComparableManifest(otherManifest, [other], otherOutgoing, otherIncoming),
+    ] });
+    const both = await first.load(context.shiftId);
+    expect(selectAcceptedComparableReference(both.acceptedReferences, patient.patientId, 'unit-a')).toEqual(accepted);
+    expect(selectAcceptedComparableReference(both.acceptedReferences, otherPatient.patientId, 'unit-b')).not.toBeNull();
+    const newerContext = { ...otherContext, key: 'group-b-updated', revision: 2 };
+    const newerManifest = freezeComparableManifest(newerContext, [other]);
+    const newerOutgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0],
+      '2026-08-27T08:16:00.000Z', undefined,
+      { shiftId: context.shiftId, context: newerContext, manifestHash: newerManifest.hash });
+    const newerIncoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1],
+      '2026-08-27T08:16:00.000Z', undefined,
+      { shiftId: context.shiftId, context: newerContext, manifestHash: newerManifest.hash,
+        acknowledgesKey: newerOutgoing.idempotencyKey });
+    await first.save({ ...createEmptyExceptionHandoverState(context.shiftId), acceptedReferences: [
+      acceptComparableManifest(newerManifest, [other], newerOutgoing, newerIncoming),
+    ] });
+    const compacted = await first.load(context.shiftId);
+    expect(compacted.acceptedReferences).toHaveLength(2);
+    expect(selectAcceptedComparableReference(compacted.acceptedReferences, patient.patientId, 'unit-a')).toEqual(accepted);
+    const expiring = createExceptionHandoverStorage('synthetic:reference', adapter,
+      () => '2026-08-29T08:15:00.000Z');
+    const before = await adapter.getItem('synthetic:reference');
+    adapter.setItem.mockRejectedValueOnce(new Error('synthetic storage unavailable'));
+    await expect(expiring.load('next-shift')).rejects.toThrow('synthetic storage unavailable');
+    expect(await adapter.getItem('synthetic:reference')).toBe(before);
+    expect((await expiring.load('next-shift')).acceptedReferences).toEqual([]);
+    expect(await adapter.getItem('synthetic:reference')).not.toBe(before);
+  });
   it('does not present unavailable evidence as an empty C06 context', async () => {
     vi.spyOn(encryptedStorage, 'getAsyncStorageAdapter').mockResolvedValue(null);
     const storage = createExceptionHandoverStorage('synthetic:unavailable');

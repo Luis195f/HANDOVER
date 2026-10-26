@@ -3,8 +3,8 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS, DEMO_NOW } from '@/src/demo/fixtures';
-import { buildExceptionHandoverContextKey, classifyExceptionHandoverPatient, createExceptionReviewEvent, createHandoffOverride, formatExceptionDateTime } from '@/src/lib/exception-handover';
-import { createEmptyExceptionHandoverState } from '@/src/lib/exception-handover-storage';
+import { buildComparableSnapshot, buildExceptionHandoverContextKey, classifyExceptionHandoverPatient, compareAcceptedSnapshot, createExceptionReviewEvent, createHandoffOverride, formatExceptionDateTime } from '@/src/lib/exception-handover';
+import { createEmptyExceptionHandoverState, mergeExceptionHandoverState, type ExceptionHandoverSessionState } from '@/src/lib/exception-handover-storage';
 import { UnitExceptionHandover } from '../UnitExceptionHandover';
 
 const colors = {
@@ -26,6 +26,88 @@ const groupScope = { viewScope: 'all-units', members: DEMO_EXCEPTION_HANDOVER_PA
 })) };
 
 describe('UnitExceptionHandover', () => {
+  it('uses a persisted, explicitly acknowledged manifest across shifts instead of the fixture lane', async () => {
+    const base = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((patient) => patient.patientId === 'demo-psych-adult-002')!;
+    const evidence = (observedAt: string) => ({
+      'direct-assessment': { status: 'current' as const, observedAt, reference: 'synthetic:assessment:1', patientId: base.patientId, unitId: 'unit-a' },
+      'care-plan': { status: 'current' as const, observedAt, reference: 'synthetic:plan:1', patientId: base.patientId, unitId: 'unit-a' },
+    });
+    const patient = { ...base, plan: { ...base.plan, requiresMedicationVerification: false },
+      sourceEvidence: evidence('2026-08-27T08:00:00.000Z') };
+    const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };
+    let persisted: ExceptionHandoverSessionState | undefined;
+    let failNextWrite = false;
+    const storage = {
+      durability: 'durable' as const,
+      load: vi.fn(async (shift: string) => persisted?.shiftId === shift ? persisted : {
+        ...createEmptyExceptionHandoverState(shift),
+        acceptedReferences: persisted?.acceptedReferences ?? [],
+      }),
+      save: vi.fn(async (state: ExceptionHandoverSessionState) => {
+        if (failNextWrite) { failNextWrite = false; throw new Error('synthetic write failure'); }
+        persisted = persisted?.shiftId === state.shiftId ? mergeExceptionHandoverState(persisted, state) : state;
+      }),
+      clear: vi.fn(async () => {}),
+    };
+    const board = (actorId: string, currentPatient = patient, shift = patient.shiftId!, clock = now) =>
+      <UnitExceptionHandover candidateMode patients={[currentPatient]} shiftId={shift} groupScope={scoped}
+        sessionUserId={actorId} colors={colors} onOpenFullHandover={() => {}} now={clock}
+        classificationReferenceTime={clock()} storage={storage} />;
+    const screen = render(board(DEMO_ACTORS[1].userId));
+    await act(async () => {});
+    expect(screen.getByText('R. REVISIÓN REQUERIDA · 1')).toBeTruthy();
+    fireEvent.press(screen.getByTestId(`open-exception-${patient.patientId}`));
+    fireEvent.press(screen.getByTestId(`transfer-r-${patient.patientId}`));
+    act(() => screen.update(board(DEMO_ACTORS[0].userId)));
+    failNextWrite = true;
+    await act(async () => { fireEvent.press(screen.getByTestId('confirm-outgoing-transfer')); });
+    expect(persisted?.frozenManifest).toBeUndefined();
+    expect(screen.getByTestId('candidate-acceptance-error')).toBeTruthy();
+    await act(async () => { fireEvent.press(screen.getByTestId('confirm-outgoing-transfer')); });
+    expect(persisted?.frozenManifest?.hash).toBeTruthy();
+    expect(persisted?.acceptedReferences).toEqual([]);
+    const changed = { ...patient, plan: { ...patient.plan,
+      requiresDirectAssessment: !patient.plan?.requiresDirectAssessment } };
+    act(() => screen.update(board(DEMO_ACTORS[1].userId, changed)));
+    expect(screen.getByTestId('confirm-incoming-attestation').props.disabled).toBe(true);
+    expect(screen.queryByTestId('outgoing-transfer-event')).toBeNull();
+    expect(persisted?.acceptedReferences).toEqual([]);
+    act(() => screen.update(board(DEMO_ACTORS[1].userId)));
+    await act(async () => { fireEvent.press(screen.getByTestId('confirm-incoming-attestation')); });
+    expect(persisted?.acceptedReferences[0]?.acceptedBy).toBe(DEMO_ACTORS[1].userId);
+    const acceptedHash = persisted?.acceptedReferences[0]?.manifestHash;
+    screen.unmount();
+    const next = { ...patient, shiftId: 'next-shift', sourceEvidence: evidence('2026-08-27T08:30:00.000Z') };
+    expect(compareAcceptedSnapshot(buildComparableSnapshot(next, 'unit-a', '2026-08-27T09:00:00.000Z'),
+      persisted?.acceptedReferences[0] ?? null, '2026-08-27T09:00:00.000Z')).toMatchObject({ handoffLane: 'C' });
+    const nextScreen = render(board(DEMO_ACTORS[0].userId, next, 'next-shift', () => '2026-08-27T09:00:00.000Z'));
+    await act(async () => {});
+    expect(nextScreen.getByText('C. SIN NOVEDADES CONFIRMADAS · 1')).toBeTruthy();
+    fireEvent.press(nextScreen.getByTestId('confirm-unchanged-review'));
+    expect(nextScreen.getByTestId('unchanged-review-event')).toBeTruthy();
+    expect(persisted?.acceptedReferences[0]?.manifestHash).toBe(acceptedHash);
+  });
+  it('does not promote a memory-only receipt and requires a reason for candidate A', () => {
+    const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((item) => item.patientId === 'demo-psych-adult-002')!;
+    const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };
+    const board = (actorId: string) => <UnitExceptionHandover candidateMode patients={[patient]}
+      groupScope={scoped} sessionUserId={actorId} colors={colors}
+      onOpenFullHandover={() => {}} now={now} storage={null} />;
+    const screen = render(board(DEMO_ACTORS[1].userId));
+    expect(screen.getByText('R. REVISIÓN REQUERIDA · 1')).toBeTruthy();
+    fireEvent.press(screen.getByTestId(`open-exception-${patient.patientId}`));
+    expect(screen.queryByTestId(`resolve-r-${patient.patientId}`)).toBeNull();
+    expect(screen.getByTestId(`designate-a-${patient.patientId}`).props.disabled).toBe(true);
+    fireEvent.press(screen.getByTestId(`transfer-r-${patient.patientId}`));
+    act(() => screen.update(board(DEMO_ACTORS[0].userId)));
+    fireEvent.press(screen.getByTestId('confirm-outgoing-transfer'));
+    expect(screen.queryByTestId('outgoing-transfer-event')).toBeNull();
+    expect(screen.getByTestId('candidate-acceptance-error')).toBeTruthy();
+    fireEvent.changeText(screen.getByTestId(`override-reason-${patient.patientId}`),
+      'Designación humana sintética por prioridad inmediata');
+    fireEvent.press(screen.getByTestId(`designate-a-${patient.patientId}`));
+    expect(screen.getByText('A. PRIORIDAD INMEDIATA · 1')).toBeTruthy();
+  });
   it('blocks closure and autosave after persisted evidence fails to hydrate', async () => {
     const save = vi.fn(async () => {});
     const storage = { load: vi.fn(async () => { throw new Error('synthetic corruption'); }), save, clear: vi.fn(async () => {}) };

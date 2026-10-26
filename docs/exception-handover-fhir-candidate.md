@@ -7,6 +7,42 @@ es demostrativa, y el namespace local de procedencia `https://handover.app/fhir/
 no acredita gobernanza institucional. No se declara un `meta.profile` propio hasta
 resolver esa decisión. `productiveFhirResources` sigue vacío.
 
+## C17 — estado candidato respaldado por fuentes
+
+La vista demo de `PatientList` usa la clasificación candidata, no el campo `status`
+prefijado de sus fixtures. Primera comparación sin referencia aceptada, ausencia de
+fuente identificable, datos inválidos, cobertura distinta, contradicción, fuente
+vencida o fecha futura llevan a **R**. **A** solo procede de una designación humana
+explícita con motivo, actor y ámbito vigente; no se derivan nuevos umbrales de
+MPAC/NEWS2. **B/C** comparan hashes del contenido de los campos cubiertos de una
+fuente validada frente al último snapshot aceptado del mismo paciente y unidad:
+**C no significa estabilidad clínica global**.
+
+| Fuente candidata | Campos estructurados admitidos | Evidencia requerida | Estado del adaptador activo |
+|---|---|---|---|
+| Valoración directa | `observationLevel`, `activeRisks`, `risks`, `risksStructured` | referencia, paciente, unidad, fecha de observación, disponibilidad y cobertura válida | `PatientList` no recibe referencia/fecha verificables; R |
+| Registro de observación | `vitals`, `oxygenTherapy` | los mismos vínculos; temperatura canónica y semántica de oxígeno existentes | la lista aporta `vitals`, pero no referencia/fecha; R |
+| Plan vigente | `plan`, `pendingTasks`, `contingencyPlan` | registro identificado y vigente, no mero texto generado | la lista aporta tareas; falta referencia/fecha; R |
+| Administración / incidencia | solo registro efectivo identificable | contrato del registro y vínculo paciente/unidad | sin adaptador verificable; si se requiere, R. Prescripción, tarea o flag no prueban administración/incidencia |
+
+El snapshot v1 contiene ID determinista, paciente, unidad, turno y por fuente su
+referencia, versión disponible, `observedAt`, cobertura, disponibilidad y hash del
+contenido comparable; no duplica los valores/narrativas. El manifiesto congelado
+ordena pacientes/unidades y vincula su hash a la transferencia saliente y a la
+atestación entrante del mismo contexto/revisión. El receptor acepta explícitamente
+**ese conjunto como referencia comparativa**; no certifica cada medición. Los
+eventos C06 antiguos sin hash de manifiesto permanecen históricos, sin aceptación
+retroactiva. Un cambio de contenido/contexto exige nueva transferencia y recepción.
+
+El store cifrado C06 conserva referencias aceptadas por paciente/unidad entre
+turnos, separadas de los eventos transitorios. La escritura debe confirmarse antes
+de mostrar aceptación; el fallback web solo en memoria no acredita durabilidad.
+La referencia caduca por defecto en un día (menos que el máximo backend de 30);
+leerla no renueva la fecha y el store gestionado purga las vencidas al acceso. La
+limpieza C07 existente cubre esta misma clave. Sin fuente ni baseline comprobable,
+el recorrido real sigue en R aunque las pruebas sintéticas demuestren B/C. Ni la
+vista demo ni este Bundle candidato activan piloto, runtime no-demo o egress FHIR.
+
 | Necesidad | Evidencia fuente | Recurso/campo candidato | Identidad y referencias | Comprobación local |
 |---|---|---|---|---|
 | Grupo y unidad | `ExceptionHandoverContext`, miembros paciente/unidad y clasificaciones C06 | `Group.identifier`, `member.entity`, extensión local de unidad por miembro | hash de contexto/revisión; `Patient` local por miembro | clave de grupo recalculada; referencias resueltas |

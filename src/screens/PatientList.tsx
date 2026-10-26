@@ -694,8 +694,13 @@ export default function PatientList({ navigation }: Props) {
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const isDemoExceptionRoute = session?.mode === 'demo' && selectedSpecialtyId === 'psych';
   const demoExceptionPatients = useMemo(
-    () => getDemoExceptionHandoverPatients(patients.map((patient) => patient.id)),
-    [patients],
+    () => getDemoExceptionHandoverPatients(patients.map((patient) => patient.id)).map((patient) => ({
+      ...patient,
+      vitals: patientById.get(patient.patientId)?.vitals,
+      risks: patientById.get(patient.patientId)?.risks,
+      pendingTasks: patientById.get(patient.patientId)?.pendingTasks,
+    })),
+    [patients, patientById],
   );
   const canViewSupervisorDashboard = hasRole(session, ["supervisor", "admin"]);
   const accessState = getPatientListAccessState(
@@ -868,6 +873,7 @@ export default function PatientList({ navigation }: Props) {
 
         {isDemoExceptionRoute ? (
           <UnitExceptionHandover
+            candidateMode
             patients={demoExceptionPatients}
             groupScope={{
               viewScope: selectedUnitId,
@@ -1488,8 +1494,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-
 
 
 
