@@ -103,11 +103,14 @@ export function mergeExceptionHandoverState(
     if (!prior) acceptedReferences.push(reference);
   }
   const covered = new Set<string>();
+  const operating = new Set<string>();
   const latestReferences = acceptedReferences.sort((left, right) =>
     Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt)).filter((reference) => {
     const members = reference.snapshots.map(({ patientId, unitId }) => `${patientId}\u0000${unitId}`);
-    const needed = members.some((member) => !covered.has(member));
+    const needed = members.some((member) => !covered.has(member) ||
+      (reference.context.shiftId !== incoming.shiftId && !operating.has(member)));
     members.forEach((member) => covered.add(member));
+    if (reference.context.shiftId !== incoming.shiftId) members.forEach((member) => operating.add(member));
     return needed;
   });
   if (current.shiftId !== incoming.shiftId) return { ...incoming, version: 2,

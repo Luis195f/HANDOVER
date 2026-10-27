@@ -135,6 +135,33 @@ describe('behavioral-health exception classification', () => {
       { now: NOW, shiftId: SHIFT, candidate: { ...candidate, scopeKey: 'different-context' } }).handoffLane).toBe('R');
     expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [{ ...designation, newLane: 'B' }] },
       { now: NOW, shiftId: SHIFT, candidate }).handoffLane).toBe('R');
+    const later = '2026-08-27T09:00:00.000Z';
+    const laterDesignation = { ...designation, recordedAt: later };
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [laterDesignation] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: later }).handoffLane).toBe('A');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [laterDesignation] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: NOW }).handoffLane).toBe('R');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [{ ...laterDesignation, reason: ' ' }] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: later }).handoffLane).toBe('R');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [{ ...laterDesignation, shiftId: 'other' }] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: later }).handoffLane).toBe('R');
+  });
+  it('requires clinical values rather than observation metadata and hashes only comparable values', () => {
+    const base = fixture('demo-psych-adult-002');
+    const sourceEvidence = { 'observation-record': { status: 'current' as const,
+      reference: 'synthetic:observation:1', patientId: base.patientId, unitId: 'unit-a', observedAt: NOW } };
+    const source = (vitals: typeof base.vitals, oxygenTherapy?: { flowLMin?: number; fio2?: number }) =>
+      buildComparableSnapshot({ ...base, observationLevel: 'enhanced', sourceEvidence, vitals, oxygenTherapy },
+        'unit-a', NOW).sources['observation-record'];
+    for (const vitals of [{}, { rr: undefined }, { rr: undefined, recordedAt: NOW },
+      { rr: undefined, issuedAt: NOW }, { rr: undefined, recordedAt: NOW, issuedAt: NOW }]) {
+      expect(source(vitals)?.availability).toBe('missing');
+    }
+    const clinical = source({ rr: 16, recordedAt: NOW });
+    expect(clinical?.availability).toBe('current');
+    expect(clinical?.contentHash).toBe(source({ rr: 16, issuedAt: '2026-08-27T08:10:00.000Z' })?.contentHash);
+    expect(source({ rr: undefined, o2: false }, { flowLMin: 0, fio2: 21 })?.availability).toBe('current');
+    expect(source({}, { flowLMin: 0 })?.availability).toBe('current');
   });
   it('projects temperature and oxygen with the existing selectors without treating empty vitals as evidence', () => {
     const base = fixture('demo-psych-adult-002');

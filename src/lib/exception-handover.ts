@@ -339,6 +339,46 @@ function canonical(value: unknown): unknown {
 
 const contentHash = (value: unknown): string => sha256(JSON.stringify(canonical(value)));
 
+const VITAL_VALUES = ['hr', 'rr', 'tempC', 'spo2', 'sbp', 'dbp', 'glucoseMgDl', 'glucoseMmolL', 'avpu'] as const;
+
+function hasComparableInput(field: ComparableField, value: unknown, patient: ExceptionPatientClassificationInput): boolean {
+  if (value === undefined) return false;
+  if (field !== 'vitals' && field !== 'oxygenTherapy') return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+  const entries = Object.entries(value);
+  if (field === 'vitals') return VITAL_VALUES.some((key) => entries.some(([name, entry]) =>
+    name === key && entry !== undefined)) || typeof patient.vitals?.o2 === 'boolean';
+  if (field === 'oxygenTherapy') return entries.some(([name, entry]) =>
+    ((name === 'flowLMin' || name === 'fio2') && entry !== undefined) ||
+    (name === 'device' && typeof entry === 'string' && Boolean(entry.trim())));
+  return true;
+}
+
+function comparableValue(field: ComparableField, value: unknown, patient: ExceptionPatientClassificationInput): unknown | undefined {
+  const parsed = FIELD_SCHEMAS[field].safeParse(value);
+  if (!parsed.success) return undefined;
+  if (field === 'vitals') {
+    const vitals = zVitals.parse(value);
+    const projected: Record<string, unknown> = Object.fromEntries(VITAL_VALUES
+      .filter((key) => vitals[key] !== undefined).map((key) => [key, vitals[key]]));
+    if (typeof patient.vitals?.o2 === 'boolean') {
+      projected.supplementalOxygen = resolveSupplementalOxygen(patient.oxygenTherapy, patient.vitals.o2);
+    }
+    return Object.keys(projected).length ? projected : undefined;
+  }
+  const projected = canonical(parsed.data);
+  if (field === 'oxygenTherapy' && projected && typeof projected === 'object' && !Array.isArray(projected)) {
+    const therapy: Record<string, unknown> = Object.fromEntries(Object.entries(projected));
+    if (typeof therapy.device === 'string') {
+      therapy.device = therapy.device.trim();
+      if (!therapy.device) delete therapy.device;
+    }
+    return Object.keys(therapy).length ? therapy : undefined;
+  }
+  return projected && typeof projected === 'object' && !Array.isArray(projected) &&
+    !Object.keys(projected).length ? undefined : projected;
+}
+
 export function buildComparableSnapshot(
   patient: ExceptionPatientClassificationInput,
   unitId: string,
@@ -356,14 +396,11 @@ export function buildComparableSnapshot(
   const sources: ComparableSnapshot['sources'] = {};
   for (const source of expectedSourcesForPatient(patient, config)) {
     const evidence = patient.sourceEvidence?.[source];
-    const coverage = (SOURCE_FIELDS[source] ?? []).filter((field) => fields[field] !== undefined);
+    const coverage = (SOURCE_FIELDS[source] ?? []).filter((field) => hasComparableInput(field, fields[field], patient));
     const observed = parseTimestamp(evidence?.observedAt);
     const current = parseTimestamp(now);
-    const validFields = coverage.every((field) => {
-      const parsed = FIELD_SCHEMAS[field].safeParse(fields[field]);
-      return parsed.success && (field !== 'vitals' && field !== 'oxygenTherapy' && field !== 'risks' && field !== 'plan' ||
-        Object.keys(parsed.data).length > 0);
-    }) &&
+    const projectedFields = coverage.map((field) => [field, comparableValue(field, fields[field], patient)] as const);
+    const validFields = projectedFields.every(([, value]) => value !== undefined) &&
       (!coverage.includes('pendingTasks') || patient.pendingTasks?.every((task) =>
         task.category !== undefined && task.priority !== undefined && task.status !== undefined));
     const unitStatus = unitSourceStatuses?.[source];
@@ -382,15 +419,7 @@ export function buildComparableSnapshot(
       ...(evidence?.version ? { version: evidence.version } : {}),
       ...(evidence?.observedAt ? { observedAt: evidence.observedAt } : {}),
       coverage,
-      ...(validFields && coverage.length ? { contentHash: contentHash(Object.fromEntries(
-        coverage.map((field) => {
-          const parsed = FIELD_SCHEMAS[field].parse(fields[field]);
-          return [field, field === 'vitals' && parsed && typeof parsed === 'object' &&
-            patient.vitals && typeof patient.vitals.o2 === 'boolean'
-            ? { ...parsed, supplementalOxygen: resolveSupplementalOxygen(patient.oxygenTherapy, patient.vitals.o2) }
-            : parsed];
-        }),
-      )) } : {}),
+      ...(validFields && coverage.length ? { contentHash: contentHash(Object.fromEntries(projectedFields)) } : {}),
     };
   }
   const shiftId = patient.shiftId ?? DEFAULT_SHIFT_ID;
@@ -400,8 +429,9 @@ export function buildComparableSnapshot(
 
 export function selectAcceptedComparableReference(
   references: readonly AcceptedComparableReference[], patientId: string, unitId: string,
+  currentShiftId?: string,
 ): AcceptedComparableReference | null {
-  return [...references].filter((reference) => reference.snapshots.some((snapshot) =>
+  return [...references].filter((reference) => reference.context.shiftId !== currentShiftId && reference.snapshots.some((snapshot) =>
     snapshot.patientId === patientId && snapshot.unitId === unitId))
     .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt))[0] ?? null;
 }
@@ -555,6 +585,7 @@ export function classifyExceptionHandoverPatient(
     shiftId?: string;
     unitSourceStatuses?: Partial<Record<ClinicalSource, SourceStatus>>;
     failureStartedAt?: string;
+    overrideAsOf?: string;
     config?: ExceptionHandoverProfileConfig;
     candidate?: { unitId: string; scopeKey: string; acceptedReference: AcceptedComparableReference | null };
   },
@@ -600,7 +631,7 @@ export function classifyExceptionHandoverPatient(
   const found = findOverrides(patient, shiftId);
   const active = options.candidate ? [...(patient.previousOverrides ?? [])].reverse().find((override) =>
     override.shiftId === shiftId && override.scopeKey === options.candidate?.scopeKey && override.newLane === 'A' &&
-    (parseTimestamp(override.recordedAt) ?? Infinity) <= (parseTimestamp(options.now) ?? -1) &&
+    (parseTimestamp(override.recordedAt) ?? Infinity) <= (parseTimestamp(options.overrideAsOf ?? options.now) ?? -1) &&
     Boolean(override.reason.trim()) && Boolean(override.professionalId.trim())) : found.active;
   const previous = found.previous;
 
@@ -696,6 +727,7 @@ export function classifyExceptionHandoverUnit(
     now: string;
     shiftId?: string;
     integration?: UnitIntegrationState;
+    overrideAsOf?: string;
     previousStatus?: UnitDataHealth;
     lastKnownClassifications?: readonly HandoffClassification[];
     config?: ExceptionHandoverProfileConfig;
@@ -722,13 +754,15 @@ export function classifyExceptionHandoverUnit(
   const classifications = patients.map((patient) => classifyExceptionHandoverPatient(patient, {
     now: options.now,
     shiftId: options.shiftId,
+    overrideAsOf: options.overrideAsOf,
     unitSourceStatuses: integration.sourceStatuses,
     failureStartedAt: integration.failureStartedAt,
     config: options.config,
     ...(options.candidate ? { candidate: { unitId: options.candidate.units.get(patient.patientId) ?? '',
       scopeKey: options.candidate.scopeKey,
       acceptedReference: selectAcceptedComparableReference(options.candidate.acceptedReferences,
-        patient.patientId, options.candidate.units.get(patient.patientId) ?? '') } } : {}),
+        patient.patientId, options.candidate.units.get(patient.patientId) ?? '',
+        options.shiftId ?? patient.shiftId ?? DEFAULT_SHIFT_ID) } } : {}),
   }));
 
   return {

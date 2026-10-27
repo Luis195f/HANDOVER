@@ -34,6 +34,14 @@ atestación entrante del mismo contexto/revisión. El receptor acepta explícita
 eventos C06 antiguos sin hash de manifiesto permanecen históricos, sin aceptación
 retroactiva. Un cambio de contenido/contexto exige nueva transferencia y recepción.
 
+La designación humana A se contrasta con el reloj de interacción, separado del
+reloj sintético de valoración. La proyección comparable excluye `recordedAt`,
+`issuedAt` y campos indefinidos del hash clínico; estos metadatos no acreditan una
+medición. Al aceptar un turno B/C se conserva la referencia previa que lo clasifica;
+la nueva referencia se selecciona desde el turno siguiente. La compactación
+retiene la referencia más reciente y la operativa previa cuando sea necesaria
+para el turno activo, por paciente y unidad, sujetas a caducidad.
+
 El store cifrado C06 conserva referencias aceptadas por paciente/unidad entre
 turnos, separadas de los eventos transitorios. La escritura debe confirmarse antes
 de mostrar aceptación; el fallback web solo en memoria no acredita durabilidad.

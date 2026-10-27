@@ -182,6 +182,7 @@ test('Expo Web real completes a dual-actor handover through offline queue replay
   await page.getByRole('button', { name: 'Sección Nutrición. Contraída.' }).click();
   await page.getByTestId('nutrition.dietType.trigger').click();
   await page.getByTestId('nutrition.dietType.option.oral').click();
+  await expect(page.getByTestId('nutrition.dietType.option.oral')).toHaveCount(0);
   await expect(page.getByTestId('nutrition.dietType.trigger')).toContainText('Oral');
   const eliminationSection = page.getByRole('button', { name: 'Sección Eliminación. Contraída.' });
   await expect(eliminationSection).toBeVisible();

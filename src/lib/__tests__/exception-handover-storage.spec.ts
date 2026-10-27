@@ -7,7 +7,7 @@ vi.mock('@/src/lib/crypto', () => ({
 }));
 
 import { DEMO_ACTORS, DEMO_EXCEPTION_HANDOVER_PATIENTS } from '@/src/demo/fixtures';
-import { acceptComparableManifest, buildComparableSnapshot, createExceptionReviewEvent, createHandoffOverride, freezeComparableManifest, selectAcceptedComparableReference } from '../exception-handover';
+import { acceptComparableManifest, buildComparableSnapshot, compareAcceptedSnapshot, createExceptionReviewEvent, createHandoffOverride, freezeComparableManifest, selectAcceptedComparableReference } from '../exception-handover';
 import {
   createEmptyExceptionHandoverState,
   createExceptionHandoverStorage,
@@ -27,6 +27,53 @@ function memoryAdapter() {
 }
 
 describe('exception handoff encrypted persistence', () => {
+  it('preserves the current-turn reference after accepting its successor and selects the successor next turn', async () => {
+    const base = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((item) => item.patientId === 'demo-psych-adult-002')!;
+    const patient = { ...base, plan: { ...base.plan, requiresMedicationVerification: false, requiresLeaveReview: false } };
+    const evidence = (observedAt: string, suffix: string) => ({
+      'direct-assessment': { status: 'current' as const, observedAt, reference: `synthetic:assessment:${suffix}`, patientId: patient.patientId, unitId: 'unit-a' },
+      'care-plan': { status: 'current' as const, observedAt, reference: `synthetic:plan:${suffix}`, patientId: patient.patientId, unitId: 'unit-a' },
+    });
+    const first = buildComparableSnapshot({ ...patient, sourceEvidence: evidence('2026-08-27T08:00:00.000Z', '1') }, 'unit-a', NOW);
+    const accept = (snapshot: typeof first, acceptedAt: string) => {
+      const context = { key: `group:${snapshot.shiftId}`, revision: 1, shiftId: snapshot.shiftId };
+      const frozen = freezeComparableManifest(context, [snapshot]);
+      const outgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], acceptedAt, undefined,
+        { shiftId: context.shiftId, context, manifestHash: frozen.hash });
+      const incoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], acceptedAt, undefined,
+        { shiftId: context.shiftId, context, manifestHash: frozen.hash, acknowledgesKey: outgoing.idempotencyKey });
+      return acceptComparableManifest(frozen, [snapshot], outgoing, incoming);
+    };
+    const firstReference = accept(first, NOW);
+    const adapter = memoryAdapter();
+    const secondTime = '2026-08-27T09:15:00.000Z';
+    const store = createExceptionHandoverStorage('synthetic:two-turns', adapter, () => secondTime);
+    await store.save({ ...createEmptyExceptionHandoverState(first.shiftId), acceptedReferences: [firstReference] });
+    const second = buildComparableSnapshot({ ...patient, shiftId: 'second-shift',
+      sourceEvidence: evidence('2026-08-27T09:00:00.000Z', '2') }, 'unit-a', secondTime);
+    expect(first.sources['direct-assessment']?.availability).toBe('current');
+    expect(first.sources['care-plan']?.availability).toBe('current');
+    expect(second.sources['direct-assessment']?.availability).toBe('current');
+    expect(second.sources['care-plan']?.availability).toBe('current');
+    expect(compareAcceptedSnapshot(second,
+      selectAcceptedComparableReference((await store.load('second-shift')).acceptedReferences,
+        patient.patientId, 'unit-a', 'second-shift'), secondTime).handoffLane).toBe('C');
+    const changed = buildComparableSnapshot({ ...patient, shiftId: 'second-shift',
+      plan: { ...patient.plan, requiresDirectAssessment: !patient.plan.requiresDirectAssessment },
+      sourceEvidence: evidence('2026-08-27T09:00:00.000Z', '2') }, 'unit-a', secondTime);
+    expect(compareAcceptedSnapshot(changed, firstReference, secondTime).handoffLane).toBe('B');
+    const secondReference = accept(second, secondTime);
+    await store.save({ ...createEmptyExceptionHandoverState('second-shift'),
+      acceptedReferences: [secondReference] });
+    const reloaded = await createExceptionHandoverStorage('synthetic:two-turns', adapter, () => secondTime)
+      .load('second-shift');
+    expect(reloaded.acceptedReferences).toHaveLength(2);
+    expect(compareAcceptedSnapshot(second,
+      selectAcceptedComparableReference(reloaded.acceptedReferences, patient.patientId, 'unit-a',
+        'second-shift'), secondTime).handoffLane).toBe('C');
+    expect(selectAcceptedComparableReference(reloaded.acceptedReferences, patient.patientId, 'unit-a',
+      'third-shift')).toEqual(secondReference);
+  });
   it('retains only an explicitly accepted manifest across shifts, without renewing expiry', async () => {
     const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS[3];
     const sourceEvidence = {

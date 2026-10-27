@@ -86,6 +86,56 @@ describe('UnitExceptionHandover', () => {
     fireEvent.press(nextScreen.getByTestId('confirm-unchanged-review'));
     expect(nextScreen.getByTestId('unchanged-review-event')).toBeTruthy();
     expect(persisted?.acceptedReferences[0]?.manifestHash).toBe(acceptedHash);
+    await act(async () => { fireEvent.press(nextScreen.getByTestId('confirm-outgoing-transfer')); });
+    act(() => nextScreen.update(board(DEMO_ACTORS[1].userId, next, 'next-shift',
+      () => '2026-08-27T09:00:00.000Z')));
+    await act(async () => { fireEvent.press(nextScreen.getByTestId('confirm-incoming-attestation')); });
+    expect(nextScreen.getByText('C. SIN NOVEDADES CONFIRMADAS · 1')).toBeTruthy();
+    expect(nextScreen.getByTestId('outgoing-transfer-event')).toBeTruthy();
+    expect(nextScreen.getByTestId('incoming-attestation-event')).toBeTruthy();
+    nextScreen.unmount();
+    const restored = render(board(DEMO_ACTORS[1].userId, next, 'next-shift',
+      () => '2026-08-27T09:00:00.000Z'));
+    await act(async () => {});
+    expect(restored.getByText('C. SIN NOVEDADES CONFIRMADAS · 1')).toBeTruthy();
+    expect(restored.getByTestId('incoming-attestation-event')).toBeTruthy();
+    restored.unmount();
+    const third = { ...next, shiftId: 'third-shift', sourceEvidence: evidence('2026-08-27T09:30:00.000Z') };
+    const thirdScreen = render(board(DEMO_ACTORS[0].userId, third, 'third-shift',
+      () => '2026-08-27T10:00:00.000Z'));
+    await act(async () => {});
+    expect(thirdScreen.getByText('C. SIN NOVEDADES CONFIRMADAS · 1')).toBeTruthy();
+  });
+  it('recognizes a later human A designation using the interaction clock after hydration', async () => {
+    const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((item) => item.patientId === 'demo-psych-adult-002')!;
+    const scoped = { viewScope: 'unit-a', members: [{ patientId: patient.patientId, unitId: 'unit-a' }] };
+    let interactionAt = '2026-09-14T19:45:00.000Z';
+    let persisted: ExceptionHandoverSessionState | undefined;
+    const storage = { durability: 'durable' as const,
+      load: vi.fn(async (shift: string) => persisted ?? createEmptyExceptionHandoverState(shift)),
+      save: vi.fn(async (state: ExceptionHandoverSessionState) => { persisted = state; }),
+      clear: vi.fn(async () => {}) };
+    const board = () => <UnitExceptionHandover candidateMode patients={[patient]} groupScope={scoped}
+      sessionUserId={DEMO_ACTORS[0].userId} colors={colors} onOpenFullHandover={() => {}}
+      now={() => interactionAt} classificationReferenceTime={DEMO_NOW} storage={storage} />;
+    const screen = render(board());
+    await act(async () => {});
+    fireEvent.press(screen.getByTestId(`open-exception-${patient.patientId}`));
+    fireEvent.changeText(screen.getByTestId(`override-reason-${patient.patientId}`), 'Designación sintética con motivo');
+    interactionAt = '2026-09-14T19:46:00.000Z';
+    fireEvent.press(screen.getByTestId(`designate-a-${patient.patientId}`));
+    expect(screen.getByText('A. PRIORIDAD INMEDIATA · 1')).toBeTruthy();
+    await act(async () => {});
+    screen.unmount();
+    const restored = render(board());
+    await act(async () => {});
+    expect(restored.getByText('A. PRIORIDAD INMEDIATA · 1')).toBeTruthy();
+    restored.unmount();
+    persisted = { ...persisted!, overrides: persisted!.overrides.map((override) => ({ ...override,
+      recordedAt: '2026-09-14T19:47:00.000Z' })) };
+    const future = render(board());
+    await act(async () => {});
+    expect(future.getByText('R. REVISIÓN REQUERIDA · 1')).toBeTruthy();
   });
   it('does not promote a memory-only receipt and requires a reason for candidate A', () => {
     const patient = DEMO_EXCEPTION_HANDOVER_PATIENTS.find((item) => item.patientId === 'demo-psych-adult-002')!;

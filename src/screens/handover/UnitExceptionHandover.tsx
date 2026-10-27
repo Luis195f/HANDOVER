@@ -121,6 +121,7 @@ export function UnitExceptionHandover({
   const [hydrated, setHydrated] = useState(storageInstance === null);
   const [storageError, setStorageError] = useState(false);
   const [acceptanceError, setAcceptanceError] = useState('');
+  const [overrideAsOf, setOverrideAsOf] = useState(() => now());
   const [expandedUnchanged, setExpandedUnchanged] = useState(false);
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean[]>>({});
@@ -153,7 +154,8 @@ export function UnitExceptionHandover({
     lastKnownClassifications,
     ...(candidateMode ? { candidate: { scopeKey, units,
       acceptedReferences: sessionState.acceptedReferences } } : {}),
-  }), [candidateMode, classifiedAt, integrationState, lastKnownClassifications, patientsWithOverrides, previousUnitDataHealth, scopeKey, sessionState.acceptedReferences, shiftId, units]);
+    ...(candidateMode ? { overrideAsOf } : {}),
+  }), [candidateMode, classifiedAt, integrationState, lastKnownClassifications, overrideAsOf, patientsWithOverrides, previousUnitDataHealth, scopeKey, sessionState.acceptedReferences, shiftId, units]);
   const classifications = unitResult.classifications;
   const groupScopeValid = Boolean(groupScope.viewScope) && groupScope.members.length === patients.length &&
     new Set(groupScope.members.map(({ patientId }) => patientId)).size === patients.length &&
@@ -221,6 +223,8 @@ export function UnitExceptionHandover({
     setStorageError(false);
     void storageInstance.load(shiftId).then((loaded) => {
       if (!active) return;
+      const hydratedAt = now();
+      setOverrideAsOf(hydratedAt);
       setSessionState((current) => {
         const merged = mergeExceptionHandoverState(current, loaded);
         const hydratedPatients = patients.map((patient) => ({ ...patient, previousOverrides: [
@@ -231,6 +235,7 @@ export function UnitExceptionHandover({
           now: classifiedAt, shiftId, integration: integrationState,
           previousStatus: previousUnitDataHealth, lastKnownClassifications,
           ...(candidateMode ? { candidate: { scopeKey, units, acceptedReferences: merged.acceptedReferences } } : {}),
+          ...(candidateMode ? { overrideAsOf: hydratedAt } : {}),
         }).classifications;
         const hydratedKey = buildExceptionHandoverContextKey(shiftId, groupScope.viewScope,
           groupScope.members, hydratedClassifications);
@@ -406,6 +411,7 @@ export function UnitExceptionHandover({
     if (!activePatient || !activeClassification || !actor || !currentContext) return;
     const reason = overrideReasons[activePatient.patientId] ?? '';
     if (!reason.trim()) return;
+    const recordedAt = now();
     const override = createHandoffOverride({
       patientId: activePatient.patientId,
       previousLane: activeClassification.handoffLane,
@@ -413,10 +419,11 @@ export function UnitExceptionHandover({
       reason,
       professional: actor,
       shiftId,
-      recordedAt: now(),
+      recordedAt,
       sourceStatuses: activeClassification.sourceStatuses,
       ...(candidateMode ? { scopeKey } : {}),
     });
+    setOverrideAsOf(recordedAt);
     updateSessionState((current) => ({
       ...current,
       overrides: appendUniqueOverride(current.overrides, override),
