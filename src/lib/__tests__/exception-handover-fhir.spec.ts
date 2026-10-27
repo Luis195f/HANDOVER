@@ -8,6 +8,7 @@ import { buildExceptionHandoverFhirCandidate } from '../exception-handover-fhir'
 import {
   buildExceptionHandoverContextKey,
   classifyExceptionHandoverPatient,
+  buildExceptionScopeKey,
   createExceptionReviewEvent,
 } from '../exception-handover';
 import { buildExceptionHandoffContract, HANDOFF_FHIR_CAPABILITY_MATRIX } from '../handoff-contract';
@@ -70,6 +71,27 @@ function candidateInput() {
 }
 
 describe('exception handover FHIR candidate, isolated from runtime', () => {
+  it('consumes a source-backed R classification, never the fixture status, without activating transport', () => {
+    const patient = fixture('demo-psych-adult-001');
+    const members = [{ patientId: patient.patientId, unitId: 'unit-a' }];
+    const classification = classifyExceptionHandoverPatient(patient, {
+      now: NOW, shiftId: SHIFT,
+      candidate: { unitId: 'unit-a', scopeKey: buildExceptionScopeKey(SHIFT, 'unit-a', members), acceptedReference: null },
+    });
+    expect(classification.handoffLane).toBe('R');
+    const context = { shiftId: SHIFT, revision: 1,
+      key: buildExceptionHandoverContextKey(SHIFT, 'unit-a', members, [classification]) };
+    const details = { shiftId: SHIFT, context };
+    const outgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], OUTGOING_AT, undefined, details);
+    const events = [createExceptionReviewEvent('r_transferred', DEMO_ACTORS[1], NOW, patient.patientId,
+      { ...details, reason: 'Fuente no verificable', targetAt: INCOMING_AT, receiverId: DEMO_ACTORS[1].userId }),
+      outgoing, createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], INCOMING_AT, undefined,
+        { ...details, acknowledgesKey: outgoing.idempotencyKey })];
+    const bundle = buildExceptionHandoverFhirCandidate({ context, viewScope: 'unit-a', members,
+      classifications: [classification], events, unitHealth: 'healthy' });
+    expect(bundle.entry.some(({ resource }) => resource.resourceType === 'Task')).toBe(true);
+    expect(validateExceptionHandoverCandidate(bundle)).toEqual({ isValid: true, errors: [] });
+  });
   it('keeps a stable, round-trippable transaction with group, actors, tasks and C08 provenance', () => {
     const input = candidateInput();
     const original = structuredClone(input);

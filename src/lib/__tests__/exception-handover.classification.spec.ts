@@ -11,6 +11,10 @@ import {
   calculateRMetrics,
   classifyExceptionHandoverPatient,
   classifyExceptionHandoverUnit,
+  buildComparableSnapshot,
+  compareAcceptedSnapshot,
+  freezeComparableManifest,
+  acceptComparableManifest,
   createExceptionReviewEvent,
   createHandoffOverride,
   getPatientTransferStatus,
@@ -33,6 +37,147 @@ const classify = (patient: ExceptionPatientClassificationInput) =>
   classifyExceptionHandoverPatient(patient, { now: NOW, shiftId: SHIFT });
 
 describe('behavioral-health exception classification', () => {
+  it('requires accepted, source-backed history instead of the fixture status', () => {
+    const patient = fixture('demo-psych-adult-002');
+    const current = buildComparableSnapshot({ ...patient, status: 'unchanged' }, 'unit-a', NOW);
+    expect(compareAcceptedSnapshot(current, null, NOW).handoffLane).toBe('R');
+    expect(current.sources['direct-assessment'].availability).not.toBe('current');
+  });
+  it('compares only accepted covered clinical fields, not source references or object key order', () => {
+    const base = fixture('demo-psych-adult-002');
+    const patient = { ...base, plan: { requiresDirectAssessment: true },
+      sourceEvidence: {
+        'direct-assessment': { status: 'current' as const, observedAt: '2026-08-27T08:00:00.000Z', reference: 'synthetic:assessment:1', patientId: base.patientId, unitId: 'unit-a' },
+        'care-plan': { status: 'current' as const, observedAt: '2026-08-27T08:00:00.000Z', reference: 'synthetic:plan:1', patientId: base.patientId, unitId: 'unit-a' },
+      } };
+    const first = buildComparableSnapshot(patient, 'unit-a', NOW);
+    const context = { key: 'group-a', revision: 1, shiftId: patient.shiftId! };
+    const frozen = freezeComparableManifest(context, [first]);
+    const outgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], NOW, undefined, { shiftId: context.shiftId, context, manifestHash: frozen.hash });
+    const incoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], NOW, undefined,
+      { shiftId: context.shiftId, context, acknowledgesKey: outgoing.idempotencyKey, manifestHash: frozen.hash });
+    const accepted = acceptComparableManifest(frozen, [first], outgoing, incoming);
+    const later = '2026-08-27T09:15:00.000Z';
+    const second = buildComparableSnapshot({ ...patient, shiftId: 'next-shift',
+      sourceEvidence: {
+        'direct-assessment': { status: 'current', observedAt: later, reference: 'synthetic:assessment:2', patientId: base.patientId, unitId: 'unit-a' },
+        'care-plan': { status: 'current', observedAt: later, reference: 'synthetic:plan:2', patientId: base.patientId, unitId: 'unit-a' },
+      } }, 'unit-a', later);
+    expect(compareAcceptedSnapshot(second, accepted, later).handoffLane).toBe('C');
+    expect(compareAcceptedSnapshot(buildComparableSnapshot({ ...patient, shiftId: 'next-shift',
+      plan: { requiresDirectAssessment: false }, sourceEvidence: {
+        'direct-assessment': { status: 'current', observedAt: later, reference: 'synthetic:assessment:2', patientId: base.patientId, unitId: 'unit-a' },
+        'care-plan': { status: 'current', observedAt: later, reference: 'synthetic:plan:2', patientId: base.patientId, unitId: 'unit-a' },
+      } }, 'unit-a', later), accepted, later).handoffLane).toBe('B');
+    expect(compareAcceptedSnapshot(second, accepted, '2026-08-29T08:15:00.000Z').handoffLane).toBe('R');
+    expect(compareAcceptedSnapshot({ ...second, unitId: 'unit-b' }, accepted, later).handoffLane).toBe('R');
+    expect(compareAcceptedSnapshot({ ...second, sources: { ...second.sources,
+      'care-plan': { ...second.sources['care-plan']!, availability: 'missing' } } }, accepted, later).handoffLane).toBe('R');
+    expect(() => acceptComparableManifest(frozen, [second], outgoing, incoming)).toThrow();
+  });
+  it('rejects missing, stale, contradictory, future, incompatible and unaccepted comparison evidence', () => {
+    const base = fixture('demo-psych-adult-002');
+    const patient = { ...base, plan: { requiresMedicationVerification: false }, sourceEvidence: {
+      'direct-assessment': { status: 'current' as const, observedAt: '2026-08-27T08:00:00.000Z', reference: 'assessment:1', patientId: base.patientId, unitId: 'unit-a' },
+      'care-plan': { status: 'current' as const, observedAt: '2026-08-27T08:00:00.000Z', reference: 'plan:1', patientId: base.patientId, unitId: 'unit-a' },
+    } };
+    const first = buildComparableSnapshot(patient, 'unit-a', NOW);
+    const frozen = freezeComparableManifest(context, [first]);
+    const outgoing = createExceptionReviewEvent('outgoing_transfer', DEMO_ACTORS[0], NOW, undefined,
+      { shiftId: SHIFT, context, manifestHash: frozen.hash });
+    const incoming = createExceptionReviewEvent('incoming_attestation', DEMO_ACTORS[1], NOW, undefined,
+      { shiftId: SHIFT, context, manifestHash: frozen.hash, acknowledgesKey: outgoing.idempotencyKey });
+    const accepted = acceptComparableManifest(frozen, [first], outgoing, incoming);
+    const later = '2026-08-27T09:15:00.000Z';
+    const evidence = { 'direct-assessment': { status: 'current' as const, observedAt: later, reference: 'assessment:2', patientId: base.patientId, unitId: 'unit-a' },
+      'care-plan': { status: 'current' as const, observedAt: later, reference: 'plan:2', patientId: base.patientId, unitId: 'unit-a' } };
+    const next = buildComparableSnapshot({ ...patient, shiftId: 'next-shift', sourceEvidence: evidence }, 'unit-a', later);
+    const lane = (snapshot: typeof next, reference = accepted, clock = later) =>
+      compareAcceptedSnapshot(snapshot, reference, clock).handoffLane;
+    expect(lane(next)).toBe('C');
+    expect(lane(next, { ...accepted, snapshots: [] })).toBe('R');
+    expect(lane(next, { ...accepted, version: 1, expiresAt: later })).toBe('R');
+    expect(lane({ ...next, patientId: 'other' })).toBe('R');
+    expect(lane({ ...next, unitId: 'other' })).toBe('R');
+    expect(lane({ ...next, sources: { ...next.sources, 'care-plan': { ...next.sources['care-plan']!, coverage: [] } } })).toBe('R');
+    expect(lane({ ...next, sources: { ...next.sources, 'care-plan': { ...next.sources['care-plan']!, version: 'v2' } } })).toBe('R');
+    expect(lane({ ...next, sources: { ...next.sources, 'care-plan': { ...next.sources['care-plan']!, observedAt: '2026-08-27T08:10:00.000Z' } } })).toBe('R');
+    expect(lane({ ...next, sources: { ...next.sources, 'care-plan': { ...next.sources['care-plan']!, observedAt: '2026-08-27T10:00:00.000Z' } } })).toBe('R');
+    expect(buildComparableSnapshot({ ...patient, sourceEvidence: { ...patient.sourceEvidence,
+      'direct-assessment': { ...evidence['direct-assessment'], coherent: false } } }, 'unit-a', later)
+      .sources['direct-assessment']?.availability).toBe('missing');
+    expect(buildComparableSnapshot({ ...patient, sourceEvidence: { ...patient.sourceEvidence,
+      'direct-assessment': { ...evidence['direct-assessment'], unitId: 'unit-b' } } }, 'unit-a', later)
+      .sources['direct-assessment']?.availability).toBe('missing');
+    expect(buildComparableSnapshot({ ...patient, sourceEvidence: { ...patient.sourceEvidence,
+      'direct-assessment': { ...evidence['direct-assessment'], status: 'unavailable' } } }, 'unit-a', later)
+      .sources['direct-assessment']?.availability).toBe('unavailable');
+    expect(buildComparableSnapshot({ ...patient, sourceEvidence: evidence }, 'unit-a', later, undefined,
+      { 'direct-assessment': 'unavailable' }).sources['direct-assessment']?.availability).toBe('unavailable');
+    expect(buildComparableSnapshot({ ...patient, sourceEvidence: { ...patient.sourceEvidence,
+      'direct-assessment': { ...evidence['direct-assessment'], observedAt: '2026-08-27T00:00:00.000Z' } } }, 'unit-a', later)
+      .sources['direct-assessment']?.availability).toBe('stale');
+    expect(() => acceptComparableManifest(frozen, [first],
+      { ...outgoing, manifestHash: undefined }, incoming)).toThrow();
+  });
+  it('keeps fixture critical/changed statuses in R until a contextual human A designation', () => {
+    const patient = fixture('demo-psych-adult-001');
+    const candidate = { unitId: 'unit-a', scopeKey: 'scope-a', acceptedReference: null };
+    expect(classifyExceptionHandoverPatient(patient, { now: NOW, shiftId: SHIFT, candidate }).handoffLane).toBe('R');
+    expect(classifyExceptionHandoverPatient({ ...patient, status: 'changed' },
+      { now: NOW, shiftId: SHIFT, candidate }).handoffLane).toBe('R');
+    const designation = createHandoffOverride({ patientId: patient.patientId, previousLane: 'R', newLane: 'A',
+      professional: DEMO_ACTORS[0], reason: 'Designación humana sintética con motivo', shiftId: SHIFT,
+      recordedAt: NOW, sourceStatuses: {}, scopeKey: candidate.scopeKey });
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [designation] },
+      { now: NOW, shiftId: SHIFT, candidate })).toMatchObject({ handoffLane: 'A', classifiedBy: 'human', overrideReason: designation.reason });
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [designation] },
+      { now: NOW, shiftId: SHIFT, candidate: { ...candidate, scopeKey: 'different-context' } }).handoffLane).toBe('R');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [{ ...designation, newLane: 'B' }] },
+      { now: NOW, shiftId: SHIFT, candidate }).handoffLane).toBe('R');
+    const later = '2026-08-27T09:00:00.000Z';
+    const laterDesignation = { ...designation, recordedAt: later };
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [laterDesignation] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: later }).handoffLane).toBe('A');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [laterDesignation] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: NOW }).handoffLane).toBe('R');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [{ ...laterDesignation, reason: ' ' }] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: later }).handoffLane).toBe('R');
+    expect(classifyExceptionHandoverPatient({ ...patient, previousOverrides: [{ ...laterDesignation, shiftId: 'other' }] },
+      { now: NOW, shiftId: SHIFT, candidate, overrideAsOf: later }).handoffLane).toBe('R');
+  });
+  it('requires clinical values rather than observation metadata and hashes only comparable values', () => {
+    const base = fixture('demo-psych-adult-002');
+    const sourceEvidence = { 'observation-record': { status: 'current' as const,
+      reference: 'synthetic:observation:1', patientId: base.patientId, unitId: 'unit-a', observedAt: NOW } };
+    const source = (vitals: typeof base.vitals, oxygenTherapy?: { flowLMin?: number; fio2?: number }) =>
+      buildComparableSnapshot({ ...base, observationLevel: 'enhanced', sourceEvidence, vitals, oxygenTherapy },
+        'unit-a', NOW).sources['observation-record'];
+    for (const vitals of [{}, { rr: undefined }, { rr: undefined, recordedAt: NOW },
+      { rr: undefined, issuedAt: NOW }, { rr: undefined, recordedAt: NOW, issuedAt: NOW }]) {
+      expect(source(vitals)?.availability).toBe('missing');
+    }
+    const clinical = source({ rr: 16, recordedAt: NOW });
+    expect(clinical?.availability).toBe('current');
+    expect(clinical?.contentHash).toBe(source({ rr: 16, issuedAt: '2026-08-27T08:10:00.000Z' })?.contentHash);
+    expect(source({ rr: undefined, o2: false }, { flowLMin: 0, fio2: 21 })?.availability).toBe('current');
+    expect(source({}, { flowLMin: 0 })?.availability).toBe('current');
+  });
+  it('projects temperature and oxygen with the existing selectors without treating empty vitals as evidence', () => {
+    const base = fixture('demo-psych-adult-002');
+    const sourceEvidence = { 'observation-record': { status: 'current' as const,
+      reference: 'synthetic:observation:1', patientId: base.patientId, unitId: 'unit-a', observedAt: NOW } };
+    const patient = { ...base, observationLevel: 'enhanced' as const, sourceEvidence,
+      vitals: { rr: 16, tempC: 37, temp: 39, o2: true }, oxygenTherapy: { fio2: 21 } };
+    const source = (input: typeof patient) => buildComparableSnapshot(input, 'unit-a', NOW)
+      .sources['observation-record'];
+    expect(source(patient)?.availability).toBe('current');
+    expect(source({ ...patient, vitals: { ...patient.vitals, temp: 35, o2: false } })?.contentHash)
+      .toBe(source(patient)?.contentHash);
+    expect(source({ ...patient, oxygenTherapy: { fio2: 28 } })?.contentHash)
+      .not.toBe(source(patient)?.contentHash);
+    expect(source({ ...patient, vitals: {}, oxygenTherapy: {} })?.availability).toBe('missing');
+  });
   it('preserves baseline A/B and keeps current baseline C in C', () => {
     const classifications = DEMO_EXCEPTION_HANDOVER_PATIENTS.map(classify);
 

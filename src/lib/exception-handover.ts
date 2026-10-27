@@ -5,8 +5,13 @@ import {
   type ExceptionHandoverProfileConfig,
 } from '@/src/config/profiles/exceptionHandover';
 import { sha256 } from 'js-sha256';
+import { z } from 'zod';
+import { zContingencyPlan, zOxygen, zPendingTask, zRiskFlags, zRiskItem, zVitals } from '@/src/validation/schemas';
+import type { ContingencyPlan, OxygenTherapy, PendingTaskSummary, RiskFlags, RiskItem, VitalsSnapshot } from '@/src/types/handover';
+import { selectNews2Temperature } from './news2-input';
+import { resolveSupplementalOxygen } from './oxygen';
 
-export type ClinicalStatus = 'stable' | 'watcher' | 'unstable';
+export type ClinicalStatus = 'stable' | 'watcher' | 'unstable' | 'unverified';
 export type HandoffLane = 'A' | 'B' | 'C' | 'R';
 export type SourceStatus = 'current' | 'stale' | 'missing' | 'unavailable';
 export type UnitDataHealth = 'healthy' | 'degraded' | 'unavailable';
@@ -25,6 +30,10 @@ export type SourceEvidence = {
   observedAt?: string;
   coherent?: boolean;
   verifiable?: boolean;
+  reference?: string;
+  version?: string;
+  patientId?: string;
+  unitId?: string;
 };
 
 export type ExceptionPatientPlan = {
@@ -44,6 +53,12 @@ export type ExceptionPatientClassificationInput = {
   observationLevel?: ObservationLevel;
   activeRisks?: readonly string[];
   plan?: ExceptionPatientPlan;
+  vitals?: VitalsSnapshot;
+  oxygenTherapy?: OxygenTherapy;
+  risks?: RiskFlags;
+  risksStructured?: readonly RiskItem[];
+  pendingTasks?: readonly PendingTaskSummary[];
+  contingencyPlan?: ContingencyPlan;
   sourceEvidence?: Partial<Record<ClinicalSource, SourceEvidence>>;
   reviewOwner?: string;
   previousOverrides?: readonly HandoffOverride[];
@@ -70,13 +85,14 @@ export type HandoffOverride = {
   shiftId: string;
   recordedAt: string;
   sourceStatuses: Partial<Record<ClinicalSource, SourceStatus>>;
+  scopeKey?: string;
 };
 
 export type HandoffClassification = {
   patientId: string;
   clinicalStatus: ClinicalStatus;
   handoffLane: HandoffLane;
-  baselineLane: Exclude<HandoffLane, 'R'>;
+  baselineLane: HandoffLane;
   reasons: string[];
   classifiedAt: string;
   classifiedBy: 'rule' | 'human';
@@ -148,6 +164,7 @@ export type ExceptionReviewEvent = {
   targetAt?: string;
   receiverId?: string;
   acknowledgesKey?: string;
+  manifestHash?: string;
   criticalPoints?: string[];
 };
 
@@ -169,6 +186,17 @@ export function buildExceptionHandoverContextKey(
         [source, sourceStatus, reason, owner, state]).sort(([left], [right]) => left.localeCompare(right))] as const)
     .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
   return sha256(JSON.stringify({ shiftId, viewScope, units: [...new Set(members.map(({ unitId }) => unitId))].sort(), group, lanes }));
+}
+
+export function buildExceptionScopeKey(shiftId: string, viewScope: string,
+  members: readonly { patientId: string; unitId: string }[],
+  snapshots: readonly ComparableSnapshot[] = []): string {
+  return sha256(JSON.stringify({ shiftId, viewScope, members: [...members]
+    .map(({ patientId, unitId }) => [patientId, unitId])
+    .sort(([leftId, leftUnit], [rightId, rightUnit]) =>
+      leftId.localeCompare(rightId) || leftUnit.localeCompare(rightUnit)),
+    evidence: snapshots.map((snapshot) => [snapshot.patientId, snapshot.unitId, snapshot.sources])
+      .sort(([left], [right]) => String(left).localeCompare(String(right))) }));
 }
 
 export type ExceptionSbar = {
@@ -242,6 +270,249 @@ const minutesBetween = (start: string | undefined, end: string): number | null =
 
 const unique = <T,>(values: readonly T[]): T[] => Array.from(new Set(values));
 
+export type ComparableField = 'observationLevel' | 'activeRisks' | 'risks' | 'risksStructured' |
+  'vitals' | 'oxygenTherapy' | 'plan' | 'pendingTasks' | 'contingencyPlan';
+export type ComparableSource = {
+  availability: SourceStatus;
+  reference?: string;
+  version?: string;
+  observedAt?: string;
+  coverage: ComparableField[];
+  contentHash?: string;
+};
+export type ComparableSnapshot = {
+  version: 1;
+  id: string;
+  patientId: string;
+  unitId: string;
+  shiftId: string;
+  sources: Partial<Record<ClinicalSource, ComparableSource>>;
+};
+export type AcceptedComparableReference = {
+  version: 1;
+  context: ExceptionHandoverContext;
+  manifestHash: string;
+  outgoingKey: string;
+  incomingKey: string;
+  acceptedBy: string;
+  acceptedAt: string;
+  expiresAt: string;
+  snapshots: ComparableSnapshot[];
+};
+export type FrozenComparableManifest = {
+  context: ExceptionHandoverContext;
+  snapshots: ComparableSnapshot[];
+  hash: string;
+};
+
+const SOURCE_FIELDS: Readonly<Partial<Record<ClinicalSource, readonly ComparableField[]>>> = {
+  'direct-assessment': ['observationLevel', 'activeRisks', 'risks', 'risksStructured'],
+  'observation-record': ['vitals', 'oxygenTherapy'],
+  'care-plan': ['plan', 'pendingTasks', 'contingencyPlan'],
+};
+const FIELD_SCHEMAS = {
+  observationLevel: z.enum(['routine', 'enhanced', 'constant']),
+  activeRisks: z.array(z.string().trim().min(1)),
+  risks: zRiskFlags,
+  risksStructured: z.array(zRiskItem),
+  vitals: zVitals,
+  oxygenTherapy: zOxygen,
+  plan: z.object({
+    requiresMedicationVerification: z.boolean().optional(),
+    requiresDirectAssessment: z.boolean().optional(),
+    requiresLeaveReview: z.boolean().optional(),
+    restrictiveInterventionReviewDue: z.boolean().optional(),
+  }),
+  pendingTasks: z.array(zPendingTask),
+  contingencyPlan: zContingencyPlan,
+} satisfies Record<ComparableField, z.ZodType>;
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonical(entry)]));
+  }
+  return value;
+}
+
+const contentHash = (value: unknown): string => sha256(JSON.stringify(canonical(value)));
+
+const VITAL_VALUES = ['hr', 'rr', 'tempC', 'spo2', 'sbp', 'dbp', 'glucoseMgDl', 'glucoseMmolL', 'avpu'] as const;
+
+function hasComparableInput(field: ComparableField, value: unknown, patient: ExceptionPatientClassificationInput): boolean {
+  if (value === undefined) return false;
+  if (field !== 'vitals' && field !== 'oxygenTherapy') return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+  const entries = Object.entries(value);
+  if (field === 'vitals') return VITAL_VALUES.some((key) => entries.some(([name, entry]) =>
+    name === key && entry !== undefined)) || typeof patient.vitals?.o2 === 'boolean';
+  if (field === 'oxygenTherapy') return entries.some(([name, entry]) =>
+    ((name === 'flowLMin' || name === 'fio2') && entry !== undefined) ||
+    (name === 'device' && typeof entry === 'string' && Boolean(entry.trim())));
+  return true;
+}
+
+function comparableValue(field: ComparableField, value: unknown, patient: ExceptionPatientClassificationInput): unknown | undefined {
+  const parsed = FIELD_SCHEMAS[field].safeParse(value);
+  if (!parsed.success) return undefined;
+  if (field === 'vitals') {
+    const vitals = zVitals.parse(value);
+    const projected: Record<string, unknown> = Object.fromEntries(VITAL_VALUES
+      .filter((key) => vitals[key] !== undefined).map((key) => [key, vitals[key]]));
+    if (typeof patient.vitals?.o2 === 'boolean') {
+      projected.supplementalOxygen = resolveSupplementalOxygen(patient.oxygenTherapy, patient.vitals.o2);
+    }
+    return Object.keys(projected).length ? projected : undefined;
+  }
+  const projected = canonical(parsed.data);
+  if (field === 'oxygenTherapy' && projected && typeof projected === 'object' && !Array.isArray(projected)) {
+    const therapy: Record<string, unknown> = Object.fromEntries(Object.entries(projected));
+    if (typeof therapy.device === 'string') {
+      therapy.device = therapy.device.trim();
+      if (!therapy.device) delete therapy.device;
+    }
+    return Object.keys(therapy).length ? therapy : undefined;
+  }
+  return projected && typeof projected === 'object' && !Array.isArray(projected) &&
+    !Object.keys(projected).length ? undefined : projected;
+}
+
+export function buildComparableSnapshot(
+  patient: ExceptionPatientClassificationInput,
+  unitId: string,
+  now: string,
+  config: ExceptionHandoverProfileConfig = BEHAVIORAL_HEALTH_EXCEPTION_HANDOVER_CONFIG,
+  unitSourceStatuses?: Partial<Record<ClinicalSource, SourceStatus>>,
+): ComparableSnapshot {
+  const fields = {
+    observationLevel: patient.observationLevel, activeRisks: patient.activeRisks,
+    risks: patient.risks, risksStructured: patient.risksStructured,
+    vitals: patient.vitals ? { ...patient.vitals, tempC: selectNews2Temperature(patient.vitals) } : undefined,
+    oxygenTherapy: patient.oxygenTherapy, plan: patient.plan,
+    pendingTasks: patient.pendingTasks, contingencyPlan: patient.contingencyPlan,
+  };
+  const sources: ComparableSnapshot['sources'] = {};
+  for (const source of expectedSourcesForPatient(patient, config)) {
+    const evidence = patient.sourceEvidence?.[source];
+    const coverage = (SOURCE_FIELDS[source] ?? []).filter((field) => hasComparableInput(field, fields[field], patient));
+    const observed = parseTimestamp(evidence?.observedAt);
+    const current = parseTimestamp(now);
+    const projectedFields = coverage.map((field) => [field, comparableValue(field, fields[field], patient)] as const);
+    const validFields = projectedFields.every(([, value]) => value !== undefined) &&
+      (!coverage.includes('pendingTasks') || patient.pendingTasks?.every((task) =>
+        task.category !== undefined && task.priority !== undefined && task.status !== undefined));
+    const unitStatus = unitSourceStatuses?.[source];
+    const availability: SourceStatus = unitStatus && unitStatus !== 'current'
+      ? unitStatus
+      : !evidence || evidence.status === 'missing' ? 'missing'
+      : evidence.status === 'unavailable' || evidence.verifiable === false ? 'unavailable'
+        : evidence.coherent === false || !evidence.reference?.trim() ||
+          evidence.patientId !== patient.patientId || evidence.unitId !== unitId || !unitId.trim() ||
+          observed === null || current === null || observed > current || !coverage.length || !validFields ? 'missing'
+          : evidence.status === 'stale' || current - observed > config.expectedFreshnessMinutes[source] * MINUTE_MS
+            ? 'stale' : 'current';
+    sources[source] = {
+      availability,
+      ...(evidence?.reference?.trim() ? { reference: evidence.reference.trim() } : {}),
+      ...(evidence?.version ? { version: evidence.version } : {}),
+      ...(evidence?.observedAt ? { observedAt: evidence.observedAt } : {}),
+      coverage,
+      ...(validFields && coverage.length ? { contentHash: contentHash(Object.fromEntries(projectedFields)) } : {}),
+    };
+  }
+  const shiftId = patient.shiftId ?? DEFAULT_SHIFT_ID;
+  return { version: 1, id: contentHash({ patientId: patient.patientId, unitId, shiftId, sources }),
+    patientId: patient.patientId, unitId, shiftId, sources };
+}
+
+export function selectAcceptedComparableReference(
+  references: readonly AcceptedComparableReference[], patientId: string, unitId: string,
+  currentShiftId?: string,
+): AcceptedComparableReference | null {
+  return [...references].filter((reference) => reference.context.shiftId !== currentShiftId && reference.snapshots.some((snapshot) =>
+    snapshot.patientId === patientId && snapshot.unitId === unitId))
+    .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt))[0] ?? null;
+}
+
+export function compareAcceptedSnapshot(
+  current: ComparableSnapshot,
+  accepted: AcceptedComparableReference | null,
+  now: string,
+): { handoffLane: 'B' | 'C' | 'R'; reasons: string[] } {
+  const nowMs = parseTimestamp(now);
+  const acceptedMs = parseTimestamp(accepted?.acceptedAt);
+  const prior = accepted?.snapshots.find((snapshot) =>
+    snapshot.patientId === current.patientId && snapshot.unitId === current.unitId);
+  if (!accepted || !prior || accepted.version !== 1 || prior.version !== current.version ||
+      acceptedMs === null || nowMs === null || acceptedMs > nowMs ||
+      (parseTimestamp(accepted.expiresAt) ?? -1) <= nowMs ||
+      accepted.manifestHash !== contentHash(accepted.snapshots) ||
+      !accepted.acceptedBy.trim() || !accepted.outgoingKey.trim() || !accepted.incomingKey.trim() ||
+      accepted.context.shiftId === current.shiftId) {
+    return { handoffLane: 'R', reasons: ['No hay referencia previa aceptada y vigente'] };
+  }
+  const sources = Object.keys(current.sources) as ClinicalSource[];
+  if (sources.length === 0 || sources.length !== Object.keys(prior.sources).length || sources.some((source) => {
+    const next = current.sources[source];
+    const previous = prior.sources[source];
+    return next?.availability !== 'current' || previous?.availability !== 'current' ||
+      !next.contentHash || !previous.contentHash || !next.reference || !previous.reference ||
+      next.version !== previous.version ||
+      JSON.stringify(next.coverage) !== JSON.stringify(previous.coverage) ||
+      (parseTimestamp(next.observedAt) ?? -1) < acceptedMs ||
+      (parseTimestamp(next.observedAt) ?? Infinity) > nowMs ||
+      (parseTimestamp(previous.observedAt) ?? Infinity) > acceptedMs;
+  })) return { handoffLane: 'R', reasons: ['Fuentes comparables insuficientes o fuera de orden'] };
+  return sources.some((source) => current.sources[source]?.contentHash !== prior.sources[source]?.contentHash)
+    ? { handoffLane: 'B', reasons: ['Diferencia en campos comparables verificados'] }
+    : { handoffLane: 'C', reasons: ['Sin diferencias en los campos comparables cubiertos'] };
+}
+
+export function freezeComparableManifest(
+  context: ExceptionHandoverContext,
+  snapshots: readonly ComparableSnapshot[],
+): FrozenComparableManifest {
+  const ordered = [...snapshots].sort((left, right) => left.patientId.localeCompare(right.patientId) ||
+    left.unitId.localeCompare(right.unitId));
+  if (!ordered.length || new Set(ordered.map(({ patientId, unitId }) => `${patientId}\u0000${unitId}`)).size !== ordered.length ||
+      ordered.some(({ shiftId, patientId, unitId }) => shiftId !== context.shiftId || !patientId || !unitId)) {
+    throw new Error('Invalid comparable manifest membership');
+  }
+  return { context, snapshots: ordered, hash: contentHash(ordered) };
+}
+
+export function acceptComparableManifest(
+  frozen: FrozenComparableManifest,
+  current: readonly ComparableSnapshot[],
+  outgoing: ExceptionReviewEvent,
+  incoming: ExceptionReviewEvent,
+  retentionDays = 1,
+): AcceptedComparableReference {
+  const now = parseTimestamp(incoming.recordedAt);
+  const sent = parseTimestamp(outgoing.recordedAt);
+  const compared = freezeComparableManifest(frozen.context, current);
+  if (frozen.hash !== compared.hash || frozen.hash !== contentHash(frozen.snapshots) ||
+      outgoing.kind !== 'outgoing_transfer' || incoming.kind !== 'incoming_attestation' ||
+      outgoing.manifestHash !== frozen.hash || incoming.manifestHash !== frozen.hash ||
+      outgoing.actorKind !== 'outgoing' || incoming.actorKind !== 'incoming' ||
+      incoming.acknowledgesKey !== outgoing.idempotencyKey || outgoing.actorId === incoming.actorId ||
+      outgoing.context?.key !== frozen.context.key || incoming.context?.key !== frozen.context.key ||
+      outgoing.context.revision !== frozen.context.revision || incoming.context.revision !== frozen.context.revision ||
+      now === null || sent === null || now < sent ||
+      !Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 30) {
+    throw new Error('Comparable manifest acceptance is not verifiable');
+  }
+  return {
+    version: 1, context: frozen.context, manifestHash: frozen.hash,
+    outgoingKey: outgoing.idempotencyKey, incomingKey: incoming.idempotencyKey,
+    acceptedBy: incoming.actorId, acceptedAt: incoming.recordedAt,
+    expiresAt: new Date(now + retentionDays * 86_400_000).toISOString(),
+    snapshots: frozen.snapshots,
+  };
+}
+
 const baselineLane = (status: ExceptionPatientClassificationInput['status']): Exclude<HandoffLane, 'R'> =>
   status === 'critical' ? 'A' : status === 'changed' ? 'B' : 'C';
 
@@ -314,12 +585,17 @@ export function classifyExceptionHandoverPatient(
     shiftId?: string;
     unitSourceStatuses?: Partial<Record<ClinicalSource, SourceStatus>>;
     failureStartedAt?: string;
+    overrideAsOf?: string;
     config?: ExceptionHandoverProfileConfig;
+    candidate?: { unitId: string; scopeKey: string; acceptedReference: AcceptedComparableReference | null };
   },
 ): HandoffClassification {
   const config = options.config ?? BEHAVIORAL_HEALTH_EXCEPTION_HANDOVER_CONFIG;
   const shiftId = options.shiftId ?? patient.shiftId ?? DEFAULT_SHIFT_ID;
-  const baseLane = baselineLane(patient.status);
+  const snapshot = options.candidate ? buildComparableSnapshot({ ...patient, shiftId },
+    options.candidate.unitId, options.now, config, options.unitSourceStatuses) : null;
+  const comparison = snapshot ? compareAcceptedSnapshot(snapshot, options.candidate?.acceptedReference ?? null, options.now) : null;
+  const baseLane: HandoffLane = comparison?.handoffLane ?? baselineLane(patient.status);
   const expectedSources = expectedSourcesForPatient(patient, config);
   const evaluated = expectedSources.map((source) => {
     const unitStatus = options.unitSourceStatuses?.[source];
@@ -332,14 +608,17 @@ export function classifyExceptionHandoverPatient(
     return evaluateSource(source, evidence, options.now, config);
   });
   const sourceStatuses = Object.fromEntries(
-    evaluated.map(({ source, status }) => [source, status]),
+    snapshot ? Object.entries(snapshot.sources).map(([source, evidence]) => [source, evidence?.availability]) :
+      evaluated.map(({ source, status }) => [source, status]),
   ) as Partial<Record<ClinicalSource, SourceStatus>>;
   const insufficient = evaluated.filter((source) => source.reason !== null);
   const validTimestamps = evaluated
     .map(({ observedAt }) => observedAt)
     .filter((value): value is string => parseTimestamp(value) != null)
     .sort((left, right) => (parseTimestamp(left) ?? 0) - (parseTimestamp(right) ?? 0));
-  const reviewRequirements: RReviewRequirement[] = insufficient.map((source) => ({
+  const reviewRequirements: RReviewRequirement[] = (comparison?.handoffLane === 'R'
+    ? expectedSources.map((source) => ({ source, status: snapshot?.sources[source]?.availability ?? 'missing',
+      reason: comparison.reasons[0], ageMinutes: null })) : insufficient).map((source) => ({
     source: source.source,
     sourceStatus: source.status,
     reason: source.reason ?? 'Información esperada insuficiente',
@@ -348,16 +627,22 @@ export function classifyExceptionHandoverPatient(
     state: 'open',
     enteredAt: options.failureStartedAt ?? options.now,
   }));
-  const ruleLane: HandoffLane = baseLane === 'C' && reviewRequirements.length > 0 ? 'R' : baseLane;
-  const { active, previous } = findOverrides(patient, shiftId);
+  const ruleLane: HandoffLane = comparison ? comparison.handoffLane : baseLane === 'C' && reviewRequirements.length > 0 ? 'R' : baseLane;
+  const found = findOverrides(patient, shiftId);
+  const active = options.candidate ? [...(patient.previousOverrides ?? [])].reverse().find((override) =>
+    override.shiftId === shiftId && override.scopeKey === options.candidate?.scopeKey && override.newLane === 'A' &&
+    (parseTimestamp(override.recordedAt) ?? Infinity) <= (parseTimestamp(options.overrideAsOf ?? options.now) ?? -1) &&
+    Boolean(override.reason.trim()) && Boolean(override.professionalId.trim())) : found.active;
+  const previous = found.previous;
 
   return {
     patientId: patient.patientId,
-    clinicalStatus: clinicalStatus(baseLane),
+    clinicalStatus: active?.newLane === 'A' ? 'unstable' : baseLane === 'R' ? 'unverified' : clinicalStatus(baseLane),
     handoffLane: active?.newLane ?? ruleLane,
     baselineLane: baseLane,
     reasons: active
       ? [active.reason]
+      : comparison ? comparison.reasons
       : ruleLane === 'R'
         ? reviewRequirements.map(({ reason }) => reason)
         : baseLane === 'C'
@@ -442,9 +727,15 @@ export function classifyExceptionHandoverUnit(
     now: string;
     shiftId?: string;
     integration?: UnitIntegrationState;
+    overrideAsOf?: string;
     previousStatus?: UnitDataHealth;
     lastKnownClassifications?: readonly HandoffClassification[];
     config?: ExceptionHandoverProfileConfig;
+    candidate?: {
+      scopeKey: string;
+      units: ReadonlyMap<string, string>;
+      acceptedReferences: readonly AcceptedComparableReference[];
+    };
   },
 ): UnitClassificationResult {
   const integration = options.integration ?? { availability: 'available' };
@@ -463,9 +754,15 @@ export function classifyExceptionHandoverUnit(
   const classifications = patients.map((patient) => classifyExceptionHandoverPatient(patient, {
     now: options.now,
     shiftId: options.shiftId,
+    overrideAsOf: options.overrideAsOf,
     unitSourceStatuses: integration.sourceStatuses,
     failureStartedAt: integration.failureStartedAt,
     config: options.config,
+    ...(options.candidate ? { candidate: { unitId: options.candidate.units.get(patient.patientId) ?? '',
+      scopeKey: options.candidate.scopeKey,
+      acceptedReference: selectAcceptedComparableReference(options.candidate.acceptedReferences,
+        patient.patientId, options.candidate.units.get(patient.patientId) ?? '',
+        options.shiftId ?? patient.shiftId ?? DEFAULT_SHIFT_ID) } } : {}),
   }));
 
   return {
@@ -540,6 +837,7 @@ type EventDetails = {
   targetAt?: string;
   receiverId?: string;
   acknowledgesKey?: string;
+  manifestHash?: string;
   criticalPoints?: readonly string[];
 };
 
@@ -559,7 +857,7 @@ export function createExceptionReviewEvent(
     throw new Error('El check-back requiere entre uno y tres puntos críticos');
   }
   return {
-    idempotencyKey: `exception-handoff:${shiftId}:${kind}:${scope}:${actor.userId}${details.context ? `:${details.context.key}:${details.context.revision}` : ''}${details.acknowledgesKey ? `:ack:${sha256(details.acknowledgesKey)}` : ''}`,
+    idempotencyKey: `exception-handoff:${shiftId}:${kind}:${scope}:${actor.userId}${details.context ? `:${details.context.key}:${details.context.revision}` : ''}${details.acknowledgesKey ? `:ack:${sha256(details.acknowledgesKey)}` : ''}${details.manifestHash ? `:manifest:${details.manifestHash}` : ''}`,
     kind,
     actorId: actor.userId,
     actorName: actor.displayName,
@@ -573,6 +871,7 @@ export function createExceptionReviewEvent(
     ...(details.targetAt ? { targetAt: details.targetAt } : {}),
     ...(details.receiverId ? { receiverId: details.receiverId } : {}),
     ...(details.acknowledgesKey ? { acknowledgesKey: details.acknowledgesKey } : {}),
+    ...(details.manifestHash ? { manifestHash: details.manifestHash } : {}),
     ...(criticalPoints.length > 0 ? { criticalPoints } : {}),
   };
 }
@@ -595,11 +894,12 @@ export function createHandoffOverride(input: {
   shiftId: string;
   recordedAt: string;
   sourceStatuses: Partial<Record<ClinicalSource, SourceStatus>>;
+  scopeKey?: string;
 }): HandoffOverride {
   const reason = input.reason.trim();
   if (!reason) throw new Error('El override requiere un motivo clínico');
   return {
-    idempotencyKey: `exception-handoff:${input.shiftId}:override:${input.patientId}:${input.professional.userId}:${input.newLane}`,
+    idempotencyKey: `exception-handoff:${input.shiftId}:override:${input.patientId}:${input.professional.userId}:${input.newLane}${input.scopeKey ? `:${input.scopeKey}` : ''}`,
     patientId: input.patientId,
     previousLane: input.previousLane,
     newLane: input.newLane,
@@ -609,6 +909,7 @@ export function createHandoffOverride(input: {
     shiftId: input.shiftId,
     recordedAt: input.recordedAt,
     sourceStatuses: { ...input.sourceStatuses },
+    ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
   };
 }
 

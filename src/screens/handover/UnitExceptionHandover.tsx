@@ -9,7 +9,10 @@ import {
   appendUniqueExceptionEvent,
   appendUniqueOverride,
   assessHandoffClosure,
+  acceptComparableManifest,
+  buildComparableSnapshot,
   buildExceptionHandoverContextKey,
+  buildExceptionScopeKey,
   buildExceptionSbarForClassification,
   calculateCheckBackMetrics,
   calculateRMetrics,
@@ -17,6 +20,7 @@ import {
   COLLECTIVE_REVIEW_RESPONSIBILITY_COPY,
   createExceptionReviewEvent,
   createHandoffOverride,
+  freezeComparableManifest,
   DEGRADED_HANDOFF_RESPONSIBILITY_COPY,
   formatExceptionDateTime,
   getPatientTransferStatus,
@@ -64,6 +68,7 @@ type Props = {
   groupScope: { viewScope: string; members: readonly { patientId: string; unitId: string }[] };
   integrationState?: UnitIntegrationState;
   storage?: ExceptionHandoverStorage | null;
+  candidateMode?: boolean;
 };
 
 const SOURCE_LABELS: Readonly<Record<ClinicalSource, string>> = {
@@ -106,6 +111,7 @@ export function UnitExceptionHandover({
   groupScope,
   integrationState = { availability: 'available' },
   storage,
+  candidateMode = false,
 }: Props) {
   const [classifiedAt] = useState(() => classificationReferenceTime ?? now());
   const [storageInstance] = useState<ExceptionHandoverStorage | null>(() =>
@@ -114,6 +120,8 @@ export function UnitExceptionHandover({
     createEmptyExceptionHandoverState(shiftId));
   const [hydrated, setHydrated] = useState(storageInstance === null);
   const [storageError, setStorageError] = useState(false);
+  const [acceptanceError, setAcceptanceError] = useState('');
+  const [overrideAsOf, setOverrideAsOf] = useState(() => now());
   const [expandedUnchanged, setExpandedUnchanged] = useState(false);
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean[]>>({});
@@ -133,13 +141,21 @@ export function UnitExceptionHandover({
       ...sessionState.overrides.filter((override) => override.patientId === patient.patientId),
     ],
   })), [patients, sessionState.overrides]);
+  const units = useMemo(() => new Map(groupScope.members.map(({ patientId, unitId }) => [patientId, unitId])), [groupScope.members]);
+  const candidateSnapshots = candidateMode ? patientsWithOverrides.map((patient) =>
+    buildComparableSnapshot({ ...patient, shiftId }, units.get(patient.patientId) ?? '', classifiedAt,
+      undefined, integrationState.sourceStatuses)) : [];
+  const scopeKey = buildExceptionScopeKey(shiftId, groupScope.viewScope, groupScope.members, candidateSnapshots);
   const unitResult = useMemo(() => classifyExceptionHandoverUnit(patientsWithOverrides, {
     now: classifiedAt,
     shiftId,
     integration: integrationState,
     previousStatus: previousUnitDataHealth,
     lastKnownClassifications,
-  }), [classifiedAt, integrationState, lastKnownClassifications, patientsWithOverrides, previousUnitDataHealth, shiftId]);
+    ...(candidateMode ? { candidate: { scopeKey, units,
+      acceptedReferences: sessionState.acceptedReferences } } : {}),
+    ...(candidateMode ? { overrideAsOf } : {}),
+  }), [candidateMode, classifiedAt, integrationState, lastKnownClassifications, overrideAsOf, patientsWithOverrides, previousUnitDataHealth, scopeKey, sessionState.acceptedReferences, shiftId, units]);
   const classifications = unitResult.classifications;
   const groupScopeValid = Boolean(groupScope.viewScope) && groupScope.members.length === patients.length &&
     new Set(groupScope.members.map(({ patientId }) => patientId)).size === patients.length &&
@@ -157,6 +173,8 @@ export function UnitExceptionHandover({
     activeContext?.key === groupKey && activeContext.shiftId === shiftId &&
     Number.isSafeInteger(activeContext.revision) && activeContext.revision > 0;
   const currentContext: ExceptionHandoverContext | null = contextReady ? activeContext : null;
+  const currentManifest = candidateMode && currentContext && candidateSnapshots.length
+    ? freezeComparableManifest(currentContext, candidateSnapshots) : null;
   const classificationByPatientId = useMemo(
     () => new Map(classifications.map((classification) => [classification.patientId, classification])),
     [classifications],
@@ -176,9 +194,11 @@ export function UnitExceptionHandover({
   const events = sessionState.events.filter((event) => event.shiftId === shiftId);
   const currentEvents = currentContext ? events.filter((event) =>
     event.context?.key === currentContext.key && event.context.revision === currentContext.revision) : [];
-  const outgoingTransfer = currentEvents.find((event) => event.kind === 'outgoing_transfer');
+  const outgoingTransfer = currentEvents.find((event) => event.kind === 'outgoing_transfer' &&
+    (!candidateMode || event.manifestHash === currentManifest?.hash));
   const incomingAttestation = currentEvents.find((event) => event.kind === 'incoming_attestation' &&
-    event.acknowledgesKey === outgoingTransfer?.idempotencyKey);
+    event.acknowledgesKey === outgoingTransfer?.idempotencyKey &&
+    (!candidateMode || event.manifestHash === currentManifest?.hash));
   const collectiveReview = currentEvents.find((event) => event.kind === 'unchanged_group_review' && !event.patientId);
   const legacyClosureEvents = events.some((event) => !event.context &&
     ['critical_check_back', 'critical_escalated', 'brief_review', 'unchanged_group_review', 'r_resolved', 'r_transferred', 'outgoing_transfer', 'incoming_attestation'].includes(event.kind));
@@ -203,6 +223,8 @@ export function UnitExceptionHandover({
     setStorageError(false);
     void storageInstance.load(shiftId).then((loaded) => {
       if (!active) return;
+      const hydratedAt = now();
+      setOverrideAsOf(hydratedAt);
       setSessionState((current) => {
         const merged = mergeExceptionHandoverState(current, loaded);
         const hydratedPatients = patients.map((patient) => ({ ...patient, previousOverrides: [
@@ -212,6 +234,8 @@ export function UnitExceptionHandover({
         const hydratedClassifications = classifyExceptionHandoverUnit(hydratedPatients, {
           now: classifiedAt, shiftId, integration: integrationState,
           previousStatus: previousUnitDataHealth, lastKnownClassifications,
+          ...(candidateMode ? { candidate: { scopeKey, units, acceptedReferences: merged.acceptedReferences } } : {}),
+          ...(candidateMode ? { overrideAsOf: hydratedAt } : {}),
         }).classifications;
         const hydratedKey = buildExceptionHandoverContextKey(shiftId, groupScope.viewScope,
           groupScope.members, hydratedClassifications);
@@ -286,6 +310,39 @@ export function UnitExceptionHandover({
     }));
   };
 
+  const recordCandidateTransfer = async (kind: 'outgoing_transfer' | 'incoming_attestation') => {
+    if (!actor || !currentContext || !currentManifest || !storageInstance ||
+        storageInstance.durability !== 'durable' || !closure.canClose || storageError) {
+      setAcceptanceError('La referencia requiere almacenamiento durable y evidencia de cierre vigente.');
+      return;
+    }
+    try {
+      const frozen = kind === 'outgoing_transfer' ? currentManifest : sessionState.frozenManifest;
+      if (!frozen || frozen.hash !== currentManifest.hash ||
+          frozen.context.key !== currentContext.key || frozen.context.revision !== currentContext.revision) {
+        throw new Error('EXCEPTION_HANDOVER_MANIFEST_CHANGED');
+      }
+      const event = createExceptionReviewEvent(kind, actor, now(), undefined, {
+        shiftId, context: currentContext, manifestHash: frozen.hash,
+        ...(kind === 'incoming_attestation' && outgoingTransfer
+          ? { acknowledgesKey: outgoingTransfer.idempotencyKey } : {}),
+      });
+      const acceptedReference = kind === 'incoming_attestation' && outgoingTransfer
+        ? acceptComparableManifest(frozen, currentManifest.snapshots, outgoingTransfer, event)
+        : undefined;
+      const next = { ...sessionState, frozenManifest: acceptedReference ? undefined : frozen,
+        events: appendUniqueExceptionEvent(sessionState.events, event),
+        acceptedReferences: acceptedReference
+          ? [...sessionState.acceptedReferences, acceptedReference] : sessionState.acceptedReferences,
+      };
+      await storageInstance.save(next);
+      setSessionState(next);
+      setAcceptanceError('');
+    } catch {
+      setAcceptanceError('No se confirmó la referencia; revise el contexto o el almacenamiento local.');
+    }
+  };
+
   const openPatient = (patient: DemoExceptionHandoverPatient) => {
     setActivePatientId(patient.patientId);
     updateSessionState((current) => ({
@@ -349,32 +406,32 @@ export function UnitExceptionHandover({
     incrementInteractions(activePatient.patientId);
   };
 
-  const recordOverride = () => {
+  const recordOverride = (newLane: 'A' | 'B' = 'B') => {
+    if (candidateMode && newLane !== 'A') return;
     if (!activePatient || !activeClassification || !actor || !currentContext) return;
     const reason = overrideReasons[activePatient.patientId] ?? '';
     if (!reason.trim()) return;
+    const recordedAt = now();
     const override = createHandoffOverride({
       patientId: activePatient.patientId,
       previousLane: activeClassification.handoffLane,
-      newLane: 'B',
+      newLane,
       reason,
       professional: actor,
       shiftId,
-      recordedAt: now(),
+      recordedAt,
       sourceStatuses: activeClassification.sourceStatuses,
+      ...(candidateMode ? { scopeKey } : {}),
     });
+    setOverrideAsOf(recordedAt);
     updateSessionState((current) => ({
       ...current,
       overrides: appendUniqueOverride(current.overrides, override),
       events: appendUniqueExceptionEvent(
-        appendUniqueExceptionEvent(
-          current.events,
+        newLane === 'B' ? appendUniqueExceptionEvent(current.events,
           createExceptionReviewEvent('r_resolved', actor, override.recordedAt, activePatient.patientId, {
-            shiftId,
-            ...(currentContext ? { context: currentContext } : {}),
-            reason: override.reason,
-          }),
-        ),
+            shiftId, context: currentContext, reason: override.reason,
+          })) : current.events,
         createExceptionReviewEvent('override_recorded', actor, override.recordedAt, activePatient.patientId, {
           shiftId,
           ...(currentContext ? { context: currentContext } : {}),
@@ -524,9 +581,10 @@ export function UnitExceptionHandover({
               testID={`override-reason-${activePatient.patientId}`}
             />
             <View style={styles.actionRow}>
-              <Pressable accessibilityRole="button" disabled={!actor || !(overrideReasons[activePatient.patientId] ?? '').trim()} onPress={recordOverride} style={[styles.primaryButton, { backgroundColor: colors.primary }]} testID={`resolve-r-${activePatient.patientId}`}>
+              {!candidateMode ? <Pressable accessibilityRole="button" disabled={!actor || !(overrideReasons[activePatient.patientId] ?? '').trim()} onPress={() => recordOverride()} style={[styles.primaryButton, { backgroundColor: colors.primary }]} testID={`resolve-r-${activePatient.patientId}`}>
                 <Text style={styles.primaryButtonText}>Resolver y reclasificar B</Text>
-              </Pressable>
+              </Pressable> : null}
+              {candidateMode ? <Pressable accessibilityRole="button" disabled={!actor || !(overrideReasons[activePatient.patientId] ?? '').trim()} onPress={() => recordOverride('A')} style={[styles.primaryButton, { backgroundColor: colors.danger }]} testID={`designate-a-${activePatient.patientId}`}><Text style={styles.primaryButtonText}>Designar prioridad A con motivo</Text></Pressable> : null}
               <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || transferredR} onPress={transferR} style={[styles.secondaryButton, { borderColor: colors.warning }]} testID={`transfer-r-${activePatient.patientId}`}>
                 <Text style={[styles.secondaryButtonText, { color: colors.warning }]}>Transferir información incompleta</Text>
               </Pressable>
@@ -686,12 +744,20 @@ export function UnitExceptionHandover({
             <Text style={[styles.cardMeta, { color: colors.muted }]}>{COLLECTIVE_REVIEW_RESPONSIBILITY_COPY}</Text>
             {!closure.canClose ? <Text accessibilityRole="alert" testID="exception-closure-blocked" style={[styles.cardMeta, { color: colors.danger }]}>{closure.blockingReasons.join('. ')}</Text> : null}
             {legacyClosureEvents && !incomingAttestation ? <Text style={[styles.cardMeta, { color: colors.muted }]}>Los eventos anteriores sin contexto de grupo se conservan como historial; requieren nueva confirmación para este cierre.</Text> : null}
+            {candidateMode ? <Text style={[styles.cardMeta, { color: colors.muted }]}>La recepción acepta este conjunto congelado como referencia comparativa del relevo, no certifica cada medición ni validación clínica institucional.</Text> : null}
+            {acceptanceError ? <Text accessibilityRole="alert" testID="candidate-acceptance-error">{acceptanceError}</Text> : null}
             <View style={styles.actionRow}>
               <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || !closure.canClose} onPress={() => {
-                if (actor?.kind === 'outgoing' && hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('outgoing_transfer');
+                if (actor?.kind === 'outgoing' && hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) {
+                  if (candidateMode) void recordCandidateTransfer('outgoing_transfer');
+                  else appendEvent('outgoing_transfer');
+                }
               }} style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: actor?.kind === 'outgoing' && closure.canClose ? 1 : 0.5 }]} testID="confirm-outgoing-transfer"><Text style={styles.primaryButtonText}>Confirmar transferencia saliente</Text></Pressable>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose} onPress={() => {
-                if (actor?.kind === 'incoming' && hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose || (candidateMode && Boolean(incomingAttestation))} onPress={() => {
+                if (actor?.kind === 'incoming' && hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) {
+                  if (candidateMode) void recordCandidateTransfer('incoming_attestation');
+                  else appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
+                }
               }} style={[styles.secondaryButton, { borderColor: colors.primary }]} testID="confirm-incoming-attestation"><Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Atestar recepción entrante</Text></Pressable>
             </View>
             {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>Confirmado por profesional saliente · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}
