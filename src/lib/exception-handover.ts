@@ -637,7 +637,8 @@ export function classifyExceptionHandoverPatient(
 
   return {
     patientId: patient.patientId,
-    clinicalStatus: active?.newLane === 'A' ? 'unstable' : baseLane === 'R' ? 'unverified' : clinicalStatus(baseLane),
+    clinicalStatus: active?.newLane === 'A' ? 'unstable' : (options.candidate && ruleLane === 'R') || baseLane === 'R'
+      ? 'unverified' : clinicalStatus(baseLane),
     handoffLane: active?.newLane ?? ruleLane,
     baselineLane: baseLane,
     reasons: active

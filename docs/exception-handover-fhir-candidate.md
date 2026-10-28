@@ -1,5 +1,36 @@
 # C11 — contrato FHIR candidato del relevo por excepciones
 
+## C12 — cableado autenticado TEST_ENV, sin piloto
+
+El backend crea un turno operativo con UUID persistido, unidad del ámbito autenticado,
+periodo y descripción explícitos; el periodo no es su identidad. La creación se
+deduplica por `operationId` y contenido. El creador es el profesional saliente; un
+profesional distinto de la misma unidad puede seleccionar el registro y atestar la
+recepción. El actor de cada evento se contrasta con el `sub` autenticado en el
+backend. No se aceptan turnos fabricados sin confirmación del servidor ni `ALL` como
+unidad. Esto no constituye una agenda institucional verificada.
+
+`ExceptionHandoverShift` conserva estado y recibos cifrados con el mecanismo AES-GCM
+existente, revisión optimista y caducidad máxima igual al menor plazo entre
+`HANDOVER_BUNDLE_RETENTION_DAYS` y 30 días. La poda elimina turnos caducados y
+referencias aceptadas vencidas; la lectura no renueva plazos. Una nueva sesión de
+turno recupera solo referencias anteriores no caducadas de la misma unidad. La
+aceptación exige un manifiesto congelado, transferencia saliente e identidad distinta
+del receptor; el replay consulta el recibo por el mismo identificador antes de
+reenviar. Una revisión obsoleta o contenido contradictorio se rechaza. Los pendientes
+locales usan almacenamiento cifrado y se borran en la limpieza/logout C07, sin
+Bearer token ni sender FHIR. Una respuesta incierta permanece pendiente y no acredita
+aceptación compartida; el trabajo offline exige un turno previamente confirmado.
+
+La capability candidata depende de configuración **servidor** en `HANDOVER_DEPLOYMENT_MODE=test`
+y `HANDOVER_EXCEPTION_TEST_RUNTIME=true`, además de identidad, permiso y unidad.
+La capability piloto permanece `false` con razones explícitas: C11V, IdP, umbrales,
+strict-mode y entorno institucional no verificados. Los datos actuales de
+`PatientList` no transportan referencia y fecha fuente verificables: su clasificación
+candidata es R, no B/C por defecto. El Bundle C11 se construye y valida localmente
+antes de la recepción, sin envío clínico. Las pruebas TEST_ENV no acreditan fuente
+clínica conectada, durabilidad en dispositivo ni activación institucional.
+
 Estado: **candidato local, no activado**. No existe envío desde `UnitExceptionHandover`,
 capability piloto nueva ni recurso productivo adicional en `HANDOFF_FHIR_CAPABILITY_MATRIX`.
 La base `https://example.org/fhir/StructureDefinition/...` de `src/lib/fhir-profiles.ts`

@@ -205,6 +205,12 @@ class AuthEndpointTests(TestCase):
                 },
                 "scopeCatalog": CLINICAL_SCOPES,
                 "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
+                "exceptionHandover": {
+                    "candidateEnabled": False,
+                    "pilotEnabled": False,
+                    "reasons": ["C11V_NOT_VERIFIED", "IDP_NOT_VERIFIED", "PROVISIONAL_THRESHOLDS",
+                                "STRICT_MODE_NOT_VERIFIED", "INSTITUTIONAL_ENV_NOT_AUTHORIZED"],
+                },
             },
         )
 

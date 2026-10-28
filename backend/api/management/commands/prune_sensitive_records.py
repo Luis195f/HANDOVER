@@ -8,12 +8,14 @@ from django.db import models
 from django.utils import timezone
 
 from backend.api.models import (
+    ExceptionHandoverShift,
     HandoverBundleRecord,
     IceaBridgeRequest,
     IceaOutboundEvent,
     IceaPipelineEvent,
     IceaPipelineSnapshot,
 )
+from backend.api.clinical_storage import decrypt_bundle_document, encrypt_bundle_document
 from backend.api.icea_transaction import intent_digest
 
 
@@ -56,6 +58,18 @@ class Command(BaseCommand):
                 'accepted_actor_sub', 'effects_claimed_at', 'effects_next_retry_at',
             ])
             redacted_bundles += 1
+        expired_exception_shifts, _ = ExceptionHandoverShift.objects.filter(expires_at__lte=now).delete()
+        pruned_exception_references = 0
+        for shift in ExceptionHandoverShift.objects.filter(expires_at__gt=now).iterator():
+            state = decrypt_bundle_document(shift.state_json, encryption_metadata=shift.encryption_metadata)
+            references = state.get('acceptedReferences', [])
+            live = [reference for reference in references if
+                    timezone.datetime.fromisoformat(reference['expiresAt'].replace('Z', '+00:00')) > now]
+            if len(live) != len(references):
+                state['acceptedReferences'] = live
+                shift.state_json, shift.encryption_metadata = encrypt_bundle_document(state)
+                shift.save(update_fields=['state_json', 'encryption_metadata'])
+                pruned_exception_references += len(references) - len(live)
         outbound_deleted, _ = IceaOutboundEvent.objects.filter(
             created_at__lt=technical_cutoff,
             status__in=[IceaOutboundEvent.STATUS_DELIVERED, IceaOutboundEvent.STATUS_FAILED],
@@ -81,6 +95,8 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 "Pruned sensitive records: "
                 f"handover_bundles={redacted_bundles}, "
+                f"exception_shifts={expired_exception_shifts}, "
+                f"exception_references={pruned_exception_references}, "
                 f"icea_outbound_events={outbound_deleted}, "
                 f"icea_bridge_requests={bridge_deleted}, "
                 f"icea_pipeline_snapshots={snapshot_deleted}, "

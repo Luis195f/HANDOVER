@@ -28,6 +28,7 @@ import {
   isInteractionBudgetExceeded,
   validateDegradedUnitTransfer,
   type ClinicalSource,
+  type ExceptionActorIdentity,
   type ExceptionReviewEvent,
   type ExceptionHandoverContext,
   type HandoffClassification,
@@ -35,6 +36,8 @@ import {
   type UnitDataHealth,
   type UnitIntegrationState,
 } from '@/src/lib/exception-handover';
+import { buildExceptionHandoverFhirCandidate } from '@/src/lib/exception-handover-fhir';
+import { validateExceptionHandoverCandidate } from '@/src/lib/fhir-validation';
 import {
   createEmptyExceptionHandoverState,
   createExceptionHandoverStorage,
@@ -60,6 +63,7 @@ type Colors = {
 type Props = {
   patients: readonly DemoExceptionHandoverPatient[];
   sessionUserId?: string;
+  authenticatedActor?: ExceptionActorIdentity;
   colors: Colors;
   onOpenFullHandover: (patientId: string) => void;
   classificationReferenceTime?: string;
@@ -103,6 +107,7 @@ function formatMinutes(value: number): string {
 export function UnitExceptionHandover({
   patients,
   sessionUserId,
+  authenticatedActor,
   colors,
   onOpenFullHandover,
   classificationReferenceTime,
@@ -133,7 +138,7 @@ export function UnitExceptionHandover({
   const [lastKnownClassifications, setLastKnownClassifications] = useState<HandoffClassification[]>([]);
   const [previousUnitDataHealth, setPreviousUnitDataHealth] = useState<UnitDataHealth>();
 
-  const actor = sessionUserId ? getDemoActorIdentity(sessionUserId) : null;
+  const actor = authenticatedActor ?? (sessionUserId ? getDemoActorIdentity(sessionUserId) : null);
   const patientsWithOverrides = useMemo(() => patients.map((patient) => ({
     ...patient,
     previousOverrides: [
@@ -335,6 +340,15 @@ export function UnitExceptionHandover({
         acceptedReferences: acceptedReference
           ? [...sessionState.acceptedReferences, acceptedReference] : sessionState.acceptedReferences,
       };
+      if (authenticatedActor && acceptedReference) {
+        const candidate = buildExceptionHandoverFhirCandidate({
+          context: currentContext, viewScope: groupScope.viewScope, members: groupScope.members,
+          classifications, events: next.events, unitHealth: unitResult.unitDataHealth.status,
+        });
+        if (!validateExceptionHandoverCandidate(candidate).isValid) {
+          throw new Error('EXCEPTION_HANDOVER_CANDIDATE_INVALID');
+        }
+      }
       await storageInstance.save(next);
       setSessionState(next);
       setAcceptanceError('');
@@ -456,7 +470,9 @@ export function UnitExceptionHandover({
     const patientEvents = currentEvents.filter((event) => event.patientId === patient.patientId);
     return (
       <View style={styles.provenanceBlock} testID={`exception-provenance-${patient.patientId}`}>
-        <Text style={[styles.provenanceText, { color: colors.muted }]}>Importado del contexto clínico sintético · {formatExceptionDateTime(patient.lastSummaryAt)}</Text>
+        <Text style={[styles.provenanceText, { color: colors.muted }]}>{authenticatedActor
+          ? 'Fuentes clínicas verificables no disponibles para esta vista; clasificación R'
+          : `Importado del contexto clínico sintético · ${formatExceptionDateTime(patient.lastSummaryAt)}`}</Text>
         {patientEvents.map((event) => (
           <Text key={event.idempotencyKey} testID={`exception-event-${event.kind}-${patient.patientId}`} style={[styles.provenanceText, { color: colors.muted }]}>
             {event.kind === 'critical_check_back'
@@ -690,8 +706,11 @@ export function UnitExceptionHandover({
   return (
     <View style={[styles.board, { borderColor: colors.border, backgroundColor: colors.surface }]} testID="unit-exception-handover">
       {storageError ? <Text accessibilityRole="alert">Evidencia local no legible o no persistida; cierre bloqueado.</Text> : null}
-      <Text style={[styles.eyebrow, { color: colors.info }]}>DEMO SINTÉTICA · RELEVO POR EXCEPCIONES</Text>
-      <Text style={[styles.title, { color: colors.text }]}>{patients[0]?.unitName ?? 'Unidad sintética de salud mental'}</Text>
+      <Text style={[styles.eyebrow, { color: colors.info }]}>{authenticatedActor
+        ? 'TEST_ENV · REGISTRO OPERATIVO DE RELEVO POR EXCEPCIONES'
+        : 'DEMO SINTÉTICA · RELEVO POR EXCEPCIONES'}</Text>
+      <Text style={[styles.title, { color: colors.text }]}>{patients[0]?.unitName ??
+        (authenticatedActor ? 'Unidad autorizada' : 'Unidad sintética de salud mental')}</Text>
       <Text style={[styles.subtitle, { color: colors.muted }]}>Clasificación explicable por perfil, plan, fuentes esperadas y vigencia. La indisponibilidad técnica se muestra separada del estado clínico.</Text>
 
       {unitResult.automaticClassificationSuspended ? renderUnavailableMode() : (

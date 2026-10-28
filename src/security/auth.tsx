@@ -66,6 +66,7 @@ type Capabilities = {
   unitIds: string[];
   permissions: CapabilityPermissions;
   fhir?: FhirCapabilities;
+  exceptionHandover?: { candidateEnabled: boolean; pilotEnabled: boolean; reasons: string[] };
 };
 
 const EMPTY_CAPABILITY_PERMISSIONS: CapabilityPermissions = {

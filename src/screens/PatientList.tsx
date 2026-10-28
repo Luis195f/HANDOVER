@@ -43,6 +43,13 @@ import { createPatient } from "@/src/lib/patients";
 import { DEMO_NOW, getDemoExceptionHandoverPatients, getDemoHandoverPrefill } from '@/src/demo/fixtures';
 import type { PatientListItem } from "@/src/types/patientList";
 import { UnitExceptionHandover } from './handover/UnitExceptionHandover';
+import {
+  createAuthenticatedExceptionHandoverStorage,
+  createConfirmedExceptionShift,
+  listConfirmedExceptionShifts,
+  type ConfirmedExceptionShift,
+} from '@/src/lib/exception-handover-auth';
+import type { DemoExceptionHandoverPatient } from '@/src/demo/fixtures';
 
 export { ALL_UNITS_OPTION } from "@/src/state/filterStore";
 export type { PatientListItem } from "@/src/types/patientList";
@@ -373,6 +380,12 @@ export default function PatientList({ navigation }: Props) {
   const [patients, setPatients] = useState<PatientListItem[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [patientLoadNotice, setPatientLoadNotice] = useState<PatientListLoadNotice | null>(null);
+  const [confirmedShifts, setConfirmedShifts] = useState<ConfirmedExceptionShift[]>([]);
+  const [selectedShift, setSelectedShift] = useState<ConfirmedExceptionShift | null>(null);
+  const [shiftStart, setShiftStart] = useState('');
+  const [shiftEnd, setShiftEnd] = useState('');
+  const [shiftDescription, setShiftDescription] = useState('');
+  const [shiftError, setShiftError] = useState('');
   const [isNewPatientModalOpen, setIsNewPatientModalOpen] = useState(false);
   const [isSubmittingNewPatient, setIsSubmittingNewPatient] = useState(false);
   const [newPatientForm, setNewPatientForm] = useState<NewPatientFormState>(NEW_PATIENT_INITIAL_STATE);
@@ -693,6 +706,50 @@ export default function PatientList({ navigation }: Props) {
 
   const patientById = useMemo(() => new Map(patients.map(p => [p.id, p])), [patients]);
   const isDemoExceptionRoute = session?.mode === 'demo' && selectedSpecialtyId === 'psych';
+  const isAuthenticatedExceptionRoute = session?.mode !== 'demo' && Boolean(session?.accessToken) &&
+    selectedSpecialtyId === 'psych' &&
+    Boolean(capabilities?.exceptionHandover?.candidateEnabled) &&
+    capabilities?.userSub === session?.userId && Boolean(capabilities?.permissions.canWriteHandover);
+  const exceptionUnitId = isAuthenticatedExceptionRoute && selectedUnitId !== ALL_UNITS_OPTION &&
+    canQuerySelectedUnit(session, selectedUnitId, capabilities) ? selectedUnitId : null;
+  useEffect(() => {
+    setSelectedShift(null);
+    setConfirmedShifts([]);
+    setShiftError('');
+    if (!exceptionUnitId || !session?.userId) return;
+    let active = true;
+    void listConfirmedExceptionShifts(session.userId, exceptionUnitId)
+      .then((shifts) => { if (active) setConfirmedShifts(shifts); })
+      .catch(() => { if (active) setShiftError('No se pudieron consultar los turnos confirmados.'); });
+    return () => { active = false; };
+  }, [exceptionUnitId, session?.userId]);
+  const authExceptionStorage = useMemo(() => selectedShift && session?.userId
+    ? createAuthenticatedExceptionHandoverStorage(selectedShift, session.userId) : null,
+  [selectedShift, session?.userId]);
+  const authenticatedExceptionPatients = useMemo<DemoExceptionHandoverPatient[]>(() =>
+    exceptionUnitId ? patients.filter((patient) => patient.unitId === exceptionUnitId).map((patient) => ({
+      patientId: patient.id, name: patient.name, bedLabel: patient.bedLabel ?? '',
+      unitName: UNITS_BY_ID[exceptionUnitId]?.name ?? exceptionUnitId,
+      status: 'unchanged', change: '', currentRisk: '', nextAction: '', owner: '', dueAt: '',
+      contingency: { trigger: '', response: '' }, lastSummaryAt: '', lastSummarySource: '',
+      criticalItems: [], vitals: patient.vitals, risks: patient.risks,
+      pendingTasks: patient.pendingTasks,
+    })) : [], [exceptionUnitId, patients]);
+  const createExceptionShift = useCallback(async () => {
+    if (!exceptionUnitId || !session?.userId || !shiftStart.trim() || !shiftEnd.trim() ||
+        !shiftDescription.trim()) return;
+    try {
+      const shift = await createConfirmedExceptionShift(session.userId, {
+        unitId: exceptionUnitId, periodStart: shiftStart.trim(), periodEnd: shiftEnd.trim(),
+        description: shiftDescription.trim(),
+      });
+      setConfirmedShifts((current) => [shift, ...current.filter((item) => item.id !== shift.id)]);
+      setSelectedShift(shift);
+      setShiftError('');
+    } catch {
+      setShiftError('El turno no está confirmado. Reintente con los mismos datos al recuperar la conexión.');
+    }
+  }, [exceptionUnitId, session?.userId, shiftStart, shiftEnd, shiftDescription]);
   const demoExceptionPatients = useMemo(
     () => getDemoExceptionHandoverPatients(patients.map((patient) => patient.id)).map((patient) => ({
       ...patient,
@@ -871,7 +928,43 @@ export default function PatientList({ navigation }: Props) {
           </View>
         </View>
 
-        {isDemoExceptionRoute ? (
+        {isAuthenticatedExceptionRoute ? (
+          <View testID="authenticated-exception-handover">
+            <Text style={{ color: colors.text }}>TEST_ENV · Registro operativo, no agenda institucional verificada.</Text>
+            {!exceptionUnitId ? <Text accessibilityRole="alert" style={{ color: colors.warning }}>
+              Seleccione una unidad autorizada; todas las unidades no identifica un turno.
+            </Text> : (
+              <>
+                <TextInput accessibilityLabel="Inicio del periodo del turno (ISO 8601)" value={shiftStart}
+                  onChangeText={setShiftStart} placeholder="2026-10-28T08:00:00Z"
+                  style={[styles.newPatientInput, { color: colors.text, borderColor: colors.border }]} />
+                <TextInput accessibilityLabel="Fin del periodo del turno (ISO 8601)" value={shiftEnd}
+                  onChangeText={setShiftEnd} placeholder="2026-10-28T16:00:00Z"
+                  style={[styles.newPatientInput, { color: colors.text, borderColor: colors.border }]} />
+                <TextInput accessibilityLabel="Descripción del turno" value={shiftDescription}
+                  onChangeText={setShiftDescription} style={[styles.newPatientInput, { color: colors.text, borderColor: colors.border }]} />
+                <Pressable accessibilityRole="button" disabled={!shiftStart || !shiftEnd || !shiftDescription}
+                  onPress={() => void createExceptionShift()}>
+                  <Text style={{ color: colors.info }}>Crear turno confirmado</Text>
+                </Pressable>
+                {confirmedShifts.map((shift) => <Pressable key={shift.id} accessibilityRole="button"
+                  accessibilityLabel={`Seleccionar turno ${shift.description}`} onPress={() => setSelectedShift(shift)}>
+                  <Text style={{ color: colors.info }}>{shift.description} · {shift.periodStart}–{shift.periodEnd}</Text>
+                </Pressable>)}
+                {shiftError ? <Text accessibilityRole="alert" style={{ color: colors.danger }}>{shiftError}</Text> : null}
+                {selectedShift?.unitId === exceptionUnitId && authExceptionStorage ? <UnitExceptionHandover
+                  key={`${selectedShift.id}:${session?.userId}`} candidateMode shiftId={selectedShift.id}
+                  authenticatedActor={{ userId: session!.userId, displayName: session!.displayName ?? session!.userId,
+                    kind: selectedShift.creatorSub === session!.userId ? 'outgoing' : 'incoming' }}
+                  patients={authenticatedExceptionPatients}
+                  groupScope={{ viewScope: exceptionUnitId, members: authenticatedExceptionPatients.map((patient) => ({
+                    patientId: patient.patientId, unitId: exceptionUnitId,
+                  })) }} storage={authExceptionStorage} colors={colors} onOpenFullHandover={onOpenPatient}
+                /> : null}
+              </>
+            )}
+          </View>
+        ) : isDemoExceptionRoute ? (
           <UnitExceptionHandover
             candidateMode
             patients={demoExceptionPatients}
@@ -1494,12 +1587,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-
-
-
-
-
 
 
 
