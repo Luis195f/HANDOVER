@@ -26,7 +26,8 @@ type PendingOperation = {
   expectedRevision: number;
   contentHash: string;
   state: ExceptionHandoverSessionState;
-  status: 'pending';
+  status: 'pending' | 'conflict';
+  conflictReason?: 'revision_conflict' | 'operation_conflict' | 'unknown_conflict';
 };
 
 type PendingCreate = {
@@ -47,17 +48,36 @@ type LocalState = {
 
 let localWrite = Promise.resolve();
 
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, canonical(entry)]));
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0)!);
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0)!);
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index];
   }
-  return value;
+  return leftPoints.length - rightPoints.length;
+}
+
+export function canonicalReceiptJson(value: unknown): string {
+  const normalized: unknown = JSON.parse(JSON.stringify(value));
+  const serialize = (entry: unknown): string => {
+    if (Array.isArray(entry)) return `[${entry.map(serialize).join(',')}]`;
+    if (typeof entry === 'number' && !Number.isSafeInteger(entry)) {
+      throw new Error('EXCEPTION_HANDOVER_HASH_INVALID');
+    }
+    if (entry && typeof entry === 'object') {
+      const object = entry as Record<string, unknown>;
+      return `{${Object.keys(object).sort(compareCodePoints)
+        .map((key) => `${JSON.stringify(key)}:${serialize(object[key])}`).join(',')}}`;
+    }
+    const scalar = JSON.stringify(entry);
+    if (scalar === undefined) throw new Error('EXCEPTION_HANDOVER_HASH_INVALID');
+    return scalar;
+  };
+  return serialize(normalized);
 }
 
 function contentHash(value: unknown): string {
-  return sha256(JSON.stringify(canonical(value)));
+  return sha256(canonicalReceiptJson(value));
 }
 
 function authenticatedState(state: ExceptionHandoverSessionState, actorSub: string): ExceptionHandoverSessionState {
@@ -154,6 +174,16 @@ async function submitPending(pending: PendingOperation): Promise<void> {
   }
 }
 
+function definitiveConflict(error: unknown): PendingOperation['conflictReason'] | null {
+  const response = error as { status?: number; details?: string };
+  if (response?.status !== 409) return null;
+  try {
+    const code = JSON.parse(response.details ?? '') as { code?: string };
+    if (code.code === 'revision_conflict' || code.code === 'operation_conflict') return code.code;
+  } catch {}
+  return 'unknown_conflict';
+}
+
 export function createAuthenticatedExceptionHandoverStorage(
   shift: ConfirmedExceptionShift, actorSub: string,
 ): ExceptionHandoverStorage & { replayPending: () => Promise<void> } {
@@ -164,8 +194,29 @@ export function createAuthenticatedExceptionHandoverStorage(
   const replayPending = async () => {
     const local = await readLocal();
     const pending = local.operations.filter((entry) => entry.shiftId === shift.id && entry.actorSub === actorSub);
+    if (pending.some((entry) => entry.status === 'conflict')) throw new Error('EXCEPTION_HANDOVER_CONFLICT');
     for (const operation of pending) {
-      await submitPending(operation);
+      try {
+        await submitPending(operation);
+      } catch (error) {
+        const reason = definitiveConflict(error);
+        if (!reason) throw error;
+        try {
+          await mutateLocal((current) => {
+            const rejectedAt = current.operations.findIndex((entry) => entry.operationId === operation.operationId);
+            if (rejectedAt < 0) return;
+            current.operations.slice(rejectedAt).forEach((entry) => {
+              if (entry.shiftId === shift.id && entry.actorSub === actorSub) {
+                entry.status = 'conflict';
+                entry.conflictReason = reason;
+              }
+            });
+          });
+        } catch {
+          throw new Error('EXCEPTION_HANDOVER_CONFLICT_PERSIST_FAILED');
+        }
+        throw new Error('EXCEPTION_HANDOVER_CONFLICT');
+      }
       revision = operation.expectedRevision + 1;
       await mutateLocal((current) => {
         current.operations = current.operations.filter((entry) => entry.operationId !== operation.operationId);
@@ -174,20 +225,40 @@ export function createAuthenticatedExceptionHandoverStorage(
   };
   return {
     durability: 'durable',
+    async listConflicts() {
+      await assertActor(actorSub, shift.unitId);
+      return (await readLocal()).operations.filter((entry) => entry.shiftId === shift.id &&
+        entry.actorSub === actorSub && entry.status === 'conflict').length;
+    },
+    async discardConflicts() {
+      await assertActor(actorSub, shift.unitId);
+      await mutateLocal((current) => {
+        current.operations = current.operations.filter((entry) => entry.shiftId !== shift.id ||
+          entry.actorSub !== actorSub || entry.status !== 'conflict');
+      });
+    },
     async load(shiftId) {
       if (shiftId !== shift.id) throw new Error('EXCEPTION_HANDOVER_SHIFT_MISMATCH');
+      let conflicted = false;
+      let authorizedState: ExceptionHandoverSessionState | null = null;
       try {
         await assertActor(actorSub, shift.unitId);
-        await replayPending();
+        try { await replayPending(); } catch (error) {
+          if ((error as Error).message !== 'EXCEPTION_HANDOVER_CONFLICT') throw error;
+          conflicted = true;
+        }
         const current = await apiGet(`/api/exception-shifts/${shift.id}`) as ConfirmedExceptionShift;
         if (!current.state || current.unitId !== shift.unitId) throw new Error('EXCEPTION_HANDOVER_STATE_INVALID');
+        authorizedState = current.state;
         revision = current.revision;
         lastState = JSON.stringify(current.state);
         await mutateLocal((local) => { local.cached[cacheKey] = { actorSub, shift: current }; });
         this.durability = 'durable';
         return current.state;
       } catch (error) {
-        if ((error as Error).message === 'EXCEPTION_HANDOVER_AUTH_CHANGED' ||
+        if (authorizedState) { this.durability = 'memory'; return authorizedState; }
+        if (conflicted || (error as Error).message === 'EXCEPTION_HANDOVER_AUTH_CHANGED' ||
+            (error as Error).message === 'EXCEPTION_HANDOVER_CONFLICT_PERSIST_FAILED' ||
             (error as { status?: number }).status === 401 || (error as { status?: number }).status === 403) throw error;
         const cached = (await readLocal()).cached[cacheKey];
         if (!cached || cached.actorSub !== actorSub || !cached.shift.state ||
@@ -209,6 +280,7 @@ export function createAuthenticatedExceptionHandoverStorage(
         }
         const outstanding = (await readLocal()).operations.filter((entry) =>
           entry.shiftId === shift.id && entry.actorSub === actorSub);
+        if (outstanding.some((entry) => entry.status === 'conflict')) throw new Error('EXCEPTION_HANDOVER_CONFLICT');
         const operation: PendingOperation = { operationId: uuidv4(), shiftId: shift.id,
           unitId: shift.unitId, actorSub, expectedRevision: revision + outstanding.length,
           contentHash: contentHash(state), state, status: 'pending' };

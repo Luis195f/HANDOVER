@@ -2,11 +2,12 @@ import os
 import copy
 import hashlib
 import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from unittest.mock import patch
 
-from django.db import close_old_connections
+from django.db import OperationalError, close_old_connections
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from datetime import timedelta
@@ -14,12 +15,13 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from backend.api.models import ExceptionHandoverShift, Patient
+from backend.api.views_exception_handover import ExceptionShiftOperationView
 from backend.security.auth import Auth0User
 
 
-def client_for(sub, units=('icu-a',)):
+def client_for(sub, units=('icu-a',), scopes=('patients:read', 'handover:write')):
     claims = {'sub': sub, 'roles': ['nurse'], 'unitIds': list(units),
-              'permissions': ['patients:read', 'handover:write']}
+              'permissions': list(scopes)}
     client = APIClient()
     client.force_authenticate(user=Auth0User(sub=sub, claims=claims), token=claims)
     return client
@@ -43,6 +45,92 @@ class ExceptionHandoverRuntimeTests(TestCase):
             'periodEnd': '2026-10-28T16:00:00Z', 'description': 'Turno sintético',
             'operationId': key,
         }, format='json')
+
+    def test_receipt_hash_fixture_matches_backend_canonical_bytes(self):
+        fixture = json.loads((Path(__file__).resolve().parents[3] / 'tests' / 'fixtures' /
+            'c12-receipt-canonical.json').read_text(encoding='utf-8'))
+        from backend.api.views_exception_handover import _digest
+        canonical = json.dumps(fixture['content'], sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+        self.assertEqual(canonical, fixture['canonical'])
+        self.assertEqual(_digest(fixture['content']), fixture['sha256'])
+
+    def test_every_endpoint_requires_both_scopes(self):
+        shift_id = self.create_shift().data['id']
+        operation_id = '97b06123-4cd6-471d-a574-354113ca08be'
+        routes = [reverse('exception-shifts'), reverse('exception-shift', args=[shift_id]),
+                  reverse('exception-shift-operation', args=[shift_id, operation_id])]
+        for scopes in (('patients:read',), ('handover:write',), ()):
+            client = client_for('auth0|alice', scopes=scopes)
+            for route in routes:
+                self.assertEqual(client.get(route, {'unitId': 'icu-a'}).status_code, 403)
+        for route in routes:
+            self.assertIn(self.alice.get(route, {'unitId': 'icu-a'}).status_code, (200, 404))
+        no_read = client_for('auth0|alice', scopes=('handover:write',))
+        no_write = client_for('auth0|alice', scopes=('patients:read',))
+        operation = reverse('exception-shift-operation', args=[shift_id, operation_id])
+        for client in (no_read, no_write):
+            self.assertEqual(client.post(operation, {'state': {}, 'expectedRevision': 0}, format='json').status_code, 403)
+            self.assertEqual(client.post(reverse('exception-shifts'), {
+                'unitId': 'icu-a', 'periodStart': '2026-10-28T08:00:00Z',
+                'periodEnd': '2026-10-28T16:00:00Z', 'description': 'Otro',
+                'operationId': '53441ea6-127a-4f8d-814c-7fdbb1c276d0',
+            }, format='json').status_code, 403)
+
+    def test_r_transfer_requires_explicit_zoned_target_and_authenticated_receiver(self):
+        shift_id = self.create_shift().data['id']
+        state = self.bob.get(reverse('exception-shift', args=[shift_id])).data['state']
+        event = {'kind': 'r_transferred', 'shiftId': shift_id, 'patientId': '1',
+                 'idempotencyKey': 'r-1', 'actorId': 'auth0|bob', 'actorKind': 'incoming',
+                 'actorName': 'forged', 'recordedAt': '2026-10-28T10:00:00Z',
+                 'reason': 'Fuente no disponible', 'receiverId': 'auth0|bob'}
+        for target in ('', 'not-a-date', '2026-10-28T16:00:00'):
+            invalid = copy.deepcopy(state)
+            invalid['events'].append({**event, 'targetAt': target})
+            self.assertEqual(self.operation(self.bob, shift_id,
+                '96bb6243-c02d-4d14-b913-f45ab128c2a1', invalid, 0).status_code, 400)
+        invalid = copy.deepcopy(state)
+        invalid['events'].append({**event, 'targetAt': '2026-10-28T16:00:00Z', 'receiverId': 'auth0|alice'})
+        self.assertEqual(self.operation(self.bob, shift_id,
+            '96bb6243-c02d-4d14-b913-f45ab128c2a1', invalid, 0).status_code, 400)
+        valid = copy.deepcopy(state)
+        valid['events'].append({**event, 'targetAt': '2026-10-28T16:00:00Z'})
+        self.assertEqual(self.operation(self.bob, shift_id,
+            '96bb6243-c02d-4d14-b913-f45ab128c2a1', valid, 0).status_code, 201)
+
+    def test_sqlite_lock_retry_is_bounded_and_preserves_original_operation(self):
+        shift_id = self.create_shift().data['id']
+        state = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        state['interactionCounts']['reviewed'] = 1
+        original = ExceptionShiftOperationView._commit_operation
+        calls = []
+
+        def transient(*args):
+            calls.append(args[2])
+            if len(calls) < 3:
+                raise OperationalError('database table is locked: api_handoverbundlerecord')
+            return original(*args)
+
+        with patch.object(ExceptionShiftOperationView, '_commit_operation', side_effect=transient), \
+                patch('backend.api.views_exception_handover.time.sleep'):
+            result = self.operation(self.alice, shift_id,
+                '6237c78d-3e73-4e63-9ca0-cb9b86ae2d73', state, 0)
+        self.assertEqual(result.status_code, 201)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0], calls[1])
+        self.assertEqual(ExceptionHandoverShift.objects.get(id=shift_id).revision, 1)
+        with patch.object(ExceptionShiftOperationView, '_commit_operation',
+                side_effect=OperationalError('database is locked')), \
+                patch('backend.api.views_exception_handover.time.sleep'):
+            exhausted = self.operation(self.alice, shift_id,
+                'd50d2c1d-4f3b-4766-956b-349733ca48e1', state, 1)
+        self.assertEqual(exhausted.status_code, 503)
+        self.assertEqual(ExceptionHandoverShift.objects.get(id=shift_id).revision, 1)
+        with patch.object(ExceptionShiftOperationView, '_commit_operation',
+                side_effect=OperationalError('no such table')):
+            with self.assertRaises(OperationalError):
+                self.operation(self.alice, shift_id,
+                    'b0ddf37e-4d05-4f20-91f5-1e79f723c4cd', state, 1)
+        self.assertEqual(ExceptionHandoverShift.objects.get(id=shift_id).revision, 1)
 
     def test_creation_is_idempotent_and_shared_but_scoped(self):
         first = self.create_shift()
@@ -85,6 +173,10 @@ class ExceptionHandoverRuntimeTests(TestCase):
     def test_state_revision_replay_actor_and_patient_scope(self):
         shift_id = self.create_shift().data['id']
         state = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        fractional = copy.deepcopy(state)
+        fractional['interactionCounts']['reviewed'] = 0.5
+        self.assertEqual(self.operation(self.alice, shift_id,
+                         '09f0aa62-68d1-4139-b9e5-9e70c589a630', fractional, 0).status_code, 400)
         event = {'kind': 'brief_review', 'shiftId': shift_id, 'patientId': '1',
                  'idempotencyKey': 'review-1', 'actorId': 'auth0|alice',
                  'actorKind': 'outgoing', 'actorName': 'forged',

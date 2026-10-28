@@ -24,6 +24,7 @@ import {
   DEGRADED_HANDOFF_RESPONSIBILITY_COPY,
   formatExceptionDateTime,
   getPatientTransferStatus,
+  isValidExceptionTargetAt,
   groupExceptionHandoverPatients,
   isInteractionBudgetExceeded,
   validateDegradedUnitTransfer,
@@ -90,6 +91,7 @@ function makeBriefDraft(patient: DemoExceptionHandoverPatient): PersistedBriefDr
     nextAction: patient.nextAction,
     owner: patient.owner,
     contingency: `Si ${patient.contingency.trigger}, ${patient.contingency.response}.`,
+    targetAt: patient.dueAt,
   };
 }
 
@@ -125,6 +127,7 @@ export function UnitExceptionHandover({
     createEmptyExceptionHandoverState(shiftId));
   const [hydrated, setHydrated] = useState(storageInstance === null);
   const [storageError, setStorageError] = useState(false);
+  const [conflictCount, setConflictCount] = useState(0);
   const [acceptanceError, setAcceptanceError] = useState('');
   const [overrideAsOf, setOverrideAsOf] = useState(() => now());
   const [expandedUnchanged, setExpandedUnchanged] = useState(false);
@@ -226,8 +229,12 @@ export function UnitExceptionHandover({
     groupChangedDuringHydration.current = false;
     setHydrated(false);
     setStorageError(false);
-    void storageInstance.load(shiftId).then((loaded) => {
+    void storageInstance.load(shiftId).then(async (loaded) => {
       if (!active) return;
+      const conflicts = await storageInstance.listConflicts?.() ?? 0;
+      if (!active) return;
+      setConflictCount(conflicts);
+      setStorageError(conflicts > 0);
       const hydratedAt = now();
       setOverrideAsOf(hydratedAt);
       setSessionState((current) => {
@@ -256,7 +263,10 @@ export function UnitExceptionHandover({
 
   useEffect(() => {
     if (!hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
-    void storageInstance.save(sessionState).catch(() => setStorageError(true));
+    void storageInstance.save(sessionState).catch(async () => {
+      setStorageError(true);
+      try { setConflictCount(await storageInstance.listConflicts?.() ?? 0); } catch {}
+    });
   }, [hydrated, sessionState, shiftId, storageInstance]);
 
   useEffect(() => {
@@ -457,10 +467,12 @@ export function UnitExceptionHandover({
   };
 
   const transferR = () => {
-    if (!activePatient || !activeClassification || actor?.kind !== 'incoming') return;
+    const targetAt = activeDraft?.targetAt?.trim();
+    const reason = activeClassification?.reasons.join('. ').trim();
+    if (!activePatient || actor?.kind !== 'incoming' || !isValidExceptionTargetAt(targetAt) || !reason) return;
     appendEvent('r_transferred', activePatient.patientId, {
-      reason: activeClassification.reasons.join('. '),
-      targetAt: activePatient.dueAt,
+      reason,
+      targetAt,
       receiverId: actor.userId,
     });
     incrementInteractions(activePatient.patientId);
@@ -579,6 +591,11 @@ export function UnitExceptionHandover({
         {lane === 'R' ? (
           <View testID={`r-information-${activePatient.patientId}`}>
             <Text style={[styles.sectionLabel, { color: colors.warning }]}>Información esperada insuficiente</Text>
+            <TextInput accessibilityLabel="Momento objetivo de transferencia R (ISO 8601 con zona)"
+              testID={`r-target-at-${activePatient.patientId}`} value={activeDraft.targetAt ?? ''}
+              onChangeText={(value) => updateActiveDraft('targetAt', value)}
+              placeholder="2026-10-28T16:00:00Z"
+              style={[styles.input, { borderColor: colors.border, color: colors.text }]} />
             {activeClassification.reviewRequirements.map((requirement) => (
               <View key={requirement.source} style={[styles.requirementCard, { borderColor: colors.warning }]}>
                 <Text style={[styles.cardLine, { color: colors.text }]}>{requirement.reason}</Text>
@@ -601,7 +618,9 @@ export function UnitExceptionHandover({
                 <Text style={styles.primaryButtonText}>Resolver y reclasificar B</Text>
               </Pressable> : null}
               {candidateMode ? <Pressable accessibilityRole="button" disabled={!actor || !(overrideReasons[activePatient.patientId] ?? '').trim()} onPress={() => recordOverride('A')} style={[styles.primaryButton, { backgroundColor: colors.danger }]} testID={`designate-a-${activePatient.patientId}`}><Text style={styles.primaryButtonText}>Designar prioridad A con motivo</Text></Pressable> : null}
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || transferredR} onPress={transferR} style={[styles.secondaryButton, { borderColor: colors.warning }]} testID={`transfer-r-${activePatient.patientId}`}>
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || transferredR ||
+                !isValidExceptionTargetAt(activeDraft.targetAt?.trim()) || !activeClassification.reasons.join('. ').trim()}
+                onPress={transferR} style={[styles.secondaryButton, { borderColor: colors.warning }]} testID={`transfer-r-${activePatient.patientId}`}>
                 <Text style={[styles.secondaryButtonText, { color: colors.warning }]}>Transferir información incompleta</Text>
               </Pressable>
             </View>
@@ -705,6 +724,17 @@ export function UnitExceptionHandover({
 
   return (
     <View style={[styles.board, { borderColor: colors.border, backgroundColor: colors.surface }]} testID="unit-exception-handover">
+      {conflictCount > 0 && storageInstance?.discardConflicts ? <View>
+        <Text accessibilityRole="alert">Hay {conflictCount} edición(es) rechazadas por conflicto. El contenido local cifrado se conserva; revise el estado compartido antes de descartarlo.</Text>
+        <Pressable accessibilityRole="button" testID="discard-exception-conflicts" onPress={() => {
+          void storageInstance.load(shiftId).then(async (loaded) => {
+            await storageInstance.discardConflicts?.();
+            setSessionState(loaded);
+            setConflictCount(0);
+            setStorageError(false);
+          }).catch(() => setStorageError(true));
+        }}><Text>Descartar explícitamente ediciones rechazadas y cargar estado autorizado</Text></Pressable>
+      </View> : null}
       {storageError ? <Text accessibilityRole="alert">Evidencia local no legible o no persistida; cierre bloqueado.</Text> : null}
       <Text style={[styles.eyebrow, { color: colors.info }]}>{authenticatedActor
         ? 'TEST_ENV · REGISTRO OPERATIVO DE RELEVO POR EXCEPCIONES'

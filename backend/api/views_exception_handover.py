@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
+import time
 import uuid
 from datetime import timedelta
 
@@ -19,7 +21,7 @@ from backend.api.pilot_control import exception_handover_test_enabled
 from backend.api.views import _resolve_unit_scope
 from backend.security.auth import Auth0JWTAuthentication
 from backend.security.permissions_roles import HasAnyRole
-from backend.security.scope_permissions import HasAnyScope
+from backend.security.scope_permissions import HasAllScopes
 
 
 def _enabled() -> bool:
@@ -28,6 +30,18 @@ def _enabled() -> bool:
 
 def _digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+
+
+def _receipt_domain(value: object) -> bool:
+    if value is None or isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, int):
+        return abs(value) <= 9007199254740991
+    if isinstance(value, list):
+        return all(_receipt_domain(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _receipt_domain(item) for key, item in value.items())
+    return False
 
 
 def _uuid(value: object) -> uuid.UUID | None:
@@ -172,9 +186,11 @@ def _transition(previous: dict, proposed: dict, record: ExceptionHandoverShift, 
             return 'actor_invalid'
         if event.get('kind') == 'incoming_attestation' and not new_references:
             return 'acceptance_invalid'
-        if event.get('kind') == 'r_transferred' and not all(
-                event.get(field) for field in ('patientId', 'reason', 'targetAt', 'receiverId')):
-            return 'transfer_invalid'
+        if event.get('kind') == 'r_transferred':
+            target_at = parse_datetime(str(event.get('targetAt', '')))
+            if not event.get('patientId') or not str(event.get('reason') or '').strip() or \
+                    event.get('receiverId') != actor or not target_at or timezone.is_naive(target_at):
+                return 'transfer_invalid'
         if event.get('kind') == 'outgoing_transfer' and (
             not frozen or event.get('manifestHash') != frozen.get('hash') or
             event.get('context') != frozen.get('context')):
@@ -223,7 +239,7 @@ def _transition(previous: dict, proposed: dict, record: ExceptionHandoverShift, 
 class ExceptionHandoverBase(APIView):
     authentication_classes = [Auth0JWTAuthentication]
     permission_classes = [IsAuthenticated, HasAnyRole.required('nurse', 'supervisor', 'admin'),
-                          HasAnyScope.required('handover:write')]
+                          HasAllScopes.required('patients:read', 'handover:write')]
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -335,38 +351,47 @@ class ExceptionShiftOperationView(ExceptionHandoverBase):
         body = request.data
         proposed = body.get('state') if isinstance(body, dict) else None
         expected_revision = body.get('expectedRevision') if isinstance(body, dict) else None
-        if not isinstance(proposed, dict) or not isinstance(expected_revision, int) or _uuid(operation_id) is None:
+        if not isinstance(proposed, dict) or not _receipt_domain(proposed) or \
+                not isinstance(expected_revision, int) or _uuid(operation_id) is None:
             return Response({'code': 'operation_invalid'}, status=400)
         digest = _digest(proposed)
-        try:
-            with transaction.atomic():
-                locked = ExceptionHandoverShift.objects.select_for_update().get(id=record.id)
-                previous = _read(locked)
-                receipt = previous.get('_operations', {}).get(str(operation_id))
-                if receipt:
-                    return Response(receipt) if receipt['contentHash'] == digest else \
-                        Response({'code': 'operation_conflict'}, status=409)
-                if locked.revision != expected_revision:
-                    return Response({'code': 'revision_conflict', 'revision': locked.revision}, status=409)
-                proposed = json.loads(json.dumps(proposed))
-                issue = _transition(previous, proposed, locked, _actor(request))
-                if issue:
-                    return Response({'code': issue}, status=400)
-                receipt = {'operationId': str(operation_id), 'contentHash': digest,
-                           'revision': locked.revision + 1, 'status': 'confirmed'}
-                proposed['_operations'] = {**previous.get('_operations', {}), str(operation_id): receipt}
-                locked.state_json, locked.encryption_metadata = encrypt_bundle_document(proposed)
-                locked.revision += 1
-                updated = ExceptionHandoverShift.objects.filter(id=locked.id, revision=expected_revision).update(
-                    state_json=locked.state_json, encryption_metadata=locked.encryption_metadata,
-                    revision=locked.revision)
-                if not updated:
-                    return Response({'code': 'revision_conflict', 'revision': expected_revision}, status=409)
-                return Response(receipt, status=201)
-        except ClinicalBundleStorageError:
-            return Response({'code': 'state_unavailable'}, status=503)
-        except OperationalError as error:
-            if connection.vendor == 'sqlite' and ('database is locked' in str(error).lower() or
-                    'database table is locked' in str(error).lower()):
-                return Response({'code': 'write_contended'}, status=503)
-            raise
+        for attempt in range(5):
+            try:
+                return self._commit_operation(request, record, proposed, expected_revision, digest, operation_id)
+            except ClinicalBundleStorageError:
+                return Response({'code': 'state_unavailable'}, status=503)
+            except OperationalError as error:
+                locked = connection.vendor == 'sqlite' and ('database is locked' in str(error).lower() or
+                    'database table is locked' in str(error).lower())
+                if not locked:
+                    raise
+                if attempt == 4:
+                    return Response({'code': 'write_contended'}, status=503)
+                time.sleep(0.02 * (attempt + 1) + random.uniform(0, 0.02))
+
+    @staticmethod
+    def _commit_operation(request, record, original, expected_revision, digest, operation_id):
+        with transaction.atomic():
+            locked = ExceptionHandoverShift.objects.select_for_update().get(id=record.id)
+            previous = _read(locked)
+            receipt = previous.get('_operations', {}).get(str(operation_id))
+            if receipt:
+                return Response(receipt) if receipt['contentHash'] == digest else \
+                    Response({'code': 'operation_conflict'}, status=409)
+            if locked.revision != expected_revision:
+                return Response({'code': 'revision_conflict', 'revision': locked.revision}, status=409)
+            proposed = json.loads(json.dumps(original))
+            issue = _transition(previous, proposed, locked, _actor(request))
+            if issue:
+                return Response({'code': issue}, status=400)
+            receipt = {'operationId': str(operation_id), 'contentHash': digest,
+                       'revision': locked.revision + 1, 'status': 'confirmed'}
+            proposed['_operations'] = {**previous.get('_operations', {}), str(operation_id): receipt}
+            locked.state_json, locked.encryption_metadata = encrypt_bundle_document(proposed)
+            locked.revision += 1
+            updated = ExceptionHandoverShift.objects.filter(id=locked.id, revision=expected_revision).update(
+                state_json=locked.state_json, encryption_metadata=locked.encryption_metadata,
+                revision=locked.revision)
+            if not updated:
+                return Response({'code': 'revision_conflict', 'revision': expected_revision}, status=409)
+            return Response(receipt, status=201)

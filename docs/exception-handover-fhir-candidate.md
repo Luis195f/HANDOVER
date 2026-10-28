@@ -22,6 +22,25 @@ locales usan almacenamiento cifrado y se borran en la limpieza/logout C07, sin
 Bearer token ni sender FHIR. Una respuesta incierta permanece pendiente y no acredita
 aceptación compartida; el trabajo offline exige un turno previamente confirmado.
 
+La transferencia R exige que el receptor introduzca un momento objetivo ISO 8601 con
+zona; se conserva en el borrador y en el evento sin inferir plazos clínicos. No resuelve
+la falta de fuente ni convierte R en B/C. La API exige conjuntamente `patients:read`
+y `handover:write` en listado, creación, estado y recibos.
+
+El hash del recibo usa JSON UTF-8 compacto con claves ordenadas por puntos de código
+Unicode en todos los niveles, equivalente a `json.dumps(sort_keys=True,
+separators=(',', ':'), ensure_ascii=False)` para el dominio admitido: enteros seguros,
+strings, booleanos, null, arrays y objetos. La fixture compartida fija bytes y SHA-256;
+la identidad de pendientes y recibos existentes no cambia.
+
+Un `409 revision_conflict` u `operation_conflict` conserva la operación rechazada
+cifrada como conflicto definitivo. La lectura recupera el estado autorizado, pero no
+reenvía la aceptación ni descarta la edición local: el usuario debe revisar y
+descartar explícitamente los cambios rechazados antes de continuar. Timeout/red
+sigue pendiente y consulta primero el recibo. La contención SQLite transitoria se
+reintenta acotadamente fuera de la transacción revertida; una revisión obsoleta
+sigue siendo conflicto.
+
 La capability candidata depende de configuración **servidor** en `HANDOVER_DEPLOYMENT_MODE=test`
 y `HANDOVER_EXCEPTION_TEST_RUNTIME=true`, además de identidad, permiso y unidad.
 La capability piloto permanece `false` con razones explícitas: C11V, IdP, umbrales,
