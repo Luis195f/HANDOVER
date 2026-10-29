@@ -129,6 +129,9 @@ export function UnitExceptionHandover({
   const [storageError, setStorageError] = useState(false);
   const [conflictCount, setConflictCount] = useState(0);
   const [acceptanceError, setAcceptanceError] = useState('');
+  const preparedTransfer = useRef<{ kind: 'outgoing_transfer' | 'incoming_attestation';
+    actorId: string; contextKey: string; manifestHash: string; eventKey: string;
+    recordedAt: string; inFlight: boolean } | null>(null);
   const [overrideAsOf, setOverrideAsOf] = useState(() => now());
   const [expandedUnchanged, setExpandedUnchanged] = useState(false);
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
@@ -264,7 +267,8 @@ export function UnitExceptionHandover({
   useEffect(() => {
     if (!hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
     void storageInstance.save(sessionState).then(() => {
-      setStorageError(storageInstance.syncStatus === 'pending' || storageInstance.syncStatus === 'conflict');
+      setStorageError(storageInstance.syncStatus === 'pending' ||
+        storageInstance.syncStatus === 'conflict' || storageInstance.syncStatus === 'rejected');
     }).catch(async () => {
       setStorageError(true);
       try { setConflictCount(await storageInstance.listConflicts?.() ?? 0); } catch {}
@@ -328,6 +332,29 @@ export function UnitExceptionHandover({
   };
 
   const recordCandidateTransfer = async (kind: 'outgoing_transfer' | 'incoming_attestation') => {
+    if (preparedTransfer.current) {
+      const prepared = preparedTransfer.current;
+      if (prepared.inFlight) return;
+      if (kind !== prepared.kind || actor?.userId !== prepared.actorId ||
+          currentContext?.key !== prepared.contextKey || currentManifest?.hash !== prepared.manifestHash ||
+          !storageInstance) {
+        setAcceptanceError('El contexto cambió; reconcilie la operación pendiente antes de continuar.');
+        return;
+      }
+      try {
+        const reconciled = await storageInstance.load(shiftId);
+        const confirmed = storageInstance.syncStatus === 'confirmed' && reconciled.events.some((event) =>
+          event.idempotencyKey === prepared.eventKey && event.recordedAt === prepared.recordedAt);
+        if (!confirmed) throw new Error('EXCEPTION_HANDOVER_TRANSFER_PENDING');
+        preparedTransfer.current = null;
+        setSessionState(reconciled);
+        setStorageError(false);
+        setAcceptanceError('');
+      } catch {
+        setAcceptanceError('Transferencia pendiente: recupere el recibo y el estado compartido antes de confirmar.');
+      }
+      return;
+    }
     if (!actor || !currentContext || !currentManifest || !storageInstance ||
         storageInstance.durability !== 'durable' || !closure.canClose || storageError) {
       setAcceptanceError('La referencia requiere almacenamiento durable y evidencia de cierre vigente.');
@@ -361,10 +388,22 @@ export function UnitExceptionHandover({
           throw new Error('EXCEPTION_HANDOVER_CANDIDATE_INVALID');
         }
       }
+      preparedTransfer.current = { kind, actorId: actor.userId, contextKey: currentContext.key,
+        manifestHash: frozen.hash, eventKey: event.idempotencyKey, recordedAt: event.recordedAt,
+        inFlight: true };
       await storageInstance.save(next);
+      if (storageInstance.syncStatus && storageInstance.syncStatus !== 'confirmed') {
+        throw new Error('EXCEPTION_HANDOVER_TRANSFER_PENDING');
+      }
+      preparedTransfer.current = null;
       setSessionState(next);
       setAcceptanceError('');
     } catch {
+      if (preparedTransfer.current && storageInstance?.syncStatus !== 'pending') {
+        preparedTransfer.current = null;
+      } else if (preparedTransfer.current) {
+        preparedTransfer.current.inFlight = false;
+      }
       setAcceptanceError('No se confirmó la referencia; revise el contexto o el almacenamiento local.');
     }
   };
@@ -727,7 +766,7 @@ export function UnitExceptionHandover({
   return (
     <View style={[styles.board, { borderColor: colors.border, backgroundColor: colors.surface }]} testID="unit-exception-handover">
       {conflictCount > 0 && storageInstance?.discardConflicts ? <View>
-        <Text accessibilityRole="alert">Hay {conflictCount} edición(es) rechazadas por conflicto. El contenido local cifrado se conserva; revise el estado compartido antes de descartarlo.</Text>
+        <Text accessibilityRole="alert">Hay {conflictCount} edición(es) rechazadas por conflicto o validación. El contenido local cifrado se conserva; revise el estado compartido antes de descartarlo.</Text>
         <Pressable accessibilityRole="button" testID="discard-exception-conflicts" onPress={() => {
           void storageInstance.load(shiftId).then(async (loaded) => {
             await storageInstance.discardConflicts?.();
@@ -741,6 +780,15 @@ export function UnitExceptionHandover({
       {storageInstance?.syncStatus === 'pending' ? <Text accessibilityRole="alert">
         Trabajo local cifrado pendiente de confirmación compartida.
       </Text> : null}
+      {storageInstance?.syncStatus === 'pending' ? <Pressable accessibilityRole="button"
+        testID="reconcile-exception-pending" onPress={() => {
+          void storageInstance.load(shiftId).then((loaded) => {
+            if (storageInstance.syncStatus !== 'confirmed') return;
+            setSessionState(loaded);
+            setStorageError(false);
+            setAcceptanceError('');
+          }).catch(() => setStorageError(true));
+        }}><Text>Comprobar recibo y estado compartido</Text></Pressable> : null}
       <Text style={[styles.eyebrow, { color: colors.info }]}>{authenticatedActor
         ? 'TEST_ENV · REGISTRO OPERATIVO DE RELEVO POR EXCEPCIONES'
         : 'DEMO SINTÉTICA · RELEVO POR EXCEPCIONES'}</Text>
@@ -801,21 +849,26 @@ export function UnitExceptionHandover({
             {candidateMode ? <Text style={[styles.cardMeta, { color: colors.muted }]}>La recepción acepta este conjunto congelado como referencia comparativa del relevo, no certifica cada medición ni validación clínica institucional.</Text> : null}
             {acceptanceError ? <Text accessibilityRole="alert" testID="candidate-acceptance-error">{acceptanceError}</Text> : null}
             <View style={styles.actionRow}>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || !closure.canClose} onPress={() => {
-                if (actor?.kind === 'outgoing' && hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) {
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || (!closure.canClose && preparedTransfer.current?.kind !== 'outgoing_transfer')} onPress={() => {
+                if (actor?.kind === 'outgoing' && (preparedTransfer.current?.kind === 'outgoing_transfer' ||
+                  hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose)) {
                   if (candidateMode) void recordCandidateTransfer('outgoing_transfer');
                   else appendEvent('outgoing_transfer');
                 }
               }} style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: actor?.kind === 'outgoing' && closure.canClose ? 1 : 0.5 }]} testID="confirm-outgoing-transfer"><Text style={styles.primaryButtonText}>Confirmar transferencia saliente</Text></Pressable>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose || (candidateMode && Boolean(incomingAttestation))} onPress={() => {
-                if (actor?.kind === 'incoming' && hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) {
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' ||
+                (preparedTransfer.current?.kind !== 'incoming_attestation' &&
+                  (!outgoingTransfer || !closure.canClose || (candidateMode && Boolean(incomingAttestation))))} onPress={() => {
+                if (actor?.kind === 'incoming' && (preparedTransfer.current?.kind === 'incoming_attestation' ||
+                  hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose)) {
                   if (candidateMode) void recordCandidateTransfer('incoming_attestation');
-                  else appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
+                  else if (outgoingTransfer) appendEvent('incoming_attestation', undefined,
+                    { acknowledgesKey: outgoingTransfer.idempotencyKey });
                 }
               }} style={[styles.secondaryButton, { borderColor: colors.primary }]} testID="confirm-incoming-attestation"><Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Atestar recepción entrante</Text></Pressable>
             </View>
-            {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>Confirmado por profesional saliente · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}
-            {incomingAttestation ? <Text testID="incoming-attestation-event" style={[styles.provenanceText, { color: colors.muted }]}>Atestado por profesional entrante · {incomingAttestation.actorName} · {formatExceptionDateTime(incomingAttestation.recordedAt)}</Text> : null}
+            {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>{storageInstance?.syncStatus === 'pending' ? 'Transferencia preparada localmente, sin confirmación compartida' : 'Confirmado por profesional saliente'} · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}
+            {incomingAttestation ? <Text testID="incoming-attestation-event" style={[styles.provenanceText, { color: colors.muted }]}>{storageInstance?.syncStatus === 'pending' ? 'Recepción preparada localmente, sin confirmación compartida' : 'Atestado por profesional entrante'} · {incomingAttestation.actorName} · {formatExceptionDateTime(incomingAttestation.recordedAt)}</Text> : null}
           </View>
         </>
       )}

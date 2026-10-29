@@ -4,6 +4,7 @@ import { apiGet, apiPost } from './api';
 import { encryptedGetItem, encryptedSetItem, encryptedRemoveItem, getAsyncStorageAdapter } from './encryptedStorage';
 import { createEmptyExceptionHandoverState, type ExceptionHandoverSessionState, type ExceptionHandoverStorage } from './exception-handover-storage';
 import { loadStoredSession } from '@/src/security/OAuthService';
+import type { PatientListItem } from '@/src/types/patientList';
 
 const STORE_KEY = 'handover.auth.exception.pending.v1';
 
@@ -27,8 +28,9 @@ type PendingOperation = {
   expectedRevision: number;
   contentHash: string;
   state: ExceptionHandoverSessionState;
-  status: 'pending' | 'conflict';
+  status: 'pending' | 'conflict' | 'rejected';
   conflictReason?: 'revision_conflict' | 'operation_conflict' | 'unknown_conflict';
+  rejectionCode?: string;
 };
 
 type PendingCreate = {
@@ -44,8 +46,11 @@ type LocalState = {
   version: 1;
   operations: PendingOperation[];
   creates: PendingCreate[];
-  cached: Record<string, { actorSub: string; shift: ConfirmedExceptionShift }>;
+  cached: Record<string, { actorSub: string; shift: ConfirmedExceptionShift; listedAt?: number }>;
+  rosters?: Record<string, { cachedAt: number; patients: PatientListItem[] }>;
 };
+
+const CONFIRMED_SHIFT_CACHE_MS = 5 * 60 * 1000;
 
 let localWrite = Promise.resolve();
 
@@ -139,7 +144,59 @@ export async function listConfirmedExceptionShifts(actorSub: string, unitId: str
   const result = await apiGet(`/api/exception-shifts?unitId=${encodeURIComponent(unitId)}`) as {
     shifts: ConfirmedExceptionShift[];
   };
+  if (!Array.isArray(result.shifts) || result.shifts.some((entry) => entry.unitId !== unitId ||
+      !Number.isFinite(Date.parse(entry.expiresAt)))) throw new Error('EXCEPTION_HANDOVER_SHIFT_LIST_INVALID');
+  await mutateLocal((current) => {
+    for (const cached of Object.values(current.cached)) {
+      if (cached.actorSub === actorSub && cached.shift.unitId === unitId) cached.listedAt = undefined;
+    }
+    for (const item of result.shifts) {
+      const key = `${actorSub}\u0000${item.id}`;
+      const prior = current.cached[key]?.shift;
+      current.cached[key] = { actorSub, listedAt: Date.now(), shift: {
+        ...item, ...(prior?.revision === item.revision && prior.state ? { state: prior.state } : {}),
+      } };
+    }
+  });
   return result.shifts;
+}
+
+export async function listCachedConfirmedExceptionShifts(
+  actorSub: string, unitId: string,
+): Promise<ConfirmedExceptionShift[]> {
+  await assertLocalActor(actorSub, unitId);
+  const now = Date.now();
+  return Object.values((await readLocal()).cached)
+    .filter((entry) => entry.actorSub === actorSub && entry.shift.unitId === unitId &&
+      typeof entry.listedAt === 'number' && now >= entry.listedAt &&
+      now - entry.listedAt <= CONFIRMED_SHIFT_CACHE_MS && Date.parse(entry.shift.expiresAt) > now)
+    .map((entry) => entry.shift);
+}
+
+export async function cacheConfirmedExceptionRoster(
+  actorSub: string, unitId: string, patients: readonly PatientListItem[],
+): Promise<void> {
+  await assertLocalActor(actorSub, unitId);
+  if (patients.some((patient) => !patient.id || patient.unitId !== unitId)) {
+    throw new Error('EXCEPTION_HANDOVER_ROSTER_INVALID');
+  }
+  await mutateLocal((current) => {
+    current.rosters ??= {};
+    current.rosters[`${actorSub}\u0000${unitId}`] = { cachedAt: Date.now(),
+      patients: patients.map(({ id, name, unitId: patientUnit, bedLabel }) => ({
+        id, name, unitId: patientUnit, bedLabel,
+      })) };
+  });
+}
+
+export async function listCachedExceptionRoster(
+  actorSub: string, unitId: string,
+): Promise<PatientListItem[] | null> {
+  await assertLocalActor(actorSub, unitId);
+  const roster = (await readLocal()).rosters?.[`${actorSub}\u0000${unitId}`];
+  const now = Date.now();
+  if (!roster || now < roster.cachedAt || now - roster.cachedAt > CONFIRMED_SHIFT_CACHE_MS) return null;
+  return roster.patients.filter((patient) => patient.unitId === unitId);
 }
 
 export async function createConfirmedExceptionShift(actorSub: string, input: {
@@ -162,6 +219,7 @@ export async function createConfirmedExceptionShift(actorSub: string, input: {
   }) }) as ConfirmedExceptionShift;
   await mutateLocal((current) => {
     current.creates = current.creates.filter((entry) => entry.operationId !== pending.operationId);
+    current.cached[`${actorSub}\u0000${confirmed.id}`] = { actorSub, shift: confirmed, listedAt: Date.now() };
   });
   return confirmed;
 }
@@ -176,12 +234,27 @@ async function submitPending(pending: PendingOperation): Promise<void> {
   } catch (error) {
     if ((error as { status?: number }).status !== 404) throw error;
   }
-  const receipt = await apiPost(path, { body: JSON.stringify({
-    expectedRevision: pending.expectedRevision, state: pending.state,
-  }) }) as { contentHash?: string; status?: string };
+  let receipt: { contentHash?: string; status?: string };
+  try {
+    receipt = await apiPost(path, { body: JSON.stringify({
+      expectedRevision: pending.expectedRevision, state: pending.state,
+    }) }) as { contentHash?: string; status?: string };
+  } catch (error) {
+    if ((error as { status?: number }).status !== 400) throw error;
+    let code = 'validation_rejected';
+    try {
+      const parsed = JSON.parse((error as { details?: string }).details ?? '') as { code?: unknown };
+      if (typeof parsed.code === 'string' && /^[a-z_]{1,64}$/.test(parsed.code)) code = parsed.code;
+    } catch {}
+    throw new DefinitiveWriteRejection(code);
+  }
   if (receipt.status !== 'confirmed' || receipt.contentHash !== pending.contentHash) {
     throw new Error('EXCEPTION_HANDOVER_RECEIPT_INVALID');
   }
+}
+
+class DefinitiveWriteRejection extends Error {
+  constructor(readonly code: string) { super('EXCEPTION_HANDOVER_WRITE_REJECTED'); }
 }
 
 function definitiveConflict(error: unknown): PendingOperation['conflictReason'] | null {
@@ -199,45 +272,48 @@ export function createAuthenticatedExceptionHandoverStorage(
 ): ExceptionHandoverStorage & { replayPending: () => Promise<void> } {
   const cacheKey = `${actorSub}\u0000${shift.id}`;
   let revision = shift.revision;
-  let lastState = JSON.stringify(shift.state ?? createEmptyExceptionHandoverState(shift.id));
+  let lastState = canonicalReceiptJson(shift.state ?? createEmptyExceptionHandoverState(shift.id));
   let serial = Promise.resolve();
-  let syncStatus: 'confirmed' | 'pending' | 'conflict' = 'confirmed';
+  let syncStatus: 'confirmed' | 'pending' | 'conflict' | 'rejected' = 'confirmed';
   const replayPending = async () => {
     const local = await readLocal();
     const pending = local.operations.filter((entry) => entry.shiftId === shift.id &&
       entry.unitId === shift.unitId && entry.actorSub === actorSub);
-    if (pending.some((entry) => entry.status === 'conflict')) {
-      syncStatus = 'conflict';
-      throw new Error('EXCEPTION_HANDOVER_CONFLICT');
+    const blocked = pending.find((entry) => entry.status !== 'pending');
+    if (blocked) {
+      syncStatus = blocked.status;
+      throw new Error(blocked.status === 'rejected' ? 'EXCEPTION_HANDOVER_REJECTED' : 'EXCEPTION_HANDOVER_CONFLICT');
     }
     for (const operation of pending) {
       try {
         await submitPending(operation);
       } catch (error) {
+        const rejected = error instanceof DefinitiveWriteRejection ? error : null;
         const reason = definitiveConflict(error);
-        if (!reason) throw error;
+        if (!rejected && !reason) throw error;
         try {
           await mutateLocal((current) => {
             const rejectedAt = current.operations.findIndex((entry) => entry.operationId === operation.operationId);
             if (rejectedAt < 0) return;
             current.operations.slice(rejectedAt).forEach((entry) => {
               if (entry.shiftId === shift.id && entry.actorSub === actorSub) {
-                entry.status = 'conflict';
-                entry.conflictReason = reason;
+                entry.status = rejected ? 'rejected' : 'conflict';
+                if (rejected) entry.rejectionCode = rejected.code;
+                else entry.conflictReason = reason ?? undefined;
               }
             });
           });
         } catch {
           throw new Error('EXCEPTION_HANDOVER_CONFLICT_PERSIST_FAILED');
         }
-        syncStatus = 'conflict';
-        throw new Error('EXCEPTION_HANDOVER_CONFLICT');
+        syncStatus = rejected ? 'rejected' : 'conflict';
+        throw new Error(rejected ? 'EXCEPTION_HANDOVER_REJECTED' : 'EXCEPTION_HANDOVER_CONFLICT');
       }
       const confirmedRevision = operation.expectedRevision + 1;
       await mutateLocal((current) => {
         current.operations = current.operations.filter((entry) => entry.operationId !== operation.operationId);
         const cached = current.cached[cacheKey];
-        current.cached[cacheKey] = { actorSub, shift: {
+        current.cached[cacheKey] = { actorSub, listedAt: cached?.listedAt, shift: {
           ...(cached?.shift ?? shift), revision: confirmedRevision, state: operation.state,
         } };
       });
@@ -251,34 +327,36 @@ export function createAuthenticatedExceptionHandoverStorage(
     async listConflicts() {
       await assertLocalActor(actorSub, shift.unitId);
       return (await readLocal()).operations.filter((entry) => entry.shiftId === shift.id &&
-        entry.unitId === shift.unitId && entry.actorSub === actorSub && entry.status === 'conflict').length;
+        entry.unitId === shift.unitId && entry.actorSub === actorSub && entry.status !== 'pending').length;
     },
     async discardConflicts() {
       await assertLocalActor(actorSub, shift.unitId);
       await mutateLocal((current) => {
         current.operations = current.operations.filter((entry) => entry.shiftId !== shift.id ||
           entry.unitId !== shift.unitId ||
-          entry.actorSub !== actorSub || entry.status !== 'conflict');
+          entry.actorSub !== actorSub || entry.status === 'pending');
       });
     },
     async load(shiftId) {
       if (shiftId !== shift.id) throw new Error('EXCEPTION_HANDOVER_SHIFT_MISMATCH');
-      let conflicted = false;
+      let blocked = false;
       let authorizedState: ExceptionHandoverSessionState | null = null;
       try {
         await assertActor(actorSub, shift.unitId);
         try { await replayPending(); } catch (error) {
-          if ((error as Error).message !== 'EXCEPTION_HANDOVER_CONFLICT') throw error;
-          conflicted = true;
+          if (!['EXCEPTION_HANDOVER_CONFLICT', 'EXCEPTION_HANDOVER_REJECTED'].includes((error as Error).message)) throw error;
+          blocked = true;
         }
         const current = await apiGet(`/api/exception-shifts/${shift.id}`) as ConfirmedExceptionShift;
         if (!current.state || current.unitId !== shift.unitId) throw new Error('EXCEPTION_HANDOVER_STATE_INVALID');
         authorizedState = current.state;
         revision = current.revision;
-        lastState = JSON.stringify(current.state);
-        await mutateLocal((local) => { local.cached[cacheKey] = { actorSub, shift: current }; });
+        lastState = canonicalReceiptJson(current.state);
+        await mutateLocal((local) => { local.cached[cacheKey] = {
+          actorSub, listedAt: local.cached[cacheKey]?.listedAt, shift: current,
+        }; });
         this.durability = 'durable';
-        syncStatus = conflicted ? 'conflict' : 'confirmed';
+        if (!blocked) syncStatus = 'confirmed';
         return current.state;
       } catch (error) {
         if (authorizedState) { this.durability = 'memory'; return authorizedState; }
@@ -294,9 +372,10 @@ export function createAuthenticatedExceptionHandoverStorage(
         revision = cached.shift.revision;
         const operations = local.operations.filter((entry) => entry.shiftId === shift.id &&
           entry.unitId === shift.unitId && entry.actorSub === actorSub);
-        if (conflicted || operations.some((entry) => entry.status === 'conflict')) {
-          syncStatus = 'conflict';
-          lastState = JSON.stringify(cached.shift.state);
+        const rejected = operations.find((entry) => entry.status !== 'pending');
+        if (blocked || rejected) {
+          syncStatus = rejected?.status ?? 'conflict';
+          lastState = canonicalReceiptJson(cached.shift.state);
           return cached.shift.state;
         }
         let expectedRevision = revision;
@@ -308,7 +387,7 @@ export function createAuthenticatedExceptionHandoverStorage(
         }
         const localState = operations.length ? operations[operations.length - 1].state : cached.shift.state;
         syncStatus = operations.length ? 'pending' : 'confirmed';
-        lastState = JSON.stringify(localState);
+        lastState = canonicalReceiptJson(localState);
         return localState;
       }
     },
@@ -317,14 +396,17 @@ export function createAuthenticatedExceptionHandoverStorage(
         if (state.shiftId !== shift.id) throw new Error('EXCEPTION_HANDOVER_SHIFT_MISMATCH');
         await assertLocalActor(actorSub, shift.unitId);
         state = authenticatedState(state, actorSub);
-        const serialized = JSON.stringify(state);
+        const serialized = canonicalReceiptJson(state);
         if (serialized === lastState) {
           await replayPending();
           return;
         }
         const outstanding = (await readLocal()).operations.filter((entry) =>
           entry.shiftId === shift.id && entry.unitId === shift.unitId && entry.actorSub === actorSub);
-        if (outstanding.some((entry) => entry.status === 'conflict')) throw new Error('EXCEPTION_HANDOVER_CONFLICT');
+        if (outstanding.some((entry) => entry.status !== 'pending')) {
+          throw new Error(outstanding.some((entry) => entry.status === 'rejected')
+            ? 'EXCEPTION_HANDOVER_REJECTED' : 'EXCEPTION_HANDOVER_CONFLICT');
+        }
         const operation: PendingOperation = { operationId: uuidv4(), shiftId: shift.id,
           unitId: shift.unitId, actorSub, expectedRevision: revision + outstanding.length,
           contentHash: contentHash(state), state, status: 'pending' };

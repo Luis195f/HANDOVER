@@ -10,7 +10,7 @@ from unittest.mock import patch
 from django.db import OperationalError, close_old_connections
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from django.urls import reverse
 from django.core.management import call_command
 from rest_framework.test import APIClient
@@ -267,7 +267,9 @@ class ExceptionHandoverRuntimeTests(TestCase):
         self.assertEqual(self.alice.get(reverse('exception-shift-operation',
             args=[shift_id, operation_id])).data, receipt.data)
 
-    def test_transfer_and_attestation_are_linked_to_distinct_actors(self):
+    @patch('backend.api.views_exception_handover.timezone.now',
+           return_value=datetime(2026, 10, 28, 11, tzinfo=datetime_timezone.utc))
+    def test_transfer_and_attestation_are_linked_to_distinct_actors(self, _clock):
         shift_id = self.create_shift().data['id']
         context = {'key': 'context-1', 'shiftId': shift_id, 'revision': 1}
         snapshot = {'patientId': '1', 'unitId': 'icu-a', 'shiftId': shift_id,

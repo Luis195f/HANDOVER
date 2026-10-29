@@ -44,8 +44,11 @@ import { DEMO_NOW, getDemoExceptionHandoverPatients, getDemoHandoverPrefill } fr
 import type { PatientListItem } from "@/src/types/patientList";
 import { UnitExceptionHandover } from './handover/UnitExceptionHandover';
 import {
+  cacheConfirmedExceptionRoster,
   createAuthenticatedExceptionHandoverStorage,
   createConfirmedExceptionShift,
+  listCachedConfirmedExceptionShifts,
+  listCachedExceptionRoster,
   listConfirmedExceptionShifts,
   type ConfirmedExceptionShift,
 } from '@/src/lib/exception-handover-auth';
@@ -436,32 +439,46 @@ export default function PatientList({ navigation }: Props) {
       if (requestId !== loadPatientsRequestRef.current) {
         return;
       }
-      setPatients(
-        normalizePatientListResponse(
-          data,
-          selectedUnitId !== ALL_UNITS_OPTION ? String(selectedUnitId) : undefined,
-        ),
+      const normalized = normalizePatientListResponse(
+        data, selectedUnitId !== ALL_UNITS_OPTION ? String(selectedUnitId) : undefined,
       );
+      setPatients(normalized);
       lastSuccessfulScopeRef.current = scopeKey;
+      if (session?.mode !== 'demo' && session?.accessToken && selectedSpecialtyId === 'psych' &&
+          selectedUnitId !== ALL_UNITS_OPTION && capabilities?.userSub === session.userId &&
+          capabilities.exceptionHandover?.candidateEnabled && capabilities.permissions.canWriteHandover) {
+        try { await cacheConfirmedExceptionRoster(session.userId, selectedUnitId, normalized); } catch {}
+      }
     } catch (error) {
       if (requestId !== loadPatientsRequestRef.current) {
         return;
       }
+      const mayRestoreRoster = (error as { status?: number }).status !== 401 &&
+        (error as { status?: number }).status !== 403 && session?.mode !== 'demo' &&
+        Boolean(session?.accessToken) && selectedSpecialtyId === 'psych' &&
+        selectedUnitId !== ALL_UNITS_OPTION && capabilities?.userSub === session?.userId &&
+        capabilities?.exceptionHandover?.candidateEnabled && capabilities?.permissions.canWriteHandover;
+      let cachedRoster: PatientListItem[] | null = null;
+      if (mayRestoreRoster && session?.userId) {
+        try { cachedRoster = await listCachedExceptionRoster(session.userId, selectedUnitId); } catch {}
+      }
+      if (requestId !== loadPatientsRequestRef.current) return;
       const keepVisiblePatients = shouldKeepPatientListOnLoadFailure(
         scopeKey,
         lastSuccessfulScopeRef.current,
         currentPatientsRef.current.length,
       );
-      if (!keepVisiblePatients) {
+      if (cachedRoster) setPatients(cachedRoster);
+      else if (!keepVisiblePatients) {
         setPatients([]);
       }
-      setPatientLoadNotice(buildPatientListLoadNotice(error, { hasStaleData: keepVisiblePatients }));
+      setPatientLoadNotice(buildPatientListLoadNotice(error, { hasStaleData: Boolean(cachedRoster) || keepVisiblePatients }));
     } finally {
       if (requestId === loadPatientsRequestRef.current) {
         setIsLoadingPatients(false);
       }
     }
-  }, [capabilities, selectedUnitId, session]);
+  }, [capabilities, selectedSpecialtyId, selectedUnitId, session]);
 
   const resetNewPatientForm = useCallback(() => {
     setNewPatientForm({
@@ -720,7 +737,24 @@ export default function PatientList({ navigation }: Props) {
     let active = true;
     void listConfirmedExceptionShifts(session.userId, exceptionUnitId)
       .then((shifts) => { if (active) setConfirmedShifts(shifts); })
-      .catch(() => { if (active) setShiftError('No se pudieron consultar los turnos confirmados.'); });
+      .catch(async (error) => {
+        if (!active) return;
+        if ((error as { status?: number }).status === 401 || (error as { status?: number }).status === 403 ||
+            (error as Error).message === 'EXCEPTION_HANDOVER_AUTH_CHANGED') {
+          setShiftError('No se pudieron consultar los turnos confirmados: sesión o permisos rechazados.');
+          return;
+        }
+        try {
+          const cached = await listCachedConfirmedExceptionShifts(session.userId, exceptionUnitId);
+          if (!active) return;
+          setConfirmedShifts(cached);
+          setShiftError(cached.length
+            ? 'Turnos confirmados disponibles solo en caché local; el estado compartido requiere reconexión.'
+            : 'No se pudieron consultar los turnos confirmados.');
+        } catch {
+          if (active) setShiftError('No se pudieron consultar los turnos confirmados.');
+        }
+      });
     return () => { active = false; };
   }, [exceptionUnitId, session?.userId]);
   const authExceptionStorage = useMemo(() => selectedShift && session?.userId
@@ -1024,13 +1058,19 @@ export default function PatientList({ navigation }: Props) {
       </View>
     ),
     [
+      authenticatedExceptionPatients,
+      authExceptionStorage,
       canCreatePatients,
       canViewSupervisorDashboard,
       colors.danger,
       colors.muted,
       colors.primary,
       colors.text,
+      confirmedShifts,
+      createExceptionShift,
+      exceptionUnitId,
       isLoadingPatients,
+      isAuthenticatedExceptionRoute,
       isDemoExceptionRoute,
       loadPatients,
       navigation,
@@ -1040,7 +1080,13 @@ export default function PatientList({ navigation }: Props) {
       onOpenPatient,
       patientLoadNotice,
       selectedSpecialtyId,
+      selectedShift,
       selectedUnitId,
+      session?.displayName,
+      shiftDescription,
+      shiftEnd,
+      shiftError,
+      shiftStart,
       actionablePriorityCount,
       emptyStateMessage,
       effectiveSortByPriority,

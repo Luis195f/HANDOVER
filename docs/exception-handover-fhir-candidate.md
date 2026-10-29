@@ -163,3 +163,21 @@ Precondiciones preservadas: firma/cardinalidad C03; reintentos C04; scope C05;
 contexto/revisión C06; procedencia por campo C08. C07 permanece PARTIAL, purga
 histórica NOT_VERIFIED y C19A BLOCKED. El fallo operativo Nightly Backups por
 `RCLONE_CONFIG_BASE64` ausente no se corrige en C11. No hay validación clínica.
+
+## C12 TEST_ENV: recuperación de operaciones y selector offline
+
+Un `400` de escritura C12 conserva la operación cifrada como `rejected`, bloquea
+su replay y el de sus dependientes, y exige comparar el estado autorizado antes
+de descartarla explícitamente. `409` conserva su estado `conflict`; `401/403`
+no autorizan fallback offline. Un `404` del GET de recibo permite comprobar la
+escritura original con la misma identidad; no es rechazo de esa escritura.
+Transferencia y recepción mantienen el evento preparado mientras falta recibo:
+otro clic reconcilia antes de generar fecha, manifiesto u operación nuevos.
+
+PatientList conserva durante cinco minutos los turnos confirmados y un censo
+mínimo cifrado por actor/unidad. Sin red, requiere sesión no caducada y capability
+local vigente; muestra que el turno solo está disponible localmente. El censo
+restaurado contiene identificador, nombre, unidad y cama, sin mediciones ni plan:
+no acredita fuentes C17 ni confirmación compartida nueva. Sin turno confirmado
+o caché vigente no crea identificadores offline. El runner `build` usa Ubuntu
+24.04 para la versión fijada de Playwright; E2E permanece obligatorio.

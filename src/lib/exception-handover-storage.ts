@@ -43,7 +43,7 @@ export type ExceptionHandoverSessionState = {
 
 export type ExceptionHandoverStorage = {
   durability?: 'durable' | 'memory';
-  readonly syncStatus?: 'confirmed' | 'pending' | 'conflict';
+  readonly syncStatus?: 'confirmed' | 'pending' | 'conflict' | 'rejected';
   listConflicts?: () => Promise<number>;
   discardConflicts?: () => Promise<void>;
   load(shiftId: string): Promise<ExceptionHandoverSessionState>;
