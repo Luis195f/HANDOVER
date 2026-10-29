@@ -238,6 +238,13 @@ export type HandoffClosureAssessment = {
   blockingReasons: string[];
 };
 
+export function isValidExceptionTargetAt(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return false;
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(Date.parse(value)) && Number.isFinite(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value.slice(0, 10);
+}
+
 export const COLLECTIVE_REVIEW_RESPONSIBILITY_COPY =
   'Revisión colectiva del resumen de unidad. No constituye validación individual de valores clínicos ni genera evoluciones individuales. La responsabilidad asistencial del turno se transfiere al equipo receptor.';
 
@@ -637,7 +644,8 @@ export function classifyExceptionHandoverPatient(
 
   return {
     patientId: patient.patientId,
-    clinicalStatus: active?.newLane === 'A' ? 'unstable' : baseLane === 'R' ? 'unverified' : clinicalStatus(baseLane),
+    clinicalStatus: active?.newLane === 'A' ? 'unstable' : (options.candidate && ruleLane === 'R') || baseLane === 'R'
+      ? 'unverified' : clinicalStatus(baseLane),
     handoffLane: active?.newLane ?? ruleLane,
     baselineLane: baseLane,
     reasons: active
@@ -1025,8 +1033,8 @@ export function assessHandoffClosure(
         event.kind === 'r_transferred' &&
         event.actorKind === 'incoming' &&
         Boolean(event.reason?.trim()) &&
-        Boolean(event.targetAt) &&
-        Boolean(event.receiverId));
+        isValidExceptionTargetAt(event.targetAt) &&
+        event.receiverId === event.actorId);
       return !resolved && !transferred;
     });
   const blockingReasons = [

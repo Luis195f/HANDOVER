@@ -42,7 +42,7 @@ class CapabilitiesViewTests(TestCase):
 
         self.assertEqual(
             set(data.keys()),
-            {"userSub", "roles", "scopes", "unitIds", "permissions", "scopeCatalog", "fhir"},
+            {"userSub", "roles", "scopes", "unitIds", "permissions", "scopeCatalog", "fhir", "exceptionHandover"},
         )
         self.assertEqual(data["userSub"], claims["sub"])
         self.assertEqual(data["roles"], ["supervisor"])
@@ -62,6 +62,8 @@ class CapabilitiesViewTests(TestCase):
             },
         )
         self.assertEqual(data["fhir"], {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES})
+        self.assertFalse(data["exceptionHandover"]["pilotEnabled"])
+        self.assertFalse(data["exceptionHandover"]["candidateEnabled"])
 
     @override_settings(DEBUG=False)
     def test_prod_requires_authentication_without_token(self):

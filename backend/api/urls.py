@@ -39,8 +39,13 @@ from .views import (
     PatientsView,
 )
 from .views_catalogs import NandaCatalogView, NicCatalogView, NocCatalogView
+from .views_exception_handover import ExceptionShiftsView, ExceptionShiftView, ExceptionShiftOperationView
 
 urlpatterns = [
+    path('exception-shifts', ExceptionShiftsView.as_view(), name='exception-shifts'),
+    path('exception-shifts/<uuid:shift_id>', ExceptionShiftView.as_view(), name='exception-shift'),
+    path('exception-shifts/<uuid:shift_id>/operations/<uuid:operation_id>',
+         ExceptionShiftOperationView.as_view(), name='exception-shift-operation'),
     path("fhir/patient", PatientView.as_view(), name="patient"),
     path("patients", PatientsView.as_view(), name="patients-no-slash"),
     path("patients/", PatientsView.as_view(), name="patients"),

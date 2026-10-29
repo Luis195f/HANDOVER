@@ -1,5 +1,67 @@
 # C11 — contrato FHIR candidato del relevo por excepciones
 
+## C12 — cableado autenticado TEST_ENV, sin piloto
+
+El backend crea un turno operativo con UUID persistido, unidad del ámbito autenticado,
+periodo y descripción explícitos; el periodo no es su identidad. La creación se
+deduplica por `operationId` y contenido. El creador es el profesional saliente; un
+profesional distinto de la misma unidad puede seleccionar el registro y atestar la
+recepción. El actor de cada evento se contrasta con el `sub` autenticado en el
+backend. No se aceptan turnos fabricados sin confirmación del servidor ni `ALL` como
+unidad. Esto no constituye una agenda institucional verificada.
+
+`ExceptionHandoverShift` conserva estado y recibos cifrados con el mecanismo AES-GCM
+existente, revisión optimista y caducidad máxima igual al menor plazo entre
+`HANDOVER_BUNDLE_RETENTION_DAYS` y 30 días. La poda elimina turnos caducados y
+referencias aceptadas vencidas; la lectura no renueva plazos. Una nueva sesión de
+turno recupera solo referencias anteriores no caducadas de la misma unidad. La
+aceptación exige un manifiesto congelado, transferencia saliente e identidad distinta
+del receptor; el replay consulta el recibo por el mismo identificador antes de
+reenviar. Una revisión obsoleta o contenido contradictorio se rechaza. Los pendientes
+locales usan almacenamiento cifrado y se borran en la limpieza/logout C07, sin
+Bearer token ni sender FHIR. Una respuesta incierta permanece pendiente y no acredita
+aceptación compartida; el trabajo offline exige un turno previamente confirmado.
+
+La transferencia R exige que el receptor introduzca un momento objetivo ISO 8601 con
+zona; se conserva en el borrador y en el evento sin inferir plazos clínicos. No resuelve
+la falta de fuente ni convierte R en B/C. La API exige conjuntamente `patients:read`
+y `handover:write` en listado, creación, estado y recibos.
+
+El hash del recibo usa JSON UTF-8 compacto con claves ordenadas por puntos de código
+Unicode en todos los niveles, equivalente a `json.dumps(sort_keys=True,
+separators=(',', ':'), ensure_ascii=False)` para el dominio admitido: enteros seguros,
+strings, booleanos, null, arrays y objetos. La fixture compartida fija bytes y SHA-256;
+la identidad de pendientes y recibos existentes no cambia.
+
+Un `409 revision_conflict` u `operation_conflict` conserva la operación rechazada
+cifrada como conflicto definitivo. La lectura recupera el estado autorizado, pero no
+reenvía la aceptación ni descarta la edición local: el usuario debe revisar y
+descartar explícitamente los cambios rechazados antes de continuar. Timeout/red
+sigue pendiente y consulta primero el recibo. La contención SQLite transitoria se
+reintenta acotadamente fuera de la transacción revertida; una revisión obsoleta
+sigue siendo conflicto.
+
+La poda de referencias vencidas usa actualización condicional por revisión y la
+incrementa; una escritura basada en la revisión anterior no puede sobrescribirla.
+La API tampoco admite reintroducir una referencia vencida. Los eventos y
+borradores previamente autorizados de pacientes dados de alta o trasladados
+permanecen históricos e inmutables; cualquier dato nuevo o cambio de borrador
+exige pertenencia actual a la unidad. La lectura offline requiere una sesión
+local vigente del mismo actor y unidad: conserva el trabajo pendiente cifrado,
+separado del estado confirmado, y bloquea el cierre hasta su confirmación
+compartida. Los conflictos no se mezclan con ese pendiente y requieren
+reconciliación explícita. Una revocación remota no puede comprobarse sin
+conexión; toda operación de servidor vuelve a exigir autorización efectiva.
+
+La capability candidata depende de configuración **servidor** en `HANDOVER_DEPLOYMENT_MODE=test`
+y `HANDOVER_EXCEPTION_TEST_RUNTIME=true`, además de identidad, permiso y unidad.
+La capability piloto permanece `false` con razones explícitas: C11V, IdP, umbrales,
+strict-mode y entorno institucional no verificados. Los datos actuales de
+`PatientList` no transportan referencia y fecha fuente verificables: su clasificación
+candidata es R, no B/C por defecto. El Bundle C11 se construye y valida localmente
+antes de la recepción, sin envío clínico. Las pruebas TEST_ENV no acreditan fuente
+clínica conectada, durabilidad en dispositivo ni activación institucional.
+
 Estado: **candidato local, no activado**. No existe envío desde `UnitExceptionHandover`,
 capability piloto nueva ni recurso productivo adicional en `HANDOFF_FHIR_CAPABILITY_MATRIX`.
 La base `https://example.org/fhir/StructureDefinition/...` de `src/lib/fhir-profiles.ts`
@@ -101,3 +163,21 @@ Precondiciones preservadas: firma/cardinalidad C03; reintentos C04; scope C05;
 contexto/revisión C06; procedencia por campo C08. C07 permanece PARTIAL, purga
 histórica NOT_VERIFIED y C19A BLOCKED. El fallo operativo Nightly Backups por
 `RCLONE_CONFIG_BASE64` ausente no se corrige en C11. No hay validación clínica.
+
+## C12 TEST_ENV: recuperación de operaciones y selector offline
+
+Un `400` de escritura C12 conserva la operación cifrada como `rejected`, bloquea
+su replay y el de sus dependientes, y exige comparar el estado autorizado antes
+de descartarla explícitamente. `409` conserva su estado `conflict`; `401/403`
+no autorizan fallback offline. Un `404` del GET de recibo permite comprobar la
+escritura original con la misma identidad; no es rechazo de esa escritura.
+Transferencia y recepción mantienen el evento preparado mientras falta recibo:
+otro clic reconcilia antes de generar fecha, manifiesto u operación nuevos.
+
+PatientList conserva durante cinco minutos los turnos confirmados y un censo
+mínimo cifrado por actor/unidad. Sin red, requiere sesión no caducada y capability
+local vigente; muestra que el turno solo está disponible localmente. El censo
+restaurado contiene identificador, nombre, unidad y cama, sin mediciones ni plan:
+no acredita fuentes C17 ni confirmación compartida nueva. Sin turno confirmado
+o caché vigente no crea identificadores offline. El runner `build` usa Ubuntu
+24.04 para la versión fijada de Playwright; E2E permanece obligatorio.

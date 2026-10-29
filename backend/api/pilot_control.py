@@ -18,6 +18,11 @@ PILOT_FEATURE_KEYS = (
     "admin_analytics",
     "ai_suggestions",
 )
+
+
+def exception_handover_test_enabled() -> bool:
+    return getattr(settings, 'HANDOVER_DEPLOYMENT_MODE', '') == 'test' and \
+        os.getenv('HANDOVER_EXCEPTION_TEST_RUNTIME', '').strip().lower() == 'true'
 PILOT_FEATURE_SET = set(PILOT_FEATURE_KEYS)
 PILOT_MODE_ALIASES = {
     "on": "enabled",
