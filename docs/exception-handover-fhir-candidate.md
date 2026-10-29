@@ -41,6 +41,18 @@ sigue pendiente y consulta primero el recibo. La contención SQLite transitoria 
 reintenta acotadamente fuera de la transacción revertida; una revisión obsoleta
 sigue siendo conflicto.
 
+La poda de referencias vencidas usa actualización condicional por revisión y la
+incrementa; una escritura basada en la revisión anterior no puede sobrescribirla.
+La API tampoco admite reintroducir una referencia vencida. Los eventos y
+borradores previamente autorizados de pacientes dados de alta o trasladados
+permanecen históricos e inmutables; cualquier dato nuevo o cambio de borrador
+exige pertenencia actual a la unidad. La lectura offline requiere una sesión
+local vigente del mismo actor y unidad: conserva el trabajo pendiente cifrado,
+separado del estado confirmado, y bloquea el cierre hasta su confirmación
+compartida. Los conflictos no se mezclan con ese pendiente y requieren
+reconciliación explícita. Una revocación remota no puede comprobarse sin
+conexión; toda operación de servidor vuelve a exigir autorización efectiva.
+
 La capability candidata depende de configuración **servidor** en `HANDOVER_DEPLOYMENT_MODE=test`
 y `HANDOVER_EXCEPTION_TEST_RUNTIME=true`, además de identidad, permiso y unidad.
 La capability piloto permanece `false` con razones explícitas: C11V, IdP, umbrales,

@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from unittest.mock import patch
 
 from django.db import OperationalError, close_old_connections
@@ -12,6 +12,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from datetime import timedelta
 from django.urls import reverse
+from django.core.management import call_command
 from rest_framework.test import APIClient
 
 from backend.api.models import ExceptionHandoverShift, Patient
@@ -209,6 +210,63 @@ class ExceptionHandoverRuntimeTests(TestCase):
         self.assertEqual(self.operation(self.alice, shift_id,
                          'b8f9d627-d180-4fb8-bdec-a612183e4a15', foreign_draft, 1).status_code, 400)
 
+    def test_inactive_patient_history_is_immutable_but_does_not_block_other_patients(self):
+        second = Patient.objects.create(first_name='Segundo', last_name='Sintético', identifier='p-2',
+                                        unit='icu-a', service='test', room='2')
+        shift_id = self.create_shift().data['id']
+        state = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        state['briefDrafts']['1'] = {'change': 'Registrado antes del alta'}
+        state['events'].append({'kind': 'brief_review', 'shiftId': shift_id, 'patientId': '1',
+            'idempotencyKey': 'before-discharge', 'actorId': 'auth0|alice', 'actorKind': 'outgoing',
+            'recordedAt': '2026-10-28T10:00:00Z'})
+        self.assertEqual(self.operation(self.alice, shift_id,
+            '9156a31b-a353-4981-97c0-d740e953604a', state, 0).status_code, 201)
+        Patient.objects.filter(id=1).update(active=False)
+        current = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        current['briefDrafts'][str(second.id)] = {'change': 'Otro paciente autorizado'}
+        self.assertEqual(self.operation(self.alice, shift_id,
+            '751ea038-936a-4d6b-887a-330cc93e5a9e', current, 1).status_code, 201)
+        saved = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        self.assertEqual(saved['events'][0]['idempotencyKey'], 'before-discharge')
+        self.assertEqual(saved['briefDrafts']['1']['change'], 'Registrado antes del alta')
+        altered = copy.deepcopy(saved)
+        altered['briefDrafts']['1']['change'] = 'Cambio posterior no autorizado'
+        self.assertEqual(self.operation(self.alice, shift_id,
+            'a51ea038-936a-4d6b-887a-330cc93e5a9e', altered, 2).status_code, 400)
+        removed = copy.deepcopy(saved)
+        del removed['briefDrafts']['1']
+        self.assertEqual(self.operation(self.alice, shift_id,
+            'a61ea038-936a-4d6b-887a-330cc93e5a9e', removed, 2).status_code, 400)
+        altered = copy.deepcopy(saved)
+        altered['events'][0]['kind'] = 'critical_check_back'
+        self.assertEqual(self.operation(self.alice, shift_id,
+            'b51ea038-936a-4d6b-887a-330cc93e5a9e', altered, 2).status_code, 400)
+        altered = copy.deepcopy(saved)
+        altered['briefDrafts']['999'] = {'change': 'Paciente ajeno'}
+        self.assertEqual(self.operation(self.alice, shift_id,
+            'c51ea038-936a-4d6b-887a-330cc93e5a9e', altered, 2).status_code, 400)
+
+    def test_prune_advances_revision_and_does_not_erase_confirmed_receipts(self):
+        from backend.api.clinical_storage import encrypt_bundle_document
+        shift_id = self.create_shift().data['id']
+        record = ExceptionHandoverShift.objects.get(id=shift_id)
+        state = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        state['acceptedReferences'] = [{'incomingKey': 'expired', 'expiresAt': '2026-10-27T00:00:00Z'}]
+        record.state_json, record.encryption_metadata = encrypt_bundle_document(state)
+        record.save(update_fields=['state_json', 'encryption_metadata'])
+        call_command('prune_sensitive_records')
+        record.refresh_from_db()
+        self.assertEqual(record.revision, 1)
+        current = self.alice.get(reverse('exception-shift', args=[shift_id])).data['state']
+        self.assertEqual(current['acceptedReferences'], [])
+        current['interactionCounts']['reviewed'] = 1
+        operation_id = 'fd693e43-bbbf-4596-87f6-ae52ab692ed1'
+        receipt = self.operation(self.alice, shift_id, operation_id, current, 1)
+        self.assertEqual(receipt.status_code, 201)
+        call_command('prune_sensitive_records')
+        self.assertEqual(self.alice.get(reverse('exception-shift-operation',
+            args=[shift_id, operation_id])).data, receipt.data)
+
     def test_transfer_and_attestation_are_linked_to_distinct_actors(self):
         shift_id = self.create_shift().data['id']
         context = {'key': 'context-1', 'shiftId': shift_id, 'revision': 1}
@@ -227,6 +285,7 @@ class ExceptionHandoverRuntimeTests(TestCase):
         state['events'].append(outgoing)
         sent = self.operation(self.alice, shift_id, '894852e9-8958-45b3-bd57-d6040a552e71', state, 0)
         self.assertEqual(sent.status_code, 201)
+        Patient.objects.filter(id=1).update(active=False)
         incoming = {'kind': 'incoming_attestation', 'shiftId': shift_id, 'context': context,
                     'idempotencyKey': 'incoming-1', 'actorId': 'auth0|bob',
                     'actorKind': 'incoming', 'actorName': 'bob',
@@ -255,10 +314,100 @@ class ExceptionHandoverRuntimeTests(TestCase):
         self.assertEqual(next_shift.status_code, 201)
         restored = self.bob.get(reverse('exception-shift', args=[next_shift.data['id']]))
         self.assertEqual(restored.data['state']['acceptedReferences'][0], reference)
+        new_manifest = copy.deepcopy(self.bob.get(reverse('exception-shift', args=[shift_id])).data['state'])
+        new_manifest['frozenManifest'] = manifest
+        self.assertEqual(self.operation(self.bob, shift_id,
+            '1403caac-a8ed-45a1-929e-724ee7ce5517', new_manifest, 2).status_code, 400)
 
 
 @override_settings(HANDOVER_DEPLOYMENT_MODE='test')
 class ExceptionHandoverConcurrencyTests(TransactionTestCase):
+    def test_pruning_and_operation_preserve_each_other_in_both_orders(self):
+        from backend.api.clinical_storage import encrypt_bundle_document
+        from backend.api.management.commands import prune_sensitive_records
+        from backend.api.views_exception_handover import _read
+
+        with patch.dict(os.environ, {'HANDOVER_EXCEPTION_TEST_RUNTIME': 'true'}):
+            for order in ('operation-first', 'prune-first'):
+                created = client_for('auth0|alice').post(reverse('exception-shifts'), {
+                    'unitId': 'icu-a', 'periodStart': '2026-10-28T08:00:00Z',
+                    'periodEnd': '2026-10-28T16:00:00Z', 'description': order,
+                    'operationId': 'ae0dbeba-75e7-4297-b230-5fb9cae6ed01' if order == 'operation-first'
+                        else 'ae0dbeba-75e7-4297-b230-5fb9cae6ed02',
+                }, format='json')
+                self.assertEqual(created.status_code, 201)
+                shift_id = created.data['id']
+                record = ExceptionHandoverShift.objects.get(id=shift_id)
+                state = _read(record)
+                state['acceptedReferences'] = [{'incomingKey': 'expired',
+                    'expiresAt': '2026-10-27T00:00:00Z'}]
+                record.state_json, record.encryption_metadata = encrypt_bundle_document(state)
+                record.save(update_fields=['state_json', 'encryption_metadata'])
+                proposed = client_for('auth0|alice').get(reverse('exception-shift', args=[shift_id])).data['state']
+                proposed['interactionCounts']['reviewed'] = 1
+                operation_id = 'ae0dbeba-75e7-4297-b230-5fb9cae6ed11' if order == 'operation-first' \
+                    else 'ae0dbeba-75e7-4297-b230-5fb9cae6ed12'
+                if order == 'operation-first':
+                    prune_read = Event()
+                    operation_done = Event()
+                    original_encrypt = prune_sensitive_records.encrypt_bundle_document
+
+                    def pause_after_read(value):
+                        if not prune_read.is_set():
+                            prune_read.set()
+                            if not operation_done.wait(5):
+                                raise AssertionError('API operation did not finish before pruning')
+                        return original_encrypt(value)
+
+                    with patch.object(prune_sensitive_records, 'encrypt_bundle_document',
+                                      side_effect=pause_after_read):
+                        with ThreadPoolExecutor(max_workers=1) as pool:
+                            future = pool.submit(prune_sensitive_records.prune_exception_references,
+                                shift_id, timezone.now())
+                            self.assertTrue(prune_read.wait(5))
+                            receipt = client_for('auth0|alice').post(reverse('exception-shift-operation',
+                                args=[shift_id, operation_id]),
+                                {'state': proposed, 'expectedRevision': 0}, format='json')
+                            self.assertEqual(receipt.status_code, 201)
+                            operation_done.set()
+                            self.assertEqual(future.result(timeout=5), 1)
+                    self.assertEqual(client_for('auth0|alice').get(reverse('exception-shift-operation',
+                        args=[shift_id, operation_id])).data, receipt.data)
+                    self.assertEqual(ExceptionHandoverShift.objects.get(id=shift_id).revision, 2)
+                else:
+                    api_read = Event()
+                    prune_done = Event()
+
+                    def submit_stale():
+                        close_old_connections()
+                        try:
+                            api_read.set()
+                            if not prune_done.wait(5):
+                                raise AssertionError('Pruning did not finish before API write')
+                            return client_for('auth0|alice').post(reverse('exception-shift-operation',
+                                args=[shift_id, operation_id]),
+                                {'state': proposed, 'expectedRevision': 0}, format='json')
+                        finally:
+                            close_old_connections()
+
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(submit_stale)
+                        self.assertTrue(api_read.wait(5))
+                        self.assertEqual(prune_sensitive_records.prune_exception_references(
+                            shift_id, timezone.now()), 1)
+                        prune_done.set()
+                        self.assertEqual(future.result(timeout=5).status_code, 409)
+                    self.assertEqual(client_for('auth0|alice').post(reverse('exception-shift-operation',
+                        args=[shift_id, operation_id]),
+                        {'state': proposed, 'expectedRevision': 1}, format='json').status_code, 400)
+                    self.assertEqual(client_for('auth0|alice').get(reverse('exception-shift-operation',
+                        args=[shift_id, operation_id])).status_code, 404)
+                    self.assertEqual(ExceptionHandoverShift.objects.get(id=shift_id).revision, 1)
+                final = _read(ExceptionHandoverShift.objects.get(id=shift_id))
+                self.assertEqual(final['acceptedReferences'], [])
+                if order == 'operation-first':
+                    self.assertEqual(final['interactionCounts']['reviewed'], 1)
+
     def test_two_writers_cannot_confirm_the_same_revision(self):
         with patch.dict(os.environ, {'HANDOVER_EXCEPTION_TEST_RUNTIME': 'true'}):
             created = client_for('auth0|alice').post(reverse('exception-shifts'), {

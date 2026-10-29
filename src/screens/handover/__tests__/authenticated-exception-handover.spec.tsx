@@ -8,7 +8,12 @@ import receiptFixture from '../../../../tests/fixtures/c12-receipt-canonical.jso
 
 const transport = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 const persisted = vi.hoisted(() => new Map<string, string>());
+const localSession = vi.hoisted(() => ({ current: {
+  userId: 'auth0|alice', units: ['icu-a'], accessToken: 'synthetic-token',
+  expiresAt: '2030-10-29T08:00:00Z', mode: 'normal',
+} as { userId: string; units: string[]; accessToken: string; expiresAt: string; mode: string } | null }));
 vi.mock('@/src/lib/api', () => ({ apiGet: transport.get, apiPost: transport.post }));
+vi.mock('@/src/security/OAuthService', () => ({ loadStoredSession: async () => localSession.current }));
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   getItem: async (key: string) => persisted.get(key) ?? null,
   setItem: async (key: string, value: string) => { persisted.set(key, value); },
@@ -22,7 +27,7 @@ vi.mock('@/src/lib/crypto', () => ({
 const shift = { id: '5c169975-bd44-429e-9a7e-135b62b417ee', unitId: 'icu-a',
   periodStart: '2026-10-28T08:00:00Z', periodEnd: '2026-10-28T16:00:00Z',
   description: 'Turno de prueba', creatorSub: 'auth0|alice', revision: 0,
-  expiresAt: '2026-10-29T08:00:00Z' };
+  expiresAt: '2030-10-29T08:00:00Z' };
 const colors = { background: '#fff', border: '#ccc', danger: '#b00', info: '#08c',
   muted: '#777', primary: '#075', success: '#090', surface: '#eee', text: '#111', warning: '#c70' };
 
@@ -36,7 +41,132 @@ function backendReceipt(value: unknown): string {
 }
 
 describe('authenticated exception handover TEST_ENV route', () => {
-  beforeEach(() => { persisted.clear(); transport.get.mockReset(); transport.post.mockReset(); });
+  beforeEach(() => {
+    persisted.clear(); transport.get.mockReset(); transport.post.mockReset();
+    localSession.current = { userId: 'auth0|alice', units: ['icu-a'], accessToken: 'synthetic-token',
+      expiresAt: '2030-10-29T08:00:00Z', mode: 'normal' };
+  });
+
+  it('restores two encrypted pending edits offline and confirms each once after reconnect', async () => {
+    const { createAuthenticatedExceptionHandoverStorage } = await import('@/src/lib/exception-handover-auth');
+    let serverState = createEmptyExceptionHandoverState(shift.id);
+    let revision = 0;
+    let offline = false;
+    let capabilitiesReachable = true;
+    const receipts = new Map<string, { status: string; contentHash: string; revision: number }>();
+    transport.get.mockImplementation(async (path: string) => {
+      if (offline && (path !== '/api/me/capabilities' || !capabilitiesReachable)) throw new Error('offline');
+      if (path === '/api/me/capabilities') return { userSub: 'auth0|alice', unitIds: ['icu-a'],
+        permissions: { canWriteHandover: true }, exceptionHandover: { candidateEnabled: true } };
+      if (path.endsWith(shift.id)) return { ...shift, revision, state: serverState };
+      if (receipts.has(path)) return receipts.get(path);
+      throw { status: 404 };
+    });
+    transport.post.mockImplementation(async (path: string, options: RequestInit) => {
+      if (offline) throw new Error('offline');
+      const body = JSON.parse(String(options.body)) as { state: typeof serverState; expectedRevision: number };
+      if (body.expectedRevision !== revision) throw { status: 409, details: '{"code":"revision_conflict"}' };
+      serverState = body.state;
+      const receipt = { status: 'confirmed', contentHash: sha256(backendReceipt(body.state)), revision: ++revision };
+      receipts.set(path, receipt);
+      return receipt;
+    });
+    const first = createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice');
+    await first.load(shift.id);
+    offline = true;
+    const firstEdit = { ...serverState, briefDrafts: { '1': { change: 'Edición local', currentRisk: '',
+      nextAction: '', owner: '', contingency: '' } } };
+    await expect(first.save(firstEdit)).rejects.toThrow('offline');
+    const restarted = createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice');
+    const restored = await restarted.load(shift.id);
+    expect(restored.briefDrafts['1'].change).toBe('Edición local');
+    expect(restarted.syncStatus).toBe('pending');
+    await expect(restarted.save(restored)).rejects.toThrow('offline');
+    capabilitiesReachable = false;
+    const fullyOffline = createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice');
+    expect((await fullyOffline.load(shift.id)).briefDrafts['1'].change).toBe('Edición local');
+    const secondEdit = { ...restored, interactionCounts: { '1': 1 } };
+    await expect(fullyOffline.save(secondEdit)).rejects.toThrow('offline');
+    offline = false;
+    expect((await fullyOffline.load(shift.id)).interactionCounts).toEqual({ '1': 1 });
+    expect(serverState.briefDrafts['1'].change).toBe('Edición local');
+    expect(revision).toBe(2);
+    expect(transport.post).toHaveBeenCalledTimes(2);
+    expect(fullyOffline.syncStatus).toBe('confirmed');
+  });
+
+  it('hydrates the mounted board from encrypted cache offline with and without a conflict', async () => {
+    const { createAuthenticatedExceptionHandoverStorage } = await import('@/src/lib/exception-handover-auth');
+    const state = createEmptyExceptionHandoverState(shift.id);
+    let offline = false;
+    transport.get.mockImplementation(async (path: string) => {
+      if (offline) throw new Error('offline');
+      if (path === '/api/me/capabilities') return { userSub: 'auth0|alice', unitIds: ['icu-a'],
+        permissions: { canWriteHandover: true }, exceptionHandover: { candidateEnabled: true } };
+      if (path.endsWith(shift.id)) return { ...shift, state };
+      throw { status: 404 };
+    });
+    transport.post.mockRejectedValue({ status: 409, details: '{"code":"revision_conflict"}' });
+    const storage = createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice');
+    await storage.load(shift.id);
+    offline = true;
+    const patient = { patientId: '1', name: 'Caso sintético', bedLabel: '1', unitName: 'UCI A',
+      status: 'unchanged' as const, change: '', currentRisk: '', nextAction: '', owner: '', dueAt: '',
+      contingency: { trigger: '', response: '' }, lastSummaryAt: '', lastSummarySource: '',
+      criticalItems: [] };
+    const board = () => <UnitExceptionHandover candidateMode shiftId={shift.id}
+      authenticatedActor={{ userId: 'auth0|alice', displayName: 'Alice', kind: 'outgoing' }}
+      patients={[patient]} groupScope={{ viewScope: 'icu-a', members: [{ patientId: '1', unitId: 'icu-a' }] }}
+      storage={createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice')}
+      colors={colors} onOpenFullHandover={() => {}} />;
+    const withoutConflict = render(board());
+    await act(async () => {});
+    expect(withoutConflict.getByText('R. REVISIÓN REQUERIDA · 1')).toBeTruthy();
+    expect(withoutConflict.queryByTestId('discard-exception-conflicts')).toBeNull();
+    withoutConflict.unmount();
+    offline = false;
+    await expect(storage.save({ ...state, interactionCounts: { '1': 1 } }))
+      .rejects.toThrow('EXCEPTION_HANDOVER_CONFLICT');
+    offline = true;
+    const withConflict = render(board());
+    await act(async () => {});
+    expect(withConflict.getByText('R. REVISIÓN REQUERIDA · 1')).toBeTruthy();
+    expect(withConflict.getByTestId('discard-exception-conflicts')).toBeTruthy();
+    expect(withConflict.getByText(/contenido local cifrado se conserva/)).toBeTruthy();
+  });
+
+  it('inspects actor-scoped conflicts offline but rejects logout, expiry and another scope', async () => {
+    const { createAuthenticatedExceptionHandoverStorage } = await import('@/src/lib/exception-handover-auth');
+    const empty = createEmptyExceptionHandoverState(shift.id);
+    let offline = false;
+    transport.get.mockImplementation(async (path: string) => {
+      if (offline) throw new Error('offline');
+      if (path === '/api/me/capabilities') return { userSub: 'auth0|alice', unitIds: ['icu-a'],
+        permissions: { canWriteHandover: true }, exceptionHandover: { candidateEnabled: true } };
+      if (path.endsWith(shift.id)) return { ...shift, state: empty };
+      throw { status: 404 };
+    });
+    transport.post.mockRejectedValue({ status: 409, details: '{"code":"revision_conflict"}' });
+    const first = createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice');
+    await first.load(shift.id);
+    await expect(first.save({ ...empty, interactionCounts: { '1': 1 } }))
+      .rejects.toThrow('EXCEPTION_HANDOVER_CONFLICT');
+    offline = true;
+    const restarted = createAuthenticatedExceptionHandoverStorage(shift, 'auth0|alice');
+    expect((await restarted.load(shift.id)).interactionCounts).toEqual({});
+    expect(await restarted.listConflicts?.()).toBe(1);
+    expect(restarted.syncStatus).toBe('conflict');
+    const other = createAuthenticatedExceptionHandoverStorage({ ...shift, id: 'another-shift' }, 'auth0|alice');
+    expect(await other.listConflicts?.()).toBe(0);
+    localSession.current = { ...localSession.current!, userId: 'auth0|bob' };
+    await expect(restarted.listConflicts?.()).rejects.toThrow('EXCEPTION_HANDOVER_AUTH_CHANGED');
+    localSession.current = { ...localSession.current!, userId: 'auth0|alice', units: ['icu-b'] };
+    await expect(restarted.listConflicts?.()).rejects.toThrow('EXCEPTION_HANDOVER_AUTH_CHANGED');
+    localSession.current = { ...localSession.current!, units: ['icu-a'], expiresAt: '2020-01-01T00:00:00Z' };
+    await expect(restarted.listConflicts?.()).rejects.toThrow('EXCEPTION_HANDOVER_AUTH_CHANGED');
+    localSession.current = null;
+    await expect(restarted.listConflicts?.()).rejects.toThrow('EXCEPTION_HANDOVER_AUTH_CHANGED');
+  });
 
   it('uses the backend canonical bytes for numeric keys, nested values and Unicode', async () => {
     const { canonicalReceiptJson } = await import('@/src/lib/exception-handover-auth');
@@ -142,10 +272,12 @@ describe('authenticated exception handover TEST_ENV route', () => {
     const alice = createAuthenticatedExceptionHandoverStorage(shift, actor);
     await alice.load(shift.id);
     actor = 'auth0|bob';
+    localSession.current = { ...localSession.current!, userId: actor };
     const bob = createAuthenticatedExceptionHandoverStorage(shift, actor);
     await bob.load(shift.id);
     await bob.save({ ...serverState, interactionCounts: { remote: 1 } });
     actor = 'auth0|alice';
+    localSession.current = { ...localSession.current!, userId: actor };
     await expect(alice.save({ ...createEmptyExceptionHandoverState(shift.id),
       interactionCounts: { local: 1 } })).rejects.toThrow('EXCEPTION_HANDOVER_CONFLICT');
     expect(await alice.listConflicts?.()).toBe(1);
@@ -192,7 +324,8 @@ describe('authenticated exception handover TEST_ENV route', () => {
         permissions: { canWriteHandover: true }, exceptionHandover: { candidateEnabled: true } };
       throw new Error('offline');
     });
-    await expect(storage.load(shift.id)).rejects.toThrow('offline');
+    expect((await storage.load(shift.id)).interactionCounts).toEqual({});
+    expect(storage.syncStatus).toBe('conflict');
   });
 
   it('shows an authenticated R candidate without a demo actor or invented source', async () => {

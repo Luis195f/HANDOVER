@@ -96,22 +96,20 @@ def _prior_references(unit_id: str) -> list[dict]:
     return list({reference['incomingKey']: reference for reference in latest.values()}.values())
 
 
-def _patient_ids_valid(unit_id: str, state: dict) -> bool:
+def _patient_ids_valid(unit_id: str, previous: dict, state: dict) -> bool:
     patient_ids = set()
-    patient_ids.update(str(patient_id) for patient_id in state.get('briefDrafts', {}))
-    for override in state.get('overrides', []):
+    old_drafts = previous.get('briefDrafts', {})
+    new_drafts = state.get('briefDrafts', {})
+    patient_ids.update(str(patient_id) for patient_id in old_drafts.keys() | new_drafts.keys()
+                       if old_drafts.get(patient_id) != new_drafts.get(patient_id))
+    for override in state.get('overrides', [])[len(previous.get('overrides', [])):]:
         if override.get('patientId'):
             patient_ids.add(str(override['patientId']))
-    for event in state.get('events', []):
+    for event in state.get('events', [])[len(previous.get('events', [])):]:
         if event.get('patientId'):
             patient_ids.add(str(event['patientId']))
-    for reference in state.get('acceptedReferences', []):
-        for snapshot in reference.get('snapshots', []):
-            if snapshot.get('unitId') != unit_id:
-                return False
-            patient_ids.add(str(snapshot.get('patientId', '')))
     manifest = state.get('frozenManifest')
-    if manifest:
+    if manifest and manifest != previous.get('frozenManifest'):
         for snapshot in manifest.get('snapshots', []):
             if snapshot.get('unitId') != unit_id:
                 return False
@@ -231,7 +229,11 @@ def _transition(previous: dict, proposed: dict, record: ExceptionHandoverShift, 
                 expires_at <= accepted_at or \
                 expires_at > accepted_at + timedelta(days=min(settings.HANDOVER_BUNDLE_RETENTION_DAYS, 30)):
             return 'acceptance_invalid'
-    if not _patient_ids_valid(record.unit_id, proposed):
+    for reference in new_references:
+        expires_at = parse_datetime(str(reference.get('expiresAt', '')))
+        if not expires_at or timezone.is_naive(expires_at) or expires_at <= timezone.now():
+            return 'acceptance_invalid'
+    if not _patient_ids_valid(record.unit_id, previous, proposed):
         return 'patient_scope_invalid'
     return None
 

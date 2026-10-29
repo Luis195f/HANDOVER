@@ -234,7 +234,7 @@ export function UnitExceptionHandover({
       const conflicts = await storageInstance.listConflicts?.() ?? 0;
       if (!active) return;
       setConflictCount(conflicts);
-      setStorageError(conflicts > 0);
+      setStorageError(conflicts > 0 || storageInstance.syncStatus === 'pending');
       const hydratedAt = now();
       setOverrideAsOf(hydratedAt);
       setSessionState((current) => {
@@ -263,7 +263,9 @@ export function UnitExceptionHandover({
 
   useEffect(() => {
     if (!hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
-    void storageInstance.save(sessionState).catch(async () => {
+    void storageInstance.save(sessionState).then(() => {
+      setStorageError(storageInstance.syncStatus === 'pending' || storageInstance.syncStatus === 'conflict');
+    }).catch(async () => {
       setStorageError(true);
       try { setConflictCount(await storageInstance.listConflicts?.() ?? 0); } catch {}
     });
@@ -736,6 +738,9 @@ export function UnitExceptionHandover({
         }}><Text>Descartar explícitamente ediciones rechazadas y cargar estado autorizado</Text></Pressable>
       </View> : null}
       {storageError ? <Text accessibilityRole="alert">Evidencia local no legible o no persistida; cierre bloqueado.</Text> : null}
+      {storageInstance?.syncStatus === 'pending' ? <Text accessibilityRole="alert">
+        Trabajo local cifrado pendiente de confirmación compartida.
+      </Text> : null}
       <Text style={[styles.eyebrow, { color: colors.info }]}>{authenticatedActor
         ? 'TEST_ENV · REGISTRO OPERATIVO DE RELEVO POR EXCEPCIONES'
         : 'DEMO SINTÉTICA · RELEVO POR EXCEPCIONES'}</Text>
