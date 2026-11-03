@@ -722,12 +722,14 @@ describe('authenticated exception handover TEST_ENV route', () => {
         ? 'confirm-outgoing-transfer' : 'confirm-incoming-attestation');
       lost = true;
       await act(async () => { fireEvent.press(button); });
+      expect(current.getByTestId('prepared-transfer-pending')).toBeTruthy();
+      expect(current.getByTestId('reconcile-prepared-transfer').props.disabled).toBe(false);
       const confirmedEvents = saved.events.filter((event) => event.kind ===
         (kind === 'outgoing' ? 'outgoing_transfer' : 'incoming_attestation'));
       expect(confirmedEvents).toHaveLength(1);
       const writesAfterLostResponse = writes;
       clock = '2026-10-28T10:05:00Z';
-      await act(async () => { fireEvent.press(button); });
+      await act(async () => { fireEvent.press(current.getByTestId('reconcile-prepared-transfer')); });
       expect(saved.events.filter((event) => event.kind === confirmedEvents[0].kind)).toEqual(confirmedEvents);
       expect(writes).toBe(writesAfterLostResponse + 1);
       expect(writtenTransfers.at(-1)).toBe(writtenTransfers.at(-2));
@@ -736,6 +738,109 @@ describe('authenticated exception handover TEST_ENV route', () => {
       await act(async () => {});
       expect(remounted.getByTestId(kind === 'outgoing'
         ? 'outgoing-transfer-event' : 'incoming-attestation-event')).toBeTruthy();
+    },
+  );
+
+  it.each(['outgoing', 'incoming'] as const)(
+    'blocks edits while the real repository confirms a prepared %s event, then resumes with its history', async (kind) => {
+      const { createAuthenticatedExceptionHandoverStorage } = await import('@/src/lib/exception-handover-auth');
+      const patient = { patientId: '1', name: 'Caso sintético', bedLabel: '1', unitName: 'UCI A',
+        status: 'unchanged' as const, change: '', currentRisk: '', nextAction: '', owner: '',
+        dueAt: '2026-10-28T15:00:00Z', contingency: { trigger: '', response: '' },
+        lastSummaryAt: '', lastSummarySource: '', criticalItems: [] };
+      let serverState = createEmptyExceptionHandoverState(shift.id);
+      let revision = 0;
+      let deferKind: 'outgoing_transfer' | 'incoming_attestation' | null = null;
+      let releaseResponse!: () => void;
+      let signalRequest!: () => void;
+      const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+      const requestStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
+      const receipts = new Map<string, { status: string; contentHash: string; revision: number }>();
+      transport.get.mockImplementation(async (path: string) => {
+        if (path === '/api/me/capabilities') return { userSub: localSession.current?.userId,
+          unitIds: ['icu-a'], permissions: { canWriteHandover: true },
+          exceptionHandover: { candidateEnabled: true } };
+        if (path.endsWith(shift.id)) return { ...shift, revision, state: serverState };
+        if (receipts.has(path)) return receipts.get(path);
+        throw { status: 404 };
+      });
+      transport.post.mockImplementation(async (path: string, options: RequestInit) => {
+        const body = JSON.parse(String(options.body)) as {
+          state: typeof serverState; expectedRevision: number;
+        };
+        if (body.expectedRevision !== revision) throw { status: 409, details: '{"code":"revision_conflict"}' };
+        if (serverState.events.some((event) => event.kind === 'outgoing_transfer') &&
+            !body.state.events.some((event) => event.kind === 'outgoing_transfer')) {
+          throw { status: 400, details: '{"code":"history_modified"}' };
+        }
+        serverState = body.state;
+        const receipt = { status: 'confirmed', contentHash: sha256(backendReceipt(body.state)),
+          revision: ++revision };
+        receipts.set(path, receipt);
+        if (deferKind && body.state.events.some((event) => event.kind === deferKind)) {
+          deferKind = null;
+          signalRequest();
+          await responseGate;
+        }
+        return receipt;
+      });
+      const element = (actorId: string, actorKind: 'outgoing' | 'incoming') =>
+        <UnitExceptionHandover candidateMode shiftId={shift.id}
+          authenticatedActor={{ userId: actorId, displayName: actorId, kind: actorKind }}
+          patients={[patient]} groupScope={{ viewScope: 'icu-a',
+            members: [{ patientId: '1', unitId: 'icu-a' }] }}
+          storage={createAuthenticatedExceptionHandoverStorage(shift, actorId)}
+          colors={colors} onOpenFullHandover={() => {}} now={() => '2026-10-28T10:00:00Z'} />;
+      const board = (actorId: string, actorKind: 'outgoing' | 'incoming') => {
+        localSession.current = { ...localSession.current!, userId: actorId };
+        return render(element(actorId, actorKind));
+      };
+      const receiver = board('auth0|bob', 'incoming');
+      await act(async () => {});
+      await act(async () => { fireEvent.press(receiver.getByTestId('open-exception-1')); });
+      await act(async () => { fireEvent.press(receiver.getByTestId('transfer-r-1')); });
+      receiver.unmount();
+      if (kind === 'incoming') {
+        const outgoing = board('auth0|alice', 'outgoing');
+        await act(async () => {});
+        await act(async () => { fireEvent.press(outgoing.getByTestId('confirm-outgoing-transfer')); });
+        outgoing.unmount();
+      }
+      const actorId = kind === 'outgoing' ? 'auth0|alice' : 'auth0|bob';
+      const current = board(actorId, kind);
+      await act(async () => {});
+      await act(async () => { fireEvent.press(current.getByTestId('open-exception-1')); });
+      const button = current.getByTestId(kind === 'outgoing'
+        ? 'confirm-outgoing-transfer' : 'confirm-incoming-attestation');
+      const preparedKind = kind === 'outgoing' ? 'outgoing_transfer' : 'incoming_attestation';
+      deferKind = preparedKind;
+      act(() => { fireEvent.press(button); });
+      await requestStarted;
+      expect(current.getByTestId('open-exception-1').props.disabled).toBe(true);
+      expect(current.getByTestId('r-target-at-1').props.editable).toBe(false);
+      const writesDuringConfirmation = transport.post.mock.calls.length;
+      act(() => {
+        fireEvent.press(current.getByTestId('open-exception-1'));
+        fireEvent.changeText(current.getByTestId('r-target-at-1'), '2026-10-28T16:00:00Z');
+      });
+      expect(transport.post).toHaveBeenCalledTimes(writesDuringConfirmation);
+      expect(current.getByTestId('r-target-at-1').props.value).toBe(patient.dueAt);
+      if (kind === 'outgoing') act(() => current.update(element('auth0|bob', 'incoming')));
+      await act(async () => { releaseResponse(); });
+      if (kind === 'outgoing') {
+        expect(current.queryByTestId('outgoing-transfer-event')).toBeNull();
+        act(() => current.update(element(actorId, kind)));
+        await act(async () => { fireEvent.press(current.getByTestId('reconcile-prepared-transfer')); });
+      }
+      await waitFor(() => expect(current.getByTestId(kind === 'outgoing'
+        ? 'outgoing-transfer-event' : 'incoming-attestation-event')).toBeTruthy());
+      expect(serverState.events.filter((event) => event.kind === preparedKind)).toHaveLength(1);
+      expect(transport.post).toHaveBeenCalledTimes(writesDuringConfirmation);
+      fireEvent.changeText(current.getByTestId('r-target-at-1'), '2026-10-28T16:00:00Z');
+      await waitFor(() => expect(serverState.briefDrafts['1']?.targetAt).toBe('2026-10-28T16:00:00Z'));
+      expect(serverState.events.some((event) => event.kind ===
+        (kind === 'outgoing' ? 'outgoing_transfer' : 'incoming_attestation'))).toBe(true);
+      current.unmount();
     },
   );
 

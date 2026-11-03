@@ -173,6 +173,9 @@ no autorizan fallback offline. Un `404` del GET de recibo permite comprobar la
 escritura original con la misma identidad; no es rechazo de esa escritura.
 Transferencia y recepción mantienen el evento preparado mientras falta recibo:
 otro clic reconcilia antes de generar fecha, manifiesto u operación nuevos.
+Mientras esa confirmación está pendiente, el tablero pausa la edición y el
+autosave; una acción accesible consulta el recibo y reanuda la edición solo al
+recuperar la confirmación del mismo actor, turno y contexto.
 
 PatientList conserva durante cinco minutos los turnos confirmados y un censo
 mínimo cifrado por actor/unidad. Sin red, requiere sesión no caducada y capability
