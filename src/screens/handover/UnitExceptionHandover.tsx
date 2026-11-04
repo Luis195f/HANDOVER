@@ -353,7 +353,6 @@ export function UnitExceptionHandover({
         const reconciled = await storageInstance.load(shiftId);
         const confirmed = storageInstance.syncStatus === 'confirmed' && reconciled.events.some((event) =>
           event.idempotencyKey === prepared.eventKey && event.recordedAt === prepared.recordedAt);
-        if (!confirmed) throw new Error('EXCEPTION_HANDOVER_TRANSFER_PENDING');
         if (latestTransferScope.current.actorId !== prepared.actorId ||
             latestTransferScope.current.shiftId !== prepared.shiftId ||
             latestTransferScope.current.contextKey !== prepared.contextKey ||
@@ -361,6 +360,19 @@ export function UnitExceptionHandover({
           setAcceptanceError('El contexto cambió; vuelva al turno original para reconciliar la operación.');
           return;
         }
+        if (!confirmed && storageInstance.durability === 'durable' &&
+            (storageInstance.syncStatus === 'conflict' || storageInstance.syncStatus === 'rejected')) {
+          const conflicts = await storageInstance.listConflicts?.() ?? 0;
+          if (!conflicts) throw new Error('EXCEPTION_HANDOVER_CONFLICT_NOT_PERSISTED');
+          preparedTransfer.current = null;
+          setTransferLocked(false);
+          setConflictCount(conflicts);
+          setSessionState(reconciled);
+          setStorageError(true);
+          setAcceptanceError('Transferencia rechazada; revise el estado compartido y reconcilie la edición local cifrada.');
+          return;
+        }
+        if (!confirmed) throw new Error('EXCEPTION_HANDOVER_TRANSFER_PENDING');
         preparedTransfer.current = null;
         setTransferLocked(false);
         setSessionState(reconciled);

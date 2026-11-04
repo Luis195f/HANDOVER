@@ -741,7 +741,7 @@ describe('authenticated exception handover TEST_ENV route', () => {
     },
   );
 
-  it.each(['outgoing', 'incoming'] as const)(
+  it.each(['outgoing', 'incoming', 'conflict'] as const)(
     'blocks edits while the real repository confirms a prepared %s event, then resumes with its history', async (kind) => {
       const { createAuthenticatedExceptionHandoverStorage } = await import('@/src/lib/exception-handover-auth');
       const patient = { patientId: '1', name: 'Caso sintético', bedLabel: '1', unitName: 'UCI A',
@@ -773,6 +773,7 @@ describe('authenticated exception handover TEST_ENV route', () => {
             !body.state.events.some((event) => event.kind === 'outgoing_transfer')) {
           throw { status: 400, details: '{"code":"history_modified"}' };
         }
+        const previousState = serverState;
         serverState = body.state;
         const receipt = { status: 'confirmed', contentHash: sha256(backendReceipt(body.state)),
           revision: ++revision };
@@ -781,6 +782,12 @@ describe('authenticated exception handover TEST_ENV route', () => {
           deferKind = null;
           signalRequest();
           await responseGate;
+          if (kind === 'conflict') {
+            serverState = previousState;
+            revision++;
+            receipts.delete(path);
+            throw new Error('response lost');
+          }
         }
         return receipt;
       });
@@ -807,12 +814,12 @@ describe('authenticated exception handover TEST_ENV route', () => {
         outgoing.unmount();
       }
       const actorId = kind === 'outgoing' ? 'auth0|alice' : 'auth0|bob';
-      const current = board(actorId, kind);
+      const current = board(actorId, kind === 'incoming' ? 'incoming' : 'outgoing');
       await act(async () => {});
       await act(async () => { fireEvent.press(current.getByTestId('open-exception-1')); });
-      const button = current.getByTestId(kind === 'outgoing'
+      const button = current.getByTestId(kind !== 'incoming'
         ? 'confirm-outgoing-transfer' : 'confirm-incoming-attestation');
-      const preparedKind = kind === 'outgoing' ? 'outgoing_transfer' : 'incoming_attestation';
+      const preparedKind = kind !== 'incoming' ? 'outgoing_transfer' : 'incoming_attestation';
       deferKind = preparedKind;
       act(() => { fireEvent.press(button); });
       await requestStarted;
@@ -827,6 +834,15 @@ describe('authenticated exception handover TEST_ENV route', () => {
       expect(current.getByTestId('r-target-at-1').props.value).toBe(patient.dueAt);
       if (kind === 'outgoing') act(() => current.update(element('auth0|bob', 'incoming')));
       await act(async () => { releaseResponse(); });
+      if (kind === 'conflict') {
+        await act(async () => { fireEvent.press(current.getByTestId('reconcile-prepared-transfer')); });
+        expect(current.getByTestId('discard-exception-conflicts').props.disabled).toBe(false);
+        expect(await createAuthenticatedExceptionHandoverStorage(shift, actorId).listConflicts?.()).toBe(1);
+        await act(async () => { fireEvent.press(current.getByTestId('discard-exception-conflicts')); });
+        expect(await createAuthenticatedExceptionHandoverStorage(shift, actorId).listConflicts?.()).toBe(0);
+        current.unmount();
+        return;
+      }
       if (kind === 'outgoing') {
         expect(current.queryByTestId('outgoing-transfer-event')).toBeNull();
         act(() => current.update(element(actorId, kind)));
