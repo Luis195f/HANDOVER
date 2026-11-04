@@ -338,7 +338,7 @@ export function UnitExceptionHandover({
     }));
   };
 
-  const recordCandidateTransfer = async (kind: 'outgoing_transfer' | 'incoming_attestation') => {
+  const recordCandidateTransfer = async (kind: 'outgoing_transfer' | 'incoming_attestation'): Promise<void> => {
     if (preparedTransfer.current) {
       const prepared = preparedTransfer.current;
       if (prepared.inFlight) return;
@@ -440,6 +440,11 @@ export function UnitExceptionHandover({
       setSessionState(next);
       setAcceptanceError('');
     } catch {
+      if (preparedTransfer.current && (storageInstance?.syncStatus === 'conflict' || storageInstance?.syncStatus === 'rejected')) {
+        preparedTransfer.current.inFlight = false;
+        await recordCandidateTransfer(kind);
+        return;
+      }
       if (preparedTransfer.current && storageInstance?.syncStatus !== 'pending') {
         preparedTransfer.current = null;
         setTransferLocked(false);

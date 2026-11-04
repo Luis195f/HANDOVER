@@ -741,8 +741,8 @@ describe('authenticated exception handover TEST_ENV route', () => {
     },
   );
 
-  it.each(['outgoing', 'incoming', 'conflict'] as const)(
-    'blocks edits while the real repository confirms a prepared %s event, then resumes with its history', async (kind) => {
+  it.each(['outgoing', 'incoming', 'conflict', 'initial-conflict', 'initial-rejected'] as const)(
+    'blocks edits around a prepared %s event and exposes explicit resolution', async (kind) => {
       const { createAuthenticatedExceptionHandoverStorage } = await import('@/src/lib/exception-handover-auth');
       const patient = { patientId: '1', name: 'Caso sintético', bedLabel: '1', unitName: 'UCI A',
         status: 'unchanged' as const, change: '', currentRisk: '', nextAction: '', owner: '',
@@ -772,6 +772,16 @@ describe('authenticated exception handover TEST_ENV route', () => {
         if (serverState.events.some((event) => event.kind === 'outgoing_transfer') &&
             !body.state.events.some((event) => event.kind === 'outgoing_transfer')) {
           throw { status: 400, details: '{"code":"history_modified"}' };
+        }
+        if ((kind === 'initial-conflict' || kind === 'initial-rejected') && deferKind &&
+            body.state.events.some((event) => event.kind === deferKind)) {
+          deferKind = null;
+          signalRequest();
+          await responseGate;
+          if (kind === 'initial-conflict') revision++;
+          throw kind === 'initial-conflict'
+            ? { status: 409, details: '{"code":"revision_conflict"}' }
+            : { status: 400, details: '{"code":"patient_scope_invalid"}' };
         }
         const previousState = serverState;
         serverState = body.state;
@@ -813,7 +823,7 @@ describe('authenticated exception handover TEST_ENV route', () => {
         await act(async () => { fireEvent.press(outgoing.getByTestId('confirm-outgoing-transfer')); });
         outgoing.unmount();
       }
-      const actorId = kind === 'outgoing' ? 'auth0|alice' : 'auth0|bob';
+      const actorId = kind === 'incoming' ? 'auth0|bob' : 'auth0|alice';
       const current = board(actorId, kind === 'incoming' ? 'incoming' : 'outgoing');
       await act(async () => {});
       await act(async () => { fireEvent.press(current.getByTestId('open-exception-1')); });
@@ -834,8 +844,8 @@ describe('authenticated exception handover TEST_ENV route', () => {
       expect(current.getByTestId('r-target-at-1').props.value).toBe(patient.dueAt);
       if (kind === 'outgoing') act(() => current.update(element('auth0|bob', 'incoming')));
       await act(async () => { releaseResponse(); });
-      if (kind === 'conflict') {
-        await act(async () => { fireEvent.press(current.getByTestId('reconcile-prepared-transfer')); });
+      if (kind === 'conflict' || kind === 'initial-conflict' || kind === 'initial-rejected') {
+        if (kind === 'conflict') await act(async () => { fireEvent.press(current.getByTestId('reconcile-prepared-transfer')); });
         expect(current.getByTestId('discard-exception-conflicts').props.disabled).toBe(false);
         expect(await createAuthenticatedExceptionHandoverStorage(shift, actorId).listConflicts?.()).toBe(1);
         await act(async () => { fireEvent.press(current.getByTestId('discard-exception-conflicts')); });
