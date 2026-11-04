@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { Text } from 'react-native';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HandoverForm from '@/src/screens/HandoverForm';
 import { SNOMED_SYSTEM } from '@/src/data/snomed-dict';
@@ -179,6 +179,13 @@ function buildFormMock(patientId: string) {
 }
 
 describe('HandoverForm patient header', () => {
+  const mounted: Array<ReturnType<typeof render>> = [];
+  const renderForm = (element: React.ReactElement) => {
+    const result = render(element);
+    mounted.push(result);
+    return result;
+  };
+  afterEach(() => { mounted.splice(0).forEach((result) => result.unmount()); });
   beforeEach(() => {
     mockUsePatientSummary.mockReset();
     mockUseZodForm.mockReset();
@@ -192,7 +199,7 @@ describe('HandoverForm patient header', () => {
     });
     mockUseZodForm.mockReturnValue(buildFormMock('123'));
 
-    const { getByTestId } = render(
+    const { getByTestId } = renderForm(
       <HandoverForm
         navigation={{ navigate: vi.fn() } as any}
         route={{ key: '1', name: 'HandoverForm', params: { patientId: '123' } } as any}
@@ -213,7 +220,7 @@ describe('HandoverForm patient header', () => {
     mockUsePatientSummary.mockReturnValue({ loading: false, error: null, summary: null });
     mockUseZodForm.mockReturnValue(buildFormMock(''));
 
-    const { getByTestId } = render(
+    const { getByTestId } = renderForm(
       <HandoverForm navigation={{ navigate: vi.fn() } as any} route={{ key: '2', name: 'HandoverForm', params: {} } as any} />,
     );
 
@@ -225,7 +232,7 @@ describe('HandoverForm patient header', () => {
     mockUsePatientSummary.mockReturnValue({ loading: false, error: null, summary: null });
     mockUseZodForm.mockReturnValue(buildFormMock('123'));
 
-    const { getByTestId } = render(
+    const { getByTestId } = renderForm(
       <HandoverForm
         navigation={{ navigate: vi.fn() } as any}
         route={{ key: '3', name: 'HandoverForm', params: { patientId: '123' } } as any}

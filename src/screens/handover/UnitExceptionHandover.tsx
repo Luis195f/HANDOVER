@@ -24,10 +24,12 @@ import {
   DEGRADED_HANDOFF_RESPONSIBILITY_COPY,
   formatExceptionDateTime,
   getPatientTransferStatus,
+  isValidExceptionTargetAt,
   groupExceptionHandoverPatients,
   isInteractionBudgetExceeded,
   validateDegradedUnitTransfer,
   type ClinicalSource,
+  type ExceptionActorIdentity,
   type ExceptionReviewEvent,
   type ExceptionHandoverContext,
   type HandoffClassification,
@@ -35,6 +37,8 @@ import {
   type UnitDataHealth,
   type UnitIntegrationState,
 } from '@/src/lib/exception-handover';
+import { buildExceptionHandoverFhirCandidate } from '@/src/lib/exception-handover-fhir';
+import { validateExceptionHandoverCandidate } from '@/src/lib/fhir-validation';
 import {
   createEmptyExceptionHandoverState,
   createExceptionHandoverStorage,
@@ -60,6 +64,7 @@ type Colors = {
 type Props = {
   patients: readonly DemoExceptionHandoverPatient[];
   sessionUserId?: string;
+  authenticatedActor?: ExceptionActorIdentity;
   colors: Colors;
   onOpenFullHandover: (patientId: string) => void;
   classificationReferenceTime?: string;
@@ -86,6 +91,7 @@ function makeBriefDraft(patient: DemoExceptionHandoverPatient): PersistedBriefDr
     nextAction: patient.nextAction,
     owner: patient.owner,
     contingency: `Si ${patient.contingency.trigger}, ${patient.contingency.response}.`,
+    targetAt: patient.dueAt,
   };
 }
 
@@ -103,6 +109,7 @@ function formatMinutes(value: number): string {
 export function UnitExceptionHandover({
   patients,
   sessionUserId,
+  authenticatedActor,
   colors,
   onOpenFullHandover,
   classificationReferenceTime,
@@ -120,7 +127,12 @@ export function UnitExceptionHandover({
     createEmptyExceptionHandoverState(shiftId));
   const [hydrated, setHydrated] = useState(storageInstance === null);
   const [storageError, setStorageError] = useState(false);
+  const [conflictCount, setConflictCount] = useState(0);
   const [acceptanceError, setAcceptanceError] = useState('');
+  const [transferLocked, setTransferLocked] = useState(false);
+  const preparedTransfer = useRef<{ kind: 'outgoing_transfer' | 'incoming_attestation';
+    actorId: string; shiftId: string; contextKey: string; manifestHash: string; eventKey: string;
+    recordedAt: string; inFlight: boolean } | null>(null);
   const [overrideAsOf, setOverrideAsOf] = useState(() => now());
   const [expandedUnchanged, setExpandedUnchanged] = useState(false);
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
@@ -133,7 +145,7 @@ export function UnitExceptionHandover({
   const [lastKnownClassifications, setLastKnownClassifications] = useState<HandoffClassification[]>([]);
   const [previousUnitDataHealth, setPreviousUnitDataHealth] = useState<UnitDataHealth>();
 
-  const actor = sessionUserId ? getDemoActorIdentity(sessionUserId) : null;
+  const actor = authenticatedActor ?? (sessionUserId ? getDemoActorIdentity(sessionUserId) : null);
   const patientsWithOverrides = useMemo(() => patients.map((patient) => ({
     ...patient,
     previousOverrides: [
@@ -175,6 +187,10 @@ export function UnitExceptionHandover({
   const currentContext: ExceptionHandoverContext | null = contextReady ? activeContext : null;
   const currentManifest = candidateMode && currentContext && candidateSnapshots.length
     ? freezeComparableManifest(currentContext, candidateSnapshots) : null;
+  const latestTransferScope = useRef({ actorId: actor?.userId, shiftId,
+    contextKey: currentContext?.key, manifestHash: currentManifest?.hash });
+  latestTransferScope.current = { actorId: actor?.userId, shiftId,
+    contextKey: currentContext?.key, manifestHash: currentManifest?.hash };
   const classificationByPatientId = useMemo(
     () => new Map(classifications.map((classification) => [classification.patientId, classification])),
     [classifications],
@@ -209,7 +225,8 @@ export function UnitExceptionHandover({
     : { canClose: false, blockingReasons: [storageError ? 'Evidencia local no legible o no persistida' : 'Contexto de grupo pendiente de confirmación'] };
 
   useEffect(() => {
-    if (!hydrated || !groupScopeValid || (storageInstance && sessionState.shiftId !== shiftId)) return;
+    if (preparedTransfer.current || !hydrated || !groupScopeValid ||
+        (storageInstance && sessionState.shiftId !== shiftId)) return;
     setSessionState((current) => current.shiftId === shiftId && current.activeContext?.key === groupKey
       ? current
       : { ...current, shiftId, activeContext: { key: groupKey, shiftId, revision: (current.activeContext?.revision ?? 0) + 1 } });
@@ -221,8 +238,12 @@ export function UnitExceptionHandover({
     groupChangedDuringHydration.current = false;
     setHydrated(false);
     setStorageError(false);
-    void storageInstance.load(shiftId).then((loaded) => {
+    void storageInstance.load(shiftId).then(async (loaded) => {
       if (!active) return;
+      const conflicts = await storageInstance.listConflicts?.() ?? 0;
+      if (!active) return;
+      setConflictCount(conflicts);
+      setStorageError(conflicts > 0 || storageInstance.syncStatus === 'pending');
       const hydratedAt = now();
       setOverrideAsOf(hydratedAt);
       setSessionState((current) => {
@@ -250,8 +271,14 @@ export function UnitExceptionHandover({
   }, [shiftId, storageInstance]);
 
   useEffect(() => {
-    if (!hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
-    void storageInstance.save(sessionState).catch(() => setStorageError(true));
+    if (preparedTransfer.current || !hydrated || !storageInstance || sessionState.shiftId !== shiftId) return;
+    void storageInstance.save(sessionState).then(() => {
+      setStorageError(storageInstance.syncStatus === 'pending' ||
+        storageInstance.syncStatus === 'conflict' || storageInstance.syncStatus === 'rejected');
+    }).catch(async () => {
+      setStorageError(true);
+      try { setConflictCount(await storageInstance.listConflicts?.() ?? 0); } catch {}
+    });
   }, [hydrated, sessionState, shiftId, storageInstance]);
 
   useEffect(() => {
@@ -282,6 +309,7 @@ export function UnitExceptionHandover({
   }, [sessionState.degradedTransfer]);
 
   const updateSessionState = (updater: (current: ExceptionHandoverSessionState) => ExceptionHandoverSessionState) => {
+    if (preparedTransfer.current) return;
     setSessionState((current) => updater(current));
   };
 
@@ -310,7 +338,53 @@ export function UnitExceptionHandover({
     }));
   };
 
-  const recordCandidateTransfer = async (kind: 'outgoing_transfer' | 'incoming_attestation') => {
+  const recordCandidateTransfer = async (kind: 'outgoing_transfer' | 'incoming_attestation'): Promise<void> => {
+    if (preparedTransfer.current) {
+      const prepared = preparedTransfer.current;
+      if (prepared.inFlight) return;
+      if (kind !== prepared.kind || actor?.userId !== prepared.actorId || shiftId !== prepared.shiftId ||
+          currentContext?.key !== prepared.contextKey || currentManifest?.hash !== prepared.manifestHash ||
+          !storageInstance) {
+        setAcceptanceError('El contexto cambió; reconcilie la operación pendiente antes de continuar.');
+        return;
+      }
+      prepared.inFlight = true;
+      try {
+        const reconciled = await storageInstance.load(shiftId);
+        const confirmed = storageInstance.syncStatus === 'confirmed' && reconciled.events.some((event) =>
+          event.idempotencyKey === prepared.eventKey && event.recordedAt === prepared.recordedAt);
+        if (latestTransferScope.current.actorId !== prepared.actorId ||
+            latestTransferScope.current.shiftId !== prepared.shiftId ||
+            latestTransferScope.current.contextKey !== prepared.contextKey ||
+            latestTransferScope.current.manifestHash !== prepared.manifestHash) {
+          setAcceptanceError('El contexto cambió; vuelva al turno original para reconciliar la operación.');
+          return;
+        }
+        if (!confirmed && storageInstance.durability === 'durable' &&
+            (storageInstance.syncStatus === 'conflict' || storageInstance.syncStatus === 'rejected')) {
+          const conflicts = await storageInstance.listConflicts?.() ?? 0;
+          if (!conflicts) throw new Error('EXCEPTION_HANDOVER_CONFLICT_NOT_PERSISTED');
+          preparedTransfer.current = null;
+          setTransferLocked(false);
+          setConflictCount(conflicts);
+          setSessionState(reconciled);
+          setStorageError(true);
+          setAcceptanceError('Transferencia rechazada; revise el estado compartido y reconcilie la edición local cifrada.');
+          return;
+        }
+        if (!confirmed) throw new Error('EXCEPTION_HANDOVER_TRANSFER_PENDING');
+        preparedTransfer.current = null;
+        setTransferLocked(false);
+        setSessionState(reconciled);
+        setStorageError(false);
+        setAcceptanceError('');
+      } catch {
+        setAcceptanceError('Transferencia pendiente: recupere el recibo y el estado compartido antes de confirmar.');
+      } finally {
+        prepared.inFlight = false;
+      }
+      return;
+    }
     if (!actor || !currentContext || !currentManifest || !storageInstance ||
         storageInstance.durability !== 'durable' || !closure.canClose || storageError) {
       setAcceptanceError('La referencia requiere almacenamiento durable y evidencia de cierre vigente.');
@@ -335,15 +409,54 @@ export function UnitExceptionHandover({
         acceptedReferences: acceptedReference
           ? [...sessionState.acceptedReferences, acceptedReference] : sessionState.acceptedReferences,
       };
+      if (authenticatedActor && acceptedReference) {
+        const candidate = buildExceptionHandoverFhirCandidate({
+          context: currentContext, viewScope: groupScope.viewScope, members: groupScope.members,
+          classifications, events: next.events, unitHealth: unitResult.unitDataHealth.status,
+        });
+        if (!validateExceptionHandoverCandidate(candidate).isValid) {
+          throw new Error('EXCEPTION_HANDOVER_CANDIDATE_INVALID');
+        }
+      }
+      preparedTransfer.current = { kind, actorId: actor.userId, shiftId, contextKey: currentContext.key,
+        manifestHash: frozen.hash, eventKey: event.idempotencyKey, recordedAt: event.recordedAt,
+        inFlight: true };
+      setTransferLocked(true);
       await storageInstance.save(next);
+      if (storageInstance.syncStatus && storageInstance.syncStatus !== 'confirmed') {
+        throw new Error('EXCEPTION_HANDOVER_TRANSFER_PENDING');
+      }
+      const prepared = preparedTransfer.current;
+      if (!prepared || latestTransferScope.current.actorId !== prepared.actorId ||
+          latestTransferScope.current.shiftId !== prepared.shiftId ||
+          latestTransferScope.current.contextKey !== prepared.contextKey ||
+          latestTransferScope.current.manifestHash !== prepared.manifestHash) {
+        if (prepared) prepared.inFlight = false;
+        setAcceptanceError('El contexto cambió; vuelva al turno original para reconciliar la operación.');
+        return;
+      }
+      preparedTransfer.current = null;
+      setTransferLocked(false);
       setSessionState(next);
       setAcceptanceError('');
     } catch {
+      if (preparedTransfer.current && (storageInstance?.syncStatus === 'conflict' || storageInstance?.syncStatus === 'rejected')) {
+        preparedTransfer.current.inFlight = false;
+        await recordCandidateTransfer(kind);
+        return;
+      }
+      if (preparedTransfer.current && storageInstance?.syncStatus !== 'pending') {
+        preparedTransfer.current = null;
+        setTransferLocked(false);
+      } else if (preparedTransfer.current) {
+        preparedTransfer.current.inFlight = false;
+      }
       setAcceptanceError('No se confirmó la referencia; revise el contexto o el almacenamiento local.');
     }
   };
 
   const openPatient = (patient: DemoExceptionHandoverPatient) => {
+    if (preparedTransfer.current) return;
     setActivePatientId(patient.patientId);
     updateSessionState((current) => ({
       ...current,
@@ -379,7 +492,7 @@ export function UnitExceptionHandover({
   };
 
   const toggleCriticalItem = (index: number) => {
-    if (!activePatient) return;
+    if (preparedTransfer.current || !activePatient) return;
     const next = [...activeCheckItems];
     next[index] = !next[index];
     setCheckedItems((current) => ({ ...current, [activePatient.patientId]: next }));
@@ -407,6 +520,7 @@ export function UnitExceptionHandover({
   };
 
   const recordOverride = (newLane: 'A' | 'B' = 'B') => {
+    if (preparedTransfer.current) return;
     if (candidateMode && newLane !== 'A') return;
     if (!activePatient || !activeClassification || !actor || !currentContext) return;
     const reason = overrideReasons[activePatient.patientId] ?? '';
@@ -443,10 +557,12 @@ export function UnitExceptionHandover({
   };
 
   const transferR = () => {
-    if (!activePatient || !activeClassification || actor?.kind !== 'incoming') return;
+    const targetAt = activeDraft?.targetAt?.trim();
+    const reason = activeClassification?.reasons.join('. ').trim();
+    if (!activePatient || actor?.kind !== 'incoming' || !isValidExceptionTargetAt(targetAt) || !reason) return;
     appendEvent('r_transferred', activePatient.patientId, {
-      reason: activeClassification.reasons.join('. '),
-      targetAt: activePatient.dueAt,
+      reason,
+      targetAt,
       receiverId: actor.userId,
     });
     incrementInteractions(activePatient.patientId);
@@ -456,7 +572,9 @@ export function UnitExceptionHandover({
     const patientEvents = currentEvents.filter((event) => event.patientId === patient.patientId);
     return (
       <View style={styles.provenanceBlock} testID={`exception-provenance-${patient.patientId}`}>
-        <Text style={[styles.provenanceText, { color: colors.muted }]}>Importado del contexto clínico sintético · {formatExceptionDateTime(patient.lastSummaryAt)}</Text>
+        <Text style={[styles.provenanceText, { color: colors.muted }]}>{authenticatedActor
+          ? 'Fuentes clínicas verificables no disponibles para esta vista; clasificación R'
+          : `Importado del contexto clínico sintético · ${formatExceptionDateTime(patient.lastSummaryAt)}`}</Text>
         {patientEvents.map((event) => (
           <Text key={event.idempotencyKey} testID={`exception-event-${event.kind}-${patient.patientId}`} style={[styles.provenanceText, { color: colors.muted }]}>
             {event.kind === 'critical_check_back'
@@ -520,7 +638,7 @@ export function UnitExceptionHandover({
             <Text style={[styles.cardMeta, { color: colors.muted }]}>Responsable: {patient.owner} · {formatExceptionDateTime(patient.dueAt)}</Text>
           </>
         )}
-        <Pressable accessibilityRole="button" onPress={() => openPatient(patient)} style={[styles.secondaryButton, { borderColor: laneColor }]} testID={`open-exception-${patient.patientId}`}>
+        <Pressable accessibilityRole="button" disabled={transferLocked} onPress={() => openPatient(patient)} style={[styles.secondaryButton, { borderColor: laneColor }]} testID={`open-exception-${patient.patientId}`}>
           <Text style={[styles.secondaryButtonText, { color: laneColor }]}>{buttonLabel}</Text>
         </Pressable>
       </View>
@@ -546,7 +664,9 @@ export function UnitExceptionHandover({
             <Text style={[styles.detailTitle, { color: colors.text }]}>{lane === 'A' ? 'Relevo prioritario' : lane === 'B' ? 'Relevo breve' : lane === 'R' ? 'Revisión de información' : 'Detalle del resumen'}</Text>
             <Text style={[styles.patientMeta, { color: colors.muted }]}>{activePatient.name} · Cama {activePatient.bedLabel}</Text>
           </View>
-          <Pressable accessibilityRole="button" onPress={() => setActivePatientId(null)}><Text style={{ color: colors.info }}>Cerrar</Text></Pressable>
+          <Pressable accessibilityRole="button" disabled={transferLocked} onPress={() => {
+            if (!preparedTransfer.current) setActivePatientId(null);
+          }}><Text style={{ color: colors.info }}>Cerrar</Text></Pressable>
         </View>
 
         {sbar ? (
@@ -563,6 +683,12 @@ export function UnitExceptionHandover({
         {lane === 'R' ? (
           <View testID={`r-information-${activePatient.patientId}`}>
             <Text style={[styles.sectionLabel, { color: colors.warning }]}>Información esperada insuficiente</Text>
+            <TextInput accessibilityLabel="Momento objetivo de transferencia R (ISO 8601 con zona)"
+              testID={`r-target-at-${activePatient.patientId}`} value={activeDraft.targetAt ?? ''}
+              editable={!transferLocked}
+              onChangeText={(value) => updateActiveDraft('targetAt', value)}
+              placeholder="2026-10-28T16:00:00Z"
+              style={[styles.input, { borderColor: colors.border, color: colors.text }]} />
             {activeClassification.reviewRequirements.map((requirement) => (
               <View key={requirement.source} style={[styles.requirementCard, { borderColor: colors.warning }]}>
                 <Text style={[styles.cardLine, { color: colors.text }]}>{requirement.reason}</Text>
@@ -577,7 +703,10 @@ export function UnitExceptionHandover({
               style={[styles.input, { borderColor: colors.border, color: colors.text }]}
               placeholder="Motivo clínico para reclasificar"
               value={overrideReasons[activePatient.patientId] ?? ''}
-              onChangeText={(value) => setOverrideReasons((current) => ({ ...current, [activePatient.patientId]: value }))}
+              editable={!transferLocked}
+              onChangeText={(value) => {
+                if (!preparedTransfer.current) setOverrideReasons((current) => ({ ...current, [activePatient.patientId]: value }));
+              }}
               testID={`override-reason-${activePatient.patientId}`}
             />
             <View style={styles.actionRow}>
@@ -585,7 +714,9 @@ export function UnitExceptionHandover({
                 <Text style={styles.primaryButtonText}>Resolver y reclasificar B</Text>
               </Pressable> : null}
               {candidateMode ? <Pressable accessibilityRole="button" disabled={!actor || !(overrideReasons[activePatient.patientId] ?? '').trim()} onPress={() => recordOverride('A')} style={[styles.primaryButton, { backgroundColor: colors.danger }]} testID={`designate-a-${activePatient.patientId}`}><Text style={styles.primaryButtonText}>Designar prioridad A con motivo</Text></Pressable> : null}
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || transferredR} onPress={transferR} style={[styles.secondaryButton, { borderColor: colors.warning }]} testID={`transfer-r-${activePatient.patientId}`}>
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || transferredR ||
+                !isValidExceptionTargetAt(activeDraft.targetAt?.trim()) || !activeClassification.reasons.join('. ').trim()}
+                onPress={transferR} style={[styles.secondaryButton, { borderColor: colors.warning }]} testID={`transfer-r-${activePatient.patientId}`}>
                 <Text style={[styles.secondaryButtonText, { color: colors.warning }]}>Transferir información incompleta</Text>
               </Pressable>
             </View>
@@ -638,7 +769,9 @@ export function UnitExceptionHandover({
 
         {renderProvenance(activePatient)}
         <Text testID={`quick-interactions-${activePatient.patientId}`} style={[styles.interactionText, { color: isInteractionBudgetExceeded(lane, interactionCount) ? colors.danger : colors.muted }]}>Interacciones relevantes de esta ruta: {interactionCount}</Text>
-        <Pressable accessibilityRole="button" onPress={() => onOpenFullHandover(activePatient.patientId)} style={[styles.fullDetailButton, { borderColor: colors.border }]}><Text style={[styles.secondaryButtonText, { color: colors.text }]}>Ver detalle completo</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={transferLocked} onPress={() => {
+          if (!preparedTransfer.current) onOpenFullHandover(activePatient.patientId);
+        }} style={[styles.fullDetailButton, { borderColor: colors.border }]}><Text style={[styles.secondaryButtonText, { color: colors.text }]}>Ver detalle completo</Text></Pressable>
       </View>
     );
   };
@@ -689,11 +822,52 @@ export function UnitExceptionHandover({
 
   return (
     <View style={[styles.board, { borderColor: colors.border, backgroundColor: colors.surface }]} testID="unit-exception-handover">
+      {conflictCount > 0 && storageInstance?.discardConflicts ? <View>
+        <Text accessibilityRole="alert">Hay {conflictCount} edición(es) rechazadas por conflicto o validación. El contenido local cifrado se conserva; revise el estado compartido antes de descartarlo.</Text>
+        <Pressable accessibilityRole="button" disabled={transferLocked} testID="discard-exception-conflicts" onPress={() => {
+          if (preparedTransfer.current) return;
+          void storageInstance.load(shiftId).then(async (loaded) => {
+            await storageInstance.discardConflicts?.();
+            setSessionState(loaded);
+            setConflictCount(0);
+            setStorageError(false);
+          }).catch(() => setStorageError(true));
+        }}><Text>Descartar explícitamente ediciones rechazadas y cargar estado autorizado</Text></Pressable>
+      </View> : null}
       {storageError ? <Text accessibilityRole="alert">Evidencia local no legible o no persistida; cierre bloqueado.</Text> : null}
-      <Text style={[styles.eyebrow, { color: colors.info }]}>DEMO SINTÉTICA · RELEVO POR EXCEPCIONES</Text>
-      <Text style={[styles.title, { color: colors.text }]}>{patients[0]?.unitName ?? 'Unidad sintética de salud mental'}</Text>
+      {storageInstance?.syncStatus === 'pending' ? <Text accessibilityRole="alert">
+        Trabajo local cifrado pendiente de confirmación compartida.
+      </Text> : null}
+      {storageInstance?.syncStatus === 'pending' ? <Pressable accessibilityRole="button" disabled={transferLocked}
+        testID="reconcile-exception-pending" onPress={() => {
+          if (preparedTransfer.current) return;
+          void storageInstance.load(shiftId).then((loaded) => {
+            if (storageInstance.syncStatus !== 'confirmed') return;
+            setSessionState(loaded);
+            setStorageError(false);
+            setAcceptanceError('');
+          }).catch(() => setStorageError(true));
+        }}><Text>Comprobar recibo y estado compartido</Text></Pressable> : null}
+      {transferLocked ? <View>
+        <Text accessibilityRole="alert" testID="prepared-transfer-pending">
+          Transferencia preparada pendiente de confirmación compartida. La edición está pausada hasta recuperar el recibo.
+        </Text>
+        {acceptanceError ? <Text accessibilityRole="alert" testID="candidate-acceptance-error">{acceptanceError}</Text> : null}
+        <Pressable accessibilityRole="button" testID="reconcile-prepared-transfer"
+          disabled={preparedTransfer.current?.inFlight !== false}
+          onPress={() => { if (preparedTransfer.current && !preparedTransfer.current.inFlight) {
+            void recordCandidateTransfer(preparedTransfer.current.kind);
+          } }}><Text>Comprobar transferencia y reanudar edición</Text></Pressable>
+      </View> : null}
+      <Text style={[styles.eyebrow, { color: colors.info }]}>{authenticatedActor
+        ? 'TEST_ENV · REGISTRO OPERATIVO DE RELEVO POR EXCEPCIONES'
+        : 'DEMO SINTÉTICA · RELEVO POR EXCEPCIONES'}</Text>
+      <Text style={[styles.title, { color: colors.text }]}>{patients[0]?.unitName ??
+        (authenticatedActor ? 'Unidad autorizada' : 'Unidad sintética de salud mental')}</Text>
       <Text style={[styles.subtitle, { color: colors.muted }]}>Clasificación explicable por perfil, plan, fuentes esperadas y vigencia. La indisponibilidad técnica se muestra separada del estado clínico.</Text>
 
+      <View pointerEvents={transferLocked ? 'none' : 'auto'} accessibilityElementsHidden={transferLocked}
+        style={{ opacity: transferLocked ? 0.5 : 1 }}>
       {unitResult.automaticClassificationSuspended ? renderUnavailableMode() : (
         <>
           {unitResult.unitDataHealth.status === 'degraded' ? (
@@ -747,24 +921,30 @@ export function UnitExceptionHandover({
             {candidateMode ? <Text style={[styles.cardMeta, { color: colors.muted }]}>La recepción acepta este conjunto congelado como referencia comparativa del relevo, no certifica cada medición ni validación clínica institucional.</Text> : null}
             {acceptanceError ? <Text accessibilityRole="alert" testID="candidate-acceptance-error">{acceptanceError}</Text> : null}
             <View style={styles.actionRow}>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || !closure.canClose} onPress={() => {
-                if (actor?.kind === 'outgoing' && hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) {
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'outgoing' || (!closure.canClose && preparedTransfer.current?.kind !== 'outgoing_transfer')} onPress={() => {
+                if (actor?.kind === 'outgoing' && (preparedTransfer.current?.kind === 'outgoing_transfer' ||
+                  hydrated && !storageError && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose)) {
                   if (candidateMode) void recordCandidateTransfer('outgoing_transfer');
                   else appendEvent('outgoing_transfer');
                 }
               }} style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: actor?.kind === 'outgoing' && closure.canClose ? 1 : 0.5 }]} testID="confirm-outgoing-transfer"><Text style={styles.primaryButtonText}>Confirmar transferencia saliente</Text></Pressable>
-              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' || !outgoingTransfer || !closure.canClose || (candidateMode && Boolean(incomingAttestation))} onPress={() => {
-                if (actor?.kind === 'incoming' && hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose) {
+              <Pressable accessibilityRole="button" disabled={actor?.kind !== 'incoming' ||
+                (preparedTransfer.current?.kind !== 'incoming_attestation' &&
+                  (!outgoingTransfer || !closure.canClose || (candidateMode && Boolean(incomingAttestation))))} onPress={() => {
+                if (actor?.kind === 'incoming' && (preparedTransfer.current?.kind === 'incoming_attestation' ||
+                  hydrated && !storageError && outgoingTransfer && currentContext && assessHandoffClosure(classifications, events, unitResult.unitDataHealth.status, currentContext).canClose)) {
                   if (candidateMode) void recordCandidateTransfer('incoming_attestation');
-                  else appendEvent('incoming_attestation', undefined, { acknowledgesKey: outgoingTransfer.idempotencyKey });
+                  else if (outgoingTransfer) appendEvent('incoming_attestation', undefined,
+                    { acknowledgesKey: outgoingTransfer.idempotencyKey });
                 }
               }} style={[styles.secondaryButton, { borderColor: colors.primary }]} testID="confirm-incoming-attestation"><Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Atestar recepción entrante</Text></Pressable>
             </View>
-            {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>Confirmado por profesional saliente · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}
-            {incomingAttestation ? <Text testID="incoming-attestation-event" style={[styles.provenanceText, { color: colors.muted }]}>Atestado por profesional entrante · {incomingAttestation.actorName} · {formatExceptionDateTime(incomingAttestation.recordedAt)}</Text> : null}
+            {outgoingTransfer ? <Text testID="outgoing-transfer-event" style={[styles.provenanceText, { color: colors.muted }]}>{storageInstance?.syncStatus === 'pending' ? 'Transferencia preparada localmente, sin confirmación compartida' : 'Confirmado por profesional saliente'} · {outgoingTransfer.actorName} · {formatExceptionDateTime(outgoingTransfer.recordedAt)}</Text> : null}
+            {incomingAttestation ? <Text testID="incoming-attestation-event" style={[styles.provenanceText, { color: colors.muted }]}>{storageInstance?.syncStatus === 'pending' ? 'Recepción preparada localmente, sin confirmación compartida' : 'Atestado por profesional entrante'} · {incomingAttestation.actorName} · {formatExceptionDateTime(incomingAttestation.recordedAt)}</Text> : null}
           </View>
         </>
       )}
+      </View>
     </View>
   );
 }

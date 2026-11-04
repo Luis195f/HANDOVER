@@ -241,6 +241,22 @@ class HandoverBundleRecord(models.Model):
         return f"HandoverBundleRecord(bundle_id={self.bundle_id}, request_id={self.request_id})"
 
 
+class ExceptionHandoverShift(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    unit_id = models.CharField(max_length=64, db_index=True)
+    period_start = models.DateTimeField()
+    period_end = models.DateTimeField()
+    description = models.CharField(max_length=160)
+    creator_sub = models.CharField(max_length=255)
+    creation_key = models.UUIDField(unique=True)
+    creation_hash = models.CharField(max_length=64)
+    revision = models.PositiveIntegerField(default=0)
+    state_json = models.JSONField()
+    encryption_metadata = models.JSONField()
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class IceaBridgeRequest(models.Model):
     STATUS_QUEUED = "queued"
     STATUS_SENT = "sent"
@@ -402,6 +418,5 @@ class IceaPipelineEvent(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
         return f"IceaPipelineEvent(stage={self.stage}, status={self.status})"
-
 
 

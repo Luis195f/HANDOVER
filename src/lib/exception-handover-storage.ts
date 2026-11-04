@@ -25,6 +25,7 @@ export type PersistedBriefDraft = {
   nextAction: string;
   owner: string;
   contingency: string;
+  targetAt?: string;
 };
 
 export type ExceptionHandoverSessionState = {
@@ -42,6 +43,9 @@ export type ExceptionHandoverSessionState = {
 
 export type ExceptionHandoverStorage = {
   durability?: 'durable' | 'memory';
+  readonly syncStatus?: 'confirmed' | 'pending' | 'conflict' | 'rejected';
+  listConflicts?: () => Promise<number>;
+  discardConflicts?: () => Promise<void>;
   load(shiftId: string): Promise<ExceptionHandoverSessionState>;
   save(state: ExceptionHandoverSessionState): Promise<void>;
   clear(): Promise<void>;

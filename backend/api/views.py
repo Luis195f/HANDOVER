@@ -62,7 +62,7 @@ from backend.api.icea_bridge_service import (
     _scoring_feature_key, enqueue_icea_bridge_request_for_transaction, load_icea_bridge_settings,
 )
 from backend.api.icea_client import load_icea_webhook_settings
-from backend.api.pilot_control import is_pilot_feature_enabled
+from backend.api.pilot_control import exception_handover_test_enabled, is_pilot_feature_enabled
 from backend.api.icea_pipeline import ensure_pipeline_snapshot_from_bundle
 from backend.api.icea_transaction import (
     TransactionIntentConflict,
@@ -1536,6 +1536,13 @@ class CapabilitiesView(APIView):
             "permissions": permissions,
             "scopeCatalog": CLINICAL_SCOPES,
             "fhir": {"version": "R4", "transaction": True, "profiles": FHIR_PROFILES},
+            "exceptionHandover": {
+                "candidateEnabled": exception_handover_test_enabled() and
+                    permissions["canWriteHandover"] and permissions["canReadPatients"] and bool(unit_ids),
+                "pilotEnabled": False,
+                "reasons": ["C11V_NOT_VERIFIED", "IDP_NOT_VERIFIED", "PROVISIONAL_THRESHOLDS",
+                            "STRICT_MODE_NOT_VERIFIED", "INSTITUTIONAL_ENV_NOT_AUTHORIZED"],
+            },
         }
         return Response(payload, status=200)
 

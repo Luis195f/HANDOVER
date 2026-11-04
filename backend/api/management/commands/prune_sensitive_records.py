@@ -3,18 +3,51 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.management.base import CommandError
 from django.core.management.base import BaseCommand
-from django.db import models
+from django.db import OperationalError, connection, models
+from django.db.models import F
 from django.utils import timezone
 
 from backend.api.models import (
+    ExceptionHandoverShift,
     HandoverBundleRecord,
     IceaBridgeRequest,
     IceaOutboundEvent,
     IceaPipelineEvent,
     IceaPipelineSnapshot,
 )
+from backend.api.clinical_storage import decrypt_bundle_document, encrypt_bundle_document
 from backend.api.icea_transaction import intent_digest
+
+
+def prune_exception_references(shift_id, now):
+    for attempt in range(5):
+        shift = ExceptionHandoverShift.objects.filter(id=shift_id, expires_at__gt=now).first()
+        if shift is None:
+            return 0
+        state = decrypt_bundle_document(shift.state_json, encryption_metadata=shift.encryption_metadata)
+        references = state.get('acceptedReferences', [])
+        live = [reference for reference in references if
+                timezone.datetime.fromisoformat(reference['expiresAt'].replace('Z', '+00:00')) > now]
+        if len(live) == len(references):
+            return 0
+        state['acceptedReferences'] = live
+        envelope, metadata = encrypt_bundle_document(state)
+        try:
+            updated = ExceptionHandoverShift.objects.filter(id=shift_id, revision=shift.revision,
+                expires_at__gt=now).update(state_json=envelope, encryption_metadata=metadata,
+                                           revision=F('revision') + 1)
+        except OperationalError as error:
+            if connection.vendor != 'sqlite' or not ('database is locked' in str(error).lower() or
+                    'database table is locked' in str(error).lower()):
+                raise
+            if attempt == 4:
+                raise CommandError('Exception reference pruning contended.') from error
+            continue
+        if updated:
+            return len(references) - len(live)
+    raise CommandError('Exception reference pruning contended.')
 
 
 class Command(BaseCommand):
@@ -56,6 +89,10 @@ class Command(BaseCommand):
                 'accepted_actor_sub', 'effects_claimed_at', 'effects_next_retry_at',
             ])
             redacted_bundles += 1
+        expired_exception_shifts, _ = ExceptionHandoverShift.objects.filter(expires_at__lte=now).delete()
+        pruned_exception_references = 0
+        for shift_id in ExceptionHandoverShift.objects.filter(expires_at__gt=now).values_list('id', flat=True).iterator():
+            pruned_exception_references += prune_exception_references(shift_id, now)
         outbound_deleted, _ = IceaOutboundEvent.objects.filter(
             created_at__lt=technical_cutoff,
             status__in=[IceaOutboundEvent.STATUS_DELIVERED, IceaOutboundEvent.STATUS_FAILED],
@@ -81,6 +118,8 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 "Pruned sensitive records: "
                 f"handover_bundles={redacted_bundles}, "
+                f"exception_shifts={expired_exception_shifts}, "
+                f"exception_references={pruned_exception_references}, "
                 f"icea_outbound_events={outbound_deleted}, "
                 f"icea_bridge_requests={bridge_deleted}, "
                 f"icea_pipeline_snapshots={snapshot_deleted}, "

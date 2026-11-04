@@ -1,0 +1,10 @@
+{
+  "content": {
+    "interactionCounts": { "2": 0, "10": 1 },
+    "nested": { "10": { "emoji": "Á😀" }, "2": { "flag": false, "nothing": null } },
+    "list": [0, false, null, { "2": "dos", "10": "diez" }],
+    "unicodeKeys": { "😀": 1, "Ｚ": 2 }
+  },
+  "canonical": "{\"interactionCounts\":{\"10\":1,\"2\":0},\"list\":[0,false,null,{\"10\":\"diez\",\"2\":\"dos\"}],\"nested\":{\"10\":{\"emoji\":\"Á😀\"},\"2\":{\"flag\":false,\"nothing\":null}},\"unicodeKeys\":{\"Ｚ\":2,\"😀\":1}}",
+  "sha256": "c70173bf1bc5ed2d267e6099c0c14f2db9bf591fe29c62ad5086893fac9b406d"
+}
