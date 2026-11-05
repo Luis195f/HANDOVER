@@ -26,6 +26,8 @@ def _key_material() -> tuple[bytes, str]:
     configured = (getattr(settings, "HANDOVER_BUNDLE_ENCRYPTION_KEY", "") or "").strip()
     if configured:
         return configured.encode("utf-8"), KEY_SOURCE_ENV
+    if getattr(settings, "HANDOVER_STRICT_SECURITY_MODE", False):
+        raise ClinicalBundleStorageError("Dedicated handover bundle encryption key is unavailable.")
     return settings.SECRET_KEY.encode("utf-8"), KEY_SOURCE_SECRET_KEY_DERIVED
 
 
@@ -35,6 +37,8 @@ def _key_material_for_source(key_source: str) -> bytes | None:
         configured = (getattr(settings, "HANDOVER_BUNDLE_ENCRYPTION_KEY", "") or "").strip()
         return configured.encode("utf-8") if configured else None
     if normalized == KEY_SOURCE_SECRET_KEY_DERIVED:
+        if getattr(settings, "HANDOVER_STRICT_SECURITY_MODE", False):
+            return None
         return settings.SECRET_KEY.encode("utf-8")
     return None
 

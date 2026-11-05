@@ -77,6 +77,7 @@ def _resolve_handover_deployment_mode(raw_mode: str) -> str:
 
 HANDOVER_DEPLOYMENT_MODE = _resolve_handover_deployment_mode(RAW_HANDOVER_DEPLOYMENT_MODE)
 HANDOVER_STRICT_SECURITY_MODE = HANDOVER_DEPLOYMENT_MODE in {"pilot", "production"}
+HANDOVER_BUNDLE_ENCRYPTION_KEY = (os.getenv("HANDOVER_BUNDLE_ENCRYPTION_KEY") or "").strip()
 HANDOVER_LOCAL_AUTH_BYPASS_ALLOWED = (
     HANDOVER_DEPLOYMENT_MODE_EXPLICIT
     and HANDOVER_DEPLOYMENT_MODE in {"development", "demo"}
@@ -263,6 +264,23 @@ if not SECRET_KEY:
         _record_startup_validation_error("SECRET_KEY is required in production.")
         SECRET_KEY = "django-insecure-placeholder"
 
+if HANDOVER_STRICT_SECURITY_MODE:
+    # Storage derives the AES-GCM key from these UTF-8 bytes; never log the material.
+    if len(HANDOVER_BUNDLE_ENCRYPTION_KEY.encode("utf-8")) < 32 or any(
+        ord(char) < 32 for char in HANDOVER_BUNDLE_ENCRYPTION_KEY
+    ):
+        _record_startup_validation_error(
+            "HANDOVER_BUNDLE_ENCRYPTION_KEY requires at least 32 UTF-8 bytes of dedicated material in pilot/production."
+        )
+    if HANDOVER_BUNDLE_ENCRYPTION_KEY and HANDOVER_BUNDLE_ENCRYPTION_KEY == SECRET_KEY:
+        _record_startup_validation_error("HANDOVER_BUNDLE_ENCRYPTION_KEY must differ from SECRET_KEY.")
+    # Match the ICEA client's _env_bool parser: only these values enable TLS verification.
+    raw_icea_verify_tls = os.getenv("ICEA_API_VERIFY_TLS")
+    if raw_icea_verify_tls is not None and raw_icea_verify_tls.strip().lower() not in {
+        "1", "true", "yes", "on"
+    }:
+        _record_startup_validation_error("ICEA_API_VERIFY_TLS must enable TLS verification in pilot/production.")
+
 _raise_startup_validation_errors()
 
 # -----------------------------
@@ -418,7 +436,6 @@ AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", "180"))
 AUDIT_HASH_SECRET = os.getenv("AUDIT_HASH_SECRET") or SECRET_KEY
 HANDOVER_BUNDLE_RETENTION_DAYS = max(int(os.getenv("HANDOVER_BUNDLE_RETENTION_DAYS", "30")), 1)
 HANDOVER_TECHNICAL_RETENTION_DAYS = max(int(os.getenv("HANDOVER_TECHNICAL_RETENTION_DAYS", "30")), 1)
-HANDOVER_BUNDLE_ENCRYPTION_KEY = (os.getenv("HANDOVER_BUNDLE_ENCRYPTION_KEY") or "").strip()
 
 # -----------------------------
 # Logging

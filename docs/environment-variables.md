@@ -21,7 +21,8 @@
 - `HANDOVER_PUBLIC_KEY_PATH`: ruta a clave pública para verificación criptográfica.
 - `HANDOVER_SIGNATURE_DISABLED`: solo válido en `development`/`demo`/`test` controlado; `pilot`/`production` fallan al arrancar si se activa.
 - `HANDOVER_MAX_AUDIO_BYTES`: límite de tamaño de audio para `/api/ai/transcribe`.
-- `HANDOVER_BUNDLE_ENCRYPTION_KEY`: clave opcional de cifrado en reposo para Bundles clínicos persistidos. Si falta, HANDOVER mantiene compatibilidad usando una clave derivada de `SECRET_KEY`.
+- `HANDOVER_BUNDLE_ENCRYPTION_KEY`: material UTF-8 dedicado para cifrado en reposo de Bundles y estados C12. En `pilot`/`production` es obligatorio, debe aportar al menos 32 bytes UTF-8 efectivos y ser distinto del material efectivo de `SECRET_KEY`; la longitud no acredita entropía. En `development`/`demo`/`test` conserva el fallback legado.
+- `ICEA_API_VERIFY_TLS`: por defecto verifica TLS. El cliente ICEA interpreta `1`, `true`, `yes` y `on` (sin distinguir mayúsculas ni espacios exteriores) como activado; cualquier otro valor explícito lo desactiva y bloquea el arranque en `pilot`/`production`.
 - `AUDIT_HASH_SECRET`: secreto dedicado para HMAC de payloads/pseudónimos de auditoría. Si falta, HANDOVER usa `SECRET_KEY` como fallback operativo.
 
 ## Auth / OIDC
@@ -93,5 +94,6 @@ AUTH0_AUDIENCE=
 
 ## Compatibilidad operativa de descifrado
 - La lectura de Bundles persistidos prioriza `encryption_metadata.key_source` cuando el registro lo incluye.
-- Existe fallback controlado entre `HANDOVER_BUNDLE_ENCRYPTION_KEY` (`env`) y la clave derivada de `SECRET_KEY` (`secret_key_derived`) para mantener legibles registros legacy retenidos.
+- Fuera de modo estricto existe fallback controlado entre `HANDOVER_BUNDLE_ENCRYPTION_KEY` (`env`) y la clave derivada de `SECRET_KEY` (`secret_key_derived`) para leer registros legacy retenidos.
+- En `pilot`/`production` no se selecciona la clave derivada de `SECRET_KEY` ni para cifrar ni para descifrar. Los documentos legacy con `key_source=secret_key_derived` no pueden leerse en ese modo: la lectura C12 devuelve indisponibilidad y la poda no modifica el registro cuando no puede descifrarlo. Antes de activar modo estricto se requiere inventariar esos registros y acordar una transición controlada fuera de este cambio; no hay migración automática ni borrado.
 - Este mecanismo mejora compatibilidad backward; no implementa rotación formal de claves ni reescritura automática de registros ya guardados.
