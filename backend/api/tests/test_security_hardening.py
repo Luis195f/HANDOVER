@@ -3,9 +3,23 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import uuid
+from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
+from django.utils import timezone
+
+from backend.api.clinical_storage import (
+    ClinicalBundleStorageError,
+    decrypt_bundle_document,
+    encrypt_bundle_document,
+)
+from backend.api.icea_pipeline import load_icea_pipeline_settings
+from backend.api.management.commands.prune_sensitive_records import prune_exception_references
+from backend.api.models import ExceptionHandoverShift
+from backend.api.views_exception_handover import _read
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -22,6 +36,8 @@ class SecurityHardeningSettingsTests(TestCase):
         env["HANDOVER_FHIR_VALIDATION_MODE"] = "local"
         env["HANDOVER_PRIVATE_KEY_PATH"] = "C:/keys/private.pem"
         env["HANDOVER_PUBLIC_KEY_PATH"] = "C:/keys/public.pem"
+        env["HANDOVER_BUNDLE_ENCRYPTION_KEY"] = "dedicated-synthetic-key-32-bytes-long"
+        env.pop("ICEA_API_VERIFY_TLS", None)
         env.pop("PYTEST_CURRENT_TEST", None)
         env["HANDOVER_ALLOWED_ORIGINS"] = ""
 
@@ -191,6 +207,141 @@ class SecurityHardeningSettingsTests(TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("HANDOVER_PRIVATE_KEY_PATH and HANDOVER_PUBLIC_KEY_PATH are required in pilot/production", result.stderr)
+
+    def test_strict_modes_require_valid_dedicated_key(self):
+        for mode in ("pilot", "production"):
+            for configured in (None, "short", " " * 32, "test-secret"):
+                with self.subTest(mode=mode, configured=configured):
+                    result = self._run_settings_import({
+                        "HANDOVER_DEPLOYMENT_MODE": mode,
+                        "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+                        "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+                        "AUTH0_AUDIENCE": "handover-api",
+                        "HANDOVER_BUNDLE_ENCRYPTION_KEY": configured,
+                    })
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("HANDOVER_BUNDLE_ENCRYPTION_KEY", result.stderr)
+                    self.assertNotIn("test-secret", result.stderr)
+
+    def test_strict_modes_reject_effectively_shared_key(self):
+        for mode in ("pilot", "production"):
+            result = self._run_settings_import({
+                "HANDOVER_DEPLOYMENT_MODE": mode,
+                "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+                "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+                "AUTH0_AUDIENCE": "handover-api",
+                "SECRET_KEY": "synthetic-shared-secret-material-32-bytes",
+                "HANDOVER_BUNDLE_ENCRYPTION_KEY": "synthetic-shared-secret-material-32-bytes",
+            })
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must differ from SECRET_KEY", result.stderr)
+            self.assertNotIn("synthetic-shared-secret-material-32-bytes", result.stderr)
+
+    def test_strict_modes_reject_effectively_disabled_icea_tls(self):
+        for mode in ("pilot", "production"):
+            for raw in ("false", "0", "", "invalid", " off "):
+                with self.subTest(mode=mode, raw=raw):
+                    result = self._run_settings_import({
+                        "HANDOVER_DEPLOYMENT_MODE": mode,
+                        "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+                        "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+                        "AUTH0_AUDIENCE": "handover-api",
+                        "ICEA_API_VERIFY_TLS": raw,
+                    })
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("ICEA_API_VERIFY_TLS", result.stderr)
+                    with patch.dict(os.environ, {"ICEA_API_VERIFY_TLS": raw}):
+                        self.assertFalse(load_icea_pipeline_settings().verify_tls)
+
+    def test_strict_modes_start_with_dedicated_key_and_tls(self):
+        for mode in ("pilot", "production"):
+            result = self._run_settings_import({
+                "HANDOVER_DEPLOYMENT_MODE": mode,
+                "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+                "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+                "AUTH0_AUDIENCE": "handover-api",
+                "ICEA_API_VERIFY_TLS": " yes ",
+            })
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_demo_and_test_keep_legacy_configuration(self):
+        for mode in ("demo", "test"):
+            result = self._run_settings_import({
+                "HANDOVER_DEPLOYMENT_MODE": mode,
+                "HANDOVER_ALLOWED_ORIGINS": "https://app.handover.test",
+                "AUTH0_ISSUER_BASE_URL": "https://issuer.example",
+                "AUTH0_AUDIENCE": "handover-api",
+                "HANDOVER_BUNDLE_ENCRYPTION_KEY": None,
+                "ICEA_API_VERIFY_TLS": "false",
+            })
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+
+class StrictClinicalStorageTests(TestCase):
+    def test_strict_mode_round_trip_and_legacy_rejection(self):
+        bundle = {"resourceType": "Bundle", "type": "transaction", "entry": []}
+        with override_settings(
+            HANDOVER_STRICT_SECURITY_MODE=False,
+            SECRET_KEY="synthetic-legacy-secret",
+            HANDOVER_BUNDLE_ENCRYPTION_KEY="",
+        ):
+            legacy, legacy_metadata = encrypt_bundle_document(bundle)
+        with override_settings(
+            HANDOVER_STRICT_SECURITY_MODE=True,
+            SECRET_KEY="synthetic-legacy-secret",
+            HANDOVER_BUNDLE_ENCRYPTION_KEY="dedicated-synthetic-key-32-bytes-long",
+        ):
+            dedicated, metadata = encrypt_bundle_document(bundle)
+            self.assertEqual(metadata["key_source"], "env")
+            self.assertEqual(decrypt_bundle_document(dedicated, encryption_metadata=metadata), bundle)
+            with self.assertRaises(ClinicalBundleStorageError):
+                decrypt_bundle_document(legacy, encryption_metadata=legacy_metadata)
+        with override_settings(
+            HANDOVER_STRICT_SECURITY_MODE=False,
+            SECRET_KEY="synthetic-legacy-secret",
+            HANDOVER_BUNDLE_ENCRYPTION_KEY="dedicated-synthetic-key-32-bytes-long",
+        ):
+            self.assertEqual(decrypt_bundle_document(legacy, encryption_metadata=legacy_metadata), bundle)
+
+    @override_settings(HANDOVER_STRICT_SECURITY_MODE=True, HANDOVER_BUNDLE_ENCRYPTION_KEY="")
+    def test_strict_encryption_never_falls_back_to_secret_key(self):
+        with self.assertRaises(ClinicalBundleStorageError):
+            encrypt_bundle_document({"resourceType": "Bundle"})
+
+    def test_legacy_c12_read_and_pruning_fail_without_mutation_in_strict_mode(self):
+        now = timezone.now()
+        with override_settings(
+            HANDOVER_STRICT_SECURITY_MODE=False,
+            SECRET_KEY="synthetic-legacy-secret",
+            HANDOVER_BUNDLE_ENCRYPTION_KEY="",
+        ):
+            envelope, metadata = encrypt_bundle_document({"acceptedReferences": [
+                {"expiresAt": (now - timedelta(days=1)).isoformat()}
+            ]})
+        shift = ExceptionHandoverShift.objects.create(
+            unit_id="unit-synthetic",
+            period_start=now - timedelta(hours=1),
+            period_end=now + timedelta(hours=1),
+            description="synthetic",
+            creator_sub="synthetic-actor",
+            creation_key=uuid.uuid4(),
+            creation_hash="0" * 64,
+            state_json=envelope,
+            encryption_metadata=metadata,
+            expires_at=now + timedelta(days=1),
+        )
+        with override_settings(
+            HANDOVER_STRICT_SECURITY_MODE=True,
+            SECRET_KEY="synthetic-legacy-secret",
+            HANDOVER_BUNDLE_ENCRYPTION_KEY="dedicated-synthetic-key-32-bytes-long",
+        ):
+            with self.assertRaises(ClinicalBundleStorageError):
+                _read(shift)
+            with self.assertRaises(ClinicalBundleStorageError):
+                prune_exception_references(shift.id, now)
+        shift.refresh_from_db()
+        self.assertEqual(shift.revision, 0)
+        self.assertEqual(shift.state_json, envelope)
 
 
 class SecurityHardeningCORSTests(TestCase):
