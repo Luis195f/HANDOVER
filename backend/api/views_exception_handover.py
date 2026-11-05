@@ -19,6 +19,7 @@ from backend.api.clinical_storage import ClinicalBundleStorageError, decrypt_bun
 from backend.api.models import ExceptionHandoverShift, Patient
 from backend.api.pilot_control import exception_handover_test_enabled
 from backend.api.views import _resolve_unit_scope
+from backend.audit.service import AuditPersistenceError, emit_audit_event
 from backend.security.auth import Auth0JWTAuthentication
 from backend.security.permissions_roles import HasAnyRole
 from backend.security.scope_permissions import HasAllScopes
@@ -314,6 +315,13 @@ class ExceptionShiftsView(ExceptionHandoverBase):
         try:
             with transaction.atomic():
                 record.save(force_insert=True)
+                emit_audit_event(
+                    event_type='exception_handover_shift', action='create', status='success',
+                    http_status=201, request=request, user_sub=actor,
+                    resource_type='ExceptionHandoverShift', resource_id=str(record.id),
+                    meta={'unitId': unit_id, 'operationId': str(operation_id), 'revision': 0},
+                    required=True,
+                )
         except IntegrityError:
             prior = ExceptionHandoverShift.objects.get(creation_key=operation_id)
             prior_error = _scope(request, prior.unit_id)
@@ -321,6 +329,8 @@ class ExceptionShiftsView(ExceptionHandoverBase):
                 return prior_error
             return Response(_public(prior), status=200) if prior.creation_hash == digest else \
                 Response({'code': 'operation_conflict'}, status=409)
+        except AuditPersistenceError:
+            return Response({'code': 'audit_unavailable'}, status=503)
         return Response(_public(record), status=201)
 
 
@@ -347,21 +357,23 @@ class ExceptionShiftOperationView(ExceptionHandoverBase):
         return Response(receipt) if receipt else Response({'code': 'operation_not_found'}, status=404)
 
     def post(self, request, shift_id, operation_id):
-        record, error = self.record(request, shift_id)
-        if error is not None:
-            return error
-        body = request.data
-        proposed = body.get('state') if isinstance(body, dict) else None
-        expected_revision = body.get('expectedRevision') if isinstance(body, dict) else None
-        if not isinstance(proposed, dict) or not _receipt_domain(proposed) or \
-                not isinstance(expected_revision, int) or _uuid(operation_id) is None:
-            return Response({'code': 'operation_invalid'}, status=400)
-        digest = _digest(proposed)
         for attempt in range(5):
             try:
+                record, error = self.record(request, shift_id)
+                if error is not None:
+                    return error
+                body = request.data
+                proposed = body.get('state') if isinstance(body, dict) else None
+                expected_revision = body.get('expectedRevision') if isinstance(body, dict) else None
+                if not isinstance(proposed, dict) or not _receipt_domain(proposed) or \
+                        not isinstance(expected_revision, int) or _uuid(operation_id) is None:
+                    return Response({'code': 'operation_invalid'}, status=400)
+                digest = _digest(proposed)
                 return self._commit_operation(request, record, proposed, expected_revision, digest, operation_id)
             except ClinicalBundleStorageError:
                 return Response({'code': 'state_unavailable'}, status=503)
+            except AuditPersistenceError:
+                return Response({'code': 'audit_unavailable'}, status=503)
             except OperationalError as error:
                 locked = connection.vendor == 'sqlite' and ('database is locked' in str(error).lower() or
                     'database table is locked' in str(error).lower())
@@ -396,4 +408,12 @@ class ExceptionShiftOperationView(ExceptionHandoverBase):
                 revision=locked.revision)
             if not updated:
                 return Response({'code': 'revision_conflict', 'revision': expected_revision}, status=409)
+            emit_audit_event(
+                event_type='exception_handover_operation', action='update', status='success',
+                http_status=201, request=request, user_sub=_actor(request),
+                resource_type='ExceptionHandoverShift', resource_id=str(locked.id),
+                meta={'unitId': locked.unit_id, 'operationId': str(operation_id),
+                      'revision': locked.revision},
+                required=True,
+            )
             return Response(receipt, status=201)
