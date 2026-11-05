@@ -1,3 +1,5 @@
+import ipaddress
+import os
 import uuid
 
 
@@ -20,7 +22,33 @@ class AuditRequestMiddleware:
 
     @staticmethod
     def _get_client_ip(request):
+        try:
+            peer = ipaddress.ip_address(request.META.get("REMOTE_ADDR", ""))
+        except ValueError:
+            return ""
+        remote = str(peer)
+        configured = os.getenv("AUDIT_TRUSTED_PROXY_CIDRS", "")
+        try:
+            trusted = [ipaddress.ip_network(value.strip(), strict=False)
+                       for value in configured.split(",") if value.strip()]
+        except ValueError:
+            return remote
+        if not any(peer in network for network in trusted):
+            return remote
         forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "")
+        if not forwarded_for:
+            return remote
+        hops = forwarded_for.split(",")
+        if len(hops) > 32:
+            return remote
+        try:
+            addresses = [ipaddress.ip_address(hop.strip()) for hop in hops]
+        except ValueError:
+            return remote
+        # Peel trusted proxies from the right. A client-controlled earlier value
+        # cannot displace the first untrusted hop nearest the trusted chain.
+        for address in reversed(addresses):
+            if not any(peer in network for network in trusted):
+                break
+            peer = address
+        return str(peer)

@@ -13,6 +13,11 @@ from backend.security.scope_permissions import _extract_permissions_from_request
 
 logger = logging.getLogger("audit")
 
+
+class AuditPersistenceError(RuntimeError):
+    """Required audit evidence could not be persisted."""
+
+
 FHIR_ACTION_MAP = {
     "create": "C",
     "read": "R",
@@ -121,6 +126,7 @@ def emit_audit_event(
     meta: Optional[Dict[str, Any]] = None,
     timestamp=None,
     request_id: Optional[str] = None,
+    required: bool = False,
 ) -> None:
     try:
         ip = ""
@@ -186,24 +192,19 @@ def emit_audit_event(
         if event_data["timestamp"] is None:
             event_data.pop("timestamp")
 
-        event = None
-        try:
-            event = AuditEvent.objects.create(**event_data)
-        except RuntimeError as e:
-            # pytest-django bloquea DB si el test no usa django_db/db fixture
-            if "Database access not allowed" not in str(e):
-                raise
-            event = None
-        except Exception:
-            event = None
+        event = AuditEvent.objects.create(**event_data)
 
         log_payload = {
-            **({"id": event.id} if event is not None else {}),
+            "id": event.id,
             **{k: v for k, v in event_data.items() if k != "meta" and v is not None},
             "has_meta": bool(meta),
         }
+        if "timestamp" in log_payload:
+            log_payload["timestamp"] = log_payload["timestamp"].isoformat()
         logger.info(json.dumps(log_payload, ensure_ascii=False))
 
-    except Exception:
-        logger.exception("Audit event emission failed")
+    except Exception as error:
+        logger.warning("Audit event emission failed")
+        if required:
+            raise AuditPersistenceError("Audit evidence unavailable") from error
 
