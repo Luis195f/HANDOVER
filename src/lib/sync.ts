@@ -298,7 +298,7 @@ async function checkOnline(): Promise<boolean> {
 
 function isRecoverableStatus(status?: number): boolean {
   if (status == null) return true;
-  if (status === 0) return true;
+  if (status === 0 || status === 429) return true;
   return status >= 500;
 }
 
@@ -318,6 +318,7 @@ function classifyQueueFailureKind(status?: number): QueueFailureKind {
   if (isDuplicateStatus(status)) return 'duplicate';
   if (isAuthStatus(status)) return 'auth';
   if (status === 422) return 'validation';
+  if (status === 429) return 'server';
   if (typeof status === 'number' && status >= 400 && status < 500) return 'client';
   if (typeof status === 'number' && status >= 500) return 'server';
   if (status === 0 || status == null) return 'network';
@@ -705,9 +706,9 @@ export async function processQueueOnce(): Promise<void> {
 
     const isAuthError = result.kind === 'auth' || isAuthStatus(result.status);
     const status = result.status;
-    const recoverable = result.recoverable ?? isRecoverableStatus(status);
+    const recoverable = status === 429 || (result.recoverable ?? isRecoverableStatus(status));
     const cappedIssuesJson = capIssuesJson(result.errorIssuesJson);
-    const isNonRetryableClientError = result.kind === 'client' || result.kind === 'validation';
+    const isNonRetryableClientError = status !== 429 && (result.kind === 'client' || result.kind === 'validation');
 
     if (isNonRetryableClientError) {
       const errorMessage = resolveSyncErrorMessage(status, result.message);

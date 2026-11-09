@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Text } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { clearAllDrafts, getHandoverDraft, setHandoverDraft } from '@/src/lib/drafts';
+import * as draftStore from '@/src/lib/drafts';
 import { FormProvider, useForm } from 'react-hook-form';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -247,6 +248,14 @@ describe('NEWS2 AI oxygen serialization parity', () => {
     beforeAll(async () => { ({ default: HandoverForm } = await import('@/src/screens/HandoverForm')); });
     const mountRequests = async () => {
       const prefilledValues = await readOxygenPrefill([], true);
+      let completeRead: () => void = () => {};
+      const formRead = new Promise<void>(resolve => { completeRead = resolve; });
+      const realRead = draftStore.getHandoverDraft;
+      vi.spyOn(draftStore, 'getHandoverDraft').mockImplementation(async (...args) => {
+        const result = await realRead(...args);
+        if (args[0] === 'synthetic-section-races' && args[1] === 'icu') completeRead();
+        return result;
+      });
       const provider = enableProvider();
       warningVisibility.realSuggestions = true;
       const pending: { section: Section; resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
@@ -256,10 +265,11 @@ describe('NEWS2 AI oxygen serialization parity', () => {
       }));
       const screen = render(<HandoverForm navigation={navigation()}
         route={{ key: 'section-races', name: 'HandoverForm', params: { patientId: 'synthetic-section-races', unitId: 'icu', prefilledValues } }} />);
-      await act(async () => { await getHandoverDraft<RrDraft>('synthetic-section-races', 'icu'); });
+      await act(async () => { await formRead; });
       await waitFor(() => {
         expect(screen.queryByText('Comprobando almacenamiento del borrador; persistencia no confirmada.')).toBeNull();
         expect(screen.queryByText('No se pudo leer el borrador; guardado automático bloqueado.')).toBeNull();
+        expect(screen.queryByText(/Borrador (solo en memoria|guardado en este dispositivo)/)).not.toBeNull();
       });
       if (!screen.queryByText('Sugerencias IA de cuidados')) fireEvent.press(screen.getByText('Diagnósticos médicos/ enfermería'));
       const panel = (section: Section) => {

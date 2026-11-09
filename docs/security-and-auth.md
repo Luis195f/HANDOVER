@@ -37,6 +37,14 @@
 - `POST /api/ai/suggest-interventions`
 - `POST /api/upload/audio-to-fhir`
 
+## Límites de solicitudes C14C
+- Todas las rutas indicadas admiten su alias con `/` final y comparten cuota entre aliases. El rechazo ocurre en DRF `initial`, después de autenticación/permisos y antes del handler; el handler existente devuelve `429`, `code=throttled` y `Retry-After` en segundos.
+- `POST /api/auth/refresh`: 10/min por IP obtenida mediante la validación de proxy C14A; XFF de un peer no confiable no cambia la clave. Nunca se usa el refresh token para la cuota.
+- `POST /api/ai/transcribe` y `/api/upload/audio-to-fhir`: cuota compartida de 60/min por `sub` autenticado. `POST /api/ai/summarize-sbar`, `/refine-sbar`, `/suggest-interventions` y `/clinical-decision`: cuota compartida de 60/min por `sub`.
+- Escrituras `POST` de `/api/fhir/patient`, `/api/patients`, `/api/fhir/medicationstatement`, `/api/fhir/transaction`, `/api/metrics/handover-time`, `/api/audit`, `/api/audit/events`, `/api/icea/actions/*`, `/api/icea/bridge/retry/*`, `/api/exception-shifts` y `/api/exception-shifts/*/operations/*`: cuota compartida de 120/min por `sub`. Los GET de esas vistas, incluidos estado y recibos C12, no consumen esta cuota.
+- El límite de archivo de audio vigente (`HANDOVER_MAX_AUDIO_BYTES`, 25 MiB por defecto) sigue comprobándose después del parseo y antes del proveedor. Si `Content-Length` declara una petición completa mayor que ese máximo más 64 KiB de margen multipart, se rechaza con `413/audio_request_too_large` antes de parsear; una longitud ausente o falsa no acredita el tamaño real, que se comprueba al leer el archivo.
+- Las ventanas son de 60 segundos según DRF `SimpleRateThrottle`. Se usa el caché Django configurado; el caché local predeterminado no coordina procesos ni ofrece una defensa DDoS. La cola aplica su propio backoff a `429` y conserva la operación; no interpreta ni garantiza el plazo de `Retry-After` del servidor.
+
 ## Endpoints de pacientes con scope y unidad
 - `GET /api/patients` requiere autenticación válida y scope `patients:read`.
 - `POST /api/patients` requiere autenticación válida y scope `patients:write`.
