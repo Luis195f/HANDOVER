@@ -24,7 +24,7 @@ La matriz asigna el ámbito desde la ruta del audit y los manifiestos: 85 avisos
 
 ## Inventario SOUP reproducible
 
-`python scripts/generate-soup-inventory.py > soup-inventory.json` usa únicamente la biblioteca estándar y lee `package.json`, `pnpm-lock.yaml`, `requirements.txt`, `requirements-dev.txt` y `backend/requirements.txt`. Ordena las entradas y omite timestamps y rutas absolutas. Dos ejecuciones sobre el mismo árbol produjeron el mismo SHA-256: `A7EF3F8F33BA44517663E7B099707DDCA003E6997F179468FD8E15A6A063FF8D` (77 dependencias JS directas, 1350 entradas de paquetes del lockfile y 21 requisitos Python). El JSON generado no se añade al repositorio.
+`python scripts/generate-soup-inventory.py --output soup-inventory.json` usa únicamente la biblioteca estándar y lee `package.json`, `pnpm-lock.yaml`, `requirements.txt`, `requirements-dev.txt` y `backend/requirements.txt`. Los hashes de entrada corresponden al contenido de esos cinco archivos tras normalizar CRLF a LF. El generador ordena las entradas, omite timestamps y rutas absolutas y escribe directamente bytes UTF-8 sin BOM, con LF y un salto final. Los manifiestos del commit y copias temporales convertidas a CRLF produjeron archivos idénticos byte a byte: SHA-256 `088f26f448a726e62c9e27cdff3d0bedd9ebae53dd3799033e31c8bc7a5a4522` (77 dependencias JS directas, 1350 entradas de paquetes del lockfile y 21 requisitos Python). El JSON generado no se añade al repositorio.
 
 `CycloneDX/SPDX = NOT_IMPLEMENTED`. El inventario no resuelve rangos Python, licencias, componentes realmente empaquetados ni el árbol de descargas externo. No se elige una licencia ni se declara cumplimiento IEC 62304.
 

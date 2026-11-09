@@ -1,7 +1,9 @@
 """Deterministic, local dependency inventory; not a CycloneDX or SPDX SBOM."""
 
+import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 
@@ -16,7 +18,7 @@ SOURCES = (
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def lock_packages(path: Path) -> list[dict[str, str]]:
@@ -54,6 +56,9 @@ def requirements(path: Path, relative_path: str) -> list[dict[str, str]]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, help="Write deterministic UTF-8 JSON bytes to this path")
+    args = parser.parse_args()
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     direct = [
         {"name": name, "specifier": specifier, "group": group}
@@ -74,7 +79,11 @@ def main() -> None:
             "Licenses, deployed reachability, downloaded tools and transitive Action code are not verified.",
         ],
     }
-    print(json.dumps(inventory, ensure_ascii=False, sort_keys=True, indent=2))
+    content = (json.dumps(inventory, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    if args.output is None:
+        sys.stdout.buffer.write(content)
+    else:
+        args.output.write_bytes(content)
 
 
 if __name__ == "__main__":
