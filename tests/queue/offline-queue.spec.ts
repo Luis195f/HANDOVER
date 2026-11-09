@@ -171,6 +171,59 @@ describe('offline queue end-to-end', () => {
     expect(item?.errorStatus).toBe(503);
   });
 
+  it('keeps a 429 pending even if a sender labels it client and nonrecoverable', async () => {
+    const queued = await queue.createOfflineQueueItem({ payload: { bundle: {
+      resourceType: 'Bundle', type: 'transaction', entry: [],
+    } }, patientId: 'pat-rate-limited' });
+    const [ciphertextBefore] = await queue.listOfflineQueue({ decrypt: false });
+    sync.setQueueSendHandler(async () => ({ ok: false as const, kind: 'client' as const,
+      recoverable: false, status: 429, message: 'throttled' }));
+    await sync.processQueueOnce();
+    const [pending] = await queue.listOfflineQueue();
+    expect(pending?.id).toBe(queued.id);
+    expect(pending?.payload).toMatchObject({ patientId: 'pat-rate-limited', bundle: {
+      resourceType: 'Bundle', type: 'transaction', entry: [],
+    } });
+    const [ciphertextAfter] = await queue.listOfflineQueue({ decrypt: false });
+    expect(ciphertextAfter?.payload).toBe(ciphertextBefore?.payload);
+    expect(pending?.syncStatus).toBe('pending');
+    expect(pending?.errorStatus).toBe(429);
+  });
+
+  it('retries the same canonical operation after 429 backoff and removes it only on FHIR confirmation', async () => {
+    vi.useFakeTimers();
+    const startedAt = new Date('2024-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(startedAt);
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-429' } as any, {
+      now: '2024-01-01T00:00:00.000Z',
+    });
+    const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-429' });
+    const [rawBefore] = await queue.listOfflineQueue({ decrypt: false });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'throttled' }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ resourceType: 'Bundle', type: 'transaction-response' }), {
+        status: 200, headers: { 'Content-Type': 'application/fhir+json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const options = { fhirBaseUrl: 'https://example.test', getToken: async () => 'synthetic-token' };
+    const first = await sync.flushSyncQueue(options);
+    expect(first).toMatchObject({ processed: 0, remaining: 1, status: 429 });
+    const [pending] = await queue.listOfflineQueue();
+    const [rawAfter] = await queue.listOfflineQueue({ decrypt: false });
+    expect(pending?.id).toBe(queued.id);
+    expect(pending?.syncStatus).toBe('pending');
+    expect(rawAfter?.payload).toBe(rawBefore?.payload);
+    await sync.processQueueOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(startedAt + sync.getNextDelayMs(pending?.attempts ?? 0) + 20);
+    const second = await sync.flushSyncQueue(options);
+    expect(second).toMatchObject({ processed: 1, remaining: 0, outcome: 'success' });
+    const keys = fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get('Idempotency-Key'));
+    expect(keys).toEqual([queued.id, queued.id]);
+    expect(await queue.listOfflineQueue()).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
   it('keeps network errors retryable when the queue handler throws a plain Error', async () => {
     vi.useFakeTimers();
     const baseTime = new Date('2024-01-01T00:00:00.000Z').getTime();
