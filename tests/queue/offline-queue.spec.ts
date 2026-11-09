@@ -194,17 +194,17 @@ describe('offline queue end-to-end', () => {
     vi.useFakeTimers();
     const startedAt = new Date('2024-01-01T00:00:00.000Z').getTime();
     vi.setSystemTime(startedAt);
-    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-429' } as any, {
+    const bundle = sync.buildTransactionBundleForQueue({ patientId: 'pat-429', bedsideChecklist: {} }, {
       now: '2024-01-01T00:00:00.000Z',
     });
     const queued = await queue.enqueueBundle(bundle, { patientId: 'pat-429' });
     const [rawBefore] = await queue.listOfflineQueue({ decrypt: false });
-    const fetchMock = vi.fn()
+    const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'throttled' }), { status: 429 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ resourceType: 'Bundle', type: 'transaction-response' }), {
         status: 200, headers: { 'Content-Type': 'application/fhir+json' },
       }));
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    vi.stubGlobal('fetch', fetchMock);
     const options = { fhirBaseUrl: 'https://example.test', getToken: async () => 'synthetic-token' };
     const first = await sync.flushSyncQueue(options);
     expect(first).toMatchObject({ processed: 0, remaining: 1, status: 429 });
