@@ -38,7 +38,7 @@ jobs:
           fi
 
       - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v0.1.5
+        uses: appleboy/ssh-action@f9010ff7f1bbd7db1a0b4bab661437550cea20c0 # v0.1.5
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}

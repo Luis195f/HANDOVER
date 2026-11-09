@@ -14,20 +14,20 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2 (v2.4.1)
         with:
           version: 10.17.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload TypeScript ESLint baseline
         if: always() && hashFiles('artifacts/eslint-ts-baseline.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: eslint-typescript-baseline
           path: |
@@ -116,7 +116,7 @@ jobs:
           genbadge coverage -i "${COV_XML}" -o coverage-badge.svg
 
       - name: Upload coverage badge
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-badge
           path: coverage-badge.svg
@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload pilot coverage evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-pilot
           path: coverage
@@ -139,7 +139,7 @@ jobs:
 
       - name: Upload Playwright evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-evidence
           path: |
@@ -159,7 +159,7 @@ jobs:
 
       - name: Upload FHIR validation evidence
         if: always() && hashFiles('artifacts/fhir-validation.txt') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fhir-validation
           path: artifacts/fhir-validation.txt
@@ -211,7 +211,7 @@ jobs:
 
       - name: Upload pilot gate summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-gate-summary
           path: |
