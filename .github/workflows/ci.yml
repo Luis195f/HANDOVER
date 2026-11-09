@@ -181,6 +181,11 @@ jobs:
             echo
             echo "## Reproducibility"
             echo
+            echo "- Tested checkout SHA: $GITHUB_SHA"
+            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+              echo "- PR branch HEAD: ${{ github.event.pull_request.head.sha }}"
+              echo "- PR test merge commit: $GITHUB_SHA"
+            fi
             echo "- Toolchain manifest: artifacts/pilot-gate-toolchain.txt"
             echo "- Frozen install: pnpm install --frozen-lockfile"
             echo "- Node source of truth: .nvmrc"
@@ -205,7 +210,7 @@ jobs:
             else
               echo "- fhir-validation: missing validation transcript."
             fi
-            echo "- Backend pytest and backend coverage stay in the separate Django CI workflow by design."
+            echo "- Backend pytest matrix and coverage run in this CI execution via the reusable Django CI workflow."
           } > artifacts/pilot-gate-summary.md
           cat artifacts/pilot-gate-summary.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -219,3 +224,53 @@ jobs:
             artifacts/pilot-gate-toolchain.txt
           if-no-files-found: error
           retention-days: 7
+
+  backend:
+    uses: ./.github/workflows/django.yml
+
+  release-gate:
+    if: ${{ always() }}
+    needs: [build, backend]
+    runs-on: ubuntu-24.04
+    env:
+      BUILD_RESULT: ${{ needs.build.result }}
+      BACKEND_RESULT: ${{ needs.backend.result }}
+      MATRIX_RESULT: ${{ needs.backend.outputs.matrix_result }}
+      COVERAGE_RESULT: ${{ needs.backend.outputs.coverage_result }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Record release gate evidence
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          {
+            echo "# Release gate"
+            echo "- Tested SHA: $GITHUB_SHA"
+            echo "- Event: $GITHUB_EVENT_NAME"
+            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+              echo "- PR branch HEAD: $PR_HEAD_SHA"
+              echo "- PR test merge commit: $GITHUB_SHA"
+            fi
+            echo "- build: $BUILD_RESULT"
+            echo "- backend reusable workflow: $BACKEND_RESULT"
+            echo "- Django 3.10/3.11/3.12 matrix: $MATRIX_RESULT"
+            echo "- backend coverage: $COVERAGE_RESULT"
+          } > artifacts/release-gate-summary.md
+          cat artifacts/release-gate-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release gate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-gate-evidence
+          path: artifacts/release-gate-summary.md
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require complete release gates
+        shell: bash
+        run: |
+          test "$BUILD_RESULT" = success
+          test "$BACKEND_RESULT" = success
+          test "$MATRIX_RESULT" = success
+          test "$COVERAGE_RESULT" = success

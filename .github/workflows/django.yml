@@ -4,10 +4,15 @@ permissions:
   contents: read
 
 on:
+  workflow_call:
+    outputs:
+      matrix_result:
+        description: Combined Django 3.10/3.11/3.12 result
+        value: ${{ jobs.backend-gate.outputs.matrix_result }}
+      coverage_result:
+        description: Backend coverage result
+        value: ${{ jobs.backend-gate.outputs.coverage_result }}
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 jobs:
   django-tests:
@@ -165,6 +170,11 @@ jobs:
             echo
             echo "## Reproducibility"
             echo
+            echo "- Tested SHA: $GITHUB_SHA"
+            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+              echo "- PR branch HEAD: ${{ github.event.pull_request.head.sha }}"
+              echo "- PR test merge commit: $GITHUB_SHA"
+            fi
             echo "- Toolchain manifest: artifacts/backend-gate-toolchain.txt"
             echo "- Runtime dependency sources: requirements.txt, backend/requirements.txt"
             echo "- Test tooling source: requirements-dev.txt"
@@ -202,3 +212,28 @@ jobs:
             backend-pytest-junit.xml
           if-no-files-found: error
           retention-days: 7
+
+  backend-gate:
+    if: ${{ always() }}
+    needs: [django-tests, coverage]
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_result: ${{ steps.results.outputs.matrix_result }}
+      coverage_result: ${{ steps.results.outputs.coverage_result }}
+    steps:
+      - name: Record backend results
+        id: results
+        env:
+          MATRIX_RESULT: ${{ needs.django-tests.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: |
+          echo "matrix_result=${MATRIX_RESULT}" >> "$GITHUB_OUTPUT"
+          echo "coverage_result=${COVERAGE_RESULT}" >> "$GITHUB_OUTPUT"
+
+      - name: Require complete backend
+        env:
+          MATRIX_RESULT: ${{ needs.django-tests.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: |
+          test "$MATRIX_RESULT" = success
+          test "$COVERAGE_RESULT" = success
