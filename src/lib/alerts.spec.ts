@@ -1,62 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { alertsFromData } from "./alerts";
+import { describe, expect, it } from 'vitest';
 
-const FIXED_NOW = "2024-02-15T12:00:00.000Z";
-const fixedNow = new Date(FIXED_NOW);
+import { computeAlerts } from './alerts';
+import type { RiskItem } from '../types/handover';
 
-describe("alertsFromData", () => {
-  it("incluye alerta NEWS2 con severidad según banda", () => {
-    const alerts = alertsFromData({ news2Score: 8, now: fixedNow });
-    const news2 = alerts.find(a => a.kind === "NEWS2_HIGH");
+const fallRisk: RiskItem = { type: 'fall', present: true, actions: [], notes: undefined };
+const highVitals = { rr: 30, spo2: 85, tempC: 39, sbp: 80, hr: 130 };
 
-    expect(news2).toBeTruthy();
-    expect(news2?.severity).toBe("critical");
+describe('computeAlerts', () => {
+  it('requires an active risk in addition to high NEWS2', () => {
+    expect(computeAlerts({ vitals: highVitals })).toEqual([]);
+    expect(computeAlerts({ vitals: highVitals, risksStructured: [fallRisk] })
+      .some((alert) => alert.id === 'news2-high-with-risk')).toBe(true);
   });
 
-  it("genera alerta por catéter con más de 7 días", () => {
-    const alerts = alertsFromData({
-      now: fixedNow,
-      devices: [
-        { code: "cvc", insertedAt: "2024-02-01T10:00:00.000Z" },
-        { code: "piv", insertedAt: "2024-02-10T10:00:00.000Z" },
-      ],
+  it('does not treat malformed vital signs as a NEWS2 alert', () => {
+    const alerts = computeAlerts({
+      vitals: { rr: Number.NaN },
+      risksStructured: [{ ...fallRisk, actions: ['bedRailsUp'] }],
     });
-    const catheterAlert = alerts.find(a => a.kind === "DEVICE_OLD");
-
-    expect(catheterAlert).toBeTruthy();
-    expect(catheterAlert?.severity).toBe("warning");
+    expect(alerts).toEqual([]);
   });
 
-  it("detecta conflicto alergia-medicación", () => {
-    const alerts = alertsFromData({
-      allergies: [{ code: "penicilina" }],
-      medications: [{ code: "penicilina" }],
+  it('keeps deterministic active risk alerts without duplicate kinds', () => {
+    const alerts = computeAlerts({
+      risksStructured: [fallRisk, { ...fallRisk }],
     });
-    const conflict = alerts.find(a => a.kind === "ALLERGY_CONFLICT");
-
-    expect(conflict).toBeTruthy();
-    expect(conflict?.severity).toBe("critical");
-  });
-
-  it("alerta tareas vencidas no críticas", () => {
-    const alerts = alertsFromData({
-      now: fixedNow,
-      tasks: [{ id: "task-1", dueAt: "2024-02-10T10:00:00.000Z", completed: false }],
-    });
-    const task = alerts.find(a => a.kind === "TASK_OVERDUE");
-
-    expect(task).toBeTruthy();
-    expect(task?.severity).toBe("warning");
-  });
-
-  it("escala tareas críticas vencidas", () => {
-    const alerts = alertsFromData({
-      now: fixedNow,
-      tasks: [{ id: "task-1", dueAt: "2024-02-10T10:00:00.000Z", completed: false, critical: true }],
-    });
-    const task = alerts.find(a => a.kind === "TASK_OVERDUE");
-
-    expect(task).toBeTruthy();
-    expect(task?.severity).toBe("critical");
+    expect(alerts.map((alert) => alert.id)).toEqual(['risk-fall-no-actions']);
   });
 });

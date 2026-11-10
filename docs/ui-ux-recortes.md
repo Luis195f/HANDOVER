@@ -23,6 +23,7 @@
 ## Dictado y reescritura
 
 - La ruta de dictado móvil está implementada para iOS/Android mediante grabación Expo y el endpoint configurado; su funcionamiento end-to-end en dispositivo real, con backend y permisos, no fue verificado en esta corrección.
+- C19B: `AudioNote` y `HandoverForm` siguen usando `createSttService`, que elige `BackendFallbackSttService` en iOS/Android con API configurada y `UnsupportedSttService` en los demás casos. Se retiró `NativeSttService` porque la factory no lo instanciaba; la seguridad de la ruta activa queda fuera de esta retirada.
 - Expo Web no está soportado. La escritura permanece disponible y el primer intento de dictado muestra un único aviso; no se repiten errores rojos junto a cada campo ni se incorpora Web Speech API.
 - La reescritura SBAR por IA sigue siendo opcional. Sin backend configurado, sus acciones permanecen explícitamente desactivadas y no bloquean apertura, edición, guardado, cola ni finalización.
 
