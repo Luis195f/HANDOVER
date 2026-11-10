@@ -180,8 +180,7 @@ prefill: se pasa explícitamente `scale2: false`.
 | `src/components/handover/VitalsSection.tsx` | Desglose y aviso FR del formulario | Consumidor de UI; sin fórmula ni cambios |
 | `src/lib/summary.ts:298,344` | Resumen normal y narración breve desde canónico | Consumidor directo; etiquetas de banda, sin cambios |
 | `src/lib/ai-degrade.ts:84` | Resumen mínimo offline desde canónico | Consumidor directo; umbral narrativo ≥5, sin cambios |
-| `src/lib/alerts.ts:186,255` | Canónico y regla combinada NEWS2 ≥7 + riesgo; otras alertas independientes | Derivación legítima; sin cambios |
-| `src/lib/alerts.ts:74` | `alertsFromData` acepta score precomputado | Compatibilidad; solo referencias en pruebas encontradas, sin cambios |
+| `src/lib/alerts.ts` (`computeAlerts`) | Canónico y regla combinada NEWS2 ≥7 + riesgo; otras alertas independientes | Derivación activa conservada |
 | `src/lib/mpac.ts:242,719` | Wrapper canónico y contribuciones MPAC por total/`anyThree` | Derivación legítima; reglas MPAC sin cambios |
 | `src/lib/priority.ts:20`, `src/lib/priority-ui.ts:259` | Orden y presentación de prioridad MPAC con `news2Score` | Decisión downstream, no fórmula; sin cambios |
 | `src/lib/scores/news2.ts:18` | Traduce nombres/null y desglose canónico | Wrapper legítimo; sin cambios |
@@ -190,11 +189,13 @@ prefill: se pasa explícitamente `scale2: false`.
 | `src/lib/patientListData.ts:54`, `src/screens/PatientList.tsx:632` | API → normalizador sin score precomputado → gate FR → MPAC/alertas/UI | Consumidor activo; sin cambios |
 | `src/lib/analytics.ts:39,56` | Agrega `news2Score` de entradas MPAC/demo | Consumidor indirecto; no puntúa, sin cambios |
 | `src/lib/ai-suggestions.ts:27`, `src/screens/HandoverForm.tsx:1887` | Envía score derivado en contexto IA, sin recalcularlo | Consumidor indirecto; sin cambios |
-| `src/features/news2/alerts.ts:8,14`, `src/lib/notifications.ts:39` | Clasificación/aviso local de score suministrado | Regla derivada distinta de la banda; sin llamador runtime hallado, no fórmula y sin cambios |
+| `src/features/news2/alerts.ts` | Clasificación/aviso local de score suministrado | Módulo retirado en C19B tras verificar que no tenía imports, reexportaciones ni rutas productivas |
 | `src/lib/fhir-map.ts:2006`, `src/lib/fhir-map/*` | Observations, tratamientos y Bundle; no puntúa NEWS2 | Transporte FHIR, sin cambios en esta fase |
 | `backend/api/*`, `backend/*` | API, persistencia/bridge; búsqueda sin cálculo NEWS2 | Sin consumidor calculador encontrado; sin cambios |
 | `src/config/profiles/overlays/*`, `src/lib/codes.ts:422` | Etiquetas/configuración y código de alerta | Referencias, no fórmula; sin cambios |
 | `src/lib/__tests__/news2*`, `tests/screens/news2-input-contract.spec.tsx`, fixtures | RCP, límites, paridad y recorrido QR/formulario | Pruebas/fixtures; no fuente productiva |
+
+C19B retiró `alertsFromData` y sus pruebas exclusivas: solo se invocaba desde tests. `computeAlerts` y sus pruebas activas permanecen; el aviso NEWS2 sin consumidor no era la ruta de puntuación ni de notificación del formulario.
 
 Flujos: Observation FHIR → `prefillFromFHIR` → gate FR → canónico Scale 1 →
 prioridad prefill → QRScan → HandoverForm. Formulario → gate FR → canónico →
